@@ -1,0 +1,423 @@
+<script>
+if('{_global_.role}'==='admin'||'{_global_.role}'==='boss')
+    document.location.href='/'+db+'/dash';
+</script>
+<style>
+    /* CSS Variables - Material Design */
+    :root {
+        --primary-color: #2563eb;
+        --primary-hover: #1d4ed8;
+        --primary-light: #3b82f6;
+        --background: #f8fafc;
+        --surface: #ffffff;
+        --border-color: #e2e8f0;
+        --text-primary: #1e293b;
+        --text-secondary: #64748b;
+        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        --success-color: #10b981;
+        --warning-color: #f59e0b;
+        --danger-color: #ef4444;
+    }
+
+    /* Container for the dashboard */
+    .pult-container {
+        padding: 24px;
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+
+    /* Section styling */
+    .pult-section {
+        margin-bottom: 32px;
+    }
+
+    .pult-section-title {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 16px;
+        padding-bottom: 12px;
+        border-bottom: 2px solid var(--primary-color);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .pult-section-title::before {
+        content: '';
+        width: 4px;
+        height: 24px;
+        background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-light) 100%);
+        border-radius: 2px;
+    }
+
+    /* Card container */
+    .pult-card {
+        background-color: var(--surface);
+        border-radius: 8px;
+        box-shadow: 0 2px 1px -1px rgba(0,0,0,0.2),
+                    0 1px 1px 0 rgba(0,0,0,0.14),
+                    0 1px 3px 0 rgba(0,0,0,0.12);
+        overflow: hidden;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .pult-card:hover {
+        box-shadow: 0 3px 5px -1px rgba(0,0,0,0.2),
+                    0 6px 10px 0 rgba(0,0,0,0.14),
+                    0 1px 18px 0 rgba(0,0,0,0.12);
+        transform: translateY(-2px);
+    }
+
+    /* Table styling with Material Design */
+    .pult-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+    }
+
+    .pult-table thead tr {
+        background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-light) 100%);
+    }
+
+    .pult-table th {
+        padding: 16px;
+        text-align: left;
+        font-weight: 600;
+        font-size: 0.875rem;
+        letter-spacing: 0.0125em;
+        text-transform: uppercase;
+    }
+
+    .pult-table td {
+        padding: 16px;
+        border-bottom: 1px solid var(--border-color);
+        color: var(--text-primary);
+    }
+
+    .pult-table tbody tr {
+        transition: background-color 0.2s ease;
+    }
+
+    .pult-table tbody tr:hover {
+        background-color: rgba(37, 99, 235, 0.05);
+    }
+
+    .pult-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+
+    /* Link styling */
+    .pult-link {
+        color: var(--primary-color);
+        text-decoration: none;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .pult-link:hover {
+        color: var(--primary-hover);
+        text-decoration: underline;
+    }
+
+    .pult-link.X {
+        font-weight: 700;
+        color: var(--danger-color);
+    }
+
+    .pult-link.X:hover {
+        color: #dc2626;
+    }
+
+    /* Badge for status */
+    .pult-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 16px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .pult-badge-success {
+        background-color: rgba(16, 185, 129, 0.15);
+        color: var(--success-color);
+    }
+
+    .pult-badge-warning {
+        background-color: rgba(245, 158, 11, 0.15);
+        color: var(--warning-color);
+    }
+
+    .pult-badge-danger {
+        background-color: rgba(239, 68, 68, 0.15);
+        color: var(--danger-color);
+    }
+
+    /* Empty state */
+    .pult-empty {
+        text-align: center;
+        padding: 48px 24px;
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+    }
+
+    .pult-empty-icon {
+        font-size: 48px;
+        margin-bottom: 16px;
+        opacity: 0.5;
+    }
+
+    /* Responsive design */
+    @media (max-width: 768px) {
+        .pult-container {
+            padding: 16px;
+        }
+
+        .pult-section-title {
+            font-size: 1.25rem;
+        }
+
+        .pult-table {
+            font-size: 0.75rem;
+        }
+
+        .pult-table th,
+        .pult-table td {
+            padding: 12px 8px;
+        }
+    }
+
+    /* Animation for cards */
+    @keyframes fadeInUp {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .pult-card {
+        animation: fadeInUp 0.5s ease-out;
+    }
+
+    .pult-section:nth-child(2) .pult-card {
+        animation-delay: 0.1s;
+    }
+
+    .pult-section:nth-child(3) .pult-card {
+        animation-delay: 0.2s;
+    }
+
+    /* Two-column grid layout for calls and tasks */
+    .pult-grid-container {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+
+    @media (min-width: 1024px) {
+        .pult-grid-container {
+            grid-template-columns: 1fr 1fr;
+        }
+    }
+
+    .pult-grid-item {
+        min-width: 0; /* Prevents grid blowout */
+    }
+
+    /* Report cards grid */
+    .pult-reports-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 16px;
+        padding: 16px;
+    }
+
+    .pult-report-card {
+        background: var(--surface);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 16px 20px;
+        transition: all 0.2s ease;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        box-shadow: var(--shadow-sm);
+    }
+
+    .pult-report-card:hover {
+        box-shadow: var(--shadow-md);
+        transform: translateY(-2px);
+        border-color: var(--primary-color);
+    }
+
+    .pult-report-card.X {
+        border-left: 4px solid var(--danger-color);
+    }
+
+    .pult-report-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-light) 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 20px;
+        flex-shrink: 0;
+    }
+
+    .pult-report-card.X .pult-report-icon {
+        background: linear-gradient(135deg, var(--danger-color) 0%, #dc2626 100%);
+    }
+
+    .pult-report-content {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .pult-report-title {
+        color: var(--text-primary);
+        font-weight: 500;
+        font-size: 0.938rem;
+        line-height: 1.4;
+        text-decoration: none;
+        display: block;
+        word-wrap: break-word;
+    }
+
+    .pult-report-card:hover .pult-report-title {
+        color: var(--primary-color);
+    }
+
+    .pult-report-card.X:hover .pult-report-title {
+        color: var(--danger-color);
+    }
+
+    @media (max-width: 768px) {
+        .pult-reports-grid {
+            grid-template-columns: 1fr;
+            padding: 8px;
+        }
+    }
+</style>
+
+<div class="pult-container">
+    <!-- Пользовательские отчеты -->
+    <div class="pult-section">
+        <h2 class="pult-section-title">Пользовательские отчеты</h2>
+        <div class="pult-card">
+            <div class="pult-reports-grid" id="reports-grid">
+                <!-- Begin:Пользовательские -->
+                <a href="/{_global_.z}/{Формат отчета}/{ЗапросID}" class="pult-report-card {приоритет}">
+                    <div class="pult-report-icon">📊</div>
+                    <div class="pult-report-content">
+                        <span class="pult-report-title">{Запрос}</span>
+                    </div>
+                </a>
+                <!-- End:Пользовательские -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Звонки и Мои задачи в две колонки -->
+    <div class="pult-grid-container">
+        <!-- Звонки -->
+        <div class="pult-section pult-grid-item">
+            <h2 class="pult-section-title">Звонки</h2>
+            <div class="pult-card">
+                <table class="pult-table">
+                    <thead>
+                        <tr>
+                            <th>Звонок</th>
+                            <th>Контакт</th>
+                            <th>Статус звонка</th>
+                            <th>Тема</th>
+                            <th>Тип звонка</th>
+                        </tr>
+                    </thead>
+                    <tbody id="calls-body">
+                        <!-- Begin:Звонки -->
+                        <tr>
+                            <td>{Звонок}</td>
+                            <td>{Лид} {Клиент}</td>
+                            <td>
+                                <span class="pult-badge pult-badge-success" style="background-color: {bgcolor}; color: white;">
+                                    {Статус звонка}
+                                </span>
+                            </td>
+                            <td>{Тема}</td>
+                            <td>{Тип звонка}</td>
+                        </tr>
+                        <!-- End:Звонки -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Мои задачи -->
+        <div class="pult-section pult-grid-item">
+            <h2 class="pult-section-title">Мои задачи</h2>
+            <div class="pult-card">
+                <table class="pult-table">
+                    <thead>
+                        <tr>
+                            <th>Задачи</th>
+                            <th>Лид</th>
+                            <th>Статус задачи</th>
+                            <th>Тип задачи</th>
+                            <th>Срок</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tasks-body">
+                        <!-- Begin:Мои задачи -->
+                        <tr>
+                            <td>{Задачи}</td>
+                            <td>{Лид}</td>
+                            <td>{Статус задачи}</td>
+                            <td>{Тип задачи}</td>
+                            <td>{Срок}</td>
+                        </tr>
+                        <!-- End:Мои задачи -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Add empty state if tables are empty
+document.addEventListener('DOMContentLoaded', function() {
+    // Check reports grid
+    const reportsGrid = document.getElementById('reports-grid');
+    if (reportsGrid && reportsGrid.children.length === 0) {
+        reportsGrid.innerHTML = '<div class="pult-empty" style="grid-column: 1 / -1;"><div class="pult-empty-icon">📭</div><div>Нет доступных отчетов</div></div>';
+    }
+
+    // Check each table body
+    const tables = [
+        {id: 'calls-body', message: 'Нет активных звонков'},
+        {id: 'tasks-body', message: 'Нет задач'}
+    ];
+
+    tables.forEach(function(table) {
+        const tbody = document.getElementById(table.id);
+        if (tbody && tbody.children.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="100%" class="pult-empty"><div class="pult-empty-icon">📭</div><div>' + table.message + '</div></td></tr>';
+        }
+    });
+});
+</script>
