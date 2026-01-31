@@ -202,6 +202,7 @@
     background: #f8f9fa;
 }
 
+/* Old filter cell styles - kept for backwards compatibility */
 .filter-cell {
     display: flex;
     align-items: center;
@@ -229,6 +230,48 @@
     border: 1px solid #dee2e6;
     border-radius: 3px;
     font-size: 14px;
+}
+
+/* New filter cell with icon inside input */
+.filter-cell-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.filter-icon-inside {
+    position: absolute;
+    left: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    color: #6c757d;
+    background: white;
+    padding: 2px 4px;
+    border-radius: 2px;
+    z-index: 1;
+    min-width: 20px;
+    text-align: center;
+}
+
+.filter-icon-inside:hover {
+    color: #007bff;
+    background: #e9ecef;
+}
+
+.filter-input-with-icon {
+    flex: 1;
+    padding: 4px 8px 4px 36px;  /* Extra left padding for icon */
+    border: 1px solid #dee2e6;
+    border-radius: 3px;
+    font-size: 14px;
+    width: 100%;
+}
+
+.filter-input-with-icon:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
 }
 
 .pagination-controls {

@@ -10,12 +10,16 @@
 - ✅ **Drag & Drop** - перетаскивание колонок для изменения порядка
 - ✅ **Настройки колонок** - скрытие/показ колонок через модальное окно
 - ✅ **Фильтрация** - 13 типов фильтров для разных типов данных
+- ✅ **Автоматическое применение фильтров** - фильтры применяются при вводе текста
+- ✅ **Скрытие служебных колонок** - автоматическое скрытие колонок с суффиксами ID и Стиль
+- ✅ **Динамическое стилизование** - применение стилей к ячейкам через колонки Стиль
 - ✅ **Persistence** - сохранение настроек в cookies браузера
 - ✅ **Адаптивность** - корректное отображение на разных устройствах
 
 ## Файлы компонента
 
-- `templates/integram-table.html` - основной компонент (класс IntegramTable)
+- `assets/js/integram-table.js` - standalone JS модуль (класс IntegramTable)
+- `templates/integram-table.html` - legacy HTML версия (deprecated)
 - `templates/table-example.html` - пример использования с демо-данными и документацией
 
 ## Быстрый старт
@@ -27,24 +31,25 @@
 <html>
 <head>
     <link rel="stylesheet" href="/css/bootstrap.min.css">
-    <link rel="stylesheet" href="https://code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
-    <script src="/js/jquery.min.js"></script>
-    <script src="/js/jquery-ui.min.js"></script>
+    <link rel="stylesheet" href="/css/info.css">
 </head>
 <body>
     <div id="my-table"></div>
 
-    <script src="templates/integram-table.html"></script>
+    <script src="/js/integram-table.js"></script>
     <script>
-        const table = new IntegramTable('my-table', {
+        const myTable = new IntegramTable('my-table', {
             apiUrl: '/api/tasks',
             pageSize: 20,
-            cookiePrefix: 'my-table'
+            cookiePrefix: 'my-table',
+            instanceName: 'myTable'
         });
     </script>
 </body>
 </html>
 ```
+
+**Примечание:** Теперь компонент - это standalone JS модуль, не требующий jQuery!
 
 ### 2. Формат данных API
 
@@ -77,10 +82,39 @@ new IntegramTable('container-id', {
     apiUrl: '/api/endpoint',       // URL API для загрузки данных
     pageSize: 20,                  // Количество записей на странице
     cookiePrefix: 'table-name',    // Префикс для cookies
+    title: 'Название таблицы',     // Опциональный заголовок
+    instanceName: 'myTable',       // Имя экземпляра для window (обязательно!)
     onCellClick: (row, col, val) => {},  // Обработчик клика по ячейке
     onDataLoad: (data) => {}       // Обработчик загрузки данных
 });
 ```
+
+**ВАЖНО:** Параметр `instanceName` обязателен для корректной работы event handlers (кнопки, пагинация, настройки).
+
+## Автоматическое скрытие колонок
+
+Компонент автоматически скрывает служебные колонки по определенным правилам:
+
+### Колонки с суффиксом "ID"
+
+Если в таблице есть колонка "Клиент" и "КлиентID", колонка "КлиентID" будет автоматически скрыта. Значение ID остается доступным для сохранения изменений, но не отображается пользователю.
+
+### Колонки со стилями
+
+Если в таблице есть колонка "Статус" и "СтатусСтиль" (или "Status" и "StatusStyle"), колонка со стилями будет скрыта, а её значение будет применено как CSS-стиль к соответствующей ячейке в колонке "Статус".
+
+**Пример:**
+```
+Колонки в API:
+- Статус (значение: "Активен")
+- СтатусСтиль (значение: "color: green; font-weight: bold;")
+
+Результат:
+- Отображается только колонка "Статус"
+- Ячейка "Активен" отображается зеленым жирным шрифтом
+```
+
+Поиск колонок со стилями **не зависит от регистра** (Style, style, Стиль, стиль - все варианты работают).
 
 ## Пагинация
 
@@ -93,6 +127,10 @@ new IntegramTable('container-id', {
 Формат: `LIMIT={offset},{count}`
 
 ## Фильтрация
+
+Фильтры автоматически применяются при вводе текста с задержкой 500мс (debounce) для оптимизации количества запросов к API.
+
+**Новый дизайн фильтров:** Иконка типа фильтра теперь находится внутри поля ввода слева.
 
 ### Типы фильтров
 

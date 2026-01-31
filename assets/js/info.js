@@ -51,6 +51,7 @@
                 pageSize: options.pageSize || 20,
                 cookiePrefix: options.cookiePrefix || 'integram-table',
                 title: options.title || '',
+                instanceName: options.instanceName || 'table',
                 onCellClick: options.onCellClick || null,
                 onDataLoad: options.onDataLoad || null
             };
@@ -63,6 +64,8 @@
             this.columnOrder = [];
             this.visibleColumns = [];
             this.filtersEnabled = false;
+            this.styleColumns = {};  // Map of column IDs to their style column values
+            this.idColumns = new Set();  // Set of hidden ID column IDs
 
             this.filterTypes = {
                 'CHARS': [
@@ -156,11 +159,14 @@
 
                 this.totalRows = json.total || this.data.length;
 
+                // Process columns to hide ID and Style suffixes
+                this.processColumnVisibility();
+
                 if (this.columnOrder.length === 0) {
                     this.columnOrder = this.columns.map(c => c.id);
                 }
                 if (this.visibleColumns.length === 0) {
-                    this.visibleColumns = this.columns.map(c => c.id);
+                    this.visibleColumns = this.columns.filter(c => !this.idColumns.has(c.id)).map(c => c.id);
                 }
 
                 if (this.options.onDataLoad) {
@@ -200,20 +206,67 @@
             }
         }
 
+        processColumnVisibility() {
+            this.idColumns.clear();
+            this.styleColumns = {};
+
+            // Build a map of column names to column objects
+            const columnsByName = {};
+            this.columns.forEach(col => {
+                columnsByName[col.name] = col;
+            });
+
+            // Process each column
+            this.columns.forEach(col => {
+                const name = col.name;
+
+                // Check for ID suffix
+                if (name.endsWith('ID')) {
+                    const baseName = name.slice(0, -2);
+                    if (columnsByName[baseName]) {
+                        this.idColumns.add(col.id);
+                    }
+                }
+
+                // Check for Стиль/style suffix (case-insensitive)
+                const lowerName = name.toLowerCase();
+                if (lowerName.endsWith('стиль') || lowerName.endsWith('style')) {
+                    let baseName;
+                    if (lowerName.endsWith('стиль')) {
+                        baseName = name.slice(0, -5);  // Remove "стиль"
+                    } else {
+                        baseName = name.slice(0, -5);  // Remove "style"
+                    }
+
+                    // Find base column (case-insensitive match)
+                    const baseCol = this.columns.find(c =>
+                        c.name.toLowerCase() === baseName.toLowerCase()
+                    );
+
+                    if (baseCol) {
+                        this.styleColumns[baseCol.id] = col.id;
+                        this.idColumns.add(col.id);  // Hide style columns too
+                    }
+                }
+            });
+        }
+
         render() {
             const orderedColumns = this.columnOrder
                 .map(id => this.columns.find(c => c.id === id))
                 .filter(c => c && this.visibleColumns.includes(c.id));
+
+            const instanceName = this.options.instanceName;
 
             let html = `
                 <div class="integram-table-wrapper">
                     <div class="integram-table-header">
                         ${ this.options.title ? `<div class="integram-table-title">${ this.options.title }</div>` : '' }
                         <div class="integram-table-controls">
-                            <button class="btn btn-sm btn-outline-secondary" onclick="window.tasksTable.toggleFilters()">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="window.${ instanceName }.toggleFilters()">
                                 ${ this.filtersEnabled ? '✓' : '' } Фильтры
                             </button>
-                            <div class="integram-table-settings" onclick="window.tasksTable.openColumnSettings()">
+                            <div class="integram-table-settings" onclick="window.${ instanceName }.openColumnSettings()">
                                 ⚙️ Настройки
                             </div>
                         </div>
@@ -258,12 +311,12 @@
 
             return `
                 <td>
-                    <div class="filter-cell">
-                        <span class="filter-type" data-column-id="${ column.id }">
+                    <div class="filter-cell-wrapper">
+                        <span class="filter-icon-inside" data-column-id="${ column.id }">
                             ${ currentFilter.type }
                         </span>
                         <input type="text"
-                               class="filter-input"
+                               class="filter-input-with-icon"
                                data-column-id="${ column.id }"
                                value="${ currentFilter.value }"
                                placeholder="Фильтр...">
@@ -276,6 +329,19 @@
             const format = column.format || 'SHORT';
             let cellClass = '';
             let displayValue = value || '';
+            let customStyle = '';
+
+            // Check if this column has a style column
+            if (this.styleColumns[column.id]) {
+                const styleColId = this.styleColumns[column.id];
+                const styleColIndex = this.columns.findIndex(c => c.id === styleColId);
+                if (styleColIndex !== -1 && this.data[rowIndex]) {
+                    const styleValue = this.data[rowIndex][styleColIndex];
+                    if (styleValue) {
+                        customStyle = ` style="${ styleValue }"`;
+                    }
+                }
+            }
 
             switch (format) {
                 case 'NUMBER':
@@ -306,10 +372,10 @@
                     displayValue = '******';
                     break;
                 case 'HTML':
-                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }">${ displayValue }</td>`;
+                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }"${ customStyle }>${ displayValue }</td>`;
                 case 'BUTTON':
                     displayValue = `<button class="btn btn-sm btn-primary">${ value || 'Действие' }</button>`;
-                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }">${ displayValue }</td>`;
+                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }"${ customStyle }>${ displayValue }</td>`;
             }
 
             const escapedValue = String(displayValue).replace(/&/g, '&amp;')
@@ -318,13 +384,14 @@
                                                       .replace(/"/g, '&quot;')
                                                       .replace(/'/g, '&#039;');
 
-            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }">${ escapedValue }</td>`;
+            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }"${ customStyle }>${ escapedValue }</td>`;
         }
 
         renderPagination() {
             const totalPages = Math.ceil(this.totalRows / this.options.pageSize);
             const hasNext = this.currentPage < totalPages - 1;
             const hasPrev = this.currentPage > 0;
+            const instanceName = this.options.instanceName;
 
             return `
                 <div class="pagination-controls">
@@ -332,9 +399,9 @@
                         Показано ${ this.currentPage * this.options.pageSize + 1 }-${ Math.min((this.currentPage + 1) * this.options.pageSize, this.totalRows) } из ${ this.totalRows }
                     </div>
                     <div>
-                        <button ${ !hasPrev ? 'disabled' : '' } onclick="window.tasksTable.prevPage()">← Назад</button>
+                        <button ${ !hasPrev ? 'disabled' : '' } onclick="window.${ instanceName }.prevPage()">← Назад</button>
                         <span style="margin: 0 10px;">Страница ${ this.currentPage + 1 } из ${ totalPages }</span>
-                        <button ${ !hasNext ? 'disabled' : '' } onclick="window.tasksTable.nextPage()">Вперед →</button>
+                        <button ${ !hasNext ? 'disabled' : '' } onclick="window.${ instanceName }.nextPage()">Вперед →</button>
                     </div>
                 </div>
             `;
@@ -377,23 +444,29 @@
                 });
             });
 
-            const filterTypes = this.container.querySelectorAll('.filter-type');
-            filterTypes.forEach(ft => {
-                ft.addEventListener('click', (e) => {
-                    this.showFilterTypeMenu(e.target, ft.dataset.columnId);
+            const filterIcons = this.container.querySelectorAll('.filter-icon-inside');
+            filterIcons.forEach(icon => {
+                icon.addEventListener('click', (e) => {
+                    this.showFilterTypeMenu(e.target, icon.dataset.columnId);
                 });
             });
 
-            const filterInputs = this.container.querySelectorAll('.filter-input');
+            const filterInputs = this.container.querySelectorAll('.filter-input-with-icon');
             filterInputs.forEach(input => {
-                input.addEventListener('change', (e) => {
+                // Use 'input' event to apply filter on text change
+                input.addEventListener('input', (e) => {
                     const colId = input.dataset.columnId;
                     if (!this.filters[colId]) {
                         this.filters[colId] = { type: '^', value: '' };
                     }
                     this.filters[colId].value = input.value;
-                    this.currentPage = 0;
-                    this.loadData();
+
+                    // Debounce the API call to avoid too many requests
+                    clearTimeout(this.filterTimeout);
+                    this.filterTimeout = setTimeout(() => {
+                        this.currentPage = 0;
+                        this.loadData();
+                    }, 500);  // Wait 500ms after user stops typing
                 });
             });
 
@@ -477,6 +550,8 @@
 
             const modal = document.createElement('div');
             modal.className = 'column-settings-modal';
+            const instanceName = this.options.instanceName;
+
             modal.innerHTML = `
                 <h5>Настройки колонок</h5>
                 <div class="column-settings-list">
@@ -492,7 +567,7 @@
                     `).join('') }
                 </div>
                 <div style="text-align: right; margin-top: 15px;">
-                    <button class="btn btn-secondary" onclick="window.tasksTable.closeColumnSettings()">Закрыть</button>
+                    <button class="btn btn-secondary" onclick="window.${ instanceName }.closeColumnSettings()">Закрыть</button>
                 </div>
             `;
 
@@ -572,7 +647,8 @@
             apiUrl: '/' + db + '/report/4283?JSON',
             pageSize: 20,
             cookiePrefix: 'tasks-table',
-            title: 'Задачи'
+            title: 'Задачи',
+            instanceName: 'tasksTable'
         });
     });
 
