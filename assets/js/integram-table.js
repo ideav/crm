@@ -305,7 +305,7 @@ class IntegramTable {
                     <div class="integram-table-header">
                         ${ this.options.title ? `<div class="integram-table-title">${ this.options.title }</div>` : '' }
                         <div class="integram-table-controls">
-                            <button class="btn btn-sm btn-outline-secondary ml-2" onclick="window.${ instanceName }.toggleFilters()">
+                            <button class="btn btn-sm btn-outline-secondary mr-2" onclick="window.${ instanceName }.toggleFilters()">
                                 ${ this.filtersEnabled ? '✓' : '' } Фильтры
                             </button>
                             <div class="integram-table-settings" onclick="window.${ instanceName }.openTableSettings()" title="Настройка">

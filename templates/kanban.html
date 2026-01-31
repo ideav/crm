@@ -769,8 +769,7 @@ function renderCard(task){
     // Use fixed FR parameter
     var tasksUrl = '';
     if(task['ЛидID']){
-        var frParam = 'FR_3881';
-        tasksUrl = '/' + db + '/object/3596?' + frParam + '=@' + task['ЛидID'];
+        tasksUrl = '/' + db + '/object/3596?FR_4547=@' + task['ЛидID'];
     }
 
     if(tasksCount > 0 && tasksUrl){
@@ -882,8 +881,7 @@ function updateTaskStatus(leadId, newStatusId){
         console.error('Network error updating status');
     };
 
-    // Use fixed POST parameters for clients (non-partners mode)
-    var postData = 't2795=' + newStatusId + '&t3807=' + timestamp + '&_xsrf=' + xsrf;
+    var postData = 't4874=' + newStatusId + '&t4863=' + timestamp + '&_xsrf=' + xsrf;
     xhr.send(postData);
 }
 

@@ -16,10 +16,10 @@
 .quick-link-badge {
     display: inline-flex;
     align-items: center;
-    padding: 8px 16px;
+    padding: 3px 9px;
     background: #f8f9fa;
     border: 1px solid #dee2e6;
-    border-radius: 20px;
+    border-radius: 6px;
     text-decoration: none;
     color: #495057;
     font-size: 14px;
@@ -58,8 +58,8 @@
 
 .tasks-container {
     background: white;
-    padding: 20px;
-    margin: 20px 0;
+    padding: 0 10px 0 10px;
+    margin: 0;
     border-radius: 8px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
