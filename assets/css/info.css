@@ -284,8 +284,8 @@
     position: fixed;
     bottom: 20px;
     left: 20px;
-    padding: 10px 15px;
-    background: white;
+    padding: 3px 15px;
+    background: #fafafa;
     border: 1px solid #dee2e6;
     border-radius: 4px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
