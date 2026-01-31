@@ -1,1 +1,1047 @@
+<!DOCTYPE html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+    <link rel="stylesheet" href="/css/css.css?{_global_.version}" />
+    <title>Управление задачами - Integram</title>
+    <script src="/js/jquery.min.js"></script>
+    <script src="/js/jquery-ui.min.js"></script>
+    <script>
+        var db='{_global_.z}',xsrf='{_global_.xsrf}',id='{_global_.id}',token='{_global_.token}',uid='{_global_.user_id}',action='{_global_.action}',menu=[];
+    </script>
+    <script src="/js/js.js?{_global_.version}"></script>
+    <script src="/js/moment.min.js"></script>
+    <style>
+        .nav-link:hover {
+            transform: translateY(-1px);
+            background-color: rgba(255, 255, 255, 0.1);
+            text-decoration: none;
+        }
 
+        .nav-link-active {
+            background-color: rgba(255, 255, 255, 0.1);
+            text-decoration: none;
+        }
+
+        .quick-links-container {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .quick-links-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .quick-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .quick-link-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 8px 16px;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 20px;
+            text-decoration: none;
+            color: #495057;
+            font-size: 14px;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .quick-link-badge:hover {
+            background: #e9ecef;
+            border-color: #adb5bd;
+            text-decoration: none;
+            color: #212529;
+            transform: translateY(-2px);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+
+        .quick-link-badge.priority {
+            background: #fff5f5;
+            border-color: #f8d7da;
+            color: #721c24;
+        }
+
+        .quick-link-badge.priority:hover {
+            background: #ffe5e5;
+            border-color: #f5c6cb;
+        }
+
+        .quick-link-badge .icon {
+            margin-right: 6px;
+            font-size: 16px;
+        }
+
+        .quick-link-badge.priority .icon {
+            color: #dc3545;
+        }
+
+        .tasks-container {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .tasks-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #6c757d;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Table component styles */
+        .integram-table-wrapper {
+            position: relative;
+            margin: 20px 0;
+        }
+
+        .integram-table-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .integram-table-settings {
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+
+        .integram-table-settings:hover {
+            background-color: #f0f0f0;
+        }
+
+        .integram-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .integram-table th {
+            background: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid #dee2e6;
+            position: relative;
+            cursor: move;
+            user-select: none;
+        }
+
+        .integram-table th.dragging {
+            opacity: 0.5;
+            background: #e9ecef;
+        }
+
+        .integram-table th.drag-over {
+            border-left: 3px solid #007bff;
+        }
+
+        .integram-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .integram-table tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        .integram-table .number-cell {
+            text-align: right;
+        }
+
+        .integram-table .boolean-cell {
+            text-align: center;
+        }
+
+        .integram-table .date-cell,
+        .integram-table .datetime-cell {
+            white-space: nowrap;
+        }
+
+        .integram-table .memo-cell {
+            max-width: 300px;
+            white-space: pre-wrap;
+        }
+
+        .integram-table .pwd-cell {
+            font-family: monospace;
+        }
+
+        .filter-row td {
+            padding: 5px;
+            background: #f8f9fa;
+        }
+
+        .filter-cell {
+            display: flex;
+            align-items: center;
+        }
+
+        .filter-type {
+            padding: 4px 8px;
+            margin-right: 5px;
+            cursor: pointer;
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 3px;
+            font-size: 14px;
+            min-width: 30px;
+            text-align: center;
+        }
+
+        .filter-type:hover {
+            background: #e9ecef;
+        }
+
+        .filter-input {
+            flex: 1;
+            padding: 4px 8px;
+            border: 1px solid #dee2e6;
+            border-radius: 3px;
+            font-size: 14px;
+        }
+
+        .pagination-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 15px;
+            padding: 10px 0;
+        }
+
+        .pagination-controls button {
+            padding: 6px 12px;
+            margin: 0 2px;
+            border: 1px solid #dee2e6;
+            background: white;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .pagination-controls button:hover:not(:disabled) {
+            background: #e9ecef;
+        }
+
+        .pagination-controls button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .column-settings-modal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            z-index: 1000;
+            max-width: 400px;
+            width: 90%;
+        }
+
+        .column-settings-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 999;
+        }
+
+        .column-settings-list {
+            max-height: 400px;
+            overflow-y: auto;
+            margin: 15px 0;
+        }
+
+        .column-settings-item {
+            padding: 8px;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            align-items: center;
+        }
+
+        .column-settings-item label {
+            margin: 0;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            width: 100%;
+        }
+
+        .column-settings-item input[type="checkbox"] {
+            margin-right: 10px;
+        }
+
+        .filter-type-menu {
+            position: absolute;
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            z-index: 100;
+            min-width: 200px;
+        }
+
+        .filter-type-option {
+            padding: 8px 12px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .filter-type-option:hover {
+            background: #f8f9fa;
+        }
+
+        .filter-type-option .symbol {
+            font-weight: bold;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+<nav id="nav" class="navbar shadow-sm navbar-expand-562 fixed-top dark navbar-fixed-top">
+    <a id="brand" class="navbar-brand" href="/{_global_.z}/">
+        <img src="/i/lamp.png" width="30" loading="lazy"/>
+    </a>
+    <button onclick="burgerClick(this)" class="navbar-toggler expand-menu" type="button"  data-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+        <span class="navbar-toggler-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 16 16" class="icon" style="shape-rendering: geometricprecision; margin-top: 0px;">
+                <path fill-rule="evenodd" class="" fill="currentColor" d="M2,12 C2,11.4477153 2.45576096,11 3.00247329,11 L12.9975267,11 C13.5511774,11 14,11.4438648 14,12 C14,12.5522847 13.544239,13 12.9975267,13 L3.00247329,13 C2.44882258,13 2,12.5561352 2,12 Z M2,8 C2,7.44771525 2.45576096,7 3.00247329,7 L12.9975267,7 C13.5511774,7 14,7.44386482 14,8 C14,8.55228475 13.544239,9 12.9975267,9 L3.00247329,9 C2.44882258,9 2,8.55613518 2,8 Z M2,4 C2,3.44771525 2.45576096,3 3.00247329,3 L12.9975267,3 C13.5511774,3 14,3.44386482 14,4 C14,4.55228475 13.544239,5 12.9975267,5 L3.00247329,5 C2.44882258,5 2,4.55613518 2,4 Z"></path>
+            </svg>
+        </span>
+    </button>
+    <div class="collapse navbar-collapse" id="navbarSupportedContent">
+        <ul id="navbar-list" class="navbar-nav">
+            <div id="navlist" class="hidden">
+                <li class="nav-item"><a class="nav-link" id="list:id:" href="/{_global_.z}/:href:">:name:</a></li>
+            </div>
+            <div id="extralist" class="hidden">
+                <li id="dropdown-link" class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle expand-menu" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                      Еще
+                    </a>
+                    <div class="dropdown-menu" id="dropdown-list" aria-labelledby="navbarDropdown">
+                        <a class="dropdown-item" href="/{_global_.z}/:href:">:name:</a>
+                    </div>
+                </li>
+            </div>
+        </ul>
+    </div>
+    <div class="right-block" id="right_block">
+        <div class="nav-item dropdown">
+            <a class="user-link dropdown-toggle user-margin" href="#" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                <svg height="30" viewBox="0 0 18 20" fill="white" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M17 19V17C17 15.9391 16.5786 14.9217 15.8284 14.1716C15.0783 13.4214 14.0609 13 13 13H5C3.93913 13 2.92172 13.4214 2.17157 14.1716C1.42143 14.9217 1 15.9391 1 17V19M13 5C13 7.20914 11.2091 9 9 9C6.79086 9 5 7.20914 5 5C5 2.79086 6.79086 1 9 1C11.2091 1 13 2.79086 13 5Z" stroke="#fafafa" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </a>
+            <div class="dropdown-menu dropdown-menu-right shadow" aria-labelledby="navbarDropdown">
+                <a class="dropdown-item" target="_blank" href="https://help.integram.io/"><t9n>[RU]Помощь[EN]Help</t9n></a>
+                <a target="_blank" href="/my?login={_global_.z}">
+                    <div class="dropdown-item box">
+                        <span><t9n>[RU]ЛК / Счет[EN]My account</t9n></span>
+                    </div>
+                </a>
+                <a class="dropdown-item" onclick="toggleLocale()">EN/RU</a>
+                <a class="dropdown-item" onclick="$('.cp-form').css('display','table');$('.ch-toggle').show();$('.wait-toggle').hide();"><t9n>[RU]Сменить пароль[EN]Change password</t9n></a>
+                <a class="dropdown-item" onclick="exitLogin()"><t9n>[RU]Выйти[EN]Exit</t9n></a>
+                <a class="dropdown-item" href="/{_global_.z}/exit"><t9n>[RU]Выйти везде[EN]Exit all devices</t9n></a>
+            </div>
+        </div>
+    </div>
+</nav>
+<div class="cp-form" style="display: none; position: absolute; top: 0; left: 0; height: 100%; width: 100%; z-index: 9999; background: rgba(255,255,255,.5);" onclick="$(this).hide();">
+  <div class="middle" style="display: table-cell; vertical-align: middle;" onkeyup="if(event.keyCode===13)changePwd()">
+    <div class="inner p-4 shadow" style="margin-left: auto; margin-right: auto; border: 1px solid gray; border-radius: 3px; background-color: #fbfbfb; max-width: 348px;" onclick="event.stopPropagation();">
+        <div class="w-100 text-center mb-3">
+            <h5><t9n>[RU]Смена пароля[EN]Password change</t9n></h5>
+        </div>
+        <div id="pwdchangemsg" class="alert w-100" style="display: none;"></div>
+        <label for="old-pwd" class="mb-0"><t9n>[RU]Действующий пароль[EN]Current password</t9n></label>
+        <input type="password" id="old-pwd" class="form-control pr-1 pl-1 mb-2" style="border: 1px solid lightgray !important;">
+        <label for="new-pwd" class="mb-0"><t9n>[RU]Новый пароль[EN]New password</t9n></label>
+        <input type="password" id="new-pwd" class="form-control pr-1 pl-1 mb-2" style="border: 1px solid lightgray !important;">
+        <label for="new-again" class="mb-0"><t9n>[RU]Повторите пароль[EN]Repeat password</t9n></label>
+        <input type="password" id="new-again" class="form-control pr-1 pl-1 mb-2" style="border: 1px solid lightgray !important;">
+        <div class="row pt-3">
+            <div class="col-12 text-center">
+                <span><img class="wait-toggle" style="display:none;" src="/i/ajax.gif"></span>
+            </div>
+            <div class="col-6 pr-2 ch-toggle">
+                <button class="btn btn-primary btn-block mr-3" type="button" onclick="changePwd()"><t9n>[RU]Сменить[EN]Change</t9n></button>
+            </div>
+            <div class="col-6 pl-2 ch-toggle">
+                <button class="btn btn-outline-secondary btn-block mr-3" type="button" onclick="$('.cp-form').hide();"><t9n>[RU]Отменить[EN]Cancel</t9n></button>
+            </div>
+        </div>
+    </div>
+  </div>
+</div>
+<div class="content" style="padding-top: 70px;">
+    <div class="container-fluid">
+        <!-- Quick Links Section -->
+        <div class="quick-links-container">
+            <div class="quick-links-title">Быстрые ссылки</div>
+            <div id="quick-links" class="quick-links">
+                <div class="loading">
+                    <div class="loading-spinner"></div>
+                    <div style="margin-top: 10px;">Загрузка...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tasks Section -->
+        <div class="tasks-container">
+            <div class="tasks-title">Задачи</div>
+            <div id="tasks-table"></div>
+        </div>
+    </div>
+</div>
+<div class="footer">
+<!--Elapsed-->
+</div>
+<FORM method="POST" id="post" action="/{_global_.z}/"><input type="hidden" name="_xsrf" value="{_global_.xsrf}"></FORM>
+<script src="/js/popper.min.js"></script>
+<script src="/js/bootstrap.min.js"></script>
+<script src="/js/main.js?00{_global_.version}"></script>
+<script>
+localize();
+function changePwd(){
+    if($('#old-pwd').val()===''||$('#new-pwd').val()===''||$('#new-again').val()==='')
+        return changeMsg('alert-danger',t9n('[RU]Заполните все поля[EN]Please fill in the inputs'));
+    $('.ch-toggle,wait-toggle').toggle();
+    var obj=new XMLHttpRequest();
+    obj.open('POST','/'+db+'/auth?JSON',true);
+    obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+    obj.onload=function(e){
+        $('.ch-toggle,wait-toggle').toggle();
+        try{
+            json=JSON.parse(this.responseText);
+        }
+        catch(e){
+            console.log(e);
+            $('#pwdchangemsg').html(this.responseText);
+        }
+        if(json.msg){
+            if(json.msg.indexOf('[err')===-1){
+                changeMsg('alert-success',json.msg);
+                $('#old-pwd,#new-pwd,#new-again').val('');
+            }
+            else
+                changeMsg('alert-danger',json.msg.replace(/ ?\[.+\]/,''));
+            token=json.token;
+            xsrf=json.xsrf;
+        }
+        else
+            changeMsg('alert-danger',t9n('[RU]Неверный пароль[EN]Wrong password'));
+        obj.abort();
+    }
+    obj.send('change=1&login={_global_.user}&pwd='+$('#old-pwd').val()+'&npw1='+$('#new-pwd').val()+'&npw2='+$('#new-again').val());
+}
+function changeMsg(cl,msg){
+    $('#pwdchangemsg').removeClass('alert-danger').removeClass('alert-success').addClass(cl).html(msg).show().delay(4500).slideUp(400);
+}
+function exitLogin(){
+    document.cookie='{_global_.z}=;Path=/';
+    document.location.href='/{_global_.z}';
+}
+function toggleLocale(){
+    document.cookie='{_global_.z}_locale='+(locale==='[EN]'?'RU':'EN')+';Path=/';
+    location.reload();
+}
+
+// Load Quick Links
+async function loadQuickLinks() {
+    try {
+        const response = await fetch('/' + db + '/report/299?JSON_KV');
+        const links = await response.json();
+
+        const container = document.getElementById('quick-links');
+        container.innerHTML = '';
+
+        links.forEach(link => {
+            const badge = document.createElement('a');
+            const format = link['Формат отчета'] || 'report';
+            const queryId = link['ЗапросID'];
+            const isPriority = link['приоритет'] === 'X';
+
+            badge.className = 'quick-link-badge' + (isPriority ? ' priority' : '');
+            badge.href = '/' + db + '/' + format + '/' + queryId;
+            badge.target = queryId;
+
+            const icon = document.createElement('span');
+            icon.className = 'icon';
+            icon.innerHTML = isPriority ? '🔴' : '📊';
+
+            const text = document.createTextNode(link['Запрос']);
+
+            badge.appendChild(icon);
+            badge.appendChild(text);
+            container.appendChild(badge);
+        });
+    } catch (error) {
+        console.error('Error loading quick links:', error);
+        document.getElementById('quick-links').innerHTML =
+            '<div class="alert alert-danger">Ошибка загрузки быстрых ссылок</div>';
+    }
+}
+
+// IntegramTable Component (inline)
+class IntegramTable {
+    constructor(containerId, options = {}) {
+        this.container = document.getElementById(containerId);
+        this.options = {
+            apiUrl: options.apiUrl || '',
+            pageSize: options.pageSize || 20,
+            cookiePrefix: options.cookiePrefix || 'integram-table',
+            onCellClick: options.onCellClick || null,
+            onDataLoad: options.onDataLoad || null
+        };
+
+        this.columns = [];
+        this.data = [];
+        this.currentPage = 0;
+        this.totalRows = 0;
+        this.filters = {};
+        this.columnOrder = [];
+        this.visibleColumns = [];
+        this.filtersEnabled = false;
+
+        this.filterTypes = {
+            'CHARS': [
+                { symbol: '^', name: 'начинается с...', format: 'FR_{T}={X}%' },
+                { symbol: '=', name: 'равно', format: 'FR_{T}={X}' },
+                { symbol: '≠', name: 'не равно', format: 'FR_{T}=!{X}' },
+                { symbol: '~', name: 'содержит', format: 'FR_{T}=%{X}%' },
+                { symbol: '!', name: 'не содержит', format: 'FR_{T}=!%{X}%' },
+                { symbol: '!^', name: 'не начинается', format: 'FR_{T}=!%{X}' },
+                { symbol: '%', name: 'не пустое', format: 'FR_{T}=%' },
+                { symbol: '!%', name: 'пустое', format: 'FR_{T}=!%' },
+                { symbol: '(,)', name: 'в списке', format: 'FR_{T}=IN({X})' },
+                { symbol: '$', name: 'заканчивается', format: 'FR_{T}=%{X}' }
+            ],
+            'NUMBER': [
+                { symbol: '=', name: 'равно', format: 'FR_{T}={X}' },
+                { symbol: '≠', name: 'не равно', format: 'FR_{T}=!{X}' },
+                { symbol: '≥', name: 'не меньше', format: 'FR_{T}=>={X}' },
+                { symbol: '≤', name: 'не больше', format: 'FR_{T}=<={X}' },
+                { symbol: '>', name: 'больше', format: 'FR_{T}=>{X}' },
+                { symbol: '<', name: 'меньше', format: 'FR_{T}=<{X}' },
+                { symbol: '...', name: 'в диапазоне', format: 'FR_{T}={X1}&TO_{T}={X2}' },
+                { symbol: '%', name: 'не пустое', format: 'FR_{T}=%' },
+                { symbol: '!%', name: 'пустое', format: 'FR_{T}=!%' }
+            ],
+            'DATE': [
+                { symbol: '=', name: 'равно', format: 'FR_{T}={X}' },
+                { symbol: '≥', name: 'не меньше', format: 'FR_{T}=>={X}' },
+                { symbol: '≤', name: 'не больше', format: 'FR_{T}=<={X}' },
+                { symbol: '>', name: 'больше', format: 'FR_{T}=>{X}' },
+                { symbol: '<', name: 'меньше', format: 'FR_{T}=<{X}' },
+                { symbol: '...', name: 'в диапазоне', format: 'FR_{T}={X1}&TO_{T}={X2}' },
+                { symbol: '%', name: 'не пустое', format: 'FR_{T}=%' },
+                { symbol: '!%', name: 'пустое', format: 'FR_{T}=!%' }
+            ]
+        };
+
+        this.filterTypes['SHORT'] = this.filterTypes['CHARS'];
+        this.filterTypes['MEMO'] = this.filterTypes['CHARS'];
+        this.filterTypes['DATETIME'] = this.filterTypes['DATE'];
+        this.filterTypes['SIGNED'] = this.filterTypes['NUMBER'];
+
+        this.init();
+    }
+
+    init() {
+        this.loadColumnState();
+        this.loadData();
+    }
+
+    async loadData() {
+        const offset = this.currentPage * this.options.pageSize;
+        const params = new URLSearchParams({
+            LIMIT: `${offset},${this.options.pageSize}`
+        });
+
+        Object.keys(this.filters).forEach(colId => {
+            const filter = this.filters[colId];
+            if (filter.value) {
+                const column = this.columns.find(c => c.id === colId);
+                if (column) {
+                    this.applyFilter(params, column, filter);
+                }
+            }
+        });
+
+        try {
+            const response = await fetch(`${this.options.apiUrl}?${params}`);
+            const json = await response.json();
+
+            this.columns = json.columns || [];
+            this.data = json.data || [];
+            this.totalRows = json.total || this.data.length;
+
+            if (this.columnOrder.length === 0) {
+                this.columnOrder = this.columns.map(c => c.id);
+            }
+            if (this.visibleColumns.length === 0) {
+                this.visibleColumns = this.columns.map(c => c.id);
+            }
+
+            if (this.options.onDataLoad) {
+                this.options.onDataLoad(json);
+            }
+
+            this.render();
+        } catch (error) {
+            console.error('Error loading data:', error);
+            this.container.innerHTML = `<div class="alert alert-danger">Ошибка загрузки данных: ${error.message}</div>`;
+        }
+    }
+
+    applyFilter(params, column, filter) {
+        const type = filter.type || '^';
+        const value = filter.value;
+        const colId = column.id;
+
+        const format = column.format || 'SHORT';
+        const filterGroup = this.filterTypes[format] || this.filterTypes['SHORT'];
+        const filterDef = filterGroup.find(f => f.symbol === type);
+
+        if (!filterDef) return;
+
+        if (type === '...') {
+            const values = value.split(',').map(v => v.trim());
+            if (values.length >= 2) {
+                params.append(`FR_${colId}`, values[0]);
+                params.append(`TO_${colId}`, values[1]);
+            }
+        } else if (type === '%' || type === '!%') {
+            params.append(`FR_${colId}`, type === '%' ? '%' : '!%');
+        } else {
+            let paramValue = filterDef.format.replace('{T}', colId).replace('{X}', value);
+            paramValue = paramValue.replace('FR_' + colId + '=', '');
+            params.append(`FR_${colId}`, paramValue);
+        }
+    }
+
+    render() {
+        const orderedColumns = this.columnOrder
+            .map(id => this.columns.find(c => c.id === id))
+            .filter(c => c && this.visibleColumns.includes(c.id));
+
+        let html = `
+            <div class="integram-table-wrapper">
+                <div class="integram-table-header">
+                    <div>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="window.tasksTable.toggleFilters()">
+                            ${this.filtersEnabled ? '✓' : ''} Фильтры
+                        </button>
+                    </div>
+                    <div class="integram-table-settings" onclick="window.tasksTable.openColumnSettings()">
+                        ⚙️ Настройки колонок
+                    </div>
+                </div>
+                <table class="integram-table">
+                    <thead>
+                        <tr>
+                            ${orderedColumns.map(col => `
+                                <th data-column-id="${col.id}" draggable="true">
+                                    ${col.name}
+                                </th>
+                            `).join('')}
+                        </tr>
+                        ${this.filtersEnabled ? `
+                        <tr class="filter-row">
+                            ${orderedColumns.map(col => this.renderFilterCell(col)).join('')}
+                        </tr>
+                        ` : ''}
+                    </thead>
+                    <tbody>
+                        ${this.data.map((row, rowIndex) => `
+                            <tr>
+                                ${orderedColumns.map((col, colIndex) => {
+                                    const cellValue = row[this.columns.indexOf(col)];
+                                    return this.renderCell(col, cellValue, rowIndex, colIndex);
+                                }).join('')}
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                ${this.renderPagination()}
+            </div>
+        `;
+
+        this.container.innerHTML = html;
+        this.attachEventListeners();
+    }
+
+    renderFilterCell(column) {
+        const format = column.format || 'SHORT';
+        const currentFilter = this.filters[column.id] || { type: '^', value: '' };
+
+        return `
+            <td>
+                <div class="filter-cell">
+                    <span class="filter-type" data-column-id="${column.id}">
+                        ${currentFilter.type}
+                    </span>
+                    <input type="text"
+                           class="filter-input"
+                           data-column-id="${column.id}"
+                           value="${currentFilter.value}"
+                           placeholder="Фильтр...">
+                </div>
+            </td>
+        `;
+    }
+
+    renderCell(column, value, rowIndex, colIndex) {
+        const format = column.format || 'SHORT';
+        let cellClass = '';
+        let displayValue = value || '';
+
+        switch (format) {
+            case 'NUMBER':
+            case 'SIGNED':
+                cellClass = 'number-cell';
+                break;
+            case 'BOOLEAN':
+                cellClass = 'boolean-cell';
+                displayValue = value ? 'Да' : 'Нет';
+                break;
+            case 'DATE':
+                cellClass = 'date-cell';
+                if (value) {
+                    displayValue = new Date(value).toLocaleDateString('ru-RU');
+                }
+                break;
+            case 'DATETIME':
+                cellClass = 'datetime-cell';
+                if (value) {
+                    displayValue = new Date(value).toLocaleString('ru-RU');
+                }
+                break;
+            case 'MEMO':
+                cellClass = 'memo-cell';
+                break;
+            case 'PWD':
+                cellClass = 'pwd-cell';
+                displayValue = '******';
+                break;
+            case 'HTML':
+                return `<td class="${cellClass}" data-row="${rowIndex}" data-col="${colIndex}">${displayValue}</td>`;
+            case 'BUTTON':
+                displayValue = `<button class="btn btn-sm btn-primary">${value || 'Действие'}</button>`;
+                return `<td class="${cellClass}" data-row="${rowIndex}" data-col="${colIndex}">${displayValue}</td>`;
+        }
+
+        const escapedValue = String(displayValue).replace(/&/g, '&amp;')
+                                                  .replace(/</g, '&lt;')
+                                                  .replace(/>/g, '&gt;')
+                                                  .replace(/"/g, '&quot;')
+                                                  .replace(/'/g, '&#039;');
+
+        return `<td class="${cellClass}" data-row="${rowIndex}" data-col="${colIndex}">${escapedValue}</td>`;
+    }
+
+    renderPagination() {
+        const totalPages = Math.ceil(this.totalRows / this.options.pageSize);
+        const hasNext = this.currentPage < totalPages - 1;
+        const hasPrev = this.currentPage > 0;
+
+        return `
+            <div class="pagination-controls">
+                <div>
+                    Показано ${this.currentPage * this.options.pageSize + 1}-${Math.min((this.currentPage + 1) * this.options.pageSize, this.totalRows)} из ${this.totalRows}
+                </div>
+                <div>
+                    <button ${!hasPrev ? 'disabled' : ''} onclick="window.tasksTable.prevPage()">← Назад</button>
+                    <span style="margin: 0 10px;">Страница ${this.currentPage + 1} из ${totalPages}</span>
+                    <button ${!hasNext ? 'disabled' : ''} onclick="window.tasksTable.nextPage()">Вперед →</button>
+                </div>
+            </div>
+        `;
+    }
+
+    attachEventListeners() {
+        const headers = this.container.querySelectorAll('th[draggable]');
+        headers.forEach(th => {
+            th.addEventListener('dragstart', (e) => {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', th.dataset.columnId);
+                th.classList.add('dragging');
+            });
+
+            th.addEventListener('dragend', (e) => {
+                th.classList.remove('dragging');
+                document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+            });
+
+            th.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                th.classList.add('drag-over');
+            });
+
+            th.addEventListener('dragleave', (e) => {
+                th.classList.remove('drag-over');
+            });
+
+            th.addEventListener('drop', (e) => {
+                e.preventDefault();
+                const draggedId = e.dataTransfer.getData('text/plain');
+                const targetId = th.dataset.columnId;
+
+                if (draggedId !== targetId) {
+                    this.reorderColumns(draggedId, targetId);
+                }
+
+                th.classList.remove('drag-over');
+            });
+        });
+
+        const filterTypes = this.container.querySelectorAll('.filter-type');
+        filterTypes.forEach(ft => {
+            ft.addEventListener('click', (e) => {
+                this.showFilterTypeMenu(e.target, ft.dataset.columnId);
+            });
+        });
+
+        const filterInputs = this.container.querySelectorAll('.filter-input');
+        filterInputs.forEach(input => {
+            input.addEventListener('change', (e) => {
+                const colId = input.dataset.columnId;
+                if (!this.filters[colId]) {
+                    this.filters[colId] = { type: '^', value: '' };
+                }
+                this.filters[colId].value = input.value;
+                this.currentPage = 0;
+                this.loadData();
+            });
+        });
+
+        if (this.options.onCellClick) {
+            this.container.querySelectorAll('td').forEach(td => {
+                td.addEventListener('click', () => {
+                    const row = parseInt(td.dataset.row);
+                    const col = parseInt(td.dataset.col);
+                    this.options.onCellClick(row, col, this.data[row][col]);
+                });
+            });
+        }
+    }
+
+    showFilterTypeMenu(target, columnId) {
+        const column = this.columns.find(c => c.id === columnId);
+        const format = column.format || 'SHORT';
+        const filterGroup = this.filterTypes[format] || this.filterTypes['SHORT'];
+
+        document.querySelectorAll('.filter-type-menu').forEach(m => m.remove());
+
+        const menu = document.createElement('div');
+        menu.className = 'filter-type-menu';
+        menu.innerHTML = filterGroup.map(f => `
+            <div class="filter-type-option" data-symbol="${f.symbol}">
+                <span class="symbol">${f.symbol}</span>
+                <span>${f.name}</span>
+            </div>
+        `).join('');
+
+        const rect = target.getBoundingClientRect();
+        menu.style.position = 'absolute';
+        menu.style.top = rect.bottom + 'px';
+        menu.style.left = rect.left + 'px';
+
+        document.body.appendChild(menu);
+
+        menu.querySelectorAll('.filter-type-option').forEach(opt => {
+            opt.addEventListener('click', () => {
+                const symbol = opt.dataset.symbol;
+                if (!this.filters[columnId]) {
+                    this.filters[columnId] = { type: '^', value: '' };
+                }
+                this.filters[columnId].type = symbol;
+                target.textContent = symbol;
+                menu.remove();
+
+                if (this.filters[columnId].value) {
+                    this.currentPage = 0;
+                    this.loadData();
+                }
+            });
+        });
+
+        setTimeout(() => {
+            document.addEventListener('click', function closeMenu(e) {
+                if (!menu.contains(e.target) && e.target !== target) {
+                    menu.remove();
+                    document.removeEventListener('click', closeMenu);
+                }
+            });
+        }, 0);
+    }
+
+    reorderColumns(draggedId, targetId) {
+        const draggedIndex = this.columnOrder.indexOf(draggedId);
+        const targetIndex = this.columnOrder.indexOf(targetId);
+
+        if (draggedIndex === -1 || targetIndex === -1) return;
+
+        this.columnOrder.splice(draggedIndex, 1);
+        this.columnOrder.splice(targetIndex, 0, draggedId);
+
+        this.saveColumnState();
+        this.render();
+    }
+
+    openColumnSettings() {
+        const overlay = document.createElement('div');
+        overlay.className = 'column-settings-overlay';
+
+        const modal = document.createElement('div');
+        modal.className = 'column-settings-modal';
+        modal.innerHTML = `
+            <h5>Настройки колонок</h5>
+            <div class="column-settings-list">
+                ${this.columns.map(col => `
+                    <div class="column-settings-item">
+                        <label>
+                            <input type="checkbox"
+                                   data-column-id="${col.id}"
+                                   ${this.visibleColumns.includes(col.id) ? 'checked' : ''}>
+                            ${col.name}
+                        </label>
+                    </div>
+                `).join('')}
+            </div>
+            <div style="text-align: right; margin-top: 15px;">
+                <button class="btn btn-secondary" onclick="window.tasksTable.closeColumnSettings()">Закрыть</button>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+        document.body.appendChild(modal);
+
+        modal.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+            cb.addEventListener('change', (e) => {
+                const colId = cb.dataset.columnId;
+                if (cb.checked) {
+                    if (!this.visibleColumns.includes(colId)) {
+                        this.visibleColumns.push(colId);
+                    }
+                } else {
+                    this.visibleColumns = this.visibleColumns.filter(id => id !== colId);
+                }
+                this.saveColumnState();
+                this.render();
+            });
+        });
+
+        overlay.addEventListener('click', () => this.closeColumnSettings());
+    }
+
+    closeColumnSettings() {
+        document.querySelectorAll('.column-settings-overlay, .column-settings-modal').forEach(el => el.remove());
+    }
+
+    toggleFilters() {
+        this.filtersEnabled = !this.filtersEnabled;
+        this.render();
+    }
+
+    nextPage() {
+        this.currentPage++;
+        this.loadData();
+    }
+
+    prevPage() {
+        if (this.currentPage > 0) {
+            this.currentPage--;
+            this.loadData();
+        }
+    }
+
+    saveColumnState() {
+        const state = {
+            order: this.columnOrder,
+            visible: this.visibleColumns
+        };
+        document.cookie = `${this.options.cookiePrefix}-state=${JSON.stringify(state)}; path=/; max-age=31536000`;
+    }
+
+    loadColumnState() {
+        const cookies = document.cookie.split(';');
+        const stateCookie = cookies.find(c => c.trim().startsWith(`${this.options.cookiePrefix}-state=`));
+
+        if (stateCookie) {
+            try {
+                const state = JSON.parse(stateCookie.split('=')[1]);
+                this.columnOrder = state.order || [];
+                this.visibleColumns = state.visible || [];
+            } catch (e) {
+                console.error('Error loading column state:', e);
+            }
+        }
+    }
+}
+
+// Initialize components on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Load quick links
+    loadQuickLinks();
+
+    // Initialize tasks table
+    window.tasksTable = new IntegramTable('tasks-table', {
+        apiUrl: '/' + db + '/report/4283?JSON',
+        pageSize: 20,
+        cookiePrefix: 'tasks-table'
+    });
+});
+</script>
+</body>
+</html>
