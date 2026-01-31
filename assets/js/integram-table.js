@@ -155,6 +155,11 @@ class IntegramTable {
 
                 this.loadedRecords += newRows.length;
 
+                // Auto-set total count if we've reached the end
+                if (!this.hasMore && this.totalRows === null) {
+                    this.totalRows = this.loadedRecords;
+                }
+
                 // Process columns to hide ID and Style suffixes
                 this.processColumnVisibility();
 
