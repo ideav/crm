@@ -1,0 +1,557 @@
+/**
+ * Info.html Workspace Script
+ * Task Management Workspace with Quick Links and Tasks Table
+ */
+
+(function() {
+    'use strict';
+
+    // Load Quick Links
+    async function loadQuickLinks() {
+        try {
+            const response = await fetch('/' + db + '/report/299?JSON_KV');
+            const links = await response.json();
+
+            const container = document.getElementById('quick-links');
+            container.innerHTML = '';
+
+            links.forEach(link => {
+                const badge = document.createElement('a');
+                const format = link['Формат отчета'] || 'report';
+                const queryId = link['ЗапросID'];
+                const isPriority = link['приоритет'] === 'X';
+
+                badge.className = 'quick-link-badge' + (isPriority ? ' priority' : '');
+                badge.href = '/' + db + '/' + format + '/' + queryId;
+                badge.target = queryId;
+
+                const icon = document.createElement('span');
+                icon.className = 'icon';
+                icon.innerHTML = isPriority ? '🔴' : '📊';
+
+                const text = document.createTextNode(link['Запрос']);
+
+                badge.appendChild(icon);
+                badge.appendChild(text);
+                container.appendChild(badge);
+            });
+        } catch (error) {
+            console.error('Error loading quick links:', error);
+            document.getElementById('quick-links').innerHTML =
+                '<div class="alert alert-danger">Ошибка загрузки быстрых ссылок</div>';
+        }
+    }
+
+    // IntegramTable Component
+    class IntegramTable {
+        constructor(containerId, options = {}) {
+            this.container = document.getElementById(containerId);
+            this.options = {
+                apiUrl: options.apiUrl || '',
+                pageSize: options.pageSize || 20,
+                cookiePrefix: options.cookiePrefix || 'integram-table',
+                onCellClick: options.onCellClick || null,
+                onDataLoad: options.onDataLoad || null
+            };
+
+            this.columns = [];
+            this.data = [];
+            this.currentPage = 0;
+            this.totalRows = 0;
+            this.filters = {};
+            this.columnOrder = [];
+            this.visibleColumns = [];
+            this.filtersEnabled = false;
+
+            this.filterTypes = {
+                'CHARS': [
+                    { symbol: '^', name: 'начинается с...', format: 'FR_{ T }={ X }%' },
+                    { symbol: '=', name: 'равно', format: 'FR_{ T }={ X }' },
+                    { symbol: '≠', name: 'не равно', format: 'FR_{ T }=!{ X }' },
+                    { symbol: '~', name: 'содержит', format: 'FR_{ T }=%{ X }%' },
+                    { symbol: '!', name: 'не содержит', format: 'FR_{ T }=!%{ X }%' },
+                    { symbol: '!^', name: 'не начинается', format: 'FR_{ T }=!%{ X }' },
+                    { symbol: '%', name: 'не пустое', format: 'FR_{ T }=%' },
+                    { symbol: '!%', name: 'пустое', format: 'FR_{ T }=!%' },
+                    { symbol: '(,)', name: 'в списке', format: 'FR_{ T }=IN({ X })' },
+                    { symbol: '$', name: 'заканчивается', format: 'FR_{ T }=%{ X }' }
+                ],
+                'NUMBER': [
+                    { symbol: '=', name: 'равно', format: 'FR_{ T }={ X }' },
+                    { symbol: '≠', name: 'не равно', format: 'FR_{ T }=!{ X }' },
+                    { symbol: '≥', name: 'не меньше', format: 'FR_{ T }=>={ X }' },
+                    { symbol: '≤', name: 'не больше', format: 'FR_{ T }=<={ X }' },
+                    { symbol: '>', name: 'больше', format: 'FR_{ T }>{ X }' },
+                    { symbol: '<', name: 'меньше', format: 'FR_{ T }<{ X }' },
+                    { symbol: '...', name: 'в диапазоне', format: 'FR_{ T }={ X1 }&TO_{ T }={ X2 }' },
+                    { symbol: '%', name: 'не пустое', format: 'FR_{ T }=%' },
+                    { symbol: '!%', name: 'пустое', format: 'FR_{ T }=!%' }
+                ],
+                'DATE': [
+                    { symbol: '=', name: 'равно', format: 'FR_{ T }={ X }' },
+                    { symbol: '≥', name: 'не меньше', format: 'FR_{ T }=>={ X }' },
+                    { symbol: '≤', name: 'не больше', format: 'FR_{ T }=<={ X }' },
+                    { symbol: '>', name: 'больше', format: 'FR_{ T }>{ X }' },
+                    { symbol: '<', name: 'меньше', format: 'FR_{ T }<{ X }' },
+                    { symbol: '...', name: 'в диапазоне', format: 'FR_{ T }={ X1 }&TO_{ T }={ X2 }' },
+                    { symbol: '%', name: 'не пустое', format: 'FR_{ T }=%' },
+                    { symbol: '!%', name: 'пустое', format: 'FR_{ T }=!%' }
+                ]
+            };
+
+            this.filterTypes['SHORT'] = this.filterTypes['CHARS'];
+            this.filterTypes['MEMO'] = this.filterTypes['CHARS'];
+            this.filterTypes['DATETIME'] = this.filterTypes['DATE'];
+            this.filterTypes['SIGNED'] = this.filterTypes['NUMBER'];
+
+            this.init();
+        }
+
+        init() {
+            this.loadColumnState();
+            this.loadData();
+        }
+
+        async loadData() {
+            const offset = this.currentPage * this.options.pageSize;
+            const params = new URLSearchParams({
+                LIMIT: `${ offset },${ this.options.pageSize }`
+            });
+
+            Object.keys(this.filters).forEach(colId => {
+                const filter = this.filters[colId];
+                if (filter.value) {
+                    const column = this.columns.find(c => c.id === colId);
+                    if (column) {
+                        this.applyFilter(params, column, filter);
+                    }
+                }
+            });
+
+            try {
+                const response = await fetch(`${ this.options.apiUrl }?${ params }`);
+                const json = await response.json();
+
+                this.columns = json.columns || [];
+                this.data = json.data || [];
+                this.totalRows = json.total || this.data.length;
+
+                if (this.columnOrder.length === 0) {
+                    this.columnOrder = this.columns.map(c => c.id);
+                }
+                if (this.visibleColumns.length === 0) {
+                    this.visibleColumns = this.columns.map(c => c.id);
+                }
+
+                if (this.options.onDataLoad) {
+                    this.options.onDataLoad(json);
+                }
+
+                this.render();
+            } catch (error) {
+                console.error('Error loading data:', error);
+                this.container.innerHTML = `<div class="alert alert-danger">Ошибка загрузки данных: ${ error.message }</div>`;
+            }
+        }
+
+        applyFilter(params, column, filter) {
+            const type = filter.type || '^';
+            const value = filter.value;
+            const colId = column.id;
+
+            const format = column.format || 'SHORT';
+            const filterGroup = this.filterTypes[format] || this.filterTypes['SHORT'];
+            const filterDef = filterGroup.find(f => f.symbol === type);
+
+            if (!filterDef) return;
+
+            if (type === '...') {
+                const values = value.split(',').map(v => v.trim());
+                if (values.length >= 2) {
+                    params.append(`FR_${ colId }`, values[0]);
+                    params.append(`TO_${ colId }`, values[1]);
+                }
+            } else if (type === '%' || type === '!%') {
+                params.append(`FR_${ colId }`, type === '%' ? '%' : '!%');
+            } else {
+                let paramValue = filterDef.format.replace('{ T }', colId).replace('{ X }', value);
+                paramValue = paramValue.replace('FR_' + colId + '=', '');
+                params.append(`FR_${ colId }`, paramValue);
+            }
+        }
+
+        render() {
+            const orderedColumns = this.columnOrder
+                .map(id => this.columns.find(c => c.id === id))
+                .filter(c => c && this.visibleColumns.includes(c.id));
+
+            let html = `
+                <div class="integram-table-wrapper">
+                    <div class="integram-table-header">
+                        <div>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="window.tasksTable.toggleFilters()">
+                                ${ this.filtersEnabled ? '✓' : '' } Фильтры
+                            </button>
+                        </div>
+                        <div class="integram-table-settings" onclick="window.tasksTable.openColumnSettings()">
+                            ⚙️ Настройки колонок
+                        </div>
+                    </div>
+                    <table class="integram-table">
+                        <thead>
+                            <tr>
+                                ${ orderedColumns.map(col => `
+                                    <th data-column-id="${ col.id }" draggable="true">
+                                        ${ col.name }
+                                    </th>
+                                `).join('') }
+                            </tr>
+                            ${ this.filtersEnabled ? `
+                            <tr class="filter-row">
+                                ${ orderedColumns.map(col => this.renderFilterCell(col)).join('') }
+                            </tr>
+                            ` : '' }
+                        </thead>
+                        <tbody>
+                            ${ this.data.map((row, rowIndex) => `
+                                <tr>
+                                    ${ orderedColumns.map((col, colIndex) => {
+                                        const cellValue = row[this.columns.indexOf(col)];
+                                        return this.renderCell(col, cellValue, rowIndex, colIndex);
+                                    }).join('') }
+                                </tr>
+                            `).join('') }
+                        </tbody>
+                    </table>
+                    ${ this.renderPagination() }
+                </div>
+            `;
+
+            this.container.innerHTML = html;
+            this.attachEventListeners();
+        }
+
+        renderFilterCell(column) {
+            const format = column.format || 'SHORT';
+            const currentFilter = this.filters[column.id] || { type: '^', value: '' };
+
+            return `
+                <td>
+                    <div class="filter-cell">
+                        <span class="filter-type" data-column-id="${ column.id }">
+                            ${ currentFilter.type }
+                        </span>
+                        <input type="text"
+                               class="filter-input"
+                               data-column-id="${ column.id }"
+                               value="${ currentFilter.value }"
+                               placeholder="Фильтр...">
+                    </div>
+                </td>
+            `;
+        }
+
+        renderCell(column, value, rowIndex, colIndex) {
+            const format = column.format || 'SHORT';
+            let cellClass = '';
+            let displayValue = value || '';
+
+            switch (format) {
+                case 'NUMBER':
+                case 'SIGNED':
+                    cellClass = 'number-cell';
+                    break;
+                case 'BOOLEAN':
+                    cellClass = 'boolean-cell';
+                    displayValue = value ? 'Да' : 'Нет';
+                    break;
+                case 'DATE':
+                    cellClass = 'date-cell';
+                    if (value) {
+                        displayValue = new Date(value).toLocaleDateString('ru-RU');
+                    }
+                    break;
+                case 'DATETIME':
+                    cellClass = 'datetime-cell';
+                    if (value) {
+                        displayValue = new Date(value).toLocaleString('ru-RU');
+                    }
+                    break;
+                case 'MEMO':
+                    cellClass = 'memo-cell';
+                    break;
+                case 'PWD':
+                    cellClass = 'pwd-cell';
+                    displayValue = '******';
+                    break;
+                case 'HTML':
+                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }">${ displayValue }</td>`;
+                case 'BUTTON':
+                    displayValue = `<button class="btn btn-sm btn-primary">${ value || 'Действие' }</button>`;
+                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }">${ displayValue }</td>`;
+            }
+
+            const escapedValue = String(displayValue).replace(/&/g, '&amp;')
+                                                      .replace(/</g, '&lt;')
+                                                      .replace(/>/g, '&gt;')
+                                                      .replace(/"/g, '&quot;')
+                                                      .replace(/'/g, '&#039;');
+
+            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }">${ escapedValue }</td>`;
+        }
+
+        renderPagination() {
+            const totalPages = Math.ceil(this.totalRows / this.options.pageSize);
+            const hasNext = this.currentPage < totalPages - 1;
+            const hasPrev = this.currentPage > 0;
+
+            return `
+                <div class="pagination-controls">
+                    <div>
+                        Показано ${ this.currentPage * this.options.pageSize + 1 }-${ Math.min((this.currentPage + 1) * this.options.pageSize, this.totalRows) } из ${ this.totalRows }
+                    </div>
+                    <div>
+                        <button ${ !hasPrev ? 'disabled' : '' } onclick="window.tasksTable.prevPage()">← Назад</button>
+                        <span style="margin: 0 10px;">Страница ${ this.currentPage + 1 } из ${ totalPages }</span>
+                        <button ${ !hasNext ? 'disabled' : '' } onclick="window.tasksTable.nextPage()">Вперед →</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        attachEventListeners() {
+            const headers = this.container.querySelectorAll('th[draggable]');
+            headers.forEach(th => {
+                th.addEventListener('dragstart', (e) => {
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', th.dataset.columnId);
+                    th.classList.add('dragging');
+                });
+
+                th.addEventListener('dragend', (e) => {
+                    th.classList.remove('dragging');
+                    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+                });
+
+                th.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    th.classList.add('drag-over');
+                });
+
+                th.addEventListener('dragleave', (e) => {
+                    th.classList.remove('drag-over');
+                });
+
+                th.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    const draggedId = e.dataTransfer.getData('text/plain');
+                    const targetId = th.dataset.columnId;
+
+                    if (draggedId !== targetId) {
+                        this.reorderColumns(draggedId, targetId);
+                    }
+
+                    th.classList.remove('drag-over');
+                });
+            });
+
+            const filterTypes = this.container.querySelectorAll('.filter-type');
+            filterTypes.forEach(ft => {
+                ft.addEventListener('click', (e) => {
+                    this.showFilterTypeMenu(e.target, ft.dataset.columnId);
+                });
+            });
+
+            const filterInputs = this.container.querySelectorAll('.filter-input');
+            filterInputs.forEach(input => {
+                input.addEventListener('change', (e) => {
+                    const colId = input.dataset.columnId;
+                    if (!this.filters[colId]) {
+                        this.filters[colId] = { type: '^', value: '' };
+                    }
+                    this.filters[colId].value = input.value;
+                    this.currentPage = 0;
+                    this.loadData();
+                });
+            });
+
+            if (this.options.onCellClick) {
+                this.container.querySelectorAll('td').forEach(td => {
+                    td.addEventListener('click', () => {
+                        const row = parseInt(td.dataset.row);
+                        const col = parseInt(td.dataset.col);
+                        this.options.onCellClick(row, col, this.data[row][col]);
+                    });
+                });
+            }
+        }
+
+        showFilterTypeMenu(target, columnId) {
+            const column = this.columns.find(c => c.id === columnId);
+            const format = column.format || 'SHORT';
+            const filterGroup = this.filterTypes[format] || this.filterTypes['SHORT'];
+
+            document.querySelectorAll('.filter-type-menu').forEach(m => m.remove());
+
+            const menu = document.createElement('div');
+            menu.className = 'filter-type-menu';
+            menu.innerHTML = filterGroup.map(f => `
+                <div class="filter-type-option" data-symbol="${ f.symbol }">
+                    <span class="symbol">${ f.symbol }</span>
+                    <span>${ f.name }</span>
+                </div>
+            `).join('');
+
+            const rect = target.getBoundingClientRect();
+            menu.style.position = 'absolute';
+            menu.style.top = rect.bottom + 'px';
+            menu.style.left = rect.left + 'px';
+
+            document.body.appendChild(menu);
+
+            menu.querySelectorAll('.filter-type-option').forEach(opt => {
+                opt.addEventListener('click', () => {
+                    const symbol = opt.dataset.symbol;
+                    if (!this.filters[columnId]) {
+                        this.filters[columnId] = { type: '^', value: '' };
+                    }
+                    this.filters[columnId].type = symbol;
+                    target.textContent = symbol;
+                    menu.remove();
+
+                    if (this.filters[columnId].value) {
+                        this.currentPage = 0;
+                        this.loadData();
+                    }
+                });
+            });
+
+            setTimeout(() => {
+                document.addEventListener('click', function closeMenu(e) {
+                    if (!menu.contains(e.target) && e.target !== target) {
+                        menu.remove();
+                        document.removeEventListener('click', closeMenu);
+                    }
+                });
+            }, 0);
+        }
+
+        reorderColumns(draggedId, targetId) {
+            const draggedIndex = this.columnOrder.indexOf(draggedId);
+            const targetIndex = this.columnOrder.indexOf(targetId);
+
+            if (draggedIndex === -1 || targetIndex === -1) return;
+
+            this.columnOrder.splice(draggedIndex, 1);
+            this.columnOrder.splice(targetIndex, 0, draggedId);
+
+            this.saveColumnState();
+            this.render();
+        }
+
+        openColumnSettings() {
+            const overlay = document.createElement('div');
+            overlay.className = 'column-settings-overlay';
+
+            const modal = document.createElement('div');
+            modal.className = 'column-settings-modal';
+            modal.innerHTML = `
+                <h5>Настройки колонок</h5>
+                <div class="column-settings-list">
+                    ${ this.columns.map(col => `
+                        <div class="column-settings-item">
+                            <label>
+                                <input type="checkbox"
+                                       data-column-id="${ col.id }"
+                                       ${ this.visibleColumns.includes(col.id) ? 'checked' : '' }>
+                                ${ col.name }
+                            </label>
+                        </div>
+                    `).join('') }
+                </div>
+                <div style="text-align: right; margin-top: 15px;">
+                    <button class="btn btn-secondary" onclick="window.tasksTable.closeColumnSettings()">Закрыть</button>
+                </div>
+            `;
+
+            document.body.appendChild(overlay);
+            document.body.appendChild(modal);
+
+            modal.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                cb.addEventListener('change', (e) => {
+                    const colId = cb.dataset.columnId;
+                    if (cb.checked) {
+                        if (!this.visibleColumns.includes(colId)) {
+                            this.visibleColumns.push(colId);
+                        }
+                    } else {
+                        this.visibleColumns = this.visibleColumns.filter(id => id !== colId);
+                    }
+                    this.saveColumnState();
+                    this.render();
+                });
+            });
+
+            overlay.addEventListener('click', () => this.closeColumnSettings());
+        }
+
+        closeColumnSettings() {
+            document.querySelectorAll('.column-settings-overlay, .column-settings-modal').forEach(el => el.remove());
+        }
+
+        toggleFilters() {
+            this.filtersEnabled = !this.filtersEnabled;
+            this.render();
+        }
+
+        nextPage() {
+            this.currentPage++;
+            this.loadData();
+        }
+
+        prevPage() {
+            if (this.currentPage > 0) {
+                this.currentPage--;
+                this.loadData();
+            }
+        }
+
+        saveColumnState() {
+            const state = {
+                order: this.columnOrder,
+                visible: this.visibleColumns
+            };
+            document.cookie = `${ this.options.cookiePrefix }-state=${ JSON.stringify(state) }; path=/; max-age=31536000`;
+        }
+
+        loadColumnState() {
+            const cookies = document.cookie.split(';');
+            const stateCookie = cookies.find(c => c.trim().startsWith(`${ this.options.cookiePrefix }-state=`));
+
+            if (stateCookie) {
+                try {
+                    const state = JSON.parse(stateCookie.split('=')[1]);
+                    this.columnOrder = state.order || [];
+                    this.visibleColumns = state.visible || [];
+                } catch (e) {
+                    console.error('Error loading column state:', e);
+                }
+            }
+        }
+    }
+
+    // Initialize components on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        // Load quick links
+        loadQuickLinks();
+
+        // Initialize tasks table
+        window.tasksTable = new IntegramTable('tasks-table', {
+            apiUrl: '/' + db + '/report/4283?JSON',
+            pageSize: 20,
+            cookiePrefix: 'tasks-table'
+        });
+    });
+
+})();
