@@ -432,11 +432,11 @@
 }
 
 .table-settings-item {
-    padding: 12px;
+    padding: 12px 12px 12px 8px;
     border-bottom: 1px solid #f0f0f0;
 }
 
-.table-settings-item label {
+.table-settings-item > label:first-child {
     font-weight: 600;
     margin-bottom: 5px;
     display: block;
