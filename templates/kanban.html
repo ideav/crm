@@ -772,8 +772,7 @@ function renderCard(task){
     // Determine the correct URL based on partners parameter
     var tasksUrl = '';
     if(task['ЛидID']){
-        var frParam = hasPartnersParam ? 'FR_3879' : 'FR_3881';
-        tasksUrl = '/' + db + '/object/3596?' + frParam + '=@' + task['ЛидID'];
+        tasksUrl = '/' + db + '/object/3596?FR_4547=@' + task['ЛидID'];
     }
 
     if(tasksCount > 0 && tasksUrl){
@@ -885,13 +884,7 @@ function updateTaskStatus(leadId, newStatusId){
         console.error('Network error updating status');
     };
 
-    // Use different POST parameters based on whether 'partners' parameter is present
-    var postData;
-    if(hasPartnersParam){
-        postData = 't3838=' + newStatusId + '&t3947=' + timestamp + '&_xsrf=' + xsrf;
-    } else {
-        postData = 't2795=' + newStatusId + '&t3807=' + timestamp + '&_xsrf=' + xsrf;
-    }
+    var postData = 't4874=' + newStatusId + '&t4863=' + timestamp + '&_xsrf=' + xsrf;
     xhr.send(postData);
 }
 
