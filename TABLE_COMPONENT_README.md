@@ -25,7 +25,41 @@
 
 ## Быстрый старт
 
-### 1. Подключение
+### 1. Подключение (рекомендуемый способ - data-атрибуты)
+
+Просто добавьте атрибут `data-integram-table` к контейнеру и укажите параметры через data-атрибуты:
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="/css/bootstrap.min.css">
+    <link rel="stylesheet" href="/css/info.css">
+</head>
+<body>
+    <div id="my-table"
+         data-integram-table
+         data-api-url="/api/tasks"
+         data-page-size="20"
+         data-cookie-prefix="my-table"
+         data-title="Мои задачи"
+         data-instance-name="myTable"></div>
+
+    <script src="/js/integram-table.js"></script>
+    <!-- Таблица инициализируется автоматически! -->
+</body>
+</html>
+```
+
+**Преимущества:**
+- ✅ Конфигурация в одном месте (в HTML)
+- ✅ Не нужно писать JavaScript код
+- ✅ Автоматическая инициализация при загрузке страницы
+- ✅ Легко редактировать параметры
+
+### 1б. Подключение (программный способ)
+
+Если нужен контроль через JavaScript:
 
 ```html
 <!DOCTYPE html>
@@ -91,6 +125,37 @@ new IntegramTable('container-id', {
 ```
 
 **ВАЖНО:** Параметр `instanceName` обязателен для корректной работы event handlers (кнопки, пагинация, настройки).
+
+### Data-атрибуты (декларативная инициализация)
+
+При использовании data-атрибутов компонент автоматически инициализируется при загрузке страницы:
+
+| Data-атрибут | Назначение | Пример |
+|--------------|------------|--------|
+| `data-integram-table` | Маркер для авто-инициализации (обязательно) | - |
+| `data-api-url` | URL API для загрузки данных | `"/api/tasks"` |
+| `data-page-size` | Количество записей на порции | `"20"` |
+| `data-cookie-prefix` | Префикс для cookies | `"my-table"` |
+| `data-title` | Заголовок таблицы | `"Задачи"` |
+| `data-instance-name` | Имя переменной в window | `"myTable"` |
+
+**Пример:**
+```html
+<div id="tasks"
+     data-integram-table
+     data-api-url="/crm/report/123?JSON"
+     data-page-size="50"
+     data-cookie-prefix="tasks-table"
+     data-title="Список задач"
+     data-instance-name="tasksTable"></div>
+```
+
+После загрузки доступ к таблице: `window.tasksTable.loadData()`
+
+**Преимущества:**
+- Все параметры в одном месте (в HTML-разметке)
+- Не нужно писать отдельный скрипт инициализации
+- Удобно для Integram шаблонов с подстановкой `{_global_.z}`
 
 ## Автоматическое скрытие колонок
 
@@ -220,7 +285,29 @@ API возвращает JSON объект с полем `count`:
 
 ## Использование в существующих шаблонах
 
-Чтобы добавить таблицу в существующий шаблон (например, в `main.html`):
+### Способ 1: Data-атрибуты (рекомендуется)
+
+```html
+<!-- В секции content -->
+<div class="content">
+    <div id="tasks-table"
+         data-integram-table
+         data-api-url="/{_global_.z}/report/4283?JSON"
+         data-page-size="20"
+         data-cookie-prefix="tasks-table"
+         data-title="Задачи"
+         data-instance-name="tasksTable"></div>
+</div>
+
+<!-- Перед закрывающим тегом body -->
+<link rel="stylesheet" href="/download/{_global_.z}/css/info.css" />
+<script src="/download/{_global_.z}/js/integram-table.js"></script>
+<!-- Таблица инициализируется автоматически! -->
+```
+
+### Способ 2: Программная инициализация
+
+Если нужны обработчики событий (onCellClick, onDataLoad):
 
 ```html
 <!-- В секции content -->
@@ -229,12 +316,15 @@ API возвращает JSON объект с полем `count`:
 </div>
 
 <!-- Перед закрывающим тегом body -->
-<script src="templates/integram-table.html"></script>
+<link rel="stylesheet" href="/download/{_global_.z}/css/info.css" />
+<script src="/download/{_global_.z}/js/integram-table.js"></script>
 <script>
     const tasksTable = new IntegramTable('tasks-table', {
-        apiUrl: '/{_global_.z}/api/tasks',
+        apiUrl: '/{_global_.z}/report/4283?JSON',
         pageSize: 20,
         cookiePrefix: 'tasks-table',
+        title: 'Задачи',
+        instanceName: 'tasksTable',
         onCellClick: function(row, col, value) {
             // Обработка клика по ячейке
             console.log('Clicked:', row, col, value);
