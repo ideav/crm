@@ -613,9 +613,14 @@ function loadKanbanData(){
     var tasksReportId = '3769';
     var statusesReportId = '3796';
 
+    // Check for 'partners' URL parameter
+    var urlParams = new URLSearchParams(window.location.search);
+    var hasPartnersParam = urlParams.has('partners');
+    var frPartnersValue = hasPartnersParam ? '%' : '!%';
+
     // Load tasks
     var xhr1 = new XMLHttpRequest();
-    xhr1.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + tasksReportId + '?JSON_KV', true);
+    xhr1.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + tasksReportId + '?JSON_KV&FR_partners=' + encodeURIComponent(frPartnersValue), true);
     xhr1.onload = function(){
         if(xhr1.status === 200){
             try{
@@ -635,7 +640,7 @@ function loadKanbanData(){
 
     // Load statuses
     var xhr2 = new XMLHttpRequest();
-    xhr2.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + statusesReportId + '?JSON_KV', true);
+    xhr2.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + statusesReportId + '?JSON_KV&FR_partners=' + encodeURIComponent(frPartnersValue), true);
     xhr2.onload = function(){
         if(xhr2.status === 200){
             try{
