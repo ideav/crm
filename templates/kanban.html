@@ -162,6 +162,7 @@
 
     .kanban-card {
         background-color: var(--surface);
+        max-width: 400px;
         border: none;
         border-radius: 4px;
         padding: 16px;
@@ -493,7 +494,7 @@
                     <label class="kanban-form-label">Название</label>
                     <input type="text" class="kanban-form-input" id="recordName" name="recordName" required>
                 </div>
-                <div class="kanban-form-group" id="innGroup" style="display:none;">
+                <div class="kanban-form-group">
                     <label class="kanban-form-label">ИНН</label>
                     <input type="text" class="kanban-form-input" id="recordInn" name="recordInn">
                 </div>
@@ -501,25 +502,25 @@
                     <label class="kanban-form-label">Статус</label>
                     <div class="kanban-form-static" id="recordStatus"></div>
                 </div>
-                <div class="kanban-form-group" id="distributorGroup" style="display:none;">
+                <div class="kanban-form-group">
                     <label class="kanban-form-label">Дистрибьютор</label>
                     <select class="kanban-form-select" id="recordDistributor" name="recordDistributor">
                         <option value="">Выберите дистрибьютора</option>
                     </select>
                 </div>
-                <div class="kanban-form-group" id="phoneGroup" style="display:none;">
+                <div class="kanban-form-group">
                     <label class="kanban-form-label">Телефон</label>
                     <input type="text" class="kanban-form-input" id="recordPhone" name="recordPhone">
                 </div>
-                <div class="kanban-form-group" id="emailGroup" style="display:none;">
+                <div class="kanban-form-group">
                     <label class="kanban-form-label">Email</label>
                     <input type="email" class="kanban-form-input" id="recordEmail" name="recordEmail">
                 </div>
-                <div class="kanban-form-group" id="contactGroup" style="display:none;">
+                <div class="kanban-form-group">
                     <label class="kanban-form-label">Контактное лицо</label>
                     <input type="text" class="kanban-form-input" id="recordContact" name="recordContact">
                 </div>
-                <div class="kanban-form-group" id="sourceGroup" style="display:none;">
+                <div class="kanban-form-group">
                     <label class="kanban-form-label">Источник</label>
                     <select class="kanban-form-select" id="recordSource" name="recordSource">
                         <option value="">Выберите источник</option>
@@ -542,10 +543,6 @@ var sourcesData = [];
 var distributorsData = [];
 var currentStatusId = null;
 var currentStatusName = null;
-
-// Parse URL parameters to check for 'partners' parameter
-var urlParams = new URLSearchParams(window.location.search);
-var hasPartnersParam = urlParams.has('partners');
 
 // Helper function to lighten a color by a percentage
 function lightenColor(color, percent) {
@@ -586,9 +583,9 @@ function lightenColor(color, percent) {
 function loadKanbanData(){
     $('#kanban').html('<div class="loading">Загрузка данных канбана...</div>');
 
-    // Determine which endpoints to use based on 'partners' parameter
-    var tasksReportId = hasPartnersParam ? '3864' : '3769';
-    var statusesReportId = hasPartnersParam ? '3917' : '3796';
+    // Use fixed report IDs
+    var tasksReportId = '3769';
+    var statusesReportId = '3796';
 
     // Load tasks
     var xhr1 = new XMLHttpRequest();
@@ -769,10 +766,10 @@ function renderCard(task){
     var tasksCount = task['Задачи'] ? parseInt(task['Задачи']) : 0;
     var buttonClass = tasksCount > 0 ? 'has-tasks' : 'no-tasks';
 
-    // Determine the correct URL based on partners parameter
+    // Use fixed FR parameter
     var tasksUrl = '';
     if(task['ЛидID']){
-        var frParam = hasPartnersParam ? 'FR_3879' : 'FR_3881';
+        var frParam = 'FR_3881';
         tasksUrl = '/' + db + '/object/3596?' + frParam + '=@' + task['ЛидID'];
     }
 
@@ -885,13 +882,8 @@ function updateTaskStatus(leadId, newStatusId){
         console.error('Network error updating status');
     };
 
-    // Use different POST parameters based on whether 'partners' parameter is present
-    var postData;
-    if(hasPartnersParam){
-        postData = 't3838=' + newStatusId + '&t3947=' + timestamp + '&_xsrf=' + xsrf;
-    } else {
-        postData = 't2795=' + newStatusId + '&t3807=' + timestamp + '&_xsrf=' + xsrf;
-    }
+    // Use fixed POST parameters for clients (non-partners mode)
+    var postData = 't2795=' + newStatusId + '&t3807=' + timestamp + '&_xsrf=' + xsrf;
     xhr.send(postData);
 }
 
@@ -1002,25 +994,6 @@ function openAddRecordModal(statusId, statusName){
     $('#addRecordForm')[0].reset();
     $('#recordStatus').text(statusName);
 
-    // Show/hide fields based on partners parameter
-    if(hasPartnersParam){
-        // Partners mode: show INN and Distributor
-        $('#innGroup').show();
-        $('#distributorGroup').show();
-        $('#phoneGroup').hide();
-        $('#emailGroup').hide();
-        $('#contactGroup').hide();
-        $('#sourceGroup').hide();
-    } else {
-        // Non-partners mode: show Phone, Email, Contact, Source
-        $('#innGroup').hide();
-        $('#distributorGroup').hide();
-        $('#phoneGroup').show();
-        $('#emailGroup').show();
-        $('#contactGroup').show();
-        $('#sourceGroup').show();
-    }
-
     // Show modal
     $('#addRecordModal').addClass('active');
 }
@@ -1043,54 +1016,41 @@ function submitAddRecord(){
     // Disable submit button
     $('#submitButton').prop('disabled', true).text('Сохранение...');
 
-    // Prepare POST data based on partners parameter
-    var entityId, postData;
+    // Prepare POST data for client (EntityID = 332)
+    var entityId = 332;
+    var inn = $('#recordInn').val().trim();
+    var distributorId = $('#recordDistributor').val();
+    var phone = $('#recordPhone').val().trim();
+    var email = $('#recordEmail').val().trim();
+    var contact = $('#recordContact').val().trim();
+    var sourceId = $('#recordSource').val();
 
-    if(hasPartnersParam){
-        // Partners mode
-        entityId = 317;
-        var inn = $('#recordInn').val().trim();
-        var distributorId = $('#recordDistributor').val();
-
-        postData = 't317=' + encodeURIComponent(name) +
-                   '&t3838=' + encodeURIComponent(currentStatusId) +
+    var postData = 't332=' + encodeURIComponent(name) +
+                   '&t4874=' + encodeURIComponent(currentStatusId) +
                    '&_xsrf=' + xsrf;
 
-        if(inn){
-            postData += '&t493=' + encodeURIComponent(inn);
-        }
-        if(distributorId){
-            postData += '&t323=' + encodeURIComponent(distributorId);
-        }
-    } else {
-        // Non-partners mode
-        entityId = 2789;
-        var phone = $('#recordPhone').val().trim();
-        var email = $('#recordEmail').val().trim();
-        var contact = $('#recordContact').val().trim();
-        var sourceId = $('#recordSource').val();
-
-        postData = 't2789=' + encodeURIComponent(name) +
-                   '&t2795=' + encodeURIComponent(currentStatusId) +
-                   '&_xsrf=' + xsrf;
-
-        if(phone){
-            postData += '&t3705=' + encodeURIComponent(phone);
-        }
-        if(email){
-            postData += '&t3706=' + encodeURIComponent(email);
-        }
-        if(contact){
-            postData += '&t3708=' + encodeURIComponent(contact);
-        }
-        if(sourceId){
-            postData += '&t2792=' + encodeURIComponent(sourceId);
-        }
+    if(inn){
+        postData += '&t637=' + encodeURIComponent(inn);
+    }
+    if(distributorId){
+        postData += '&t4862=' + encodeURIComponent(distributorId);
+    }
+    if(phone){
+        postData += '&t4536=' + encodeURIComponent(phone);
+    }
+    if(email){
+        postData += '&t4537=' + encodeURIComponent(email);
+    }
+    if(contact){
+        postData += '&t4538=' + encodeURIComponent(contact);
+    }
+    if(sourceId){
+        postData += '&t4861=' + encodeURIComponent(sourceId);
     }
 
     // Submit via POST
     var xhr = new XMLHttpRequest();
-    xhr.open('POST', 'https://' + window.location.hostname + '/slider/_m_new/' + entityId + '?JSON&up=1', true);
+    xhr.open('POST', 'https://' + window.location.hostname + '/' + db + '/_m_new/' + entityId + '?JSON&up=1', true);
     xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
     xhr.onload = function(){
         $('#submitButton').prop('disabled', false).text('Сохранить');
