@@ -399,21 +399,31 @@
     }
 
     .kanban-form-group {
-        margin-bottom: 16px;
+        position: relative;
+        margin-bottom: 20px;
     }
 
     .kanban-form-label {
-        display: block;
+        position: absolute;
+        top: -8px;
+        left: 8px;
+        background-color: var(--surface);
+        padding: 0 4px;
         font-weight: 500;
         color: var(--text-primary);
-        margin-bottom: 6px;
-        font-size: 0.875rem;
+        font-size: 0.75rem;
+        z-index: 1;
+    }
+
+    .kanban-form-label.required::after {
+        content: ' *';
+        color: #dc3545;
     }
 
     .kanban-form-input,
     .kanban-form-select {
         width: 100%;
-        padding: 8px 12px;
+        padding: 12px 12px 8px 12px;
         border: 1px solid var(--border-color);
         border-radius: 6px;
         font-size: 0.875rem;
@@ -425,6 +435,11 @@
         outline: none;
         border-color: var(--primary-color);
         box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    .kanban-form-input.error,
+    .kanban-form-select.error {
+        border-color: #dc3545;
     }
 
     .kanban-form-static {
@@ -491,8 +506,8 @@
         <div class="kanban-modal-body">
             <form id="addRecordForm">
                 <div class="kanban-form-group">
-                    <label class="kanban-form-label">Название</label>
-                    <input type="text" class="kanban-form-input" id="recordName" name="recordName" required>
+                    <label class="kanban-form-label required">Название</label>
+                    <input type="text" class="kanban-form-input" id="recordName" name="recordName">
                 </div>
                 <div class="kanban-form-group">
                     <label class="kanban-form-label">ИНН</label>
@@ -503,17 +518,23 @@
                     <div class="kanban-form-static" id="recordStatus"></div>
                 </div>
                 <div class="kanban-form-group">
+                    <label class="kanban-form-label required">Партнер</label>
+                    <select class="kanban-form-select" id="recordPartner" name="recordPartner">
+                        <option value="">Выберите партнера</option>
+                    </select>
+                </div>
+                <div class="kanban-form-group">
                     <label class="kanban-form-label">Дистрибьютор</label>
                     <select class="kanban-form-select" id="recordDistributor" name="recordDistributor">
                         <option value="">Выберите дистрибьютора</option>
                     </select>
                 </div>
                 <div class="kanban-form-group">
-                    <label class="kanban-form-label">Телефон</label>
+                    <label class="kanban-form-label required">Телефон</label>
                     <input type="text" class="kanban-form-input" id="recordPhone" name="recordPhone">
                 </div>
                 <div class="kanban-form-group">
-                    <label class="kanban-form-label">Email</label>
+                    <label class="kanban-form-label required">Email</label>
                     <input type="email" class="kanban-form-input" id="recordEmail" name="recordEmail">
                 </div>
                 <div class="kanban-form-group">
@@ -521,10 +542,14 @@
                     <input type="text" class="kanban-form-input" id="recordContact" name="recordContact">
                 </div>
                 <div class="kanban-form-group">
-                    <label class="kanban-form-label">Источник</label>
+                    <label class="kanban-form-label required">Источник</label>
                     <select class="kanban-form-select" id="recordSource" name="recordSource">
                         <option value="">Выберите источник</option>
                     </select>
+                </div>
+                <div class="kanban-form-group">
+                    <label class="kanban-form-label">Сумма</label>
+                    <input type="number" class="kanban-form-input" id="recordAmount" name="recordAmount">
                 </div>
             </form>
         </div>
@@ -541,6 +566,7 @@ var kanbanData = [];
 var statusesData = [];
 var sourcesData = [];
 var distributorsData = [];
+var partnersData = [];
 var currentStatusId = null;
 var currentStatusName = null;
 
@@ -919,7 +945,7 @@ function copyContact(value, type, event){
     }, 1500);
 }
 
-// Load sources and distributors data
+// Load sources, distributors, and partners data
 function loadSourcesAndDistributors(){
     // Load sources
     var xhr1 = new XMLHttpRequest();
@@ -960,6 +986,26 @@ function loadSourcesAndDistributors(){
         console.error('Network error loading distributors');
     };
     xhr2.send();
+
+    // Load partners
+    var xhr3 = new XMLHttpRequest();
+    xhr3.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/5089?JSON_KV', true);
+    xhr3.onload = function(){
+        if(xhr3.status === 200){
+            try{
+                partnersData = JSON.parse(xhr3.responseText);
+                populatePartnersDropdown();
+            } catch(e){
+                console.error('Error parsing partners data:', e);
+            }
+        } else {
+            console.error('Error loading partners:', xhr3.status);
+        }
+    };
+    xhr3.onerror = function(){
+        console.error('Network error loading partners');
+    };
+    xhr3.send();
 }
 
 function populateSourcesDropdown(){
@@ -980,6 +1026,17 @@ function populateDistributorsDropdown(){
         var option = $('<option></option>');
         option.val(distributor['ДистрибьюторID']);
         option.text(distributor['Дистрибьютор']);
+        select.append(option);
+    });
+}
+
+function populatePartnersDropdown(){
+    var select = $('#recordPartner');
+    select.find('option:not(:first)').remove();
+    partnersData.forEach(function(partner){
+        var option = $('<option></option>');
+        option.val(partner['ПартнерID']);
+        option.text(partner['Партнер']);
         select.append(option);
     });
 }
@@ -1005,9 +1062,40 @@ function closeAddRecordModal(){
 function submitAddRecord(){
     // Get form values
     var name = $('#recordName').val().trim();
+    var sourceId = $('#recordSource').val();
+    var partnerId = $('#recordPartner').val();
+    var phone = $('#recordPhone').val().trim();
+    var email = $('#recordEmail').val().trim();
+
+    // Clear previous error states
+    $('.kanban-form-input, .kanban-form-select').removeClass('error');
+
+    // Validate required fields
+    var hasError = false;
 
     if(!name){
-        alert('Пожалуйста, заполните название');
+        $('#recordName').addClass('error');
+        hasError = true;
+    }
+
+    if(!sourceId){
+        $('#recordSource').addClass('error');
+        hasError = true;
+    }
+
+    if(!partnerId){
+        $('#recordPartner').addClass('error');
+        hasError = true;
+    }
+
+    if(!phone && !email){
+        $('#recordPhone').addClass('error');
+        $('#recordEmail').addClass('error');
+        hasError = true;
+    }
+
+    if(hasError){
+        alert('Пожалуйста, заполните все обязательные поля:\n- Название\n- Партнер\n- Источник\n- Телефон или Email');
         return;
     }
 
@@ -1018,10 +1106,8 @@ function submitAddRecord(){
     var entityId = 332;
     var inn = $('#recordInn').val().trim();
     var distributorId = $('#recordDistributor').val();
-    var phone = $('#recordPhone').val().trim();
-    var email = $('#recordEmail').val().trim();
     var contact = $('#recordContact').val().trim();
-    var sourceId = $('#recordSource').val();
+    var amount = $('#recordAmount').val().trim();
 
     var postData = 't332=' + encodeURIComponent(name) +
                    '&t4874=' + encodeURIComponent(currentStatusId) +
@@ -1029,6 +1115,9 @@ function submitAddRecord(){
 
     if(inn){
         postData += '&t637=' + encodeURIComponent(inn);
+    }
+    if(partnerId){
+        postData += '&t443=' + encodeURIComponent(partnerId);
     }
     if(distributorId){
         postData += '&t4862=' + encodeURIComponent(distributorId);
@@ -1044,6 +1133,9 @@ function submitAddRecord(){
     }
     if(sourceId){
         postData += '&t4861=' + encodeURIComponent(sourceId);
+    }
+    if(amount){
+        postData += '&t4864=' + encodeURIComponent(amount);
     }
 
     // Submit via POST
