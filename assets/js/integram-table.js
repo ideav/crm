@@ -695,6 +695,35 @@ class IntegramTable {
         }
     }
 
+// Auto-initialize tables from data attributes
+function autoInitTables() {
+    const tables = document.querySelectorAll('[data-integram-table]');
+    tables.forEach(element => {
+        const options = {
+            apiUrl: element.dataset.apiUrl || '',
+            pageSize: parseInt(element.dataset.pageSize) || 20,
+            cookiePrefix: element.dataset.cookiePrefix || 'integram-table',
+            title: element.dataset.title || '',
+            instanceName: element.dataset.instanceName || element.id
+        };
+
+        // Create instance and store in window if instanceName is provided
+        const instance = new IntegramTable(element.id, options);
+        if (options.instanceName) {
+            window[options.instanceName] = instance;
+        }
+    });
+}
+
+// Auto-initialize on DOM ready
+if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', autoInitTables);
+    } else {
+        autoInitTables();
+    }
+}
+
 // Export for use in modules or directly in browser
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = IntegramTable;

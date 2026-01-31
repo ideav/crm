@@ -1,10 +1,13 @@
 /**
  * Info.html Workspace Script
- * Loads quick links and initializes the tasks table
+ * Loads quick links
+ * Note: Tasks table auto-initializes from data attributes in integram-table.js
  */
 
 (function() {
     'use strict';
+
+    const db = window._global_.z;
 
     // Load quick links
     async function loadQuickLinks() {
@@ -45,14 +48,7 @@
         // Load quick links
         loadQuickLinks();
 
-        // Initialize tasks table
-        window.tasksTable = new IntegramTable('tasks-table', {
-            apiUrl: '/' + db + '/report/4283?JSON',
-            pageSize: 20,
-            cookiePrefix: 'tasks-table',
-            title: 'Задачи',
-            instanceName: 'tasksTable'
-        });
+        // Tasks table auto-initializes from data-integram-table attributes
     });
 
 })();
