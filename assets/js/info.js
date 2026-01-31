@@ -11,7 +11,7 @@
         const container = document.getElementById('quick-links');
 
         try {
-            const response = await fetch(`/${db}/report/4282?JSON`);
+            const response = await fetch(`/${db}/report/299?JSON`);
             const result = await response.json();
 
             if (!result.data || result.data.length === 0) {
