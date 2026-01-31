@@ -99,6 +99,11 @@
     margin: 20px 0;
 }
 
+.integram-table-container {
+    overflow-x: auto;
+    width: 100%;
+}
+
 .integram-table-header {
     display: flex;
     justify-content: space-between;
@@ -276,11 +281,18 @@
 
 /* Scroll counter (replaces pagination) */
 .scroll-counter {
-    text-align: center;
-    margin-top: 15px;
-    padding: 10px 0;
-    color: #6c757d;
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    padding: 10px 15px;
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    color: #495057;
     font-size: 14px;
+    font-weight: 500;
+    z-index: 100;
 }
 
 .total-count-unknown {
