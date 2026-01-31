@@ -71,12 +71,6 @@
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
-.tasks-title {
-    font-size: 18px;
-    font-weight: 600;
-    margin-bottom: 15px;
-    color: #333;
-}
 
 .loading {
     text-align: center;
@@ -112,6 +106,18 @@
     margin-bottom: 15px;
 }
 
+.integram-table-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #333;
+}
+
+.integram-table-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
 .integram-table-settings {
     cursor: pointer;
     padding: 8px;
@@ -136,9 +142,14 @@
     text-align: left;
     font-weight: 600;
     border-bottom: 2px solid #dee2e6;
+    border-left: 1px solid #dee2e6;
     position: relative;
     cursor: move;
     user-select: none;
+}
+
+.integram-table th:first-child {
+    border-left: none;
 }
 
 .integram-table th.dragging {
@@ -153,6 +164,11 @@
 .integram-table td {
     padding: 10px 12px;
     border-bottom: 1px solid #dee2e6;
+    border-left: 1px solid #dee2e6;
+}
+
+.integram-table td:first-child {
+    border-left: none;
 }
 
 .integram-table tr:hover {
