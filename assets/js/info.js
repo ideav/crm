@@ -58,8 +58,10 @@
 
             this.columns = [];
             this.data = [];
-            this.currentPage = 0;
-            this.totalRows = 0;
+            this.loadedRecords = 0;  // Changed from currentPage to loadedRecords
+            this.totalRows = null;  // null means unknown, user can click to fetch
+            this.hasMore = true;  // Whether there are more records to load
+            this.isLoading = false;  // Prevent multiple simultaneous loads
             this.filters = {};
             this.columnOrder = [];
             this.visibleColumns = [];
@@ -116,10 +118,19 @@
             this.loadData();
         }
 
-        async loadData() {
-            const offset = this.currentPage * this.options.pageSize;
+        async loadData(append = false) {
+            if (this.isLoading || (!append && !this.hasMore && this.loadedRecords > 0)) {
+                return;
+            }
+
+            this.isLoading = true;
+
+            // Request pageSize + 1 to detect if there are more records
+            const requestSize = this.options.pageSize + 1;
+            const offset = append ? this.loadedRecords : 0;
+
             const params = new URLSearchParams({
-                LIMIT: `${ offset },${ this.options.pageSize }`
+                LIMIT: `${ offset },${ requestSize }`
             });
 
             Object.keys(this.filters).forEach(colId => {
@@ -140,24 +151,39 @@
                 this.columns = json.columns || [];
 
                 // Transform column-based data to row-based data
-                // json.data is an array of column arrays, transpose to rows
                 const columnData = json.data || [];
+                let newRows = [];
+
                 if (columnData.length > 0 && Array.isArray(columnData[0])) {
-                    // Transpose: convert column arrays to row arrays
                     const numRows = columnData[0].length;
-                    this.data = [];
                     for (let rowIndex = 0; rowIndex < numRows; rowIndex++) {
                         const row = [];
                         for (let colIndex = 0; colIndex < columnData.length; colIndex++) {
                             row.push(columnData[colIndex][rowIndex]);
                         }
-                        this.data.push(row);
+                        newRows.push(row);
                     }
                 } else {
-                    this.data = columnData;
+                    newRows = columnData;
                 }
 
-                this.totalRows = json.total || this.data.length;
+                // Check if there are more records (we requested pageSize + 1)
+                this.hasMore = newRows.length > this.options.pageSize;
+
+                // Keep only pageSize records
+                if (this.hasMore) {
+                    newRows = newRows.slice(0, this.options.pageSize);
+                }
+
+                // Append or replace data
+                if (append) {
+                    this.data = this.data.concat(newRows);
+                } else {
+                    this.data = newRows;
+                    this.loadedRecords = 0;
+                }
+
+                this.loadedRecords += newRows.length;
 
                 // Process columns to hide ID and Style suffixes
                 this.processColumnVisibility();
@@ -176,7 +202,37 @@
                 this.render();
             } catch (error) {
                 console.error('Error loading data:', error);
-                this.container.innerHTML = `<div class="alert alert-danger">Ошибка загрузки данных: ${ error.message }</div>`;
+                if (!append) {
+                    this.container.innerHTML = `<div class="alert alert-danger">Ошибка загрузки данных: ${ error.message }</div>`;
+                }
+            } finally {
+                this.isLoading = false;
+            }
+        }
+
+        async fetchTotalCount() {
+            const params = new URLSearchParams({
+                RECORD_COUNT: '1'
+            });
+
+            Object.keys(this.filters).forEach(colId => {
+                const filter = this.filters[colId];
+                if (filter.value) {
+                    const column = this.columns.find(c => c.id === colId);
+                    if (column) {
+                        this.applyFilter(params, column, filter);
+                    }
+                }
+            });
+
+            try {
+                const separator = this.options.apiUrl.includes('?') ? '&' : '?';
+                const response = await fetch(`${ this.options.apiUrl }${ separator }${ params }`);
+                const text = await response.text();
+                this.totalRows = parseInt(text, 10);
+                this.render();  // Re-render to update the counter
+            } catch (error) {
+                console.error('Error fetching total count:', error);
             }
         }
 
@@ -297,12 +353,13 @@
                             `).join('') }
                         </tbody>
                     </table>
-                    ${ this.renderPagination() }
+                    ${ this.renderScrollCounter() }
                 </div>
             `;
 
             this.container.innerHTML = html;
             this.attachEventListeners();
+            this.attachScrollListener();
         }
 
         renderFilterCell(column) {
@@ -387,22 +444,15 @@
             return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }"${ customStyle }>${ escapedValue }</td>`;
         }
 
-        renderPagination() {
-            const totalPages = Math.ceil(this.totalRows / this.options.pageSize);
-            const hasNext = this.currentPage < totalPages - 1;
-            const hasPrev = this.currentPage > 0;
+        renderScrollCounter() {
             const instanceName = this.options.instanceName;
+            const totalDisplay = this.totalRows === null
+                ? `<span class="total-count-unknown" onclick="window.${ instanceName }.fetchTotalCount()" title="Нажмите, чтобы узнать общее количество">?</span>`
+                : this.totalRows;
 
             return `
-                <div class="pagination-controls">
-                    <div>
-                        Показано ${ this.currentPage * this.options.pageSize + 1 }-${ Math.min((this.currentPage + 1) * this.options.pageSize, this.totalRows) } из ${ this.totalRows }
-                    </div>
-                    <div>
-                        <button ${ !hasPrev ? 'disabled' : '' } onclick="window.${ instanceName }.prevPage()">← Назад</button>
-                        <span style="margin: 0 10px;">Страница ${ this.currentPage + 1 } из ${ totalPages }</span>
-                        <button ${ !hasNext ? 'disabled' : '' } onclick="window.${ instanceName }.nextPage()">Вперед →</button>
-                    </div>
+                <div class="scroll-counter">
+                    Показано ${ this.loadedRecords } из ${ totalDisplay }
                 </div>
             `;
         }
@@ -464,8 +514,12 @@
                     // Debounce the API call to avoid too many requests
                     clearTimeout(this.filterTimeout);
                     this.filterTimeout = setTimeout(() => {
-                        this.currentPage = 0;
-                        this.loadData();
+                        // Reset data and load from beginning
+                        this.data = [];
+                        this.loadedRecords = 0;
+                        this.hasMore = true;
+                        this.totalRows = null;  // Reset total, user can click to fetch again
+                        this.loadData(false);
                     }, 500);  // Wait 500ms after user stops typing
                 });
             });
@@ -479,6 +533,30 @@
                     });
                 });
             }
+        }
+
+        attachScrollListener() {
+            const tableWrapper = this.container.querySelector('.integram-table-wrapper');
+            if (!tableWrapper) return;
+
+            // Remove existing scroll listener if any
+            if (this.scrollListener) {
+                window.removeEventListener('scroll', this.scrollListener);
+            }
+
+            this.scrollListener = () => {
+                if (this.isLoading || !this.hasMore) return;
+
+                const rect = tableWrapper.getBoundingClientRect();
+                const scrollThreshold = 200;  // Load more when 200px from bottom
+
+                // Check if user scrolled near the bottom of the table
+                if (rect.bottom - window.innerHeight < scrollThreshold) {
+                    this.loadData(true);  // Append mode
+                }
+            };
+
+            window.addEventListener('scroll', this.scrollListener);
         }
 
         showFilterTypeMenu(target, columnId) {
@@ -515,8 +593,12 @@
                     menu.remove();
 
                     if (this.filters[columnId].value) {
-                        this.currentPage = 0;
-                        this.loadData();
+                        // Reset data and load from beginning
+                        this.data = [];
+                        this.loadedRecords = 0;
+                        this.hasMore = true;
+                        this.totalRows = null;
+                        this.loadData(false);
                     }
                 });
             });
@@ -599,18 +681,6 @@
         toggleFilters() {
             this.filtersEnabled = !this.filtersEnabled;
             this.render();
-        }
-
-        nextPage() {
-            this.currentPage++;
-            this.loadData();
-        }
-
-        prevPage() {
-            if (this.currentPage > 0) {
-                this.currentPage--;
-                this.loadData();
-            }
         }
 
         saveColumnState() {
