@@ -177,6 +177,8 @@ class IntegramTable {
                 }
             } finally {
                 this.isLoading = false;
+                // Check if table fits on screen and needs more data
+                this.checkAndLoadMore();
             }
         }
 
@@ -297,7 +299,8 @@ class IntegramTable {
                             </div>
                         </div>
                     </div>
-                    <table class="integram-table">
+                    <div class="integram-table-container">
+                        <table class="integram-table">
                         <thead>
                             <tr>
                                 ${ orderedColumns.map(col => `
@@ -322,7 +325,8 @@ class IntegramTable {
                                 </tr>
                             `).join('') }
                         </tbody>
-                    </table>
+                        </table>
+                    </div>
                     ${ this.renderScrollCounter() }
                 </div>
             `;
@@ -527,6 +531,20 @@ class IntegramTable {
             };
 
             window.addEventListener('scroll', this.scrollListener);
+        }
+
+        checkAndLoadMore() {
+            // Check if table fits entirely on screen and there are more records
+            setTimeout(() => {
+                const tableWrapper = this.container.querySelector('.integram-table-wrapper');
+                if (!tableWrapper || this.isLoading || !this.hasMore) return;
+
+                const rect = tableWrapper.getBoundingClientRect();
+                // If table bottom is above viewport bottom (table fits on screen), load more
+                if (rect.bottom < window.innerHeight - 50) {
+                    this.loadData(true);  // Append mode
+                }
+            }, 100);  // Small delay to ensure DOM is updated
         }
 
         showFilterTypeMenu(target, columnId) {
