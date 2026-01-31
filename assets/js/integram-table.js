@@ -40,6 +40,13 @@ class IntegramTable {
             this.idColumns = new Set();  // Set of hidden ID column IDs
             this.columnWidths = {};  // Map of column IDs to their widths in pixels
 
+            // Table settings
+            this.settings = {
+                compact: false,  // false = spacious (default), true = compact
+                pageSize: this.options.pageSize,  // Current page size
+                truncateLongValues: true  // true = truncate to 127 chars (default)
+            };
+
             this.filterTypes = {
                 'CHARS': [
                     { symbol: '^', name: 'начинается с...', format: 'FR_{ T }={ X }%' },
@@ -86,6 +93,7 @@ class IntegramTable {
 
         init() {
             this.loadColumnState();
+            this.loadSettings();
             this.loadData();
         }
 
@@ -300,13 +308,16 @@ class IntegramTable {
                             <button class="btn btn-sm btn-outline-secondary" onclick="window.${ instanceName }.toggleFilters()">
                                 ${ this.filtersEnabled ? '✓' : '' } Фильтры
                             </button>
+                            <div class="integram-table-settings" onclick="window.${ instanceName }.openTableSettings()" title="Настройка">
+                                ⚙️
+                            </div>
                             <div class="integram-table-settings" onclick="window.${ instanceName }.openColumnSettings()">
                                 ☰ Колонки
                             </div>
                         </div>
                     </div>
                     <div class="integram-table-container">
-                        <table class="integram-table">
+                        <table class="integram-table${ this.settings.compact ? ' compact' : '' }">
                         <thead>
                             <tr>
                                 ${ orderedColumns.map(col => {
@@ -425,11 +436,19 @@ class IntegramTable {
                     return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }"${ customStyle }>${ displayValue }</td>`;
             }
 
-            const escapedValue = String(displayValue).replace(/&/g, '&amp;')
+            let escapedValue = String(displayValue).replace(/&/g, '&amp;')
                                                       .replace(/</g, '&lt;')
                                                       .replace(/>/g, '&gt;')
                                                       .replace(/"/g, '&quot;')
                                                       .replace(/'/g, '&#039;');
+
+            // Truncate long values if setting is enabled
+            if (this.settings.truncateLongValues && escapedValue.length > 127) {
+                const truncated = escapedValue.substring(0, 127);
+                const fullValueEscaped = escapedValue.replace(/'/g, '\\\'');
+                const instanceName = this.options.instanceName;
+                escapedValue = `${ truncated }<a href="#" class="show-full-value" onclick="window.${ instanceName }.showFullValue(event, '${ fullValueEscaped }'); return false;">...</a>`;
+            }
 
             return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }"${ customStyle }>${ escapedValue }</td>`;
         }
@@ -792,6 +811,180 @@ class IntegramTable {
             document.querySelectorAll('.column-settings-overlay, .column-settings-modal').forEach(el => el.remove());
         }
 
+        openTableSettings() {
+            const overlay = document.createElement('div');
+            overlay.className = 'column-settings-overlay';
+
+            const modal = document.createElement('div');
+            modal.className = 'column-settings-modal';
+            const instanceName = this.options.instanceName;
+
+            modal.innerHTML = `
+                <h5>Настройка таблицы</h5>
+                <div class="column-settings-list">
+                    <div class="table-settings-item">
+                        <button class="btn btn-sm btn-danger" onclick="window.${ instanceName }.resetSettings()">Сбросить настройки</button>
+                    </div>
+
+                    <div class="table-settings-item">
+                        <label>Отступы:</label>
+                        <div>
+                            <label>
+                                <input type="radio" name="padding-mode" value="spacious" ${ !this.settings.compact ? 'checked' : '' }>
+                                Просторно
+                            </label>
+                            <label style="margin-left: 15px;">
+                                <input type="radio" name="padding-mode" value="compact" ${ this.settings.compact ? 'checked' : '' }>
+                                Компактно
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="table-settings-item">
+                        <label for="page-size-select">Размер страницы:</label>
+                        <select id="page-size-select" class="form-control form-control-sm" style="display: inline-block; width: auto;">
+                            <option value="10" ${ this.settings.pageSize === 10 ? 'selected' : '' }>10</option>
+                            <option value="20" ${ this.settings.pageSize === 20 ? 'selected' : '' }>20</option>
+                            <option value="30" ${ this.settings.pageSize === 30 ? 'selected' : '' }>30</option>
+                            <option value="50" ${ this.settings.pageSize === 50 ? 'selected' : '' }>50</option>
+                            <option value="100" ${ this.settings.pageSize === 100 ? 'selected' : '' }>100</option>
+                            <option value="custom">Свой вариант</option>
+                        </select>
+                        <input type="number" id="custom-page-size" class="form-control form-control-sm" style="display: none; width: 80px; margin-left: 10px;" placeholder="Число">
+                    </div>
+
+                    <div class="table-settings-item">
+                        <label>Сокращать длинные значения:</label>
+                        <div>
+                            <label>
+                                <input type="radio" name="truncate-mode" value="yes" ${ this.settings.truncateLongValues ? 'checked' : '' }>
+                                Да
+                            </label>
+                            <label style="margin-left: 15px;">
+                                <input type="radio" name="truncate-mode" value="no" ${ !this.settings.truncateLongValues ? 'checked' : '' }>
+                                Нет
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div style="text-align: right; margin-top: 15px;">
+                    <button class="btn btn-secondary" onclick="window.${ instanceName }.closeTableSettings()">Закрыть</button>
+                </div>
+            `;
+
+            document.body.appendChild(overlay);
+            document.body.appendChild(modal);
+
+            // Handle padding mode change
+            modal.querySelectorAll('input[name="padding-mode"]').forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    this.settings.compact = e.target.value === 'compact';
+                    this.saveSettings();
+                    this.render();
+                });
+            });
+
+            // Handle page size change
+            const pageSizeSelect = modal.querySelector('#page-size-select');
+            const customPageSizeInput = modal.querySelector('#custom-page-size');
+
+            pageSizeSelect.addEventListener('change', (e) => {
+                if (e.target.value === 'custom') {
+                    customPageSizeInput.style.display = 'inline-block';
+                } else {
+                    customPageSizeInput.style.display = 'none';
+                    this.settings.pageSize = parseInt(e.target.value);
+                    this.options.pageSize = this.settings.pageSize;
+                    this.saveSettings();
+                    // Reload data with new page size
+                    this.data = [];
+                    this.loadedRecords = 0;
+                    this.hasMore = true;
+                    this.totalRows = null;
+                    this.loadData(false);
+                }
+            });
+
+            customPageSizeInput.addEventListener('change', (e) => {
+                const customSize = parseInt(e.target.value);
+                if (customSize && customSize > 0) {
+                    this.settings.pageSize = customSize;
+                    this.options.pageSize = customSize;
+                    this.saveSettings();
+                    // Reload data with new page size
+                    this.data = [];
+                    this.loadedRecords = 0;
+                    this.hasMore = true;
+                    this.totalRows = null;
+                    this.loadData(false);
+                }
+            });
+
+            // Handle truncate mode change
+            modal.querySelectorAll('input[name="truncate-mode"]').forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    this.settings.truncateLongValues = e.target.value === 'yes';
+                    this.saveSettings();
+                    this.render();
+                });
+            });
+
+            overlay.addEventListener('click', () => this.closeTableSettings());
+        }
+
+        closeTableSettings() {
+            document.querySelectorAll('.column-settings-overlay, .column-settings-modal').forEach(el => el.remove());
+        }
+
+        resetSettings() {
+            // Delete settings cookie
+            document.cookie = `${ this.options.cookiePrefix }-settings=; path=/; max-age=0`;
+
+            // Reset to defaults
+            this.settings = {
+                compact: false,
+                pageSize: 20,
+                truncateLongValues: true
+            };
+            this.options.pageSize = 20;
+
+            // Close modal and reload
+            this.closeTableSettings();
+            this.data = [];
+            this.loadedRecords = 0;
+            this.hasMore = true;
+            this.totalRows = null;
+            this.loadData(false);
+            this.render();
+        }
+
+        showFullValue(event, fullValue) {
+            event.preventDefault();
+            const overlay = document.createElement('div');
+            overlay.className = 'column-settings-overlay';
+
+            const modal = document.createElement('div');
+            modal.className = 'column-settings-modal';
+
+            modal.innerHTML = `
+                <h5>Полное значение</h5>
+                <div style="max-height: 400px; overflow-y: auto; margin: 15px 0; padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                    <pre style="white-space: pre-wrap; word-wrap: break-word; margin: 0;">${ fullValue }</pre>
+                </div>
+                <div style="text-align: right;">
+                    <button class="btn btn-secondary" onclick="this.closest('.column-settings-modal').remove(); document.querySelector('.column-settings-overlay').remove();">Закрыть</button>
+                </div>
+            `;
+
+            document.body.appendChild(overlay);
+            document.body.appendChild(modal);
+
+            overlay.addEventListener('click', () => {
+                modal.remove();
+                overlay.remove();
+            });
+        }
+
         toggleFilters() {
             this.filtersEnabled = !this.filtersEnabled;
             this.render();
@@ -818,6 +1011,34 @@ class IntegramTable {
                     this.columnWidths = state.widths || {};
                 } catch (e) {
                     console.error('Error loading column state:', e);
+                }
+            }
+        }
+
+        saveSettings() {
+            const settings = {
+                compact: this.settings.compact,
+                pageSize: this.settings.pageSize,
+                truncateLongValues: this.settings.truncateLongValues
+            };
+            document.cookie = `${ this.options.cookiePrefix }-settings=${ JSON.stringify(settings) }; path=/; max-age=31536000`;
+        }
+
+        loadSettings() {
+            const cookies = document.cookie.split(';');
+            const settingsCookie = cookies.find(c => c.trim().startsWith(`${ this.options.cookiePrefix }-settings=`));
+
+            if (settingsCookie) {
+                try {
+                    const settings = JSON.parse(settingsCookie.split('=')[1]);
+                    this.settings.compact = settings.compact !== undefined ? settings.compact : false;
+                    this.settings.pageSize = settings.pageSize || 20;
+                    this.settings.truncateLongValues = settings.truncateLongValues !== undefined ? settings.truncateLongValues : true;
+
+                    // Update options.pageSize to match loaded settings
+                    this.options.pageSize = this.settings.pageSize;
+                } catch (e) {
+                    console.error('Error loading settings:', e);
                 }
             }
         }

@@ -206,6 +206,15 @@
     padding-right: 10px;
 }
 
+/* Compact mode */
+.integram-table.compact th {
+    padding: 1px 3px;
+}
+
+.integram-table.compact td {
+    padding: 1px 3px;
+}
+
 .integram-table td {
     padding: 10px 12px;
     border-bottom: 1px solid #dee2e6;
@@ -420,6 +429,32 @@
 
 .column-settings-item input[type="checkbox"] {
     margin-right: 10px;
+}
+
+.table-settings-item {
+    padding: 12px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.table-settings-item label {
+    font-weight: 600;
+    margin-bottom: 5px;
+    display: block;
+}
+
+.table-settings-item input[type="radio"] {
+    margin-right: 5px;
+}
+
+.show-full-value {
+    color: #007bff;
+    text-decoration: none;
+    margin-left: 2px;
+    font-weight: bold;
+}
+
+.show-full-value:hover {
+    text-decoration: underline;
 }
 
 .filter-type-menu {
