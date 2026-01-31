@@ -104,6 +104,25 @@
     width: 100%;
 }
 
+/* Sticky horizontal scrollbar */
+.integram-table-sticky-scrollbar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 20px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    z-index: 99;
+    background: rgba(255, 255, 255, 0.95);
+    border-top: 1px solid #dee2e6;
+    display: none;
+}
+
+.integram-table-sticky-scrollbar-content {
+    height: 1px;
+}
+
 .integram-table-header {
     display: flex;
     justify-content: space-between;
@@ -164,6 +183,27 @@
 
 .integram-table th.drag-over {
     border-left: 3px solid #007bff;
+}
+
+/* Column resize handle */
+.column-resize-handle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 8px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+    z-index: 10;
+}
+
+.column-resize-handle:hover {
+    background: rgba(0, 123, 255, 0.3);
+}
+
+.column-header-content {
+    display: inline-block;
+    padding-right: 10px;
 }
 
 .integram-table td {

@@ -38,6 +38,7 @@ class IntegramTable {
             this.filtersEnabled = false;
             this.styleColumns = {};  // Map of column IDs to their style column values
             this.idColumns = new Set();  // Set of hidden ID column IDs
+            this.columnWidths = {};  // Map of column IDs to their widths in pixels
 
             this.filterTypes = {
                 'CHARS': [
@@ -300,7 +301,7 @@ class IntegramTable {
                                 ${ this.filtersEnabled ? '✓' : '' } Фильтры
                             </button>
                             <div class="integram-table-settings" onclick="window.${ instanceName }.openColumnSettings()">
-                                ⚙️ Настройки
+                                ☰ Колонки
                             </div>
                         </div>
                     </div>
@@ -308,11 +309,16 @@ class IntegramTable {
                         <table class="integram-table">
                         <thead>
                             <tr>
-                                ${ orderedColumns.map(col => `
-                                    <th data-column-id="${ col.id }" draggable="true">
-                                        ${ col.name }
+                                ${ orderedColumns.map(col => {
+                                    const width = this.columnWidths[col.id];
+                                    const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
+                                    return `
+                                    <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
+                                        <span class="column-header-content">${ col.name }</span>
+                                        <div class="column-resize-handle" data-column-id="${ col.id }"></div>
                                     </th>
-                                `).join('') }
+                                `;
+                                }).join('') }
                             </tr>
                             ${ this.filtersEnabled ? `
                             <tr class="filter-row">
@@ -334,11 +340,16 @@ class IntegramTable {
                     </div>
                     ${ this.renderScrollCounter() }
                 </div>
+                <div class="integram-table-sticky-scrollbar" id="${ this.container.id }-sticky-scrollbar">
+                    <div class="integram-table-sticky-scrollbar-content"></div>
+                </div>
             `;
 
             this.container.innerHTML = html;
             this.attachEventListeners();
             this.attachScrollListener();
+            this.attachStickyScrollbar();
+            this.attachColumnResizeHandlers();
         }
 
         renderFilterCell(column) {
@@ -552,6 +563,116 @@ class IntegramTable {
             }, 100);  // Small delay to ensure DOM is updated
         }
 
+        attachStickyScrollbar() {
+            const tableContainer = this.container.querySelector('.integram-table-container');
+            const stickyScrollbar = document.getElementById(`${this.container.id}-sticky-scrollbar`);
+            const stickyContent = stickyScrollbar?.querySelector('.integram-table-sticky-scrollbar-content');
+
+            if (!tableContainer || !stickyScrollbar || !stickyContent) return;
+
+            // Set sticky scrollbar content width to match table width
+            const updateStickyWidth = () => {
+                const table = tableContainer.querySelector('.integram-table');
+                if (table) {
+                    stickyContent.style.width = table.scrollWidth + 'px';
+                }
+            };
+
+            // Sync scroll positions
+            const syncFromTable = () => {
+                if (!this.isSyncingScroll) {
+                    this.isSyncingScroll = true;
+                    stickyScrollbar.scrollLeft = tableContainer.scrollLeft;
+                    this.isSyncingScroll = false;
+                }
+            };
+
+            const syncFromSticky = () => {
+                if (!this.isSyncingScroll) {
+                    this.isSyncingScroll = true;
+                    tableContainer.scrollLeft = stickyScrollbar.scrollLeft;
+                    this.isSyncingScroll = false;
+                }
+            };
+
+            // Show/hide sticky scrollbar based on table container visibility
+            const checkStickyVisibility = () => {
+                const rect = tableContainer.getBoundingClientRect();
+                const tableBottom = rect.bottom;
+                const viewportHeight = window.innerHeight;
+
+                // Show sticky scrollbar if table scrollbar is below viewport
+                if (tableBottom > viewportHeight && tableContainer.scrollWidth > tableContainer.clientWidth) {
+                    stickyScrollbar.style.display = 'block';
+                } else {
+                    stickyScrollbar.style.display = 'none';
+                }
+            };
+
+            // Remove existing listeners if any
+            if (this.tableScrollListener) {
+                tableContainer.removeEventListener('scroll', this.tableScrollListener);
+            }
+            if (this.stickyScrollListener) {
+                stickyScrollbar.removeEventListener('scroll', this.stickyScrollListener);
+            }
+            if (this.stickyVisibilityListener) {
+                window.removeEventListener('scroll', this.stickyVisibilityListener);
+                window.removeEventListener('resize', this.stickyVisibilityListener);
+            }
+
+            // Attach listeners
+            this.tableScrollListener = syncFromTable;
+            this.stickyScrollListener = syncFromSticky;
+            this.stickyVisibilityListener = () => {
+                checkStickyVisibility();
+                updateStickyWidth();
+            };
+
+            tableContainer.addEventListener('scroll', this.tableScrollListener);
+            stickyScrollbar.addEventListener('scroll', this.stickyScrollListener);
+            window.addEventListener('scroll', this.stickyVisibilityListener);
+            window.addEventListener('resize', this.stickyVisibilityListener);
+
+            // Initial setup
+            updateStickyWidth();
+            checkStickyVisibility();
+        }
+
+        attachColumnResizeHandlers() {
+            const resizeHandles = this.container.querySelectorAll('.column-resize-handle');
+
+            resizeHandles.forEach(handle => {
+                handle.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    const columnId = handle.dataset.columnId;
+                    const th = handle.parentElement;
+                    const startX = e.pageX;
+                    const startWidth = th.offsetWidth;
+
+                    const onMouseMove = (e) => {
+                        const diff = e.pageX - startX;
+                        const newWidth = Math.max(50, startWidth + diff);  // Min width 50px
+
+                        th.style.width = newWidth + 'px';
+                        th.style.minWidth = newWidth + 'px';
+                        this.columnWidths[columnId] = newWidth;
+                    };
+
+                    const onMouseUp = () => {
+                        document.removeEventListener('mousemove', onMouseMove);
+                        document.removeEventListener('mouseup', onMouseUp);
+                        this.saveColumnState();
+                    };
+
+                    document.addEventListener('mousemove', onMouseMove);
+                    document.addEventListener('mouseup', onMouseUp);
+                });
+            });
+        }
+
         showFilterTypeMenu(target, columnId) {
             const column = this.columns.find(c => c.id === columnId);
             const format = column.format || 'SHORT';
@@ -679,7 +800,8 @@ class IntegramTable {
         saveColumnState() {
             const state = {
                 order: this.columnOrder,
-                visible: this.visibleColumns
+                visible: this.visibleColumns,
+                widths: this.columnWidths
             };
             document.cookie = `${ this.options.cookiePrefix }-state=${ JSON.stringify(state) }; path=/; max-age=31536000`;
         }
@@ -693,6 +815,7 @@ class IntegramTable {
                     const state = JSON.parse(stateCookie.split('=')[1]);
                     this.columnOrder = state.order || [];
                     this.visibleColumns = state.visible || [];
+                    this.columnWidths = state.widths || {};
                 } catch (e) {
                     console.error('Error loading column state:', e);
                 }
