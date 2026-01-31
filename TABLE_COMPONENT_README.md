@@ -146,7 +146,13 @@ new IntegramTable('container-id', {
 /api/tasks?RECORD_COUNT=1&FR_4284=test%
 ```
 
-API должен вернуть **простое число** (не JSON): `142`
+API возвращает JSON объект с полем `count`:
+
+```json
+{
+    "count": "142"
+}
+```
 
 ## Фильтрация
 

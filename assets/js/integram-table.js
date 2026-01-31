@@ -198,8 +198,8 @@ class IntegramTable {
             try {
                 const separator = this.options.apiUrl.includes('?') ? '&' : '?';
                 const response = await fetch(`${ this.options.apiUrl }${ separator }${ params }`);
-                const text = await response.text();
-                this.totalRows = parseInt(text, 10);
+                const result = await response.json();
+                this.totalRows = parseInt(result.count, 10);
                 this.render();  // Re-render to update the counter
             } catch (error) {
                 console.error('Error fetching total count:', error);
