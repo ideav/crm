@@ -50,6 +50,7 @@
                 apiUrl: options.apiUrl || '',
                 pageSize: options.pageSize || 20,
                 cookiePrefix: options.cookiePrefix || 'integram-table',
+                title: options.title || '',
                 onCellClick: options.onCellClick || null,
                 onDataLoad: options.onDataLoad || null
             };
@@ -129,11 +130,30 @@
             });
 
             try {
-                const response = await fetch(`${ this.options.apiUrl }?${ params }`);
+                const separator = this.options.apiUrl.includes('?') ? '&' : '?';
+                const response = await fetch(`${ this.options.apiUrl }${ separator }${ params }`);
                 const json = await response.json();
 
                 this.columns = json.columns || [];
-                this.data = json.data || [];
+
+                // Transform column-based data to row-based data
+                // json.data is an array of column arrays, transpose to rows
+                const columnData = json.data || [];
+                if (columnData.length > 0 && Array.isArray(columnData[0])) {
+                    // Transpose: convert column arrays to row arrays
+                    const numRows = columnData[0].length;
+                    this.data = [];
+                    for (let rowIndex = 0; rowIndex < numRows; rowIndex++) {
+                        const row = [];
+                        for (let colIndex = 0; colIndex < columnData.length; colIndex++) {
+                            row.push(columnData[colIndex][rowIndex]);
+                        }
+                        this.data.push(row);
+                    }
+                } else {
+                    this.data = columnData;
+                }
+
                 this.totalRows = json.total || this.data.length;
 
                 if (this.columnOrder.length === 0) {
@@ -188,13 +208,14 @@
             let html = `
                 <div class="integram-table-wrapper">
                     <div class="integram-table-header">
-                        <div>
+                        ${ this.options.title ? `<div class="integram-table-title">${ this.options.title }</div>` : '' }
+                        <div class="integram-table-controls">
                             <button class="btn btn-sm btn-outline-secondary" onclick="window.tasksTable.toggleFilters()">
                                 ${ this.filtersEnabled ? '✓' : '' } Фильтры
                             </button>
-                        </div>
-                        <div class="integram-table-settings" onclick="window.tasksTable.openColumnSettings()">
-                            ⚙️ Настройки колонок
+                            <div class="integram-table-settings" onclick="window.tasksTable.openColumnSettings()">
+                                ⚙️ Настройки
+                            </div>
                         </div>
                     </div>
                     <table class="integram-table">
@@ -550,7 +571,8 @@
         window.tasksTable = new IntegramTable('tasks-table', {
             apiUrl: '/' + db + '/report/4283?JSON',
             pageSize: 20,
-            cookiePrefix: 'tasks-table'
+            cookiePrefix: 'tasks-table',
+            title: 'Задачи'
         });
     });
 
