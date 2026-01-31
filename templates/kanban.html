@@ -923,7 +923,7 @@ function copyContact(value, type, event){
 function loadSourcesAndDistributors(){
     // Load sources
     var xhr1 = new XMLHttpRequest();
-    xhr1.open('GET', 'https://' + window.location.hostname + '/slider/report/4500?JSON_KV', true);
+    xhr1.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/4500?JSON_KV', true);
     xhr1.onload = function(){
         if(xhr1.status === 200){
             try{
@@ -943,7 +943,7 @@ function loadSourcesAndDistributors(){
 
     // Load distributors
     var xhr2 = new XMLHttpRequest();
-    xhr2.open('GET', 'https://' + window.location.hostname + '/slider/report/4506?JSON_KV', true);
+    xhr2.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/4506?JSON_KV', true);
     xhr2.onload = function(){
         if(xhr2.status === 200){
             try{
