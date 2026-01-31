@@ -12,22 +12,24 @@
         const container = document.getElementById('quick-links');
 
         try {
-            const response = await fetch(`/${window.db}/report/299?JSON`);
-            const result = await response.json();
+            const response = await fetch(`/${window.db}/report/299?JSON_KV`);
+            const links = await response.json();
 
-            if (!result.data || result.data.length === 0) {
+            if (!links || links.length === 0) {
                 container.innerHTML = '<div style="padding: 20px; color: #6c757d;">Нет быстрых ссылок</div>';
                 return;
             }
 
             let html = '';
-            result.data.forEach(row => {
-                const url = row[0] || '#';
-                const label = row[1] || 'Ссылка';
-                const isPriority = row[2] === 'Да';
+            links.forEach(link => {
+                const format = link['Формат отчета'] || 'report';
+                const queryId = link['ЗапросID'];
+                const label = link['Запрос'] || 'Ссылка';
+                const isPriority = link['приоритет'] === 'X';
+                const url = `/${window.db}/${format}/${queryId}`;
 
                 html += `
-                    <a href="${url}" class="quick-link-badge${isPriority ? ' priority' : ''}">
+                    <a href="${url}" class="quick-link-badge${isPriority ? ' priority' : ''}" target="${queryId}">
                         ${isPriority ? '<span class="icon">⚡</span>' : ''}
                         ${label}
                     </a>
