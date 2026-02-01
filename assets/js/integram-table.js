@@ -313,7 +313,10 @@ class IntegramTable {
                         <div class="integram-table-controls">
                             ${ this.hasActiveFilters() ? `
                             <button class="btn btn-sm btn-outline-secondary mr-2" onclick="window.${ instanceName }.clearAllFilters()" title="Очистить фильтры">
-                                ✕
+                                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle;">
+                                    <path d="M3 3L7 7M7 7L3 11M7 7L11 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                                    <path d="M14 7C14 7 14 7 14 7L14 13M14 13L12 11M14 13L16 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
                             </button>
                             ` : '' }
                             <button class="btn btn-sm btn-outline-secondary mr-2" onclick="window.${ instanceName }.toggleFilters()">
