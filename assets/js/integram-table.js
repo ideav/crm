@@ -932,7 +932,7 @@ class IntegramTable {
                 <h5>Настройка таблицы</h5>
                 <div class="column-settings-list">
                     <div class="table-settings-item">
-                        <button class="btn btn-sm btn-danger" onclick="window.${ instanceName }.resetSettings()">Сбросить настройки</button>
+                        <button class="btn btn-sm btn-danger" id="reset-settings-btn">Сбросить настройки</button>
                     </div>
 
                     <div class="table-settings-item">
@@ -977,12 +977,24 @@ class IntegramTable {
                     </div>
                 </div>
                 <div style="text-align: right; margin-top: 15px;">
-                    <button class="btn btn-secondary" onclick="window.${ instanceName }.closeTableSettings()">Закрыть</button>
+                    <button class="btn btn-secondary" id="close-settings-btn">Закрыть</button>
                 </div>
             `;
 
             document.body.appendChild(overlay);
             document.body.appendChild(modal);
+
+            // Handle reset settings button
+            const resetBtn = modal.querySelector('#reset-settings-btn');
+            resetBtn.addEventListener('click', () => {
+                this.resetSettings();
+            });
+
+            // Handle close settings button
+            const closeBtn = modal.querySelector('#close-settings-btn');
+            closeBtn.addEventListener('click', () => {
+                this.closeTableSettings();
+            });
 
             // Handle padding mode change
             modal.querySelectorAll('input[name="padding-mode"]').forEach(radio => {
