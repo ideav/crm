@@ -39,6 +39,8 @@ class IntegramTable {
             this.styleColumns = {};  // Map of column IDs to their style column values
             this.idColumns = new Set();  // Set of hidden ID column IDs
             this.columnWidths = {};  // Map of column IDs to their widths in pixels
+            this.metadataCache = {};  // Cache for metadata by type ID
+            this.editableColumns = new Map();  // Map of column IDs to their corresponding ID column IDs
 
             // Table settings
             this.settings = {
@@ -251,6 +253,7 @@ class IntegramTable {
         processColumnVisibility() {
             this.idColumns.clear();
             this.styleColumns = {};
+            this.editableColumns.clear();
 
             // Build a map of column names to column objects
             const columnsByName = {};
@@ -267,6 +270,8 @@ class IntegramTable {
                     const baseName = name.slice(0, -2);
                     if (columnsByName[baseName]) {
                         this.idColumns.add(col.id);
+                        // Mark the base column as editable and store the ID column reference
+                        this.editableColumns.set(columnsByName[baseName].id, col.id);
                     }
                 }
 
@@ -388,6 +393,7 @@ class IntegramTable {
             let cellClass = '';
             let displayValue = value || '';
             let customStyle = '';
+            let isEditable = this.editableColumns.has(column.id);
 
             // Check if this column has a style column
             if (this.styleColumns[column.id]) {
@@ -399,6 +405,11 @@ class IntegramTable {
                         customStyle = ` style="${ styleValue }"`;
                     }
                 }
+            }
+
+            // Add editable class if this cell has an ID column
+            if (isEditable) {
+                cellClass += ' editable-cell';
             }
 
             switch (format) {
@@ -448,6 +459,17 @@ class IntegramTable {
                 const fullValueEscaped = escapedValue.replace(/'/g, '\\\'');
                 const instanceName = this.options.instanceName;
                 escapedValue = `${ truncated }<a href="#" class="show-full-value" onclick="window.${ instanceName }.showFullValue(event, '${ fullValueEscaped }'); return false;">...</a>`;
+            }
+
+            // Add edit icon for editable cells
+            if (isEditable) {
+                const idColId = this.editableColumns.get(column.id);
+                const idColIndex = this.columns.findIndex(c => c.id === idColId);
+                const recordId = idColIndex !== -1 && this.data[rowIndex] ? this.data[rowIndex][idColIndex] : '';
+                const typeId = column.type || '';
+                const instanceName = this.options.instanceName;
+                const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();" title="Редактировать"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M0 11.0833V14H2.91667L11.5442 5.3725L8.6275 2.45583L0 11.0833ZM13.8083 3.10833L10.8917 0.191667C10.6583 -0.0416667 10.2917 -0.0416667 10.0583 0.191667L7.90833 2.34167L10.825 5.25833L12.975 3.10833C13.2083 2.875 13.2083 2.50833 12.975 2.275L13.8083 3.10833Z" fill="currentColor"/></svg></span>`;
+                escapedValue = `<div class="cell-content-wrapper">${ escapedValue }${ editIcon }</div>`;
             }
 
             return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }"${ customStyle }>${ escapedValue }</td>`;
@@ -1041,6 +1063,444 @@ class IntegramTable {
                     console.error('Error loading settings:', e);
                 }
             }
+        }
+
+        // Modal Edit Form functionality
+        async openEditForm(recordId, typeId, rowIndex) {
+            if (!typeId) {
+                this.showToast('Ошибка: не указан тип записи', 'error');
+                return;
+            }
+
+            const isCreate = !recordId || recordId === '';
+
+            try {
+                // Fetch metadata if not cached
+                if (!this.metadataCache[typeId]) {
+                    this.metadataCache[typeId] = await this.fetchMetadata(typeId);
+                }
+
+                const metadata = this.metadataCache[typeId];
+
+                let recordData = null;
+                if (!isCreate) {
+                    recordData = await this.fetchRecordData(recordId);
+                }
+
+                this.renderEditFormModal(metadata, recordData, isCreate, typeId);
+            } catch (error) {
+                console.error('Error opening edit form:', error);
+                this.showToast(`Ошибка загрузки формы: ${ error.message }`, 'error');
+            }
+        }
+
+        async fetchMetadata(typeId) {
+            const apiBase = this.getApiBase();
+            const response = await fetch(`${ apiBase }/metadata/${ typeId }`);
+
+            if (!response.ok) {
+                throw new Error(`Failed to fetch metadata: ${ response.statusText }`);
+            }
+
+            const text = await response.text();
+
+            try {
+                const data = JSON.parse(text);
+
+                // Check for error in response
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                return data;
+            } catch (e) {
+                if (e.message && e.message.includes('error')) {
+                    throw e;
+                }
+                throw new Error(`Invalid JSON response: ${ text }`);
+            }
+        }
+
+        async fetchRecordData(recordId) {
+            const apiBase = this.getApiBase();
+            const response = await fetch(`${ apiBase }/edit_obj/${ recordId }?JSON`);
+
+            if (!response.ok) {
+                throw new Error(`Failed to fetch record data: ${ response.statusText }`);
+            }
+
+            const text = await response.text();
+
+            try {
+                const data = JSON.parse(text);
+
+                // Check for error in response
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                return data;
+            } catch (e) {
+                if (e.message && e.message.includes('error')) {
+                    throw e;
+                }
+                throw new Error(`Invalid JSON response: ${ text }`);
+            }
+        }
+
+        async fetchReferenceOptions(requisiteId, recordId = 0, searchQuery = '') {
+            const apiBase = this.getApiBase();
+            const params = new URLSearchParams();
+
+            if (searchQuery) {
+                params.append('q', searchQuery);
+            }
+            if (recordId && recordId !== 0) {
+                params.append('id', recordId);
+            }
+
+            const url = `${ apiBase }/_ref_reqs/${ requisiteId }${ params.toString() ? '?' + params.toString() : '' }`;
+            const response = await fetch(url);
+
+            if (!response.ok) {
+                throw new Error(`Failed to fetch reference options: ${ response.statusText }`);
+            }
+
+            const text = await response.text();
+
+            try {
+                const data = JSON.parse(text);
+
+                // Check for error in response
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+
+                return data;
+            } catch (e) {
+                if (e.message && e.message.includes('error')) {
+                    throw e;
+                }
+                throw new Error(`Invalid JSON response: ${ text }`);
+            }
+        }
+
+        getApiBase() {
+            // Extract base URL from apiUrl by removing query parameters and path after /report/ or /type/
+            const url = this.options.apiUrl;
+            const match = url.match(/^(.*?\/(report|type)\/\d+)/);
+            if (match) {
+                return match[1].replace(/\/(report|type)\/\d+$/, '');
+            }
+            // Fallback: remove everything after ? or last /
+            return url.split('?')[0].replace(/\/[^\/]*$/, '');
+        }
+
+        parseAttrs(attrs) {
+            const result = {
+                required: false,
+                multi: false,
+                alias: null
+            };
+
+            if (!attrs) return result;
+
+            result.required = attrs.includes(':!NULL:');
+            result.multi = attrs.includes(':MULTI:');
+
+            const aliasMatch = attrs.match(/:ALIAS=(.*?):/);
+            if (aliasMatch) {
+                result.alias = aliasMatch[1];
+            }
+
+            return result;
+        }
+
+        renderEditFormModal(metadata, recordData, isCreate, typeId) {
+            const overlay = document.createElement('div');
+            overlay.className = 'edit-form-overlay';
+
+            const modal = document.createElement('div');
+            modal.className = 'edit-form-modal';
+
+            const title = isCreate ? `Создание: ${ metadata.val }` : `Редактирование: ${ metadata.val }`;
+
+            let formHtml = `
+                <div class="edit-form-header">
+                    <h5>${ title }</h5>
+                    <button class="edit-form-close" onclick="this.closest('.edit-form-modal').remove(); document.querySelector('.edit-form-overlay').remove();">×</button>
+                </div>
+                <div class="edit-form-body">
+                    <form id="edit-form" class="edit-form">
+            `;
+
+            // Main value field
+            const mainValue = recordData && recordData.obj ? recordData.obj.val : '';
+            formHtml += `
+                <div class="form-group">
+                    <label for="field-main">${ metadata.val } <span class="required">*</span></label>
+                    <input type="text" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required>
+                </div>
+            `;
+
+            // Requisite fields
+            const reqs = metadata.reqs || [];
+            const recordReqs = recordData && recordData.reqs ? recordData.reqs : {};
+
+            // Sort by order if available
+            const sortedReqs = reqs.sort((a, b) => {
+                const orderA = recordReqs[a.id] ? recordReqs[a.id].order || 0 : 0;
+                const orderB = recordReqs[b.id] ? recordReqs[b.id].order || 0 : 0;
+                return orderA - orderB;
+            });
+
+            sortedReqs.forEach(req => {
+                const attrs = this.parseAttrs(req.attrs);
+                const fieldName = attrs.alias || req.val;
+                const reqValue = recordReqs[req.id] ? recordReqs[req.id].value : '';
+                const baseType = recordReqs[req.id] ? recordReqs[req.id].base : req.type;
+                const isRequired = attrs.required;
+
+                // Skip subordinate table fields (arr_id)
+                if (req.arr_id) {
+                    const arrCount = recordReqs[req.id] ? recordReqs[req.id].arr || 0 : 0;
+                    formHtml += `
+                        <div class="form-group">
+                            <label>${ fieldName }</label>
+                            <div class="subordinate-table-indicator">
+                                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                                    <rect x="2" y="2" width="16" height="3" />
+                                    <rect x="2" y="7" width="16" height="3" />
+                                    <rect x="2" y="12" width="16" height="3" />
+                                </svg>
+                                <span>${ arrCount } записей</span>
+                            </div>
+                        </div>
+                    `;
+                    return;
+                }
+
+                formHtml += `<div class="form-group">`;
+                formHtml += `<label for="field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
+
+                // Reference field (dropdown)
+                if (req.ref_id) {
+                    formHtml += `<select class="form-control ref-select" id="field-${ req.id }" name="t${ req.id }" data-ref-id="${ req.id }" data-multi="${ attrs.multi }" ${ isRequired ? 'required' : '' }>`;
+                    formHtml += `<option value="">Загрузка...</option>`;
+                    formHtml += `</select>`;
+                }
+                // Boolean field
+                else if (baseType === '7') {  // BOOLEAN type
+                    const isChecked = reqValue ? 'checked' : '';
+                    const prevValue = reqValue || '';
+                    formHtml += `<input type="checkbox" id="field-${ req.id }" name="t${ req.id }" value="1" ${ isChecked }>`;
+                    formHtml += `<input type="hidden" name="b${ req.id }" value="${ this.escapeHtml(prevValue) }">`;
+                }
+                // Date/DateTime field
+                else if (baseType === '4' || baseType === '47') {  // DATE or DATETIME
+                    const dateValue = reqValue ? this.formatDateForInput(reqValue) : '';
+                    formHtml += `<input type="text" class="form-control date-input" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(dateValue) }" placeholder="ДД.ММ.ГГГГ" ${ isRequired ? 'required' : '' }>`;
+                }
+                // MEMO field (rich text)
+                else if (baseType === '2') {  // MEMO
+                    formHtml += `<textarea class="form-control memo-field" id="field-${ req.id }" name="t${ req.id }" rows="5" ${ isRequired ? 'required' : '' }>${ this.escapeHtml(reqValue) }</textarea>`;
+                }
+                // Regular text field
+                else {
+                    formHtml += `<input type="text" class="form-control" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(reqValue) }" ${ isRequired ? 'required' : '' }>`;
+                }
+
+                formHtml += `</div>`;
+            });
+
+            formHtml += `
+                    </form>
+                </div>
+                <div class="edit-form-footer">
+                    <button type="button" class="btn btn-secondary" onclick="this.closest('.edit-form-modal').remove(); document.querySelector('.edit-form-overlay').remove();">Отмена</button>
+                    <button type="button" class="btn btn-primary" id="save-record-btn">Сохранить</button>
+                </div>
+            `;
+
+            modal.innerHTML = formHtml;
+            document.body.appendChild(overlay);
+            document.body.appendChild(modal);
+
+            // Load reference options for dropdowns
+            this.loadReferenceOptions(metadata.reqs, recordData ? recordData.obj.id : 0);
+
+            // Attach save handler
+            const saveBtn = modal.querySelector('#save-record-btn');
+            const recordId = recordData && recordData.obj ? recordData.obj.id : null;
+            const parentId = recordData && recordData.obj ? recordData.obj.parent : 1;
+
+            saveBtn.addEventListener('click', () => {
+                this.saveRecord(modal, isCreate, recordId, typeId, parentId);
+            });
+
+            overlay.addEventListener('click', () => {
+                modal.remove();
+                overlay.remove();
+            });
+        }
+
+        async loadReferenceOptions(reqs, recordId) {
+            const refSelects = document.querySelectorAll('.ref-select');
+
+            for (const select of refSelects) {
+                const refReqId = select.dataset.refId;
+
+                try {
+                    const options = await this.fetchReferenceOptions(refReqId, recordId);
+
+                    select.innerHTML = '<option value="">Выберите...</option>';
+
+                    Object.entries(options).forEach(([id, name]) => {
+                        const option = document.createElement('option');
+                        option.value = id;
+                        option.textContent = name;
+                        select.appendChild(option);
+                    });
+
+                    // Set current value if exists
+                    const currentValue = select.closest('.form-group').querySelector(`[name="t${ refReqId }"]`);
+                    if (currentValue && currentValue.dataset.value) {
+                        select.value = currentValue.dataset.value;
+                    }
+                } catch (error) {
+                    console.error('Error loading reference options:', error);
+                    select.innerHTML = '<option value="">Ошибка загрузки</option>';
+                }
+            }
+        }
+
+        async saveRecord(modal, isCreate, recordId, typeId, parentId) {
+            const form = modal.querySelector('#edit-form');
+
+            if (!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+
+            const formData = new FormData(form);
+            const params = new URLSearchParams();
+
+            // Add XSRF token if available
+            if (typeof _xsrf !== 'undefined') {
+                params.append('_xsrf', _xsrf);
+            }
+
+            // Add all form fields
+            for (const [key, value] of formData.entries()) {
+                params.append(key, value);
+            }
+
+            // Get main value
+            const mainValue = formData.get('main');
+
+            const apiBase = this.getApiBase();
+            let url;
+
+            if (isCreate) {
+                url = `${ apiBase }/_m_new/${ typeId }?JSON&up=${ parentId || 1 }`;
+                params.append('t0', mainValue);
+            } else {
+                url = `${ apiBase }/_m_save/${ recordId }?JSON`;
+                params.append('t0', mainValue);
+            }
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: params.toString()
+                });
+
+                const text = await response.text();
+
+                let result;
+                try {
+                    result = JSON.parse(text);
+                } catch (e) {
+                    // If not JSON, check if it's an error message
+                    if (text.includes('error') || !response.ok) {
+                        throw new Error(text);
+                    }
+                    // Otherwise treat as success
+                    result = { success: true };
+                }
+
+                if (result.error) {
+                    throw new Error(result.error);
+                }
+
+                // Close modal
+                modal.remove();
+                document.querySelector('.edit-form-overlay').remove();
+
+                // Show success message
+                this.showToast('Запись успешно сохранена', 'success');
+
+                // Reload table data
+                this.data = [];
+                this.loadedRecords = 0;
+                this.hasMore = true;
+                this.totalRows = null;
+                await this.loadData(false);
+
+            } catch (error) {
+                console.error('Error saving record:', error);
+                this.showToast(`Ошибка сохранения: ${ error.message }`, 'error');
+            }
+        }
+
+        formatDateForInput(value) {
+            // Convert date from various formats to DD.MM.YYYY
+            if (!value) return '';
+
+            const date = new Date(value);
+            if (isNaN(date.getTime())) return value;  // Return as-is if not a valid date
+
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+
+            return `${ day }.${ month }.${ year }`;
+        }
+
+        escapeHtml(text) {
+            if (text === null || text === undefined) return '';
+            return String(text).replace(/&/g, '&amp;')
+                              .replace(/</g, '&lt;')
+                              .replace(/>/g, '&gt;')
+                              .replace(/"/g, '&quot;')
+                              .replace(/'/g, '&#039;');
+        }
+
+        showToast(message, type = 'info') {
+            // Remove existing toasts
+            const existingToasts = document.querySelectorAll('.integram-toast');
+            existingToasts.forEach(toast => toast.remove());
+
+            const toast = document.createElement('div');
+            toast.className = `integram-toast integram-toast-${ type }`;
+            toast.textContent = message;
+
+            document.body.appendChild(toast);
+
+            // Auto-remove after 5 seconds
+            setTimeout(() => {
+                toast.classList.add('fade-out');
+                setTimeout(() => toast.remove(), 300);
+            }, 5000);
+
+            // Click to dismiss
+            toast.addEventListener('click', () => {
+                toast.classList.add('fade-out');
+                setTimeout(() => toast.remove(), 300);
+            });
         }
     }
 
