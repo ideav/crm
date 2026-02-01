@@ -542,6 +542,37 @@
     box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
 }
 
+/* Date and DateTime pickers */
+.edit-form .date-picker,
+.edit-form .datetime-picker {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 14px;
+    background-color: white;
+    cursor: pointer;
+}
+
+.edit-form .date-picker:focus,
+.edit-form .datetime-picker:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+/* Style for calendar icon in date/datetime inputs */
+.edit-form .date-picker::-webkit-calendar-picker-indicator,
+.edit-form .datetime-picker::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.6;
+}
+
+.edit-form .date-picker::-webkit-calendar-picker-indicator:hover,
+.edit-form .datetime-picker::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+}
+
 .edit-form .memo-field {
     min-height: 100px;
     resize: vertical;
