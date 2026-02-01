@@ -1403,10 +1403,15 @@ class IntegramTable {
                     formHtml += `<input type="checkbox" id="field-${ req.id }" name="t${ req.id }" value="1" ${ isChecked }>`;
                     formHtml += `<input type="hidden" name="b${ req.id }" value="${ this.escapeHtml(prevValue) }">`;
                 }
-                // Date/DateTime field
-                else if (baseFormat === 'DATE' || baseFormat === 'DATETIME') {
-                    const dateValue = reqValue ? this.formatDateForInput(reqValue) : '';
+                // Date field
+                else if (baseFormat === 'DATE') {
+                    const dateValue = reqValue ? this.formatDateForInput(reqValue, false) : '';
                     formHtml += `<input type="text" class="form-control date-input" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(dateValue) }" placeholder="ДД.ММ.ГГГГ" ${ isRequired ? 'required' : '' }>`;
+                }
+                // DateTime field (with time rounded to 5 minutes)
+                else if (baseFormat === 'DATETIME') {
+                    const dateTimeValue = reqValue ? this.formatDateForInput(reqValue, true) : '';
+                    formHtml += `<input type="text" class="form-control date-input" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(dateTimeValue) }" placeholder="ДД.ММ.ГГГГ ЧЧ:ММ" ${ isRequired ? 'required' : '' }>`;
                 }
                 // MEMO field (multi-line text, 4 rows)
                 else if (baseFormat === 'MEMO') {
@@ -1563,16 +1568,37 @@ class IntegramTable {
             }
         }
 
-        formatDateForInput(value) {
-            // Convert date from various formats to DD.MM.YYYY
+        roundToNearest5Minutes(date) {
+            // Round date to nearest 5 minutes
+            const minutes = date.getMinutes();
+            const roundedMinutes = Math.round(minutes / 5) * 5;
+            date.setMinutes(roundedMinutes);
+            date.setSeconds(0);
+            date.setMilliseconds(0);
+            return date;
+        }
+
+        formatDateForInput(value, includeTime = false) {
+            // Convert date from various formats to DD.MM.YYYY or DD.MM.YYYY HH:MM
             if (!value) return '';
 
-            const date = new Date(value);
+            let date = new Date(value);
             if (isNaN(date.getTime())) return value;  // Return as-is if not a valid date
+
+            // Round to 5 minutes if time is included
+            if (includeTime) {
+                date = this.roundToNearest5Minutes(date);
+            }
 
             const day = String(date.getDate()).padStart(2, '0');
             const month = String(date.getMonth() + 1).padStart(2, '0');
             const year = date.getFullYear();
+
+            if (includeTime) {
+                const hours = String(date.getHours()).padStart(2, '0');
+                const minutes = String(date.getMinutes()).padStart(2, '0');
+                return `${ day }.${ month }.${ year } ${ hours }:${ minutes }`;
+            }
 
             return `${ day }.${ month }.${ year }`;
         }
