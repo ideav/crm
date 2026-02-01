@@ -1304,6 +1304,24 @@ class IntegramTable {
             return formatMap[String(typeId)] || 'SHORT';
         }
 
+        normalizeFormat(baseTypeId) {
+            // If baseTypeId is already a symbolic format name (like "MEMO", "BOOLEAN"),
+            // use it directly without conversion
+            const validFormats = ['SHORT', 'CHARS', 'DATE', 'NUMBER', 'SIGNED', 'BOOLEAN',
+                                  'MEMO', 'DATETIME', 'FILE', 'HTML', 'BUTTON', 'PWD',
+                                  'GRANT', 'REPORT_COLUMN', 'PATH'];
+
+            const upperTypeId = String(baseTypeId).toUpperCase();
+
+            if (validFormats.includes(upperTypeId)) {
+                // Already a symbolic format name - return as is
+                return upperTypeId;
+            }
+
+            // Otherwise, it's a numeric ID - convert it
+            return this.getFormatById(baseTypeId);
+        }
+
         renderEditFormModal(metadata, recordData, isCreate, typeId) {
             const overlay = document.createElement('div');
             overlay.className = 'edit-form-overlay';
@@ -1347,7 +1365,7 @@ class IntegramTable {
                 const fieldName = attrs.alias || req.val;
                 const reqValue = recordReqs[req.id] ? recordReqs[req.id].value : '';
                 const baseTypeId = recordReqs[req.id] ? recordReqs[req.id].base : req.type;
-                const baseFormat = this.getFormatById(baseTypeId);
+                const baseFormat = this.normalizeFormat(baseTypeId);
                 const isRequired = attrs.required;
 
                 // Skip subordinate table fields (arr_id)
