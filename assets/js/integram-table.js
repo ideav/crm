@@ -334,7 +334,7 @@ class IntegramTable {
                             </tr>
                             ${ this.filtersEnabled ? `
                             <tr class="filter-row">
-                                ${ orderedColumns.map(col => this.renderFilterCell(col)).join('') }
+                                ${ orderedColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('') }
                             </tr>
                             ` : '' }
                         </thead>
@@ -364,9 +364,10 @@ class IntegramTable {
             this.attachColumnResizeHandlers();
         }
 
-        renderFilterCell(column) {
+        renderFilterCell(column, columnIndex = 0) {
             const format = column.format || 'SHORT';
             const currentFilter = this.filters[column.id] || { type: '^', value: '' };
+            const placeholder = columnIndex === 0 ? 'Фильтр...' : '';
 
             return `
                 <td>
@@ -378,7 +379,7 @@ class IntegramTable {
                                class="filter-input-with-icon"
                                data-column-id="${ column.id }"
                                value="${ currentFilter.value }"
-                               placeholder="Фильтр...">
+                               placeholder="${ placeholder }">
                     </div>
                 </td>
             `;
