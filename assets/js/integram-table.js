@@ -1449,8 +1449,15 @@ class IntegramTable {
                     </form>
                 </div>
                 <div class="edit-form-footer">
-                    <button type="button" class="btn btn-secondary" onclick="this.closest('.edit-form-modal').remove(); document.querySelector('.edit-form-overlay').remove();">Отмена</button>
-                    <button type="button" class="btn btn-primary" id="save-record-btn">Сохранить</button>
+                    <button type="button" class="btn btn-icon form-settings-btn" id="form-settings-btn" title="Настройка видимости полей">
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M17.43 10.98c.04-.32.07-.64.07-.98 0-.34-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C12.46.21 12.25 0 12 0h-4c-.25 0-.46.21-.49.49l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98 0 .33.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.28.24.49.49.49h4c.25 0 .46-.21.49-.49l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM10 13c-1.65 0-3-1.35-3-3s1.35-3 3-3 3 1.35 3 3-1.35 3-3 3z"/>
+                        </svg>
+                    </button>
+                    <div class="edit-form-footer-buttons">
+                        <button type="button" class="btn btn-secondary" onclick="this.closest('.edit-form-modal').remove(); document.querySelector('.edit-form-overlay').remove();">Отмена</button>
+                        <button type="button" class="btn btn-primary" id="save-record-btn">Сохранить</button>
+                    </div>
                 </div>
             `;
 
@@ -1463,6 +1470,15 @@ class IntegramTable {
 
             // Attach date/datetime picker handlers
             this.attachDatePickerHandlers(modal);
+
+            // Attach form field settings handler
+            const formSettingsBtn = modal.querySelector('#form-settings-btn');
+            formSettingsBtn.addEventListener('click', () => {
+                this.openFormFieldSettings(typeId, metadata);
+            });
+
+            // Apply saved field visibility settings
+            this.applyFormFieldSettings(modal, typeId);
 
             // Attach save handler
             const saveBtn = modal.querySelector('#save-record-btn');
@@ -1604,6 +1620,130 @@ class IntegramTable {
                 });
 
                 dropdown.appendChild(optionDiv);
+            });
+        }
+
+        // Form field visibility settings
+        openFormFieldSettings(typeId, metadata) {
+            const overlay = document.createElement('div');
+            overlay.className = 'form-field-settings-overlay';
+
+            const modal = document.createElement('div');
+            modal.className = 'form-field-settings-modal';
+
+            const visibleFields = this.loadFormFieldVisibility(typeId);
+
+            let modalHtml = `
+                <div class="form-field-settings-header">
+                    <h5>Настройка видимости полей</h5>
+                    <button class="form-field-settings-close">&times;</button>
+                </div>
+                <div class="form-field-settings-body">
+                    <p class="form-field-settings-info">Выберите поля, которые должны отображаться в форме редактирования:</p>
+                    <div class="form-field-settings-list">
+            `;
+
+            // Add checkbox for each requisite
+            const reqs = metadata.reqs || [];
+            reqs.forEach(req => {
+                const attrs = this.parseAttrs(req.attrs);
+                const fieldName = attrs.alias || req.val;
+                const fieldId = req.id;
+                const isChecked = visibleFields[fieldId] !== false; // Default to visible
+
+                modalHtml += `
+                    <div class="form-field-settings-item">
+                        <label>
+                            <input type="checkbox"
+                                   class="form-field-visibility-checkbox"
+                                   data-field-id="${ fieldId }"
+                                   ${ isChecked ? 'checked' : '' }>
+                            <span>${ fieldName }</span>
+                        </label>
+                    </div>
+                `;
+            });
+
+            modalHtml += `
+                    </div>
+                </div>
+                <div class="form-field-settings-footer">
+                    <button type="button" class="btn btn-secondary form-field-settings-cancel">Отмена</button>
+                    <button type="button" class="btn btn-primary form-field-settings-save">Сохранить</button>
+                </div>
+            `;
+
+            modal.innerHTML = modalHtml;
+            document.body.appendChild(overlay);
+            document.body.appendChild(modal);
+
+            // Attach handlers
+            const closeBtn = modal.querySelector('.form-field-settings-close');
+            const cancelBtn = modal.querySelector('.form-field-settings-cancel');
+            const saveBtn = modal.querySelector('.form-field-settings-save');
+
+            const closeModal = () => {
+                modal.remove();
+                overlay.remove();
+            };
+
+            closeBtn.addEventListener('click', closeModal);
+            cancelBtn.addEventListener('click', closeModal);
+            overlay.addEventListener('click', closeModal);
+
+            saveBtn.addEventListener('click', () => {
+                const checkboxes = modal.querySelectorAll('.form-field-visibility-checkbox');
+                const visibility = {};
+
+                checkboxes.forEach(checkbox => {
+                    const fieldId = checkbox.dataset.fieldId;
+                    visibility[fieldId] = checkbox.checked;
+                });
+
+                this.saveFormFieldVisibility(typeId, visibility);
+                closeModal();
+
+                // Reload the edit form if it's open
+                const editFormModal = document.querySelector('.edit-form-modal');
+                if (editFormModal) {
+                    this.applyFormFieldSettings(editFormModal, typeId);
+                }
+            });
+        }
+
+        saveFormFieldVisibility(typeId, visibility) {
+            const cookieName = `${ this.options.cookiePrefix }-form-fields-${ typeId }`;
+            document.cookie = `${ cookieName }=${ JSON.stringify(visibility) }; path=/; max-age=31536000`;
+        }
+
+        loadFormFieldVisibility(typeId) {
+            const cookieName = `${ this.options.cookiePrefix }-form-fields-${ typeId }`;
+            const cookies = document.cookie.split(';');
+            const fieldsCookie = cookies.find(c => c.trim().startsWith(`${ cookieName }=`));
+
+            if (fieldsCookie) {
+                try {
+                    const visibility = JSON.parse(fieldsCookie.split('=')[1]);
+                    return visibility;
+                } catch (error) {
+                    console.error('Error parsing form field visibility settings:', error);
+                    return {};
+                }
+            }
+
+            return {}; // Default: all fields visible
+        }
+
+        applyFormFieldSettings(modal, typeId) {
+            const visibility = this.loadFormFieldVisibility(typeId);
+
+            Object.entries(visibility).forEach(([fieldId, isVisible]) => {
+                if (!isVisible) {
+                    const formGroup = modal.querySelector(`#field-${ fieldId }`)?.closest('.form-group');
+                    if (formGroup) {
+                        formGroup.style.display = 'none';
+                    }
+                }
             });
         }
 
