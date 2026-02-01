@@ -1758,9 +1758,9 @@ class IntegramTable {
             const formData = new FormData(form);
             const params = new URLSearchParams();
 
-            // Add XSRF token if available
-            if (typeof _xsrf !== 'undefined') {
-                params.append('_xsrf', _xsrf);
+            // Add XSRF token (global variable xsrf is initialized on the page)
+            if (typeof xsrf !== 'undefined') {
+                params.append('_xsrf', xsrf);
             }
 
             // Add all form fields
