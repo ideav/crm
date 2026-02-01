@@ -1403,15 +1403,19 @@ class IntegramTable {
                     formHtml += `<input type="checkbox" id="field-${ req.id }" name="t${ req.id }" value="1" ${ isChecked }>`;
                     formHtml += `<input type="hidden" name="b${ req.id }" value="${ this.escapeHtml(prevValue) }">`;
                 }
-                // Date field
+                // Date field with HTML5 date picker
                 else if (baseFormat === 'DATE') {
-                    const dateValue = reqValue ? this.formatDateForInput(reqValue, false) : '';
-                    formHtml += `<input type="text" class="form-control date-input" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(dateValue) }" placeholder="ДД.ММ.ГГГГ" ${ isRequired ? 'required' : '' }>`;
+                    const dateValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, false) : '';
+                    const dateValueDisplay = reqValue ? this.formatDateForInput(reqValue, false) : '';
+                    formHtml += `<input type="date" class="form-control date-picker" id="field-${ req.id }-picker" value="${ this.escapeHtml(dateValueHtml5) }" ${ isRequired ? 'required' : '' } data-target="field-${ req.id }">`;
+                    formHtml += `<input type="hidden" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(dateValueDisplay) }">`;
                 }
-                // DateTime field (with time rounded to 5 minutes)
+                // DateTime field with HTML5 datetime-local picker (with time rounded to 5 minutes)
                 else if (baseFormat === 'DATETIME') {
-                    const dateTimeValue = reqValue ? this.formatDateForInput(reqValue, true) : '';
-                    formHtml += `<input type="text" class="form-control date-input" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(dateTimeValue) }" placeholder="ДД.ММ.ГГГГ ЧЧ:ММ" ${ isRequired ? 'required' : '' }>`;
+                    const dateTimeValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, true) : '';
+                    const dateTimeValueDisplay = reqValue ? this.formatDateForInput(reqValue, true) : '';
+                    formHtml += `<input type="datetime-local" class="form-control datetime-picker" id="field-${ req.id }-picker" value="${ this.escapeHtml(dateTimeValueHtml5) }" ${ isRequired ? 'required' : '' } data-target="field-${ req.id }" step="300">`;
+                    formHtml += `<input type="hidden" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(dateTimeValueDisplay) }">`;
                 }
                 // MEMO field (multi-line text, 4 rows)
                 else if (baseFormat === 'MEMO') {
@@ -1441,6 +1445,9 @@ class IntegramTable {
             // Load reference options for dropdowns
             this.loadReferenceOptions(metadata.reqs, recordData ? recordData.obj.id : 0);
 
+            // Attach date/datetime picker handlers
+            this.attachDatePickerHandlers(modal);
+
             // Attach save handler
             const saveBtn = modal.querySelector('#save-record-btn');
             const recordId = recordData && recordData.obj ? recordData.obj.id : null;
@@ -1453,6 +1460,34 @@ class IntegramTable {
             overlay.addEventListener('click', () => {
                 modal.remove();
                 overlay.remove();
+            });
+        }
+
+        attachDatePickerHandlers(modal) {
+            // Handle date pickers
+            const datePickers = modal.querySelectorAll('.date-picker');
+            datePickers.forEach(picker => {
+                picker.addEventListener('change', (e) => {
+                    const targetId = picker.dataset.target;
+                    const hiddenInput = modal.querySelector(`#${ targetId }`);
+                    if (hiddenInput) {
+                        const displayValue = this.convertHtml5DateToDisplay(picker.value, false);
+                        hiddenInput.value = displayValue;
+                    }
+                });
+            });
+
+            // Handle datetime pickers
+            const datetimePickers = modal.querySelectorAll('.datetime-picker');
+            datetimePickers.forEach(picker => {
+                picker.addEventListener('change', (e) => {
+                    const targetId = picker.dataset.target;
+                    const hiddenInput = modal.querySelector(`#${ targetId }`);
+                    if (hiddenInput) {
+                        const displayValue = this.convertHtml5DateToDisplay(picker.value, true);
+                        hiddenInput.value = displayValue;
+                    }
+                });
             });
         }
 
@@ -1601,6 +1636,47 @@ class IntegramTable {
             }
 
             return `${ day }.${ month }.${ year }`;
+        }
+
+        formatDateForHtml5(value, includeTime = false) {
+            // Convert date to HTML5 format: YYYY-MM-DD or YYYY-MM-DDTHH:MM
+            if (!value) return '';
+
+            let date = new Date(value);
+            if (isNaN(date.getTime())) return '';
+
+            // Round to 5 minutes if time is included
+            if (includeTime) {
+                date = this.roundToNearest5Minutes(date);
+            }
+
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+
+            if (includeTime) {
+                const hours = String(date.getHours()).padStart(2, '0');
+                const minutes = String(date.getMinutes()).padStart(2, '0');
+                return `${ year }-${ month }-${ day }T${ hours }:${ minutes }`;
+            }
+
+            return `${ year }-${ month }-${ day }`;
+        }
+
+        convertHtml5DateToDisplay(html5Value, includeTime = false) {
+            // Convert HTML5 date format to display format
+            if (!html5Value) return '';
+
+            if (includeTime) {
+                // YYYY-MM-DDTHH:MM -> DD.MM.YYYY HH:MM
+                const [datePart, timePart] = html5Value.split('T');
+                const [year, month, day] = datePart.split('-');
+                return `${ day }.${ month }.${ year } ${ timePart }`;
+            } else {
+                // YYYY-MM-DD -> DD.MM.YYYY
+                const [year, month, day] = html5Value.split('-');
+                return `${ day }.${ month }.${ year }`;
+            }
         }
 
         escapeHtml(text) {
