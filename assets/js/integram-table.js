@@ -306,6 +306,11 @@ class IntegramTable {
                     <div class="integram-table-header">
                         ${ this.options.title ? `<div class="integram-table-title">${ this.options.title }</div>` : '' }
                         <div class="integram-table-controls">
+                            ${ this.hasActiveFilters() ? `
+                            <button class="btn btn-sm btn-outline-secondary mr-2" onclick="window.${ instanceName }.clearAllFilters()" title="Очистить фильтры">
+                                ✕
+                            </button>
+                            ` : '' }
                             <button class="btn btn-sm btn-outline-secondary mr-2" onclick="window.${ instanceName }.toggleFilters()">
                                 ${ this.filtersEnabled ? '✓' : '' } Фильтры
                             </button>
@@ -1040,6 +1045,15 @@ class IntegramTable {
         toggleFilters() {
             this.filtersEnabled = !this.filtersEnabled;
             this.render();
+        }
+
+        hasActiveFilters() {
+            return Object.values(this.filters).some(filter => filter && filter.value && filter.value.trim() !== '');
+        }
+
+        clearAllFilters() {
+            this.filters = {};
+            this.loadData();
         }
 
         saveColumnState() {
