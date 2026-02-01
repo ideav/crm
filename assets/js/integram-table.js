@@ -1390,11 +1390,27 @@ class IntegramTable {
                 formHtml += `<div class="form-group">`;
                 formHtml += `<label for="field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
 
-                // Reference field (dropdown)
+                // Reference field (searchable dropdown)
                 if (req.ref_id) {
-                    formHtml += `<select class="form-control ref-select" id="field-${ req.id }" name="t${ req.id }" data-ref-id="${ req.id }" data-multi="${ attrs.multi }" ${ isRequired ? 'required' : '' }>`;
-                    formHtml += `<option value="">Загрузка...</option>`;
-                    formHtml += `</select>`;
+                    const currentValue = reqValue || '';
+                    formHtml += `
+                        <div class="searchable-select-wrapper" data-ref-id="${ req.id }" data-required="${ isRequired }">
+                            <input type="text"
+                                   class="form-control searchable-select-input"
+                                   id="field-${ req.id }-search"
+                                   placeholder="Начните вводить для поиска..."
+                                   autocomplete="off">
+                            <div class="searchable-select-dropdown" id="field-${ req.id }-dropdown">
+                                <div class="searchable-select-loading">Загрузка...</div>
+                            </div>
+                            <input type="hidden"
+                                   class="searchable-select-value"
+                                   id="field-${ req.id }"
+                                   name="t${ req.id }"
+                                   value="${ this.escapeHtml(currentValue) }"
+                                   data-ref-id="${ req.id }">
+                        </div>
+                    `;
                 }
                 // Boolean field
                 else if (baseFormat === 'BOOLEAN') {
@@ -1492,33 +1508,103 @@ class IntegramTable {
         }
 
         async loadReferenceOptions(reqs, recordId) {
-            const refSelects = document.querySelectorAll('.ref-select');
+            const searchableSelects = document.querySelectorAll('.searchable-select-wrapper');
 
-            for (const select of refSelects) {
-                const refReqId = select.dataset.refId;
+            for (const wrapper of searchableSelects) {
+                const refReqId = wrapper.dataset.refId;
+                const searchInput = wrapper.querySelector('.searchable-select-input');
+                const dropdown = wrapper.querySelector('.searchable-select-dropdown');
+                const hiddenInput = wrapper.querySelector('.searchable-select-value');
 
                 try {
                     const options = await this.fetchReferenceOptions(refReqId, recordId);
 
-                    select.innerHTML = '<option value="">Выберите...</option>';
+                    // Store options data on the wrapper
+                    wrapper.dataset.options = JSON.stringify(options);
 
-                    Object.entries(options).forEach(([id, name]) => {
-                        const option = document.createElement('option');
-                        option.value = id;
-                        option.textContent = name;
-                        select.appendChild(option);
-                    });
+                    // Render all options initially
+                    this.renderSearchableOptions(dropdown, options, hiddenInput, searchInput);
 
                     // Set current value if exists
-                    const currentValue = select.closest('.form-group').querySelector(`[name="t${ refReqId }"]`);
-                    if (currentValue && currentValue.dataset.value) {
-                        select.value = currentValue.dataset.value;
+                    if (hiddenInput.value) {
+                        const currentLabel = options[hiddenInput.value];
+                        if (currentLabel) {
+                            searchInput.value = currentLabel;
+                        }
                     }
+
+                    // Attach search event
+                    searchInput.addEventListener('input', (e) => {
+                        const query = e.target.value.toLowerCase();
+                        const allOptions = JSON.parse(wrapper.dataset.options);
+
+                        // Filter options
+                        const filtered = {};
+                        Object.entries(allOptions).forEach(([id, name]) => {
+                            if (name.toLowerCase().includes(query)) {
+                                filtered[id] = name;
+                            }
+                        });
+
+                        this.renderSearchableOptions(dropdown, filtered, hiddenInput, searchInput);
+                        dropdown.style.display = 'block';
+                    });
+
+                    // Show dropdown on focus
+                    searchInput.addEventListener('focus', () => {
+                        dropdown.style.display = 'block';
+                    });
+
+                    // Hide dropdown when clicking outside
+                    document.addEventListener('click', (e) => {
+                        if (!wrapper.contains(e.target)) {
+                            dropdown.style.display = 'none';
+                        }
+                    });
+
                 } catch (error) {
                     console.error('Error loading reference options:', error);
-                    select.innerHTML = '<option value="">Ошибка загрузки</option>';
+                    dropdown.innerHTML = '<div class="searchable-select-error">Ошибка загрузки</div>';
                 }
             }
+        }
+
+        renderSearchableOptions(dropdown, options, hiddenInput, searchInput) {
+            dropdown.innerHTML = '';
+
+            const optionsCount = Object.keys(options).length;
+
+            if (optionsCount === 0) {
+                dropdown.innerHTML = '<div class="searchable-select-no-results">Ничего не найдено</div>';
+                return;
+            }
+
+            Object.entries(options).forEach(([id, name]) => {
+                const optionDiv = document.createElement('div');
+                optionDiv.className = 'searchable-select-option';
+                optionDiv.textContent = name;
+                optionDiv.dataset.value = id;
+
+                // Highlight if selected
+                if (hiddenInput.value === id) {
+                    optionDiv.classList.add('selected');
+                }
+
+                optionDiv.addEventListener('click', () => {
+                    hiddenInput.value = id;
+                    searchInput.value = name;
+                    dropdown.style.display = 'none';
+
+                    // Remove 'selected' from all options
+                    dropdown.querySelectorAll('.searchable-select-option').forEach(opt => {
+                        opt.classList.remove('selected');
+                    });
+                    // Add 'selected' to this option
+                    optionDiv.classList.add('selected');
+                });
+
+                dropdown.appendChild(optionDiv);
+            });
         }
 
         async saveRecord(modal, isCreate, recordId, typeId, parentId) {
