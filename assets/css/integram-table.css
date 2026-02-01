@@ -226,7 +226,7 @@
 
 .filter-input-with-icon {
     flex: 1;
-    padding: 4px 8px 4px 26px;  /* Extra left padding for icon */
+    padding: 3px 0 3px 26px;  /* Extra left padding for icon */
     border: 1px solid #dee2e6;
     border-radius: 3px;
     font-size: 14px;
