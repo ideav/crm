@@ -61,6 +61,7 @@ class IntegramTable {
                     { symbol: '$', name: 'заканчивается', format: 'FR_{ T }=%{ X }' }
                 ],
                 'NUMBER': [
+                    { symbol: '^', name: 'начинается с...', format: 'FR_{ T }={ X }%' },
                     { symbol: '=', name: 'равно', format: 'FR_{ T }={ X }' },
                     { symbol: '≠', name: 'не равно', format: 'FR_{ T }=!{ X }' },
                     { symbol: '≥', name: 'не меньше', format: 'FR_{ T }=>={ X }' },
