@@ -1282,6 +1282,28 @@ class IntegramTable {
             return result;
         }
 
+        getFormatById(typeId) {
+            // Map type IDs to format names based on TABLE_COMPONENT_README.md
+            const formatMap = {
+                '3': 'SHORT',
+                '8': 'CHARS',
+                '9': 'DATE',
+                '13': 'NUMBER',
+                '14': 'SIGNED',
+                '11': 'BOOLEAN',
+                '12': 'MEMO',
+                '4': 'DATETIME',
+                '10': 'FILE',
+                '2': 'HTML',
+                '7': 'BUTTON',
+                '6': 'PWD',
+                '5': 'GRANT',
+                '16': 'REPORT_COLUMN',
+                '17': 'PATH'
+            };
+            return formatMap[String(typeId)] || 'SHORT';
+        }
+
         renderEditFormModal(metadata, recordData, isCreate, typeId) {
             const overlay = document.createElement('div');
             overlay.className = 'edit-form-overlay';
@@ -1324,7 +1346,8 @@ class IntegramTable {
                 const attrs = this.parseAttrs(req.attrs);
                 const fieldName = attrs.alias || req.val;
                 const reqValue = recordReqs[req.id] ? recordReqs[req.id].value : '';
-                const baseType = recordReqs[req.id] ? recordReqs[req.id].base : req.type;
+                const baseTypeId = recordReqs[req.id] ? recordReqs[req.id].base : req.type;
+                const baseFormat = this.getFormatById(baseTypeId);
                 const isRequired = attrs.required;
 
                 // Skip subordinate table fields (arr_id)
@@ -1356,20 +1379,20 @@ class IntegramTable {
                     formHtml += `</select>`;
                 }
                 // Boolean field
-                else if (baseType === '7') {  // BOOLEAN type
+                else if (baseFormat === 'BOOLEAN') {
                     const isChecked = reqValue ? 'checked' : '';
                     const prevValue = reqValue || '';
                     formHtml += `<input type="checkbox" id="field-${ req.id }" name="t${ req.id }" value="1" ${ isChecked }>`;
                     formHtml += `<input type="hidden" name="b${ req.id }" value="${ this.escapeHtml(prevValue) }">`;
                 }
                 // Date/DateTime field
-                else if (baseType === '4' || baseType === '47') {  // DATE or DATETIME
+                else if (baseFormat === 'DATE' || baseFormat === 'DATETIME') {
                     const dateValue = reqValue ? this.formatDateForInput(reqValue) : '';
                     formHtml += `<input type="text" class="form-control date-input" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(dateValue) }" placeholder="ДД.ММ.ГГГГ" ${ isRequired ? 'required' : '' }>`;
                 }
-                // MEMO field (rich text)
-                else if (baseType === '2') {  // MEMO
-                    formHtml += `<textarea class="form-control memo-field" id="field-${ req.id }" name="t${ req.id }" rows="5" ${ isRequired ? 'required' : '' }>${ this.escapeHtml(reqValue) }</textarea>`;
+                // MEMO field (multi-line text, 4 rows)
+                else if (baseFormat === 'MEMO') {
+                    formHtml += `<textarea class="form-control memo-field" id="field-${ req.id }" name="t${ req.id }" rows="4" ${ isRequired ? 'required' : '' }>${ this.escapeHtml(reqValue) }</textarea>`;
                 }
                 // Regular text field
                 else {
