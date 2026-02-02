@@ -1893,6 +1893,28 @@ class IntegramTable {
             const reqs = metadata.reqs || [];
             const regularFields = reqs.filter(req => !req.arr_id);
 
+            // Determine the type of the main (first column) field
+            const mainFieldType = this.normalizeFormat(metadata.type);
+
+            // Build main field HTML based on its type
+            let mainFieldHtml = '';
+            if (mainFieldType === 'BOOLEAN') {
+                mainFieldHtml = `<input type="checkbox" id="sub-field-main" name="main" value="1">`;
+            } else if (mainFieldType === 'DATE') {
+                mainFieldHtml = `<input type="date" class="form-control date-picker" id="sub-field-main-picker" required data-target="sub-field-main">`;
+                mainFieldHtml += `<input type="hidden" id="sub-field-main" name="main" value="">`;
+            } else if (mainFieldType === 'DATETIME') {
+                mainFieldHtml = `<input type="datetime-local" class="form-control datetime-picker" id="sub-field-main-picker" required data-target="sub-field-main" step="300">`;
+                mainFieldHtml += `<input type="hidden" id="sub-field-main" name="main" value="">`;
+            } else if (mainFieldType === 'NUMBER' || mainFieldType === 'SIGNED') {
+                mainFieldHtml = `<input type="number" class="form-control" id="sub-field-main" name="main" value="" required ${ mainFieldType === 'SIGNED' ? 'step="0.01"' : '' }>`;
+            } else if (mainFieldType === 'MEMO') {
+                mainFieldHtml = `<textarea class="form-control memo-field" id="sub-field-main" name="main" rows="4" required></textarea>`;
+            } else {
+                // Default: text input (SHORT, CHARS, etc.)
+                mainFieldHtml = `<input type="text" class="form-control" id="sub-field-main" name="main" value="" required>`;
+            }
+
             let formHtml = `
                 <div class="edit-form-header">
                     <h5>${ title }</h5>
@@ -1902,7 +1924,7 @@ class IntegramTable {
                     <form id="subordinate-edit-form" class="edit-form">
                         <div class="form-group">
                             <label for="sub-field-main">${ metadata.val } <span class="required">*</span></label>
-                            <input type="text" class="form-control" id="sub-field-main" name="main" value="" required>
+                            ${ mainFieldHtml }
                         </div>
             `;
 
