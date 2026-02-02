@@ -418,7 +418,7 @@
     left: 50%;
     transform: translate(-50%, -50%);
     background: var(--md-surface);
-    padding: 0;
+    padding: 20px;
     border-radius: 4px;
     box-shadow: var(--md-elevation-4);
     z-index: 1000;
