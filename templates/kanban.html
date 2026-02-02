@@ -508,12 +508,14 @@
         display: flex;
         align-items: center;
         gap: 12px;
+        min-height: 38px;
     }
 
     .kanban-control-label {
         font-weight: 500;
         color: var(--text-primary);
         font-size: 0.875rem;
+        align-self: center;
     }
 
     /* Toggle switch styles */
@@ -907,7 +909,8 @@ function loadKanbanData(){
 }
 
 function checkDataLoaded(){
-    if(kanbanData.length > 0 && statusesData.length > 0){
+    // Render kanban if we have statuses data, even if kanbanData is empty
+    if(statusesData.length > 0){
         renderKanban();
     }
 }
