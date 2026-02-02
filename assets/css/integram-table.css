@@ -621,6 +621,13 @@
     display: flex;
     flex-direction: column;
     font-family: 'Roboto', sans-serif;
+    transition: max-width 0.3s ease, max-height 0.3s ease;
+}
+
+/* Expanded modal for subordinate tables */
+.edit-form-modal.expanded {
+    max-width: 93%;
+    max-height: 93vh;
 }
 
 .edit-form-header {
