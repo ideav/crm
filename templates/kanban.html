@@ -928,6 +928,8 @@ var sourcesData = [];
 var distributorsData = [];
 var partnersData = [];
 var productsData = [];
+var managersData = [];
+var taskTypesData = [];
 var currentStatusId = null;
 var currentStatusName = null;
 var currentFilterType = 'sales'; // 'sales' or 'partners'
@@ -1575,6 +1577,48 @@ function populatePartnersDropdown(){
     });
 }
 
+// Load managers list for task executor dropdown
+function loadManagersList(){
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/5230?JSON_KV', true);
+    xhr.onload = function(){
+        if(xhr.status === 200){
+            try{
+                managersData = JSON.parse(xhr.responseText);
+            } catch(e){
+                console.error('Error parsing managers data:', e);
+            }
+        } else {
+            console.error('Error loading managers:', xhr.status);
+        }
+    };
+    xhr.onerror = function(){
+        console.error('Network error loading managers');
+    };
+    xhr.send();
+}
+
+// Load task types list for task type dropdown
+function loadTaskTypesList(){
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/5241?JSON_KV', true);
+    xhr.onload = function(){
+        if(xhr.status === 200){
+            try{
+                taskTypesData = JSON.parse(xhr.responseText);
+            } catch(e){
+                console.error('Error parsing task types data:', e);
+            }
+        } else {
+            console.error('Error loading task types:', xhr.status);
+        }
+    };
+    xhr.onerror = function(){
+        console.error('Network error loading task types');
+    };
+    xhr.send();
+}
+
 function openAddRecordModal(statusId, statusName){
     currentStatusId = statusId;
     currentStatusName = statusName;
@@ -1717,6 +1761,8 @@ $(document).ready(function(){
     loadKanbanData();
     loadSourcesAndDistributors();
     loadProductsList();
+    loadManagersList();
+    loadTaskTypesList();
 });
 
 // Client edit modal functionality
@@ -1931,7 +1977,7 @@ function submitEditClient(){
 // Task creation modal functionality
 var currentTaskLeadId = null;
 var currentTaskButton = null;
-var taskTypeId = 4167;  // Task type ID
+var taskTypeId = 3596;  // Task type ID (Задача для команды)
 
 function openTaskCreateForm(leadId, button){
     currentTaskLeadId = leadId;
@@ -1952,13 +1998,30 @@ function renderTaskCreateForm(){
     // Task name field
     html += '<div class="kanban-edit-form-group">';
     html += '<label class="kanban-edit-form-label required">Название задачи</label>';
-    html += '<input type="text" class="kanban-edit-form-input" id="taskName" name="t4167">';
+    html += '<input type="text" class="kanban-edit-form-input" id="taskName" name="t3596">';
     html += '</div>';
 
-    // Task description
+    // Executor field (Исполнитель)
     html += '<div class="kanban-edit-form-group">';
-    html += '<label class="kanban-edit-form-label">Описание</label>';
-    html += '<textarea class="kanban-edit-form-textarea" id="taskDescription" name="t4542"></textarea>';
+    html += '<label class="kanban-edit-form-label">Исполнитель</label>';
+    html += '<select class="kanban-edit-form-select" id="taskExecutor" name="t3942">';
+    html += '<option value="">Выберите исполнителя</option>';
+    managersData.forEach(function(manager){
+        var selected = (typeof window.uid !== 'undefined' && manager['ПользовательID'] == window.uid) ? 'selected' : '';
+        html += '<option value="' + manager['ПользовательID'] + '" ' + selected + '>' + manager['Пользователь'] + '</option>';
+    });
+    html += '</select>';
+    html += '</div>';
+
+    // Task type field (Тип задачи)
+    html += '<div class="kanban-edit-form-group">';
+    html += '<label class="kanban-edit-form-label">Тип задачи</label>';
+    html += '<select class="kanban-edit-form-select" id="taskType" name="t4299">';
+    html += '<option value="">Выберите тип задачи</option>';
+    taskTypesData.forEach(function(taskType){
+        html += '<option value="' + taskType['Тип задачиID'] + '">' + taskType['Тип задачи'] + '</option>';
+    });
+    html += '</select>';
     html += '</div>';
 
     // Due date field
@@ -2004,11 +2067,23 @@ function submitCreateTask(){
 
     // Build POST data
     var postData = 't' + taskTypeId + '=' + encodeURIComponent(taskName);
-    postData += '&t4547=' + encodeURIComponent(currentTaskLeadId);  // Link to lead
+    postData += '&t4547=' + encodeURIComponent(currentTaskLeadId);  // Link to lead (client ID)
 
-    var description = $('#taskDescription').val().trim();
-    if(description){
-        postData += '&t4542=' + encodeURIComponent(description);
+    // Add current user ID
+    if(typeof window.uid !== 'undefined' && window.uid){
+        postData += '&t4844=' + encodeURIComponent(window.uid);
+    }
+
+    // Add executor (Исполнитель)
+    var executor = $('#taskExecutor').val();
+    if(executor){
+        postData += '&t3942=' + encodeURIComponent(executor);
+    }
+
+    // Add task type (Тип задачи)
+    var taskType = $('#taskType').val();
+    if(taskType){
+        postData += '&t4299=' + encodeURIComponent(taskType);
     }
 
     var dueDate = $('#taskDueDateHidden').val();
