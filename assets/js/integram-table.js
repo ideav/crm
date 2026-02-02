@@ -2052,12 +2052,17 @@ class IntegramTable {
                     params.append('_xsrf', xsrf);
                 }
 
+                // Skip empty parameters when creating so server can fill defaults
                 for (const [key, value] of formData.entries()) {
-                    params.append(key, value);
+                    if (value !== '' && value !== null && value !== undefined) {
+                        params.append(key, value);
+                    }
                 }
 
                 const mainValue = formData.get('main');
-                params.append('t0', mainValue);
+                if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
+                    params.append('t0', mainValue);
+                }
 
                 const apiBase = this.getApiBase();
                 const url = `${ apiBase }/_m_new/${ arrId }?JSON&up=${ parentRecordId }`;
@@ -2375,8 +2380,16 @@ class IntegramTable {
             }
 
             // Add all form fields
+            // When creating, skip empty parameters so server can fill defaults
+            // When editing, include all parameters to allow clearing fields
             for (const [key, value] of formData.entries()) {
-                params.append(key, value);
+                if (isCreate) {
+                    if (value !== '' && value !== null && value !== undefined) {
+                        params.append(key, value);
+                    }
+                } else {
+                    params.append(key, value);
+                }
             }
 
             // Get main value
@@ -2387,7 +2400,9 @@ class IntegramTable {
 
             if (isCreate) {
                 url = `${ apiBase }/_m_new/${ typeId }?JSON&up=${ parentId || 1 }`;
-                params.append('t0', mainValue);
+                if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
+                    params.append('t0', mainValue);
+                }
             } else {
                 url = `${ apiBase }/_m_save/${ recordId }?JSON`;
                 params.append('t0', mainValue);
