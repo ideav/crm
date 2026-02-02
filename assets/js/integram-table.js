@@ -341,7 +341,7 @@ class IntegramTable {
                                 ⚙️
                             </div>
                             <div class="integram-table-settings" onclick="window.${ instanceName }.openColumnSettings()">
-                                ☰ Колонки
+                                <span font="size:+1" style="font-size: 146%;">▥</span> Колонки
                             </div>
                         </div>
                     </div>
@@ -1535,9 +1535,7 @@ class IntegramTable {
                 </div>
                 <div class="edit-form-footer">
                     <button type="button" class="btn btn-icon form-settings-btn" id="form-settings-btn" title="Настройка видимости полей">
-                        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                            <path d="M17.43 10.98c.04-.32.07-.64.07-.98 0-.34-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C12.46.21 12.25 0 12 0h-4c-.25 0-.46.21-.49.49l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98 0 .33.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.28.24.49.49.49h4c.25 0 .46-.21.49-.49l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM10 13c-1.65 0-3-1.35-3-3s1.35-3 3-3 3 1.35 3 3-1.35 3-3 3z"/>
-                        </svg>
+                        ⚙️
                     </button>
                     <div class="edit-form-footer-buttons">
                         <button type="button" class="btn btn-primary" id="save-record-btn">Сохранить</button>
