@@ -1473,7 +1473,7 @@ class IntegramTable {
             }
 
             // Build attributes form HTML
-            let attributesHtml = this.renderAttributesForm(metadata, recordData, regularFields, recordReqs);
+            let attributesHtml = this.renderAttributesForm(metadata, recordData, regularFields, recordReqs, isCreate);
 
             let formHtml = `
                 <div class="edit-form-header">
@@ -1574,8 +1574,24 @@ class IntegramTable {
             overlay.addEventListener('click', closeModal);
         }
 
-        renderAttributesForm(metadata, recordData, regularFields, recordReqs) {
+        renderAttributesForm(metadata, recordData, regularFields, recordReqs, isCreate = false) {
             let html = '';
+
+            // Get current date/datetime for default values in create mode
+            let currentDateHtml5 = '';
+            let currentDateTimeHtml5 = '';
+            let currentDateDisplay = '';
+            let currentDateTimeDisplay = '';
+
+            if (isCreate) {
+                const now = new Date();
+                currentDateHtml5 = now.toISOString().split('T')[0]; // YYYY-MM-DD
+                const minutes = Math.round(now.getMinutes() / 5) * 5; // Round to 5 minutes
+                now.setMinutes(minutes);
+                currentDateTimeHtml5 = now.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
+                currentDateDisplay = now.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.'); // DD.MM.YYYY
+                currentDateTimeDisplay = currentDateDisplay + ' ' + now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); // DD.MM.YYYY HH:MM
+            }
 
             // Main value field
             const mainValue = recordData && recordData.obj ? recordData.obj.val : '';
@@ -1628,15 +1644,15 @@ class IntegramTable {
                 }
                 // Date field with HTML5 date picker
                 else if (baseFormat === 'DATE') {
-                    const dateValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, false) : '';
-                    const dateValueDisplay = reqValue ? this.formatDateForInput(reqValue, false) : '';
+                    const dateValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, false) : (isCreate ? currentDateHtml5 : '');
+                    const dateValueDisplay = reqValue ? this.formatDateForInput(reqValue, false) : (isCreate ? currentDateDisplay : '');
                     html += `<input type="date" class="form-control date-picker" id="field-${ req.id }-picker" value="${ this.escapeHtml(dateValueHtml5) }" ${ isRequired ? 'required' : '' } data-target="field-${ req.id }">`;
                     html += `<input type="hidden" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(dateValueDisplay) }">`;
                 }
                 // DateTime field with HTML5 datetime-local picker (with time rounded to 5 minutes)
                 else if (baseFormat === 'DATETIME') {
-                    const dateTimeValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, true) : '';
-                    const dateTimeValueDisplay = reqValue ? this.formatDateForInput(reqValue, true) : '';
+                    const dateTimeValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, true) : (isCreate ? currentDateTimeHtml5 : '');
+                    const dateTimeValueDisplay = reqValue ? this.formatDateForInput(reqValue, true) : (isCreate ? currentDateTimeDisplay : '');
                     html += `<input type="datetime-local" class="form-control datetime-picker" id="field-${ req.id }-picker" value="${ this.escapeHtml(dateTimeValueHtml5) }" ${ isRequired ? 'required' : '' } data-target="field-${ req.id }" step="300">`;
                     html += `<input type="hidden" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(dateTimeValueDisplay) }">`;
                 }
@@ -1896,16 +1912,25 @@ class IntegramTable {
             // Determine the type of the main (first column) field
             const mainFieldType = this.normalizeFormat(metadata.type);
 
+            // Get current date/datetime for default values
+            const now = new Date();
+            const currentDateHtml5 = now.toISOString().split('T')[0]; // YYYY-MM-DD
+            const minutes = Math.round(now.getMinutes() / 5) * 5; // Round to 5 minutes
+            now.setMinutes(minutes);
+            const currentDateTimeHtml5 = now.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
+            const currentDateDisplay = now.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.'); // DD.MM.YYYY
+            const currentDateTimeDisplay = currentDateDisplay + ' ' + now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); // DD.MM.YYYY HH:MM
+
             // Build main field HTML based on its type
             let mainFieldHtml = '';
             if (mainFieldType === 'BOOLEAN') {
                 mainFieldHtml = `<input type="checkbox" id="sub-field-main" name="main" value="1">`;
             } else if (mainFieldType === 'DATE') {
-                mainFieldHtml = `<input type="date" class="form-control date-picker" id="sub-field-main-picker" required data-target="sub-field-main">`;
-                mainFieldHtml += `<input type="hidden" id="sub-field-main" name="main" value="">`;
+                mainFieldHtml = `<input type="date" class="form-control date-picker" id="sub-field-main-picker" required data-target="sub-field-main" value="${ currentDateHtml5 }">`;
+                mainFieldHtml += `<input type="hidden" id="sub-field-main" name="main" value="${ currentDateDisplay }">`;
             } else if (mainFieldType === 'DATETIME') {
-                mainFieldHtml = `<input type="datetime-local" class="form-control datetime-picker" id="sub-field-main-picker" required data-target="sub-field-main" step="300">`;
-                mainFieldHtml += `<input type="hidden" id="sub-field-main" name="main" value="">`;
+                mainFieldHtml = `<input type="datetime-local" class="form-control datetime-picker" id="sub-field-main-picker" required data-target="sub-field-main" step="300" value="${ currentDateTimeHtml5 }">`;
+                mainFieldHtml += `<input type="hidden" id="sub-field-main" name="main" value="${ currentDateTimeDisplay }">`;
             } else if (mainFieldType === 'NUMBER' || mainFieldType === 'SIGNED') {
                 mainFieldHtml = `<input type="number" class="form-control" id="sub-field-main" name="main" value="" required ${ mainFieldType === 'SIGNED' ? 'step="0.01"' : '' }>`;
             } else if (mainFieldType === 'MEMO') {
@@ -1962,12 +1987,12 @@ class IntegramTable {
                     formHtml += `<input type="checkbox" id="sub-field-${ req.id }" name="t${ req.id }" value="1">`;
                 }
                 else if (baseFormat === 'DATE') {
-                    formHtml += `<input type="date" class="form-control date-picker" id="sub-field-${ req.id }-picker" ${ isRequired ? 'required' : '' } data-target="sub-field-${ req.id }">`;
-                    formHtml += `<input type="hidden" id="sub-field-${ req.id }" name="t${ req.id }" value="">`;
+                    formHtml += `<input type="date" class="form-control date-picker" id="sub-field-${ req.id }-picker" ${ isRequired ? 'required' : '' } data-target="sub-field-${ req.id }" value="${ currentDateHtml5 }">`;
+                    formHtml += `<input type="hidden" id="sub-field-${ req.id }" name="t${ req.id }" value="${ currentDateDisplay }">`;
                 }
                 else if (baseFormat === 'DATETIME') {
-                    formHtml += `<input type="datetime-local" class="form-control datetime-picker" id="sub-field-${ req.id }-picker" ${ isRequired ? 'required' : '' } data-target="sub-field-${ req.id }" step="300">`;
-                    formHtml += `<input type="hidden" id="sub-field-${ req.id }" name="t${ req.id }" value="">`;
+                    formHtml += `<input type="datetime-local" class="form-control datetime-picker" id="sub-field-${ req.id }-picker" ${ isRequired ? 'required' : '' } data-target="sub-field-${ req.id }" step="300" value="${ currentDateTimeHtml5 }">`;
+                    formHtml += `<input type="hidden" id="sub-field-${ req.id }" name="t${ req.id }" value="${ currentDateTimeDisplay }">`;
                 }
                 else if (baseFormat === 'MEMO') {
                     formHtml += `<textarea class="form-control memo-field" id="sub-field-${ req.id }" name="t${ req.id }" rows="4" ${ isRequired ? 'required' : '' }></textarea>`;
