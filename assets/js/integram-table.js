@@ -1145,7 +1145,13 @@ class IntegramTable {
         }
 
         hasActiveFilters() {
-            return Object.values(this.filters).some(filter => filter && filter.value && filter.value.trim() !== '');
+            return Object.values(this.filters).some(filter => {
+                if (!filter) return false;
+                // For Empty (%) and Not Empty (!%) filters, they are active even with empty value
+                if (filter.type === '%' || filter.type === '!%') return true;
+                // For other filters, check if value is not empty
+                return filter.value && filter.value.trim() !== '';
+            });
         }
 
         clearAllFilters() {
