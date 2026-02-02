@@ -180,6 +180,9 @@ class IntegramTable {
                 }
                 if (this.visibleColumns.length === 0) {
                     this.visibleColumns = this.columns.filter(c => !this.idColumns.has(c.id)).map(c => c.id);
+                } else {
+                    // Filter out style columns from visibleColumns if loaded from cookie
+                    this.visibleColumns = this.visibleColumns.filter(id => !this.idColumns.has(id));
                 }
 
                 if (this.options.onDataLoad) {
