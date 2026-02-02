@@ -117,7 +117,7 @@ class IntegramTable {
 
             Object.keys(this.filters).forEach(colId => {
                 const filter = this.filters[colId];
-                if (filter.value) {
+                if (filter.value || filter.type === '%' || filter.type === '!%') {
                     const column = this.columns.find(c => c.id === colId);
                     if (column) {
                         this.applyFilter(params, column, filter);
@@ -206,7 +206,7 @@ class IntegramTable {
 
             Object.keys(this.filters).forEach(colId => {
                 const filter = this.filters[colId];
-                if (filter.value) {
+                if (filter.value || filter.type === '%' || filter.type === '!%') {
                     const column = this.columns.find(c => c.id === colId);
                     if (column) {
                         this.applyFilter(params, column, filter);
