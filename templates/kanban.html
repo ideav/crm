@@ -2184,11 +2184,11 @@ function updateTaskCount(leadId){
 
 // Helper function to escape HTML
 function escapeHtml(text){
-    // Handle null, undefined
+    // Handle null, undefined, and their string representations
     if(text === null || text === undefined) return '';
-    var str = String(text);
-    // Check for literal 'undefined' or 'null' strings
-    if(str === 'undefined' || str === 'null') return '';
+    var str = String(text).trim();
+    var strLower = str.toLowerCase();
+    if(strLower === 'undefined' || strLower === 'null' || str === '') return '';
     return str.replace(/&/g, '&amp;')
               .replace(/</g, '&lt;')
               .replace(/>/g, '&gt;')
@@ -2199,33 +2199,25 @@ function escapeHtml(text){
 // Helper function to safely get value (handles undefined/null strings)
 function safeValue(value){
     if(value === null || value === undefined) return '';
-    var str = String(value);
-    if(str === 'undefined' || str === 'null') return '';
+    var str = String(value).trim();
+    var strLower = str.toLowerCase();
+    if(strLower === 'undefined' || strLower === 'null' || str === '') return '';
     return str;
 }
 
 // Helper function to safely get requisite value
 function getReqValue(reqs, key){
-    try {
-        if(!reqs) return '';
-        var req = reqs[key];
-        if(req === null || req === undefined) return '';
-        // If req is not an object, treat it as the value directly
-        var value;
-        if(typeof req === 'object') {
-            value = req.value;
-        } else {
-            value = req;
-        }
-        // Handle null, undefined
-        if(value === null || value === undefined) return '';
-        // Convert to string
-        var str = String(value);
-        if(str === 'undefined' || str === 'null') return '';
-        return str;
-    } catch(e) {
-        return '';
-    }
+    if(!reqs || !reqs[key]) return '';
+    var req = reqs[key];
+    // Handle case where req itself might be a primitive value instead of an object
+    if(typeof req !== 'object' || req === null) return '';
+    var value = req.value;
+    // Handle null, undefined, and their string representations
+    if(value === null || value === undefined) return '';
+    var str = String(value).trim();
+    var strLower = str.toLowerCase();
+    if(strLower === 'undefined' || strLower === 'null' || str === '') return '';
+    return str;
 }
 
 // Close modals when clicking outside
