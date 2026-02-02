@@ -1862,7 +1862,7 @@ function renderClientEditForm(data){
     if(reqs['637'] !== undefined){
         html += '<div class="kanban-edit-form-group">';
         html += '<label class="kanban-edit-form-label">ИНН</label>';
-        html += '<input type="text" class="kanban-edit-form-input" id="editClientInn" name="t637" value="' + escapeHtml(getReqValue(reqs, '637')) + '">';
+        html += '<input type="text" class="kanban-edit-form-input" id="editClientInn" name="t637" value="' + (escapeHtml(getReqValue(reqs, '637')) || '') + '">';
         html += '</div>';
     }
 
@@ -1872,10 +1872,10 @@ function renderClientEditForm(data){
         html += '<label class="kanban-edit-form-label">Партнер</label>';
         html += '<select class="kanban-edit-form-select" id="editClientPartner" name="t443">';
         html += '<option value="">Выберите партнера</option>';
-        var partnerValue = getReqValue(reqs, '443');
+        var partnerValue = getReqValue(reqs, '443') || '';
         partnersData.forEach(function(partner){
             var selected = partnerValue == partner['ПартнерID'] ? 'selected' : '';
-            html += '<option value="' + escapeHtml(partner['ПартнерID'] || '') + '" ' + selected + '>' + escapeHtml(partner['Партнер'] || '') + '</option>';
+            html += '<option value="' + (escapeHtml(partner['ПартнерID'] || '') || '') + '" ' + selected + '>' + (escapeHtml(partner['Партнер'] || '') || '') + '</option>';
         });
         html += '</select>';
         html += '</div>';
@@ -1887,10 +1887,10 @@ function renderClientEditForm(data){
         html += '<label class="kanban-edit-form-label">Дистрибьютор</label>';
         html += '<select class="kanban-edit-form-select" id="editClientDistributor" name="t4862">';
         html += '<option value="">Выберите дистрибьютора</option>';
-        var distributorValue = getReqValue(reqs, '4862');
+        var distributorValue = getReqValue(reqs, '4862') || '';
         distributorsData.forEach(function(distributor){
             var selected = distributorValue == distributor['ДистрибьюторID'] ? 'selected' : '';
-            html += '<option value="' + escapeHtml(distributor['ДистрибьюторID'] || '') + '" ' + selected + '>' + escapeHtml(distributor['Дистрибьютор'] || '') + '</option>';
+            html += '<option value="' + (escapeHtml(distributor['ДистрибьюторID'] || '') || '') + '" ' + selected + '>' + (escapeHtml(distributor['Дистрибьютор'] || '') || '') + '</option>';
         });
         html += '</select>';
         html += '</div>';
@@ -1900,7 +1900,7 @@ function renderClientEditForm(data){
     if(reqs['4536'] !== undefined){
         html += '<div class="kanban-edit-form-group">';
         html += '<label class="kanban-edit-form-label">Телефон</label>';
-        html += '<input type="text" class="kanban-edit-form-input" id="editClientPhone" name="t4536" value="' + escapeHtml(getReqValue(reqs, '4536')) + '">';
+        html += '<input type="text" class="kanban-edit-form-input" id="editClientPhone" name="t4536" value="' + (escapeHtml(getReqValue(reqs, '4536')) || '') + '">';
         html += '</div>';
     }
 
@@ -1908,7 +1908,7 @@ function renderClientEditForm(data){
     if(reqs['4537'] !== undefined){
         html += '<div class="kanban-edit-form-group">';
         html += '<label class="kanban-edit-form-label">Email</label>';
-        html += '<input type="email" class="kanban-edit-form-input" id="editClientEmail" name="t4537" value="' + escapeHtml(getReqValue(reqs, '4537')) + '">';
+        html += '<input type="email" class="kanban-edit-form-input" id="editClientEmail" name="t4537" value="' + (escapeHtml(getReqValue(reqs, '4537')) || '') + '">';
         html += '</div>';
     }
 
@@ -1916,7 +1916,7 @@ function renderClientEditForm(data){
     if(reqs['4538'] !== undefined){
         html += '<div class="kanban-edit-form-group">';
         html += '<label class="kanban-edit-form-label">Контактное лицо</label>';
-        html += '<input type="text" class="kanban-edit-form-input" id="editClientContact" name="t4538" value="' + escapeHtml(getReqValue(reqs, '4538')) + '">';
+        html += '<input type="text" class="kanban-edit-form-input" id="editClientContact" name="t4538" value="' + (escapeHtml(getReqValue(reqs, '4538')) || '') + '">';
         html += '</div>';
     }
 
@@ -1926,10 +1926,10 @@ function renderClientEditForm(data){
         html += '<label class="kanban-edit-form-label">Источник</label>';
         html += '<select class="kanban-edit-form-select" id="editClientSource" name="t4861">';
         html += '<option value="">Выберите источник</option>';
-        var sourceValue = getReqValue(reqs, '4861');
+        var sourceValue = getReqValue(reqs, '4861') || '';
         sourcesData.forEach(function(source){
             var selected = sourceValue == source['ИсточникID'] ? 'selected' : '';
-            html += '<option value="' + escapeHtml(source['ИсточникID'] || '') + '" ' + selected + '>' + escapeHtml(source['Источник'] || '') + '</option>';
+            html += '<option value="' + (escapeHtml(source['ИсточникID'] || '') || '') + '" ' + selected + '>' + (escapeHtml(source['Источник'] || '') || '') + '</option>';
         });
         html += '</select>';
         html += '</div>';
@@ -1939,7 +1939,7 @@ function renderClientEditForm(data){
     if(reqs['4864'] !== undefined){
         html += '<div class="kanban-edit-form-group">';
         html += '<label class="kanban-edit-form-label">Сумма</label>';
-        html += '<input type="number" class="kanban-edit-form-input" id="editClientAmount" name="t4864" value="' + escapeHtml(getReqValue(reqs, '4864')) + '">';
+        html += '<input type="number" class="kanban-edit-form-input" id="editClientAmount" name="t4864" value="' + (escapeHtml(getReqValue(reqs, '4864')) || '') + '">';
         html += '</div>';
     }
 
@@ -1947,7 +1947,7 @@ function renderClientEditForm(data){
     if(reqs['4539'] !== undefined){
         html += '<div class="kanban-edit-form-group">';
         html += '<label class="kanban-edit-form-label">Примечание</label>';
-        html += '<textarea class="kanban-edit-form-textarea" id="editClientNote" name="t4539">' + escapeHtml(getReqValue(reqs, '4539')) + '</textarea>';
+        html += '<textarea class="kanban-edit-form-textarea" id="editClientNote" name="t4539">' + (escapeHtml(getReqValue(reqs, '4539')) || '') + '</textarea>';
         html += '</div>';
     }
 
