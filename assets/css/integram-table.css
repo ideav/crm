@@ -34,6 +34,10 @@
     font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
+#form-settings-btn {
+    font-size: 19px;
+}
+
 .integram-table-container {
     overflow-x: auto;
     width: 100%;
