@@ -1146,8 +1146,18 @@ class IntegramTable {
         }
 
         clearAllFilters() {
+            // Clear all filters
             this.filters = {};
-            this.loadData();
+
+            // Reset data and load from beginning
+            this.data = [];
+            this.loadedRecords = 0;
+            this.hasMore = true;
+            this.totalRows = null;
+            this.loadData(false);
+
+            // Re-render to update UI (clear filter inputs)
+            this.render();
         }
 
         saveColumnState() {
