@@ -492,7 +492,120 @@
     .kanban-button-secondary:hover {
         background-color: var(--border-color);
     }
+
+    /* Control panel styles */
+    .kanban-controls {
+        background-color: var(--surface);
+        padding: 12px 20px;
+        box-shadow: var(--shadow-sm);
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        flex-wrap: wrap;
+    }
+
+    .kanban-control-group {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+    }
+
+    .kanban-control-label {
+        font-weight: 500;
+        color: var(--text-primary);
+        font-size: 0.875rem;
+    }
+
+    /* Toggle switch styles */
+    .kanban-toggle {
+        display: inline-flex;
+        background-color: var(--background);
+        border-radius: 6px;
+        padding: 2px;
+        gap: 2px;
+    }
+
+    .kanban-toggle-option {
+        padding: 6px 16px;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: var(--text-secondary);
+        background-color: transparent;
+        border: none;
+        white-space: nowrap;
+    }
+
+    .kanban-toggle-option:hover {
+        color: var(--text-primary);
+    }
+
+    .kanban-toggle-option.active {
+        background-color: var(--primary-color);
+        color: white;
+        box-shadow: var(--shadow-sm);
+    }
+
+    /* Radio button styles */
+    .kanban-radio-group {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .kanban-radio-label {
+        display: inline-flex;
+        align-items: center;
+        cursor: pointer;
+        padding: 6px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border-color);
+        background-color: var(--surface);
+        font-size: 0.875rem;
+        transition: all 0.2s ease;
+        white-space: nowrap;
+    }
+
+    .kanban-radio-label:hover {
+        border-color: var(--primary-color);
+        background-color: var(--background);
+    }
+
+    .kanban-radio-label input[type="radio"] {
+        margin-right: 6px;
+        cursor: pointer;
+    }
+
+    .kanban-radio-label input[type="radio"]:checked + span {
+        font-weight: 600;
+        color: var(--primary-color);
+    }
+
+    .kanban-radio-label:has(input[type="radio"]:checked) {
+        border-color: var(--primary-color);
+        background-color: rgba(37, 99, 235, 0.05);
+    }
 </style>
+
+<!-- Control panel above kanban -->
+<div class="kanban-controls">
+    <div class="kanban-control-group">
+        <span class="kanban-control-label">Тип:</span>
+        <div class="kanban-toggle">
+            <button class="kanban-toggle-option" id="toggleSales" onclick="setFilterType('sales')">Продажи</button>
+            <button class="kanban-toggle-option" id="togglePartners" onclick="setFilterType('partners')">Партнеры</button>
+        </div>
+    </div>
+    <div class="kanban-control-group">
+        <span class="kanban-control-label">Продукт:</span>
+        <div class="kanban-radio-group" id="productRadioGroup">
+            <!-- Will be populated dynamically -->
+        </div>
+    </div>
+</div>
+
 <div id="kanban"></div>
 
 <!-- Modal for adding new record -->
@@ -566,8 +679,139 @@ var statusesData = [];
 var sourcesData = [];
 var distributorsData = [];
 var partnersData = [];
+var productsData = [];
 var currentStatusId = null;
 var currentStatusName = null;
+var currentFilterType = 'sales'; // 'sales' or 'partners'
+var currentProductId = 'all'; // 'all' or specific product ID
+
+// Cookie management functions
+function setCookie(name, value, days) {
+    var expires = "";
+    if (days) {
+        var date = new Date();
+        date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+        expires = "; expires=" + date.toUTCString();
+    }
+    document.cookie = name + "=" + (value || "") + expires + "; path=/";
+}
+
+function getCookie(name) {
+    var nameEQ = name + "=";
+    var ca = document.cookie.split(';');
+    for (var i = 0; i < ca.length; i++) {
+        var c = ca[i];
+        while (c.charAt(0) == ' ') c = c.substring(1, c.length);
+        if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length, c.length);
+    }
+    return null;
+}
+
+// Set filter type (sales/partners)
+function setFilterType(type) {
+    currentFilterType = type;
+    setCookie('kanban_filter_type', type, 365);
+
+    // Update toggle UI
+    $('#toggleSales').toggleClass('active', type === 'sales');
+    $('#togglePartners').toggleClass('active', type === 'partners');
+
+    // Reload kanban data
+    loadKanbanData();
+}
+
+// Set product filter
+function setProductFilter(productId) {
+    currentProductId = productId;
+    setCookie('kanban_product_id', productId, 365);
+
+    // Reload kanban data
+    loadKanbanData();
+}
+
+// Load products list
+function loadProductsList() {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/5172?JSON_KV', true);
+    xhr.onload = function() {
+        if (xhr.status === 200) {
+            try {
+                productsData = JSON.parse(xhr.responseText);
+                populateProductRadios();
+            } catch (e) {
+                console.error('Error parsing products data:', e);
+            }
+        } else {
+            console.error('Error loading products:', xhr.status);
+        }
+    };
+    xhr.onerror = function() {
+        console.error('Network error loading products');
+    };
+    xhr.send();
+}
+
+// Populate product radio buttons
+function populateProductRadios() {
+    var radioGroup = $('#productRadioGroup');
+    radioGroup.empty();
+
+    // Add "Все" option
+    var allLabel = $('<label class="kanban-radio-label"></label>');
+    var allRadio = $('<input type="radio" name="product" value="all">');
+    var allText = $('<span>Все</span>');
+
+    if (currentProductId === 'all') {
+        allRadio.prop('checked', true);
+    }
+
+    allRadio.on('change', function() {
+        if (this.checked) {
+            setProductFilter('all');
+        }
+    });
+
+    allLabel.append(allRadio).append(allText);
+    radioGroup.append(allLabel);
+
+    // Add individual product options
+    productsData.forEach(function(product) {
+        var label = $('<label class="kanban-radio-label"></label>');
+        var radio = $('<input type="radio" name="product" value="' + product['ПродуктID'] + '">');
+        var text = $('<span>' + product['Продукт'] + '</span>');
+
+        if (currentProductId === product['ПродуктID']) {
+            radio.prop('checked', true);
+        }
+
+        radio.on('change', function() {
+            if (this.checked) {
+                setProductFilter(product['ПродуктID']);
+            }
+        });
+
+        label.append(radio).append(text);
+        radioGroup.append(label);
+    });
+}
+
+// Restore user preferences from cookies
+function restoreUserPreferences() {
+    var savedFilterType = getCookie('kanban_filter_type');
+    var savedProductId = getCookie('kanban_product_id');
+
+    if (savedFilterType) {
+        currentFilterType = savedFilterType;
+    }
+
+    if (savedProductId) {
+        currentProductId = savedProductId;
+    }
+
+    // Update toggle UI
+    $('#toggleSales').toggleClass('active', currentFilterType === 'sales');
+    $('#togglePartners').toggleClass('active', currentFilterType === 'partners');
+}
 
 // Helper function to lighten a color by a percentage
 function lightenColor(color, percent) {
@@ -612,14 +856,18 @@ function loadKanbanData(){
     var tasksReportId = '3769';
     var statusesReportId = '3796';
 
-    // Check for 'partners' URL parameter
-    var urlParams = new URLSearchParams(window.location.search);
-    var hasPartnersParam = urlParams.has('partners');
-    var frPartnersValue = hasPartnersParam ? '%' : '!%';
+    // Build FR_partners parameter based on current filter type
+    var frPartnersValue = currentFilterType === 'partners' ? '%25' : '!%25';
+
+    // Build FR_product parameter if a specific product is selected
+    var productParam = '';
+    if (currentProductId !== 'all') {
+        productParam = '&FR_product=' + encodeURIComponent(currentProductId);
+    }
 
     // Load tasks
     var xhr1 = new XMLHttpRequest();
-    xhr1.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + tasksReportId + '?JSON_KV&FR_partners=' + encodeURIComponent(frPartnersValue), true);
+    xhr1.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + tasksReportId + '?JSON_KV&FR_partners=' + frPartnersValue + productParam, true);
     xhr1.onload = function(){
         if(xhr1.status === 200){
             try{
@@ -639,7 +887,7 @@ function loadKanbanData(){
 
     // Load statuses
     var xhr2 = new XMLHttpRequest();
-    xhr2.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + statusesReportId + '?JSON_KV&FR_partners=' + encodeURIComponent(frPartnersValue), true);
+    xhr2.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + statusesReportId + '?JSON_KV&FR_partners=' + frPartnersValue + productParam, true);
     xhr2.onload = function(){
         if(xhr2.status === 200){
             try{
@@ -1183,7 +1431,9 @@ $(document).on('click', function(event){
 
 // Load data on page load
 $(document).ready(function(){
+    restoreUserPreferences();
     loadKanbanData();
     loadSourcesAndDistributors();
+    loadProductsList();
 });
 </script>
