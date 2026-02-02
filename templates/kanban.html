@@ -1834,7 +1834,7 @@ function renderClientEditForm(data){
         var statusValue = getReqValue(reqs, '4874');
         statusesData.forEach(function(status){
             var selected = statusValue == status['СтатусID'] ? 'selected' : '';
-            html += '<option value="' + status['СтатусID'] + '" ' + selected + '>' + status['Статус'] + '</option>';
+            html += '<option value="' + escapeHtml(status['СтатусID'] || '') + '" ' + selected + '>' + escapeHtml(status['Статус'] || '') + '</option>';
         });
         html += '</select>';
         html += '</div>';
@@ -1857,7 +1857,7 @@ function renderClientEditForm(data){
         var partnerValue = getReqValue(reqs, '443');
         partnersData.forEach(function(partner){
             var selected = partnerValue == partner['ПартнерID'] ? 'selected' : '';
-            html += '<option value="' + partner['ПартнерID'] + '" ' + selected + '>' + partner['Партнер'] + '</option>';
+            html += '<option value="' + escapeHtml(partner['ПартнерID'] || '') + '" ' + selected + '>' + escapeHtml(partner['Партнер'] || '') + '</option>';
         });
         html += '</select>';
         html += '</div>';
@@ -1872,7 +1872,7 @@ function renderClientEditForm(data){
         var distributorValue = getReqValue(reqs, '4862');
         distributorsData.forEach(function(distributor){
             var selected = distributorValue == distributor['ДистрибьюторID'] ? 'selected' : '';
-            html += '<option value="' + distributor['ДистрибьюторID'] + '" ' + selected + '>' + distributor['Дистрибьютор'] + '</option>';
+            html += '<option value="' + escapeHtml(distributor['ДистрибьюторID'] || '') + '" ' + selected + '>' + escapeHtml(distributor['Дистрибьютор'] || '') + '</option>';
         });
         html += '</select>';
         html += '</div>';
@@ -1911,7 +1911,7 @@ function renderClientEditForm(data){
         var sourceValue = getReqValue(reqs, '4861');
         sourcesData.forEach(function(source){
             var selected = sourceValue == source['ИсточникID'] ? 'selected' : '';
-            html += '<option value="' + source['ИсточникID'] + '" ' + selected + '>' + source['Источник'] + '</option>';
+            html += '<option value="' + escapeHtml(source['ИсточникID'] || '') + '" ' + selected + '>' + escapeHtml(source['Источник'] || '') + '</option>';
         });
         html += '</select>';
         html += '</div>';
