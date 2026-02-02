@@ -518,6 +518,28 @@
         align-self: center;
     }
 
+    /* Quick search input styles */
+    .kanban-search-input {
+        padding: 6px 12px;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        font-size: 0.875rem;
+        width: 250px;
+        transition: all 0.2s ease;
+        background-color: var(--surface);
+        color: var(--text-primary);
+    }
+
+    .kanban-search-input:focus {
+        outline: none;
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    .kanban-search-input::placeholder {
+        color: var(--text-secondary);
+    }
+
     /* Toggle switch styles */
     .kanban-toggle {
         display: inline-flex;
@@ -594,6 +616,9 @@
 
 <!-- Control panel above kanban -->
 <div class="kanban-controls">
+    <div class="kanban-control-group">
+        <input type="text" id="quickSearch" class="kanban-search-input" placeholder="Быстрый поиск" oninput="performQuickSearch()">
+    </div>
     <div class="kanban-control-group">
         <span class="kanban-control-label">Тип:</span>
         <div class="kanban-toggle">
@@ -687,6 +712,7 @@ var currentStatusId = null;
 var currentStatusName = null;
 var currentFilterType = 'sales'; // 'sales' or 'partners'
 var currentProductId = 'all'; // 'all' or specific product ID
+var searchQuery = ''; // Quick search query
 
 // Cookie management functions
 function setCookie(name, value, days) {
@@ -730,6 +756,12 @@ function setProductFilter(productId) {
 
     // Reload kanban data
     loadKanbanData();
+}
+
+// Quick search function
+function performQuickSearch() {
+    searchQuery = document.getElementById('quickSearch').value.toLowerCase().trim();
+    renderKanban();
 }
 
 // Load products list
@@ -931,19 +963,39 @@ function renderKanban(){
         // Filter tasks for this status
         // Use flexible matching to handle cases where СтатусID might contain the status name instead of ID
         var tasks = kanbanData.filter(function(task){
+            // First check if task matches status
+            var matchesStatus = false;
             // Try matching by СтатусID (numeric ID or string ID)
             if(task['СтатусID'] === statusId){
-                return true;
+                matchesStatus = true;
             }
             // Fallback: if task's СтатусID contains the status name, match by name
             if(task['СтатусID'] === statusName){
-                return true;
+                matchesStatus = true;
             }
             // Also try matching task's Статус with status's Статус as a final fallback
             if(task['Статус'] && task['Статус'] === statusName){
-                return true;
+                matchesStatus = true;
             }
-            return false;
+
+            if(!matchesStatus) return false;
+
+            // If there's a search query, filter by all fields
+            if(searchQuery && searchQuery !== ''){
+                var searchableText = [
+                    task['Лид'] || '',
+                    task['Контактное лицо'] || '',
+                    task['Примечание'] || '',
+                    task['Сумма'] || '',
+                    task['Телефон'] || '',
+                    task['Email'] || '',
+                    task['Дата'] || ''
+                ].join(' ').toLowerCase();
+
+                return searchableText.indexOf(searchQuery) !== -1;
+            }
+
+            return true;
         });
 
         // Calculate total sum for this status
