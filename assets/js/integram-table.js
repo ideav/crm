@@ -326,8 +326,8 @@ class IntegramTable {
                             ${ this.hasActiveFilters() ? `
                             <button class="btn btn-sm btn-outline-secondary mr-2" onclick="window.${ instanceName }.clearAllFilters()" title="Очистить фильтры">
                                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle;">
-                                    <path d="M3 3L7 7M7 7L3 11M7 7L11 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                                    <path d="M14 7C14 7 14 7 14 7L14 13M14 13L12 11M14 13L16 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                    <polygon fill="var(--ci-primary-color, currentColor)" points="2,1 6,1 10,6 10,12 6,10 6,6"/>
+                                    <polygon fill="var(--ci-primary-color, currentColor)" points="10,10 11,9 13,11 15,9 16,10 14,12 16,14 15,15 13,13 11,15 10,14 12,12"/>
                                 </svg>
                             </button>
                             ` : '' }
