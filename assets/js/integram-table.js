@@ -834,7 +834,24 @@ class IntegramTable {
                     target.textContent = symbol;
                     menu.remove();
 
-                    if (this.filters[columnId].value) {
+                    // For Empty (%) and Not Empty (!%) filters, clear input and apply immediately
+                    if (symbol === '%' || symbol === '!%') {
+                        this.filters[columnId].value = '';
+
+                        // Clear the input field
+                        const filterInput = this.container.querySelector(`.filter-input-with-icon[data-column-id="${columnId}"]`);
+                        if (filterInput) {
+                            filterInput.value = '';
+                        }
+
+                        // Reset data and load from beginning
+                        this.data = [];
+                        this.loadedRecords = 0;
+                        this.hasMore = true;
+                        this.totalRows = null;
+                        this.loadData(false);
+                    } else if (this.filters[columnId].value) {
+                        // For other filter types, only reload if there's a value
                         // Reset data and load from beginning
                         this.data = [];
                         this.loadedRecords = 0;
