@@ -1083,6 +1083,9 @@ class IntegramTable {
             // Delete settings cookie
             document.cookie = `${ this.options.cookiePrefix }-settings=; path=/; max-age=0`;
 
+            // Delete state cookie (column order, visibility, widths)
+            document.cookie = `${ this.options.cookiePrefix }-state=; path=/; max-age=0`;
+
             // Reset to defaults
             this.settings = {
                 compact: false,
@@ -1090,6 +1093,11 @@ class IntegramTable {
                 truncateLongValues: true
             };
             this.options.pageSize = 20;
+
+            // Reset column state
+            this.columnOrder = [];
+            this.visibleColumns = [];
+            this.columnWidths = {};
 
             // Close modal and reload
             this.closeTableSettings();
