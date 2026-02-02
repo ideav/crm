@@ -1414,11 +1414,27 @@ class IntegramTable {
         }
 
         renderEditFormModal(metadata, recordData, isCreate, typeId) {
+            // Track modal depth for z-index stacking
+            if (!window._integramModalDepth) {
+                window._integramModalDepth = 0;
+            }
+            window._integramModalDepth++;
+            const modalDepth = window._integramModalDepth;
+            const baseZIndex = 1000 + (modalDepth * 10);
+
             const overlay = document.createElement('div');
             overlay.className = 'edit-form-overlay';
+            overlay.style.zIndex = baseZIndex;
+            overlay.dataset.modalDepth = modalDepth;
 
             const modal = document.createElement('div');
             modal.className = 'edit-form-modal';
+            modal.style.zIndex = baseZIndex + 1;
+            modal.dataset.modalDepth = modalDepth;
+            modal.dataset.overlayRef = 'true';
+
+            // Store reference to overlay on modal for proper cleanup
+            modal._overlayElement = overlay;
 
             const title = isCreate ? `Создание: ${ metadata.val }` : `Редактирование: ${ metadata.val }`;
             const instanceName = this.options.instanceName;
@@ -1462,7 +1478,7 @@ class IntegramTable {
             let formHtml = `
                 <div class="edit-form-header">
                     <h5>${ title }</h5>
-                    <button class="edit-form-close" onclick="this.closest('.edit-form-modal').remove(); document.querySelector('.edit-form-overlay').remove();">×</button>
+                    <button class="edit-form-close" data-close-modal="true">×</button>
                 </div>
                 ${ tabsHtml }
                 <div class="edit-form-body">
@@ -1492,7 +1508,7 @@ class IntegramTable {
                     </button>
                     <div class="edit-form-footer-buttons">
                         <button type="button" class="btn btn-primary" id="save-record-btn">Сохранить</button>
-                        <button type="button" class="btn btn-secondary" onclick="this.closest('.edit-form-modal').remove(); document.querySelector('.edit-form-overlay').remove();">Отмена</button>
+                        <button type="button" class="btn btn-secondary" data-close-modal="true">Отмена</button>
                     </div>
                 </div>
             `;
@@ -1540,11 +1556,22 @@ class IntegramTable {
                 this.saveRecord(modal, isCreate, recordId, typeId, parentId);
             });
 
-            overlay.addEventListener('click', () => {
+            // Close modal helper function
+            const closeModal = () => {
                 modal.remove();
                 overlay.remove();
-                this.currentEditModal = null;
+                window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+                if (modalDepth === 1) {
+                    this.currentEditModal = null;
+                }
+            };
+
+            // Attach close handlers to buttons with data-close-modal attribute
+            modal.querySelectorAll('[data-close-modal="true"]').forEach(btn => {
+                btn.addEventListener('click', closeModal);
             });
+
+            overlay.addEventListener('click', closeModal);
         }
 
         renderAttributesForm(metadata, recordData, regularFields, recordReqs) {
@@ -1841,12 +1868,24 @@ class IntegramTable {
         }
 
         renderSubordinateCreateForm(metadata, arrId, parentRecordId) {
+            // Track modal depth for z-index stacking
+            if (!window._integramModalDepth) {
+                window._integramModalDepth = 0;
+            }
+            window._integramModalDepth++;
+            const modalDepth = window._integramModalDepth;
+            const baseZIndex = 1000 + (modalDepth * 10);
+
             // Create a new form modal for subordinate record
             const overlay = document.createElement('div');
             overlay.className = 'edit-form-overlay subordinate-form-overlay';
+            overlay.style.zIndex = baseZIndex;
+            overlay.dataset.modalDepth = modalDepth;
 
             const modal = document.createElement('div');
             modal.className = 'edit-form-modal subordinate-form-modal';
+            modal.style.zIndex = baseZIndex + 1;
+            modal.dataset.modalDepth = modalDepth;
 
             const title = `Создание: ${ metadata.val }`;
 
@@ -1943,6 +1982,7 @@ class IntegramTable {
             const closeModal = () => {
                 modal.remove();
                 overlay.remove();
+                window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
             };
 
             modal.querySelector('.subordinate-close-btn').addEventListener('click', closeModal);

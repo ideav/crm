@@ -596,6 +596,7 @@
 }
 
 /* Edit Form Modal */
+/* z-index is set dynamically in JavaScript for proper stacking of nested modals */
 .edit-form-overlay {
     position: fixed;
     top: 0;
@@ -603,7 +604,6 @@
     right: 0;
     bottom: 0;
     background: rgba(0, 0, 0, 0.32);
-    z-index: 1999;
     backdrop-filter: blur(2px);
 }
 
@@ -615,7 +615,6 @@
     background: var(--md-surface);
     border-radius: 4px;
     box-shadow: var(--md-elevation-4);
-    z-index: 2000;
     width: 90%;
     max-width: 600px;
     max-height: 85vh;
@@ -1276,11 +1275,7 @@
 }
 
 /* Subordinate form modal (stacked on top of main modal) */
-.subordinate-form-overlay {
-    z-index: 1100;
-}
-
+/* z-index is set dynamically in JavaScript for proper stacking */
 .subordinate-form-modal {
-    z-index: 1101;
     max-width: 500px;
 }
