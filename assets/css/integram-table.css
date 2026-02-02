@@ -174,11 +174,11 @@
 
 /* Compact mode */
 .integram-table.compact th {
-    padding: 1px 3px;
+    padding: 8px 5px;
 }
 
 .integram-table.compact td {
-    padding: 1px 3px;
+    padding: 3px 5px;
 }
 
 .integram-table td {
