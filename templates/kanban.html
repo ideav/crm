@@ -1833,10 +1833,8 @@ function renderClientEditForm(data){
         html += '<option value="">Выберите статус</option>';
         var statusValue = getReqValue(reqs, '4874');
         statusesData.forEach(function(status){
-            var statusId = safeValue(status['СтатусID']);
-            var statusName = safeValue(status['Статус']);
-            var selected = statusValue && statusId && statusValue == statusId ? 'selected' : '';
-            html += '<option value="' + escapeHtml(statusId) + '" ' + selected + '>' + escapeHtml(statusName) + '</option>';
+            var selected = statusValue == status['СтатусID'] ? 'selected' : '';
+            html += '<option value="' + escapeHtml(status['СтатусID'] || '') + '" ' + selected + '>' + escapeHtml(status['Статус'] || '') + '</option>';
         });
         html += '</select>';
         html += '</div>';
@@ -1858,10 +1856,8 @@ function renderClientEditForm(data){
         html += '<option value="">Выберите партнера</option>';
         var partnerValue = getReqValue(reqs, '443');
         partnersData.forEach(function(partner){
-            var partnerId = safeValue(partner['ПартнерID']);
-            var partnerName = safeValue(partner['Партнер']);
-            var selected = partnerValue && partnerId && partnerValue == partnerId ? 'selected' : '';
-            html += '<option value="' + escapeHtml(partnerId) + '" ' + selected + '>' + escapeHtml(partnerName) + '</option>';
+            var selected = partnerValue == partner['ПартнерID'] ? 'selected' : '';
+            html += '<option value="' + escapeHtml(partner['ПартнерID'] || '') + '" ' + selected + '>' + escapeHtml(partner['Партнер'] || '') + '</option>';
         });
         html += '</select>';
         html += '</div>';
@@ -1875,10 +1871,8 @@ function renderClientEditForm(data){
         html += '<option value="">Выберите дистрибьютора</option>';
         var distributorValue = getReqValue(reqs, '4862');
         distributorsData.forEach(function(distributor){
-            var distributorId = safeValue(distributor['ДистрибьюторID']);
-            var distributorName = safeValue(distributor['Дистрибьютор']);
-            var selected = distributorValue && distributorId && distributorValue == distributorId ? 'selected' : '';
-            html += '<option value="' + escapeHtml(distributorId) + '" ' + selected + '>' + escapeHtml(distributorName) + '</option>';
+            var selected = distributorValue == distributor['ДистрибьюторID'] ? 'selected' : '';
+            html += '<option value="' + escapeHtml(distributor['ДистрибьюторID'] || '') + '" ' + selected + '>' + escapeHtml(distributor['Дистрибьютор'] || '') + '</option>';
         });
         html += '</select>';
         html += '</div>';
@@ -1916,10 +1910,8 @@ function renderClientEditForm(data){
         html += '<option value="">Выберите источник</option>';
         var sourceValue = getReqValue(reqs, '4861');
         sourcesData.forEach(function(source){
-            var sourceId = safeValue(source['ИсточникID']);
-            var sourceName = safeValue(source['Источник']);
-            var selected = sourceValue && sourceId && sourceValue == sourceId ? 'selected' : '';
-            html += '<option value="' + escapeHtml(sourceId) + '" ' + selected + '>' + escapeHtml(sourceName) + '</option>';
+            var selected = sourceValue == source['ИсточникID'] ? 'selected' : '';
+            html += '<option value="' + escapeHtml(source['ИсточникID'] || '') + '" ' + selected + '>' + escapeHtml(source['Источник'] || '') + '</option>';
         });
         html += '</select>';
         html += '</div>';
@@ -2023,10 +2015,8 @@ function renderTaskCreateForm(){
     html += '<select class="kanban-edit-form-select" id="taskExecutor" name="t3942">';
     html += '<option value="">Выберите исполнителя</option>';
     managersData.forEach(function(manager){
-        var managerId = safeValue(manager['ПользовательID']);
-        var managerName = safeValue(manager['Пользователь']);
-        var selected = (typeof window.uid !== 'undefined' && managerId && managerId == window.uid) ? 'selected' : '';
-        html += '<option value="' + escapeHtml(managerId) + '" ' + selected + '>' + escapeHtml(managerName) + '</option>';
+        var selected = (typeof window.uid !== 'undefined' && manager['ПользовательID'] == window.uid) ? 'selected' : '';
+        html += '<option value="' + manager['ПользовательID'] + '" ' + selected + '>' + manager['Пользователь'] + '</option>';
     });
     html += '</select>';
     html += '</div>';
@@ -2037,9 +2027,7 @@ function renderTaskCreateForm(){
     html += '<select class="kanban-edit-form-select" id="taskType" name="t4299">';
     html += '<option value="">Выберите тип задачи</option>';
     taskTypesData.forEach(function(taskType){
-        var taskTypeId = safeValue(taskType['Тип задачиID']);
-        var taskTypeName = safeValue(taskType['Тип задачи']);
-        html += '<option value="' + escapeHtml(taskTypeId) + '">' + escapeHtml(taskTypeName) + '</option>';
+        html += '<option value="' + taskType['Тип задачиID'] + '">' + taskType['Тип задачи'] + '</option>';
     });
     html += '</select>';
     html += '</div>';
