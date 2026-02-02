@@ -540,7 +540,12 @@ class IntegramTable {
             // Truncate long values if setting is enabled
             if (this.settings.truncateLongValues && escapedValue.length > 127) {
                 const truncated = escapedValue.substring(0, 127);
-                const fullValueEscaped = escapedValue.replace(/'/g, '\\\'');
+                // Properly escape all JavaScript special characters for use in onclick string literal
+                const fullValueEscaped = escapedValue
+                    .replace(/\\/g, '\\\\')   // Escape backslashes first
+                    .replace(/\n/g, '\\n')    // Escape newlines
+                    .replace(/\r/g, '\\r')    // Escape carriage returns
+                    .replace(/'/g, '\\\'');   // Escape single quotes
                 const instanceName = this.options.instanceName;
                 escapedValue = `${ truncated }<a href="#" class="show-full-value" onclick="window.${ instanceName }.showFullValue(event, '${ fullValueEscaped }'); return false;">...</a>`;
             }
