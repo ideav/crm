@@ -2168,8 +2168,9 @@ function updateTaskCount(leadId){
 function escapeHtml(text){
     // Handle null, undefined, and their string representations
     if(text === null || text === undefined) return '';
-    var str = String(text);
-    if(str === 'undefined' || str === 'null' || str === '') return '';
+    var str = String(text).trim();
+    var strLower = str.toLowerCase();
+    if(strLower === 'undefined' || strLower === 'null' || str === '') return '';
     return str.replace(/&/g, '&amp;')
               .replace(/</g, '&lt;')
               .replace(/>/g, '&gt;')
@@ -2180,8 +2181,9 @@ function escapeHtml(text){
 // Helper function to safely get value (handles undefined/null strings)
 function safeValue(value){
     if(value === null || value === undefined) return '';
-    var str = String(value);
-    if(str === 'undefined' || str === 'null') return '';
+    var str = String(value).trim();
+    var strLower = str.toLowerCase();
+    if(strLower === 'undefined' || strLower === 'null' || str === '') return '';
     return str;
 }
 
@@ -2194,8 +2196,9 @@ function getReqValue(reqs, key){
     var value = req.value;
     // Handle null, undefined, and their string representations
     if(value === null || value === undefined) return '';
-    var str = String(value);
-    if(str === 'undefined' || str === 'null') return '';
+    var str = String(value).trim();
+    var strLower = str.toLowerCase();
+    if(strLower === 'undefined' || strLower === 'null' || str === '') return '';
     return str;
 }
 
