@@ -1709,8 +1709,12 @@ class IntegramTable {
                     const footer = modal.querySelector('.edit-form-footer');
                     if (tabId === 'attributes') {
                         footer.style.display = 'flex';
+                        // Collapse modal back to normal size
+                        modal.classList.remove('expanded');
                     } else {
                         footer.style.display = 'none';
+                        // Expand modal to fit subordinate table
+                        modal.classList.add('expanded');
                     }
                 });
             });
