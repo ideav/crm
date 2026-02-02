@@ -319,6 +319,10 @@
                             <input type="text" class="column-filter" data-column="Партнер" placeholder="Фильтр...">
                         </th>
                         <th>
+                            <span>Дистрибьютор <span class="filter-toggle-icon" title="Показать/скрыть фильтр">▼</span></span>
+                            <input type="text" class="column-filter" data-column="Дистрибьютор" placeholder="Фильтр...">
+                        </th>
+                        <th>
                             <span>Сделок <span class="filter-toggle-icon" title="Показать/скрыть фильтр">▼</span></span>
                             <input type="text" class="column-filter" data-column="Сделок" placeholder="Фильтр...">
                         </th>
@@ -342,7 +346,7 @@
                 </thead>
                 <tbody id="partnersTableBody">
                     <tr>
-                        <td colspan="6" class="loading">Загрузка данных...</td>
+                        <td colspan="7" class="loading">Загрузка данных...</td>
                     </tr>
                 </tbody>
             </table>
@@ -381,7 +385,7 @@ if(currentYear > 2025){
 }
 
 function loadPartnersData(){
-    document.getElementById('partnersTableBody').innerHTML = '<tr><td colspan="6" class="loading">Загрузка данных...</td></tr>';
+    document.getElementById('partnersTableBody').innerHTML = '<tr><td colspan="7" class="loading">Загрузка данных...</td></tr>';
 
     // Load partners data
     var xhr1 = new XMLHttpRequest();
@@ -439,12 +443,12 @@ function checkDataLoaded(){
         renderTable();
     } else if(partnersData.length === 0 && levelsData.length > 0){
         // No data found after applying filters
-        document.getElementById('partnersTableBody').innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: var(--text-secondary);">Данные не найдены</td></tr>';
+        document.getElementById('partnersTableBody').innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: var(--text-secondary);">Данные не найдены</td></tr>';
     }
 }
 
 function showError(message){
-    document.getElementById('partnersTableBody').innerHTML = '<tr><td colspan="6" class="error">' + message + '</td></tr>';
+    document.getElementById('partnersTableBody').innerHTML = '<tr><td colspan="7" class="error">' + message + '</td></tr>';
 }
 
 function processData(){
@@ -517,7 +521,7 @@ function renderTable(){
     tbody.innerHTML = '';
 
     if(filteredData.length === 0){
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: var(--text-secondary);">Нет данных для отображения</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 40px; color: var(--text-secondary);">Нет данных для отображения</td></tr>';
         document.getElementById('paginationContainer').style.display = 'none';
         return;
     }
@@ -532,10 +536,15 @@ function renderTable(){
     pageData.forEach(function(partner){
         var tr = document.createElement('tr');
 
-        // Партнер
+        // Партнер (as HTML - may contain hyperlinks)
         var td1 = document.createElement('td');
-        td1.textContent = decodeHtmlEntities(partner['Партнер']) || '';
+        td1.innerHTML = partner['Партнер'] || '';
         tr.appendChild(td1);
+
+        // Дистрибьютор
+        var td2 = document.createElement('td');
+        td2.textContent = partner['Дистрибьютор'] || '';
+        tr.appendChild(td2);
 
         // Сделок
         var td3 = document.createElement('td');
