@@ -1969,6 +1969,8 @@ function submitEditClient(){
     $('#editClientSubmitButton').prop('disabled', true).text('Сохранение...');
 
     var formData = $('#editClientForm').serialize();
+    // Remove t4874 (status) if empty - don't send parameter when status is not selected
+    formData = formData.replace(/&t4874=(?=&|$)/, '').replace(/^t4874=&/, '');
     formData += '&_xsrf=' + xsrf;
 
     var xhr = new XMLHttpRequest();
