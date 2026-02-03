@@ -1255,11 +1255,8 @@ function loadKanbanData(){
         productParam = '&FR_product=' + encodeURIComponent(currentProductId);
     }
 
-    // Build FR_manager parameter if a manager is selected
-    var managerParam = '';
-    if (currentManagerId) {
-        managerParam = '&FR_manager=' + encodeURIComponent(currentManagerId);
-    }
+    // Build FR_manager parameter - always pass it
+    var managerParam = '&FR_manager=' + encodeURIComponent(currentManagerId || '');
 
     // Load tasks
     var xhr1 = new XMLHttpRequest();
