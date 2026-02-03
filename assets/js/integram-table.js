@@ -2629,15 +2629,21 @@ class IntegramTable {
         }
 
         formatDateForInput(value, includeTime = false) {
-            // Convert date from various formats to DD.MM.YYYY or DD.MM.YYYY HH:MM
+            // Convert date from various formats to DD.MM.YYYY or DD.MM.YYYY HH:MM:SS
             if (!value) return '';
 
-            let date = new Date(value);
-            if (isNaN(date.getTime())) return value;  // Return as-is if not a valid date
-
-            // Round to 5 minutes if time is included
+            let date;
+            // Try to parse DD.MM.YYYY or DD.MM.YYYY HH:MM:SS format first
             if (includeTime) {
-                date = this.roundToNearest5Minutes(date);
+                date = this.parseDDMMYYYYHHMMSS(value);
+            } else {
+                date = this.parseDDMMYYYY(value);
+            }
+
+            // If parsing failed, try standard Date constructor
+            if (!date || isNaN(date.getTime())) {
+                date = new Date(value);
+                if (isNaN(date.getTime())) return value;  // Return as-is if not a valid date
             }
 
             const day = String(date.getDate()).padStart(2, '0');
@@ -2647,7 +2653,8 @@ class IntegramTable {
             if (includeTime) {
                 const hours = String(date.getHours()).padStart(2, '0');
                 const minutes = String(date.getMinutes()).padStart(2, '0');
-                return `${ day }.${ month }.${ year } ${ hours }:${ minutes }`;
+                const seconds = String(date.getSeconds()).padStart(2, '0');
+                return `${ day }.${ month }.${ year } ${ hours }:${ minutes }:${ seconds }`;
             }
 
             return `${ day }.${ month }.${ year }`;
@@ -2657,8 +2664,19 @@ class IntegramTable {
             // Convert date to HTML5 format: YYYY-MM-DD or YYYY-MM-DDTHH:MM
             if (!value) return '';
 
-            let date = new Date(value);
-            if (isNaN(date.getTime())) return '';
+            let date;
+            // Try to parse DD.MM.YYYY or DD.MM.YYYY HH:MM:SS format first
+            if (includeTime) {
+                date = this.parseDDMMYYYYHHMMSS(value);
+            } else {
+                date = this.parseDDMMYYYY(value);
+            }
+
+            // If parsing failed, try standard Date constructor
+            if (!date || isNaN(date.getTime())) {
+                date = new Date(value);
+                if (isNaN(date.getTime())) return '';
+            }
 
             // Round to 5 minutes if time is included
             if (includeTime) {
@@ -2683,12 +2701,15 @@ class IntegramTable {
             if (!html5Value) return '';
 
             if (includeTime) {
-                // YYYY-MM-DDTHH:MM(:SS) -> DD.MM.YYYY HH:MM
+                // YYYY-MM-DDTHH:MM(:SS) -> DD.MM.YYYY HH:MM:SS
                 const [datePart, timePart] = html5Value.split('T');
                 const [year, month, day] = datePart.split('-');
-                // Strip seconds if present (keep only HH:MM)
-                const timeWithoutSeconds = timePart.split(':').slice(0, 2).join(':');
-                return `${ day }.${ month }.${ year } ${ timeWithoutSeconds }`;
+                // Ensure we have seconds (add :00 if not present)
+                const timeParts = timePart.split(':');
+                const hours = timeParts[0] || '00';
+                const minutes = timeParts[1] || '00';
+                const seconds = timeParts[2] || '00';
+                return `${ day }.${ month }.${ year } ${ hours }:${ minutes }:${ seconds }`;
             } else {
                 // YYYY-MM-DD -> DD.MM.YYYY
                 const [year, month, day] = html5Value.split('-');
