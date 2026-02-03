@@ -337,6 +337,45 @@
         cursor: default;
     }
 
+    .kanban-card-deals-button {
+        height: 20px;
+        border-radius: 4px;
+        padding: 4px 12px;
+        font-size: 0.875rem;
+        font-weight: 500;
+        border: none;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        text-decoration: none; /* For anchor tags */
+        text-transform: none;
+        letter-spacing: 0.0178571429em;
+    }
+
+    .kanban-card-deals-button.has-deals {
+        background-color: #55b875;
+        color: white;
+        box-shadow: 0 2px 1px -1px rgba(0,0,0,0.2),
+                    0 1px 1px 0 rgba(0,0,0,0.14),
+                    0 1px 3px 0 rgba(0,0,0,0.12);
+    }
+
+    .kanban-card-deals-button.has-deals:hover {
+        background-color: #4aa668;
+        transform: translateY(-1px);
+        box-shadow: 0 3px 3px -2px rgba(0,0,0,0.2),
+                    0 3px 4px 0 rgba(0,0,0,0.14),
+                    0 1px 8px 0 rgba(0,0,0,0.12);
+    }
+
+    .kanban-card-deals-button.no-deals {
+        background-color: rgba(0, 0, 0, 0.12);
+        color: rgba(0, 0, 0, 0.38);
+        cursor: default;
+    }
+
     .kanban-card-tasks-row {
         display: flex;
         align-items: center;
@@ -1391,6 +1430,25 @@ function renderCard(task){
         html += '</span>';
     }
     html += '<button class="kanban-add-task-button" onclick="openTaskCreateForm(\'' + task['ЛидID'] + '\', this); event.stopPropagation();" title="Добавить задачу">+</button>';
+
+    // Add deals badge next to tasks badge
+    var dealsCount = task['Сделок'] ? parseInt(task['Сделок']) : 0;
+    var dealsButtonClass = dealsCount > 0 ? 'has-deals' : 'no-deals';
+    var dealsUrl = '';
+    if(task['ЛидID']){
+        dealsUrl = '/' + db + '/smartq/6271?FR_КлиентID=' + task['ЛидID'];
+    }
+
+    if(dealsCount > 0 && dealsUrl){
+        html += '<a href="' + dealsUrl + '" target="deals" class="kanban-card-deals-button ' + dealsButtonClass + '" data-lead-id="' + task['ЛидID'] + '" onclick="event.stopPropagation();">';
+        html += 'Сделки: <span class="deals-count">' + dealsCount + '</span>';
+        html += '</a>';
+    } else {
+        html += '<span class="kanban-card-deals-button ' + dealsButtonClass + '" data-lead-id="' + task['ЛидID'] + '">';
+        html += 'Сделки: <span class="deals-count">' + dealsCount + '</span>';
+        html += '</span>';
+    }
+
     html += '</div>';
 
     html += '</div>';
