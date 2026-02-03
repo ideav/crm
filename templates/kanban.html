@@ -2274,6 +2274,23 @@ function renderTaskCreateForm(){
             $('#taskDueDateHidden').val('');
         }
     });
+
+    // Handle task type selection - auto-fill task name when empty
+    $('#taskType').on('change', function(){
+        var taskNameField = $('#taskName');
+        var currentTaskName = taskNameField.val().trim();
+
+        // Only auto-fill if task name field is empty
+        if(!currentTaskName){
+            var selectedOption = $(this).find('option:selected');
+            var taskTypeName = selectedOption.text();
+
+            // Only set if a valid task type is selected (not the placeholder)
+            if(selectedOption.val()){
+                taskNameField.val(taskTypeName);
+            }
+        }
+    });
 }
 
 function submitCreateTask(){
