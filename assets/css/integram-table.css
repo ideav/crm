@@ -86,7 +86,7 @@
 
 .integram-table-settings {
     cursor: pointer;
-    padding: 8px 16px;
+    padding: 8px 8px;
     border-radius: 4px;
     transition: var(--md-transition);
     font-weight: 500;
