@@ -1056,6 +1056,12 @@ var currentFilterType = 'sales'; // 'sales' or 'partners'
 var currentProductId = 'all'; // 'all' or specific product ID
 var currentManagerId = null; // Selected manager ID, defaults to window.uid
 var searchQuery = ''; // Quick search query
+// Check if there's a saved manager ID in cookie
+var savedManagerId = getCookie('kanban_manager_id');
+currentManagerId = savedManagerId;
+
+console.log('populateManagerSelect '+savedManagerId);
+populateManagerSelect();
 
 // Cookie management functions
 function setCookie(name, value, days) {
@@ -1255,6 +1261,7 @@ function loadKanbanData(){
 
     // Build FR_manager parameter - always pass it
     var managerParam = '&FR_manager=' + encodeURIComponent(currentManagerId || '');
+console.log('loadKanbanData');
 
     // Load tasks
     var xhr1 = new XMLHttpRequest();
@@ -1738,6 +1745,7 @@ function loadManagersList(){
     xhr.onload = function(){
         if(xhr.status === 200){
             try{
+                console.log('loadManagersList');
                 managersData = JSON.parse(xhr.responseText);
                 populateManagerSelect();
             } catch(e){
@@ -1760,9 +1768,6 @@ function populateManagerSelect() {
 
     // Clear existing options
     select.innerHTML = '';
-
-    // Check if there's a saved manager ID in cookie
-    var savedManagerId = getCookie('kanban_manager_id');
 
     // Populate options
     managersData.forEach(function(manager) {
