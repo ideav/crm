@@ -2683,10 +2683,12 @@ class IntegramTable {
             if (!html5Value) return '';
 
             if (includeTime) {
-                // YYYY-MM-DDTHH:MM -> DD.MM.YYYY HH:MM
+                // YYYY-MM-DDTHH:MM(:SS) -> DD.MM.YYYY HH:MM
                 const [datePart, timePart] = html5Value.split('T');
                 const [year, month, day] = datePart.split('-');
-                return `${ day }.${ month }.${ year } ${ timePart }`;
+                // Strip seconds if present (keep only HH:MM)
+                const timeWithoutSeconds = timePart.split(':').slice(0, 2).join(':');
+                return `${ day }.${ month }.${ year } ${ timeWithoutSeconds }`;
             } else {
                 // YYYY-MM-DD -> DD.MM.YYYY
                 const [year, month, day] = html5Value.split('-');
