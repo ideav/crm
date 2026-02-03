@@ -664,6 +664,30 @@
         background-color: rgba(37, 99, 235, 0.05);
     }
 
+    /* Manager select dropdown */
+    .kanban-select {
+        padding: 6px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border-color);
+        background-color: var(--surface);
+        font-size: 0.875rem;
+        color: var(--text-primary);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        min-width: 150px;
+    }
+
+    .kanban-select:hover {
+        border-color: var(--primary-color);
+        background-color: var(--background);
+    }
+
+    .kanban-select:focus {
+        outline: none;
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
     /* Edit form modal styles */
     .kanban-edit-modal-overlay {
         display: none;
@@ -813,6 +837,12 @@
         </div>
     </div>
     <div class="kanban-control-group">
+        <span class="kanban-control-label">Менеджер:</span>
+        <select id="managerSelect" class="kanban-select" onchange="onManagerChange()">
+            <!-- Will be populated dynamically -->
+        </select>
+    </div>
+    <div class="kanban-control-group">
         <span class="kanban-control-label">Продукт:</span>
         <div class="kanban-radio-group" id="productRadioGroup">
             <!-- Will be populated dynamically -->
@@ -935,6 +965,7 @@ var currentStatusId = null;
 var currentStatusName = null;
 var currentFilterType = 'sales'; // 'sales' or 'partners'
 var currentProductId = 'all'; // 'all' or specific product ID
+var currentManagerId = null; // Selected manager ID, defaults to window.uid
 var searchQuery = ''; // Quick search query
 
 // Cookie management functions
@@ -976,6 +1007,16 @@ function setFilterType(type) {
 function setProductFilter(productId) {
     currentProductId = productId;
     setCookie('kanban_product_id', productId, 365);
+
+    // Reload kanban data
+    loadKanbanData();
+}
+
+// Handle manager selection change
+function onManagerChange() {
+    var select = document.getElementById('managerSelect');
+    currentManagerId = select.value;
+    setCookie('kanban_manager_id', currentManagerId, 365);
 
     // Reload kanban data
     loadKanbanData();
@@ -1123,9 +1164,15 @@ function loadKanbanData(){
         productParam = '&FR_product=' + encodeURIComponent(currentProductId);
     }
 
+    // Build FR_manager parameter if a manager is selected
+    var managerParam = '';
+    if (currentManagerId) {
+        managerParam = '&FR_manager=' + encodeURIComponent(currentManagerId);
+    }
+
     // Load tasks
     var xhr1 = new XMLHttpRequest();
-    xhr1.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + tasksReportId + '?JSON_KV&FR_partners=' + frPartnersValue + productParam, true);
+    xhr1.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + tasksReportId + '?JSON_KV&FR_partners=' + frPartnersValue + productParam + managerParam, true);
     xhr1.onload = function(){
         if(xhr1.status === 200){
             try{
@@ -1145,7 +1192,7 @@ function loadKanbanData(){
 
     // Load statuses
     var xhr2 = new XMLHttpRequest();
-    xhr2.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + statusesReportId + '?JSON_KV&FR_partners=' + frPartnersValue + productParam, true);
+    xhr2.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + statusesReportId + '?JSON_KV&FR_partners=' + frPartnersValue + productParam + managerParam, true);
     xhr2.onload = function(){
         if(xhr2.status === 200){
             try{
@@ -1586,6 +1633,7 @@ function loadManagersList(){
         if(xhr.status === 200){
             try{
                 managersData = JSON.parse(xhr.responseText);
+                populateManagerSelect();
             } catch(e){
                 console.error('Error parsing managers data:', e);
             }
@@ -1597,6 +1645,44 @@ function loadManagersList(){
         console.error('Network error loading managers');
     };
     xhr.send();
+}
+
+// Populate manager select dropdown
+function populateManagerSelect() {
+    var select = document.getElementById('managerSelect');
+    if (!select) return;
+
+    // Clear existing options
+    select.innerHTML = '';
+
+    // Check if there's a saved manager ID in cookie
+    var savedManagerId = getCookie('kanban_manager_id');
+
+    // Populate options
+    managersData.forEach(function(manager) {
+        var option = document.createElement('option');
+        option.value = manager['ПользовательID'];
+        option.text = manager['Пользователь'];
+
+        // Set selected: prioritize saved cookie, then window.uid
+        if (savedManagerId) {
+            if (manager['ПользовательID'] == savedManagerId) {
+                option.selected = true;
+                currentManagerId = savedManagerId;
+            }
+        } else if (typeof window.uid !== 'undefined' && manager['ПользовательID'] == window.uid) {
+            option.selected = true;
+            currentManagerId = window.uid;
+        }
+
+        select.appendChild(option);
+    });
+
+    // If no manager was selected, select the first one
+    if (!currentManagerId && managersData.length > 0) {
+        currentManagerId = managersData[0]['ПользовательID'];
+        select.value = currentManagerId;
+    }
 }
 
 // Load task types list for task type dropdown
