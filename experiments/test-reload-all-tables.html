@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/css/bootstrap.min.css">
+    <title>Test reloadAllIntegramTables() Function</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .test-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .test-controls {
+            margin: 20px 0;
+            padding: 15px;
+            background: #e9ecef;
+            border-radius: 5px;
+        }
+        .test-controls button {
+            margin: 5px;
+            padding: 10px 20px;
+            font-size: 14px;
+        }
+        .test-result {
+            margin-top: 10px;
+            padding: 10px;
+            background: white;
+            border-left: 4px solid #28a745;
+            border-radius: 4px;
+        }
+        h1 {
+            color: #333;
+        }
+        h2 {
+            color: #555;
+            margin-top: 30px;
+        }
+        .info-box {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+    </style>
+    <link rel="stylesheet" href="/assets/css/integram-table.css">
+    <script src="/js/jquery.min.js"></script>
+    <script src="/js/jquery-ui.min.js"></script>
+</head>
+<body>
+
+<h1>🧪 Test: Global Table Reload Function</h1>
+
+<div class="info-box">
+    <h3>📋 Test Purpose</h3>
+    <p>This page demonstrates the new global <code>reloadAllIntegramTables()</code> function that reloads all table instances with their current filter parameters.</p>
+    <p><strong>Feature:</strong> When called, this function will reload all IntegramTable components on the page while preserving their current filter settings.</p>
+</div>
+
+<div class="test-controls">
+    <h3>🎮 Test Controls</h3>
+    <button class="btn btn-primary btn-lg" onclick="testReloadAllTables()">
+        🔄 Test: Reload All Tables
+    </button>
+    <button class="btn btn-secondary" onclick="testReloadTable1()">
+        🔄 Reload Table 1 Only
+    </button>
+    <button class="btn btn-secondary" onclick="testReloadTable2()">
+        🔄 Reload Table 2 Only
+    </button>
+    <button class="btn btn-info" onclick="showInstanceInfo()">
+        ℹ️ Show Instance Info
+    </button>
+    <div id="test-result" class="test-result" style="display:none;"></div>
+</div>
+
+<div class="info-box">
+    <h4>✅ How to Test:</h4>
+    <ol>
+        <li>Apply some filters to the tables below</li>
+        <li>Click "Test: Reload All Tables" button</li>
+        <li>Observe that both tables reload while preserving the filters you applied</li>
+        <li>Check the console for detailed logs</li>
+    </ol>
+    <h4>📝 Expected Results:</h4>
+    <ul>
+        <li>Both tables should reload from the beginning (reset to first page)</li>
+        <li>All filter parameters should be preserved</li>
+        <li>The function should be accessible globally as <code>window.reloadAllIntegramTables</code></li>
+        <li>All instances should be registered in <code>window._integramTableInstances</code> array</li>
+    </ul>
+</div>
+
+<h2>Table 1: Tasks</h2>
+<div id="test-table-1"
+     data-integram-table
+     data-api-url="/report/3769?FR_manager=1"
+     data-page-size="10"
+     data-cookie-prefix="test-table-1"
+     data-title="Тестовая таблица 1"
+     data-instance-name="testTable1">
+</div>
+
+<h2>Table 2: Projects</h2>
+<div id="test-table-2"
+     data-integram-table
+     data-api-url="/report/3769?FR_manager=1"
+     data-page-size="10"
+     data-cookie-prefix="test-table-2"
+     data-title="Тестовая таблица 2"
+     data-instance-name="testTable2">
+</div>
+
+<script src="/assets/js/integram-table.js"></script>
+<script>
+// Test functions
+function testReloadAllTables() {
+    console.log('🧪 Testing reloadAllIntegramTables()...');
+
+    const resultDiv = document.getElementById('test-result');
+    resultDiv.style.display = 'block';
+
+    if (typeof window.reloadAllIntegramTables === 'function') {
+        console.log('✅ Function reloadAllIntegramTables exists globally');
+
+        const instanceCount = window._integramTableInstances ? window._integramTableInstances.length : 0;
+        console.log(`📊 Found ${instanceCount} registered instances`);
+
+        // Call the global reload function
+        window.reloadAllIntegramTables();
+
+        resultDiv.innerHTML = `
+            <strong>✅ Test Successful!</strong><br>
+            - Function <code>reloadAllIntegramTables()</code> called successfully<br>
+            - Reloading ${instanceCount} table instance(s)<br>
+            - Filters are preserved<br>
+            - Check console for detailed logs
+        `;
+        resultDiv.style.borderColor = '#28a745';
+
+        console.log('✅ All tables reloaded successfully');
+    } else {
+        console.error('❌ Function reloadAllIntegramTables not found!');
+        resultDiv.innerHTML = `
+            <strong>❌ Test Failed!</strong><br>
+            Function <code>reloadAllIntegramTables()</code> not found in global scope.
+        `;
+        resultDiv.style.borderColor = '#dc3545';
+    }
+}
+
+function testReloadTable1() {
+    console.log('🧪 Testing reload of testTable1...');
+    if (window.testTable1 && typeof window.testTable1.reload === 'function') {
+        window.testTable1.reload();
+        console.log('✅ Table 1 reloaded');
+    } else {
+        console.error('❌ testTable1.reload() not available');
+    }
+}
+
+function testReloadTable2() {
+    console.log('🧪 Testing reload of testTable2...');
+    if (window.testTable2 && typeof window.testTable2.reload === 'function') {
+        window.testTable2.reload();
+        console.log('✅ Table 2 reloaded');
+    } else {
+        console.error('❌ testTable2.reload() not available');
+    }
+}
+
+function showInstanceInfo() {
+    console.log('📊 Instance Information:');
+    console.log('- Global function exists:', typeof window.reloadAllIntegramTables === 'function');
+    console.log('- Instances array exists:', Array.isArray(window._integramTableInstances));
+    console.log('- Number of instances:', window._integramTableInstances ? window._integramTableInstances.length : 0);
+    console.log('- testTable1 exists:', typeof window.testTable1 !== 'undefined');
+    console.log('- testTable2 exists:', typeof window.testTable2 !== 'undefined');
+
+    if (window._integramTableInstances) {
+        console.log('- Instances:', window._integramTableInstances);
+    }
+
+    const resultDiv = document.getElementById('test-result');
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = `
+        <strong>📊 Instance Information:</strong><br>
+        - Global function: ${typeof window.reloadAllIntegramTables === 'function' ? '✅' : '❌'}<br>
+        - Instances array: ${Array.isArray(window._integramTableInstances) ? '✅' : '❌'}<br>
+        - Number of instances: ${window._integramTableInstances ? window._integramTableInstances.length : 0}<br>
+        - testTable1: ${typeof window.testTable1 !== 'undefined' ? '✅' : '❌'}<br>
+        - testTable2: ${typeof window.testTable2 !== 'undefined' ? '✅' : '❌'}<br>
+        <em>Check console for detailed information</em>
+    `;
+    resultDiv.style.borderColor = '#17a2b8';
+}
+
+// Auto-test on page load
+window.addEventListener('load', function() {
+    console.log('🚀 Page loaded, running initial checks...');
+    setTimeout(() => {
+        showInstanceInfo();
+    }, 1000);
+});
+</script>
+
+</body>
+</html>

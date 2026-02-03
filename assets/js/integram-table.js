@@ -1193,6 +1193,20 @@ class IntegramTable {
             this.render();
         }
 
+        /**
+         * Reload table data with current filter parameters
+         * This method resets the table state and reloads from the beginning
+         * while preserving current filters, column settings, and other state
+         */
+        reload() {
+            // Reset data and load from beginning with current filters
+            this.data = [];
+            this.loadedRecords = 0;
+            this.hasMore = true;
+            this.totalRows = null;
+            this.loadData(false);
+        }
+
         saveColumnState() {
             const state = {
                 order: this.columnOrder,
@@ -2751,6 +2765,35 @@ class IntegramTable {
         }
     }
 
+// Global registry for all IntegramTable instances
+if (typeof window !== 'undefined') {
+    window._integramTableInstances = window._integramTableInstances || [];
+}
+
+/**
+ * Global function to reload all IntegramTable instances
+ * Reloads all table components with their current filter parameters
+ * This function is globally accessible and can be called from anywhere on the page
+ *
+ * @example
+ * // Reload all tables on the page
+ * reloadAllIntegramTables();
+ */
+function reloadAllIntegramTables() {
+    if (typeof window !== 'undefined' && window._integramTableInstances) {
+        window._integramTableInstances.forEach(instance => {
+            if (instance && typeof instance.reload === 'function') {
+                instance.reload();
+            }
+        });
+    }
+}
+
+// Make the function globally accessible
+if (typeof window !== 'undefined') {
+    window.reloadAllIntegramTables = reloadAllIntegramTables;
+}
+
 // Auto-initialize tables from data attributes
 function autoInitTables() {
     const tables = document.querySelectorAll('[data-integram-table]');
@@ -2767,6 +2810,11 @@ function autoInitTables() {
         const instance = new IntegramTable(element.id, options);
         if (options.instanceName) {
             window[options.instanceName] = instance;
+        }
+
+        // Register instance in global registry
+        if (typeof window !== 'undefined' && window._integramTableInstances) {
+            window._integramTableInstances.push(instance);
         }
     });
 }
