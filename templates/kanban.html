@@ -840,7 +840,7 @@
                     <input type="text" class="kanban-form-input" id="recordInn" name="recordInn">
                 </div>
                 <div class="kanban-form-group">
-                    <label class="kanban-form-label">Статус для перевода к партнеру</label>
+                    <label class="kanban-form-label">Статус</label>
                     <div class="kanban-form-static" id="recordStatus"></div>
                 </div>
                 <div class="kanban-form-group">
@@ -1846,7 +1846,7 @@ function renderClientEditForm(data){
     // Status field (from requisites) - use editFormStatusesData (all statuses, unfiltered)
     if(reqs['4874']){
         html += '<div class="kanban-edit-form-group">';
-        html += '<label class="kanban-edit-form-label">Статус</label>';
+        html += '<label class="kanban-edit-form-label">Статус для перевода к партнеру</label>';
         html += '<select class="kanban-edit-form-select" id="editClientStatus" name="t4874">';
         html += '<option value="">Выберите статус</option>';
         var statusValue = getReqValue(reqs, '4874');
