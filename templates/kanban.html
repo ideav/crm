@@ -352,6 +352,7 @@
         text-decoration: none; /* For anchor tags */
         text-transform: none;
         letter-spacing: 0.0178571429em;
+        margin-left: 10px;
     }
 
     .kanban-card-deals-button.has-deals {
@@ -1422,11 +1423,11 @@ function renderCard(task){
     html += '<div class="kanban-card-tasks-row">';
     if(tasksCount > 0 && tasksUrl){
         html += '<a href="' + tasksUrl + '" target="tasks" class="kanban-card-tasks-button ' + buttonClass + '" data-lead-id="' + task['ЛидID'] + '" onclick="event.stopPropagation();">';
-        html += 'Задачи: <span class="tasks-count">' + tasksCount + '</span>';
+        html += 'Задачи:&nbsp;<span class="tasks-count">' + tasksCount + '</span>';
         html += '</a>';
     } else {
         html += '<span class="kanban-card-tasks-button ' + buttonClass + '" data-lead-id="' + task['ЛидID'] + '">';
-        html += 'Задачи: <span class="tasks-count">' + tasksCount + '</span>';
+        html += 'Задачи:&nbsp;<span class="tasks-count">' + tasksCount + '</span>';
         html += '</span>';
     }
     html += '<button class="kanban-add-task-button" onclick="openTaskCreateForm(\'' + task['ЛидID'] + '\', this); event.stopPropagation();" title="Добавить задачу">+</button>';
@@ -1441,11 +1442,11 @@ function renderCard(task){
 
     if(dealsCount > 0 && dealsUrl){
         html += '<a href="' + dealsUrl + '" target="deals" class="kanban-card-deals-button ' + dealsButtonClass + '" data-lead-id="' + task['ЛидID'] + '" onclick="event.stopPropagation();">';
-        html += 'Сделки: <span class="deals-count">' + dealsCount + '</span>';
+        html += 'Сделки:&nbsp;<span class="deals-count">' + dealsCount + '</span>';
         html += '</a>';
     } else {
         html += '<span class="kanban-card-deals-button ' + dealsButtonClass + '" data-lead-id="' + task['ЛидID'] + '">';
-        html += 'Сделки: <span class="deals-count">' + dealsCount + '</span>';
+        html += 'Сделки:&nbsp;<span class="deals-count">' + dealsCount + '</span>';
         html += '</span>';
     }
 
