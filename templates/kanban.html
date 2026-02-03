@@ -399,11 +399,46 @@
         transition: all 0.2s ease;
         padding: 0;
         line-height: 1;
+        box-shadow: 0 2px 1px -1px rgba(0,0,0,0.2),
+                    0 1px 1px 0 rgba(0,0,0,0.14),
+                    0 1px 3px 0 rgba(0,0,0,0.12);
     }
 
     .kanban-add-task-button:hover {
         background-color: var(--primary-hover);
         transform: scale(1.1);
+        box-shadow: 0 3px 3px -2px rgba(0,0,0,0.2),
+                    0 3px 4px 0 rgba(0,0,0,0.14),
+                    0 1px 8px 0 rgba(0,0,0,0.12);
+    }
+
+    .kanban-add-deal-button {
+        width: 20px;
+        height: 20px;
+        border-radius: 4px;
+        border: none;
+        background-color: #55b875;
+        color: white;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s ease;
+        padding: 0;
+        line-height: 1;
+        box-shadow: 0 2px 1px -1px rgba(0,0,0,0.2),
+                    0 1px 1px 0 rgba(0,0,0,0.14),
+                    0 1px 3px 0 rgba(0,0,0,0.12);
+    }
+
+    .kanban-add-deal-button:hover {
+        background-color: #4aa668;
+        transform: scale(1.1);
+        box-shadow: 0 3px 3px -2px rgba(0,0,0,0.2),
+                    0 3px 4px 0 rgba(0,0,0,0.14),
+                    0 1px 8px 0 rgba(0,0,0,0.12);
     }
 
     .loading {
@@ -990,6 +1025,23 @@
     </div>
 </div>
 
+<!-- Modal for creating deal -->
+<div id="createDealModal" class="kanban-edit-modal-overlay">
+    <div class="kanban-edit-modal">
+        <div class="kanban-edit-modal-header">
+            <h3 class="kanban-edit-modal-title">Добавить сделку</h3>
+            <button class="kanban-edit-modal-close" onclick="closeDealCreateModal()">&times;</button>
+        </div>
+        <div class="kanban-edit-modal-body" id="createDealModalBody">
+            <div class="kanban-edit-loading">Загрузка...</div>
+        </div>
+        <div class="kanban-edit-modal-footer">
+            <button class="kanban-button kanban-button-primary" onclick="submitCreateDeal()" id="createDealSubmitButton">Создать</button>
+            <button class="kanban-button kanban-button-secondary" onclick="closeDealCreateModal()">Отмена</button>
+        </div>
+    </div>
+</div>
+
 <script>
 // Kanban functionality
 var kanbanData = [];
@@ -1448,6 +1500,7 @@ function renderCard(task){
         html += 'Сделки: <span class="deals-count">' + dealsCount + '</span>';
         html += '</span>';
     }
+    html += '<button class="kanban-add-deal-button" onclick="openDealCreateForm(\'' + task['ЛидID'] + '\', this); event.stopPropagation();" title="Добавить сделку">+</button>';
 
     html += '</div>';
 
@@ -2322,8 +2375,181 @@ function updateTaskCount(leadId){
                 var cardLeadId = card.data('lead-id');
                 var tasksUrl = '/' + db + '/object/3596?FR_4547=@' + cardLeadId;
 
-                var newButton = $('<a href="' + tasksUrl + '" target="tasks" class="kanban-card-tasks-button has-tasks" data-lead-id="' + leadId + '" onclick="event.stopPropagation();">Задачи (<span class="tasks-count">' + newCount + '</span>)</a>');
+                var newButton = $('<a href="' + tasksUrl + '" target="tasks" class="kanban-card-tasks-button has-tasks" data-lead-id="' + leadId + '" onclick="event.stopPropagation();">Задачи: <span class="tasks-count">' + newCount + '</span></a>');
                 taskButton.replaceWith(newButton);
+            }
+        }
+    }
+}
+
+// Deal creation modal functionality
+var currentDealLeadId = null;
+var currentDealButton = null;
+var dealTypeId = 430;  // Deal type ID (Сделка)
+
+function openDealCreateForm(leadId, button){
+    currentDealLeadId = leadId;
+    currentDealButton = button;
+    $('#createDealModal').addClass('active');
+    renderDealCreateForm();
+}
+
+function closeDealCreateModal(){
+    $('#createDealModal').removeClass('active');
+    currentDealLeadId = null;
+    currentDealButton = null;
+}
+
+function renderDealCreateForm(){
+    var html = '<form id="createDealForm">';
+
+    // Quantity field (Количество)
+    html += '<div class="kanban-edit-form-group">';
+    html += '<label class="kanban-edit-form-label">Количество</label>';
+    html += '<input type="number" class="kanban-edit-form-input" id="dealQuantity" name="t447" value="1" min="1" step="1">';
+    html += '</div>';
+
+    // Product field (Продукт) - required
+    html += '<div class="kanban-edit-form-group">';
+    html += '<label class="kanban-edit-form-label required">Продукт</label>';
+    html += '<select class="kanban-edit-form-select" id="dealProduct" name="t449" required>';
+    html += '<option value="">Выберите продукт</option>';
+    productsData.forEach(function(product){
+        // Default to currently selected product in productRadioGroup
+        var selected = (currentProductId !== 'all' && product['ПродуктID'] == currentProductId) ? 'selected' : '';
+        html += '<option value="' + product['ПродуктID'] + '" ' + selected + '>' + product['Продукт'] + '</option>';
+    });
+    html += '</select>';
+    html += '</div>';
+
+    // Amount field (Стоимость)
+    html += '<div class="kanban-edit-form-group">';
+    html += '<label class="kanban-edit-form-label">Стоимость (₽)</label>';
+    html += '<input type="number" class="kanban-edit-form-input" id="dealAmount" name="t5309" min="0" step="0.01">';
+    html += '</div>';
+
+    // Partner field (Партнер)
+    html += '<div class="kanban-edit-form-group">';
+    html += '<label class="kanban-edit-form-label">Партнер</label>';
+    html += '<select class="kanban-edit-form-select" id="dealPartner" name="t479">';
+    html += '<option value="">Выберите партнера</option>';
+    partnersData.forEach(function(partner){
+        html += '<option value="' + partner['ПартнерID'] + '">' + partner['Партнер'] + '</option>';
+    });
+    html += '</select>';
+    html += '</div>';
+
+    // Note field (Примечание)
+    html += '<div class="kanban-edit-form-group">';
+    html += '<label class="kanban-edit-form-label">Примечание</label>';
+    html += '<textarea class="kanban-edit-form-textarea" id="dealNote" name="t636" rows="4"></textarea>';
+    html += '</div>';
+
+    html += '</form>';
+
+    $('#createDealModalBody').html(html);
+}
+
+function submitCreateDeal(){
+    if(!currentDealLeadId) return;
+
+    var productId = $('#dealProduct').val();
+    if(!productId){
+        $('#dealProduct').addClass('error');
+        alert('Продукт обязателен для заполнения');
+        return;
+    }
+
+    $('#createDealSubmitButton').prop('disabled', true).text('Создание...');
+
+    // Build POST data
+    var postData = '';
+
+    // Add quantity (t447)
+    var quantity = $('#dealQuantity').val();
+    if(quantity){
+        postData += 't447=' + encodeURIComponent(quantity);
+    }
+
+    // Add hardcoded t5315=1
+    postData += '&t5315=1';
+
+    // Add product (t449) - required
+    postData += '&t449=' + encodeURIComponent(productId);
+
+    // Add amount (t5309)
+    var amount = $('#dealAmount').val();
+    if(amount){
+        postData += '&t5309=' + encodeURIComponent(amount);
+    }
+
+    // Add note (t636)
+    var note = $('#dealNote').val();
+    if(note){
+        postData += '&t636=' + encodeURIComponent(note);
+    }
+
+    // Add partner (t479)
+    var partnerId = $('#dealPartner').val();
+    if(partnerId){
+        postData += '&t479=' + encodeURIComponent(partnerId);
+    }
+
+    postData += '&_xsrf=' + xsrf;
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', 'https://' + window.location.hostname + '/' + db + '/_m_new/' + dealTypeId + '?JSON&up=' + currentDealLeadId, true);
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    xhr.onload = function(){
+        $('#createDealSubmitButton').prop('disabled', false).text('Создать');
+        if(xhr.status === 200){
+            try{
+                var response = JSON.parse(xhr.responseText);
+                console.log('Deal created:', response);
+
+                // Update deal count in the badge
+                updateDealCount(currentDealLeadId);
+
+                closeDealCreateModal();
+            } catch(e){
+                console.error('Error parsing response:', e);
+                updateDealCount(currentDealLeadId);
+                closeDealCreateModal();
+            }
+        } else {
+            console.error('Error creating deal:', xhr.status, xhr.responseText);
+            alert('Ошибка при создании сделки: ' + xhr.status);
+        }
+    };
+    xhr.onerror = function(){
+        $('#createDealSubmitButton').prop('disabled', false).text('Создать');
+        console.error('Network error creating deal');
+        alert('Ошибка сети при создании сделки');
+    };
+    xhr.send(postData);
+}
+
+function updateDealCount(leadId){
+    // Find the deal button for this lead and update the count
+    var dealButton = $('.kanban-card-deals-button[data-lead-id="' + leadId + '"]');
+    if(dealButton.length > 0){
+        var countSpan = dealButton.find('.deals-count');
+        if(countSpan.length > 0){
+            var currentCount = parseInt(countSpan.text()) || 0;
+            var newCount = currentCount + 1;
+            countSpan.text(newCount);
+
+            // Update button class if it was 'no-deals'
+            if(dealButton.hasClass('no-deals')){
+                dealButton.removeClass('no-deals').addClass('has-deals');
+
+                // Convert span to anchor with link
+                var card = dealButton.closest('.kanban-card');
+                var cardLeadId = card.data('lead-id');
+                var dealsUrl = '/' + db + '/smartq/6271?FR_КлиентID=' + cardLeadId;
+
+                var newButton = $('<a href="' + dealsUrl + '" target="deals" class="kanban-card-deals-button has-deals" data-lead-id="' + leadId + '" onclick="event.stopPropagation();">Сделки: <span class="deals-count">' + newCount + '</span></a>');
+                dealButton.replaceWith(newButton);
             }
         }
     }
@@ -2374,6 +2600,9 @@ $(document).on('click', function(event){
     }
     if(event.target.id === 'createTaskModal'){
         closeTaskCreateModal();
+    }
+    if(event.target.id === 'createDealModal'){
+        closeDealCreateModal();
     }
 });
 </script>
