@@ -352,9 +352,12 @@ class IntegramTable {
                                 ${ orderedColumns.map(col => {
                                     const width = this.columnWidths[col.id];
                                     const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
+                                    const addButtonHtml = this.shouldShowAddButton(col) ?
+                                        `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись">+</button>` : '';
                                     return `
                                     <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
                                         <span class="column-header-content">${ col.name }</span>
+                                        ${ addButtonHtml }
                                         <div class="column-resize-handle" data-column-id="${ col.id }"></div>
                                     </th>
                                 `;
@@ -1272,6 +1275,55 @@ class IntegramTable {
             }
         }
 
+        shouldShowAddButton(column) {
+            // Check if column has granted: 1
+            if (column.granted !== 1) {
+                return false;
+            }
+
+            // Check if there's a corresponding column with "ID" suffix
+            const idColumnName = column.name + 'ID';
+            const idColumn = this.columns.find(col => col.name === idColumnName);
+
+            // Check if ID column exists and has a ref (reference type)
+            return idColumn && idColumn.ref && idColumn.ref > 0;
+        }
+
+        async openColumnCreateForm(columnId) {
+            try {
+                const column = this.columns.find(col => col.id === columnId);
+                if (!column) {
+                    this.showToast('Ошибка: колонка не найдена', 'error');
+                    return;
+                }
+
+                // Find the corresponding ID column
+                const idColumnName = column.name + 'ID';
+                const idColumn = this.columns.find(col => col.name === idColumnName);
+
+                if (!idColumn || !idColumn.ref) {
+                    this.showToast('Ошибка: не найден тип записи', 'error');
+                    return;
+                }
+
+                const typeId = idColumn.ref;
+
+                // Fetch metadata and open create form
+                if (!this.metadataCache[typeId]) {
+                    this.metadataCache[typeId] = await this.fetchMetadata(typeId);
+                }
+
+                const metadata = this.metadataCache[typeId];
+
+                // Render create form (recordData = null for create mode)
+                this.renderEditFormModal(metadata, null, true, typeId, columnId);
+
+            } catch (error) {
+                console.error('Error opening create form from column header:', error);
+                this.showToast(`Ошибка: ${ error.message }`, 'error');
+            }
+        }
+
         async fetchMetadata(typeId) {
             const apiBase = this.getApiBase();
             const response = await fetch(`${ apiBase }/metadata/${ typeId }`);
@@ -1434,7 +1486,7 @@ class IntegramTable {
             return this.getFormatById(baseTypeId);
         }
 
-        renderEditFormModal(metadata, recordData, isCreate, typeId) {
+        renderEditFormModal(metadata, recordData, isCreate, typeId, columnId = null) {
             // Track modal depth for z-index stacking
             if (!window._integramModalDepth) {
                 window._integramModalDepth = 0;
@@ -1574,7 +1626,7 @@ class IntegramTable {
             const parentId = recordData && recordData.obj ? recordData.obj.parent : 1;
 
             saveBtn.addEventListener('click', () => {
-                this.saveRecord(modal, isCreate, recordId, typeId, parentId);
+                this.saveRecord(modal, isCreate, recordId, typeId, parentId, columnId);
             });
 
             // Close modal helper function
@@ -2401,7 +2453,7 @@ class IntegramTable {
             });
         }
 
-        async saveRecord(modal, isCreate, recordId, typeId, parentId) {
+        async saveRecord(modal, isCreate, recordId, typeId, parentId, columnId = null) {
             const form = modal.querySelector('#edit-form');
 
             if (!form.checkValidity()) {
@@ -2480,16 +2532,89 @@ class IntegramTable {
                 // Show success message
                 this.showToast('Запись успешно сохранена', 'success');
 
-                // Reload table data
+                // Handle special refresh for column header create
+                if (isCreate && columnId) {
+                    // Extract created record ID from response
+                    const createdId = result.id || result.i;
+
+                    if (createdId) {
+                        await this.refreshWithNewRecord(columnId, createdId);
+                    } else {
+                        // Fallback to full reload if no ID returned
+                        this.data = [];
+                        this.loadedRecords = 0;
+                        this.hasMore = true;
+                        this.totalRows = null;
+                        await this.loadData(false);
+                    }
+                } else {
+                    // Normal reload for edit or regular create
+                    this.data = [];
+                    this.loadedRecords = 0;
+                    this.hasMore = true;
+                    this.totalRows = null;
+                    await this.loadData(false);
+                }
+
+            } catch (error) {
+                console.error('Error saving record:', error);
+                this.showToast(`Ошибка сохранения: ${ error.message }`, 'error');
+            }
+        }
+
+        async refreshWithNewRecord(columnId, createdRecordId) {
+            try {
+                // Fetch the new record using filter
+                const params = new URLSearchParams({
+                    LIMIT: '0,1',
+                    [`FR_${ columnId }`]: createdRecordId
+                });
+
+                const separator = this.options.apiUrl.includes('?') ? '&' : '?';
+                const response = await fetch(`${ this.options.apiUrl }${ separator }${ params }`);
+                const json = await response.json();
+
+                // Transform column-based data to row-based data
+                const columnData = json.data || [];
+                let newRow = null;
+
+                if (columnData.length > 0 && Array.isArray(columnData[0]) && columnData[0].length > 0) {
+                    // Extract the first (and only) row
+                    const row = [];
+                    for (let colIndex = 0; colIndex < columnData.length; colIndex++) {
+                        row.push(columnData[colIndex][0]);
+                    }
+                    newRow = row;
+                }
+
+                if (newRow) {
+                    // Add the new record to the beginning of the data
+                    this.data.unshift(newRow);
+                    this.loadedRecords++;
+
+                    // Update total count if known
+                    if (this.totalRows !== null) {
+                        this.totalRows++;
+                    }
+
+                    // Re-render the table
+                    this.render();
+                } else {
+                    // Fallback: full reload if we couldn't fetch the new record
+                    this.data = [];
+                    this.loadedRecords = 0;
+                    this.hasMore = true;
+                    this.totalRows = null;
+                    await this.loadData(false);
+                }
+            } catch (error) {
+                console.error('Error fetching new record:', error);
+                // Fallback to full reload on error
                 this.data = [];
                 this.loadedRecords = 0;
                 this.hasMore = true;
                 this.totalRows = null;
                 await this.loadData(false);
-
-            } catch (error) {
-                console.error('Error saving record:', error);
-                this.showToast(`Ошибка сохранения: ${ error.message }`, 'error');
             }
         }
 

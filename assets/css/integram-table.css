@@ -172,6 +172,50 @@
     padding-right: 10px;
 }
 
+/* Column header add button */
+.integram-table th {
+    position: relative;
+}
+
+.column-add-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--md-primary);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    width: 24px;
+    height: 24px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: bold;
+    line-height: 1;
+    padding: 0;
+    box-shadow: var(--md-elevation-1);
+    transition: var(--md-transition);
+    z-index: 1;
+}
+
+.integram-table th:hover .column-add-btn {
+    display: flex;
+}
+
+.column-add-btn:hover {
+    background: var(--md-primary-dark);
+    box-shadow: var(--md-elevation-2);
+}
+
+.column-add-btn:active {
+    background: var(--md-primary-dark);
+    box-shadow: var(--md-elevation-1);
+    transform: translateY(-50%) scale(0.95);
+}
+
 /* Compact mode */
 .integram-table.compact th {
     padding: 8px 5px;
