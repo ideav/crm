@@ -1285,29 +1285,17 @@ class IntegramTable {
                     params.append('_xsrf', xsrf);
                 }
 
-                // Determine parent record ID from the current row data
-                // According to the issue: parent record ID is a number found in a column whose name ends with "ID"
-                const rowIndex = parseInt(cell.dataset.row);
-                console.log('[TRACE] Looking for parent record ID in row', rowIndex);
-                console.log('[TRACE] Available columns:', this.columns.map(c => ({ id: c.id, name: c.name })));
+                // Use parent record ID from parentInfo (already determined in startInlineEdit)
+                console.log('[TRACE] saveInlineEdit - parentInfo:', parentInfo);
 
-                // Find a column whose name ends with "ID"
-                const idColumn = this.columns.find(c => c.name && c.name.endsWith('ID'));
-                console.log('[TRACE] Found ID column:', idColumn);
-
-                let parentRecordId = null;
-                if (idColumn) {
-                    const idColIndex = this.columns.findIndex(c => c.id === idColumn.id);
-                    parentRecordId = idColIndex !== -1 && this.data[rowIndex] ? this.data[rowIndex][idColIndex] : null;
-                    console.log('[TRACE] Parent record ID from ID column:', parentRecordId);
-                }
+                const parentRecordId = parentInfo.parentRecordId;
 
                 if (!parentRecordId) {
-                    console.log('[TRACE] Failed to find parent record ID');
+                    console.log('[TRACE] saveInlineEdit - Failed to find parent record ID in parentInfo');
                     throw new Error('Не удалось определить ID родительской записи');
                 }
 
-                console.log('[TRACE] Using parent record ID:', parentRecordId);
+                console.log('[TRACE] saveInlineEdit - Using parent record ID from parentInfo:', parentRecordId);
 
                 let url;
                 if (parentInfo.isFirstColumn) {
