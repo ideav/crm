@@ -273,6 +273,7 @@ class IntegramTable {
         }
 
         processColumnVisibility() {
+            console.log('[TRACE] processColumnVisibility - start');
             this.idColumns.clear();
             this.styleColumns = {};
             this.editableColumns.clear();
@@ -283,6 +284,13 @@ class IntegramTable {
                 columnsByName[col.name] = col;
             });
 
+            console.log('[TRACE] processColumnVisibility - columns:', this.columns.map(c => ({
+                id: c.id,
+                name: c.name,
+                granted: c.granted,
+                type: c.type
+            })));
+
             // Process each column
             this.columns.forEach(col => {
                 const name = col.name;
@@ -292,8 +300,11 @@ class IntegramTable {
                     const baseName = name.slice(0, -2);
                     if (columnsByName[baseName]) {
                         this.idColumns.add(col.id);
-                        // Mark the base column as editable and store the ID column reference
-                        this.editableColumns.set(columnsByName[baseName].id, col.id);
+                        console.log('[TRACE] processColumnVisibility - marking ID column as hidden:', {
+                            colId: col.id,
+                            colName: name,
+                            baseName: baseName
+                        });
                     }
                 }
 
@@ -315,8 +326,62 @@ class IntegramTable {
                     if (baseCol) {
                         this.styleColumns[baseCol.id] = col.id;
                         this.idColumns.add(col.id);  // Hide style columns too
+                        console.log('[TRACE] processColumnVisibility - marking style column as hidden:', {
+                            colId: col.id,
+                            colName: name,
+                            baseColId: baseCol.id
+                        });
                     }
                 }
+
+                // NEW: Mark ALL columns with granted=1 as editable
+                if (col.granted === 1) {
+                    // Look for corresponding ID column
+                    const idColumnName = name + 'ID';
+                    const idColumn = this.columns.find(c => c.name === idColumnName);
+
+                    if (idColumn) {
+                        // Store ID column reference for this editable column
+                        this.editableColumns.set(col.id, idColumn.id);
+                        console.log('[TRACE] processColumnVisibility - marking column as editable (granted=1, has ID column):', {
+                            colId: col.id,
+                            colName: name,
+                            granted: col.granted,
+                            idColId: idColumn.id,
+                            idColName: idColumnName
+                        });
+                    } else {
+                        // No ID column found, but still mark as editable with null reference
+                        // The parent ID will be determined dynamically using the logic from the issue
+                        this.editableColumns.set(col.id, null);
+                        console.log('[TRACE] processColumnVisibility - marking column as editable (granted=1, NO ID column):', {
+                            colId: col.id,
+                            colName: name,
+                            granted: col.granted,
+                            note: 'Parent ID will be determined dynamically'
+                        });
+                    }
+                } else {
+                    console.log('[TRACE] processColumnVisibility - column NOT editable (granted != 1):', {
+                        colId: col.id,
+                        colName: name,
+                        granted: col.granted
+                    });
+                }
+            });
+
+            console.log('[TRACE] processColumnVisibility - summary:', {
+                totalColumns: this.columns.length,
+                editableColumns: Array.from(this.editableColumns.keys()).map(colId => {
+                    const col = this.columns.find(c => c.id === colId);
+                    return {
+                        colId,
+                        colName: col?.name,
+                        idColId: this.editableColumns.get(colId)
+                    };
+                }),
+                hiddenIdColumns: Array.from(this.idColumns),
+                styleColumns: Object.keys(this.styleColumns)
             });
         }
 
@@ -598,8 +663,19 @@ class IntegramTable {
             // Add edit icon for editable cells (only when recordId exists - no create new)
             if (isEditable) {
                 const idColId = this.editableColumns.get(column.id);
-                const idColIndex = this.columns.findIndex(c => c.id === idColId);
-                const recordId = idColIndex !== -1 && this.data[rowIndex] ? this.data[rowIndex][idColIndex] : '';
+                let recordId = '';
+
+                // If we have an ID column reference, get the record ID from it
+                if (idColId !== null) {
+                    const idColIndex = this.columns.findIndex(c => c.id === idColId);
+                    recordId = idColIndex !== -1 && this.data[rowIndex] ? this.data[rowIndex][idColIndex] : '';
+                } else {
+                    // No ID column - need to determine parent ID using the logic from the issue
+                    // A) If first column: look for column with type={column.type} and name ending in ID
+                    // B) If requisite: look for column with type={parent object id} and name ending in ID
+                    recordId = this.determineParentRecordId(column, rowIndex);
+                }
+
                 const typeId = column.type || '';
                 const instanceName = this.options.instanceName;
                 // Only show edit icon if recordId exists (disable creating new records)
@@ -613,10 +689,19 @@ class IntegramTable {
             let editableAttrs = '';
             if (isEditable && !customStyle.includes('edit-icon')) {
                 const idColId = this.editableColumns.get(column.id);
-                const idColIndex = this.columns.findIndex(c => c.id === idColId);
-                const recordId = idColIndex !== -1 && this.data[rowIndex] ? this.data[rowIndex][idColIndex] : '';
+                let recordId = '';
+
+                // If we have an ID column reference, get the record ID from it
+                if (idColId !== null) {
+                    const idColIndex = this.columns.findIndex(c => c.id === idColId);
+                    recordId = idColIndex !== -1 && this.data[rowIndex] ? this.data[rowIndex][idColIndex] : '';
+                } else {
+                    // No ID column - need to determine parent ID using the logic from the issue
+                    recordId = this.determineParentRecordId(column, rowIndex);
+                }
+
                 if (recordId && recordId !== '' && recordId !== '0') {
-                    editableAttrs = ` data-editable="true" data-record-id="${ recordId }" data-col-id="${ column.id }" data-col-type="${ column.type }" data-col-format="${ format }"`;
+                    editableAttrs = ` data-editable="true" data-record-id="${ recordId }" data-col-id="${ column.id }" data-col-type="${ column.type }" data-col-format="${ format }" data-row-index="${ rowIndex }"`;
                     cellClass += ' inline-editable';
                 }
             }
@@ -717,7 +802,10 @@ class IntegramTable {
             // Attach inline editing handlers
             this.container.querySelectorAll('td[data-editable="true"]').forEach(td => {
                 td.addEventListener('click', (e) => {
-                    console.log('[TRACE] Cell clicked:', {
+                    const colId = td.dataset.colId;
+                    const column = this.columns.find(c => c.id === colId);
+
+                    console.log('[TRACE] EDITABLE cell clicked:', {
                         target: e.target,
                         isEditIcon: !!e.target.closest('.edit-icon'),
                         alreadyEditing: !!this.currentEditingCell,
@@ -725,8 +813,16 @@ class IntegramTable {
                             recordId: td.dataset.recordId,
                             colId: td.dataset.colId,
                             colType: td.dataset.colType,
-                            editable: td.dataset.editable
-                        }
+                            editable: td.dataset.editable,
+                            rowIndex: td.dataset.rowIndex
+                        },
+                        columnInfo: column ? {
+                            id: column.id,
+                            name: column.name,
+                            type: column.type,
+                            granted: column.granted
+                        } : 'column not found',
+                        cellText: td.textContent?.substring(0, 50)
                     });
                     // Don't trigger if clicking on edit icon or already editing
                     if (e.target.closest('.edit-icon') || this.currentEditingCell) {
@@ -736,35 +832,87 @@ class IntegramTable {
                     this.startInlineEdit(td);
                 });
             });
+
+            // TRACE: Also log clicks on NON-editable cells to explain why they're not editable
+            this.container.querySelectorAll('td:not([data-editable="true"])').forEach(td => {
+                td.addEventListener('click', (e) => {
+                    const row = parseInt(td.dataset.row);
+                    const col = parseInt(td.dataset.col);
+                    if (isNaN(row) || isNaN(col)) return;
+
+                    const column = this.columns[col];
+                    if (!column) return;
+
+                    // Check if this column is in editableColumns
+                    const isInEditableColumns = this.editableColumns.has(column.id);
+
+                    console.log('[TRACE] NON-EDITABLE cell clicked - why is it not editable?', {
+                        columnInfo: {
+                            id: column.id,
+                            name: column.name,
+                            type: column.type,
+                            granted: column.granted,
+                            format: column.format
+                        },
+                        reasons: {
+                            granted_not_1: column.granted !== 1,
+                            not_in_editableColumns: !isInEditableColumns,
+                            is_id_column: this.idColumns.has(column.id),
+                            is_style_column: !!this.styleColumns[column.id]
+                        },
+                        cellText: td.textContent?.substring(0, 50)
+                    });
+                });
+            });
         }
 
         async startInlineEdit(cell) {
-            console.log('[TRACE] startInlineEdit called');
+            console.log('[TRACE] startInlineEdit - called for cell');
             // Check if we can edit this cell (need to determine parent ID)
-            const recordId = cell.dataset.recordId;
+            let recordId = cell.dataset.recordId;
             const colId = cell.dataset.colId;
             const colType = cell.dataset.colType;
             const format = cell.dataset.colFormat;
 
-            console.log('[TRACE] Cell data:', { recordId, colId, colType, format });
+            console.log('[TRACE] startInlineEdit - initial cell data:', {
+                recordId,
+                colId,
+                colType,
+                format,
+                cellText: cell.textContent?.substring(0, 50)
+            });
 
-            if (!recordId || !colId || !colType) {
-                console.log('[TRACE] Missing required data - cannot edit');
+            if (!colId || !colType) {
+                console.log('[TRACE] startInlineEdit - missing colId or colType - cannot edit');
                 return;
             }
 
-            // Determine if this is first column or requisite
-            console.log('[TRACE] Determining parent record...');
-            const parentInfo = await this.determineParentRecord(colId, colType);
-            console.log('[TRACE] Parent info result:', parentInfo);
+            // Determine parent record using the logic from the issue
+            console.log('[TRACE] startInlineEdit - determining parent record...');
+            const parentInfo = await this.determineParentRecord(colId, colType, recordId);
+            console.log('[TRACE] startInlineEdit - parent info result:', parentInfo);
+
             if (!parentInfo) {
-                console.log('[TRACE] Failed to determine parent record');
+                console.log('[TRACE] startInlineEdit - FAILED to determine parent record');
                 this.showToast('Не удалось определить родительскую запись', 'error');
+                return;
+            }
+
+            // If recordId was 'dynamic', now we should have the actual parent record ID
+            if (recordId === 'dynamic' && parentInfo.parentRecordId) {
+                recordId = parentInfo.parentRecordId;
+                console.log('[TRACE] startInlineEdit - resolved dynamic recordId to:', recordId);
+            }
+
+            if (!recordId || recordId === '' || recordId === '0') {
+                console.log('[TRACE] startInlineEdit - no valid recordId after parent determination');
+                this.showToast('Не удалось определить ID записи для редактирования', 'error');
                 return;
             }
 
             // Get current value from the cell
             const currentValue = this.extractCellValue(cell);
+            console.log('[TRACE] startInlineEdit - current value:', currentValue);
 
             // Store reference to current editing cell
             this.currentEditingCell = {
@@ -777,6 +925,7 @@ class IntegramTable {
                 originalValue: currentValue
             };
 
+            console.log('[TRACE] startInlineEdit - rendering inline editor');
             // Create inline editor based on format
             this.renderInlineEditor(cell, currentValue, format);
         }
@@ -788,46 +937,229 @@ class IntegramTable {
             return cellContent.replace(/\.\.\.$/g, '').trim();
         }
 
-        async determineParentRecord(colId, colType) {
-            console.log('[TRACE] determineParentRecord - colId:', colId, 'colType:', colType);
-            // Use global metadata to determine parent record
+        determineParentRecordId(column, rowIndex) {
+            // Helper method to determine parent record ID for a cell at render time
+            // Implements the logic from the issue for finding parent record ID
+            console.log('[TRACE] determineParentRecordId - START:', {
+                columnId: column.id,
+                columnName: column.name,
+                columnType: column.type,
+                rowIndex: rowIndex
+            });
+
             if (!this.globalMetadata) {
-                console.log('[TRACE] No global metadata available');
-                return null;
+                console.log('[TRACE] determineParentRecordId - no global metadata');
+                return '';
             }
 
-            console.log('[TRACE] Global metadata:', this.globalMetadata);
+            const colType = column.type;
 
-            // Check if colType is among the top-level metadata IDs (first column)
+            // A) Check if this is a first column (type is in top-level metadata)
             const metaItem = this.globalMetadata.find(item => item.id === colType);
             if (metaItem) {
-                console.log('[TRACE] Found as first column in metadata');
-                // This is a first column - parent ID is in the same column
-                return {
-                    isFirstColumn: true,
-                    parentType: colType,
-                    parentColumnId: colId
-                };
+                console.log('[TRACE] determineParentRecordId - first column case');
+                // Look for column with type=colType and name ending in ID
+                const idColumnName = column.name + 'ID';
+                const idColumn = this.columns.find(c => c.name === idColumnName && c.type === colType);
+
+                if (idColumn) {
+                    const idColIndex = this.columns.findIndex(c => c.id === idColumn.id);
+                    const parentRecordId = idColIndex !== -1 && this.data[rowIndex] ? this.data[rowIndex][idColIndex] : '';
+                    console.log('[TRACE] determineParentRecordId - found parent ID (first column):', {
+                        idColumnName: idColumn.name,
+                        idColumnId: idColumn.id,
+                        parentRecordId: parentRecordId
+                    });
+                    return parentRecordId;
+                } else {
+                    console.log('[TRACE] determineParentRecordId - ID column not found for first column');
+                }
             }
 
-            // Check if colType is in any reqs (requisite columns)
+            // B) Check if this is a requisite (type is in reqs of some metadata item)
             for (const item of this.globalMetadata) {
                 if (item.reqs) {
                     const req = item.reqs.find(r => r.id === colType);
                     if (req) {
-                        console.log('[TRACE] Found as requisite in metadata, parent:', item.id);
-                        // This is a requisite - need to find parent ID column
-                        const parentColumnId = item.id;
+                        console.log('[TRACE] determineParentRecordId - requisite case, parent type:', item.id);
+                        // Look for column with type=item.id and name ending in ID
+                        const parentIdColumn = this.columns.find(c => c.type === item.id && c.name.endsWith('ID'));
+
+                        if (parentIdColumn) {
+                            const idColIndex = this.columns.findIndex(c => c.id === parentIdColumn.id);
+                            const parentRecordId = idColIndex !== -1 && this.data[rowIndex] ? this.data[rowIndex][idColIndex] : '';
+                            console.log('[TRACE] determineParentRecordId - found parent ID (requisite):', {
+                                parentIdColumnName: parentIdColumn.name,
+                                parentIdColumnId: parentIdColumn.id,
+                                parentRecordId: parentRecordId
+                            });
+                            return parentRecordId;
+                        } else {
+                            console.log('[TRACE] determineParentRecordId - parent ID column not found for requisite');
+                        }
+                    }
+                }
+            }
+
+            console.log('[TRACE] determineParentRecordId - no parent found');
+            return '';
+        }
+
+        async determineParentRecord(colId, colType, recordId) {
+            console.log('[TRACE] determineParentRecord - START');
+            console.log('[TRACE] determineParentRecord - inputs:', {
+                colId,
+                colType,
+                recordId
+            });
+
+            // Find the column object
+            const column = this.columns.find(c => c.id === colId);
+            if (!column) {
+                console.log('[TRACE] determineParentRecord - column not found for colId:', colId);
+                return null;
+            }
+
+            console.log('[TRACE] determineParentRecord - column:', {
+                id: column.id,
+                name: column.name,
+                type: column.type,
+                granted: column.granted
+            });
+
+            // Use global metadata to determine parent record
+            if (!this.globalMetadata) {
+                console.log('[TRACE] determineParentRecord - no global metadata available');
+                return null;
+            }
+
+            console.log('[TRACE] determineParentRecord - global metadata items:', this.globalMetadata.map(item => ({
+                id: item.id,
+                name: item.name,
+                hasReqs: !!item.reqs,
+                reqsCount: item.reqs?.length
+            })));
+
+            // NEW LOGIC FROM ISSUE:
+            // A) If this is the first column of the table, the parent record ID will be in
+            //    the report column with type={type of this cell} and name ending in ID
+            // B) If this is a requisite, the parent record ID will be in the report column
+            //    with type={id of the object whose reqs contained this cell's type}, and name ending in ID
+
+            // Check if colType is among the top-level metadata IDs (first column case - A)
+            const metaItem = this.globalMetadata.find(item => item.id === colType);
+            if (metaItem) {
+                console.log('[TRACE] determineParentRecord - found as first column in metadata:', {
+                    metaItemId: metaItem.id,
+                    metaItemName: metaItem.name
+                });
+
+                // This is a first column - look for column with type=colType and name ending in ID
+                const idColumnName = column.name + 'ID';
+                console.log('[TRACE] determineParentRecord - looking for ID column:', {
+                    searchingFor: idColumnName,
+                    expectedType: colType
+                });
+
+                const idColumn = this.columns.find(c => c.name === idColumnName && c.type === colType);
+                if (!idColumn) {
+                    console.log('[TRACE] determineParentRecord - ID column not found');
+                    console.log('[TRACE] determineParentRecord - available columns ending in ID:', this.columns.filter(c => c.name.endsWith('ID')).map(c => ({
+                        name: c.name,
+                        type: c.type,
+                        id: c.id
+                    })));
+                    return null;
+                }
+
+                console.log('[TRACE] determineParentRecord - found ID column:', {
+                    idColId: idColumn.id,
+                    idColName: idColumn.name,
+                    idColType: idColumn.type
+                });
+
+                // Get the parent record ID from this ID column
+                // We need to know which row we're in
+                let parentRecordId = recordId;
+                if (recordId === 'dynamic') {
+                    // Need to extract from the data - but we don't have rowIndex here
+                    // This should have been passed in renderCell, so recordId shouldn't be 'dynamic' here
+                    console.log('[TRACE] determineParentRecord - WARNING: recordId is still dynamic, cannot determine parent');
+                }
+
+                console.log('[TRACE] determineParentRecord - RESULT (first column case):', {
+                    isFirstColumn: true,
+                    parentType: colType,
+                    parentColumnId: idColumn.id,
+                    parentRecordId: parentRecordId
+                });
+
+                return {
+                    isFirstColumn: true,
+                    parentType: colType,
+                    parentColumnId: idColumn.id,
+                    parentRecordId: parentRecordId
+                };
+            }
+
+            // Check if colType is in any reqs (requisite case - B)
+            console.log('[TRACE] determineParentRecord - checking if this is a requisite...');
+            for (const item of this.globalMetadata) {
+                if (item.reqs) {
+                    const req = item.reqs.find(r => r.id === colType);
+                    if (req) {
+                        console.log('[TRACE] determineParentRecord - found as requisite in metadata:', {
+                            reqId: req.id,
+                            reqName: req.name,
+                            parentItemId: item.id,
+                            parentItemName: item.name
+                        });
+
+                        // This is a requisite - look for column with type=item.id and name ending in ID
+                        console.log('[TRACE] determineParentRecord - looking for parent ID column with type:', item.id);
+
+                        const parentIdColumn = this.columns.find(c => c.type === item.id && c.name.endsWith('ID'));
+                        if (!parentIdColumn) {
+                            console.log('[TRACE] determineParentRecord - parent ID column not found');
+                            console.log('[TRACE] determineParentRecord - available columns ending in ID:', this.columns.filter(c => c.name.endsWith('ID')).map(c => ({
+                                name: c.name,
+                                type: c.type,
+                                id: c.id
+                            })));
+                            return null;
+                        }
+
+                        console.log('[TRACE] determineParentRecord - found parent ID column:', {
+                            parentIdColId: parentIdColumn.id,
+                            parentIdColName: parentIdColumn.name,
+                            parentIdColType: parentIdColumn.type
+                        });
+
+                        // Get the parent record ID from this ID column
+                        let parentRecordId = recordId;
+                        if (recordId === 'dynamic') {
+                            console.log('[TRACE] determineParentRecord - WARNING: recordId is still dynamic, cannot determine parent');
+                        }
+
+                        console.log('[TRACE] determineParentRecord - RESULT (requisite case):', {
+                            isFirstColumn: false,
+                            parentType: item.id,
+                            parentColumnId: parentIdColumn.id,
+                            parentRecordId: parentRecordId
+                        });
+
                         return {
                             isFirstColumn: false,
                             parentType: item.id,
-                            parentColumnId: parentColumnId
+                            parentColumnId: parentIdColumn.id,
+                            parentRecordId: parentRecordId
                         };
                     }
                 }
             }
 
-            console.log('[TRACE] Not found in metadata');
+            console.log('[TRACE] determineParentRecord - NOT FOUND in metadata (neither first column nor requisite)');
+            console.log('[TRACE] determineParentRecord - searched for colType:', colType);
             return null;
         }
 
