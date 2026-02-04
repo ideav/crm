@@ -41,6 +41,8 @@ class IntegramTable {
             this.columnWidths = {};  // Map of column IDs to their widths in pixels
             this.metadataCache = {};  // Cache for metadata by type ID
             this.editableColumns = new Map();  // Map of column IDs to their corresponding ID column IDs
+            this.globalMetadata = null;  // Global metadata for determining parent relationships
+            this.currentEditingCell = null;  // Track currently editing cell
 
             // Table settings
             this.settings = {
@@ -97,7 +99,23 @@ class IntegramTable {
         init() {
             this.loadColumnState();
             this.loadSettings();
+            this.loadGlobalMetadata();  // Load metadata once at initialization
             this.loadData();
+        }
+
+        async loadGlobalMetadata() {
+            try {
+                const apiBase = this.getApiBase();
+                const response = await fetch(`${ apiBase }/metadata`);
+                if (!response.ok) {
+                    console.error('Failed to fetch global metadata');
+                    return;
+                }
+                const metadata = await response.json();
+                this.globalMetadata = metadata;
+            } catch (error) {
+                console.error('Error loading global metadata:', error);
+            }
         }
 
         async loadData(append = false) {
@@ -591,7 +609,19 @@ class IntegramTable {
                 }
             }
 
-            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }"${ customStyle }>${ escapedValue }</td>`;
+            // Add inline editing data attributes for editable cells (only when not already showing edit icon)
+            let editableAttrs = '';
+            if (isEditable && !customStyle.includes('edit-icon')) {
+                const idColId = this.editableColumns.get(column.id);
+                const idColIndex = this.columns.findIndex(c => c.id === idColId);
+                const recordId = idColIndex !== -1 && this.data[rowIndex] ? this.data[rowIndex][idColIndex] : '';
+                if (recordId && recordId !== '' && recordId !== '0') {
+                    editableAttrs = ` data-editable="true" data-record-id="${ recordId }" data-col-id="${ column.id }" data-col-type="${ column.type }" data-col-format="${ format }"`;
+                    cellClass += ' inline-editable';
+                }
+            }
+
+            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }"${ customStyle }${ editableAttrs }>${ escapedValue }</td>`;
         }
 
         renderScrollCounter() {
@@ -683,6 +713,360 @@ class IntegramTable {
                     });
                 });
             }
+
+            // Attach inline editing handlers
+            this.container.querySelectorAll('td[data-editable="true"]').forEach(td => {
+                td.addEventListener('click', (e) => {
+                    // Don't trigger if clicking on edit icon or already editing
+                    if (e.target.closest('.edit-icon') || this.currentEditingCell) {
+                        return;
+                    }
+                    this.startInlineEdit(td);
+                });
+            });
+        }
+
+        async startInlineEdit(cell) {
+            // Check if we can edit this cell (need to determine parent ID)
+            const recordId = cell.dataset.recordId;
+            const colId = cell.dataset.colId;
+            const colType = cell.dataset.colType;
+            const format = cell.dataset.colFormat;
+
+            if (!recordId || !colId || !colType) {
+                return;
+            }
+
+            // Determine if this is first column or requisite
+            const parentInfo = await this.determineParentRecord(colId, colType);
+            if (!parentInfo) {
+                this.showToast('Не удалось определить родительскую запись', 'error');
+                return;
+            }
+
+            // Get current value from the cell
+            const currentValue = this.extractCellValue(cell);
+
+            // Store reference to current editing cell
+            this.currentEditingCell = {
+                cell,
+                recordId,
+                colId,
+                colType,
+                format,
+                parentInfo,
+                originalValue: currentValue
+            };
+
+            // Create inline editor based on format
+            this.renderInlineEditor(cell, currentValue, format);
+        }
+
+        extractCellValue(cell) {
+            // Extract the actual value from the cell (removing HTML, truncation indicators, etc.)
+            const cellContent = cell.textContent || '';
+            // Remove "..." link if present (from truncation)
+            return cellContent.replace(/\.\.\.$/g, '').trim();
+        }
+
+        async determineParentRecord(colId, colType) {
+            // Use global metadata to determine parent record
+            if (!this.globalMetadata) {
+                return null;
+            }
+
+            // Check if colType is among the top-level metadata IDs (first column)
+            const metaItem = this.globalMetadata.find(item => item.id === colType);
+            if (metaItem) {
+                // This is a first column - parent ID is in the same column
+                return {
+                    isFirstColumn: true,
+                    parentType: colType,
+                    parentColumnId: colId
+                };
+            }
+
+            // Check if colType is in any reqs (requisite columns)
+            for (const item of this.globalMetadata) {
+                if (item.reqs) {
+                    const req = item.reqs.find(r => r.id === colType);
+                    if (req) {
+                        // This is a requisite - need to find parent ID column
+                        const parentColumnId = item.id;
+                        return {
+                            isFirstColumn: false,
+                            parentType: item.id,
+                            parentColumnId: parentColumnId
+                        };
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        renderInlineEditor(cell, currentValue, format) {
+            // Save original content for cancel
+            const originalContent = cell.innerHTML;
+
+            let editorHtml = '';
+            const escapedValue = this.escapeHtml(currentValue);
+
+            switch (format) {
+                case 'NUMBER':
+                case 'SIGNED':
+                    editorHtml = `<input type="number" class="inline-editor inline-editor-number" value="${ escapedValue }" ${ format === 'SIGNED' ? 'step="0.01"' : '' }>`;
+                    break;
+                case 'BOOLEAN':
+                    const isChecked = currentValue === 'Да' || currentValue === '1' || currentValue === 'true';
+                    editorHtml = `<input type="checkbox" class="inline-editor inline-editor-checkbox" ${ isChecked ? 'checked' : '' }>`;
+                    break;
+                case 'DATE':
+                    const dateValue = this.formatDateForHtml5(currentValue, false);
+                    editorHtml = `<input type="date" class="inline-editor inline-editor-date" value="${ dateValue }">`;
+                    break;
+                case 'DATETIME':
+                    const datetimeValue = this.formatDateForHtml5(currentValue, true);
+                    editorHtml = `<input type="datetime-local" class="inline-editor inline-editor-datetime" value="${ datetimeValue }" step="300">`;
+                    break;
+                case 'MEMO':
+                    editorHtml = `<textarea class="inline-editor inline-editor-memo" rows="3">${ escapedValue }</textarea>`;
+                    break;
+                default:
+                    // SHORT, CHARS, etc. - text input
+                    editorHtml = `<input type="text" class="inline-editor inline-editor-text" value="${ escapedValue }">`;
+            }
+
+            cell.innerHTML = editorHtml;
+            const editor = cell.querySelector('.inline-editor');
+
+            // Focus the editor
+            editor.focus();
+            if (editor.select) {
+                editor.select();
+            }
+
+            // Attach event handlers
+            const saveEdit = async () => {
+                let newValue = '';
+                if (format === 'BOOLEAN') {
+                    newValue = editor.checked ? '1' : '0';
+                } else if (format === 'DATE') {
+                    newValue = this.convertHtml5DateToDisplay(editor.value, false);
+                } else if (format === 'DATETIME') {
+                    newValue = this.convertHtml5DateToDisplay(editor.value, true);
+                } else {
+                    newValue = editor.value;
+                }
+
+                // Only save if value changed
+                if (newValue !== this.currentEditingCell.originalValue) {
+                    await this.saveInlineEdit(newValue);
+                } else {
+                    this.cancelInlineEdit(originalContent);
+                }
+            };
+
+            const cancelEdit = () => {
+                this.cancelInlineEdit(originalContent);
+            };
+
+            // Enter to save (except for textarea)
+            if (format !== 'MEMO') {
+                editor.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        saveEdit();
+                    } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        cancelEdit();
+                    }
+                });
+            } else {
+                // For textarea: Ctrl+Enter to save, Escape to cancel
+                editor.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && e.ctrlKey) {
+                        e.preventDefault();
+                        saveEdit();
+                    } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        cancelEdit();
+                    }
+                });
+            }
+
+            // Click outside to save (with small delay to avoid immediate trigger)
+            setTimeout(() => {
+                const outsideClickHandler = (e) => {
+                    if (!cell.contains(e.target)) {
+                        document.removeEventListener('click', outsideClickHandler);
+                        saveEdit();
+                    }
+                };
+                document.addEventListener('click', outsideClickHandler);
+
+                // Store handler reference to clean up if canceled
+                this.currentEditingCell.outsideClickHandler = outsideClickHandler;
+            }, 100);
+        }
+
+        async saveInlineEdit(newValue) {
+            if (!this.currentEditingCell) {
+                return;
+            }
+
+            const { cell, recordId, colId, colType, parentInfo } = this.currentEditingCell;
+
+            try {
+                // Determine API endpoint and parameters
+                const apiBase = this.getApiBase();
+                const params = new URLSearchParams();
+
+                // Add XSRF token
+                if (typeof xsrf !== 'undefined') {
+                    params.append('_xsrf', xsrf);
+                }
+
+                // Determine parent record ID from the current row data
+                const rowIndex = parseInt(cell.dataset.row);
+                const parentColIndex = this.columns.findIndex(c => c.id === parentInfo.parentColumnId);
+                const parentRecordId = parentColIndex !== -1 && this.data[rowIndex] ? this.data[rowIndex][parentColIndex] : null;
+
+                if (!parentRecordId) {
+                    throw new Error('Не удалось определить ID родительской записи');
+                }
+
+                let url;
+                if (parentInfo.isFirstColumn) {
+                    // Use _m_save for first column
+                    url = `${ apiBase }/_m_save/${ parentRecordId }?JSON`;
+                    params.append(`t${ colType }`, newValue);
+                } else {
+                    // Use _m_set for requisites
+                    url = `${ apiBase }/_m_set/${ parentRecordId }?JSON`;
+                    params.append(`t${ colType }`, newValue);
+                }
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: params.toString()
+                });
+
+                const result = await response.json();
+
+                if (result.error) {
+                    throw new Error(result.error);
+                }
+
+                // Update the cell display with the new value
+                this.updateCellDisplay(cell, newValue, this.currentEditingCell.format);
+
+                this.showToast('Изменения сохранены', 'success');
+
+            } catch (error) {
+                console.error('Error saving inline edit:', error);
+                this.showToast(`Ошибка сохранения: ${ error.message }`, 'error');
+                // Restore original content on error
+                this.cancelInlineEdit(cell.dataset.originalContent);
+            } finally {
+                // Clean up
+                if (this.currentEditingCell && this.currentEditingCell.outsideClickHandler) {
+                    document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
+                }
+                this.currentEditingCell = null;
+            }
+        }
+
+        updateCellDisplay(cell, newValue, format) {
+            // Update the display value in the cell after successful save
+            let displayValue = newValue;
+
+            switch (format) {
+                case 'BOOLEAN':
+                    displayValue = (newValue === '1' || newValue === 'true') ? 'Да' : 'Нет';
+                    break;
+                case 'DATE':
+                    if (newValue) {
+                        const dateObj = this.parseDDMMYYYY(newValue);
+                        if (dateObj && !isNaN(dateObj.getTime())) {
+                            displayValue = this.formatDateDisplay(dateObj);
+                        }
+                    }
+                    break;
+                case 'DATETIME':
+                    if (newValue) {
+                        const datetimeObj = this.parseDDMMYYYYHHMMSS(newValue);
+                        if (datetimeObj && !isNaN(datetimeObj.getTime())) {
+                            displayValue = this.formatDateTimeDisplay(datetimeObj);
+                        }
+                    }
+                    break;
+            }
+
+            // Escape HTML and update
+            let escapedValue = String(displayValue).replace(/&/g, '&amp;')
+                                                    .replace(/</g, '&lt;')
+                                                    .replace(/>/g, '&gt;')
+                                                    .replace(/"/g, '&quot;')
+                                                    .replace(/'/g, '&#039;');
+
+            // Apply truncation if enabled
+            if (this.settings.truncateLongValues && escapedValue.length > 127) {
+                const truncated = escapedValue.substring(0, 127);
+                const fullValueEscaped = escapedValue
+                    .replace(/\\/g, '\\\\')
+                    .replace(/\n/g, '\\n')
+                    .replace(/\r/g, '\\r')
+                    .replace(/'/g, '\\\'');
+                const instanceName = this.options.instanceName;
+                escapedValue = `${ truncated }<a href="#" class="show-full-value" onclick="window.${ instanceName }.showFullValue(event, '${ fullValueEscaped }'); return false;">...</a>`;
+            }
+
+            // Restore edit icon if present
+            const hasEditIcon = cell.querySelector('.edit-icon');
+            if (hasEditIcon) {
+                const editIconHtml = hasEditIcon.outerHTML;
+                cell.innerHTML = `<div class="cell-content-wrapper">${ escapedValue }${ editIconHtml }</div>`;
+            } else {
+                cell.innerHTML = escapedValue;
+            }
+
+            // Update the data array as well
+            const rowIndex = parseInt(cell.dataset.row);
+            const colIndex = parseInt(cell.dataset.col);
+            if (this.data[rowIndex]) {
+                this.data[rowIndex][colIndex] = newValue;
+            }
+        }
+
+        cancelInlineEdit(originalContent) {
+            if (!this.currentEditingCell) {
+                return;
+            }
+
+            const { cell } = this.currentEditingCell;
+
+            // Restore original content
+            if (originalContent) {
+                cell.innerHTML = originalContent;
+            } else {
+                // Fallback: re-render the cell
+                const rowIndex = parseInt(cell.dataset.row);
+                const colIndex = parseInt(cell.dataset.col);
+                const column = this.columns[colIndex];
+                const value = this.data[rowIndex] ? this.data[rowIndex][colIndex] : '';
+                cell.outerHTML = this.renderCell(column, value, rowIndex, colIndex);
+            }
+
+            // Clean up event handlers
+            if (this.currentEditingCell.outsideClickHandler) {
+                document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
+            }
+
+            this.currentEditingCell = null;
         }
 
         attachScrollListener() {

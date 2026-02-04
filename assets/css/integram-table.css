@@ -1340,3 +1340,87 @@
 .subordinate-form-modal {
     max-width: 500px;
 }
+
+/* ========================================
+   Inline Cell Editing Styles
+   ======================================== */
+
+/* Make cells with inline editing capability visually distinct on hover */
+.inline-editable {
+    cursor: text;
+    position: relative;
+}
+
+.inline-editable:hover {
+    background-color: rgba(25, 118, 210, 0.04) !important;
+}
+
+/* Inline editor input styles */
+.inline-editor {
+    width: 100%;
+    padding: 6px 10px;
+    border: 2px solid var(--md-primary);
+    border-radius: 4px;
+    font-size: 14px;
+    font-family: 'Roboto', sans-serif;
+    color: var(--md-text-primary);
+    background: var(--md-surface);
+    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.15);
+    transition: var(--md-transition);
+    outline: none;
+    box-sizing: border-box;
+}
+
+.inline-editor:focus {
+    border-color: var(--md-primary-dark);
+    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.25);
+}
+
+/* Specific styles for different editor types */
+.inline-editor-number,
+.inline-editor-text {
+    min-height: 32px;
+}
+
+.inline-editor-date,
+.inline-editor-datetime {
+    min-height: 32px;
+    cursor: pointer;
+}
+
+.inline-editor-checkbox {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+    margin: 0 auto;
+    display: block;
+}
+
+.inline-editor-memo {
+    min-height: 60px;
+    resize: vertical;
+    font-family: 'Roboto', sans-serif;
+}
+
+/* Style for calendar icon in inline date/datetime inputs */
+.inline-editor-date::-webkit-calendar-picker-indicator,
+.inline-editor-datetime::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.7;
+}
+
+.inline-editor-date::-webkit-calendar-picker-indicator:hover,
+.inline-editor-datetime::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+}
+
+/* Visual feedback for inline editing active state */
+td:has(.inline-editor) {
+    background-color: rgba(25, 118, 210, 0.08) !important;
+    padding: 4px !important;
+}
+
+/* Ensure proper sizing in compact mode */
+.integram-table.compact td:has(.inline-editor) {
+    padding: 2px !important;
+}
