@@ -647,6 +647,9 @@ class IntegramTable {
                                                       .replace(/"/g, '&quot;')
                                                       .replace(/'/g, '&#039;');
 
+            // Store full value for editing before truncation
+            let fullValueForEditing = escapedValue;
+
             // Truncate long values if setting is enabled
             if (this.settings.truncateLongValues && escapedValue.length > 127) {
                 const truncated = escapedValue.substring(0, 127);
@@ -700,10 +703,19 @@ class IntegramTable {
                     recordId = this.determineParentRecordId(column, rowIndex);
                 }
 
-                if (recordId && recordId !== '' && recordId !== '0') {
+                // For reference fields, we allow editing even with empty values as long as we can determine parent record
+                // For non-reference fields, we still require a valid recordId
+                const isRefField = column.ref === 1;
+                const canEdit = isRefField ? true : (recordId && recordId !== '' && recordId !== '0');
+
+                if (canEdit) {
                     // Add ref attribute if this is a reference field
-                    const refAttr = column.ref === 1 ? ` data-col-ref="1"` : '';
-                    editableAttrs = ` data-editable="true" data-record-id="${ recordId }" data-col-id="${ column.id }" data-col-type="${ column.type }" data-col-format="${ format }" data-row-index="${ rowIndex }"${ refAttr }`;
+                    const refAttr = isRefField ? ` data-col-ref="1"` : '';
+                    // Store full value for editing (escape for HTML attribute)
+                    const fullValueAttr = fullValueForEditing ? ` data-full-value="${ fullValueForEditing.replace(/"/g, '&quot;') }"` : '';
+                    // Use 'dynamic' as placeholder for recordId if it's empty (will be determined at edit time)
+                    const recordIdAttr = recordId && recordId !== '' && recordId !== '0' ? recordId : 'dynamic';
+                    editableAttrs = ` data-editable="true" data-record-id="${ recordIdAttr }" data-col-id="${ column.id }" data-col-type="${ column.type }" data-col-format="${ format }" data-row-index="${ rowIndex }"${ refAttr }${ fullValueAttr }`;
                     cellClass += ' inline-editable';
                 }
             }
@@ -942,6 +954,11 @@ class IntegramTable {
         }
 
         extractCellValue(cell) {
+            // If full value is stored in data attribute, use it (for truncated fields)
+            if (cell.dataset.fullValue) {
+                return cell.dataset.fullValue;
+            }
+
             // Extract the actual value from the cell (removing HTML, truncation indicators, etc.)
             const cellContent = cell.textContent || '';
             // Remove "..." link if present (from truncation)
@@ -1660,6 +1677,9 @@ class IntegramTable {
                                                     .replace(/"/g, '&quot;')
                                                     .replace(/'/g, '&#039;');
 
+            // Store full value before truncation
+            let fullValueForEditing = escapedValue;
+
             // Apply truncation if enabled
             if (this.settings.truncateLongValues && escapedValue.length > 127) {
                 const truncated = escapedValue.substring(0, 127);
@@ -1670,6 +1690,11 @@ class IntegramTable {
                     .replace(/'/g, '\\\'');
                 const instanceName = this.options.instanceName;
                 escapedValue = `${ truncated }<a href="#" class="show-full-value" onclick="window.${ instanceName }.showFullValue(event, '${ fullValueEscaped }'); return false;">...</a>`;
+            }
+
+            // Update data attribute with full value for editing
+            if (fullValueForEditing) {
+                cell.setAttribute('data-full-value', fullValueForEditing);
             }
 
             // Restore edit icon if present
