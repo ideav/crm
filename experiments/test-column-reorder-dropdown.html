@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест: Дефект при редактировании выпадающего списка после изменения порядка колонок</title>
+    <link rel="stylesheet" href="../assets/css/integram-table.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .test-info {
+            background: #f0f0f0;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+        .test-info h2 {
+            margin-top: 0;
+        }
+        .test-info .bug {
+            color: #d9534f;
+            font-weight: bold;
+        }
+        .test-info .fix {
+            color: #5cb85c;
+            font-weight: bold;
+        }
+        .steps {
+            background: #fff3cd;
+            padding: 10px;
+            border-left: 4px solid #ffc107;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-info">
+        <h2>Тест Issue #207: Дефект при редактировании выпадающего списка после изменения порядка колонок</h2>
+
+        <div class="steps">
+            <p><strong>Как воспроизвести проблему:</strong></p>
+            <ol>
+                <li>Перетащите колонку "Статус" (справочное поле с выпадающим списком) в другое место (например, перед колонкой "Клиент")</li>
+                <li>Кликните на ячейку в колонке "Статус" для редактирования</li>
+                <li>НЕ выбирайте ничего из выпадающего списка</li>
+                <li>Кликните вне ячейки (чтобы отменить редактирование)</li>
+                <li><span class="bug">БАГ (до исправления):</span> В ячейку запишется значение из соседней колонки</li>
+                <li><span class="fix">ИСПРАВЛЕНИЕ:</span> Ячейка должна сохранить исходное значение</li>
+            </ol>
+        </div>
+
+        <p><strong>Корневая причина:</strong></p>
+        <p>В методе <code>cancelInlineEdit()</code> использовался визуальный индекс колонки (<code>cell.dataset.col</code>)
+        для доступа к массиву <code>this.columns</code> и <code>this.data</code>. После изменения порядка колонок визуальный
+        индекс не соответствует индексу в данных, что приводит к получению значения из неправильной колонки.</p>
+
+        <p><strong>Решение:</strong></p>
+        <p>Использовать <code>cell.dataset.colId</code> для поиска колонки по ID, а затем получить реальный индекс
+        данных через <code>this.columns.indexOf(column)</code>.</p>
+
+        <p><strong>Статус:</strong> <span id="test-status" class="fix">✓ Исправление применено</span></p>
+    </div>
+
+    <div id="test-table"></div>
+
+    <script src="../assets/js/integram-table.js"></script>
+    <script>
+        // This test demonstrates the fix for issue #207
+        // The bug occurred when:
+        // 1. User reorders columns (e.g., drag "Status" column to a different position)
+        // 2. User clicks on a reference field cell (dropdown) to edit
+        // 3. User clicks outside without selecting anything
+        // 4. BUG: The cell would display the value from a neighboring column
+        // 5. FIX: The cell should restore its original value
+
+        console.log('=== Test for Issue #207 ===');
+        console.log('Scenario: Column reordering + dropdown editing + cancel without selection');
+
+        // Note: This is a manual test file that demonstrates the issue
+        // The actual fix is in assets/js/integram-table.js in the cancelInlineEdit() method
+        //
+        // Before fix:
+        //   const column = this.columns[colIndex]; // Wrong! Uses visual index
+        //   const value = this.data[rowIndex][colIndex]; // Wrong! Uses visual index
+        //
+        // After fix:
+        //   const colId = cell.dataset.colId;
+        //   const column = this.columns.find(c => c.id === colId); // Correct! Uses column ID
+        //   const dataIndex = this.columns.indexOf(column);
+        //   const value = this.data[rowIndex][dataIndex]; // Correct! Uses data index
+
+        alert('Этот тест требует подключения к реальному API для демонстрации редактирования справочных полей.\n\n' +
+              'Для полноценного тестирования:\n' +
+              '1. Откройте реальное приложение с таблицей\n' +
+              '2. Найдите таблицу со справочными полями (выпадающие списки)\n' +
+              '3. Измените порядок колонок перетаскиванием\n' +
+              '4. Попробуйте кликнуть на ячейку со справочным полем\n' +
+              '5. Кликните вне ячейки без выбора значения\n' +
+              '6. Убедитесь, что значение ячейки не изменилось\n\n' +
+              'Исправление находится в методе cancelInlineEdit() файла integram-table.js');
+
+        // Mock data for visual demonstration (though inline editing won't work without real API)
+        const mockData = {
+            "columns": [
+                {
+                    "id": "col1",
+                    "type": "3596",
+                    "format": "CHARS",
+                    "name": "Название",
+                    "granted": 1,
+                    "ref": 0
+                },
+                {
+                    "id": "col2",
+                    "type": "332",
+                    "format": "SHORT",
+                    "name": "Клиент",
+                    "granted": 1,
+                    "ref": 0
+                },
+                {
+                    "id": "col3",
+                    "type": "3942",
+                    "format": "NUMBER",
+                    "name": "ID",
+                    "granted": 1,
+                    "ref": 0
+                },
+                {
+                    "id": "col4",
+                    "type": "3884",
+                    "format": "SHORT",
+                    "name": "Статус",
+                    "granted": 1,
+                    "ref": 1  // This is a reference field (dropdown)
+                }
+            ],
+            "data": [
+                ["Настройка CRM", "ООО Рога и Копыта", "1001", "В работе"],
+                ["Консультация по интеграции", "ИП Иванов", "1002", "Ожидание"],
+                ["Разработка сайта", "ООО Синтез", "1003", "Завершено"],
+                ["Аудит информационной системы", "АО Электропочта", "1004", "В работе"],
+                ["Интеграция API с 1С", "ООО Технологии", "1005", "Новая"]
+            ],
+            "total": 5
+        };
+
+        const mockApiUrl = 'data:application/json,' + encodeURIComponent(JSON.stringify(mockData));
+
+        const table = new IntegramTable('test-table', {
+            title: 'Тест Issue #207 - Дефект редактирования выпадающего списка при измененном порядке колонок',
+            apiUrl: mockApiUrl,
+            pageSize: 50,
+            instanceName: 'testTable'
+        });
+
+        window.testTable = table;
+
+        console.log('Table initialized. Try reordering columns and editing reference fields.');
+        console.log('Note: Full inline editing requires connection to a real API.');
+    </script>
+</body>
+</html>

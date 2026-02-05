@@ -1728,8 +1728,18 @@ class IntegramTable {
                 // Fallback: re-render the cell
                 const rowIndex = parseInt(cell.dataset.row);
                 const colIndex = parseInt(cell.dataset.col);
-                const column = this.columns[colIndex];
-                const value = this.data[rowIndex] ? this.data[rowIndex][colIndex] : '';
+                const colId = cell.dataset.colId;
+
+                // Find column by ID (handles column reordering correctly)
+                const column = this.columns.find(c => c.id === colId);
+                if (!column) {
+                    console.error('Column not found:', colId);
+                    return;
+                }
+
+                // Get the actual data array index for this column
+                const dataIndex = this.columns.indexOf(column);
+                const value = this.data[rowIndex] ? this.data[rowIndex][dataIndex] : '';
                 cell.outerHTML = this.renderCell(column, value, rowIndex, colIndex);
             }
 
