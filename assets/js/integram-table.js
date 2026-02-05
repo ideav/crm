@@ -1337,9 +1337,10 @@ class IntegramTable {
                 const origType = column && column.orig ? column.orig : null;
 
                 // Determine button to show: "+" button if granted=1 and orig exists, otherwise "×" (clear)
+                // The "+" button is initially hidden and will be shown only when search input has non-zero length
                 const showAddButton = hasGranted && origType !== null;
                 const buttonHtml = showAddButton
-                    ? `<button class="inline-editor-reference-add" title="Создать запись" aria-label="Создать запись">+</button>`
+                    ? `<button class="inline-editor-reference-add" style="display: none;" title="Создать запись" aria-label="Создать запись">+</button>`
                     : `<button class="inline-editor-reference-clear" title="Очистить значение" aria-label="Очистить значение">×</button>`;
 
                 // Create dropdown with search
@@ -1376,6 +1377,15 @@ class IntegramTable {
                 let searchTimeout;
                 searchInput.addEventListener('input', async (e) => {
                     const searchText = e.target.value.trim();
+
+                    // Show/hide add button based on search input length (issue #215)
+                    if (addButton) {
+                        if (searchText.length > 0) {
+                            addButton.style.display = '';
+                        } else {
+                            addButton.style.display = 'none';
+                        }
+                    }
 
                     clearTimeout(searchTimeout);
                     searchTimeout = setTimeout(async () => {
