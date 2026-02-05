@@ -1334,10 +1334,13 @@ class IntegramTable {
                 // Create dropdown with search
                 const editorHtml = `
                     <div class="inline-editor-reference">
-                        <input type="text"
-                               class="inline-editor-reference-search"
-                               placeholder="Поиск..."
-                               autocomplete="off">
+                        <div class="inline-editor-reference-header">
+                            <input type="text"
+                                   class="inline-editor-reference-search"
+                                   placeholder="Поиск..."
+                                   autocomplete="off">
+                            <button class="inline-editor-reference-clear" title="Очистить значение" aria-label="Очистить значение">×</button>
+                        </div>
                         <div class="inline-editor-reference-dropdown">
                             ${this.renderReferenceOptions(options, currentValue)}
                         </div>
@@ -1348,6 +1351,7 @@ class IntegramTable {
 
                 const searchInput = cell.querySelector('.inline-editor-reference-search');
                 const dropdown = cell.querySelector('.inline-editor-reference-dropdown');
+                const clearButton = cell.querySelector('.inline-editor-reference-clear');
 
                 // Store original options for filtering
                 this.currentEditingCell.referenceOptions = options;
@@ -1393,6 +1397,13 @@ class IntegramTable {
                         const selectedText = option.dataset.text;
                         await this.saveReferenceEdit(selectedId, selectedText);
                     }
+                });
+
+                // Handle clear button click
+                clearButton.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    await this.saveReferenceEdit('', '');
                 });
 
                 // Handle keyboard navigation

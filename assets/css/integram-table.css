@@ -1445,17 +1445,55 @@ td:has(.inline-editor) {
     box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.15);
 }
 
-.inline-editor-reference-search {
-    width: 100%;
-    padding: 8px 12px;
-    border: none;
+.inline-editor-reference-header {
+    display: flex;
+    align-items: center;
     border-bottom: 1px solid var(--md-divider);
+    position: relative;
+}
+
+.inline-editor-reference-search {
+    flex: 1;
+    padding: 8px 12px;
+    padding-right: 36px;
+    border: none;
     font-size: 14px;
     font-family: 'Roboto', sans-serif;
     color: var(--md-text-primary);
     background: var(--md-surface);
     outline: none;
     box-sizing: border-box;
+}
+
+.inline-editor-reference-clear {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    color: var(--md-text-secondary);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 0;
+    font-weight: 300;
+}
+
+.inline-editor-reference-clear:hover {
+    background: rgba(244, 67, 54, 0.1);
+    color: #f44336;
+}
+
+.inline-editor-reference-clear:active {
+    transform: translateY(-50%) scale(0.9);
 }
 
 .inline-editor-reference-search::placeholder {
