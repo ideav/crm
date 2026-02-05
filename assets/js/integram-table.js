@@ -1385,8 +1385,18 @@ class IntegramTable {
                     }, 300);
                 });
 
-                // Handle option selection
+                // Handle option selection and deletion
                 dropdown.addEventListener('click', async (e) => {
+                    // Check if delete button was clicked
+                    const deleteBtn = e.target.closest('.inline-editor-reference-option-delete');
+                    if (deleteBtn) {
+                        e.stopPropagation();
+                        const optionId = deleteBtn.dataset.id;
+                        await this.deleteReferenceOption(optionId);
+                        return;
+                    }
+
+                    // Otherwise handle option selection
                     const option = e.target.closest('.inline-editor-reference-option');
                     if (option) {
                         const selectedId = option.dataset.id;
@@ -1498,7 +1508,10 @@ class IntegramTable {
 
             return filteredOptions.map(([id, text]) => {
                 const escapedText = this.escapeHtml(text);
-                return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${escapedText}" tabindex="0">${escapedText}</div>`;
+                return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${escapedText}" tabindex="0">
+                    <span class="inline-editor-reference-option-text">${escapedText}</span>
+                    <span class="inline-editor-reference-option-delete" data-id="${id}" title="Удалить значение">×</span>
+                </div>`;
             }).join('');
         }
 
@@ -1568,6 +1581,67 @@ class IntegramTable {
                     document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
                 }
                 this.currentEditingCell = null;
+            }
+        }
+
+        async deleteReferenceOption(optionId) {
+            if (!this.currentEditingCell) {
+                return;
+            }
+
+            const { cell, colType, parentInfo } = this.currentEditingCell;
+
+            // Confirm deletion
+            if (!confirm('Вы уверены, что хотите удалить это значение из справочника?')) {
+                return;
+            }
+
+            try {
+                const apiBase = this.getApiBase();
+                const params = new URLSearchParams();
+
+                // Add XSRF token
+                if (typeof xsrf !== 'undefined') {
+                    params.append('_xsrf', xsrf);
+                }
+
+                // Delete the option by calling _m_del
+                const url = `${apiBase}/_m_del/${optionId}?JSON`;
+
+                console.log('[TRACE] deleteReferenceOption - URL:', url);
+                console.log('[TRACE] deleteReferenceOption - optionId:', optionId);
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: params.toString()
+                });
+
+                const result = await response.json();
+
+                if (result.error) {
+                    throw new Error(result.error);
+                }
+
+                this.showToast('Значение удалено из справочника', 'success');
+
+                // Refresh the options list
+                const updatedOptions = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId);
+                this.currentEditingCell.referenceOptions = updatedOptions;
+
+                // Re-render the dropdown with updated options
+                const dropdown = cell.querySelector('.inline-editor-reference-dropdown');
+                if (dropdown) {
+                    const searchInput = cell.querySelector('.inline-editor-reference-search');
+                    const currentValue = cell.dataset.originalContent;
+                    dropdown.innerHTML = this.renderReferenceOptions(updatedOptions, currentValue);
+                }
+
+            } catch (error) {
+                console.error('Error deleting reference option:', error);
+                this.showToast(`Ошибка удаления: ${error.message}`, 'error');
             }
         }
 
