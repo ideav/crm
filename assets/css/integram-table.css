@@ -1463,9 +1463,18 @@ td:has(.inline-editor) {
 }
 
 .inline-editor-reference-dropdown {
+    position: absolute;
+    top: 100%;
+    left: -2px;
+    right: -2px;
     max-height: 200px;
     overflow-y: auto;
     background: var(--md-surface);
+    border: 2px solid var(--md-primary);
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
 }
 
 .inline-editor-reference-option {
