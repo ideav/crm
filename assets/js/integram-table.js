@@ -805,19 +805,23 @@ class IntegramTable {
                 });
             });
 
-            if (this.options.onCellClick) {
-                this.container.querySelectorAll('td').forEach(td => {
-                    td.addEventListener('click', () => {
-                        const row = parseInt(td.dataset.row);
-                        const col = parseInt(td.dataset.col);
-                        this.options.onCellClick(row, col, this.data[row][col]);
-                    });
-                });
-            }
+            // Use event delegation for cell clicks - attaches to container once, handles all cells
+            // This ensures listeners work even when cells are updated/recreated
+            this.container.addEventListener('click', (e) => {
+                const td = e.target.closest('td');
+                if (!td) return;
 
-            // Attach inline editing handlers
-            this.container.querySelectorAll('td[data-editable="true"]').forEach(td => {
-                td.addEventListener('click', (e) => {
+                // Handle onCellClick callback for all cells
+                if (this.options.onCellClick) {
+                    const row = parseInt(td.dataset.row);
+                    const col = parseInt(td.dataset.col);
+                    if (!isNaN(row) && !isNaN(col) && this.data[row]) {
+                        this.options.onCellClick(row, col, this.data[row][col]);
+                    }
+                }
+
+                // Handle inline editing for editable cells
+                if (td.dataset.editable === 'true') {
                     const colId = td.dataset.colId;
                     const column = this.columns.find(c => c.id === colId);
 
@@ -846,12 +850,8 @@ class IntegramTable {
                         return;
                     }
                     this.startInlineEdit(td);
-                });
-            });
-
-            // TRACE: Also log clicks on NON-editable cells to explain why they're not editable
-            this.container.querySelectorAll('td:not([data-editable="true"])').forEach(td => {
-                td.addEventListener('click', (e) => {
+                } else {
+                    // TRACE: Log clicks on NON-editable cells to explain why they're not editable
                     const row = parseInt(td.dataset.row);
                     const col = parseInt(td.dataset.col);
                     if (isNaN(row) || isNaN(col)) return;
@@ -878,7 +878,7 @@ class IntegramTable {
                         },
                         cellText: td.textContent?.substring(0, 50)
                     });
-                });
+                }
             });
         }
 
