@@ -1602,6 +1602,52 @@ function initDragAndDrop(){
 
         return false;
     });
+
+    // Handle general mouse move for auto-scroll without dragging
+    var mouseScrollInterval = null;
+    $(document).on('mousemove', function(e){
+        var board = $('.kanban-board')[0];
+        if(!board) return;
+
+        var clientX = e.clientX;
+        var boardRect = board.getBoundingClientRect();
+        var scrollThreshold = 50;
+
+        // Clear existing scroll interval
+        if(mouseScrollInterval) clearInterval(mouseScrollInterval);
+
+        // Scroll left if near left edge
+        if(clientX < boardRect.left + scrollThreshold && boardRect.left >= 0){
+            mouseScrollInterval = setInterval(function(){
+                if(board.scrollLeft > 0){
+                    board.scrollLeft -= 10;
+                }
+            }, 20);
+        }
+        // Scroll right if near right edge
+        else if(clientX > boardRect.right - scrollThreshold && boardRect.right <= window.innerWidth){
+            mouseScrollInterval = setInterval(function(){
+                if(board.scrollLeft < board.scrollWidth - board.clientWidth){
+                    board.scrollLeft += 10;
+                }
+            }, 20);
+        }
+        // Stop scrolling if mouse is in the middle
+        else {
+            if(mouseScrollInterval) {
+                clearInterval(mouseScrollInterval);
+                mouseScrollInterval = null;
+            }
+        }
+    });
+
+    // Clear scroll interval when mouse leaves the window
+    $(document).on('mouseleave', function(){
+        if(mouseScrollInterval) {
+            clearInterval(mouseScrollInterval);
+            mouseScrollInterval = null;
+        }
+    });
 }
 
 function updateColumnCounts(){
