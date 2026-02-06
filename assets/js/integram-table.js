@@ -681,7 +681,8 @@ class IntegramTable {
                     recordId = this.determineParentRecordId(column, rowIndex);
                 }
 
-                const typeId = column.type || '';
+                // Use column.orig for reference fields (dictionary values), fallback to column.type
+                const typeId = column.orig || column.type || '';
                 const instanceName = this.options.instanceName;
                 // Only show edit icon if recordId exists (disable creating new records)
                 if (recordId && recordId !== '' && recordId !== '0') {
