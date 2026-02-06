@@ -1598,6 +1598,17 @@ td:has(.inline-editor-reference) {
     position: relative;
 }
 
+/* Remove blue border from form reference editors (keep it only for inline table cell editors) */
+.form-ref-editor-box.inline-editor-reference {
+    border: 1px solid var(--md-divider);
+    box-shadow: none;
+}
+
+/* Also update dropdown border to match */
+.form-ref-editor-box .inline-editor-reference-dropdown {
+    border: 1px solid var(--md-divider);
+}
+
 .form-ref-editor-box .inline-editor-reference-dropdown {
     position: relative;
     top: auto;
