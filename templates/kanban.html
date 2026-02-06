@@ -1908,13 +1908,17 @@ function openAddRecordModal(statusId, statusName){
                 var metadata = JSON.parse(typeXhr.responseText);
 
                 // Create a temporary table instance to use its form rendering
+                var apiBase = 'https://' + window.location.hostname + '/' + db;
                 var tempOptions = {
-                    instanceName: 'tempAddClientTable'
+                    instanceName: 'tempAddClientTable',
+                    apiUrl: apiBase + '/type/332'
                 };
 
                 // Create a wrapper object that delegates to IntegramTable prototype
                 var tempTable = Object.create(IntegramTable.prototype);
                 tempTable.options = tempOptions;
+                tempTable.metadataCache = {};
+                tempTable.settings = { compact: false, pageSize: 20, truncateLongValues: true };
 
                 // Create a mock record data with the status pre-set
                 var recordData = {
@@ -2139,28 +2143,17 @@ function openClientEditForm(clientId){
                             $('#editClientModal').removeClass('active');
 
                             // Create a temporary table instance to use its form rendering
+                            var apiBase = 'https://' + window.location.hostname + '/' + db;
                             var tempOptions = {
-                                instanceName: 'tempClientTable'
+                                instanceName: 'tempClientTable',
+                                apiUrl: apiBase + '/type/' + clientTypeId
                             };
 
-                            // Create a simple object with the renderEditFormModal method
-                            var tempTable = {
-                                options: tempOptions,
-                                parseAttrs: function(attrs){
-                                    var result = {required: false, alias: '', multi: false};
-                                    if(!attrs) return result;
-                                    var parts = attrs.split(':');
-                                    if(parts[0]) result.alias = parts[0];
-                                    if(attrs.includes('!NULL:')) result.required = true;
-                                    if(attrs.includes('MULTI:')) result.multi = true;
-                                    return result;
-                                },
-                                escapeHtml: function(str){
-                                    if(!str) return '';
-                                    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
-                                },
-                                renderEditFormModal: IntegramTable.prototype.renderEditFormModal
-                            };
+                            // Create a wrapper object that delegates to IntegramTable prototype
+                            var tempTable = Object.create(IntegramTable.prototype);
+                            tempTable.options = tempOptions;
+                            tempTable.metadataCache = {};
+                            tempTable.settings = { compact: false, pageSize: 20, truncateLongValues: true };
 
                             // Use IntegramTable's form rendering
                             tempTable.renderEditFormModal(metadata, recordData, false, clientTypeId);

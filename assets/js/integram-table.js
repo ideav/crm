@@ -2762,6 +2762,14 @@ class IntegramTable {
         getApiBase() {
             // Extract base URL from apiUrl by removing query parameters and path after /report/ or /type/
             const url = this.options.apiUrl;
+            if (!url) {
+                // Fallback: construct API base from current page URL using the database path segment
+                const pathParts = window.location.pathname.split('/');
+                if (pathParts.length >= 2 && pathParts[1]) {
+                    return 'https://' + window.location.hostname + '/' + pathParts[1];
+                }
+                return '';
+            }
             const match = url.match(/^(.*?\/(report|type)\/\d+)/);
             if (match) {
                 return match[1].replace(/\/(report|type)\/\d+$/, '');
