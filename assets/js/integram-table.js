@@ -2667,19 +2667,8 @@ class IntegramTable {
                 return false;
             }
 
-            // Check top-level metadata ids
-            if (this.globalMetadata.some(item => item.id === typeId)) {
-                return true;
-            }
-
-            // Check requisite ids within metadata items
-            for (const item of this.globalMetadata) {
-                if (item.reqs && item.reqs.some(r => r.id === typeId)) {
-                    return true;
-                }
-            }
-
-            return false;
+            // Check top-level metadata ids only (not reqs)
+            return this.globalMetadata.some(item => item.id === typeId);
         }
 
         async openColumnCreateForm(columnId) {
