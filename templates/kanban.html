@@ -1899,14 +1899,13 @@ function openAddRecordModal(statusId, statusName){
     currentStatusId = statusId;
     currentStatusName = statusName;
 
-    // Load type metadata for Client (type 332)
+    // Load type metadata for Client (type 332) using the /metadata endpoint
     var typeXhr = new XMLHttpRequest();
-    typeXhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/type_edit/332?JSON', true);
+    typeXhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/metadata/332', true);
     typeXhr.onload = function(){
         if(typeXhr.status === 200){
             try{
-                var typeData = JSON.parse(typeXhr.responseText);
-                var metadata = typeData.type || {};
+                var metadata = JSON.parse(typeXhr.responseText);
 
                 // Create a temporary table instance to use its form rendering
                 var tempOptions = {
@@ -2128,14 +2127,13 @@ function openClientEditForm(clientId){
             try{
                 var recordData = JSON.parse(xhr.responseText);
 
-                // Load type metadata
+                // Load type metadata using the /metadata endpoint
                 var typeXhr = new XMLHttpRequest();
-                typeXhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/type_edit/' + clientTypeId + '?JSON', true);
+                typeXhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/metadata/' + clientTypeId, true);
                 typeXhr.onload = function(){
                     if(typeXhr.status === 200){
                         try{
-                            var typeData = JSON.parse(typeXhr.responseText);
-                            var metadata = typeData.type || {};
+                            var metadata = JSON.parse(typeXhr.responseText);
 
                             // Hide the old modal if it exists
                             $('#editClientModal').removeClass('active');
