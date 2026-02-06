@@ -1690,20 +1690,18 @@ class IntegramTable {
                 </div>
             `;
 
-            // Add other fields if needed (simplified, only required fields for now)
+            // Add all fields of this type
             regularFields.forEach(req => {
                 const attrs = this.parseAttrs(req.attrs);
                 const fieldName = attrs.alias || req.val;
                 const isRequired = attrs.required;
 
-                if (isRequired) {
-                    attributesHtml += `
-                        <div class="form-group">
-                            <label for="field-ref-${req.id}">${fieldName} <span class="required">*</span></label>
-                            <input type="text" class="form-control" id="field-ref-${req.id}" name="t${req.id}" required>
-                        </div>
-                    `;
-                }
+                attributesHtml += `
+                    <div class="form-group">
+                        <label for="field-ref-${req.id}">${fieldName}${isRequired ? ' <span class="required">*</span>' : ''}</label>
+                        <input type="text" class="form-control" id="field-ref-${req.id}" name="t${req.id}"${isRequired ? ' required' : ''}>
+                    </div>
+                `;
             });
 
             let formHtml = `

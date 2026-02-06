@@ -1511,6 +1511,7 @@ function renderCard(task){
 
 function initDragAndDrop(){
     var draggedElement = null;
+    var scrollInterval = null;
 
     // Handle drag start
     $(document).on('dragstart', '.kanban-card', function(e){
@@ -1524,15 +1525,43 @@ function initDragAndDrop(){
     $(document).on('dragend', '.kanban-card', function(e){
         $(this).removeClass('dragging');
         $('.kanban-column-body').removeClass('drag-over');
+        // Clear scroll interval
+        if(scrollInterval) {
+            clearInterval(scrollInterval);
+            scrollInterval = null;
+        }
     });
 
-    // Handle drag over
+    // Handle drag over with auto-scroll
     $(document).on('dragover', '.kanban-column-body', function(e){
         if(e.preventDefault){
             e.preventDefault();
         }
         e.originalEvent.dataTransfer.dropEffect = 'move';
         $(this).addClass('drag-over');
+
+        // Auto-scroll kanban board based on mouse position
+        var board = $('.kanban-board')[0];
+        var clientX = e.originalEvent.clientX;
+        var boardRect = board.getBoundingClientRect();
+        var scrollThreshold = 50;
+
+        // Clear existing scroll interval
+        if(scrollInterval) clearInterval(scrollInterval);
+
+        // Scroll left if near left edge
+        if(clientX < boardRect.left + scrollThreshold){
+            scrollInterval = setInterval(function(){
+                board.scrollLeft -= 10;
+            }, 20);
+        }
+        // Scroll right if near right edge
+        else if(clientX > boardRect.right - scrollThreshold){
+            scrollInterval = setInterval(function(){
+                board.scrollLeft += 10;
+            }, 20);
+        }
+
         return false;
     });
 
@@ -1544,6 +1573,12 @@ function initDragAndDrop(){
     // Handle drag leave
     $(document).on('dragleave', '.kanban-column-body', function(e){
         $(this).removeClass('drag-over');
+        // Clear scroll interval when leaving all column bodies
+        var anyDragOver = $('.kanban-column-body.drag-over').length > 0;
+        if(!anyDragOver && scrollInterval) {
+            clearInterval(scrollInterval);
+            scrollInterval = null;
+        }
     });
 
     // Handle drop
