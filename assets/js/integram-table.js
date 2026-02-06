@@ -1815,7 +1815,8 @@ class IntegramTable {
                 // Extract created record ID and value from response
                 // According to the issue: "её id приходит в ключе obj JSON в ответ на запрос _m_new"
                 const createdId = result.obj || result.id || result.i;
-                const createdValue = mainValue; // Use the value we just created
+                // Use the value from the response (result.val) if available, otherwise use the input value
+                const createdValue = result.val || mainValue;
 
                 // Close the create form modal
                 modal.remove();
