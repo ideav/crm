@@ -57,3 +57,16 @@ Proceed.
 
 
 Run timestamp: 2026-02-06T10:50:20.957Z
+
+---
+
+Issue to solve: https://github.com/ideav/crm/issues/238
+Your prepared branch: issue-238-387e5c9bd48e
+Your prepared working directory: /tmp/gh-issue-solver-1770385513337
+Your forked repository: konard/ideav-crm
+Original repository (upstream): ideav/crm
+
+Proceed.
+
+
+Run timestamp: 2026-02-06T13:45:19.323Z
