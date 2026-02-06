@@ -2650,12 +2650,10 @@ class IntegramTable {
                 return false;
             }
 
-            // Check if there's a corresponding column with "ID" suffix
-            const idColumnName = column.name + 'ID';
-            const idColumn = this.columns.find(col => col.name === idColumnName);
+            // Check if column has orig or type (metadata type identifier)
+            const hasMetadataType = (column.orig && column.orig > 0) || (column.type && column.type > 0);
 
-            // Check if ID column exists and has a ref (reference type)
-            return idColumn && idColumn.ref && idColumn.ref > 0;
+            return hasMetadataType;
         }
 
         async openColumnCreateForm(columnId) {
@@ -2666,16 +2664,14 @@ class IntegramTable {
                     return;
                 }
 
-                // Find the corresponding ID column
-                const idColumnName = column.name + 'ID';
-                const idColumn = this.columns.find(col => col.name === idColumnName);
+                // Determine typeId from column metadata
+                // Priority: 1) column.orig, 2) column.type
+                const typeId = column.orig || column.type;
 
-                if (!idColumn || !idColumn.ref) {
+                if (!typeId) {
                     this.showToast('Ошибка: не найден тип записи', 'error');
                     return;
                 }
-
-                const typeId = idColumn.ref;
 
                 // Fetch metadata and open create form
                 if (!this.metadataCache[typeId]) {
