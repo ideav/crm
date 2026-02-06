@@ -133,8 +133,9 @@ class IntegramTable {
                 LIMIT: `${ offset },${ requestSize }`
             });
 
-            Object.keys(this.filters).forEach(colId => {
-                const filter = this.filters[colId];
+            const filters = this.filters || {};
+            Object.keys(filters).forEach(colId => {
+                const filter = filters[colId];
                 if (filter.value || filter.type === '%' || filter.type === '!%') {
                     const column = this.columns.find(c => c.id === colId);
                     if (column) {
@@ -225,8 +226,9 @@ class IntegramTable {
                 RECORD_COUNT: '1'
             });
 
-            Object.keys(this.filters).forEach(colId => {
-                const filter = this.filters[colId];
+            const filters = this.filters || {};
+            Object.keys(filters).forEach(colId => {
+                const filter = filters[colId];
                 if (filter.value || filter.type === '%' || filter.type === '!%') {
                     const column = this.columns.find(c => c.id === colId);
                     if (column) {
@@ -1763,17 +1765,21 @@ class IntegramTable {
                 params.append('_xsrf', xsrf);
             }
 
-            // Add all form fields (skip empty parameters so server can fill defaults)
+            // Get main value before iterating form fields
+            const mainValue = formData.get('main');
+
+            // Add all form fields (skip 'main' since it's handled separately as t{typeId})
+            // Skip empty parameters so server can fill defaults
             for (const [key, value] of formData.entries()) {
+                if (key === 'main') continue;
                 if (value !== '' && value !== null && value !== undefined) {
                     params.append(key, value);
                 }
             }
 
-            // Get main value
-            const mainValue = formData.get('main');
+            // Add main value as t{typeId} parameter
             if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
-                params.append('t0', mainValue);
+                params.append(`t${ typeId }`, mainValue);
             }
 
             const apiBase = this.getApiBase();
@@ -3821,10 +3827,14 @@ class IntegramTable {
                 params.append('_xsrf', xsrf);
             }
 
-            // Add all form fields
+            // Get main value before iterating form fields
+            const mainValue = formData.get('main');
+
+            // Add all form fields (skip 'main' since it's handled separately as t{typeId})
             // When creating, skip empty parameters so server can fill defaults
             // When editing, include all parameters to allow clearing fields
             for (const [key, value] of formData.entries()) {
+                if (key === 'main') continue;
                 if (isCreate) {
                     if (value !== '' && value !== null && value !== undefined) {
                         params.append(key, value);
@@ -3834,20 +3844,17 @@ class IntegramTable {
                 }
             }
 
-            // Get main value
-            const mainValue = formData.get('main');
-
             const apiBase = this.getApiBase();
             let url;
 
             if (isCreate) {
                 url = `${ apiBase }/_m_new/${ typeId }?JSON&up=${ parentId || 1 }`;
                 if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
-                    params.append('t0', mainValue);
+                    params.append(`t${ typeId }`, mainValue);
                 }
             } else {
                 url = `${ apiBase }/_m_save/${ recordId }?JSON`;
-                params.append('t0', mainValue);
+                params.append(`t${ typeId }`, mainValue);
             }
 
             try {
