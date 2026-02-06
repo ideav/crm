@@ -1895,16 +1895,77 @@ function openAddRecordModal(statusId, statusName){
     currentStatusId = statusId;
     currentStatusName = statusName;
 
-    // Reset form
-    $('#addRecordForm')[0].reset();
-    $('#recordStatus').text(statusName);
+    // Load type metadata for Client (type 332)
+    var typeXhr = new XMLHttpRequest();
+    typeXhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/type_edit/332?JSON', true);
+    typeXhr.onload = function(){
+        if(typeXhr.status === 200){
+            try{
+                var typeData = JSON.parse(typeXhr.responseText);
+                var metadata = typeData.type || {};
 
-    // Show modal
-    $('#addRecordModal').addClass('active');
+                // Create a temporary table instance to use its form rendering
+                var tempOptions = {
+                    instanceName: 'tempAddClientTable'
+                };
+
+                // Create a simple object with the renderEditFormModal method
+                var tempTable = {
+                    options: tempOptions,
+                    parseAttrs: function(attrs){
+                        var result = {required: false, alias: '', multi: false};
+                        if(!attrs) return result;
+                        var parts = attrs.split(':');
+                        if(parts[0]) result.alias = parts[0];
+                        if(attrs.includes('!NULL:')) result.required = true;
+                        if(attrs.includes('MULTI:')) result.multi = true;
+                        return result;
+                    },
+                    escapeHtml: function(str){
+                        if(!str) return '';
+                        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+                    },
+                    renderEditFormModal: IntegramTable.prototype.renderEditFormModal
+                };
+
+                // Create a mock record data with the status pre-set
+                var recordData = {
+                    obj: {id: null, val: ''},
+                    reqs: {}
+                };
+
+                // Use IntegramTable's form rendering for creating a new client with specified status
+                tempTable.renderEditFormModal(metadata, recordData, true, 332);
+
+                // After the form is rendered, set the status field to the kanban status
+                setTimeout(function(){
+                    // Try to find and set the status field (requisite 4874 is the status field)
+                    var statusField = document.querySelector('[data-requisite-id="4874"]');
+                    if(statusField){
+                        // If it's a select, set the value
+                        var select = statusField.querySelector('select');
+                        if(select){
+                            select.value = statusId;
+                        }
+                    }
+                }, 100);
+            } catch(e){
+                console.error('Error rendering form:', e);
+                alert('Ошибка при подготовке формы: ' + e.message);
+            }
+        } else {
+            alert('Ошибка загрузки метаданных типа');
+        }
+    };
+    typeXhr.onerror = function(){
+        alert('Ошибка сети при загрузке метаданных');
+    };
+    typeXhr.send();
 }
 
 function closeAddRecordModal(){
-    $('#addRecordModal').removeClass('active');
+    // The IntegramTable form will handle its own modal closing
+    // This function is kept for backward compatibility
     currentStatusId = null;
     currentStatusName = null;
 }
