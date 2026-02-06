@@ -1606,4 +1606,5 @@ td:has(.inline-editor-reference) {
     max-height: 200px;
     border-top: none;
     border-radius: 0 0 4px 4px;
+    display: none;
 }
