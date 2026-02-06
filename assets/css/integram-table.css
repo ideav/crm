@@ -284,10 +284,10 @@
     border-bottom: 1px solid var(--md-divider);
     border-right: 1px solid rgba(0, 0, 0, 0.06);
     position: sticky;
-    /* top: 44px; */
-    z-index: 9;
+    /* top: 44px;
     height: 40px;
-    min-height: 40px;
+    min-height: 40px; */
+    z-index: 9;
     vertical-align: middle;
 }
 
