@@ -1583,3 +1583,27 @@ td:has(.inline-editor-reference) {
     background-color: rgba(25, 118, 210, 0.08) !important;
     padding: 4px !important;
 }
+
+/* ========================================
+   Form Reference Editor Styles
+   (identical look to inline table cell reference editor)
+   ======================================== */
+
+.form-reference-editor {
+    position: relative;
+    width: 100%;
+}
+
+.form-ref-editor-box {
+    position: relative;
+}
+
+.form-ref-editor-box .inline-editor-reference-dropdown {
+    position: relative;
+    top: auto;
+    left: auto;
+    right: auto;
+    max-height: 200px;
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+}

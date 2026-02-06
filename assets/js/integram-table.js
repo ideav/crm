@@ -3061,21 +3061,27 @@ class IntegramTable {
                 html += `<div class="form-group">`;
                 html += `<label for="field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
 
-                // Reference field (searchable dropdown)
+                // Reference field (searchable dropdown with clear/add buttons - same as inline table editor)
                 if (req.ref_id) {
                     const currentValue = reqValue || '';
                     html += `
-                        <div class="searchable-select-wrapper" data-ref-id="${ req.id }" data-required="${ isRequired }">
-                            <input type="text"
-                                   class="form-control searchable-select-input"
-                                   id="field-${ req.id }-search"
-                                   placeholder="Начните вводить для поиска..."
-                                   autocomplete="off">
-                            <div class="searchable-select-dropdown" id="field-${ req.id }-dropdown">
-                                <div class="searchable-select-loading">Загрузка...</div>
+                        <div class="form-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.ref_id }">
+                            <div class="inline-editor-reference form-ref-editor-box">
+                                <div class="inline-editor-reference-header">
+                                    <input type="text"
+                                           class="inline-editor-reference-search form-ref-search"
+                                           id="field-${ req.id }-search"
+                                           placeholder="Поиск..."
+                                           autocomplete="off">
+                                    <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button">×</button>
+                                    <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button">+</button>
+                                </div>
+                                <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${ req.id }-dropdown">
+                                    <div class="inline-editor-reference-empty">Загрузка...</div>
+                                </div>
                             </div>
                             <input type="hidden"
-                                   class="searchable-select-value"
+                                   class="form-ref-value"
                                    id="field-${ req.id }"
                                    name="t${ req.id }"
                                    value="${ this.escapeHtml(currentValue) }"
@@ -3418,20 +3424,26 @@ class IntegramTable {
                 formHtml += `<div class="form-group">`;
                 formHtml += `<label for="sub-field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
 
-                // Reference field
+                // Reference field (searchable dropdown with clear/add buttons - same as inline table editor)
                 if (req.ref_id) {
                     formHtml += `
-                        <div class="searchable-select-wrapper" data-ref-id="${ req.id }" data-required="${ isRequired }">
-                            <input type="text"
-                                   class="form-control searchable-select-input"
-                                   id="sub-field-${ req.id }-search"
-                                   placeholder="Начните вводить для поиска..."
-                                   autocomplete="off">
-                            <div class="searchable-select-dropdown" id="sub-field-${ req.id }-dropdown">
-                                <div class="searchable-select-loading">Загрузка...</div>
+                        <div class="form-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.ref_id }">
+                            <div class="inline-editor-reference form-ref-editor-box">
+                                <div class="inline-editor-reference-header">
+                                    <input type="text"
+                                           class="inline-editor-reference-search form-ref-search"
+                                           id="sub-field-${ req.id }-search"
+                                           placeholder="Поиск..."
+                                           autocomplete="off">
+                                    <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button">×</button>
+                                    <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button">+</button>
+                                </div>
+                                <div class="inline-editor-reference-dropdown form-ref-dropdown" id="sub-field-${ req.id }-dropdown">
+                                    <div class="inline-editor-reference-empty">Загрузка...</div>
+                                </div>
                             </div>
                             <input type="hidden"
-                                   class="searchable-select-value"
+                                   class="form-ref-value"
                                    id="sub-field-${ req.id }"
                                    name="t${ req.id }"
                                    value=""
@@ -3604,22 +3616,29 @@ class IntegramTable {
         }
 
         async loadReferenceOptions(reqs, recordId) {
-            const searchableSelects = document.querySelectorAll('.searchable-select-wrapper');
+            // Load reference options for the new form-reference-editor elements
+            const formRefEditors = document.querySelectorAll('.form-reference-editor');
 
-            for (const wrapper of searchableSelects) {
+            for (const wrapper of formRefEditors) {
                 const refReqId = wrapper.dataset.refId;
-                const searchInput = wrapper.querySelector('.searchable-select-input');
-                const dropdown = wrapper.querySelector('.searchable-select-dropdown');
-                const hiddenInput = wrapper.querySelector('.searchable-select-value');
+                const refTypeId = wrapper.dataset.refTypeId;
+                const searchInput = wrapper.querySelector('.form-ref-search');
+                const dropdown = wrapper.querySelector('.form-ref-dropdown');
+                const hiddenInput = wrapper.querySelector('.form-ref-value');
+                const clearButton = wrapper.querySelector('.form-ref-clear');
+                const addButton = wrapper.querySelector('.form-ref-add');
+
+                if (!searchInput || !dropdown || !hiddenInput) continue;
 
                 try {
                     const options = await this.fetchReferenceOptions(refReqId, recordId);
 
                     // Store options data on the wrapper
-                    wrapper.dataset.options = JSON.stringify(options);
+                    wrapper._referenceOptions = options;
+                    wrapper._allOptionsFetched = Object.keys(options).length < 50;
 
-                    // Render all options initially
-                    this.renderSearchableOptions(dropdown, options, hiddenInput, searchInput);
+                    // Render options
+                    this.renderFormReferenceOptions(dropdown, options, hiddenInput, searchInput);
 
                     // Set current value if exists
                     if (hiddenInput.value) {
@@ -3629,21 +3648,46 @@ class IntegramTable {
                         }
                     }
 
-                    // Attach search event
-                    searchInput.addEventListener('input', (e) => {
-                        const query = e.target.value.toLowerCase();
-                        const allOptions = JSON.parse(wrapper.dataset.options);
+                    // Handle search input
+                    let searchTimeout;
+                    searchInput.addEventListener('input', async (e) => {
+                        const searchText = e.target.value.trim();
 
-                        // Filter options
-                        const filtered = {};
-                        Object.entries(allOptions).forEach(([id, name]) => {
-                            if (name.toLowerCase().includes(query)) {
-                                filtered[id] = name;
+                        // Toggle buttons based on search input length (like inline editor)
+                        if (searchText.length > 0) {
+                            if (addButton) addButton.style.display = '';
+                            if (clearButton) clearButton.style.display = 'none';
+                        } else {
+                            if (addButton) addButton.style.display = 'none';
+                            if (clearButton) clearButton.style.display = '';
+                        }
+
+                        clearTimeout(searchTimeout);
+                        searchTimeout = setTimeout(async () => {
+                            if (searchText === '') {
+                                this.renderFormReferenceOptions(dropdown, wrapper._referenceOptions, hiddenInput, searchInput);
+                            } else {
+                                // Filter locally first
+                                const filtered = {};
+                                for (const [id, text] of Object.entries(wrapper._referenceOptions)) {
+                                    if (text.toLowerCase().includes(searchText.toLowerCase())) {
+                                        filtered[id] = text;
+                                    }
+                                }
+                                this.renderFormReferenceOptions(dropdown, filtered, hiddenInput, searchInput);
+
+                                // If not all fetched, re-query from server
+                                if (!wrapper._allOptionsFetched) {
+                                    try {
+                                        const serverOptions = await this.fetchReferenceOptions(refReqId, recordId, searchText);
+                                        wrapper._referenceOptions = serverOptions;
+                                        this.renderFormReferenceOptions(dropdown, serverOptions, hiddenInput, searchInput);
+                                    } catch (error) {
+                                        console.error('Error re-querying reference options:', error);
+                                    }
+                                }
                             }
-                        });
-
-                        this.renderSearchableOptions(dropdown, filtered, hiddenInput, searchInput);
-                        dropdown.style.display = 'block';
+                        }, 300);
                     });
 
                     // Show dropdown on focus
@@ -3651,8 +3695,75 @@ class IntegramTable {
                         dropdown.style.display = 'block';
                     });
 
+                    // Handle keyboard navigation
+                    searchInput.addEventListener('keydown', (e) => {
+                        if (e.key === 'ArrowDown') {
+                            e.preventDefault();
+                            const firstOption = dropdown.querySelector('.inline-editor-reference-option');
+                            if (firstOption) firstOption.focus();
+                        } else if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const firstOption = dropdown.querySelector('.inline-editor-reference-option');
+                            if (firstOption) firstOption.click();
+                        }
+                    });
+
+                    // Handle keyboard navigation in dropdown
+                    dropdown.addEventListener('keydown', (e) => {
+                        const currentOption = document.activeElement;
+                        if (e.key === 'ArrowDown') {
+                            e.preventDefault();
+                            const nextOption = currentOption.nextElementSibling;
+                            if (nextOption && nextOption.classList.contains('inline-editor-reference-option')) nextOption.focus();
+                        } else if (e.key === 'ArrowUp') {
+                            e.preventDefault();
+                            const prevOption = currentOption.previousElementSibling;
+                            if (prevOption && prevOption.classList.contains('inline-editor-reference-option')) {
+                                prevOption.focus();
+                            } else {
+                                searchInput.focus();
+                            }
+                        } else if (e.key === 'Enter') {
+                            e.preventDefault();
+                            currentOption.click();
+                        }
+                    });
+
+                    // Handle option selection via click delegation
+                    dropdown.addEventListener('click', (e) => {
+                        const option = e.target.closest('.inline-editor-reference-option');
+                        if (option) {
+                            hiddenInput.value = option.dataset.id;
+                            searchInput.value = option.dataset.text;
+                            dropdown.style.display = 'none';
+                        }
+                    });
+
+                    // Handle clear button
+                    if (clearButton) {
+                        clearButton.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            hiddenInput.value = '';
+                            searchInput.value = '';
+                            this.renderFormReferenceOptions(dropdown, wrapper._referenceOptions, hiddenInput, searchInput);
+                        });
+                    }
+
+                    // Handle add button (create new record)
+                    if (addButton && refTypeId) {
+                        addButton.addEventListener('click', async (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const inputValue = searchInput.value.trim();
+                            await this.openCreateFormForFormReference(refTypeId, inputValue, recordId, hiddenInput, searchInput, wrapper, dropdown);
+                        });
+                    }
+
                     // Hide dropdown when clicking outside
                     document.addEventListener('click', (e) => {
+                        // Don't hide if clicking inside a create-form modal
+                        if (e.target.closest('.edit-form-modal') || e.target.closest('.edit-form-overlay')) return;
                         if (!wrapper.contains(e.target)) {
                             dropdown.style.display = 'none';
                         }
@@ -3660,47 +3771,236 @@ class IntegramTable {
 
                 } catch (error) {
                     console.error('Error loading reference options:', error);
-                    dropdown.innerHTML = '<div class="searchable-select-error">Ошибка загрузки</div>';
+                    dropdown.innerHTML = '<div class="inline-editor-reference-empty">Ошибка загрузки</div>';
                 }
             }
         }
 
-        renderSearchableOptions(dropdown, options, hiddenInput, searchInput) {
+        renderFormReferenceOptions(dropdown, options, hiddenInput, searchInput) {
             dropdown.innerHTML = '';
+            dropdown.style.display = 'block';
 
-            const optionsCount = Object.keys(options).length;
+            const entries = Object.entries(options);
 
-            if (optionsCount === 0) {
-                dropdown.innerHTML = '<div class="searchable-select-no-results">Ничего не найдено</div>';
+            if (entries.length === 0) {
+                dropdown.innerHTML = '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
                 return;
             }
 
-            Object.entries(options).forEach(([id, name]) => {
+            entries.forEach(([id, text]) => {
+                const escapedText = this.escapeHtml(text);
                 const optionDiv = document.createElement('div');
-                optionDiv.className = 'searchable-select-option';
-                optionDiv.textContent = name;
-                optionDiv.dataset.value = id;
+                optionDiv.className = 'inline-editor-reference-option';
+                optionDiv.textContent = text;
+                optionDiv.dataset.id = id;
+                optionDiv.dataset.text = text;
+                optionDiv.tabIndex = 0;
 
                 // Highlight if selected
                 if (hiddenInput.value === id) {
-                    optionDiv.classList.add('selected');
+                    optionDiv.style.backgroundColor = 'var(--md-selected)';
+                    optionDiv.style.color = 'var(--md-primary)';
+                    optionDiv.style.fontWeight = '500';
                 }
-
-                optionDiv.addEventListener('click', () => {
-                    hiddenInput.value = id;
-                    searchInput.value = name;
-                    dropdown.style.display = 'none';
-
-                    // Remove 'selected' from all options
-                    dropdown.querySelectorAll('.searchable-select-option').forEach(opt => {
-                        opt.classList.remove('selected');
-                    });
-                    // Add 'selected' to this option
-                    optionDiv.classList.add('selected');
-                });
 
                 dropdown.appendChild(optionDiv);
             });
+        }
+
+        async openCreateFormForFormReference(typeId, initialValue, parentRecordId, hiddenInput, searchInput, wrapper, dropdown) {
+            // Open a create form for new record from form reference field
+            // After creation, set the newly created record ID and value in the reference field
+            try {
+                if (!this.metadataCache[typeId]) {
+                    this.metadataCache[typeId] = await this.fetchMetadata(typeId);
+                }
+
+                const metadata = this.metadataCache[typeId];
+                this.renderCreateFormForFormReference(metadata, typeId, initialValue, parentRecordId, hiddenInput, searchInput, wrapper, dropdown);
+
+            } catch (error) {
+                console.error('Error opening create form for form reference:', error);
+                this.showToast(`Ошибка открытия формы: ${error.message}`, 'error');
+            }
+        }
+
+        renderCreateFormForFormReference(metadata, typeId, initialValue, parentRecordId, hiddenInput, searchInput, wrapper, dropdown) {
+            // Track modal depth for z-index stacking
+            if (!window._integramModalDepth) {
+                window._integramModalDepth = 0;
+            }
+            window._integramModalDepth++;
+            const modalDepth = window._integramModalDepth;
+            const baseZIndex = 1000 + (modalDepth * 10);
+
+            const overlay = document.createElement('div');
+            overlay.className = 'edit-form-overlay';
+            overlay.style.zIndex = baseZIndex;
+            overlay.dataset.modalDepth = modalDepth;
+
+            const modal = document.createElement('div');
+            modal.className = 'edit-form-modal';
+            modal.style.zIndex = baseZIndex + 1;
+            modal.dataset.modalDepth = modalDepth;
+            modal.dataset.overlayRef = 'true';
+            modal._overlayElement = overlay;
+
+            const title = `Создание: ${metadata.val}`;
+
+            const reqs = metadata.reqs || [];
+            const regularFields = reqs.filter(req => !req.arr_id);
+
+            let attributesHtml = `
+                <div class="form-group">
+                    <label for="field-main-form-ref-create">${metadata.val} <span class="required">*</span></label>
+                    <input type="text" class="form-control" id="field-main-form-ref-create" name="main" value="${this.escapeHtml(initialValue)}" required>
+                </div>
+            `;
+
+            regularFields.forEach(req => {
+                const attrs = this.parseAttrs(req.attrs);
+                const fieldName = attrs.alias || req.val;
+                const isRequired = attrs.required;
+
+                attributesHtml += `
+                    <div class="form-group">
+                        <label for="field-form-ref-${req.id}">${fieldName}${isRequired ? ' <span class="required">*</span>' : ''}</label>
+                        <input type="text" class="form-control" id="field-form-ref-${req.id}" name="t${req.id}"${isRequired ? ' required' : ''}>
+                    </div>
+                `;
+            });
+
+            let formHtml = `
+                <div class="edit-form-header">
+                    <h5>${title}</h5>
+                    <button class="edit-form-close" data-close-form-ref-modal="true">×</button>
+                </div>
+                <div class="edit-form-body">
+                    <form id="edit-form-form-ref-create" class="edit-form">
+                        ${attributesHtml}
+                    </form>
+                </div>
+                <div class="edit-form-footer">
+                    <div class="edit-form-footer-buttons">
+                        <button type="button" class="btn btn-primary" id="save-form-ref-btn">Сохранить</button>
+                        <button type="button" class="btn btn-secondary" data-close-form-ref-modal="true">Отмена</button>
+                    </div>
+                </div>
+            `;
+
+            modal.innerHTML = formHtml;
+            document.body.appendChild(overlay);
+            document.body.appendChild(modal);
+
+            // Attach save handler
+            const saveBtn = modal.querySelector('#save-form-ref-btn');
+            saveBtn.addEventListener('click', async () => {
+                await this.saveRecordForFormReference(modal, overlay, typeId, parentRecordId, hiddenInput, searchInput, wrapper, dropdown);
+            });
+
+            // Close modal helper
+            const closeModal = () => {
+                modal.remove();
+                overlay.remove();
+                window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+            };
+
+            modal.querySelectorAll('[data-close-form-ref-modal="true"]').forEach(btn => {
+                btn.addEventListener('click', closeModal);
+            });
+
+            overlay.addEventListener('click', closeModal);
+        }
+
+        async saveRecordForFormReference(modal, overlay, typeId, parentRecordId, hiddenInput, searchInput, wrapper, dropdown) {
+            const form = modal.querySelector('#edit-form-form-ref-create');
+
+            if (!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+
+            const formData = new FormData(form);
+            const params = new URLSearchParams();
+
+            if (typeof xsrf !== 'undefined') {
+                params.append('_xsrf', xsrf);
+            }
+
+            const mainValue = formData.get('main');
+
+            for (const [key, value] of formData.entries()) {
+                if (key === 'main') continue;
+                if (value !== '' && value !== null && value !== undefined) {
+                    params.append(key, value);
+                }
+            }
+
+            if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
+                params.append(`t${ typeId }`, mainValue);
+            }
+
+            const apiBase = this.getApiBase();
+            const url = `${apiBase}/_m_new/${typeId}?JSON&up=1`;
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: params.toString()
+                });
+
+                const text = await response.text();
+
+                let result;
+                try {
+                    result = JSON.parse(text);
+                } catch (e) {
+                    if (text.includes('error') || !response.ok) {
+                        throw new Error(text);
+                    }
+                    result = { success: true };
+                }
+
+                if (result.error) {
+                    throw new Error(result.error);
+                }
+
+                const createdId = result.obj || result.id || result.i;
+                const createdValue = result.val || mainValue;
+
+                console.log('[TRACE] saveRecordForFormReference - response:', JSON.stringify(result));
+                console.log('[TRACE] saveRecordForFormReference - createdId:', createdId, 'createdValue:', createdValue);
+
+                // Close the create form modal
+                modal.remove();
+                overlay.remove();
+                window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+
+                this.showToast('Запись успешно создана', 'success');
+
+                // Set the created record in the form reference field
+                if (createdId) {
+                    hiddenInput.value = createdId;
+                    searchInput.value = createdValue;
+                    dropdown.style.display = 'none';
+
+                    // Re-fetch options to include the new record
+                    try {
+                        const refReqId = wrapper.dataset.refId;
+                        const newOptions = await this.fetchReferenceOptions(refReqId, parentRecordId);
+                        wrapper._referenceOptions = newOptions;
+                    } catch (err) {
+                        console.error('Error re-fetching reference options:', err);
+                    }
+                }
+
+            } catch (error) {
+                console.error('Error saving record for form reference:', error);
+                this.showToast(`Ошибка сохранения: ${error.message}`, 'error');
+            }
         }
 
         // Form field visibility settings
