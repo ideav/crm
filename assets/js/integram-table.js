@@ -3644,8 +3644,9 @@ class IntegramTable {
                     wrapper._referenceOptions = options;
                     wrapper._allOptionsFetched = Object.keys(options).length < 50;
 
-                    // Render options
+                    // Render options (hidden by default, shown on focus)
                     this.renderFormReferenceOptions(dropdown, options, hiddenInput, searchInput);
+                    dropdown.style.display = 'none';
 
                     // Set current value if exists
                     if (hiddenInput.value) {
@@ -3694,6 +3695,7 @@ class IntegramTable {
                                     }
                                 }
                             }
+                            dropdown.style.display = 'block';
                         }, 300);
                     });
 
@@ -3754,6 +3756,7 @@ class IntegramTable {
                             hiddenInput.value = '';
                             searchInput.value = '';
                             this.renderFormReferenceOptions(dropdown, wrapper._referenceOptions, hiddenInput, searchInput);
+                            dropdown.style.display = 'block';
                         });
                     }
 
@@ -3767,10 +3770,8 @@ class IntegramTable {
                         });
                     }
 
-                    // Hide dropdown when clicking outside
+                    // Hide dropdown when clicking outside the reference editor wrapper
                     document.addEventListener('click', (e) => {
-                        // Don't hide if clicking inside a create-form modal
-                        if (e.target.closest('.edit-form-modal') || e.target.closest('.edit-form-overlay')) return;
                         if (!wrapper.contains(e.target)) {
                             dropdown.style.display = 'none';
                         }
@@ -3785,7 +3786,6 @@ class IntegramTable {
 
         renderFormReferenceOptions(dropdown, options, hiddenInput, searchInput) {
             dropdown.innerHTML = '';
-            dropdown.style.display = 'block';
 
             const entries = Object.entries(options);
 
