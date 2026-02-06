@@ -113,6 +113,11 @@ class IntegramTable {
                 }
                 const metadata = await response.json();
                 this.globalMetadata = metadata;
+                // Re-render if data is already loaded, so column-add-btn visibility
+                // can be recalculated based on the metadata ids
+                if (this.columns.length > 0) {
+                    this.render();
+                }
             } catch (error) {
                 console.error('Error loading global metadata:', error);
             }
@@ -2652,9 +2657,29 @@ class IntegramTable {
             }
 
             // Check if column has orig or type (metadata type identifier)
-            const hasMetadataType = (column.orig && column.orig > 0) || (column.type && column.type > 0);
+            const typeId = column.orig || column.type;
+            if (!typeId || typeId <= 0) {
+                return false;
+            }
 
-            return hasMetadataType;
+            // Check if typeId is found among the ids in global metadata response
+            if (!this.globalMetadata) {
+                return false;
+            }
+
+            // Check top-level metadata ids
+            if (this.globalMetadata.some(item => item.id === typeId)) {
+                return true;
+            }
+
+            // Check requisite ids within metadata items
+            for (const item of this.globalMetadata) {
+                if (item.reqs && item.reqs.some(r => r.id === typeId)) {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         async openColumnCreateForm(columnId) {
