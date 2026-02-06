@@ -1913,24 +1913,9 @@ function openAddRecordModal(statusId, statusName){
                     instanceName: 'tempAddClientTable'
                 };
 
-                // Create a simple object with the renderEditFormModal method
-                var tempTable = {
-                    options: tempOptions,
-                    parseAttrs: function(attrs){
-                        var result = {required: false, alias: '', multi: false};
-                        if(!attrs) return result;
-                        var parts = attrs.split(':');
-                        if(parts[0]) result.alias = parts[0];
-                        if(attrs.includes('!NULL:')) result.required = true;
-                        if(attrs.includes('MULTI:')) result.multi = true;
-                        return result;
-                    },
-                    escapeHtml: function(str){
-                        if(!str) return '';
-                        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
-                    },
-                    renderEditFormModal: IntegramTable.prototype.renderEditFormModal
-                };
+                // Create a wrapper object that delegates to IntegramTable prototype
+                var tempTable = Object.create(IntegramTable.prototype);
+                tempTable.options = tempOptions;
 
                 // Create a mock record data with the status pre-set
                 var recordData = {
