@@ -989,18 +989,11 @@
 </div>
 
 <!-- Modal for editing client -->
+<!-- Client edit modal - will be replaced with IntegramTable form -->
 <div id="editClientModal" class="kanban-edit-modal-overlay">
     <div class="kanban-edit-modal">
-        <div class="kanban-edit-modal-header">
-            <h3 class="kanban-edit-modal-title">Редактировать клиента</h3>
-            <button class="kanban-edit-modal-close" onclick="closeEditClientModal()">&times;</button>
-        </div>
         <div class="kanban-edit-modal-body" id="editClientModalBody">
             <div class="kanban-edit-loading">Загрузка...</div>
-        </div>
-        <div class="kanban-edit-modal-footer">
-            <button class="kanban-button kanban-button-primary" onclick="submitEditClient()" id="editClientSubmitButton">Сохранить</button>
-            <button class="kanban-button kanban-button-secondary" onclick="closeEditClientModal()">Отмена</button>
         </div>
     </div>
 </div>
@@ -2030,11 +2023,73 @@ var clientTypeId = 332;  // Client type ID
 
 function openClientEditForm(clientId){
     currentEditClientId = clientId;
-    $('#editClientModal').addClass('active');
-    $('#editClientModalBody').html('<div class="kanban-edit-loading">Загрузка данных клиента...</div>');
 
-    // Load client data
-    loadClientEditData(clientId);
+    // Load client data using IntegramTable form
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/edit_obj/' + clientId + '?JSON', true);
+    xhr.onload = function(){
+        if(xhr.status === 200){
+            try{
+                var recordData = JSON.parse(xhr.responseText);
+
+                // Load type metadata
+                var typeXhr = new XMLHttpRequest();
+                typeXhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/type_edit/' + clientTypeId + '?JSON', true);
+                typeXhr.onload = function(){
+                    if(typeXhr.status === 200){
+                        try{
+                            var typeData = JSON.parse(typeXhr.responseText);
+                            var metadata = typeData.type || {};
+
+                            // Hide the old modal if it exists
+                            $('#editClientModal').removeClass('active');
+
+                            // Create a temporary table instance to use its form rendering
+                            var tempOptions = {
+                                instanceName: 'tempClientTable'
+                            };
+
+                            // Create a simple object with the renderEditFormModal method
+                            var tempTable = {
+                                options: tempOptions,
+                                parseAttrs: function(attrs){
+                                    var result = {required: false, alias: '', multi: false};
+                                    if(!attrs) return result;
+                                    var parts = attrs.split(':');
+                                    if(parts[0]) result.alias = parts[0];
+                                    if(attrs.includes('!NULL:')) result.required = true;
+                                    if(attrs.includes('MULTI:')) result.multi = true;
+                                    return result;
+                                },
+                                escapeHtml: function(str){
+                                    if(!str) return '';
+                                    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+                                },
+                                renderEditFormModal: IntegramTable.prototype.renderEditFormModal
+                            };
+
+                            // Use IntegramTable's form rendering
+                            tempTable.renderEditFormModal(metadata, recordData, false, clientTypeId);
+                        } catch(e){
+                            console.error('Error rendering form:', e);
+                            alert('Ошибка при подготовке формы: ' + e.message);
+                        }
+                    } else {
+                        alert('Ошибка загрузки метаданных типа');
+                    }
+                };
+                typeXhr.send();
+            } catch(e){
+                alert('Ошибка парсинга данных: ' + e.message);
+            }
+        } else {
+            alert('Ошибка загрузки данных клиента: ' + xhr.status);
+        }
+    };
+    xhr.onerror = function(){
+        alert('Ошибка сети при загрузке данных');
+    };
+    xhr.send();
 }
 
 function closeEditClientModal(){
@@ -2042,197 +2097,6 @@ function closeEditClientModal(){
     currentEditClientId = null;
 }
 
-function loadClientEditData(clientId){
-    var xhr = new XMLHttpRequest();
-    xhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/edit_obj/' + clientId + '?JSON', true);
-    xhr.onload = function(){
-        if(xhr.status === 200){
-            try{
-                var data = JSON.parse(xhr.responseText);
-                renderClientEditForm(data);
-            } catch(e){
-                $('#editClientModalBody').html('<div class="error">Ошибка парсинга данных: ' + e.message + '</div>');
-            }
-        } else {
-            $('#editClientModalBody').html('<div class="error">Ошибка загрузки данных: ' + xhr.status + '</div>');
-        }
-    };
-    xhr.onerror = function(){
-        $('#editClientModalBody').html('<div class="error">Ошибка сети при загрузке данных</div>');
-    };
-    xhr.send();
-}
-
-function renderClientEditForm(data){
-    var obj = data.obj || {};
-    var reqs = data.reqs || {};
-
-    var html = '<form id="editClientForm">';
-
-    // Main name field
-    html += '<div class="kanban-edit-form-group">';
-    html += '<label class="kanban-edit-form-label required">Название</label>';
-    html += '<input type="text" class="kanban-edit-form-input" id="editClientName" name="t0" value="' + escapeHtml(obj.val || '') + '">';
-    html += '</div>';
-
-    // Status field (from requisites) - use editFormStatusesData (all statuses, unfiltered)
-    if(reqs['4874']){
-        html += '<div class="kanban-edit-form-group">';
-        html += '<label class="kanban-edit-form-label">Статус для перевода к партнеру</label>';
-        html += '<select class="kanban-edit-form-select" id="editClientStatus" name="t4874">';
-        html += '<option value="">Выберите статус</option>';
-        var statusValue = getReqValue(reqs, '4874');
-        editFormStatusesData.forEach(function(status){
-            var selected = statusValue == status['СтатусID'] ? 'selected' : '';
-            html += '<option value="' + escapeHtml(status['СтатусID'] || '') + '" ' + selected + '>' + escapeHtml(status['Статус'] || '') + '</option>';
-        });
-        html += '</select>';
-        html += '</div>';
-    }
-
-    // INN field
-    if(reqs['637'] !== undefined){
-        html += '<div class="kanban-edit-form-group">';
-        html += '<label class="kanban-edit-form-label">ИНН</label>';
-        html += '<input type="text" class="kanban-edit-form-input" id="editClientInn" name="t637" value="' + (escapeHtml(getReqValue(reqs, '637')) || '') + '">';
-        html += '</div>';
-    }
-
-    // Partner field
-    if(reqs['443'] !== undefined){
-        html += '<div class="kanban-edit-form-group">';
-        html += '<label class="kanban-edit-form-label">Партнер</label>';
-        html += '<select class="kanban-edit-form-select" id="editClientPartner" name="t443">';
-        html += '<option value="">Выберите партнера</option>';
-        var partnerValue = getReqValue(reqs, '443') || '';
-        partnersData.forEach(function(partner){
-            var selected = partnerValue == partner['ПартнерID'] ? 'selected' : '';
-            html += '<option value="' + (escapeHtml(partner['ПартнерID'] || '') || '') + '" ' + selected + '>' + (escapeHtml(partner['Партнер'] || '') || '') + '</option>';
-        });
-        html += '</select>';
-        html += '</div>';
-    }
-
-    // Distributor field
-    if(reqs['4862'] !== undefined){
-        html += '<div class="kanban-edit-form-group">';
-        html += '<label class="kanban-edit-form-label">Дистрибьютор</label>';
-        html += '<select class="kanban-edit-form-select" id="editClientDistributor" name="t4862">';
-        html += '<option value="">Выберите дистрибьютора</option>';
-        var distributorValue = getReqValue(reqs, '4862') || '';
-        distributorsData.forEach(function(distributor){
-            var selected = distributorValue == distributor['ДистрибьюторID'] ? 'selected' : '';
-            html += '<option value="' + (escapeHtml(distributor['ДистрибьюторID'] || '') || '') + '" ' + selected + '>' + (escapeHtml(distributor['Дистрибьютор'] || '') || '') + '</option>';
-        });
-        html += '</select>';
-        html += '</div>';
-    }
-
-    // Phone field
-    if(reqs['4536'] !== undefined){
-        html += '<div class="kanban-edit-form-group">';
-        html += '<label class="kanban-edit-form-label">Телефон</label>';
-        html += '<input type="text" class="kanban-edit-form-input" id="editClientPhone" name="t4536" value="' + (escapeHtml(getReqValue(reqs, '4536')) || '') + '">';
-        html += '</div>';
-    }
-
-    // Email field
-    if(reqs['4537'] !== undefined){
-        html += '<div class="kanban-edit-form-group">';
-        html += '<label class="kanban-edit-form-label">Email</label>';
-        html += '<input type="email" class="kanban-edit-form-input" id="editClientEmail" name="t4537" value="' + (escapeHtml(getReqValue(reqs, '4537')) || '') + '">';
-        html += '</div>';
-    }
-
-    // Contact person field
-    if(reqs['4538'] !== undefined){
-        html += '<div class="kanban-edit-form-group">';
-        html += '<label class="kanban-edit-form-label">Контактное лицо</label>';
-        html += '<input type="text" class="kanban-edit-form-input" id="editClientContact" name="t4538" value="' + (escapeHtml(getReqValue(reqs, '4538')) || '') + '">';
-        html += '</div>';
-    }
-
-    // Source field
-    if(reqs['4861'] !== undefined){
-        html += '<div class="kanban-edit-form-group">';
-        html += '<label class="kanban-edit-form-label">Источник</label>';
-        html += '<select class="kanban-edit-form-select" id="editClientSource" name="t4861">';
-        html += '<option value="">Выберите источник</option>';
-        var sourceValue = getReqValue(reqs, '4861') || '';
-        sourcesData.forEach(function(source){
-            var selected = sourceValue == source['ИсточникID'] ? 'selected' : '';
-            html += '<option value="' + (escapeHtml(source['ИсточникID'] || '') || '') + '" ' + selected + '>' + (escapeHtml(source['Источник'] || '') || '') + '</option>';
-        });
-        html += '</select>';
-        html += '</div>';
-    }
-
-    // Amount field
-    if(reqs['4864'] !== undefined){
-        html += '<div class="kanban-edit-form-group">';
-        html += '<label class="kanban-edit-form-label">Сумма</label>';
-        html += '<input type="number" class="kanban-edit-form-input" id="editClientAmount" name="t4864" value="' + (escapeHtml(getReqValue(reqs, '4864')) || '') + '">';
-        html += '</div>';
-    }
-
-    // Note field
-    if(reqs['4539'] !== undefined){
-        html += '<div class="kanban-edit-form-group">';
-        html += '<label class="kanban-edit-form-label">Примечание</label>';
-        html += '<textarea class="kanban-edit-form-textarea" id="editClientNote" name="t4539">' + (escapeHtml(getReqValue(reqs, '4539')) || '') + '</textarea>';
-        html += '</div>';
-    }
-
-    html += '</form>';
-
-    $('#editClientModalBody').html(html);
-}
-
-function submitEditClient(){
-    if(!currentEditClientId) return;
-
-    var name = $('#editClientName').val().trim();
-    if(!name){
-        $('#editClientName').addClass('error');
-        alert('Название обязательно для заполнения');
-        return;
-    }
-
-    $('#editClientSubmitButton').prop('disabled', true).text('Сохранение...');
-
-    var formData = $('#editClientForm').serialize();
-    // Remove t4874 (status) if empty - don't send parameter when status is not selected
-    formData = formData.replace(/&t4874=(?=&|$)/, '').replace(/^t4874=&/, '');
-    formData += '&_xsrf=' + xsrf;
-
-    var xhr = new XMLHttpRequest();
-    xhr.open('POST', 'https://' + window.location.hostname + '/' + db + '/_m_save/' + currentEditClientId + '?JSON', true);
-    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-    xhr.onload = function(){
-        $('#editClientSubmitButton').prop('disabled', false).text('Сохранить');
-        if(xhr.status === 200){
-            try{
-                var response = JSON.parse(xhr.responseText);
-                console.log('Client updated:', response);
-                closeEditClientModal();
-                loadKanbanData();
-            } catch(e){
-                console.error('Error parsing response:', e);
-                closeEditClientModal();
-                loadKanbanData();
-            }
-        } else {
-            console.error('Error updating client:', xhr.status, xhr.responseText);
-            alert('Ошибка при сохранении: ' + xhr.status);
-        }
-    };
-    xhr.onerror = function(){
-        $('#editClientSubmitButton').prop('disabled', false).text('Сохранить');
-        console.error('Network error updating client');
-        alert('Ошибка сети при сохранении');
-    };
-    xhr.send(formData);
-}
 
 // Task creation modal functionality
 var currentTaskLeadId = null;
