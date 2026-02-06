@@ -1542,31 +1542,6 @@ class IntegramTable {
             }
         }
 
-        async fetchReferenceOptions(colType, parentRecordId, searchText = '') {
-            const apiBase = this.getApiBase();
-            const params = new URLSearchParams({
-                JSON: '',
-                id: parentRecordId,
-                LIMIT: '50'
-            });
-
-            if (searchText) {
-                params.append('q', searchText);
-            }
-
-            const url = `${apiBase}/_ref_reqs/${colType}?${params}`;
-            console.log('[TRACE] fetchReferenceOptions - URL:', url);
-
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-
-            const data = await response.json();
-            console.log('[TRACE] fetchReferenceOptions - received data:', data);
-            return data;
-        }
-
         renderReferenceOptions(options, currentValue) {
             // Filter out current value from options
             const filteredOptions = Object.entries(options).filter(([id, text]) => text !== currentValue);
@@ -1695,7 +1670,8 @@ class IntegramTable {
             // Store reference to overlay on modal for proper cleanup
             modal._overlayElement = overlay;
 
-            const title = `Создание: ${metadata.val}`;
+            const typeName = this.getMetadataName(metadata);
+            const title = `Создание: ${typeName}`;
 
             // Build attributes form HTML (similar to renderAttributesForm but simplified for create mode)
             const reqs = metadata.reqs || [];
@@ -1703,7 +1679,7 @@ class IntegramTable {
 
             let attributesHtml = `
                 <div class="form-group">
-                    <label for="field-main-ref-create">${metadata.val} <span class="required">*</span></label>
+                    <label for="field-main-ref-create">${typeName} <span class="required">*</span></label>
                     <input type="text" class="form-control" id="field-main-ref-create" name="main" value="${this.escapeHtml(initialValue)}" required>
                 </div>
             `;
@@ -2715,7 +2691,12 @@ class IntegramTable {
             const text = await response.text();
 
             try {
-                const data = JSON.parse(text);
+                let data = JSON.parse(text);
+
+                // Handle case where API returns an array instead of an object
+                if (Array.isArray(data)) {
+                    data = data[0] || {};
+                }
 
                 // Check for error in response
                 if (data.error) {
@@ -2760,16 +2741,19 @@ class IntegramTable {
 
         async fetchReferenceOptions(requisiteId, recordId = 0, searchQuery = '') {
             const apiBase = this.getApiBase();
-            const params = new URLSearchParams();
+            const params = new URLSearchParams({
+                JSON: '',
+                LIMIT: '50'
+            });
 
-            if (searchQuery) {
-                params.append('q', searchQuery);
-            }
             if (recordId && recordId !== 0) {
                 params.append('id', recordId);
             }
+            if (searchQuery) {
+                params.append('q', searchQuery);
+            }
 
-            const url = `${ apiBase }/_ref_reqs/${ requisiteId }${ params.toString() ? '?' + params.toString() : '' }`;
+            const url = `${ apiBase }/_ref_reqs/${ requisiteId }?${ params }`;
             const response = await fetch(url);
 
             if (!response.ok) {
@@ -2793,6 +2777,10 @@ class IntegramTable {
                 }
                 throw new Error(`Invalid JSON response: ${ text }`);
             }
+        }
+
+        getMetadataName(metadata) {
+            return metadata.val || metadata.name || metadata.title || `Тип #${ metadata.id || '?' }`;
         }
 
         getApiBase() {
@@ -2897,7 +2885,8 @@ class IntegramTable {
             // Store reference to overlay on modal for proper cleanup
             modal._overlayElement = overlay;
 
-            const title = isCreate ? `Создание: ${ metadata.val }` : `Редактирование: ${ metadata.val }`;
+            const typeName = this.getMetadataName(metadata);
+            const title = isCreate ? `Создание: ${ typeName }` : `Редактирование: ${ typeName }`;
             const instanceName = this.options.instanceName;
             const recordId = recordData && recordData.obj ? recordData.obj.id : null;
 
@@ -2994,8 +2983,8 @@ class IntegramTable {
                 this.attachTabHandlers(modal);
             }
 
-            // Load reference options for dropdowns
-            this.loadReferenceOptions(metadata.reqs, recordId || 0);
+            // Load reference options for dropdowns (scoped to this modal)
+            this.loadReferenceOptions(metadata.reqs, recordId || 0, modal);
 
             // Attach date/datetime picker handlers
             this.attachDatePickerHandlers(modal);
@@ -3056,10 +3045,11 @@ class IntegramTable {
             }
 
             // Main value field
+            const typeName = this.getMetadataName(metadata);
             const mainValue = recordData && recordData.obj ? recordData.obj.val : '';
             html += `
                 <div class="form-group">
-                    <label for="field-main">${ metadata.val } <span class="required">*</span></label>
+                    <label for="field-main">${ typeName } <span class="required">*</span></label>
                     <input type="text" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required>
                 </div>
             `;
@@ -3234,7 +3224,7 @@ class IntegramTable {
                 html += `<div class="subordinate-table-wrapper"><table class="subordinate-table"><thead><tr>`;
 
                 // Header: main value column + requisite columns
-                html += `<th>${ metadata.val }</th>`;
+                html += `<th>${ this.getMetadataName(metadata) }</th>`;
                 reqs.forEach(req => {
                     const attrs = this.parseAttrs(req.attrs);
                     const fieldName = attrs.alias || req.val;
@@ -3379,7 +3369,8 @@ class IntegramTable {
             modal.style.zIndex = baseZIndex + 1;
             modal.dataset.modalDepth = modalDepth;
 
-            const title = `Создание: ${ metadata.val }`;
+            const typeName = this.getMetadataName(metadata);
+            const title = `Создание: ${ typeName }`;
 
             // Build form for regular fields only (no nested subordinate tables in create mode)
             const reqs = metadata.reqs || [];
@@ -3424,7 +3415,7 @@ class IntegramTable {
                 <div class="edit-form-body">
                     <form id="subordinate-edit-form" class="edit-form">
                         <div class="form-group">
-                            <label for="sub-field-main">${ metadata.val } <span class="required">*</span></label>
+                            <label for="sub-field-main">${ typeName } <span class="required">*</span></label>
                             ${ mainFieldHtml }
                         </div>
             `;
@@ -3509,8 +3500,8 @@ class IntegramTable {
             document.body.appendChild(overlay);
             document.body.appendChild(modal);
 
-            // Load reference options
-            this.loadReferenceOptions(regularFields, 0);
+            // Load reference options (scoped to this modal)
+            this.loadReferenceOptions(regularFields, 0, modal);
 
             // Attach date picker handlers
             this.attachDatePickerHandlers(modal);
@@ -3629,9 +3620,11 @@ class IntegramTable {
             });
         }
 
-        async loadReferenceOptions(reqs, recordId) {
+        async loadReferenceOptions(reqs, recordId, modalElement) {
             // Load reference options for the new form-reference-editor elements
-            const formRefEditors = document.querySelectorAll('.form-reference-editor');
+            // Scope query to the specific modal to avoid affecting other open modals
+            const container = modalElement || document;
+            const formRefEditors = container.querySelectorAll('.form-reference-editor');
 
             for (const wrapper of formRefEditors) {
                 const refReqId = wrapper.dataset.refId;
@@ -3859,14 +3852,15 @@ class IntegramTable {
             modal.dataset.overlayRef = 'true';
             modal._overlayElement = overlay;
 
-            const title = `Создание: ${metadata.val}`;
+            const typeName = this.getMetadataName(metadata);
+            const title = `Создание: ${typeName}`;
 
             const reqs = metadata.reqs || [];
             const regularFields = reqs.filter(req => !req.arr_id);
 
             let attributesHtml = `
                 <div class="form-group">
-                    <label for="field-main-form-ref-create">${metadata.val} <span class="required">*</span></label>
+                    <label for="field-main-form-ref-create">${typeName} <span class="required">*</span></label>
                     <input type="text" class="form-control" id="field-main-form-ref-create" name="main" value="${this.escapeHtml(initialValue)}" required>
                 </div>
             `;
