@@ -181,14 +181,18 @@ class IntegramTable {
                 // Process columns to hide ID and Style suffixes
                 this.processColumnVisibility();
 
-                if (this.columnOrder.length === 0) {
+                const currentColumnIds = new Set(this.columns.map(c => c.id));
+
+                // Validate columnOrder against current columns; reset if stale (no matches)
+                if (this.columnOrder.length === 0 || !this.columnOrder.some(id => currentColumnIds.has(id))) {
                     this.columnOrder = this.columns.map(c => c.id);
                 }
-                if (this.visibleColumns.length === 0) {
+                // Validate visibleColumns; reset if stale (no matches after filtering)
+                const validVisible = this.visibleColumns.filter(id => currentColumnIds.has(id) && !this.idColumns.has(id));
+                if (this.visibleColumns.length === 0 || validVisible.length === 0) {
                     this.visibleColumns = this.columns.filter(c => !this.idColumns.has(c.id)).map(c => c.id);
                 } else {
-                    // Filter out style columns from visibleColumns if loaded from cookie
-                    this.visibleColumns = this.visibleColumns.filter(id => !this.idColumns.has(id));
+                    this.visibleColumns = validVisible;
                 }
 
                 if (this.options.onDataLoad) {
