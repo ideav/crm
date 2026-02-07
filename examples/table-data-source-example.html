@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IntegramTable - Примеры источников данных</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="../assets/css/integram-table.css">
+    <style>
+        body {
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .example-section {
+            background: white;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .example-section h2 {
+            color: #1976d2;
+            margin-bottom: 15px;
+        }
+        .code-block {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            border-left: 4px solid #1976d2;
+        }
+        .info-box {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 15px 0;
+            border-left: 4px solid #2196f3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <h1 class="mb-4">IntegramTable - Примеры источников данных</h1>
+        <p class="lead">Компонент IntegramTable поддерживает два типа источников данных: отчеты (report) и таблицы (table).</p>
+
+        <!-- Example 1: Report Data Source -->
+        <div class="example-section">
+            <h2>Пример 1: Источник данных из отчета (report)</h2>
+            <div class="info-box">
+                <strong>Описание:</strong> Загрузка данных из предварительно сконфигурированного отчета Integram.
+                API endpoint: <code>/report/{report_id}?JSON</code>
+            </div>
+
+            <h4>HTML разметка:</h4>
+            <div class="code-block">
+&lt;div id="report-table"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-integram-table<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-api-url="/crm/report/4283?JSON"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-page-size="20"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-cookie-prefix="report-table"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-title="Задачи из отчета"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-instance-name="reportTable"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-data-source="report"&gt;&lt;/div&gt;
+            </div>
+
+            <h4>JavaScript инициализация:</h4>
+            <div class="code-block">
+const reportTable = new IntegramTable('report-table', {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;apiUrl: '/crm/report/4283?JSON',<br>
+&nbsp;&nbsp;&nbsp;&nbsp;pageSize: 20,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;cookiePrefix: 'report-table',<br>
+&nbsp;&nbsp;&nbsp;&nbsp;title: 'Задачи из отчета',<br>
+&nbsp;&nbsp;&nbsp;&nbsp;instanceName: 'reportTable',<br>
+&nbsp;&nbsp;&nbsp;&nbsp;dataSource: 'report'&nbsp;&nbsp;// Значение по умолчанию<br>
+});
+            </div>
+
+            <div id="report-table"
+                 data-integram-table
+                 data-api-url="/demo/report-data.json"
+                 data-page-size="10"
+                 data-cookie-prefix="report-demo"
+                 data-title="Демо: Данные из отчета"
+                 data-instance-name="reportDemo"
+                 data-data-source="report"></div>
+        </div>
+
+        <!-- Example 2: Table Data Source -->
+        <div class="example-section">
+            <h2>Пример 2: Источник данных из таблицы (table)</h2>
+            <div class="info-box">
+                <strong>Описание:</strong> Загрузка данных из таблицы Integram с фильтром по родителю.
+                API endpoint: <code>/object/{table_type_id}/?JSON_DATA&F_U={parent_id}</code>
+            </div>
+
+            <h4>HTML разметка:</h4>
+            <div class="code-block">
+&lt;div id="table-source"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-integram-table<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-data-source="table"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-table-type-id="335"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-parent-id="123"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-page-size="20"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-cookie-prefix="table-source"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-title="Подчиненная таблица"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-instance-name="tableSource"&gt;&lt;/div&gt;
+            </div>
+
+            <h4>JavaScript инициализация:</h4>
+            <div class="code-block">
+const tableSource = new IntegramTable('table-source', {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;dataSource: 'table',<br>
+&nbsp;&nbsp;&nbsp;&nbsp;tableTypeId: '335',&nbsp;&nbsp;// ID типа таблицы<br>
+&nbsp;&nbsp;&nbsp;&nbsp;parentId: '123',&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// ID родительской записи<br>
+&nbsp;&nbsp;&nbsp;&nbsp;pageSize: 20,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;cookiePrefix: 'table-source',<br>
+&nbsp;&nbsp;&nbsp;&nbsp;title: 'Подчиненная таблица',<br>
+&nbsp;&nbsp;&nbsp;&nbsp;instanceName: 'tableSource'<br>
+});
+            </div>
+        </div>
+
+        <!-- Example 3: Parent ID from GET Parameter -->
+        <div class="example-section">
+            <h2>Пример 3: Parent ID из GET-параметра</h2>
+            <div class="info-box">
+                <strong>Описание:</strong> Компонент автоматически считывает parent ID из URL параметров:
+                <code>parentId</code>, <code>F_U</code> или <code>up</code>
+            </div>
+
+            <h4>URL пример:</h4>
+            <div class="code-block">
+https://example.com/page.html?parentId=456<br>
+https://example.com/page.html?F_U=456<br>
+https://example.com/page.html?up=456
+            </div>
+
+            <h4>HTML разметка (parentId берется из URL):</h4>
+            <div class="code-block">
+&lt;div id="auto-parent-table"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-integram-table<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-data-source="table"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-table-type-id="335"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-page-size="20"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-title="Таблица с auto parent ID"<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;data-instance-name="autoParentTable"&gt;&lt;/div&gt;
+            </div>
+
+            <p class="mt-3"><strong>Примечание:</strong> Если <code>data-parent-id</code> не указан в атрибутах,
+            компонент автоматически проверит URL параметры при инициализации.</p>
+        </div>
+
+        <!-- Example 4: Programmatic Parent ID -->
+        <div class="example-section">
+            <h2>Пример 4: Программная передача Parent ID</h2>
+            <div class="info-box">
+                <strong>Описание:</strong> Parent ID можно передать программно при создании экземпляра таблицы.
+            </div>
+
+            <h4>JavaScript инициализация с динамическим Parent ID:</h4>
+            <div class="code-block">
+// Получить parent ID из контекста приложения<br>
+const currentParentId = window.currentRecordId || '789';<br>
+<br>
+const dynamicTable = new IntegramTable('dynamic-table', {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;dataSource: 'table',<br>
+&nbsp;&nbsp;&nbsp;&nbsp;tableTypeId: '335',<br>
+&nbsp;&nbsp;&nbsp;&nbsp;parentId: currentParentId,&nbsp;&nbsp;// Динамический ID<br>
+&nbsp;&nbsp;&nbsp;&nbsp;pageSize: 20,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;cookiePrefix: 'dynamic-table',<br>
+&nbsp;&nbsp;&nbsp;&nbsp;title: 'Динамическая таблица',<br>
+&nbsp;&nbsp;&nbsp;&nbsp;instanceName: 'dynamicTable'<br>
+});
+            </div>
+        </div>
+
+        <!-- Configuration Reference -->
+        <div class="example-section">
+            <h2>Справка по параметрам конфигурации</h2>
+            <table class="table table-bordered">
+                <thead class="thead-light">
+                    <tr>
+                        <th>Параметр</th>
+                        <th>Тип</th>
+                        <th>По умолчанию</th>
+                        <th>Описание</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>dataSource</code></td>
+                        <td>String</td>
+                        <td>'report'</td>
+                        <td>Тип источника данных: 'report' или 'table'</td>
+                    </tr>
+                    <tr>
+                        <td><code>apiUrl</code></td>
+                        <td>String</td>
+                        <td>''</td>
+                        <td>URL API для загрузки данных (для dataSource='report')</td>
+                    </tr>
+                    <tr>
+                        <td><code>tableTypeId</code></td>
+                        <td>String/Number</td>
+                        <td>null</td>
+                        <td>ID типа таблицы (обязательно для dataSource='table')</td>
+                    </tr>
+                    <tr>
+                        <td><code>parentId</code></td>
+                        <td>String/Number</td>
+                        <td>null или из URL</td>
+                        <td>ID родительской записи (для dataSource='table')</td>
+                    </tr>
+                    <tr>
+                        <td><code>pageSize</code></td>
+                        <td>Number</td>
+                        <td>20</td>
+                        <td>Количество записей на странице</td>
+                    </tr>
+                    <tr>
+                        <td><code>cookiePrefix</code></td>
+                        <td>String</td>
+                        <td>'integram-table'</td>
+                        <td>Префикс для сохранения настроек в cookies</td>
+                    </tr>
+                    <tr>
+                        <td><code>title</code></td>
+                        <td>String</td>
+                        <td>''</td>
+                        <td>Заголовок таблицы</td>
+                    </tr>
+                    <tr>
+                        <td><code>instanceName</code></td>
+                        <td>String</td>
+                        <td>'table'</td>
+                        <td>Имя глобальной переменной для доступа к экземпляру</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- API Endpoints -->
+        <div class="example-section">
+            <h2>API Endpoints</h2>
+
+            <h4>1. Report Format (dataSource='report')</h4>
+            <div class="code-block">
+GET /report/{report_id}?JSON&LIMIT={offset},{limit}<br>
+<br>
+Ответ:<br>
+{<br>
+&nbsp;&nbsp;"columns": [<br>
+&nbsp;&nbsp;&nbsp;&nbsp;{ "id": "4284", "type": "3596", "format": "CHARS", "name": "Задача", "granted": 1, "ref": 0 }<br>
+&nbsp;&nbsp;],<br>
+&nbsp;&nbsp;"data": [<br>
+&nbsp;&nbsp;&nbsp;&nbsp;["Значение 1"],<br>
+&nbsp;&nbsp;&nbsp;&nbsp;["Значение 2"]<br>
+&nbsp;&nbsp;]<br>
+}
+            </div>
+
+            <h4>2. Table Format (dataSource='table')</h4>
+            <div class="code-block">
+GET /metadata/{table_type_id}&nbsp;&nbsp;// Загрузка структуры колонок<br>
+GET /object/{table_type_id}/?JSON_DATA&F_U={parent_id}&nbsp;&nbsp;// Загрузка данных<br>
+<br>
+Ответ от /object/...:<br>
+[<br>
+&nbsp;&nbsp;{<br>
+&nbsp;&nbsp;&nbsp;&nbsp;"i": 5300,&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// ID записи<br>
+&nbsp;&nbsp;&nbsp;&nbsp;"u": 335,&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// ID родителя<br>
+&nbsp;&nbsp;&nbsp;&nbsp;"o": 1,&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// Порядковый номер<br>
+&nbsp;&nbsp;&nbsp;&nbsp;"r": [&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;// Массив значений полей<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"20260202",<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"",<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;""<br>
+&nbsp;&nbsp;&nbsp;&nbsp;]<br>
+&nbsp;&nbsp;}<br>
+]
+            </div>
+        </div>
+    </div>
+
+    <script src="../assets/js/integram-table.js"></script>
+    <script>
+        // Примечание: В реальном использовании демо-данные будут загружаться с сервера
+        // Здесь показан только пример HTML-разметки и конфигурации
+        console.log('IntegramTable examples loaded');
+        console.log('Report table instance:', window.reportDemo);
+    </script>
+</body>
+</html>

@@ -16,6 +16,11 @@
 class IntegramTable {
         constructor(containerId, options = {}) {
             this.container = document.getElementById(containerId);
+
+            // Check URL parameters for parentId
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlParentId = urlParams.get('parentId') || urlParams.get('F_U') || urlParams.get('up');
+
             this.options = {
                 apiUrl: options.apiUrl || '',
                 pageSize: options.pageSize || 20,
@@ -23,7 +28,11 @@ class IntegramTable {
                 title: options.title || '',
                 instanceName: options.instanceName || 'table',
                 onCellClick: options.onCellClick || null,
-                onDataLoad: options.onDataLoad || null
+                onDataLoad: options.onDataLoad || null,
+                // New options for dual data source support
+                dataSource: options.dataSource || 'report',  // 'report' or 'table'
+                tableTypeId: options.tableTypeId || null,   // Required for dataSource='table'
+                parentId: options.parentId || urlParentId || null  // Parent ID for table data source
             };
 
             this.columns = [];
@@ -130,48 +139,21 @@ class IntegramTable {
 
             this.isLoading = true;
 
-            // Request pageSize + 1 to detect if there are more records
-            const requestSize = this.options.pageSize + 1;
-            const offset = append ? this.loadedRecords : 0;
-
-            const params = new URLSearchParams({
-                LIMIT: `${ offset },${ requestSize }`
-            });
-
-            const filters = this.filters || {};
-            Object.keys(filters).forEach(colId => {
-                const filter = filters[colId];
-                if (filter.value || filter.type === '%' || filter.type === '!%') {
-                    const column = this.columns.find(c => c.id === colId);
-                    if (column) {
-                        this.applyFilter(params, column, filter);
-                    }
-                }
-            });
-
             try {
-                const separator = this.options.apiUrl.includes('?') ? '&' : '?';
-                const response = await fetch(`${ this.options.apiUrl }${ separator }${ params }`);
-                const json = await response.json();
-
-                this.columns = json.columns || [];
-
-                // Transform column-based data to row-based data
-                const columnData = json.data || [];
+                let json;
                 let newRows = [];
 
-                if (columnData.length > 0 && Array.isArray(columnData[0])) {
-                    const numRows = columnData[0].length;
-                    for (let rowIndex = 0; rowIndex < numRows; rowIndex++) {
-                        const row = [];
-                        for (let colIndex = 0; colIndex < columnData.length; colIndex++) {
-                            row.push(columnData[colIndex][rowIndex]);
-                        }
-                        newRows.push(row);
-                    }
+                if (this.options.dataSource === 'table') {
+                    // Load data from table format (object/{typeId}/?JSON_DATA&F_U={parentId})
+                    json = await this.loadDataFromTable(append);
+                    newRows = json.rows || [];
                 } else {
-                    newRows = columnData;
+                    // Load data from report format (default behavior)
+                    json = await this.loadDataFromReport(append);
+                    newRows = json.rows || [];
                 }
+
+                this.columns = json.columns || [];
 
                 // Check if there are more records (we requested pageSize + 1)
                 this.hasMore = newRows.length > this.options.pageSize;
@@ -224,6 +206,132 @@ class IntegramTable {
                 // Check if table fits on screen and needs more data
                 this.checkAndLoadMore();
             }
+        }
+
+        async loadDataFromReport(append = false) {
+            // Original report-based data loading logic
+            const requestSize = this.options.pageSize + 1;
+            const offset = append ? this.loadedRecords : 0;
+
+            const params = new URLSearchParams({
+                LIMIT: `${ offset },${ requestSize }`
+            });
+
+            const filters = this.filters || {};
+            Object.keys(filters).forEach(colId => {
+                const filter = filters[colId];
+                if (filter.value || filter.type === '%' || filter.type === '!%') {
+                    const column = this.columns.find(c => c.id === colId);
+                    if (column) {
+                        this.applyFilter(params, column, filter);
+                    }
+                }
+            });
+
+            const separator = this.options.apiUrl.includes('?') ? '&' : '?';
+            const response = await fetch(`${ this.options.apiUrl }${ separator }${ params }`);
+            const json = await response.json();
+
+            // Transform column-based data to row-based data
+            const columnData = json.data || [];
+            let rows = [];
+
+            if (columnData.length > 0 && Array.isArray(columnData[0])) {
+                const numRows = columnData[0].length;
+                for (let rowIndex = 0; rowIndex < numRows; rowIndex++) {
+                    const row = [];
+                    for (let colIndex = 0; colIndex < columnData.length; colIndex++) {
+                        row.push(columnData[colIndex][rowIndex]);
+                    }
+                    rows.push(row);
+                }
+            } else {
+                rows = columnData;
+            }
+
+            return {
+                columns: json.columns || [],
+                rows: rows
+            };
+        }
+
+        async loadDataFromTable(append = false) {
+            // Table-based data loading using object/{typeId}/?JSON_DATA&F_U={parentId}
+            if (!this.options.tableTypeId) {
+                throw new Error('tableTypeId is required for dataSource=table');
+            }
+
+            const requestSize = this.options.pageSize + 1;
+            const offset = append ? this.loadedRecords : 0;
+
+            // First load, fetch metadata to get column information
+            if (this.columns.length === 0) {
+                const apiBase = this.getApiBase();
+                const metadataUrl = `${ apiBase }/metadata/${ this.options.tableTypeId }`;
+                const metadataResponse = await fetch(metadataUrl);
+                const metadata = await metadataResponse.json();
+
+                // Convert metadata to columns format
+                const columns = [];
+
+                // Add main value column
+                columns.push({
+                    id: '0',
+                    type: metadata.type || 'SHORT',
+                    format: metadata.type || 'SHORT',
+                    name: metadata.name || 'Значение',
+                    granted: 1,
+                    ref: 0
+                });
+
+                // Add requisite columns
+                if (metadata.reqs && Array.isArray(metadata.reqs)) {
+                    metadata.reqs.forEach((req, idx) => {
+                        const attrs = this.parseAttrs(req.attrs);
+                        columns.push({
+                            id: String(idx + 1),
+                            type: req.type || 'SHORT',
+                            format: req.type || 'SHORT',
+                            name: attrs.alias || req.val,
+                            granted: req.granted || 1,
+                            ref: req.arr_id || 0
+                        });
+                    });
+                }
+
+                this.columns = columns;
+            }
+
+            // Build data URL
+            const apiBase = this.getApiBase();
+            let dataUrl = `${ apiBase }/object/${ this.options.tableTypeId }/?JSON_DATA`;
+
+            if (this.options.parentId) {
+                dataUrl += `&F_U=${ this.options.parentId }`;
+            }
+
+            // Note: Table format doesn't support LIMIT/offset in the same way as reports
+            // We'll fetch all data and handle pagination client-side
+            const dataResponse = await fetch(dataUrl);
+            const data = await dataResponse.json();
+
+            // Transform table format to row format
+            // Input format: [{ i: 5151, u: 333, o: 1, r: ["val1", "val2"] }]
+            // Output format: [["val1", "val2"]]
+            let allRows = [];
+            if (Array.isArray(data)) {
+                allRows = data.map(item => item.r || []);
+            }
+
+            // Apply client-side pagination
+            const startIdx = append ? this.loadedRecords : 0;
+            const endIdx = startIdx + requestSize;
+            const rows = allRows.slice(startIdx, endIdx);
+
+            return {
+                columns: this.columns,
+                rows: rows
+            };
         }
 
         async fetchTotalCount() {
@@ -4488,7 +4596,10 @@ function autoInitTables() {
             pageSize: parseInt(element.dataset.pageSize) || 20,
             cookiePrefix: element.dataset.cookiePrefix || 'integram-table',
             title: element.dataset.title || '',
-            instanceName: element.dataset.instanceName || element.id
+            instanceName: element.dataset.instanceName || element.id,
+            dataSource: element.dataset.dataSource || 'report',
+            tableTypeId: element.dataset.tableTypeId || null,
+            parentId: element.dataset.parentId || null
         };
 
         // Create instance and store in window if instanceName is provided
