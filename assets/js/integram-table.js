@@ -403,8 +403,8 @@ class IntegramTable {
 
             // Now fetch data using object/{id}/?JSON_DATA endpoint
             const apiBase = this.getApiBase();
-            const typeId = metadata.type;
-            let dataUrl = `${ apiBase }/object/${ typeId }/?JSON_DATA`;
+            const tableId = metadata.id;
+            let dataUrl = `${ apiBase }/object/${ tableId }/?JSON_DATA`;
 
             // Apply filters if any
             const filters = this.filters || {};
