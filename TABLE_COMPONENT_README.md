@@ -141,17 +141,119 @@ API должен принимать параметр `LIMIT` для пагина
 
 ```javascript
 new IntegramTable('container-id', {
-    apiUrl: '/api/endpoint',       // URL API для загрузки данных
+    // Общие параметры
     pageSize: 20,                  // Количество записей на странице
     cookiePrefix: 'table-name',    // Префикс для cookies
     title: 'Название таблицы',     // Опциональный заголовок
     instanceName: 'myTable',       // Имя экземпляра для window (обязательно!)
     onCellClick: (row, col, val) => {},  // Обработчик клика по ячейке
     onDataLoad: (data) => {}       // Обработчик загрузки данных
+
+    // Параметры для источника данных 'report' (по умолчанию)
+    dataSource: 'report',          // Тип источника: 'report' или 'table'
+    apiUrl: '/api/endpoint',       // URL API для загрузки данных (для report)
+
+    // Параметры для источника данных 'table'
+    dataSource: 'table',           // Тип источника: 'report' или 'table'
+    tableTypeId: '335',            // ID типа таблицы (обязательно для dataSource='table')
+    parentId: '123'                // ID родителя (опционально, можно передать через GET параметр)
 });
 ```
 
 **ВАЖНО:** Параметр `instanceName` обязателен для корректной работы event handlers (кнопки, пагинация, настройки).
+
+### 3a. Двойная поддержка источников данных
+
+Компонент поддерживает два типа источников данных из Integram API:
+
+#### Вариант 1: Данные из отчета (report) - по умолчанию
+
+```javascript
+new IntegramTable('tasks-table', {
+    dataSource: 'report',  // можно не указывать, это значение по умолчанию
+    apiUrl: '/crm/report/4283?JSON',
+    pageSize: 20
+});
+```
+
+**API endpoint:** `GET /report/{report_id}?JSON&LIMIT={offset},{limit}`
+
+**Формат ответа:**
+```json
+{
+  "columns": [
+    { "id": "4284", "type": "3596", "format": "CHARS", "name": "Задача", "granted": 1, "ref": 0 }
+  ],
+  "data": [
+    ["Значение 1"],
+    ["Значение 2"]
+  ]
+}
+```
+
+#### Вариант 2: Данные из таблицы (table)
+
+```javascript
+new IntegramTable('subordinate-table', {
+    dataSource: 'table',
+    tableTypeId: '335',     // ID типа таблицы
+    parentId: '123',        // ID родительской записи
+    pageSize: 20
+});
+```
+
+**API endpoints:**
+- Метаданные: `GET /metadata/{table_type_id}`
+- Данные: `GET /object/{table_type_id}/?JSON_DATA&F_U={parent_id}`
+
+**Формат ответа (данные):**
+```json
+[
+  {
+    "i": 5300,        // ID записи
+    "u": 335,         // ID родителя
+    "o": 1,           // Порядковый номер
+    "r": [            // Массив значений полей
+      "20260202",
+      "",
+      ""
+    ]
+  }
+]
+```
+
+#### Передача Parent ID
+
+Parent ID можно передать тремя способами:
+
+**1. Через параметр конфигурации:**
+```javascript
+new IntegramTable('my-table', {
+    dataSource: 'table',
+    tableTypeId: '335',
+    parentId: '123'  // Явно указан
+});
+```
+
+**2. Через GET-параметр URL:**
+```
+https://example.com/page.html?parentId=456
+https://example.com/page.html?F_U=456
+https://example.com/page.html?up=456
+```
+
+Компонент автоматически считывает значение из URL параметров `parentId`, `F_U` или `up`.
+
+**3. Через data-атрибут:**
+```html
+<div id="my-table"
+     data-integram-table
+     data-data-source="table"
+     data-table-type-id="335"
+     data-parent-id="456"></div>
+```
+
+**Приоритет:** Если `parentId` указан в параметрах конфигурации, он имеет приоритет над GET-параметрами URL.
 
 ### Data-атрибуты (декларативная инициализация)
 
@@ -160,13 +262,16 @@ new IntegramTable('container-id', {
 | Data-атрибут | Назначение | Пример |
 |--------------|------------|--------|
 | `data-integram-table` | Маркер для авто-инициализации (обязательно) | - |
-| `data-api-url` | URL API для загрузки данных | `"/api/tasks"` |
+| `data-api-url` | URL API для загрузки данных (для dataSource='report') | `"/api/tasks"` |
+| `data-data-source` | Тип источника данных: 'report' или 'table' | `"report"` |
+| `data-table-type-id` | ID типа таблицы (для dataSource='table') | `"335"` |
+| `data-parent-id` | ID родителя (для dataSource='table') | `"123"` |
 | `data-page-size` | Количество записей на порции | `"20"` |
 | `data-cookie-prefix` | Префикс для cookies | `"my-table"` |
 | `data-title` | Заголовок таблицы | `"Задачи"` |
 | `data-instance-name` | Имя переменной в window | `"myTable"` |
 
-**Пример:**
+**Пример 1: Источник данных - отчет (report)**
 ```html
 <div id="tasks"
      data-integram-table
@@ -175,6 +280,19 @@ new IntegramTable('container-id', {
      data-cookie-prefix="tasks-table"
      data-title="Список задач"
      data-instance-name="tasksTable"></div>
+```
+
+**Пример 2: Источник данных - таблица (table)**
+```html
+<div id="subordinate"
+     data-integram-table
+     data-data-source="table"
+     data-table-type-id="335"
+     data-parent-id="123"
+     data-page-size="20"
+     data-cookie-prefix="subordinate-table"
+     data-title="Подчиненная таблица"
+     data-instance-name="subordinateTable"></div>
 ```
 
 После загрузки доступ к таблице: `window.tasksTable.loadData()`
