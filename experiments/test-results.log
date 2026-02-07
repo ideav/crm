@@ -1,0 +1,40 @@
+=== Testing parseYYYYMMDD ===
+  ✓ parseYYYYMMDD("20260207") => 2026-02-06 (expected: 2026-02-06)
+  ✓ parseYYYYMMDD("19991231") => 1999-12-30 (expected: 1999-12-30)
+  ✓ parseYYYYMMDD("20000101") => 1999-12-31 (expected: 1999-12-31)
+  ✓ parseYYYYMMDD("2026020") => null (expected: null)
+  ✓ parseYYYYMMDD("202602077") => null (expected: null)
+  ✓ parseYYYYMMDD("abcd1234") => null (expected: null)
+  ✓ parseYYYYMMDD("20261301") => null (expected: null)
+  ✓ parseYYYYMMDD("20260232") => null (expected: null)
+
+=== Testing parseDDMMYYYY (now with auto-detection) ===
+  ✓ parseDDMMYYYY("07.02.2026") => 2026-02-06 (expected: 2026-02-06)
+  ✓ parseDDMMYYYY("31.12.1999") => 1999-12-30 (expected: 1999-12-30)
+  ✓ parseDDMMYYYY("01.01.2000") => 1999-12-31 (expected: 1999-12-31)
+  ✓ parseDDMMYYYY("7.2.2026") => 2026-02-06 (expected: 2026-02-06)
+  ✗ parseDDMMYYYY("32.01.2026") => 2026-01-31 (expected: null)
+  ✓ parseDDMMYYYY("invalid") => null (expected: null)
+  ✓ parseDDMMYYYY("20260207") => 2026-02-06 (expected: 2026-02-06)
+  ✓ parseDDMMYYYY("19991231") => 1999-12-30 (expected: 1999-12-30)
+  ✓ parseDDMMYYYY("20000101") => 1999-12-31 (expected: 1999-12-31)
+  ✓ parseDDMMYYYY("2026020") => null (expected: null)
+  ✓ parseDDMMYYYY("202602077") => null (expected: null)
+  ✓ parseDDMMYYYY("abcd1234") => null (expected: null)
+  ✓ parseDDMMYYYY("20261301") => null (expected: null)
+  ✓ parseDDMMYYYY("20260232") => null (expected: null)
+
+=== Testing formatDateForInput ===
+  ✓ formatDateForInput("20260207") => "07.02.2026" (expected: "07.02.2026")
+  ✓ formatDateForInput("07.02.2026") => "07.02.2026" (expected: "07.02.2026")
+  ✓ formatDateForInput("19991231") => "31.12.1999" (expected: "31.12.1999")
+  ✓ formatDateForInput("31.12.1999") => "31.12.1999" (expected: "31.12.1999")
+
+=== Testing formatDateForHtml5 ===
+  ✓ formatDateForHtml5("20260207") => "2026-02-07" (expected: "2026-02-07")
+  ✓ formatDateForHtml5("07.02.2026") => "2026-02-07" (expected: "2026-02-07")
+  ✓ formatDateForHtml5("19991231") => "1999-12-31" (expected: "1999-12-31")
+  ✓ formatDateForHtml5("31.12.1999") => "1999-12-31" (expected: "1999-12-31")
+
+=== Summary ===
+All tests completed. Check results above for any failures.
