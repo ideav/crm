@@ -290,12 +290,6 @@ class IntegramTable {
                 columnsByName[col.name] = col;
             });
 
-                id: c.id,
-                name: c.name,
-                granted: c.granted,
-                type: c.type
-            })));
-
             // Process each column
             this.columns.forEach(col => {
                 const name = col.name;
@@ -305,10 +299,6 @@ class IntegramTable {
                     const baseName = name.slice(0, -2);
                     if (columnsByName[baseName]) {
                         this.idColumns.add(col.id);
-                            colId: col.id,
-                            colName: name,
-                            baseName: baseName
-                        });
                     }
                 }
 
@@ -330,10 +320,6 @@ class IntegramTable {
                     if (baseCol) {
                         this.styleColumns[baseCol.id] = col.id;
                         this.idColumns.add(col.id);  // Hide style columns too
-                            colId: col.id,
-                            colName: name,
-                            baseColId: baseCol.id
-                        });
                     }
                 }
 
@@ -346,41 +332,12 @@ class IntegramTable {
                     if (idColumn) {
                         // Store ID column reference for this editable column
                         this.editableColumns.set(col.id, idColumn.id);
-                            colId: col.id,
-                            colName: name,
-                            granted: col.granted,
-                            idColId: idColumn.id,
-                            idColName: idColumnName
-                        });
                     } else {
                         // No ID column found, but still mark as editable with null reference
                         // The parent ID will be determined dynamically using the logic from the issue
                         this.editableColumns.set(col.id, null);
-                            colId: col.id,
-                            colName: name,
-                            granted: col.granted,
-                            note: 'Parent ID will be determined dynamically'
-                        });
                     }
-                } else {
-                        colId: col.id,
-                        colName: name,
-                        granted: col.granted
-                    });
                 }
-            });
-
-                totalColumns: this.columns.length,
-                editableColumns: Array.from(this.editableColumns.keys()).map(colId => {
-                    const col = this.columns.find(c => c.id === colId);
-                    return {
-                        colId,
-                        colName: col?.name,
-                        idColId: this.editableColumns.get(colId)
-                    };
-                }),
-                hiddenIdColumns: Array.from(this.idColumns),
-                styleColumns: Object.keys(this.styleColumns)
             });
         }
 
@@ -823,24 +780,6 @@ class IntegramTable {
                     const colId = td.dataset.colId;
                     const column = this.columns.find(c => c.id === colId);
 
-                        target: e.target,
-                        isEditIcon: !!e.target.closest('.edit-icon'),
-                        alreadyEditing: !!this.currentEditingCell,
-                        cellData: {
-                            recordId: td.dataset.recordId,
-                            colId: td.dataset.colId,
-                            colType: td.dataset.colType,
-                            editable: td.dataset.editable,
-                            rowIndex: td.dataset.rowIndex
-                        },
-                        columnInfo: column ? {
-                            id: column.id,
-                            name: column.name,
-                            type: column.type,
-                            granted: column.granted
-                        } : 'column not found',
-                        cellText: td.textContent?.substring(0, 50)
-                    });
                     // Don't trigger if clicking on edit icon or already editing
                     if (e.target.closest('.edit-icon') || this.currentEditingCell) {
                         return;
@@ -857,22 +796,6 @@ class IntegramTable {
 
                     // Check if this column is in editableColumns
                     const isInEditableColumns = this.editableColumns.has(column.id);
-
-                        columnInfo: {
-                            id: column.id,
-                            name: column.name,
-                            type: column.type,
-                            granted: column.granted,
-                            format: column.format
-                        },
-                        reasons: {
-                            granted_not_1: column.granted !== 1,
-                            not_in_editableColumns: !isInEditableColumns,
-                            is_id_column: this.idColumns.has(column.id),
-                            is_style_column: !!this.styleColumns[column.id]
-                        },
-                        cellText: td.textContent?.substring(0, 50)
-                    });
                 }
             });
         }
@@ -885,15 +808,6 @@ class IntegramTable {
             const format = cell.dataset.colFormat;
             const isRef = cell.dataset.colRef === '1';
             const rowIndex = parseInt(cell.dataset.rowIndex);
-
-                recordId,
-                colId,
-                colType,
-                format,
-                isRef,
-                rowIndex,
-                cellText: cell.textContent?.substring(0, 50)
-            });
 
             if (!colId || !colType) {
                 return;
@@ -955,11 +869,6 @@ class IntegramTable {
         determineParentRecordId(column, rowIndex) {
             // Helper method to determine parent record ID for a cell at render time
             // Implements the logic from the issue for finding parent record ID
-                columnId: column.id,
-                columnName: column.name,
-                columnType: column.type,
-                rowIndex: rowIndex
-            });
 
             if (!this.globalMetadata) {
                 return '';
@@ -977,12 +886,7 @@ class IntegramTable {
                 if (idColumn) {
                     const idColIndex = this.columns.findIndex(c => c.id === idColumn.id);
                     const parentRecordId = idColIndex !== -1 && this.data[rowIndex] ? this.data[rowIndex][idColIndex] : '';
-                        idColumnName: idColumn.name,
-                        idColumnId: idColumn.id,
-                        parentRecordId: parentRecordId
-                    });
                     return parentRecordId;
-                } else {
                 }
             }
 
@@ -997,12 +901,7 @@ class IntegramTable {
                         if (parentIdColumn) {
                             const idColIndex = this.columns.findIndex(c => c.id === parentIdColumn.id);
                             const parentRecordId = idColIndex !== -1 && this.data[rowIndex] ? this.data[rowIndex][idColIndex] : '';
-                                parentIdColumnName: parentIdColumn.name,
-                                parentIdColumnId: parentIdColumn.id,
-                                parentRecordId: parentRecordId
-                            });
                             return parentRecordId;
-                        } else {
                         }
                     }
                 }
@@ -1012,34 +911,16 @@ class IntegramTable {
         }
 
         async determineParentRecord(colId, colType, recordId, rowIndex) {
-                colId,
-                colType,
-                recordId,
-                rowIndex
-            });
-
             // Find the column object
             const column = this.columns.find(c => c.id === colId);
             if (!column) {
                 return null;
             }
 
-                id: column.id,
-                name: column.name,
-                type: column.type,
-                granted: column.granted
-            });
-
             // Use global metadata to determine parent record
             if (!this.globalMetadata) {
                 return null;
             }
-
-                id: item.id,
-                name: item.name,
-                hasReqs: !!item.reqs,
-                reqsCount: item.reqs?.length
-            })));
 
             // NEW LOGIC FROM ISSUE:
             // A) If this is the first column of the table, the parent record ID will be in
@@ -1050,29 +931,13 @@ class IntegramTable {
             // Check if colType is among the top-level metadata IDs (first column case - A)
             const metaItem = this.globalMetadata.find(item => item.id === colType);
             if (metaItem) {
-                    metaItemId: metaItem.id,
-                    metaItemName: metaItem.name
-                });
-
                 // This is a first column - look for column with type=colType and name ending in ID
                 const idColumnName = column.name + 'ID';
-                    searchingFor: idColumnName,
-                    expectedType: colType
-                });
 
                 const idColumn = this.columns.find(c => c.name === idColumnName && c.type === colType);
                 if (!idColumn) {
-                        name: c.name,
-                        type: c.type,
-                        id: c.id
-                    })));
                     return null;
                 }
-
-                    idColId: idColumn.id,
-                    idColName: idColumn.name,
-                    idColType: idColumn.type
-                });
 
                 // Get the parent record ID from this ID column by extracting from row data
                 let parentRecordId = '';
@@ -1080,20 +945,8 @@ class IntegramTable {
                     const idColIndex = this.columns.findIndex(c => c.id === idColumn.id);
                     if (idColIndex !== -1 && this.data[rowIndex]) {
                         parentRecordId = this.data[rowIndex][idColIndex] || '';
-                            rowIndex,
-                            idColIndex,
-                            parentRecordId
-                        });
-                    } else {
                     }
-                } else {
                 }
-
-                    isFirstColumn: true,
-                    parentType: colType,
-                    parentColumnId: idColumn.id,
-                    parentRecordId: parentRecordId
-                });
 
                 return {
                     isFirstColumn: true,
@@ -1108,27 +961,12 @@ class IntegramTable {
                 if (item.reqs) {
                     const req = item.reqs.find(r => r.id === colType);
                     if (req) {
-                            reqId: req.id,
-                            reqName: req.name,
-                            parentItemId: item.id,
-                            parentItemName: item.name
-                        });
-
                         // This is a requisite - look for column with type=item.id and name ending in ID
 
                         const parentIdColumn = this.columns.find(c => c.type === item.id && c.name.endsWith('ID'));
                         if (!parentIdColumn) {
-                                name: c.name,
-                                type: c.type,
-                                id: c.id
-                            })));
                             return null;
                         }
-
-                            parentIdColId: parentIdColumn.id,
-                            parentIdColName: parentIdColumn.name,
-                            parentIdColType: parentIdColumn.type
-                        });
 
                         // Get the parent record ID from this ID column by extracting from row data
                         let parentRecordId = '';
@@ -1136,20 +974,8 @@ class IntegramTable {
                             const parentIdColIndex = this.columns.findIndex(c => c.id === parentIdColumn.id);
                             if (parentIdColIndex !== -1 && this.data[rowIndex]) {
                                 parentRecordId = this.data[rowIndex][parentIdColIndex] || '';
-                                    rowIndex,
-                                    parentIdColIndex,
-                                    parentRecordId
-                                });
-                            } else {
                             }
-                        } else {
                         }
-
-                            isFirstColumn: false,
-                            parentType: item.id,
-                            parentColumnId: parentIdColumn.id,
-                            parentRecordId: parentRecordId
-                        });
 
                         return {
                             isFirstColumn: false,
