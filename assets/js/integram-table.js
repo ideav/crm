@@ -1669,8 +1669,7 @@ class IntegramTable {
 
             // Add cascade offset for nested modals (6px per level)
             const cascadeOffset = (modalDepth - 1) * 6;
-            modal.style.left = `${cascadeOffset}px`;
-            modal.style.top = `${cascadeOffset}px`;
+            modal.style.transform = `translate(calc(-50% + ${cascadeOffset}px), calc(-50% + ${cascadeOffset}px))`;
 
             // Store reference to overlay on modal for proper cleanup
             modal._overlayElement = overlay;
@@ -2924,8 +2923,7 @@ class IntegramTable {
 
             // Add cascade offset for nested modals (6px per level)
             const cascadeOffset = (modalDepth - 1) * 6;
-            modal.style.left = `${cascadeOffset}px`;
-            modal.style.top = `${cascadeOffset}px`;
+            modal.style.transform = `translate(calc(-50% + ${cascadeOffset}px), calc(-50% + ${cascadeOffset}px))`;
 
             // Store reference to overlay on modal for proper cleanup
             modal._overlayElement = overlay;
@@ -3416,8 +3414,7 @@ class IntegramTable {
 
             // Add cascade offset for nested modals (6px per level)
             const cascadeOffset = (modalDepth - 1) * 6;
-            modal.style.left = `${cascadeOffset}px`;
-            modal.style.top = `${cascadeOffset}px`;
+            modal.style.transform = `translate(calc(-50% + ${cascadeOffset}px), calc(-50% + ${cascadeOffset}px))`;
 
             const typeName = this.getMetadataName(metadata);
             const title = `Создание: ${ typeName }`;
@@ -3903,8 +3900,7 @@ class IntegramTable {
 
             // Add cascade offset for nested modals (6px per level)
             const cascadeOffset = (modalDepth - 1) * 6;
-            modal.style.left = `${cascadeOffset}px`;
-            modal.style.top = `${cascadeOffset}px`;
+            modal.style.transform = `translate(calc(-50% + ${cascadeOffset}px), calc(-50% + ${cascadeOffset}px))`;
 
             modal._overlayElement = overlay;
 
