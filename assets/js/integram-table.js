@@ -238,6 +238,11 @@ class IntegramTable {
                 return await this.parseObjectFormat(json, append);
             }
 
+            // Check if response is JSON_DATA array format: [{i, u, o, r}, ...]
+            if (this.isJsonDataArrayFormat(json)) {
+                return await this.parseJsonDataArray(json, append);
+            }
+
             // Transform column-based data to row-based data
             const columnData = json.data || [];
             let rows = [];
@@ -444,6 +449,96 @@ class IntegramTable {
 
             return {
                 columns: columns,
+                rows: rows
+            };
+        }
+
+        /**
+         * Check if the response is a JSON_DATA array format: [{i, u, o, r}, ...]
+         * This format is returned by object/{typeId}/?JSON_DATA endpoints
+         */
+        isJsonDataArrayFormat(json) {
+            // Non-empty array with {i, r} objects
+            if (Array.isArray(json) && json.length > 0 &&
+                json[0].hasOwnProperty('i') &&
+                json[0].hasOwnProperty('r') &&
+                Array.isArray(json[0].r)) {
+                return true;
+            }
+            // Empty array when apiUrl contains JSON_DATA
+            if (Array.isArray(json) && json.length === 0 &&
+                this.options.apiUrl && this.options.apiUrl.includes('JSON_DATA')) {
+                return true;
+            }
+            return false;
+        }
+
+        /**
+         * Parse JSON_DATA array format and fetch metadata for column definitions
+         * Input format: [{i: 3598, u: 1, o: 0, r: ["val1", "val2", ...]}, ...]
+         */
+        async parseJsonDataArray(dataArray, append = false) {
+            // Extract typeId from the apiUrl (e.g., /object/3596/?JSON_DATA -> 3596)
+            const typeIdMatch = this.options.apiUrl.match(/\/object\/(\d+)/);
+            if (!typeIdMatch) {
+                throw new Error('Cannot determine typeId from apiUrl for JSON_DATA format');
+            }
+            const typeId = typeIdMatch[1];
+
+            // Fetch metadata if columns are not yet loaded
+            if (this.columns.length === 0) {
+                const apiBase = this.getApiBase();
+                const metadataUrl = `${ apiBase }/metadata/${ typeId }`;
+                const metadataResponse = await fetch(metadataUrl);
+                const metadata = await metadataResponse.json();
+
+                // Convert metadata to columns format
+                const columns = [];
+
+                // Add main value column
+                columns.push({
+                    id: '0',
+                    type: metadata.type || 'SHORT',
+                    format: metadata.type || 'SHORT',
+                    name: metadata.val || metadata.name || 'Значение',
+                    granted: 1,
+                    ref: 0,
+                    orig: metadata.id
+                });
+
+                // Add requisite columns
+                if (metadata.reqs && Array.isArray(metadata.reqs)) {
+                    metadata.reqs.forEach((req, idx) => {
+                        const attrs = this.parseAttrs(req.attrs);
+                        const isReference = req.hasOwnProperty('ref_id');
+
+                        columns.push({
+                            id: String(idx + 1),
+                            type: req.type || 'SHORT',
+                            format: req.type || 'SHORT',
+                            name: attrs.alias || req.val,
+                            granted: req.granted || 1,
+                            ref: isReference ? req.orig : 0,
+                            ref_id: req.ref_id || null,
+                            orig: req.orig || null,
+                            attrs: req.attrs || ''
+                        });
+                    });
+                }
+
+                this.columns = columns;
+            }
+
+            // Transform JSON_DATA array to row format
+            const allRows = dataArray.map(item => item.r || []);
+
+            // Apply client-side pagination
+            const requestSize = this.options.pageSize + 1;
+            const offset = append ? this.loadedRecords : 0;
+            const rows = allRows.slice(offset, offset + requestSize);
+
+            return {
+                columns: this.columns,
                 rows: rows
             };
         }
@@ -2839,7 +2934,7 @@ class IntegramTable {
         }
 
         getApiBase() {
-            // Extract base URL from apiUrl by removing query parameters and path after /report/, /type/, or /metadata/
+            // Extract base URL from apiUrl by removing query parameters and path after /report/, /type/, /metadata/, or /object/
             const url = this.options.apiUrl;
             if (!url) {
                 // Fallback: construct API base from current page URL using the database path segment
@@ -2849,9 +2944,9 @@ class IntegramTable {
                 }
                 return '';
             }
-            const match = url.match(/^(.*?\/(report|type|metadata)\/\d+)/);
+            const match = url.match(/^(.*?\/(report|type|metadata|object)\/\d+)/);
             if (match) {
-                return match[1].replace(/\/(report|type|metadata)\/\d+$/, '');
+                return match[1].replace(/\/(report|type|metadata|object)\/\d+$/, '');
             }
             // Fallback: remove everything after ? or last /
             return url.split('?')[0].replace(/\/[^\/]*$/, '');
@@ -4360,17 +4455,23 @@ class IntegramTable {
                 const response = await fetch(`${ this.options.apiUrl }${ separator }${ params }`);
                 const json = await response.json();
 
-                // Transform column-based data to row-based data
-                const columnData = json.data || [];
                 let newRow = null;
 
-                if (columnData.length > 0 && Array.isArray(columnData[0]) && columnData[0].length > 0) {
-                    // Extract the first (and only) row
-                    const row = [];
-                    for (let colIndex = 0; colIndex < columnData.length; colIndex++) {
-                        row.push(columnData[colIndex][0]);
+                // Check if response is JSON_DATA array format
+                if (this.isJsonDataArrayFormat(json)) {
+                    newRow = json[0].r || [];
+                } else {
+                    // Transform column-based data to row-based data
+                    const columnData = json.data || [];
+
+                    if (columnData.length > 0 && Array.isArray(columnData[0]) && columnData[0].length > 0) {
+                        // Extract the first (and only) row
+                        const row = [];
+                        for (let colIndex = 0; colIndex < columnData.length; colIndex++) {
+                            row.push(columnData[colIndex][0]);
+                        }
+                        newRow = row;
                     }
-                    newRow = row;
                 }
 
                 if (newRow) {
