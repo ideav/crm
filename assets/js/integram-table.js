@@ -1849,7 +1849,9 @@ class IntegramTable {
 
                 // Close the create form modal
                 modal.remove();
-                document.querySelector('.edit-form-overlay:last-of-type').remove();
+                if (modal._overlayElement) {
+                    modal._overlayElement.remove();
+                }
                 window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
 
                 // Show success message
@@ -4276,7 +4278,9 @@ class IntegramTable {
 
                 // Close modal
                 modal.remove();
-                document.querySelector('.edit-form-overlay').remove();
+                if (modal._overlayElement) {
+                    modal._overlayElement.remove();
+                }
 
                 // Show success message
                 this.showToast('Запись успешно сохранена', 'success');
