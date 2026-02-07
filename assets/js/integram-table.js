@@ -232,6 +232,12 @@ class IntegramTable {
             const response = await fetch(`${ this.options.apiUrl }${ separator }${ params }`);
             const json = await response.json();
 
+            // Check if this is object format (has id, type keys but not columns, data)
+            if (this.isObjectFormat(json)) {
+                // Parse as object format instead
+                return await this.parseObjectFormat(json, append);
+            }
+
             // Transform column-based data to row-based data
             const columnData = json.data || [];
             let rows = [];
@@ -330,6 +336,114 @@ class IntegramTable {
 
             return {
                 columns: this.columns,
+                rows: rows
+            };
+        }
+
+        /**
+         * Check if the response is in object format (metadata structure)
+         * Object format has: id, type, val, reqs (optional)
+         * Report format has: columns, data
+         */
+        isObjectFormat(json) {
+            // Object format has id, type but not columns, data
+            return json.hasOwnProperty('id') &&
+                   json.hasOwnProperty('type') &&
+                   !json.hasOwnProperty('columns') &&
+                   !json.hasOwnProperty('data');
+        }
+
+        /**
+         * Parse object format metadata and fetch data
+         * Object format structure:
+         * {
+         *   "id": "3596",
+         *   "type": "8",
+         *   "val": "Задача",
+         *   "reqs": [
+         *     {"num": 1, "id": "3597", "val": "Описание", "type": "12", "orig": "119"},
+         *     ...
+         *   ]
+         * }
+         */
+        async parseObjectFormat(metadata, append = false) {
+            // Convert metadata to columns format
+            const columns = [];
+
+            // First column: id -> type, val -> name, type -> column type
+            columns.push({
+                id: '0',
+                type: metadata.type || 'SHORT',
+                format: metadata.type || 'SHORT',
+                name: metadata.val || 'Значение',
+                granted: 1,
+                ref: 0,
+                orig: metadata.id // Store the original table id
+            });
+
+            // Remaining columns from reqs array
+            if (metadata.reqs && Array.isArray(metadata.reqs)) {
+                metadata.reqs.forEach((req, idx) => {
+                    const attrs = this.parseAttrs(req.attrs);
+                    const isReference = req.hasOwnProperty('ref_id');
+
+                    columns.push({
+                        id: String(idx + 1),
+                        type: req.type || 'SHORT',
+                        format: req.type || 'SHORT',
+                        name: attrs.alias || req.val,
+                        granted: req.granted || 1,
+                        ref: isReference ? req.orig : 0,
+                        ref_id: req.ref_id || null,
+                        orig: req.orig || null,
+                        attrs: req.attrs || ''
+                    });
+                });
+            }
+
+            // Now fetch data using object/{id}/?JSON_DATA endpoint
+            const apiBase = this.getApiBase();
+            const typeId = metadata.type;
+            let dataUrl = `${ apiBase }/object/${ typeId }/?JSON_DATA`;
+
+            // Apply filters if any
+            const filters = this.filters || {};
+            const filterParams = new URLSearchParams();
+
+            Object.keys(filters).forEach(colId => {
+                const filter = filters[colId];
+                if (filter.value || filter.type === '%' || filter.type === '!%') {
+                    const column = columns.find(c => c.id === colId);
+                    if (column) {
+                        this.applyFilter(filterParams, column, filter);
+                    }
+                }
+            });
+
+            // Add filter parameters to URL
+            if (filterParams.toString()) {
+                dataUrl += `&${ filterParams.toString() }`;
+            }
+
+            // Fetch data
+            const dataResponse = await fetch(dataUrl);
+            const dataArray = await dataResponse.json();
+
+            // Transform object format data to row format
+            // Input: [{ i: 5151, u: 333, o: 1, r: ["val1", "val2"] }]
+            // Output: [["val1", "val2"]]
+            let allRows = [];
+            if (Array.isArray(dataArray)) {
+                allRows = dataArray.map(item => item.r || []);
+            }
+
+            // Apply client-side pagination (LIMIT)
+            const requestSize = this.options.pageSize + 1;
+            const offset = append ? this.loadedRecords : 0;
+            const rows = allRows.slice(offset, offset + requestSize);
+
+            return {
+                columns: columns,
                 rows: rows
             };
         }
