@@ -671,6 +671,7 @@
     box-shadow: var(--md-elevation-4);
     /* width: 90%;
     max-width: 600px; */
+    min-width: 600px;
     max-height: 85vh;
     display: flex;
     flex-direction: column;
