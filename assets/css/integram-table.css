@@ -670,8 +670,8 @@
     border-radius: 4px;
     box-shadow: var(--md-elevation-4);
     /* width: 90%;
-    max-width: 600px;
-    max-height: 85vh; */
+    max-width: 600px; */
+    max-height: 85vh;
     display: flex;
     flex-direction: column;
     font-family: 'Roboto', sans-serif;
