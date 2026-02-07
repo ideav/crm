@@ -3214,7 +3214,9 @@ class IntegramTable {
 
                     // First column (main value) - clickable to edit
                     const mainValue = values[0] || '';
-                    const displayMainValue = this.formatSubordinateCellValue(mainValue, null);
+                    // Pass metadata type information for proper formatting
+                    const mainFieldInfo = { type: metadata.type };
+                    const displayMainValue = this.formatSubordinateCellValue(mainValue, mainFieldInfo);
                     html += `<td class="subordinate-cell-clickable" data-row-id="${ rowId }" data-type-id="${ arrId }">${ displayMainValue }</td>`;
 
                     // Other columns
