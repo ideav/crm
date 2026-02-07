@@ -1690,12 +1690,42 @@ class IntegramTable {
                 const fieldName = attrs.alias || req.val;
                 const isRequired = attrs.required;
 
-                attributesHtml += `
-                    <div class="form-group">
-                        <label for="field-ref-${req.id}">${fieldName}${isRequired ? ' <span class="required">*</span>' : ''}</label>
-                        <input type="text" class="form-control" id="field-ref-${req.id}" name="t${req.id}"${isRequired ? ' required' : ''}>
-                    </div>
-                `;
+                attributesHtml += `<div class="form-group">`;
+                attributesHtml += `<label for="field-ref-${req.id}">${fieldName}${isRequired ? ' <span class="required">*</span>' : ''}</label>`;
+
+                // Check if this is a reference field
+                if (req.ref_id) {
+                    // Render as reference dropdown (same as in edit form)
+                    attributesHtml += `
+                        <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}">
+                            <div class="inline-editor-reference form-ref-editor-box">
+                                <div class="inline-editor-reference-header">
+                                    <input type="text"
+                                           class="inline-editor-reference-search form-ref-search"
+                                           id="field-ref-${req.id}-search"
+                                           placeholder="Поиск..."
+                                           autocomplete="off">
+                                    <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button">×</button>
+                                    <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button">+</button>
+                                </div>
+                                <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-ref-${req.id}-dropdown">
+                                    <div class="inline-editor-reference-empty">Загрузка...</div>
+                                </div>
+                            </div>
+                            <input type="hidden"
+                                   class="form-ref-value"
+                                   id="field-ref-${req.id}"
+                                   name="t${req.id}"
+                                   value=""
+                                   data-ref-id="${req.id}">
+                        </div>
+                    `;
+                } else {
+                    // Render as simple text input
+                    attributesHtml += `<input type="text" class="form-control" id="field-ref-${req.id}" name="t${req.id}"${isRequired ? ' required' : ''}>`;
+                }
+
+                attributesHtml += `</div>`;
             });
 
             let formHtml = `
@@ -1719,6 +1749,9 @@ class IntegramTable {
             modal.innerHTML = formHtml;
             document.body.appendChild(overlay);
             document.body.appendChild(modal);
+
+            // Load reference options for dropdown fields
+            this.loadReferenceOptions(regularFields, parentRecordId, modal);
 
             // Attach save handler
             const saveBtn = modal.querySelector('#save-record-ref-btn');
@@ -3870,12 +3903,42 @@ class IntegramTable {
                 const fieldName = attrs.alias || req.val;
                 const isRequired = attrs.required;
 
-                attributesHtml += `
-                    <div class="form-group">
-                        <label for="field-form-ref-${req.id}">${fieldName}${isRequired ? ' <span class="required">*</span>' : ''}</label>
-                        <input type="text" class="form-control" id="field-form-ref-${req.id}" name="t${req.id}"${isRequired ? ' required' : ''}>
-                    </div>
-                `;
+                attributesHtml += `<div class="form-group">`;
+                attributesHtml += `<label for="field-form-ref-${req.id}">${fieldName}${isRequired ? ' <span class="required">*</span>' : ''}</label>`;
+
+                // Check if this is a reference field
+                if (req.ref_id) {
+                    // Render as reference dropdown (same as in edit form)
+                    attributesHtml += `
+                        <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}">
+                            <div class="inline-editor-reference form-ref-editor-box">
+                                <div class="inline-editor-reference-header">
+                                    <input type="text"
+                                           class="inline-editor-reference-search form-ref-search"
+                                           id="field-form-ref-${req.id}-search"
+                                           placeholder="Поиск..."
+                                           autocomplete="off">
+                                    <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button">×</button>
+                                    <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button">+</button>
+                                </div>
+                                <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-form-ref-${req.id}-dropdown">
+                                    <div class="inline-editor-reference-empty">Загрузка...</div>
+                                </div>
+                            </div>
+                            <input type="hidden"
+                                   class="form-ref-value"
+                                   id="field-form-ref-${req.id}"
+                                   name="t${req.id}"
+                                   value=""
+                                   data-ref-id="${req.id}">
+                        </div>
+                    `;
+                } else {
+                    // Render as simple text input
+                    attributesHtml += `<input type="text" class="form-control" id="field-form-ref-${req.id}" name="t${req.id}"${isRequired ? ' required' : ''}>`;
+                }
+
+                attributesHtml += `</div>`;
             });
 
             let formHtml = `
@@ -3899,6 +3962,9 @@ class IntegramTable {
             modal.innerHTML = formHtml;
             document.body.appendChild(overlay);
             document.body.appendChild(modal);
+
+            // Load reference options for dropdown fields
+            this.loadReferenceOptions(regularFields, parentRecordId, modal);
 
             // Attach save handler
             const saveBtn = modal.querySelector('#save-form-ref-btn');
