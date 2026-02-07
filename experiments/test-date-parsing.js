@@ -3,10 +3,28 @@
 
 // Mock implementation of the date parsing methods
 class DateParser {
-    // Helper method to parse DD.MM.YYYY date format from API
+    // Helper method to parse date format from API (supports both DD.MM.YYYY and YYYYMMDD)
     parseDDMMYYYY(dateStr) {
         if (!dateStr || typeof dateStr !== 'string') return null;
-        const parts = dateStr.trim().split('.');
+        const trimmed = dateStr.trim();
+
+        // Try YYYYMMDD format first (exactly 8 digits)
+        if (/^\d{8}$/.test(trimmed)) {
+            const year = parseInt(trimmed.substring(0, 4), 10);
+            const month = parseInt(trimmed.substring(4, 6), 10);
+            const day = parseInt(trimmed.substring(6, 8), 10);
+
+            if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
+
+            // Validate month and day ranges
+            if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+            // Month is 0-indexed in JavaScript Date
+            return new Date(year, month - 1, day);
+        }
+
+        // Try DD.MM.YYYY format
+        const parts = trimmed.split('.');
         if (parts.length !== 3) return null;
         const day = parseInt(parts[0], 10);
         const month = parseInt(parts[1], 10);
@@ -124,14 +142,24 @@ testCasesYYYYMMDD.forEach(({ input, expected }) => {
     console.log(`  ${pass ? '✓' : '✗'} parseYYYYMMDD("${input}") => ${result ? result.toISOString().split('T')[0] : 'null'} (expected: ${expected ? expected.toISOString().split('T')[0] : 'null'})`);
 });
 
-console.log('\n=== Testing parseDDMMYYYY ===');
+console.log('\n=== Testing parseDDMMYYYY (now with auto-detection) ===');
 const testCasesDDMMYYYY = [
+    // DD.MM.YYYY format tests
     { input: '07.02.2026', expected: new Date(2026, 1, 7) },
     { input: '31.12.1999', expected: new Date(1999, 11, 31) },
     { input: '01.01.2000', expected: new Date(2000, 0, 1) },
     { input: '7.2.2026', expected: new Date(2026, 1, 7) }, // Without leading zeros
     { input: '32.01.2026', expected: null }, // Invalid day (but will still parse as Date allows)
     { input: 'invalid', expected: null },
+    // YYYYMMDD format tests (auto-detection)
+    { input: '20260207', expected: new Date(2026, 1, 7) },
+    { input: '19991231', expected: new Date(1999, 11, 31) },
+    { input: '20000101', expected: new Date(2000, 0, 1) },
+    { input: '2026020', expected: null }, // Too short
+    { input: '202602077', expected: null }, // Too long
+    { input: 'abcd1234', expected: null }, // Non-digits
+    { input: '20261301', expected: null }, // Invalid month
+    { input: '20260232', expected: null }, // Invalid day
 ];
 
 testCasesDDMMYYYY.forEach(({ input, expected }) => {
