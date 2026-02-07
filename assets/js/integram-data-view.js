@@ -411,16 +411,10 @@ class IntegramControls {
  */
 class IntegramDataView {
     constructor(containerId, options = {}) {
-        IntegramDebug.log('DataView', `Constructor called for container: ${containerId}`);
-
         this.container = document.getElementById(containerId);
         if (!this.container) {
-            const errorMsg = `Container element with id "${containerId}" not found`;
-            IntegramDebug.error('DataView', errorMsg);
-            throw new Error(errorMsg);
+            throw new Error(`Container element with id "${containerId}" not found`);
         }
-
-        IntegramDebug.verbose('DataView', `Container element found:`, this.container);
 
         // Check URL parameters for parentId
         const urlParams = new URLSearchParams(window.location.search);
@@ -513,54 +507,32 @@ class IntegramDataView {
 
         // Register instance globally
         window[this.options.instanceName] = this;
-
-        IntegramDebug.log('DataView', `Instance registered as window.${this.options.instanceName}`);
-        IntegramDebug.verbose('DataView', `Constructor options:`, this.options);
-
-        // Auto-initialize
-        IntegramDebug.log('DataView', `Calling init() for ${containerId}...`);
-        this.init();
     }
 
     /**
      * Initialize the component
      */
     init() {
-        IntegramDebug.log('DataView', `init() started for ${this.container.id}`);
-
         this.loadColumnState();
         this.loadSettings();
         this.loadGlobalMetadata();
         this.loadData();
-
-        IntegramDebug.log('DataView', `init() completed for ${this.container.id}`);
     }
 
     /**
      * Load global metadata for determining relationships
      */
     async loadGlobalMetadata() {
-        IntegramDebug.log('DataView', 'Loading global metadata...');
-
         try {
             const apiBase = IntegramControls.extractApiBase(this.options.apiUrl);
-            const metadataUrl = `${apiBase}/type/?JSON_DATA`;
-
-            IntegramDebug.verbose('DataView', `Fetching metadata from: ${metadataUrl}`);
-
-            const response = await fetch(metadataUrl);
+            const response = await fetch(`${apiBase}/type/?JSON_DATA`);
             const json = await response.json();
             this.globalMetadata = json;
 
-            IntegramDebug.log('DataView', `Global metadata loaded successfully`);
-            IntegramDebug.verbose('DataView', `Metadata:`, json);
-
             if (this.data.length > 0) {
-                IntegramDebug.log('DataView', 'Data already loaded, re-rendering...');
                 this.render();
             }
         } catch (error) {
-            IntegramDebug.error('DataView', 'Error loading global metadata:', error);
             console.error('Error loading global metadata:', error);
         }
     }
@@ -1099,8 +1071,6 @@ class IntegramDataView {
  */
 class IntegramTables extends IntegramDataView {
     constructor(containerId, options = {}) {
-        IntegramDebug.log('Tables', `IntegramTables constructor called for: ${containerId}`);
-
         super(containerId, {
             ...options,
             cookiePrefix: options.cookiePrefix || 'integram-tables'
@@ -1108,51 +1078,33 @@ class IntegramTables extends IntegramDataView {
 
         this.options.tableTypeId = options.tableTypeId || null;
 
-        IntegramDebug.verbose('Tables', `tableTypeId: ${this.options.tableTypeId}`);
-
         if (!this.options.tableTypeId) {
-            const errorMsg = 'tableTypeId is required for IntegramTables';
-            IntegramDebug.error('Tables', errorMsg);
-            throw new Error(errorMsg);
+            throw new Error('tableTypeId is required for IntegramTables');
         }
-
-        IntegramDebug.log('Tables', `IntegramTables instance created successfully for: ${containerId}`);
     }
 
     /**
      * Load data from table endpoint
      */
     async loadData(append = false) {
-        IntegramDebug.log('Tables', `loadData called (append=${append})`);
-
         if (this.isLoading || (!append && !this.hasMore && this.loadedRecords > 0)) {
-            IntegramDebug.warn('Tables', `loadData skipped - isLoading=${this.isLoading}, hasMore=${this.hasMore}, loadedRecords=${this.loadedRecords}`);
             return;
         }
 
         this.isLoading = true;
-        IntegramDebug.log('Tables', 'Loading data...');
 
         try {
             if (!append) {
-                IntegramDebug.log('Tables', 'Showing loading indicator...');
                 IntegramControls.showLoading(this.container);
             }
 
             const apiBase = IntegramControls.extractApiBase(this.options.apiUrl);
             const offset = append ? this.loadedRecords : 0;
 
-            IntegramDebug.verbose('Tables', `API base: ${apiBase}, offset: ${offset}`);
-
             // First load: fetch metadata
             if (!append && this.columns.length === 0) {
-                const metadataUrl = `${apiBase}/type/${this.options.tableTypeId}/?JSON_DATA`;
-                IntegramDebug.log('Tables', `Fetching metadata from: ${metadataUrl}`);
-
-                const metaResponse = await fetch(metadataUrl);
+                const metaResponse = await fetch(`${apiBase}/type/${this.options.tableTypeId}/?JSON_DATA`);
                 const metaJson = await metaResponse.json();
-
-                IntegramDebug.verbose('Tables', 'Metadata response:', metaJson);
 
                 if (metaJson.f && Array.isArray(metaJson.f)) {
                     this.columns = metaJson.f.map(col => ({
@@ -1164,11 +1116,6 @@ class IntegramTables extends IntegramDataView {
                         granted: col.g
                     }));
                     this.metadataCache[this.options.tableTypeId] = metaJson;
-
-                    IntegramDebug.log('Tables', `Loaded ${this.columns.length} columns from metadata`);
-                    IntegramDebug.verbose('Tables', 'Columns:', this.columns);
-                } else {
-                    IntegramDebug.warn('Tables', 'No columns found in metadata response', metaJson);
                 }
             }
 
@@ -1176,7 +1123,6 @@ class IntegramTables extends IntegramDataView {
             let dataUrl = `${apiBase}/object/${this.options.tableTypeId}/?JSON_DATA`;
             if (this.options.parentId) {
                 dataUrl += `&F_U=${this.options.parentId}`;
-                IntegramDebug.verbose('Tables', `Using parentId: ${this.options.parentId}`);
             }
             dataUrl += `&LIMIT=${this.options.pageSize}&OFFSET=${offset}`;
 
@@ -1190,18 +1136,13 @@ class IntegramTables extends IntegramDataView {
                         const filterParam = IntegramControls.parseFilter(column, filter, this.filterTypes);
                         if (filterParam) {
                             dataUrl += `&${filterParam}`;
-                            IntegramDebug.verbose('Tables', `Applied filter: ${filterParam}`);
                         }
                     }
                 }
             });
 
-            IntegramDebug.log('Tables', `Fetching data from: ${dataUrl}`);
-
             const dataResponse = await fetch(dataUrl);
             const dataJson = await dataResponse.json();
-
-            IntegramDebug.verbose('Tables', 'Data response:', dataJson);
 
             // Process data
             const newRows = [];
@@ -1214,50 +1155,35 @@ class IntegramTables extends IntegramDataView {
                     });
                     newRows.push(row);
                 });
-
-                IntegramDebug.log('Tables', `Processed ${newRows.length} data rows`);
-            } else {
-                IntegramDebug.warn('Tables', 'No data array found in response', dataJson);
             }
 
             if (!append) {
                 this.data = newRows;
                 this.loadedRecords = 0;
-                IntegramDebug.log('Tables', 'Data replaced (not appending)');
             } else {
                 this.data.push(...newRows);
-                IntegramDebug.log('Tables', 'Data appended');
             }
 
             this.loadedRecords += newRows.length;
             this.hasMore = newRows.length >= this.options.pageSize;
 
-            IntegramDebug.verbose('Tables', `Total loaded records: ${this.loadedRecords}, hasMore: ${this.hasMore}`);
-
             if (newRows.length < this.options.pageSize) {
                 this.totalRows = this.loadedRecords;
                 this.hasMore = false;
-                IntegramDebug.log('Tables', `All data loaded. Total rows: ${this.totalRows}`);
             }
 
             // Process metadata
             if (!append) {
-                IntegramDebug.log('Tables', 'Processing column metadata...');
                 this.processColumnMetadata();
             }
 
-            IntegramDebug.log('Tables', 'Rendering table...');
             this.render();
 
             if (this.options.onDataLoad) {
-                IntegramDebug.verbose('Tables', 'Calling onDataLoad callback');
                 this.options.onDataLoad(this.data);
             }
 
-            IntegramDebug.log('Tables', 'Data load completed successfully');
-
         } catch (error) {
-            IntegramDebug.error('Tables', 'Error loading data:', error);
             console.error('Error loading data:', error);
             IntegramControls.showError(this.container, `Ошибка загрузки данных: ${error.message}`);
         } finally {
@@ -1325,33 +1251,24 @@ class IntegramTables extends IntegramDataView {
  */
 class IntegramReports extends IntegramDataView {
     constructor(containerId, options = {}) {
-        IntegramDebug.log('Reports', `IntegramReports constructor called for: ${containerId}`);
-
         super(containerId, {
             ...options,
             cookiePrefix: options.cookiePrefix || 'integram-reports'
         });
-
-        IntegramDebug.log('Reports', `IntegramReports instance created successfully for: ${containerId}`);
     }
 
     /**
      * Load data from report endpoint
      */
     async loadData(append = false) {
-        IntegramDebug.log('Reports', `loadData called (append=${append})`);
-
         if (this.isLoading || (!append && !this.hasMore && this.loadedRecords > 0)) {
-            IntegramDebug.warn('Reports', `loadData skipped - isLoading=${this.isLoading}, hasMore=${this.hasMore}, loadedRecords=${this.loadedRecords}`);
             return;
         }
 
         this.isLoading = true;
-        IntegramDebug.log('Reports', 'Loading data...');
 
         try {
             if (!append) {
-                IntegramDebug.log('Reports', 'Showing loading indicator...');
                 IntegramControls.showLoading(this.container);
             }
 
@@ -1359,8 +1276,6 @@ class IntegramReports extends IntegramDataView {
             const params = new URLSearchParams();
             params.set('LIMIT', this.options.pageSize);
             params.set('OFFSET', offset);
-
-            IntegramDebug.verbose('Reports', `Offset: ${offset}, PageSize: ${this.options.pageSize}`);
 
             // Apply filters
             const filters = this.filters || {};
@@ -1381,14 +1296,8 @@ class IntegramReports extends IntegramDataView {
             });
 
             const separator = this.options.apiUrl.includes('?') ? '&' : '?';
-            const fetchUrl = `${this.options.apiUrl}${separator}${params}`;
-
-            IntegramDebug.log('Reports', `Fetching data from: ${fetchUrl}`);
-
-            const response = await fetch(fetchUrl);
+            const response = await fetch(`${this.options.apiUrl}${separator}${params}`);
             const json = await response.json();
-
-            IntegramDebug.verbose('Reports', 'Data response:', json);
 
             // Extract columns from first load
             if (!append && json.f) {
@@ -1400,11 +1309,6 @@ class IntegramReports extends IntegramDataView {
                     orig: col.o || col.orig,
                     granted: col.g || col.granted || 0
                 }));
-
-                IntegramDebug.log('Reports', `Loaded ${this.columns.length} columns from response`);
-                IntegramDebug.verbose('Reports', 'Columns:', this.columns);
-            } else if (!append) {
-                IntegramDebug.warn('Reports', 'No columns found in response', json);
             }
 
             // Process data
@@ -1417,50 +1321,35 @@ class IntegramReports extends IntegramDataView {
                     });
                     newRows.push(row);
                 });
-
-                IntegramDebug.log('Reports', `Processed ${newRows.length} data rows`);
-            } else {
-                IntegramDebug.warn('Reports', 'No data array found in response', json);
             }
 
             if (!append) {
                 this.data = newRows;
                 this.loadedRecords = 0;
-                IntegramDebug.log('Reports', 'Data replaced (not appending)');
             } else {
                 this.data.push(...newRows);
-                IntegramDebug.log('Reports', 'Data appended');
             }
 
             this.loadedRecords += newRows.length;
             this.hasMore = newRows.length >= this.options.pageSize;
 
-            IntegramDebug.verbose('Reports', `Total loaded records: ${this.loadedRecords}, hasMore: ${this.hasMore}`);
-
             if (newRows.length < this.options.pageSize) {
                 this.totalRows = this.loadedRecords;
                 this.hasMore = false;
-                IntegramDebug.log('Reports', `All data loaded. Total rows: ${this.totalRows}`);
             }
 
             // Process metadata
             if (!append) {
-                IntegramDebug.log('Reports', 'Processing column metadata...');
                 this.processColumnMetadata();
             }
 
-            IntegramDebug.log('Reports', 'Rendering table...');
             this.render();
 
             if (this.options.onDataLoad) {
-                IntegramDebug.verbose('Reports', 'Calling onDataLoad callback');
                 this.options.onDataLoad(this.data);
             }
 
-            IntegramDebug.log('Reports', 'Data load completed successfully');
-
         } catch (error) {
-            IntegramDebug.error('Reports', 'Error loading data:', error);
             console.error('Error loading data:', error);
             IntegramControls.showError(this.container, `Ошибка загрузки данных: ${error.message}`);
         } finally {
@@ -1509,126 +1398,13 @@ class IntegramReports extends IntegramDataView {
 }
 
 // ============================================================================
-// DEBUG/TRACING MODULE
-// ============================================================================
-
-/**
- * IntegramDebug provides comprehensive tracing and debugging capabilities
- * for the IntegramDataView component. Can be enabled/disabled at runtime.
- */
-class IntegramDebug {
-    static enabled = false;
-    static verboseEnabled = false;
-
-    /**
-     * Enable debug mode
-     * @param {boolean} verbose - Enable verbose logging
-     */
-    static enable(verbose = false) {
-        IntegramDebug.enabled = true;
-        IntegramDebug.verboseEnabled = verbose;
-        console.log('[IntegramDataView] Debug mode enabled' + (verbose ? ' (VERBOSE)' : ''));
-    }
-
-    /**
-     * Disable debug mode
-     */
-    static disable() {
-        IntegramDebug.enabled = false;
-        IntegramDebug.verboseEnabled = false;
-        console.log('[IntegramDataView] Debug mode disabled');
-    }
-
-    /**
-     * Log a debug message
-     * @param {string} category - Message category
-     * @param {string} message - Message text
-     * @param {*} data - Optional data to log
-     */
-    static log(category, message, data = null) {
-        if (!IntegramDebug.enabled) return;
-
-        const timestamp = new Date().toISOString().substr(11, 12);
-        const prefix = `[${timestamp}][${category}]`;
-
-        if (data !== null) {
-            console.log(prefix, message, data);
-        } else {
-            console.log(prefix, message);
-        }
-    }
-
-    /**
-     * Log verbose debug message (only when verbose mode is on)
-     * @param {string} category - Message category
-     * @param {string} message - Message text
-     * @param {*} data - Optional data to log
-     */
-    static verbose(category, message, data = null) {
-        if (!IntegramDebug.enabled || !IntegramDebug.verboseEnabled) return;
-
-        const timestamp = new Date().toISOString().substr(11, 12);
-        const prefix = `[${timestamp}][${category}][VERBOSE]`;
-
-        if (data !== null) {
-            console.log(prefix, message, data);
-        } else {
-            console.log(prefix, message);
-        }
-    }
-
-    /**
-     * Log an error
-     * @param {string} category - Error category
-     * @param {string} message - Error message
-     * @param {Error} error - Error object
-     */
-    static error(category, message, error = null) {
-        const timestamp = new Date().toISOString().substr(11, 12);
-        const prefix = `[${timestamp}][${category}][ERROR]`;
-
-        if (error !== null) {
-            console.error(prefix, message, error);
-        } else {
-            console.error(prefix, message);
-        }
-    }
-
-    /**
-     * Log a warning
-     * @param {string} category - Warning category
-     * @param {string} message - Warning message
-     * @param {*} data - Optional data
-     */
-    static warn(category, message, data = null) {
-        if (!IntegramDebug.enabled) return;
-
-        const timestamp = new Date().toISOString().substr(11, 12);
-        const prefix = `[${timestamp}][${category}][WARN]`;
-
-        if (data !== null) {
-            console.warn(prefix, message, data);
-        } else {
-            console.warn(prefix, message);
-        }
-    }
-}
-
-// Make debug class globally accessible
-if (typeof window !== 'undefined') {
-    window.IntegramDebug = IntegramDebug;
-}
-
-// ============================================================================
 // AUTO-INITIALIZATION
 // ============================================================================
 
 /**
  * Auto-initialize tables and reports from HTML data attributes
  *
- * Supported patterns:
- *
- * Pattern 1 (new): data-integram-type attribute
+ * Usage in HTML:
  * ```html
  * <div id="my-table"
  *      data-integram-type="table"
@@ -1644,174 +1420,32 @@ if (typeof window !== 'undefined') {
  *      data-title="My Report">
  * </div>
  * ```
- *
- * Pattern 2 (legacy): data-integram-table attribute
- * ```html
- * <div id="my-table"
- *      data-integram-table
- *      data-api-url="https://api.integram.ru/report/789"
- *      data-title="My Table">
- * </div>
- * ```
  */
-function autoInitIntegramDataViews() {
-    IntegramDebug.log('INIT', 'Starting auto-initialization...');
+document.addEventListener('DOMContentLoaded', () => {
+    // Auto-initialize table views
+    document.querySelectorAll('[data-integram-type="table"]').forEach(element => {
+        const options = {
+            apiUrl: element.dataset.apiUrl || '',
+            tableTypeId: element.dataset.tableTypeId || null,
+            parentId: element.dataset.parentId || null,
+            title: element.dataset.title || '',
+            pageSize: parseInt(element.dataset.pageSize || 20)
+        };
 
-    let initializedCount = 0;
-
-    // Pattern 1: Auto-initialize with data-integram-type="table"
-    const tableElements = document.querySelectorAll('[data-integram-type="table"]');
-    IntegramDebug.log('INIT', `Found ${tableElements.length} elements with data-integram-type="table"`);
-
-    tableElements.forEach(element => {
-        try {
-            IntegramDebug.log('INIT', `Initializing table: ${element.id || '(no id)'}`);
-
-            if (!element.id) {
-                IntegramDebug.error('INIT', 'Element has no ID, skipping', element);
-                return;
-            }
-
-            const options = {
-                apiUrl: element.dataset.apiUrl || '',
-                tableTypeId: element.dataset.tableTypeId || null,
-                parentId: element.dataset.parentId || null,
-                title: element.dataset.title || '',
-                pageSize: parseInt(element.dataset.pageSize || 20),
-                cookiePrefix: element.dataset.cookiePrefix || undefined,
-                instanceName: element.dataset.instanceName || undefined
-            };
-
-            IntegramDebug.verbose('INIT', `Table options for ${element.id}:`, options);
-
-            if (!options.apiUrl) {
-                IntegramDebug.warn('INIT', `No apiUrl specified for table ${element.id}`);
-            }
-            if (!options.tableTypeId) {
-                IntegramDebug.warn('INIT', `No tableTypeId specified for table ${element.id}`);
-            }
-
-            const instance = new IntegramTables(element.id, options);
-            initializedCount++;
-
-            IntegramDebug.log('INIT', `Successfully initialized table: ${element.id}`);
-        } catch (error) {
-            IntegramDebug.error('INIT', `Failed to initialize table ${element.id}:`, error);
-        }
+        new IntegramTables(element.id, options);
     });
 
-    // Pattern 2: Auto-initialize with data-integram-type="report"
-    const reportElements = document.querySelectorAll('[data-integram-type="report"]');
-    IntegramDebug.log('INIT', `Found ${reportElements.length} elements with data-integram-type="report"`);
+    // Auto-initialize report views
+    document.querySelectorAll('[data-integram-type="report"]').forEach(element => {
+        const options = {
+            apiUrl: element.dataset.apiUrl || '',
+            title: element.dataset.title || '',
+            pageSize: parseInt(element.dataset.pageSize || 20)
+        };
 
-    reportElements.forEach(element => {
-        try {
-            IntegramDebug.log('INIT', `Initializing report: ${element.id || '(no id)'}`);
-
-            if (!element.id) {
-                IntegramDebug.error('INIT', 'Element has no ID, skipping', element);
-                return;
-            }
-
-            const options = {
-                apiUrl: element.dataset.apiUrl || '',
-                title: element.dataset.title || '',
-                pageSize: parseInt(element.dataset.pageSize || 20),
-                cookiePrefix: element.dataset.cookiePrefix || undefined,
-                instanceName: element.dataset.instanceName || undefined
-            };
-
-            IntegramDebug.verbose('INIT', `Report options for ${element.id}:`, options);
-
-            if (!options.apiUrl) {
-                IntegramDebug.warn('INIT', `No apiUrl specified for report ${element.id}`);
-            }
-
-            const instance = new IntegramReports(element.id, options);
-            initializedCount++;
-
-            IntegramDebug.log('INIT', `Successfully initialized report: ${element.id}`);
-        } catch (error) {
-            IntegramDebug.error('INIT', `Failed to initialize report ${element.id}:`, error);
-        }
+        new IntegramReports(element.id, options);
     });
-
-    // Pattern 3 (legacy): Auto-initialize with data-integram-table attribute
-    // This pattern auto-detects whether to use IntegramReports or IntegramTables
-    // based on whether data-table-type-id is present
-    const legacyElements = document.querySelectorAll('[data-integram-table]');
-    IntegramDebug.log('INIT', `Found ${legacyElements.length} elements with data-integram-table (legacy pattern)`);
-
-    legacyElements.forEach(element => {
-        try {
-            IntegramDebug.log('INIT', `Initializing legacy table: ${element.id || '(no id)'}`);
-
-            if (!element.id) {
-                IntegramDebug.error('INIT', 'Element has no ID, skipping', element);
-                return;
-            }
-
-            const hasTableTypeId = element.dataset.tableTypeId;
-            const dataSource = element.dataset.dataSource;
-
-            // Determine if this should be a table or report
-            const isTable = hasTableTypeId || dataSource === 'table';
-
-            IntegramDebug.log('INIT', `Legacy element ${element.id} detected as: ${isTable ? 'TABLE' : 'REPORT'}`);
-
-            if (isTable) {
-                const options = {
-                    apiUrl: element.dataset.apiUrl || '',
-                    tableTypeId: element.dataset.tableTypeId || null,
-                    parentId: element.dataset.parentId || null,
-                    title: element.dataset.title || '',
-                    pageSize: parseInt(element.dataset.pageSize || 20),
-                    cookiePrefix: element.dataset.cookiePrefix || undefined,
-                    instanceName: element.dataset.instanceName || undefined
-                };
-
-                IntegramDebug.verbose('INIT', `Legacy table options for ${element.id}:`, options);
-
-                if (!options.tableTypeId) {
-                    IntegramDebug.warn('INIT', `No tableTypeId specified for legacy table ${element.id}`);
-                }
-
-                const instance = new IntegramTables(element.id, options);
-                initializedCount++;
-            } else {
-                const options = {
-                    apiUrl: element.dataset.apiUrl || '',
-                    title: element.dataset.title || '',
-                    pageSize: parseInt(element.dataset.pageSize || 20),
-                    cookiePrefix: element.dataset.cookiePrefix || undefined,
-                    instanceName: element.dataset.instanceName || undefined
-                };
-
-                IntegramDebug.verbose('INIT', `Legacy report options for ${element.id}:`, options);
-
-                const instance = new IntegramReports(element.id, options);
-                initializedCount++;
-            }
-
-            IntegramDebug.log('INIT', `Successfully initialized legacy element: ${element.id}`);
-        } catch (error) {
-            IntegramDebug.error('INIT', `Failed to initialize legacy element ${element.id}:`, error);
-        }
-    });
-
-    IntegramDebug.log('INIT', `Auto-initialization complete. Initialized ${initializedCount} components.`);
-}
-
-// Auto-initialize on DOM ready
-if (typeof document !== 'undefined') {
-    if (document.readyState === 'loading') {
-        IntegramDebug.log('INIT', 'Waiting for DOMContentLoaded event...');
-        document.addEventListener('DOMContentLoaded', autoInitIntegramDataViews);
-    } else {
-        IntegramDebug.log('INIT', 'DOM already loaded, initializing immediately...');
-        autoInitIntegramDataViews();
-    }
-}
+});
 
 // Export for module usage
 if (typeof module !== 'undefined' && module.exports) {
