@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Object Format Parser</title>
+    <link rel="stylesheet" href="/assets/css/bootstrap.min.css">
+    <link rel="stylesheet" href="/assets/css/integram-data-view.css">
+    <link rel="stylesheet" href="/assets/css/integram-table.css">
+    <style>
+        body {
+            padding: 20px;
+        }
+        .test-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .test-section h3 {
+            margin-top: 0;
+        }
+        pre {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 3px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <h1>Test Object Format Parser</h1>
+        <p>This page tests the new object format parser for integram-table.js</p>
+
+        <div class="test-section">
+            <h3>Test 1: Detect Object Format</h3>
+            <div id="test1-result"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>Test 2: Parse Object Metadata</h3>
+            <div id="test2-result"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>Test 3: Parse Object Data</h3>
+            <div id="test3-result"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>Test 4: Full Integration Test</h3>
+            <div id="test-table"></div>
+        </div>
+    </div>
+
+    <script src="/assets/js/integram-table.js"></script>
+    <script>
+        // Sample metadata in object format
+        const objectMetadata = {
+            "id": "3596",
+            "up": "0",
+            "type": "8",
+            "val": "Задача",
+            "unique": "0",
+            "reqs": [
+                {"num": 1, "id": "3597", "orig": "119", "val": "Описание", "type": "12"},
+                {"num": 2, "id": "3888", "orig": "3887", "val": "Срок", "type": "4", "attrs": ":!NULL:"},
+                {"num": 3, "id": "4299", "orig": "4297", "val": "Тип задачи", "type": "3", "ref": "4297", "ref_id": "4298", "attrs": ":!NULL:"}
+            ]
+        };
+
+        // Sample metadata in report format (for comparison)
+        const reportMetadata = {
+            "columns": [
+                {"id": "0", "name": "Задача", "type": "SHORT"},
+                {"id": "1", "name": "Описание", "type": "MEMO"}
+            ],
+            "data": [
+                ["Задача 1", "Описание 1"],
+                ["Задача 2", "Описание 2"]
+            ]
+        };
+
+        // Sample data response
+        const objectData = [
+            {"i": 3598, "u": 1, "o": 0, "r": ["Отчеты для Григория", "по верхней границе срока оплаты", ""]},
+            {"i": 3600, "u": 1, "o": 0, "r": ["Отчеты для Григория 2", "Актуально 1 месяц", "08.02.2026 15:30:00"]}
+        ];
+
+        // Test 1: Format Detection
+        function test1() {
+            const table = new IntegramTable('test-table', {
+                apiUrl: 'dummy',
+                pageSize: 20
+            });
+
+            const isObjectFormat = table.isObjectFormat(objectMetadata);
+            const isReportFormat = table.isObjectFormat(reportMetadata);
+
+            const result = document.getElementById('test1-result');
+            result.innerHTML = `
+                <p><strong>Object metadata detected as object format:</strong> ${isObjectFormat ? '✅ PASS' : '❌ FAIL'}</p>
+                <p><strong>Report metadata NOT detected as object format:</strong> ${!isReportFormat ? '✅ PASS' : '❌ FAIL'}</p>
+            `;
+        }
+
+        // Test 2: Metadata Parsing
+        async function test2() {
+            const table = new IntegramTable('test-table', {
+                apiUrl: 'dummy',
+                pageSize: 20
+            });
+
+            // Mock the fetch for data
+            const originalFetch = window.fetch;
+            window.fetch = async (url) => {
+                if (url.includes('/object/')) {
+                    return {
+                        ok: true,
+                        json: async () => objectData
+                    };
+                }
+                return originalFetch(url);
+            };
+
+            try {
+                const parsed = await table.parseObjectFormat(objectMetadata, false);
+
+                const result = document.getElementById('test2-result');
+                result.innerHTML = `
+                    <p><strong>Columns parsed:</strong> ${parsed.columns.length === 4 ? '✅ PASS' : '❌ FAIL'} (Expected: 4, Got: ${parsed.columns.length})</p>
+                    <p><strong>First column name:</strong> ${parsed.columns[0].name === 'Задача' ? '✅ PASS' : '❌ FAIL'}</p>
+                    <p><strong>Second column name:</strong> ${parsed.columns[1].name === 'Описание' ? '✅ PASS' : '❌ FAIL'}</p>
+                    <p><strong>Third column name:</strong> ${parsed.columns[2].name === 'Срок' ? '✅ PASS' : '❌ FAIL'}</p>
+                    <h4>Parsed Columns:</h4>
+                    <pre>${JSON.stringify(parsed.columns, null, 2)}</pre>
+                `;
+            } catch (error) {
+                document.getElementById('test2-result').innerHTML = `<p class="text-danger">❌ ERROR: ${error.message}</p>`;
+            }
+
+            window.fetch = originalFetch;
+        }
+
+        // Test 3: Data Parsing
+        async function test3() {
+            const table = new IntegramTable('test-table', {
+                apiUrl: 'dummy',
+                pageSize: 20
+            });
+
+            // Mock the fetch for data
+            const originalFetch = window.fetch;
+            window.fetch = async (url) => {
+                if (url.includes('/object/')) {
+                    return {
+                        ok: true,
+                        json: async () => objectData
+                    };
+                }
+                return originalFetch(url);
+            };
+
+            try {
+                const parsed = await table.parseObjectFormat(objectMetadata, false);
+
+                const result = document.getElementById('test3-result');
+                result.innerHTML = `
+                    <p><strong>Rows parsed:</strong> ${parsed.rows.length === 2 ? '✅ PASS' : '❌ FAIL'} (Expected: 2, Got: ${parsed.rows.length})</p>
+                    <p><strong>First row values:</strong> ${parsed.rows[0].length === 3 ? '✅ PASS' : '❌ FAIL'}</p>
+                    <h4>Parsed Rows:</h4>
+                    <pre>${JSON.stringify(parsed.rows, null, 2)}</pre>
+                `;
+            } catch (error) {
+                document.getElementById('test3-result').innerHTML = `<p class="text-danger">❌ ERROR: ${error.message}</p>`;
+            }
+
+            window.fetch = originalFetch;
+        }
+
+        // Run tests
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('Running tests...');
+            test1();
+            test2();
+            test3();
+        });
+    </script>
+</body>
+</html>
