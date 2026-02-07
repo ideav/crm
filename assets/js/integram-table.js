@@ -2839,7 +2839,7 @@ class IntegramTable {
         }
 
         getApiBase() {
-            // Extract base URL from apiUrl by removing query parameters and path after /report/ or /type/
+            // Extract base URL from apiUrl by removing query parameters and path after /report/, /type/, or /metadata/
             const url = this.options.apiUrl;
             if (!url) {
                 // Fallback: construct API base from current page URL using the database path segment
@@ -2849,9 +2849,9 @@ class IntegramTable {
                 }
                 return '';
             }
-            const match = url.match(/^(.*?\/(report|type)\/\d+)/);
+            const match = url.match(/^(.*?\/(report|type|metadata)\/\d+)/);
             if (match) {
-                return match[1].replace(/\/(report|type)\/\d+$/, '');
+                return match[1].replace(/\/(report|type|metadata)\/\d+$/, '');
             }
             // Fallback: remove everything after ? or last /
             return url.split('?')[0].replace(/\/[^\/]*$/, '');
