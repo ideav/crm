@@ -613,6 +613,27 @@ class IntegramTable {
             return new Date(year, month - 1, day, hour, minute, second);
         }
 
+        // Helper method to parse YYYYMMDD date format from API
+        parseYYYYMMDD(dateStr) {
+            if (!dateStr || typeof dateStr !== 'string') return null;
+            const trimmed = dateStr.trim();
+
+            // Check if it matches YYYYMMDD format (exactly 8 digits)
+            if (!/^\d{8}$/.test(trimmed)) return null;
+
+            const year = parseInt(trimmed.substring(0, 4), 10);
+            const month = parseInt(trimmed.substring(4, 6), 10);
+            const day = parseInt(trimmed.substring(6, 8), 10);
+
+            if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
+
+            // Validate month and day ranges
+            if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+            // Month is 0-indexed in JavaScript Date
+            return new Date(year, month - 1, day);
+        }
+
         // Format Date object for display as DD.MM.YYYY
         formatDateDisplay(dateObj) {
             if (!dateObj || isNaN(dateObj.getTime())) return '';
@@ -4273,7 +4294,12 @@ class IntegramTable {
                 date = this.parseDDMMYYYY(value);
             }
 
-            // If parsing failed, try standard Date constructor
+            // If parsing failed, try YYYYMMDD format
+            if (!date || isNaN(date.getTime())) {
+                date = this.parseYYYYMMDD(value);
+            }
+
+            // If still failed, try standard Date constructor
             if (!date || isNaN(date.getTime())) {
                 date = new Date(value);
                 if (isNaN(date.getTime())) return value;  // Return as-is if not a valid date
@@ -4305,7 +4331,12 @@ class IntegramTable {
                 date = this.parseDDMMYYYY(value);
             }
 
-            // If parsing failed, try standard Date constructor
+            // If parsing failed, try YYYYMMDD format
+            if (!date || isNaN(date.getTime())) {
+                date = this.parseYYYYMMDD(value);
+            }
+
+            // If still failed, try standard Date constructor
             if (!date || isNaN(date.getTime())) {
                 date = new Date(value);
                 if (isNaN(date.getTime())) return '';
