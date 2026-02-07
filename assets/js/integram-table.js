@@ -1667,6 +1667,11 @@ class IntegramTable {
             modal.dataset.overlayRef = 'true';
             modal.dataset.isReferenceCreate = 'true'; // Mark this as a special reference creation modal
 
+            // Add cascade offset for nested modals (6px per level)
+            const cascadeOffset = (modalDepth - 1) * 6;
+            modal.style.left = `${cascadeOffset}px`;
+            modal.style.top = `${cascadeOffset}px`;
+
             // Store reference to overlay on modal for proper cleanup
             modal._overlayElement = overlay;
 
@@ -2917,6 +2922,11 @@ class IntegramTable {
             modal.dataset.modalDepth = modalDepth;
             modal.dataset.overlayRef = 'true';
 
+            // Add cascade offset for nested modals (6px per level)
+            const cascadeOffset = (modalDepth - 1) * 6;
+            modal.style.left = `${cascadeOffset}px`;
+            modal.style.top = `${cascadeOffset}px`;
+
             // Store reference to overlay on modal for proper cleanup
             modal._overlayElement = overlay;
 
@@ -3404,6 +3414,11 @@ class IntegramTable {
             modal.style.zIndex = baseZIndex + 1;
             modal.dataset.modalDepth = modalDepth;
 
+            // Add cascade offset for nested modals (6px per level)
+            const cascadeOffset = (modalDepth - 1) * 6;
+            modal.style.left = `${cascadeOffset}px`;
+            modal.style.top = `${cascadeOffset}px`;
+
             const typeName = this.getMetadataName(metadata);
             const title = `Создание: ${ typeName }`;
 
@@ -3885,6 +3900,12 @@ class IntegramTable {
             modal.style.zIndex = baseZIndex + 1;
             modal.dataset.modalDepth = modalDepth;
             modal.dataset.overlayRef = 'true';
+
+            // Add cascade offset for nested modals (6px per level)
+            const cascadeOffset = (modalDepth - 1) * 6;
+            modal.style.left = `${cascadeOffset}px`;
+            modal.style.top = `${cascadeOffset}px`;
+
             modal._overlayElement = overlay;
 
             const typeName = this.getMetadataName(metadata);
