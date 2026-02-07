@@ -217,9 +217,13 @@ class IntegramTable {
             const requestSize = this.options.pageSize + 1;
             const offset = append ? this.loadedRecords : 0;
 
-            const params = new URLSearchParams({
-                LIMIT: `${ offset },${ requestSize }`
-            });
+            const params = new URLSearchParams();
+
+            // Only add LIMIT for non-metadata URLs (metadata ignores LIMIT)
+            const isMetadataUrl = /\/metadata\/\d+/.test(this.options.apiUrl);
+            if (!isMetadataUrl) {
+                params.set('LIMIT', `${ offset },${ requestSize }`);
+            }
 
             const filters = this.filters || {};
             Object.keys(filters).forEach(colId => {
@@ -317,31 +321,24 @@ class IntegramTable {
                 this.columns = columns;
             }
 
-            // Build data URL
+            // Build data URL with server-side LIMIT for pagination
             const apiBase = this.getApiBase();
-            let dataUrl = `${ apiBase }/object/${ this.options.tableTypeId }/?JSON_DATA`;
+            let dataUrl = `${ apiBase }/object/${ this.options.tableTypeId }/?JSON_DATA&LIMIT=${ offset },${ requestSize }`;
 
             if (this.options.parentId) {
                 dataUrl += `&F_U=${ this.options.parentId }`;
             }
 
-            // Note: Table format doesn't support LIMIT/offset in the same way as reports
-            // We'll fetch all data and handle pagination client-side
             const dataResponse = await fetch(dataUrl);
             const data = await dataResponse.json();
 
             // Transform table format to row format
             // Input format: [{ i: 5151, u: 333, o: 1, r: ["val1", "val2"] }]
             // Output format: [["val1", "val2"]]
-            let allRows = [];
+            let rows = [];
             if (Array.isArray(data)) {
-                allRows = data.map(item => item.r || []);
+                rows = data.map(item => item.r || []);
             }
-
-            // Apply client-side pagination
-            const startIdx = append ? this.loadedRecords : 0;
-            const endIdx = startIdx + requestSize;
-            const rows = allRows.slice(startIdx, endIdx);
 
             return {
                 columns: this.columns,
@@ -413,7 +410,9 @@ class IntegramTable {
             // Now fetch data using object/{id}/?JSON_DATA endpoint
             const apiBase = this.getApiBase();
             const tableId = metadata.id;
-            let dataUrl = `${ apiBase }/object/${ tableId }/?JSON_DATA`;
+            const requestSize = this.options.pageSize + 1;
+            const offset = append ? this.loadedRecords : 0;
+            let dataUrl = `${ apiBase }/object/${ tableId }/?JSON_DATA&LIMIT=${ offset },${ requestSize }`;
 
             // Apply filters if any
             const filters = this.filters || {};
@@ -441,15 +440,10 @@ class IntegramTable {
             // Transform object format data to row format
             // Input: [{ i: 5151, u: 333, o: 1, r: ["val1", "val2"] }]
             // Output: [["val1", "val2"]]
-            let allRows = [];
+            let rows = [];
             if (Array.isArray(dataArray)) {
-                allRows = dataArray.map(item => item.r || []);
+                rows = dataArray.map(item => item.r || []);
             }
-
-            // Apply client-side pagination (LIMIT)
-            const requestSize = this.options.pageSize + 1;
-            const offset = append ? this.loadedRecords : 0;
-            const rows = allRows.slice(offset, offset + requestSize);
 
             return {
                 columns: columns,
@@ -534,12 +528,8 @@ class IntegramTable {
             }
 
             // Transform JSON_DATA array to row format
-            const allRows = dataArray.map(item => item.r || []);
-
-            // Apply client-side pagination
-            const requestSize = this.options.pageSize + 1;
-            const offset = append ? this.loadedRecords : 0;
-            const rows = allRows.slice(offset, offset + requestSize);
+            // LIMIT is already applied server-side via the fetch URL in loadDataFromReport
+            const rows = dataArray.map(item => item.r || []);
 
             return {
                 columns: this.columns,
