@@ -402,11 +402,9 @@ class IntegramTable {
             }
 
             // Now fetch data using object/{id}/?JSON_DATA endpoint
-            // For object format, use parametrized URL: https://{host}/{db}/object/{id}?JSON_DATA
-            const host = window.location.hostname;
-            const db = window.db || '';
+            const apiBase = this.getApiBase();
             const tableId = metadata.id;
-            let dataUrl = `https://${ host }/${ db }/object/${ tableId }/?JSON_DATA`;
+            let dataUrl = `${ apiBase }/object/${ tableId }/?JSON_DATA`;
 
             // Apply filters if any
             const filters = this.filters || {};
