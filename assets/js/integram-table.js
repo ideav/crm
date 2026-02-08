@@ -1124,7 +1124,15 @@ class IntegramTable {
 
                 const instanceName = this.options.instanceName;
                 // Only show edit icon if recordId exists (disable creating new records)
-                if (recordId && recordId !== '' && recordId !== '0') {
+                // In object format: show edit icon ONLY for first column or reference fields
+                let shouldShowEditIcon = recordId && recordId !== '' && recordId !== '0';
+                if (shouldShowEditIcon && isInObjectFormat) {
+                    const isFirstColumn = column.id === String(this.objectTableId);
+                    const isReferenceField = column.ref_id != null;
+                    shouldShowEditIcon = isFirstColumn || isReferenceField;
+                }
+
+                if (shouldShowEditIcon) {
                     const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();" title="Редактировать"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M0 11.0833V14H2.91667L11.5442 5.3725L8.6275 2.45583L0 11.0833ZM13.8083 3.10833L10.8917 0.191667C10.6583 -0.0416667 10.2917 -0.0416667 10.0583 0.191667L7.90833 2.34167L10.825 5.25833L12.975 3.10833C13.2083 2.875 13.2083 2.50833 12.975 2.275L13.8083 3.10833Z" fill="currentColor"/></svg></span>`;
                     escapedValue = `<div class="cell-content-wrapper">${ escapedValue }${ editIcon }</div>`;
                 }
