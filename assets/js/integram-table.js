@@ -662,7 +662,15 @@ class IntegramTable {
                 params.append(`FR_${ colId }`, type === '%' ? '%' : '!%');
             } else {
                 let paramValue = filterDef.format.replace('{ T }', colId).replace('{ X }', value);
-                paramValue = paramValue.replace('FR_' + colId + '=', '');
+                // Remove FR_{colId} prefix (which may be followed by = or other operators like >, <, etc.)
+                const prefix = 'FR_' + colId;
+                if (paramValue.startsWith(prefix)) {
+                    paramValue = paramValue.substring(prefix.length);
+                    // Also remove leading = if present (for formats like FR_{T}={X})
+                    if (paramValue.startsWith('=')) {
+                        paramValue = paramValue.substring(1);
+                    }
+                }
                 params.append(`FR_${ colId }`, paramValue);
             }
         }
