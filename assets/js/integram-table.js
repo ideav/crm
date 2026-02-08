@@ -199,23 +199,25 @@ class IntegramTable {
                 // Check if there are more records (we requested pageSize + 1)
                 this.hasMore = newRows.length > this.options.pageSize;
 
-                // Keep only pageSize records
+                // Keep only pageSize records; also trim rawData to stay aligned
+                let rawData = json.rawData || [];
                 if (this.hasMore) {
                     newRows = newRows.slice(0, this.options.pageSize);
+                    rawData = rawData.slice(0, this.options.pageSize);
                 }
 
                 // Append or replace data
                 if (append) {
                     this.data = this.data.concat(newRows);
                     // Append raw object data if present
-                    if (json.rawData) {
-                        this.rawObjectData = this.rawObjectData.concat(json.rawData);
+                    if (rawData.length > 0) {
+                        this.rawObjectData = this.rawObjectData.concat(rawData);
                     }
                 } else {
                     this.data = newRows;
                     this.loadedRecords = 0;
                     // Replace raw object data if present
-                    this.rawObjectData = json.rawData || [];
+                    this.rawObjectData = rawData;
                 }
 
                 this.loadedRecords += newRows.length;
@@ -405,7 +407,8 @@ class IntegramTable {
 
             return {
                 columns: this.columns,
-                rows: rows
+                rows: rows,
+                rawData: Array.isArray(data) ? data : []  // Preserve raw data with 'i' keys for record IDs
             };
         }
 
