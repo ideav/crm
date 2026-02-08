@@ -4500,32 +4500,54 @@ class IntegramTable {
                 if (modal._overlayElement) {
                     modal._overlayElement.remove();
                 }
+                window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
 
                 // Show success message
                 this.showToast('Запись успешно сохранена', 'success');
 
-                // Handle special refresh for column header create
-                if (isCreate && columnId) {
-                    // Extract created record ID from response
-                    const createdId = result.id || result.i;
+                // Check if we edited a record from a subordinate table
+                let refreshedSubordinateTable = false;
+                if (!isCreate && this.currentEditModal && this.currentEditModal.subordinateTables) {
+                    // Find which subordinate table this record belongs to (by matching typeId with arr_id)
+                    const subordinateTable = this.currentEditModal.subordinateTables.find(st => st.arr_id === typeId);
 
-                    if (createdId) {
-                        await this.refreshWithNewRecord(columnId, createdId);
+                    if (subordinateTable) {
+                        // Reload the specific subordinate table
+                        const tabContent = this.currentEditModal.modal.querySelector(`[data-tab-content="sub-${ subordinateTable.id }"]`);
+                        if (tabContent) {
+                            tabContent.dataset.loaded = '';
+                            await this.loadSubordinateTable(tabContent, subordinateTable.arr_id, this.currentEditModal.recordId);
+                            tabContent.dataset.loaded = 'true';
+                            refreshedSubordinateTable = true;
+                        }
+                    }
+                }
+
+                // If we didn't refresh a subordinate table, handle normal table refresh
+                if (!refreshedSubordinateTable) {
+                    // Handle special refresh for column header create
+                    if (isCreate && columnId) {
+                        // Extract created record ID from response
+                        const createdId = result.id || result.i;
+
+                        if (createdId) {
+                            await this.refreshWithNewRecord(columnId, createdId);
+                        } else {
+                            // Fallback to full reload if no ID returned
+                            this.data = [];
+                            this.loadedRecords = 0;
+                            this.hasMore = true;
+                            this.totalRows = null;
+                            await this.loadData(false);
+                        }
                     } else {
-                        // Fallback to full reload if no ID returned
+                        // Normal reload for edit or regular create
                         this.data = [];
                         this.loadedRecords = 0;
                         this.hasMore = true;
                         this.totalRows = null;
                         await this.loadData(false);
                     }
-                } else {
-                    // Normal reload for edit or regular create
-                    this.data = [];
-                    this.loadedRecords = 0;
-                    this.hasMore = true;
-                    this.totalRows = null;
-                    await this.loadData(false);
                 }
 
             } catch (error) {
