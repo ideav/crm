@@ -2454,9 +2454,11 @@ class IntegramTable {
 
             // Update the data array as well
             const rowIndex = parseInt(cell.dataset.row);
-            const colIndex = parseInt(cell.dataset.col);
+            const colId = cell.dataset.colId;
+            const column = this.columns.find(c => c.id === colId);
+            const dataIndex = column ? this.columns.indexOf(column) : parseInt(cell.dataset.col);
             if (this.data[rowIndex]) {
-                this.data[rowIndex][colIndex] = newValue;
+                this.data[rowIndex][dataIndex] = newValue;
             }
         }
 
