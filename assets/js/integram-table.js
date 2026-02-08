@@ -1457,9 +1457,16 @@ class IntegramTable {
                     // When editing, we use 'i' as the recordId for the API call
                     const parentRecordId = rawItem.i ? String(rawItem.i) : '';
 
+                    // Determine if this is the first column
+                    // First column has column.id === this.objectTableId
+                    const isFirstColumn = colId === String(this.objectTableId);
+
                     if (window.INTEGRAM_DEBUG) {
                         console.log('[determineParentRecord] Object format detected:');
                         console.log('  - rowIndex:', rowIndex);
+                        console.log('  - colId:', colId);
+                        console.log('  - objectTableId:', this.objectTableId);
+                        console.log('  - isFirstColumn:', isFirstColumn);
                         console.log('  - rawItem.i (record ID):', rawItem.i);
                         console.log('  - rawItem.u (parent of this record):', rawItem.u);
                         console.log('  - Using rawItem.i as parentRecordId:', parentRecordId);
@@ -1468,6 +1475,7 @@ class IntegramTable {
                     if (parentRecordId) {
                         return {
                             isObjectFormat: true,
+                            isFirstColumn: isFirstColumn,
                             parentType: this.objectTableId,
                             parentRecordId: parentRecordId
                         };
