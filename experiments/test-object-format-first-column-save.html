@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Object Format First Column Save with _m_save</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; border-bottom: 2px solid #4CAF50; padding-bottom: 10px; }
+        h2 { color: #555; margin-top: 0; }
+        .pass { color: #4CAF50; font-weight: bold; }
+        .fail { color: #f44336; font-weight: bold; }
+        pre {
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            overflow-x: auto;
+            font-size: 13px;
+        }
+        .test-result {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .test-result.pass {
+            background-color: #e8f5e9;
+            border-left: 4px solid #4CAF50;
+        }
+        .test-result.fail {
+            background-color: #ffebee;
+            border-left: 4px solid #f44336;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Test: Object Format First Column Save</h1>
+
+    <div class="test-section">
+        <h2>Test Description</h2>
+        <p>This test verifies that in object format, the <code>determineParentRecord</code> method correctly sets <code>isFirstColumn: true</code> for the first column and <code>isFirstColumn: false</code> for requisite columns.</p>
+        <p><strong>Issue #333:</strong> "В альтернативном (объектном) формате при редактировании ячейки первую колонку сохранять командой _m_save"</p>
+        <p><strong>Expected behavior:</strong> First column should use <code>_m_save</code>, requisite columns should use <code>_m_set</code></p>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 1: First Column - isFirstColumn should be true</h2>
+        <p>Tests that when editing the first column (column.id === objectTableId), isFirstColumn is true.</p>
+        <button onclick="runTest1()">Run Test 1</button>
+        <div id="test1-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 2: Requisite Column - isFirstColumn should be false</h2>
+        <p>Tests that when editing a requisite column (column.id !== objectTableId), isFirstColumn is false.</p>
+        <button onclick="runTest2()">Run Test 2</button>
+        <div id="test2-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 3: Multiple Columns - Verify All</h2>
+        <p>Tests all columns in the table to ensure first column has isFirstColumn=true, others have isFirstColumn=false.</p>
+        <button onclick="runTest3()">Run Test 3</button>
+        <div id="test3-result"></div>
+    </div>
+
+    <script src="../assets/js/integram-table.js"></script>
+    <script>
+        // Enable debug mode
+        window.INTEGRAM_DEBUG = true;
+
+        // Mock data matching object format
+        const mockObjectData = [
+            { i: 333, u: 1, o: 0, r: ["Финтех", "9705086966", "14.01.2025"] },
+            { i: 334, u: 1, o: 0, r: ["АО \"КИНОСТУДИЯ\"", "9715404978", "23.04.2025"] },
+            { i: 335, u: 1, o: 0, r: ["АО \"БАИР\"", "7704017596", "14.01.2025"] }
+        ];
+
+        const mockMetadata = {
+            id: 332,  // This is the table/object type ID
+            type: "3",
+            val: "Клиент",
+            reqs: [
+                { id: 637, type: "3", val: "ИНН" },
+                { id: 638, type: "6", val: "Дата создания" }
+            ]
+        };
+
+        async function runTest1() {
+            const resultDiv = document.getElementById('test1-result');
+            resultDiv.innerHTML = '<p>Running test...</p>';
+
+            try {
+                const container = document.createElement('div');
+                container.id = 'test-table-1';
+                document.body.appendChild(container);
+
+                const table = new IntegramTable('test-table-1', {
+                    apiUrl: '/object/332/?JSON_OBJ&F_U=1',
+                    columns: [],
+                    data: []
+                });
+
+                // Simulate object format data loading
+                table.objectTableId = '332';
+                table.rawObjectData = mockObjectData;
+                table.columns = [
+                    { id: '332', type: '3', name: mockMetadata.val, granted: 1, ref: 0, paramId: 332 },  // First column
+                    { id: '637', type: '3', name: mockMetadata.reqs[0].val, granted: 1, ref: 0, paramId: 637 },
+                    { id: '638', type: '6', name: mockMetadata.reqs[1].val, granted: 1, ref: 0, paramId: 638 }
+                ];
+                table.data = mockObjectData.map(item => item.r);
+
+                // Test determineParentRecord for the FIRST COLUMN (id='332')
+                const result = await table.determineParentRecord('332', '332', '', 0);
+
+                let html = '<div class="test-result ';
+                if (result && result.isFirstColumn === true && result.parentRecordId === '333') {
+                    html += 'pass"><p class="pass">✓ PASS</p>';
+                    html += '<p><strong>Expected:</strong> isFirstColumn = true, parentRecordId = "333"</p>';
+                    html += '<p><strong>Got:</strong> isFirstColumn = ' + result.isFirstColumn + ', parentRecordId = "' + result.parentRecordId + '"</p>';
+                    html += '<p><strong>Result object:</strong></p>';
+                    html += '<pre>' + JSON.stringify(result, null, 2) + '</pre>';
+                } else {
+                    html += 'fail"><p class="fail">✗ FAIL</p>';
+                    html += '<p><strong>Expected:</strong> isFirstColumn = true, parentRecordId = "333"</p>';
+                    html += '<p><strong>Got:</strong> ' + (result ? 'isFirstColumn = ' + result.isFirstColumn + ', parentRecordId = "' + result.parentRecordId + '"' : 'null') + '</p>';
+                    if (result) {
+                        html += '<p><strong>Result object:</strong></p>';
+                        html += '<pre>' + JSON.stringify(result, null, 2) + '</pre>';
+                    }
+                }
+                html += '</div>';
+
+                resultDiv.innerHTML = html;
+                document.body.removeChild(container);
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="test-result fail"><p class="fail">✗ ERROR</p><p>' + error.message + '</p><pre>' + error.stack + '</pre></div>';
+            }
+        }
+
+        async function runTest2() {
+            const resultDiv = document.getElementById('test2-result');
+            resultDiv.innerHTML = '<p>Running test...</p>';
+
+            try {
+                const container = document.createElement('div');
+                container.id = 'test-table-2';
+                document.body.appendChild(container);
+
+                const table = new IntegramTable('test-table-2', {
+                    apiUrl: '/object/332/?JSON_OBJ&F_U=1',
+                    columns: [],
+                    data: []
+                });
+
+                table.objectTableId = '332';
+                table.rawObjectData = mockObjectData;
+                table.columns = [
+                    { id: '332', type: '3', name: mockMetadata.val, granted: 1, ref: 0, paramId: 332 },
+                    { id: '637', type: '3', name: mockMetadata.reqs[0].val, granted: 1, ref: 0, paramId: 637 },  // Requisite column
+                    { id: '638', type: '6', name: mockMetadata.reqs[1].val, granted: 1, ref: 0, paramId: 638 }
+                ];
+                table.data = mockObjectData.map(item => item.r);
+
+                // Test determineParentRecord for a REQUISITE COLUMN (id='637')
+                const result = await table.determineParentRecord('637', '637', '', 0);
+
+                let html = '<div class="test-result ';
+                if (result && result.isFirstColumn === false && result.parentRecordId === '333') {
+                    html += 'pass"><p class="pass">✓ PASS</p>';
+                    html += '<p><strong>Expected:</strong> isFirstColumn = false, parentRecordId = "333"</p>';
+                    html += '<p><strong>Got:</strong> isFirstColumn = ' + result.isFirstColumn + ', parentRecordId = "' + result.parentRecordId + '"</p>';
+                    html += '<p><strong>Result object:</strong></p>';
+                    html += '<pre>' + JSON.stringify(result, null, 2) + '</pre>';
+                } else {
+                    html += 'fail"><p class="fail">✗ FAIL</p>';
+                    html += '<p><strong>Expected:</strong> isFirstColumn = false, parentRecordId = "333"</p>';
+                    html += '<p><strong>Got:</strong> ' + (result ? 'isFirstColumn = ' + result.isFirstColumn + ', parentRecordId = "' + result.parentRecordId + '"' : 'null') + '</p>';
+                    if (result) {
+                        html += '<p><strong>Result object:</strong></p>';
+                        html += '<pre>' + JSON.stringify(result, null, 2) + '</pre>';
+                    }
+                }
+                html += '</div>';
+
+                resultDiv.innerHTML = html;
+                document.body.removeChild(container);
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="test-result fail"><p class="fail">✗ ERROR</p><p>' + error.message + '</p><pre>' + error.stack + '</pre></div>';
+            }
+        }
+
+        async function runTest3() {
+            const resultDiv = document.getElementById('test3-result');
+            resultDiv.innerHTML = '<p>Running test...</p>';
+
+            try {
+                const container = document.createElement('div');
+                container.id = 'test-table-3';
+                document.body.appendChild(container);
+
+                const table = new IntegramTable('test-table-3', {
+                    apiUrl: '/object/332/?JSON_OBJ&F_U=1',
+                    columns: [],
+                    data: []
+                });
+
+                table.objectTableId = '332';
+                table.rawObjectData = mockObjectData;
+                table.columns = [
+                    { id: '332', type: '3', name: mockMetadata.val, granted: 1, ref: 0, paramId: 332 },
+                    { id: '637', type: '3', name: mockMetadata.reqs[0].val, granted: 1, ref: 0, paramId: 637 },
+                    { id: '638', type: '6', name: mockMetadata.reqs[1].val, granted: 1, ref: 0, paramId: 638 }
+                ];
+                table.data = mockObjectData.map(item => item.r);
+
+                // Test all columns
+                const results = [];
+                for (let i = 0; i < table.columns.length; i++) {
+                    const col = table.columns[i];
+                    const result = await table.determineParentRecord(col.id, col.id, '', 0);
+                    const expectedIsFirstColumn = (col.id === '332');  // First column
+                    results.push({
+                        columnId: col.id,
+                        columnName: col.name,
+                        expectedIsFirstColumn: expectedIsFirstColumn,
+                        actualIsFirstColumn: result ? result.isFirstColumn : null,
+                        pass: result && result.isFirstColumn === expectedIsFirstColumn && result.parentRecordId === '333'
+                    });
+                }
+
+                const allPass = results.every(r => r.pass);
+                let html = '<div class="test-result ' + (allPass ? 'pass' : 'fail') + '">';
+                html += '<p class="' + (allPass ? 'pass' : 'fail') + '">' + (allPass ? '✓ PASS' : '✗ FAIL') + '</p>';
+                html += '<p><strong>Results:</strong></p><ul>';
+                results.forEach(r => {
+                    html += '<li>Column "' + r.columnName + '" (id=' + r.columnId + '): Expected isFirstColumn=' + r.expectedIsFirstColumn + ', Got ' + r.actualIsFirstColumn + ' - ' + (r.pass ? '✓' : '✗') + '</li>';
+                });
+                html += '</ul></div>';
+
+                resultDiv.innerHTML = html;
+                document.body.removeChild(container);
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="test-result fail"><p class="fail">✗ ERROR</p><p>' + error.message + '</p><pre>' + error.stack + '</pre></div>';
+            }
+        }
+
+        // Auto-run all tests on load
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('Running all tests automatically...');
+            setTimeout(() => runTest1(), 100);
+            setTimeout(() => runTest2(), 200);
+            setTimeout(() => runTest3(), 300);
+        });
+    </script>
+</body>
+</html>
