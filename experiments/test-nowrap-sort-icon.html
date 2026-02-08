@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Test Non-Wrappable Sort Icon and Column Name</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .test-info { background: #f0f0f0; padding: 15px; margin-bottom: 20px; border-radius: 4px; }
+        .test-case { border: 1px solid #ccc; padding: 10px; margin-bottom: 15px; }
+        .test-case h3 { margin-top: 0; }
+
+        /* Simulate narrow column */
+        .narrow-column { max-width: 80px; border: 2px solid red; }
+    </style>
+    <link rel="stylesheet" href="../assets/css/integram-table.css">
+</head>
+<body>
+    <div class="test-info">
+        <h2>Тест непереносимого текста для значка сортировки и названия колонки</h2>
+        <p><strong>Цель:</strong> Убедиться, что значок сортировки (▲/▼) и название колонки не переносятся на разные строки.</p>
+        <p><strong>Как проверить:</strong> Посмотрите на узкую колонку ниже. Значок сортировки и название должны оставаться вместе на одной строке, даже если они не помещаются.</p>
+    </div>
+
+    <div class="test-case">
+        <h3>Test Case 1: Узкая колонка с длинным названием</h3>
+        <table class="integram-table">
+            <thead>
+                <tr>
+                    <th class="narrow-column">
+                        <span class="column-header-content">▲ Очень длинное название колонки</span>
+                    </th>
+                    <th>
+                        <span class="column-header-content">▼ Нормальная колонка</span>
+                    </th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Данные 1</td>
+                    <td>Данные 2</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="test-case">
+        <h3>Test Case 2: Колонка с сортировкой по возрастанию</h3>
+        <table class="integram-table">
+            <thead>
+                <tr>
+                    <th style="width: 100px;">
+                        <span class="column-header-content">▲ Название</span>
+                    </th>
+                    <th>
+                        <span class="column-header-content">Без сортировки</span>
+                    </th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Проект А</td>
+                    <td>Статус 1</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="test-case">
+        <h3>Test Case 3: Колонка с сортировкой по убыванию</h3>
+        <table class="integram-table">
+            <thead>
+                <tr>
+                    <th style="width: 90px;">
+                        <span class="column-header-content">▼ Количество</span>
+                    </th>
+                    <th>
+                        <span class="column-header-content">Описание</span>
+                    </th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>150</td>
+                    <td>Текст описания</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="test-info" style="background: #e8f5e9;">
+        <h3>✓ Ожидаемый результат</h3>
+        <p>Значки сортировки (▲/▼) и названия колонок должны оставаться вместе на одной строке, даже если колонка узкая. Текст может выходить за границы колонки, но не должен переноситься на новую строку.</p>
+    </div>
+</body>
+</html>
