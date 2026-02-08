@@ -347,7 +347,8 @@ class IntegramTable {
                     format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
                     name: metadata.name || 'Значение',
                     granted: 1,
-                    ref: 0
+                    ref: 0,
+                    paramId: metadata.id // For cell editing: use t{metadata.id} for first column
                 });
 
                 // Add requisite columns
@@ -360,7 +361,8 @@ class IntegramTable {
                             format: this.mapTypeIdToFormat(req.type || 'SHORT'),
                             name: attrs.alias || req.val,
                             granted: 1,  // In object format, allow editing all cells
-                            ref: req.arr_id || 0
+                            ref: req.arr_id || 0,
+                            paramId: req.id // For cell editing: use t{req.id} for requisite columns
                         });
                     });
                 }
@@ -431,7 +433,8 @@ class IntegramTable {
                 name: metadata.val || 'Значение',
                 granted: 1,
                 ref: 0,
-                orig: metadata.id // Store the original table id
+                orig: metadata.id, // Store the original table id
+                paramId: metadata.id // For cell editing: use t{metadata.id} for first column
             });
 
             // Remaining columns from reqs array: use req.id as column id (not sequential index)
@@ -449,7 +452,8 @@ class IntegramTable {
                         ref: isReference ? req.orig : 0,
                         ref_id: req.ref_id || null,
                         orig: req.orig || null,
-                        attrs: req.attrs || ''
+                        attrs: req.attrs || '',
+                        paramId: req.id // For cell editing: use t{req.id} for requisite columns
                     });
                 });
             }
@@ -551,7 +555,8 @@ class IntegramTable {
                     name: metadata.val || metadata.name || 'Значение',
                     granted: 1,
                     ref: 0,
-                    orig: metadata.id
+                    orig: metadata.id,
+                    paramId: metadata.id // For cell editing: use t{metadata.id} for first column
                 });
 
                 // Add requisite columns
@@ -569,7 +574,8 @@ class IntegramTable {
                             ref: isReference ? req.orig : 0,
                             ref_id: req.ref_id || null,
                             orig: req.orig || null,
-                            attrs: req.attrs || ''
+                            attrs: req.attrs || '',
+                            paramId: req.id // For cell editing: use t{req.id} for requisite columns
                         });
                     });
                 }
@@ -1153,7 +1159,9 @@ class IntegramTable {
                     const fullValueAttr = fullValueForEditing ? ` data-full-value="${ fullValueForEditing.replace(/"/g, '&quot;') }"` : '';
                     // Use 'dynamic' as placeholder for recordId if it's empty (will be determined at edit time)
                     const recordIdAttr = recordId && recordId !== '' && recordId !== '0' ? recordId : 'dynamic';
-                    editableAttrs = ` data-editable="true" data-record-id="${ recordIdAttr }" data-col-id="${ column.id }" data-col-type="${ column.type }" data-col-format="${ format }" data-row-index="${ rowIndex }"${ refAttr }${ fullValueAttr }`;
+                    // Use paramId for object format (metadata ID), otherwise fall back to type (data type)
+                    const colTypeForParam = column.paramId || column.type;
+                    editableAttrs = ` data-editable="true" data-record-id="${ recordIdAttr }" data-col-id="${ column.id }" data-col-type="${ colTypeForParam }" data-col-format="${ format }" data-row-index="${ rowIndex }"${ refAttr }${ fullValueAttr }`;
                     cellClass += ' inline-editable';
                     if (window.INTEGRAM_DEBUG) {
                         console.log(`  ✓ Cell will be editable with recordId=${recordIdAttr}`);
