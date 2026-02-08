@@ -3540,16 +3540,7 @@ class IntegramTable {
                 return '';
             }
 
-            // Handle reference values (format: "id:label")
-            if (typeof value === 'string' && value.includes(':')) {
-                const parts = value.split(':');
-                if (parts.length >= 2 && !isNaN(parseInt(parts[0]))) {
-                    // It's a reference value, show the label
-                    return this.escapeHtml(parts.slice(1).join(':'));
-                }
-            }
-
-            // Format based on type if req is provided
+            // Format based on type if req is provided - check this BEFORE reference value parsing
             if (req) {
                 const baseFormat = this.normalizeFormat(req.type);
 
@@ -3572,6 +3563,16 @@ class IntegramTable {
                             }
                         }
                         break;
+                }
+            }
+
+            // Handle reference values (format: "id:label")
+            // This must come AFTER type-based formatting to avoid misinterpreting datetime values as references
+            if (typeof value === 'string' && value.includes(':')) {
+                const parts = value.split(':');
+                if (parts.length >= 2 && !isNaN(parseInt(parts[0]))) {
+                    // It's a reference value, show the label
+                    return this.escapeHtml(parts.slice(1).join(':'));
                 }
             }
 
