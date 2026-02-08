@@ -1009,6 +1009,17 @@ class IntegramTable {
             let displayValue = value || '';
             let customStyle = '';
             let isEditable = this.editableColumns.has(column.id);
+            let refValueId = null;  // Parsed reference ID from "id:Value" format
+
+            // In object format, reference fields return values as "id:Value"
+            // Parse to extract the id and display only the Value part
+            if (column.ref_id != null && value && typeof value === 'string') {
+                const colonIndex = value.indexOf(':');
+                if (colonIndex > 0) {
+                    refValueId = value.substring(0, colonIndex);
+                    displayValue = value.substring(colonIndex + 1);
+                }
+            }
 
             // Check if this column has a style column
             if (this.styleColumns[column.id]) {
@@ -1107,11 +1118,17 @@ class IntegramTable {
                 const isInObjectFormat = this.rawObjectData.length > 0 && this.objectTableId;
 
                 if (isInObjectFormat) {
-                    // For ALL columns in object format, use 'i' from rawObjectData
-                    const rawItem = this.rawObjectData[rowIndex];
-                    recordId = rawItem && rawItem.i ? String(rawItem.i) : '';
-                    // For first column, use objectTableId; for requisites, use their orig or type
-                    typeId = column.id === String(this.objectTableId) ? this.objectTableId : (column.orig || column.type || '');
+                    // For reference fields with parsed "id:Value", use the reference id
+                    if (refValueId && column.ref_id != null) {
+                        recordId = refValueId;
+                        typeId = column.ref || column.orig || column.type || '';
+                    } else {
+                        // For ALL columns in object format, use 'i' from rawObjectData
+                        const rawItem = this.rawObjectData[rowIndex];
+                        recordId = rawItem && rawItem.i ? String(rawItem.i) : '';
+                        // For first column, use objectTableId; for requisites, use their orig or type
+                        typeId = column.id === String(this.objectTableId) ? this.objectTableId : (column.orig || column.type || '');
+                    }
                 } else if (idColId !== null) {
                     // If we have an ID column reference, get the record ID from it
                     const idColIndex = this.columns.findIndex(c => c.id === idColId);
@@ -1196,13 +1213,15 @@ class IntegramTable {
                 if (canEdit) {
                     // Add ref attribute if this is a reference field
                     const refAttr = isRefField ? ` data-col-ref="1"` : '';
+                    // Store parsed reference value ID from "id:Value" format
+                    const refValueIdAttr = refValueId ? ` data-ref-value-id="${ refValueId }"` : '';
                     // Store full value for editing (escape for HTML attribute)
                     const fullValueAttr = fullValueForEditing ? ` data-full-value="${ fullValueForEditing.replace(/"/g, '&quot;') }"` : '';
                     // Use 'dynamic' as placeholder for recordId if it's empty (will be determined at edit time)
                     const recordIdAttr = recordId && recordId !== '' && recordId !== '0' ? recordId : 'dynamic';
                     // Use paramId for object format (metadata ID), otherwise fall back to type (data type)
                     const colTypeForParam = column.paramId || column.type;
-                    editableAttrs = ` data-editable="true" data-record-id="${ recordIdAttr }" data-col-id="${ column.id }" data-col-type="${ colTypeForParam }" data-col-format="${ format }" data-row-index="${ rowIndex }"${ refAttr }${ fullValueAttr }`;
+                    editableAttrs = ` data-editable="true" data-record-id="${ recordIdAttr }" data-col-id="${ column.id }" data-col-type="${ colTypeForParam }" data-col-format="${ format }" data-row-index="${ rowIndex }"${ refAttr }${ refValueIdAttr }${ fullValueAttr }`;
                     cellClass += ' inline-editable';
                     if (window.INTEGRAM_DEBUG) {
                         console.log(`  ✓ Cell will be editable with recordId=${recordIdAttr}`);
