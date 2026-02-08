@@ -45,6 +45,7 @@ class IntegramTable {
             this.columnOrder = [];
             this.visibleColumns = [];
             this.filtersEnabled = false;
+            this.objectTableId = null;  // Table ID when data is in object/JSON_DATA format (for _count=1 queries)
             this.styleColumns = {};  // Map of column IDs to their style column values
             this.idColumns = new Set();  // Set of hidden ID column IDs
             this.columnWidths = {};  // Map of column IDs to their widths in pixels
@@ -280,6 +281,8 @@ class IntegramTable {
                 throw new Error('tableTypeId is required for dataSource=table');
             }
 
+            this.objectTableId = this.options.tableTypeId;  // Store table ID for _count=1 queries
+
             const requestSize = this.options.pageSize + 1;
             const offset = append ? this.loadedRecords : 0;
 
@@ -410,6 +413,7 @@ class IntegramTable {
             // Now fetch data using object/{id}/?JSON_DATA endpoint
             const apiBase = this.getApiBase();
             const tableId = metadata.id;
+            this.objectTableId = tableId;  // Store table ID for _count=1 queries
             const requestSize = this.options.pageSize + 1;
             const offset = append ? this.loadedRecords : 0;
             let dataUrl = `${ apiBase }/object/${ tableId }/?JSON_DATA&LIMIT=${ offset },${ requestSize }`;
@@ -482,6 +486,7 @@ class IntegramTable {
                 throw new Error('Cannot determine typeId from apiUrl for JSON_DATA format');
             }
             const typeId = typeIdMatch[1];
+            this.objectTableId = typeId;  // Store table ID for _count=1 queries
 
             // Fetch metadata if columns are not yet loaded
             if (this.columns.length === 0) {
@@ -538,24 +543,56 @@ class IntegramTable {
         }
 
         async fetchTotalCount() {
-            const params = new URLSearchParams({
-                RECORD_COUNT: '1'
-            });
-
-            const filters = this.filters || {};
-            Object.keys(filters).forEach(colId => {
-                const filter = filters[colId];
-                if (filter.value || filter.type === '%' || filter.type === '!%') {
-                    const column = this.columns.find(c => c.id === colId);
-                    if (column) {
-                        this.applyFilter(params, column, filter);
-                    }
-                }
-            });
-
             try {
-                const separator = this.options.apiUrl.includes('?') ? '&' : '?';
-                const response = await fetch(`${ this.options.apiUrl }${ separator }${ params }`);
+                let countUrl;
+
+                if (this.objectTableId) {
+                    // Object/JSON_DATA format: use _count=1 on the JSON_DATA endpoint
+                    const apiBase = this.getApiBase();
+                    const params = new URLSearchParams({
+                        _count: '1'
+                    });
+
+                    // Apply current filters
+                    const filters = this.filters || {};
+                    Object.keys(filters).forEach(colId => {
+                        const filter = filters[colId];
+                        if (filter.value || filter.type === '%' || filter.type === '!%') {
+                            const column = this.columns.find(c => c.id === colId);
+                            if (column) {
+                                this.applyFilter(params, column, filter);
+                            }
+                        }
+                    });
+
+                    // Add parent filter if applicable
+                    if (this.options.parentId) {
+                        params.set('F_U', this.options.parentId);
+                    }
+
+                    countUrl = `${ apiBase }/object/${ this.objectTableId }/?JSON_DATA&${ params }`;
+                } else {
+                    // Report format: use RECORD_COUNT=1 on the report URL
+                    const params = new URLSearchParams({
+                        RECORD_COUNT: '1'
+                    });
+
+                    const filters = this.filters || {};
+                    Object.keys(filters).forEach(colId => {
+                        const filter = filters[colId];
+                        if (filter.value || filter.type === '%' || filter.type === '!%') {
+                            const column = this.columns.find(c => c.id === colId);
+                            if (column) {
+                                this.applyFilter(params, column, filter);
+                            }
+                        }
+                    });
+
+                    const separator = this.options.apiUrl.includes('?') ? '&' : '?';
+                    countUrl = `${ this.options.apiUrl }${ separator }${ params }`;
+                }
+
+                const response = await fetch(countUrl);
                 const result = await response.json();
                 this.totalRows = parseInt(result.count, 10);
                 this.render();  // Re-render to update the counter
