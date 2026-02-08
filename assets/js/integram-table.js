@@ -1434,11 +1434,43 @@ class IntegramTable {
             // Find the column object
             const column = this.columns.find(c => c.id === colId);
             if (!column) {
+                console.warn('[determineParentRecord] Column not found for colId:', colId);
                 return null;
+            }
+
+            // OBJECT FORMAT: For object format data, parent record ID is in rawObjectData
+            const isInObjectFormat = this.rawObjectData && this.rawObjectData.length > 0 && this.objectTableId;
+            if (isInObjectFormat && rowIndex !== undefined && rowIndex !== null) {
+                const rawItem = this.rawObjectData[rowIndex];
+                if (rawItem) {
+                    // In object format:
+                    // - 'i' is the record ID (this record)
+                    // - 'u' is the parent ID (parent of this record)
+                    // When editing, we use 'i' as the recordId for the API call
+                    const parentRecordId = rawItem.i ? String(rawItem.i) : '';
+
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log('[determineParentRecord] Object format detected:');
+                        console.log('  - rowIndex:', rowIndex);
+                        console.log('  - rawItem.i (record ID):', rawItem.i);
+                        console.log('  - rawItem.u (parent of this record):', rawItem.u);
+                        console.log('  - Using rawItem.i as parentRecordId:', parentRecordId);
+                    }
+
+                    if (parentRecordId) {
+                        return {
+                            isObjectFormat: true,
+                            parentType: this.objectTableId,
+                            parentRecordId: parentRecordId
+                        };
+                    }
+                }
+                console.warn('[determineParentRecord] Object format but no valid rawItem at rowIndex:', rowIndex);
             }
 
             // Use global metadata to determine parent record
             if (!this.globalMetadata) {
+                console.warn('[determineParentRecord] No globalMetadata available');
                 return null;
             }
 
@@ -1456,6 +1488,7 @@ class IntegramTable {
 
                 const idColumn = this.columns.find(c => c.name === idColumnName && c.type === colType);
                 if (!idColumn) {
+                    console.warn('[determineParentRecord] ID column not found for first column case:', idColumnName);
                     return null;
                 }
 
@@ -1466,6 +1499,12 @@ class IntegramTable {
                     if (idColIndex !== -1 && this.data[rowIndex]) {
                         parentRecordId = this.data[rowIndex][idColIndex] || '';
                     }
+                }
+
+                if (window.INTEGRAM_DEBUG) {
+                    console.log('[determineParentRecord] First column case (A):');
+                    console.log('  - idColumnName:', idColumnName);
+                    console.log('  - parentRecordId:', parentRecordId);
                 }
 
                 return {
@@ -1485,6 +1524,7 @@ class IntegramTable {
 
                         const parentIdColumn = this.columns.find(c => c.type === item.id && c.name.endsWith('ID'));
                         if (!parentIdColumn) {
+                            console.warn('[determineParentRecord] Parent ID column not found for requisite case, item.id:', item.id);
                             return null;
                         }
 
@@ -1497,6 +1537,12 @@ class IntegramTable {
                             }
                         }
 
+                        if (window.INTEGRAM_DEBUG) {
+                            console.log('[determineParentRecord] Requisite case (B):');
+                            console.log('  - item.id:', item.id);
+                            console.log('  - parentRecordId:', parentRecordId);
+                        }
+
                         return {
                             isFirstColumn: false,
                             parentType: item.id,
@@ -1507,6 +1553,7 @@ class IntegramTable {
                 }
             }
 
+            console.warn('[determineParentRecord] No parent record determination logic matched');
             return null;
         }
 
