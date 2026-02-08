@@ -45,7 +45,7 @@ class IntegramTable {
             this.columnOrder = [];
             this.visibleColumns = [];
             this.filtersEnabled = false;
-            this.objectTableId = null;  // Table ID when data is in object/JSON_DATA format (for _count=1 queries)
+            this.objectTableId = null;  // Table ID when data is in object/JSON_OBJ format (for _count=1 queries)
             this.styleColumns = {};  // Map of column IDs to their style column values
             this.idColumns = new Set();  // Set of hidden ID column IDs
             this.columnWidths = {};  // Map of column IDs to their widths in pixels
@@ -145,7 +145,7 @@ class IntegramTable {
                 let newRows = [];
 
                 if (this.options.dataSource === 'table') {
-                    // Load data from table format (object/{typeId}/?JSON_DATA&F_U={parentId})
+                    // Load data from table format (object/{typeId}/?JSON_OBJ&F_U={parentId})
                     json = await this.loadDataFromTable(append);
                     newRows = json.rows || [];
                 } else {
@@ -247,7 +247,7 @@ class IntegramTable {
                 return await this.parseObjectFormat(json, append);
             }
 
-            // Check if response is JSON_DATA array format: [{i, u, o, r}, ...]
+            // Check if response is JSON_OBJ array format: [{i, u, o, r}, ...]
             if (this.isJsonDataArrayFormat(json)) {
                 return await this.parseJsonDataArray(json, append);
             }
@@ -276,7 +276,7 @@ class IntegramTable {
         }
 
         async loadDataFromTable(append = false) {
-            // Table-based data loading using object/{typeId}/?JSON_DATA&F_U={parentId}
+            // Table-based data loading using object/{typeId}/?JSON_OBJ&F_U={parentId}
             if (!this.options.tableTypeId) {
                 throw new Error('tableTypeId is required for dataSource=table');
             }
@@ -326,7 +326,7 @@ class IntegramTable {
 
             // Build data URL with server-side LIMIT for pagination
             const apiBase = this.getApiBase();
-            let dataUrl = `${ apiBase }/object/${ this.options.tableTypeId }/?JSON_DATA&LIMIT=${ offset },${ requestSize }`;
+            let dataUrl = `${ apiBase }/object/${ this.options.tableTypeId }/?JSON_OBJ&LIMIT=${ offset },${ requestSize }`;
 
             if (this.options.parentId) {
                 dataUrl += `&F_U=${ this.options.parentId }`;
@@ -410,13 +410,13 @@ class IntegramTable {
                 });
             }
 
-            // Now fetch data using object/{id}/?JSON_DATA endpoint
+            // Now fetch data using object/{id}/?JSON_OBJ endpoint
             const apiBase = this.getApiBase();
             const tableId = metadata.id;
             this.objectTableId = tableId;  // Store table ID for _count=1 queries
             const requestSize = this.options.pageSize + 1;
             const offset = append ? this.loadedRecords : 0;
-            let dataUrl = `${ apiBase }/object/${ tableId }/?JSON_DATA&LIMIT=${ offset },${ requestSize }`;
+            let dataUrl = `${ apiBase }/object/${ tableId }/?JSON_OBJ&LIMIT=${ offset },${ requestSize }`;
 
             // Apply filters if any
             const filters = this.filters || {};
@@ -456,8 +456,8 @@ class IntegramTable {
         }
 
         /**
-         * Check if the response is a JSON_DATA array format: [{i, u, o, r}, ...]
-         * This format is returned by object/{typeId}/?JSON_DATA endpoints
+         * Check if the response is a JSON_OBJ array format: [{i, u, o, r}, ...]
+         * This format is returned by object/{typeId}/?JSON_OBJ endpoints
          */
         isJsonDataArrayFormat(json) {
             // Non-empty array with {i, r} objects
@@ -467,23 +467,23 @@ class IntegramTable {
                 Array.isArray(json[0].r)) {
                 return true;
             }
-            // Empty array when apiUrl contains JSON_DATA
+            // Empty array when apiUrl contains JSON_OBJ
             if (Array.isArray(json) && json.length === 0 &&
-                this.options.apiUrl && this.options.apiUrl.includes('JSON_DATA')) {
+                this.options.apiUrl && this.options.apiUrl.includes('JSON_OBJ')) {
                 return true;
             }
             return false;
         }
 
         /**
-         * Parse JSON_DATA array format and fetch metadata for column definitions
+         * Parse JSON_OBJ array format and fetch metadata for column definitions
          * Input format: [{i: 3598, u: 1, o: 0, r: ["val1", "val2", ...]}, ...]
          */
         async parseJsonDataArray(dataArray, append = false) {
-            // Extract typeId from the apiUrl (e.g., /object/3596/?JSON_DATA -> 3596)
+            // Extract typeId from the apiUrl (e.g., /object/3596/?JSON_OBJ -> 3596)
             const typeIdMatch = this.options.apiUrl.match(/\/object\/(\d+)/);
             if (!typeIdMatch) {
-                throw new Error('Cannot determine typeId from apiUrl for JSON_DATA format');
+                throw new Error('Cannot determine typeId from apiUrl for JSON_OBJ format');
             }
             const typeId = typeIdMatch[1];
             this.objectTableId = typeId;  // Store table ID for _count=1 queries
@@ -532,7 +532,7 @@ class IntegramTable {
                 this.columns = columns;
             }
 
-            // Transform JSON_DATA array to row format
+            // Transform JSON_OBJ array to row format
             // LIMIT is already applied server-side via the fetch URL in loadDataFromReport
             const rows = dataArray.map(item => item.r || []);
 
@@ -547,7 +547,7 @@ class IntegramTable {
                 let countUrl;
 
                 if (this.objectTableId) {
-                    // Object/JSON_DATA format: use _count=1 on the JSON_DATA endpoint
+                    // Object/JSON_OBJ format: use _count=1 on the JSON_OBJ endpoint
                     const apiBase = this.getApiBase();
                     const params = new URLSearchParams({
                         _count: '1'
@@ -570,7 +570,7 @@ class IntegramTable {
                         params.set('F_U', this.options.parentId);
                     }
 
-                    countUrl = `${ apiBase }/object/${ this.objectTableId }/?JSON_DATA&${ params }`;
+                    countUrl = `${ apiBase }/object/${ this.objectTableId }/?JSON_OBJ&${ params }`;
                 } else {
                     // Report format: use RECORD_COUNT=1 on the report URL
                     const params = new URLSearchParams({
@@ -3376,7 +3376,7 @@ class IntegramTable {
 
                 // Fetch data for subordinate table
                 const apiBase = this.getApiBase();
-                const dataUrl = `${ apiBase }/object/${ arrId }/?JSON_DATA&F_U=${ parentRecordId }`;
+                const dataUrl = `${ apiBase }/object/${ arrId }/?JSON_OBJ&F_U=${ parentRecordId }`;
                 const dataResponse = await fetch(dataUrl);
                 const data = await dataResponse.json();
 
@@ -4488,7 +4488,7 @@ class IntegramTable {
 
                 let newRow = null;
 
-                // Check if response is JSON_DATA array format
+                // Check if response is JSON_OBJ array format
                 if (this.isJsonDataArrayFormat(json)) {
                     newRow = json[0].r || [];
                 } else {
