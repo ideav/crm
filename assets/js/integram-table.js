@@ -5093,6 +5093,7 @@ class IntegramTable {
 
         /**
          * Export table data to specified format
+         * Loads ALL data matching current filters before export
          * @param {string} format - Export format: 'csv', 'xlsx', or 'xls'
          */
         async exportTable(format) {
@@ -5114,13 +5115,22 @@ class IntegramTable {
                     return;
                 }
 
-                if (this.data.length === 0) {
+                // Show loading message
+                this.showToast('Загрузка всех данных для экспорта...', 'info');
+
+                // Load all data matching current filters
+                const allData = await this.loadAllDataForExport();
+
+                if (allData.length === 0) {
                     this.showToast('Нет данных для экспорта', 'error');
                     return;
                 }
 
+                // Show progress message
+                this.showToast(`Экспорт ${ allData.length } записей...`, 'info');
+
                 // Prepare data for export
-                const exportData = this.prepareExportData(orderedColumns);
+                const exportData = this.prepareExportDataFromRows(allData, orderedColumns);
 
                 // Export based on format
                 switch (format.toLowerCase()) {
@@ -5138,6 +5148,209 @@ class IntegramTable {
                 console.error('Export error:', error);
                 this.showToast(`Ошибка экспорта: ${ error.message }`, 'error');
             }
+        }
+
+        /**
+         * Load all data matching current filters for export
+         * Fetches data in batches until all records are loaded
+         * @returns {Promise<Array>} Array of all data rows
+         */
+        async loadAllDataForExport() {
+            const allRows = [];
+            let offset = 0;
+            const batchSize = 1000; // Load in batches of 1000 records
+            let hasMore = true;
+
+            while (hasMore) {
+                try {
+                    let json;
+                    let newRows = [];
+
+                    if (this.options.dataSource === 'table') {
+                        // Load data from table format
+                        json = await this.loadDataFromTableForExport(offset, batchSize);
+                        newRows = json.rows || [];
+                    } else {
+                        // Load data from report format
+                        json = await this.loadDataFromReportForExport(offset, batchSize);
+                        newRows = json.rows || [];
+                    }
+
+                    // Add rows to result
+                    if (newRows.length > 0) {
+                        allRows.push(...newRows);
+                        offset += newRows.length;
+                    }
+
+                    // Check if we got fewer rows than requested (end of data)
+                    hasMore = newRows.length === batchSize;
+
+                    // Safety limit to prevent infinite loops (max 100k records)
+                    if (allRows.length >= 100000) {
+                        console.warn('Export limit reached: 100,000 records');
+                        hasMore = false;
+                    }
+
+                } catch (error) {
+                    console.error('Error loading export data:', error);
+                    throw error;
+                }
+            }
+
+            return allRows;
+        }
+
+        /**
+         * Load data from report format for export
+         * @param {number} offset - Starting offset
+         * @param {number} limit - Number of records to fetch
+         * @returns {Promise<Object>} JSON response with rows
+         */
+        async loadDataFromReportForExport(offset, limit) {
+            const params = new URLSearchParams();
+
+            // Add LIMIT for pagination
+            const isMetadataUrl = /\/metadata\/\d+/.test(this.options.apiUrl);
+            if (!isMetadataUrl) {
+                params.set('LIMIT', `${ offset },${ limit }`);
+            }
+
+            // Apply current filters
+            const filters = this.filters || {};
+            Object.keys(filters).forEach(colId => {
+                const filter = filters[colId];
+                if (filter.value || filter.type === '%' || filter.type === '!%') {
+                    const column = this.columns.find(c => c.id === colId);
+                    if (column) {
+                        this.applyFilter(params, column, filter);
+                    }
+                }
+            });
+
+            // Add ORDER parameter for sorting
+            if (this.sortColumn !== null && this.sortDirection !== null) {
+                const orderValue = this.sortDirection === 'desc' ? `-${this.sortColumn}` : this.sortColumn;
+                params.set('ORDER', orderValue);
+            }
+
+            const separator = this.options.apiUrl.includes('?') ? '&' : '?';
+            const response = await fetch(`${ this.options.apiUrl }${ separator }${ params }`);
+            const json = await response.json();
+
+            // Check if this is object format
+            if (this.isObjectFormat(json)) {
+                return await this.parseObjectFormat(json, false);
+            }
+
+            // Check if response is JSON_OBJ array format
+            if (this.isJsonDataArrayFormat(json)) {
+                return await this.parseJsonDataArray(json, false);
+            }
+
+            // Transform column-based data to row-based data
+            const columnData = json.data || [];
+            let rows = [];
+
+            if (columnData.length > 0 && Array.isArray(columnData[0])) {
+                const numRows = columnData[0].length;
+                for (let rowIndex = 0; rowIndex < numRows; rowIndex++) {
+                    const row = [];
+                    for (let colIndex = 0; colIndex < columnData.length; colIndex++) {
+                        row.push(columnData[colIndex][rowIndex]);
+                    }
+                    rows.push(row);
+                }
+            } else {
+                rows = columnData;
+            }
+
+            return { rows, columns: json.columns || [] };
+        }
+
+        /**
+         * Load data from table format for export
+         * @param {number} offset - Starting offset
+         * @param {number} limit - Number of records to fetch
+         * @returns {Promise<Object>} JSON response with rows
+         */
+        async loadDataFromTableForExport(offset, limit) {
+            const params = new URLSearchParams();
+            params.set('JSON_OBJ', '1');
+            params.set('LIMIT', `${ offset },${ limit }`);
+
+            if (this.options.parentId) {
+                params.set('F_U', this.options.parentId);
+            }
+
+            // Apply current filters
+            const filters = this.filters || {};
+            Object.keys(filters).forEach(colId => {
+                const filter = filters[colId];
+                if (filter.value || filter.type === '%' || filter.type === '!%') {
+                    const column = this.columns.find(c => c.id === colId);
+                    if (column) {
+                        this.applyFilter(params, column, filter);
+                    }
+                }
+            });
+
+            // Add ORDER parameter for sorting
+            if (this.sortColumn !== null && this.sortDirection !== null) {
+                const orderValue = this.sortDirection === 'desc' ? `-${this.sortColumn}` : this.sortColumn;
+                params.set('ORDER', orderValue);
+            }
+
+            const apiBase = this.getApiBase();
+            const url = `${ apiBase }/object/${ this.options.tableTypeId }/?${ params }`;
+
+            const response = await fetch(url);
+            const json = await response.json();
+
+            // Parse JSON_OBJ format
+            if (this.isJsonDataArrayFormat(json)) {
+                return await this.parseJsonDataArray(json, false);
+            }
+
+            return { rows: [], columns: [] };
+        }
+
+        /**
+         * Prepare export data from raw rows
+         * @param {Array} rows - Array of data rows
+         * @param {Array} columns - Array of column definitions
+         * @returns {Array} Array of export data
+         */
+        prepareExportDataFromRows(rows, columns) {
+            return rows.map(row => {
+                const exportRow = [];
+                columns.forEach(col => {
+                    const cellValue = row[this.columns.indexOf(col)];
+                    const format = col.format || 'SHORT';
+                    let value = cellValue || '';
+
+                    // Convert special formats to plain text
+                    switch (format) {
+                        case 'BOOLEAN':
+                            value = cellValue ? 'Да' : 'Нет';
+                            break;
+                        case 'PWD':
+                            value = '******';
+                            break;
+                        case 'HTML':
+                        case 'BUTTON':
+                            // Strip HTML tags for export
+                            const tmp = document.createElement('div');
+                            tmp.innerHTML = String(value);
+                            value = tmp.textContent || tmp.innerText || '';
+                            break;
+                        default:
+                            value = String(value);
+                    }
+
+                    exportRow.push(value);
+                });
+                return exportRow;
+            });
         }
 
         /**
