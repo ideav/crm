@@ -1079,10 +1079,10 @@ class IntegramTable {
                     displayValue = '******';
                     break;
                 case 'HTML':
-                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }"${ customStyle }>${ displayValue }</td>`;
+                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.options.dataSource }"${ customStyle }>${ displayValue }</td>`;
                 case 'BUTTON':
                     displayValue = `<button class="btn btn-sm btn-primary">${ value || 'Действие' }</button>`;
-                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }"${ customStyle }>${ displayValue }</td>`;
+                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.options.dataSource }"${ customStyle }>${ displayValue }</td>`;
             }
 
             let escapedValue = String(displayValue).replace(/&/g, '&amp;')
@@ -1233,7 +1233,7 @@ class IntegramTable {
                 }
             }
 
-            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }"${ customStyle }${ editableAttrs }>${ escapedValue }</td>`;
+            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.options.dataSource }"${ customStyle }${ editableAttrs }>${ escapedValue }</td>`;
         }
 
         renderScrollCounter() {
