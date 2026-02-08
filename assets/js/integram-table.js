@@ -1144,7 +1144,8 @@ class IntegramTable {
 
                 // For reference fields, we allow editing even with empty values as long as we can determine parent record
                 // For non-reference fields, we still require a valid recordId
-                const isRefField = column.ref === 1;
+                // In object format, check for ref_id existence; in report format, check ref === 1
+                const isRefField = column.ref_id != null || column.ref === 1;
                 const canEdit = isRefField ? true : (recordId && recordId !== '' && recordId !== '0');
 
                 if (window.INTEGRAM_DEBUG) {
