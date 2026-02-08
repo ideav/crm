@@ -28,11 +28,19 @@ When clicked, the export button displays a dropdown menu with three options:
 
 ## Features
 
-### 1. **Respects Visible Columns**
+### 1. **Complete Data Export**
+   - **Exports ALL data** matching current filters, not just visible rows on screen
+   - Automatically loads all paginated data in batches of 1000 records
+   - Shows progress messages during data loading
+   - Safety limit of 100,000 records to prevent browser memory issues
+
+### 2. **Respects Visible Columns & Filters**
    - Only exports columns that are currently visible
    - Respects the current column order set by the user
+   - **Honors all active filters** - only exports rows matching current filter criteria
+   - **Preserves sort order** - data is exported in the current sort order
 
-### 2. **Smart Data Formatting**
+### 3. **Smart Data Formatting**
    - **Boolean**: Exported as "Да" / "Нет" (Yes/No in Russian)
    - **Password**: Exported as "******" for security
    - **HTML/Button**: HTML tags are stripped, only text content is exported
@@ -50,9 +58,17 @@ When clicked, the export button displays a dropdown menu with three options:
    - Column width capped at 50 characters for readability
    - Headers in first row with bold formatting
 
-### 5. **User Feedback**
+### 5. **Performance & Progress**
+   - Batch loading for large datasets (1000 records per batch)
+   - Progress notifications:
+     - "Загрузка всех данных для экспорта..." - When starting data load
+     - "Экспорт N записей..." - Before actual export begins
+   - Efficient memory management
+
+### 6. **User Feedback**
    - Toast notifications for success/error states
    - Loading indicator when downloading SheetJS library
+   - Real-time progress updates for large exports
    - Helpful error messages
 
 ## File Naming Convention
@@ -81,11 +97,14 @@ The implementation adds the following methods to the `IntegramTable` class:
 
 1. `toggleExportMenu(event)` - Shows/hides the export dropdown
 2. `exportTable(format)` - Main export orchestrator
-3. `prepareExportData(columns)` - Converts table data to exportable format
-4. `exportToCSV(data, columns)` - CSV export implementation
-5. `exportToExcel(data, columns, format)` - Excel export implementation
-6. `loadScript(url)` - Dynamic script loader for SheetJS
-7. `downloadBlob(blob, filename)` - File download helper
+3. `loadAllDataForExport()` - Loads all data matching current filters in batches
+4. `loadDataFromReportForExport(offset, limit)` - Batch loader for report data source
+5. `loadDataFromTableForExport(offset, limit)` - Batch loader for table data source
+6. `prepareExportDataFromRows(rows, columns)` - Converts rows to exportable format
+7. `exportToCSV(data, columns)` - CSV export implementation
+8. `exportToExcel(data, columns, format)` - Excel export implementation
+9. `loadScript(url)` - Dynamic script loader for SheetJS
+10. `downloadBlob(blob, filename)` - File download helper
 
 ## Usage Example
 
