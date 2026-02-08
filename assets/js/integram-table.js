@@ -32,8 +32,14 @@ class IntegramTable {
                 // New options for dual data source support
                 dataSource: options.dataSource || 'report',  // 'report' or 'table'
                 tableTypeId: options.tableTypeId || null,   // Required for dataSource='table'
-                parentId: options.parentId || urlParentId || null  // Parent ID for table data source
+                parentId: options.parentId || urlParentId || null,  // Parent ID for table data source
+                debug: options.debug || false  // Enable debug tracing
             };
+
+            // Set global debug flag if enabled
+            if (this.options.debug) {
+                window.INTEGRAM_DEBUG = true;
+            }
 
             this.columns = [];
             this.data = [];
@@ -1060,17 +1066,16 @@ class IntegramTable {
                 let recordId = '';
                 let typeId = '';
 
-                // Check if this is the first column in object format (has rawObjectData)
-                // First column ID matches objectTableId and we have raw data with 'i' keys
-                const isFirstColumnInObjectFormat = this.rawObjectData.length > 0 &&
-                                                    this.objectTableId &&
-                                                    column.id === String(this.objectTableId);
+                // Check if this is in object format (has rawObjectData)
+                // In object format, ALL columns use the record ID from rawObjectData
+                const isInObjectFormat = this.rawObjectData.length > 0 && this.objectTableId;
 
-                if (isFirstColumnInObjectFormat) {
-                    // For first column in object format, use 'i' from rawObjectData
+                if (isInObjectFormat) {
+                    // For ALL columns in object format, use 'i' from rawObjectData
                     const rawItem = this.rawObjectData[rowIndex];
                     recordId = rawItem && rawItem.i ? String(rawItem.i) : '';
-                    typeId = this.objectTableId;
+                    // For first column, use objectTableId; for requisites, use their orig or type
+                    typeId = column.id === String(this.objectTableId) ? this.objectTableId : (column.orig || column.type || '');
                 } else if (idColId !== null) {
                     // If we have an ID column reference, get the record ID from it
                     const idColIndex = this.columns.findIndex(c => c.id === idColId);
@@ -1098,19 +1103,48 @@ class IntegramTable {
                 const idColId = this.editableColumns.get(column.id);
                 let recordId = '';
 
-                // If we have an ID column reference, get the record ID from it
-                if (idColId !== null) {
+                // TRACE: Log the decision-making process for inline editing
+                const isInObjectFormat = this.rawObjectData.length > 0 && this.objectTableId;
+                if (window.INTEGRAM_DEBUG) {
+                    console.log(`[TRACE] renderCell - Inline editing check for column ${column.id} (${column.name}), row ${rowIndex}:`);
+                    console.log(`  - isEditable: ${isEditable}`);
+                    console.log(`  - isInObjectFormat: ${isInObjectFormat}`);
+                    console.log(`  - objectTableId: ${this.objectTableId}`);
+                    console.log(`  - idColId (ID column reference): ${idColId}`);
+                }
+
+                // Check if this is in object format - ALL columns should use rawObjectData
+                if (isInObjectFormat) {
+                    // For ALL columns in object format, use 'i' from rawObjectData
+                    const rawItem = this.rawObjectData[rowIndex];
+                    recordId = rawItem && rawItem.i ? String(rawItem.i) : '';
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log(`  - Object format detected - using rawObjectData[${rowIndex}].i = ${recordId}`);
+                    }
+                } else if (idColId !== null) {
+                    // If we have an ID column reference, get the record ID from it
                     const idColIndex = this.columns.findIndex(c => c.id === idColId);
                     recordId = idColIndex !== -1 && this.data[rowIndex] ? this.data[rowIndex][idColIndex] : '';
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log(`  - Using ID column reference: recordId = ${recordId}`);
+                    }
                 } else {
                     // No ID column - need to determine parent ID using the logic from the issue
                     recordId = this.determineParentRecordId(column, rowIndex);
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log(`  - Using determineParentRecordId: recordId = ${recordId}`);
+                    }
                 }
 
                 // For reference fields, we allow editing even with empty values as long as we can determine parent record
                 // For non-reference fields, we still require a valid recordId
                 const isRefField = column.ref === 1;
                 const canEdit = isRefField ? true : (recordId && recordId !== '' && recordId !== '0');
+
+                if (window.INTEGRAM_DEBUG) {
+                    console.log(`  - isRefField: ${isRefField}`);
+                    console.log(`  - canEdit: ${canEdit} (recordId=${recordId})`);
+                }
 
                 if (canEdit) {
                     // Add ref attribute if this is a reference field
@@ -1121,6 +1155,13 @@ class IntegramTable {
                     const recordIdAttr = recordId && recordId !== '' && recordId !== '0' ? recordId : 'dynamic';
                     editableAttrs = ` data-editable="true" data-record-id="${ recordIdAttr }" data-col-id="${ column.id }" data-col-type="${ column.type }" data-col-format="${ format }" data-row-index="${ rowIndex }"${ refAttr }${ fullValueAttr }`;
                     cellClass += ' inline-editable';
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log(`  ✓ Cell will be editable with recordId=${recordIdAttr}`);
+                    }
+                } else {
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log(`  ✗ Cell will NOT be editable - canEdit=${canEdit}, recordId=${recordId}`);
+                    }
                 }
             }
 
@@ -1227,8 +1268,21 @@ class IntegramTable {
                     const colId = td.dataset.colId;
                     const column = this.columns.find(c => c.id === colId);
 
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log(`[TRACE] Cell click - EDITABLE cell clicked:`, {
+                            colId: td.dataset.colId,
+                            colName: column ? column.name : 'unknown',
+                            recordId: td.dataset.recordId,
+                            rowIndex: td.dataset.rowIndex,
+                            isRefField: td.dataset.colRef === '1'
+                        });
+                    }
+
                     // Don't trigger if clicking on edit icon or already editing
                     if (e.target.closest('.edit-icon') || this.currentEditingCell) {
+                        if (window.INTEGRAM_DEBUG) {
+                            console.log(`  - Skipping edit (clicking on edit icon or already editing)`);
+                        }
                         return;
                     }
                     this.startInlineEdit(td);
@@ -1243,6 +1297,25 @@ class IntegramTable {
 
                     // Check if this column is in editableColumns
                     const isInEditableColumns = this.editableColumns.has(column.id);
+
+                    if (window.INTEGRAM_DEBUG) {
+                        const isInObjectFormat = this.rawObjectData.length > 0 && this.objectTableId;
+                        console.log(`[TRACE] Cell click - NON-editable cell clicked:`, {
+                            colId: column.id,
+                            colName: column.name,
+                            colGranted: column.granted,
+                            isInEditableColumns: isInEditableColumns,
+                            isInObjectFormat: isInObjectFormat,
+                            hasClassEditableCell: td.classList.contains('editable-cell'),
+                            dataEditableAttr: td.dataset.editable,
+                            rowIndex: row
+                        });
+                        console.log(`  ✗ Cell not editable because data-editable="${td.dataset.editable}" (not "true")`);
+                        if (isInEditableColumns && td.classList.contains('editable-cell')) {
+                            console.log(`  ⚠️ WARNING: Cell has editable-cell class and column is in editableColumns, but data-editable is not "true"!`);
+                            console.log(`  This indicates the recordId was not found during rendering.`);
+                        }
+                    }
                 }
             });
         }
