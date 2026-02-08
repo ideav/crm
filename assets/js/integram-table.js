@@ -60,6 +60,8 @@ class IntegramTable {
             this.editableColumns = new Map();  // Map of column IDs to their corresponding ID column IDs
             this.globalMetadata = null;  // Global metadata for determining parent relationships
             this.currentEditingCell = null;  // Track currently editing cell
+            this.sortColumn = null;  // Column ID being sorted (null = no sort)
+            this.sortDirection = null;  // 'asc' or 'desc' (null = no sort)
 
             // Table settings
             this.settings = {
@@ -281,6 +283,12 @@ class IntegramTable {
                 }
             });
 
+            // Add ORDER parameter for sorting
+            if (this.sortColumn !== null && this.sortDirection !== null) {
+                const orderValue = this.sortDirection === 'desc' ? `-${this.sortColumn}` : this.sortColumn;
+                params.set('ORDER', orderValue);
+            }
+
             const separator = this.options.apiUrl.includes('?') ? '&' : '?';
             const response = await fetch(`${ this.options.apiUrl }${ separator }${ params }`);
             const json = await response.json();
@@ -376,6 +384,12 @@ class IntegramTable {
 
             if (this.options.parentId) {
                 dataUrl += `&F_U=${ this.options.parentId }`;
+            }
+
+            // Add ORDER parameter for sorting
+            if (this.sortColumn !== null && this.sortDirection !== null) {
+                const orderValue = this.sortDirection === 'desc' ? `-${this.sortColumn}` : this.sortColumn;
+                dataUrl += `&ORDER=${ orderValue }`;
             }
 
             const dataResponse = await fetch(dataUrl);
@@ -483,6 +497,12 @@ class IntegramTable {
             // Add filter parameters to URL
             if (filterParams.toString()) {
                 dataUrl += `&${ filterParams.toString() }`;
+            }
+
+            // Add ORDER parameter for sorting
+            if (this.sortColumn !== null && this.sortDirection !== null) {
+                const orderValue = this.sortDirection === 'desc' ? `-${this.sortColumn}` : this.sortColumn;
+                dataUrl += `&ORDER=${ orderValue }`;
             }
 
             // Fetch data
@@ -801,9 +821,16 @@ class IntegramTable {
                                     const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
                                     const addButtonHtml = this.shouldShowAddButton(col) ?
                                         `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись">+</button>` : '';
+
+                                    // Add sort indicator if this column is sorted
+                                    let sortIndicator = '';
+                                    if (this.sortColumn === col.id) {
+                                        sortIndicator = this.sortDirection === 'asc' ? '▲ ' : '▼ ';
+                                    }
+
                                     return `
                                     <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
-                                        <span class="column-header-content">${ col.name }</span>
+                                        <span class="column-header-content" data-column-id="${ col.id }">${ sortIndicator }${ col.name }</span>
                                         ${ addButtonHtml }
                                         <div class="column-resize-handle" data-column-id="${ col.id }"></div>
                                     </th>
@@ -1225,6 +1252,22 @@ class IntegramTable {
 
                     th.classList.remove('drag-over');
                 });
+            });
+
+            // Add click handlers for column header sorting
+            const headerContents = this.container.querySelectorAll('.column-header-content');
+            headerContents.forEach(span => {
+                span.addEventListener('click', (e) => {
+                    // Only trigger sort if clicking directly on the span, not its children
+                    if (e.target === span) {
+                        const columnId = span.dataset.columnId;
+                        if (columnId) {
+                            this.toggleSort(columnId);
+                        }
+                    }
+                });
+                // Make header content look clickable
+                span.style.cursor = 'pointer';
             });
 
             const filterIcons = this.container.querySelectorAll('.filter-icon-inside');
@@ -2924,6 +2967,39 @@ class IntegramTable {
 
             // Re-render to update UI (clear filter inputs)
             this.render();
+        }
+
+        /**
+         * Toggle sort for a column
+         * Cycle: no sort → ascending → descending → no sort
+         * Clicking on a different column resets the previous sort and starts ascending on new column
+         */
+        toggleSort(columnId) {
+            if (this.sortColumn === columnId) {
+                // Same column - cycle through states
+                if (this.sortDirection === 'asc') {
+                    // asc → desc
+                    this.sortDirection = 'desc';
+                } else if (this.sortDirection === 'desc') {
+                    // desc → no sort
+                    this.sortColumn = null;
+                    this.sortDirection = null;
+                } else {
+                    // Should not happen, but just in case
+                    this.sortDirection = 'asc';
+                }
+            } else {
+                // Different column - start with ascending
+                this.sortColumn = columnId;
+                this.sortDirection = 'asc';
+            }
+
+            // Reset data and load from beginning with new sort
+            this.data = [];
+            this.loadedRecords = 0;
+            this.hasMore = true;
+            this.totalRows = null;
+            this.loadData(false);
         }
 
         /**
