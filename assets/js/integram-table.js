@@ -379,9 +379,9 @@ class IntegramTable {
             // Convert metadata to columns format
             const columns = [];
 
-            // First column: id -> type, val -> name, type -> column type
+            // First column: use metadata.id as column id (not sequential index)
             columns.push({
-                id: '0',
+                id: String(metadata.id),
                 type: metadata.type || 'SHORT',
                 format: metadata.type || 'SHORT',
                 name: metadata.val || 'Значение',
@@ -390,14 +390,14 @@ class IntegramTable {
                 orig: metadata.id // Store the original table id
             });
 
-            // Remaining columns from reqs array
+            // Remaining columns from reqs array: use req.id as column id (not sequential index)
             if (metadata.reqs && Array.isArray(metadata.reqs)) {
                 metadata.reqs.forEach((req, idx) => {
                     const attrs = this.parseAttrs(req.attrs);
                     const isReference = req.hasOwnProperty('ref_id');
 
                     columns.push({
-                        id: String(idx + 1),
+                        id: String(req.id),
                         type: req.type || 'SHORT',
                         format: req.type || 'SHORT',
                         name: attrs.alias || req.val,
