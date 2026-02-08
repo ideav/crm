@@ -1148,6 +1148,10 @@ class IntegramTable {
                 // Don't show edit icon in empty cells - no point editing nothing
                 const hasValue = value !== null && value !== undefined && value !== '';
                 let shouldShowEditIcon = hasValue && recordId && recordId !== '' && recordId !== '0';
+                // In report data source, hide edit icon when no corresponding ID column exists
+                if (shouldShowEditIcon && this.options.dataSource === 'report' && idColId === null) {
+                    shouldShowEditIcon = false;
+                }
                 if (shouldShowEditIcon && isInObjectFormat) {
                     const isFirstColumn = column.id === String(this.objectTableId);
                     const isReferenceField = column.ref_id != null;
