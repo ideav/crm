@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Test Sorting Functionality</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .test-info { background: #f0f0f0; padding: 15px; margin-bottom: 20px; border-radius: 4px; }
+        .column-header-content { cursor: pointer; user-select: none; }
+        .column-header-content:hover { text-decoration: underline; }
+    </style>
+    <link rel="stylesheet" href="../assets/css/integram-table.css">
+</head>
+<body>
+    <div class="test-info">
+        <h2>Тест сортировки таблицы</h2>
+        <p>Кликните на название колонки, чтобы включить сортировку:</p>
+        <ul>
+            <li>Первый клик - сортировка по возрастанию (▲)</li>
+            <li>Второй клик - сортировка по убыванию (▼)</li>
+            <li>Третий клик - выключить сортировку</li>
+            <li>Клик на другую колонку сбрасывает предыдущую сортировку</li>
+        </ul>
+        <p><strong>Примечание:</strong> Это тест работает с мок-данными и показывает только визуальную часть. В реальной работе ORDER параметр передается в API запросах.</p>
+    </div>
+
+    <div id="integram-table-container"></div>
+
+    <script src="../assets/js/integram-table.js"></script>
+    <script>
+        // Mock data for testing
+        const mockData = {
+            columns: [
+                { id: '1', name: 'Название', format: 'SHORT', granted: 0 },
+                { id: '2', name: 'Дата', format: 'DATE', granted: 0 },
+                { id: '3', name: 'Количество', format: 'NUMBER', granted: 0 },
+                { id: '4', name: 'Статус', format: 'SHORT', granted: 0 }
+            ],
+            rows: [
+                ['Проект А', '01.01.2024', '100', 'Активен'],
+                ['Проект Б', '15.02.2024', '250', 'Завершен'],
+                ['Проект В', '10.03.2024', '75', 'Активен'],
+                ['Проект Г', '20.04.2024', '150', 'В работе']
+            ]
+        };
+
+        // Override fetch to return mock data
+        const originalFetch = window.fetch;
+        window.fetch = function(url) {
+            console.log('Mock fetch called with URL:', url);
+
+            // Log ORDER parameter if present
+            const urlObj = new URL(url, 'http://example.com');
+            const orderParam = urlObj.searchParams.get('ORDER');
+            if (orderParam) {
+                console.log('ORDER parameter detected:', orderParam);
+                const isDesc = orderParam.startsWith('-');
+                const colId = isDesc ? orderParam.substring(1) : orderParam;
+                const direction = isDesc ? 'descending' : 'ascending';
+                console.log(`  → Sort column ${colId} ${direction}`);
+            }
+
+            return Promise.resolve({
+                ok: true,
+                json: () => Promise.resolve(mockData)
+            });
+        };
+
+        // Initialize table
+        const table = new IntegramTable('integram-table-container', {
+            apiUrl: 'http://example.com/api/data',
+            pageSize: 20,
+            title: 'Тест сортировки',
+            instanceName: 'testTable',
+            debug: true
+        });
+
+        // Make it globally accessible for testing
+        window.testTable = table;
+    </script>
+</body>
+</html>
