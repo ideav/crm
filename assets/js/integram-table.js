@@ -1811,8 +1811,17 @@ class IntegramTable {
                     body: params.toString()
                 });
 
-                const result = await response.json();
+                let result;
+                const responseText = await response.text();
 
+                try {
+                    result = JSON.parse(responseText);
+                } catch (jsonError) {
+                    // Invalid JSON response
+                    throw new Error(`Невалидный JSON ответ: ${responseText}`);
+                }
+
+                // Check if response has error key anywhere in the JSON
                 if (result.error) {
                     throw new Error(result.error);
                 }
@@ -2131,8 +2140,17 @@ class IntegramTable {
                     body: params.toString()
                 });
 
-                const result = await response.json();
+                let result;
+                const responseText = await response.text();
 
+                try {
+                    result = JSON.parse(responseText);
+                } catch (jsonError) {
+                    // Invalid JSON response
+                    throw new Error(`Невалидный JSON ответ: ${responseText}`);
+                }
+
+                // Check if response has error key anywhere in the JSON
                 if (result.error) {
                     throw new Error(result.error);
                 }
@@ -3807,7 +3825,15 @@ class IntegramTable {
                         body: params.toString()
                     });
 
-                    const result = await response.json();
+                    let result;
+                    const responseText = await response.text();
+
+                    try {
+                        result = JSON.parse(responseText);
+                    } catch (jsonError) {
+                        // Invalid JSON response
+                        throw new Error(`Невалидный JSON ответ: ${responseText}`);
+                    }
 
                     if (result.error) {
                         throw new Error(result.error);
