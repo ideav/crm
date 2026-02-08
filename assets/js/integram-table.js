@@ -353,7 +353,7 @@ class IntegramTable {
                             type: req.type || 'SHORT',
                             format: this.mapTypeIdToFormat(req.type || 'SHORT'),
                             name: attrs.alias || req.val,
-                            granted: req.granted || 1,
+                            granted: 1,  // In object format, allow editing all cells
                             ref: req.arr_id || 0
                         });
                     });
@@ -439,7 +439,7 @@ class IntegramTable {
                         type: req.type || 'SHORT',
                         format: this.mapTypeIdToFormat(req.type || 'SHORT'),
                         name: attrs.alias || req.val,
-                        granted: req.granted || 1,
+                        granted: 1,  // In object format, allow editing all cells
                         ref: isReference ? req.orig : 0,
                         ref_id: req.ref_id || null,
                         orig: req.orig || null,
@@ -559,7 +559,7 @@ class IntegramTable {
                             type: req.type || 'SHORT',
                             format: this.mapTypeIdToFormat(req.type || 'SHORT'),
                             name: attrs.alias || req.val,
-                            granted: req.granted || 1,
+                            granted: 1,  // In object format, allow editing all cells
                             ref: isReference ? req.orig : 0,
                             ref_id: req.ref_id || null,
                             orig: req.orig || null,
