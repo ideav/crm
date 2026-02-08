@@ -46,6 +46,7 @@ class IntegramTable {
             this.visibleColumns = [];
             this.filtersEnabled = false;
             this.objectTableId = null;  // Table ID when data is in object/JSON_OBJ format (for _count=1 queries)
+            this.rawObjectData = [];  // Raw data array with {i, u, o, r} for object format (preserves record IDs)
             this.styleColumns = {};  // Map of column IDs to their style column values
             this.idColumns = new Set();  // Set of hidden ID column IDs
             this.columnWidths = {};  // Map of column IDs to their widths in pixels
@@ -167,9 +168,15 @@ class IntegramTable {
                 // Append or replace data
                 if (append) {
                     this.data = this.data.concat(newRows);
+                    // Append raw object data if present
+                    if (json.rawData) {
+                        this.rawObjectData = this.rawObjectData.concat(json.rawData);
+                    }
                 } else {
                     this.data = newRows;
                     this.loadedRecords = 0;
+                    // Replace raw object data if present
+                    this.rawObjectData = json.rawData || [];
                 }
 
                 this.loadedRecords += newRows.length;
@@ -451,7 +458,8 @@ class IntegramTable {
 
             return {
                 columns: columns,
-                rows: rows
+                rows: rows,
+                rawData: Array.isArray(dataArray) ? dataArray : []  // Preserve raw data with 'i' keys
             };
         }
 
@@ -538,7 +546,8 @@ class IntegramTable {
 
             return {
                 columns: this.columns,
-                rows: rows
+                rows: rows,
+                rawData: dataArray  // Preserve raw data with 'i' keys
             };
         }
 
@@ -1010,20 +1019,32 @@ class IntegramTable {
             if (isEditable) {
                 const idColId = this.editableColumns.get(column.id);
                 let recordId = '';
+                let typeId = '';
 
-                // If we have an ID column reference, get the record ID from it
-                if (idColId !== null) {
+                // Check if this is the first column in object format (has rawObjectData)
+                // First column ID matches objectTableId and we have raw data with 'i' keys
+                const isFirstColumnInObjectFormat = this.rawObjectData.length > 0 &&
+                                                    this.objectTableId &&
+                                                    column.id === String(this.objectTableId);
+
+                if (isFirstColumnInObjectFormat) {
+                    // For first column in object format, use 'i' from rawObjectData
+                    const rawItem = this.rawObjectData[rowIndex];
+                    recordId = rawItem && rawItem.i ? String(rawItem.i) : '';
+                    typeId = this.objectTableId;
+                } else if (idColId !== null) {
+                    // If we have an ID column reference, get the record ID from it
                     const idColIndex = this.columns.findIndex(c => c.id === idColId);
                     recordId = idColIndex !== -1 && this.data[rowIndex] ? this.data[rowIndex][idColIndex] : '';
+                    typeId = column.orig || column.type || '';
                 } else {
                     // No ID column - need to determine parent ID using the logic from the issue
                     // A) If first column: look for column with type={column.type} and name ending in ID
                     // B) If requisite: look for column with type={parent object id} and name ending in ID
                     recordId = this.determineParentRecordId(column, rowIndex);
+                    typeId = column.orig || column.type || '';
                 }
 
-                // Use column.orig for reference fields (dictionary values), fallback to column.type
-                const typeId = column.orig || column.type || '';
                 const instanceName = this.options.instanceName;
                 // Only show edit icon if recordId exists (disable creating new records)
                 if (recordId && recordId !== '' && recordId !== '0') {
