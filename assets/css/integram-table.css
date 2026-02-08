@@ -134,11 +134,11 @@
 
 .integram-table th:first-child {
     border-left: none;
-    padding-left: 24px;
+    padding-left: 6px;
 }
 
 .integram-table th:last-child {
-    padding-right: 24px;
+    padding-right: 6px;
 }
 
 .integram-table th.dragging {
@@ -237,11 +237,11 @@
 
 .integram-table td:first-child {
     border-left: none;
-    padding-left: 24px;
+    padding-left: 6px;
 }
 
 .integram-table td:last-child {
-    padding-right: 24px;
+    padding-right: 6px;
 }
 
 .integram-table tbody tr {
