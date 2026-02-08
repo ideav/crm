@@ -1459,7 +1459,7 @@ class IntegramTable {
                     break;
                 case 'DATETIME':
                     const datetimeValue = this.formatDateForHtml5(currentValue, true);
-                    editorHtml = `<input type="datetime-local" class="inline-editor inline-editor-datetime" value="${ datetimeValue }" step="300">`;
+                    editorHtml = `<input type="datetime-local" class="inline-editor inline-editor-datetime" value="${ datetimeValue }">`;
                     break;
                 case 'MEMO':
                     editorHtml = `<textarea class="inline-editor inline-editor-memo" rows="3">${ escapedValue }</textarea>`;
@@ -3360,7 +3360,7 @@ class IntegramTable {
                     const isFirstColumn = typeId && String(req.id) === String(typeId);
                     const dateTimeValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, true) : (isCreate && isFirstColumn ? currentDateTimeHtml5 : '');
                     const dateTimeValueDisplay = reqValue ? this.formatDateForInput(reqValue, true) : (isCreate && isFirstColumn ? currentDateTimeDisplay : '');
-                    html += `<input type="datetime-local" class="form-control datetime-picker" id="field-${ req.id }-picker" value="${ this.escapeHtml(dateTimeValueHtml5) }" ${ isRequired ? 'required' : '' } data-target="field-${ req.id }" step="300">`;
+                    html += `<input type="datetime-local" class="form-control datetime-picker" id="field-${ req.id }-picker" value="${ this.escapeHtml(dateTimeValueHtml5) }" ${ isRequired ? 'required' : '' } data-target="field-${ req.id }">`;
                     html += `<input type="hidden" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(dateTimeValueDisplay) }">`;
                 }
                 // MEMO field (multi-line text, 4 rows)
@@ -3648,7 +3648,7 @@ class IntegramTable {
                 mainFieldHtml = `<input type="date" class="form-control date-picker" id="sub-field-main-picker" required data-target="sub-field-main" value="${ currentDateHtml5 }">`;
                 mainFieldHtml += `<input type="hidden" id="sub-field-main" name="main" value="${ currentDateDisplay }">`;
             } else if (mainFieldType === 'DATETIME') {
-                mainFieldHtml = `<input type="datetime-local" class="form-control datetime-picker" id="sub-field-main-picker" required data-target="sub-field-main" step="300" value="${ currentDateTimeHtml5 }">`;
+                mainFieldHtml = `<input type="datetime-local" class="form-control datetime-picker" id="sub-field-main-picker" required data-target="sub-field-main" value="${ currentDateTimeHtml5 }">`;
                 mainFieldHtml += `<input type="hidden" id="sub-field-main" name="main" value="${ currentDateTimeDisplay }">`;
             } else if (mainFieldType === 'NUMBER' || mainFieldType === 'SIGNED') {
                 mainFieldHtml = `<input type="number" class="form-control" id="sub-field-main" name="main" value="" required ${ mainFieldType === 'SIGNED' ? 'step="0.01"' : '' }>`;
@@ -3724,7 +3724,7 @@ class IntegramTable {
                     const isFirstColumn = String(req.id) === String(arrId);
                     const dateTimeValue = isFirstColumn ? currentDateTimeHtml5 : '';
                     const dateTimeDisplay = isFirstColumn ? currentDateTimeDisplay : '';
-                    formHtml += `<input type="datetime-local" class="form-control datetime-picker" id="sub-field-${ req.id }-picker" ${ isRequired ? 'required' : '' } data-target="sub-field-${ req.id }" step="300" value="${ dateTimeValue }">`;
+                    formHtml += `<input type="datetime-local" class="form-control datetime-picker" id="sub-field-${ req.id }-picker" ${ isRequired ? 'required' : '' } data-target="sub-field-${ req.id }" value="${ dateTimeValue }">`;
                     formHtml += `<input type="hidden" id="sub-field-${ req.id }" name="t${ req.id }" value="${ dateTimeDisplay }">`;
                 }
                 else if (baseFormat === 'MEMO') {
