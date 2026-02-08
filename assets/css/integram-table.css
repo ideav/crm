@@ -170,6 +170,7 @@
 .column-header-content {
     display: inline-block;
     padding-right: 10px;
+    white-space: nowrap;
 }
 
 /* Column header add button */
