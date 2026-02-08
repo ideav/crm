@@ -107,6 +107,37 @@ class IntegramTable {
             this.init();
         }
 
+        /**
+         * Map type ID (from metadata) to base format name for filters
+         * Type IDs are the base data types: string, number, date
+         * Format names are used to determine which filter operators are available
+         */
+        mapTypeIdToFormat(typeId) {
+            // Convert to string for consistent comparison
+            const id = String(typeId);
+
+            // Map of type IDs to format names based on TABLE_COMPONENT_README.md
+            const typeMap = {
+                '3': 'SHORT',      // Short string (up to 127 chars)
+                '8': 'CHARS',      // String without length limit
+                '9': 'DATE',       // Date
+                '13': 'NUMBER',    // Integer number
+                '14': 'SIGNED',    // Number with decimal part
+                '11': 'CHARS',     // Boolean (treat as string for filters)
+                '12': 'MEMO',      // Multiline text
+                '4': 'DATETIME',   // Date and time
+                '10': 'CHARS',     // File (treat as string for filters)
+                '2': 'CHARS',      // HTML (treat as string for filters)
+                '7': 'CHARS',      // Button (treat as string for filters)
+                '6': 'CHARS',      // Password (treat as string for filters)
+                '5': 'NUMBER',     // Grant (treat as number for filters)
+                '16': 'NUMBER',    // Report column (treat as number for filters)
+                '17': 'CHARS'      // Path (treat as string for filters)
+            };
+
+            return typeMap[id] || 'SHORT'; // Default to SHORT if not found
+        }
+
         init() {
             this.loadColumnState();
             this.loadSettings();
@@ -307,7 +338,7 @@ class IntegramTable {
                 columns.push({
                     id: '0',
                     type: metadata.type || 'SHORT',
-                    format: metadata.type || 'SHORT',
+                    format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
                     name: metadata.name || 'Значение',
                     granted: 1,
                     ref: 0
@@ -320,7 +351,7 @@ class IntegramTable {
                         columns.push({
                             id: String(idx + 1),
                             type: req.type || 'SHORT',
-                            format: req.type || 'SHORT',
+                            format: this.mapTypeIdToFormat(req.type || 'SHORT'),
                             name: attrs.alias || req.val,
                             granted: req.granted || 1,
                             ref: req.arr_id || 0
@@ -390,7 +421,7 @@ class IntegramTable {
             columns.push({
                 id: String(metadata.id),
                 type: metadata.type || 'SHORT',
-                format: metadata.type || 'SHORT',
+                format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
                 name: metadata.val || 'Значение',
                 granted: 1,
                 ref: 0,
@@ -406,7 +437,7 @@ class IntegramTable {
                     columns.push({
                         id: String(req.id),
                         type: req.type || 'SHORT',
-                        format: req.type || 'SHORT',
+                        format: this.mapTypeIdToFormat(req.type || 'SHORT'),
                         name: attrs.alias || req.val,
                         granted: req.granted || 1,
                         ref: isReference ? req.orig : 0,
@@ -510,7 +541,7 @@ class IntegramTable {
                 columns.push({
                     id: '0',
                     type: metadata.type || 'SHORT',
-                    format: metadata.type || 'SHORT',
+                    format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
                     name: metadata.val || metadata.name || 'Значение',
                     granted: 1,
                     ref: 0,
@@ -526,7 +557,7 @@ class IntegramTable {
                         columns.push({
                             id: String(idx + 1),
                             type: req.type || 'SHORT',
-                            format: req.type || 'SHORT',
+                            format: this.mapTypeIdToFormat(req.type || 'SHORT'),
                             name: attrs.alias || req.val,
                             granted: req.granted || 1,
                             ref: isReference ? req.orig : 0,
