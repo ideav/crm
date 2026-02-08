@@ -1125,7 +1125,9 @@ class IntegramTable {
                 const instanceName = this.options.instanceName;
                 // Only show edit icon if recordId exists (disable creating new records)
                 // In object format: show edit icon ONLY for first column or reference fields
-                let shouldShowEditIcon = recordId && recordId !== '' && recordId !== '0';
+                // Don't show edit icon in empty cells - no point editing nothing
+                const hasValue = value !== null && value !== undefined && value !== '';
+                let shouldShowEditIcon = hasValue && recordId && recordId !== '' && recordId !== '0';
                 if (shouldShowEditIcon && isInObjectFormat) {
                     const isFirstColumn = column.id === String(this.objectTableId);
                     const isReferenceField = column.ref_id != null;
