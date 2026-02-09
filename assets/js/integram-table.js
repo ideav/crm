@@ -1149,7 +1149,10 @@ class IntegramTable {
                     break;
                 case 'BOOLEAN':
                     cellClass = 'boolean-cell';
-                    displayValue = value ? 'Да' : 'Нет';
+                    // Display as checkbox icon
+                    const boolValue = value === true || value === 1 || value === '1' || value === 'true' || value === 'Да';
+                    displayValue = boolValue ? '<span class="boolean-check">✓</span>' : '<span class="boolean-uncheck">✗</span>';
+                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }" data-base-type="BOOLEAN"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
                     break;
                 case 'DATE':
                     cellClass = 'date-cell';
@@ -2579,7 +2582,9 @@ class IntegramTable {
 
             switch (format) {
                 case 'BOOLEAN':
-                    displayValue = (newValue === '1' || newValue === 'true') ? 'Да' : 'Нет';
+                    // Display as checkbox icon
+                    const boolValue = newValue === '1' || newValue === 'true' || newValue === true;
+                    displayValue = boolValue ? '<span class="boolean-check">✓</span>' : '<span class="boolean-uncheck">✗</span>';
                     break;
                 case 'DATE':
                     if (newValue) {
@@ -4120,7 +4125,9 @@ class IntegramTable {
 
                 switch (baseFormat) {
                     case 'BOOLEAN':
-                        return value ? 'Да' : 'Нет';
+                        // Display as checkbox icon
+                        const boolVal = value === true || value === 1 || value === '1' || value === 'true' || value === 'Да';
+                        return boolVal ? '<span class="boolean-check">✓</span>' : '<span class="boolean-uncheck">✗</span>';
                     case 'DATE':
                         if (value) {
                             const dateObj = this.parseDDMMYYYY(value);
