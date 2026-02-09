@@ -1094,6 +1094,16 @@ class IntegramTable {
                     cellClass = 'pwd-cell';
                     displayValue = '******';
                     break;
+                case 'FILE':
+                    cellClass = 'file-cell';
+                    if (value && value !== '') {
+                        // Display as a download link if value exists
+                        const apiBase = this.getApiBase();
+                        const fileName = value.split('/').pop() || value;
+                        displayValue = `<a href="${ apiBase }/file/${ value }" target="_blank" class="file-link" title="Скачать файл">${ this.escapeHtml(fileName) }</a>`;
+                        return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.options.dataSource }"${ customStyle }>${ displayValue }</td>`;
+                    }
+                    break;
                 case 'HTML':
                     return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.options.dataSource }"${ customStyle }>${ displayValue }</td>`;
                 case 'BUTTON':
@@ -1696,6 +1706,21 @@ class IntegramTable {
                 case 'MEMO':
                     editorHtml = `<textarea class="inline-editor inline-editor-memo" rows="3">${ escapedValue }</textarea>`;
                     break;
+                case 'FILE':
+                    editorHtml = `
+                        <div class="inline-editor inline-editor-file">
+                            <input type="file" class="file-input" id="inline-file-input" style="display: none;">
+                            <div class="file-dropzone">
+                                <span class="file-dropzone-text">Перетащите файл сюда или нажмите для выбора</span>
+                                <button type="button" class="file-select-btn">Выбрать файл</button>
+                            </div>
+                            <div class="file-preview" style="display: none;">
+                                <span class="file-name"></span>
+                                <button type="button" class="file-remove-btn" title="Удалить файл">×</button>
+                            </div>
+                        </div>
+                    `;
+                    break;
                 default:
                     // SHORT, CHARS, etc. - text input
                     editorHtml = `<input type="text" class="inline-editor inline-editor-text" value="${ escapedValue }">`;
@@ -1704,10 +1729,17 @@ class IntegramTable {
             cell.innerHTML = editorHtml;
             const editor = cell.querySelector('.inline-editor');
 
+            // Special handling for FILE type
+            if (format === 'FILE') {
+                this.attachFileUploadHandlers(editor, currentValue);
+            }
+
             // Focus the editor
-            editor.focus();
-            if (editor.select) {
-                editor.select();
+            if (format !== 'FILE') {
+                editor.focus();
+                if (editor.select) {
+                    editor.select();
+                }
             }
 
             // Attach event handlers
@@ -1719,6 +1751,9 @@ class IntegramTable {
                     newValue = this.convertHtml5DateToDisplay(editor.value, false);
                 } else if (format === 'DATETIME') {
                     newValue = this.convertHtml5DateToDisplay(editor.value, true);
+                } else if (format === 'FILE') {
+                    // For FILE type, the value is stored in data attribute by file upload handler
+                    newValue = editor.dataset.fileValue || '';
                 } else {
                     newValue = editor.value;
                 }
@@ -1735,8 +1770,8 @@ class IntegramTable {
                 this.cancelInlineEdit(originalContent);
             };
 
-            // Enter to save (except for textarea)
-            if (format !== 'MEMO') {
+            // Enter to save (except for textarea and file upload)
+            if (format !== 'MEMO' && format !== 'FILE') {
                 editor.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter') {
                         e.preventDefault();
@@ -1746,13 +1781,21 @@ class IntegramTable {
                         cancelEdit();
                     }
                 });
-            } else {
+            } else if (format === 'MEMO') {
                 // For textarea: Ctrl+Enter to save, Escape to cancel
                 editor.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter' && e.ctrlKey) {
                         e.preventDefault();
                         saveEdit();
                     } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        cancelEdit();
+                    }
+                });
+            } else if (format === 'FILE') {
+                // For file upload: Escape to cancel only
+                editor.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape') {
                         e.preventDefault();
                         cancelEdit();
                     }
@@ -3519,6 +3562,9 @@ class IntegramTable {
             // Attach date/datetime picker handlers
             this.attachDatePickerHandlers(modal);
 
+            // Attach file upload handlers
+            this.attachFormFileUploadHandlers(modal);
+
             // Attach form field settings handler
             const formSettingsBtn = modal.querySelector('#form-settings-btn');
             formSettingsBtn.addEventListener('click', () => {
@@ -3651,6 +3697,25 @@ class IntegramTable {
                 // MEMO field (multi-line text, 4 rows)
                 else if (baseFormat === 'MEMO') {
                     html += `<textarea class="form-control memo-field" id="field-${ req.id }" name="t${ req.id }" rows="4" ${ isRequired ? 'required' : '' }>${ this.escapeHtml(reqValue) }</textarea>`;
+                }
+                // FILE field (file upload with drag-and-drop)
+                else if (baseFormat === 'FILE') {
+                    const currentFileName = reqValue ? (reqValue.split('/').pop() || reqValue) : '';
+                    const hasFile = reqValue && reqValue !== '';
+                    html += `
+                        <div class="form-file-upload" data-req-id="${ req.id }">
+                            <input type="file" class="file-input" id="field-${ req.id }-file" style="display: none;">
+                            <div class="file-dropzone" style="${ hasFile ? 'display: none;' : '' }">
+                                <span class="file-dropzone-text">Перетащите файл сюда или нажмите для выбора</span>
+                                <button type="button" class="file-select-btn">Выбрать файл</button>
+                            </div>
+                            <div class="file-preview" style="${ hasFile ? 'display: flex;' : 'display: none;' }">
+                                <span class="file-name">${ this.escapeHtml(currentFileName) }</span>
+                                <button type="button" class="file-remove-btn" title="Удалить файл">×</button>
+                            </div>
+                            <input type="hidden" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(reqValue) }" ${ isRequired ? 'required' : '' }>
+                        </div>
+                    `;
                 }
                 // Regular text field
                 else {
@@ -4043,6 +4108,9 @@ class IntegramTable {
             // Attach date picker handlers
             this.attachDatePickerHandlers(modal);
 
+            // Attach file upload handlers
+            this.attachFormFileUploadHandlers(modal);
+
             // Close handlers
             const closeModal = () => {
                 modal.remove();
@@ -4163,6 +4231,95 @@ class IntegramTable {
                     }
                 });
             });
+        }
+
+        attachFormFileUploadHandlers(modal) {
+            const fileUploads = modal.querySelectorAll('.form-file-upload');
+            fileUploads.forEach(uploadContainer => {
+                const reqId = uploadContainer.dataset.reqId;
+                const fileInput = uploadContainer.querySelector('.file-input');
+                const dropzone = uploadContainer.querySelector('.file-dropzone');
+                const selectBtn = uploadContainer.querySelector('.file-select-btn');
+                const preview = uploadContainer.querySelector('.file-preview');
+                const fileName = uploadContainer.querySelector('.file-name');
+                const removeBtn = uploadContainer.querySelector('.file-remove-btn');
+                const hiddenInput = uploadContainer.querySelector(`#field-${ reqId }`);
+
+                // Click to select file
+                selectBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    fileInput.click();
+                });
+
+                // Dropzone click
+                dropzone.addEventListener('click', () => {
+                    fileInput.click();
+                });
+
+                // File input change
+                fileInput.addEventListener('change', async (e) => {
+                    const file = e.target.files[0];
+                    if (file) {
+                        await this.handleFormFileSelection(file, uploadContainer, dropzone, preview, fileName, hiddenInput);
+                    }
+                });
+
+                // Drag and drop handlers
+                dropzone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropzone.classList.add('drag-over');
+                });
+
+                dropzone.addEventListener('dragleave', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropzone.classList.remove('drag-over');
+                });
+
+                dropzone.addEventListener('drop', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropzone.classList.remove('drag-over');
+
+                    const file = e.dataTransfer.files[0];
+                    if (file) {
+                        await this.handleFormFileSelection(file, uploadContainer, dropzone, preview, fileName, hiddenInput);
+                    }
+                });
+
+                // Remove file button
+                removeBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    fileName.textContent = '';
+                    dropzone.style.display = 'flex';
+                    preview.style.display = 'none';
+                    fileInput.value = '';
+                    hiddenInput.value = '';
+                });
+            });
+        }
+
+        async handleFormFileSelection(file, uploadContainer, dropzone, preview, fileName, hiddenInput) {
+            // Show loading state
+            const dropzoneText = dropzone.querySelector('.file-dropzone-text');
+            const originalText = dropzoneText.textContent;
+            dropzoneText.textContent = 'Загрузка...';
+
+            try {
+                // Upload file to server
+                const uploadedPath = await this.uploadFile(file);
+
+                // Update UI
+                fileName.textContent = file.name;
+                dropzone.style.display = 'none';
+                preview.style.display = 'flex';
+                hiddenInput.value = uploadedPath;
+            } catch (error) {
+                console.error('Error uploading file:', error);
+                this.showToast(`Ошибка загрузки файла: ${ error.message }`, 'error');
+                dropzoneText.textContent = originalText;
+            }
         }
 
         async loadReferenceOptions(reqs, recordId, modalElement) {
@@ -5019,6 +5176,130 @@ class IntegramTable {
                 const [year, month, day] = html5Value.split('-');
                 return `${ day }.${ month }.${ year }`;
             }
+        }
+
+        attachFileUploadHandlers(editor, currentValue) {
+            const fileInput = editor.querySelector('.file-input');
+            const dropzone = editor.querySelector('.file-dropzone');
+            const selectBtn = editor.querySelector('.file-select-btn');
+            const preview = editor.querySelector('.file-preview');
+            const fileName = editor.querySelector('.file-name');
+            const removeBtn = editor.querySelector('.file-remove-btn');
+
+            let selectedFile = null;
+
+            // Show current file if exists
+            if (currentValue && currentValue !== '') {
+                fileName.textContent = currentValue.split('/').pop() || currentValue;
+                dropzone.style.display = 'none';
+                preview.style.display = 'flex';
+                editor.dataset.fileValue = currentValue;
+            }
+
+            // Click to select file
+            selectBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                fileInput.click();
+            });
+
+            // Dropzone click
+            dropzone.addEventListener('click', () => {
+                fileInput.click();
+            });
+
+            // File input change
+            fileInput.addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    await this.handleFileSelection(file, editor, dropzone, preview, fileName);
+                }
+            });
+
+            // Drag and drop handlers
+            dropzone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropzone.classList.add('drag-over');
+            });
+
+            dropzone.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropzone.classList.remove('drag-over');
+            });
+
+            dropzone.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropzone.classList.remove('drag-over');
+
+                const file = e.dataTransfer.files[0];
+                if (file) {
+                    await this.handleFileSelection(file, editor, dropzone, preview, fileName);
+                }
+            });
+
+            // Remove file button
+            removeBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                selectedFile = null;
+                editor.dataset.fileValue = '';
+                fileName.textContent = '';
+                dropzone.style.display = 'flex';
+                preview.style.display = 'none';
+                fileInput.value = '';
+            });
+        }
+
+        async handleFileSelection(file, editor, dropzone, preview, fileName) {
+            // Show loading state
+            const dropzoneText = dropzone.querySelector('.file-dropzone-text');
+            const originalText = dropzoneText.textContent;
+            dropzoneText.textContent = 'Загрузка...';
+
+            try {
+                // Upload file to server
+                const uploadedPath = await this.uploadFile(file);
+
+                // Update UI
+                fileName.textContent = file.name;
+                dropzone.style.display = 'none';
+                preview.style.display = 'flex';
+                editor.dataset.fileValue = uploadedPath;
+            } catch (error) {
+                console.error('Error uploading file:', error);
+                this.showToast(`Ошибка загрузки файла: ${ error.message }`, 'error');
+                dropzoneText.textContent = originalText;
+            }
+        }
+
+        async uploadFile(file) {
+            const apiBase = this.getApiBase();
+            const formData = new FormData();
+            formData.append('file', file);
+
+            // Add XSRF token
+            if (typeof xsrf !== 'undefined') {
+                formData.append('_xsrf', xsrf);
+            }
+
+            const response = await fetch(`${ apiBase }/_upload`, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                throw new Error(`Ошибка загрузки: ${ response.statusText }`);
+            }
+
+            const result = await response.json();
+
+            if (result.error) {
+                throw new Error(result.error);
+            }
+
+            // Return the file path from server response
+            return result.path || result.file || result.filename;
         }
 
         escapeHtml(text) {

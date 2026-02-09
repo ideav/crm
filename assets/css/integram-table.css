@@ -1621,3 +1621,138 @@ td:has(.inline-editor-reference) {
     border-radius: 0 0 4px 4px;
     display: none;
 }
+
+/* ========================================
+   File Upload Styles (Inline and Form)
+   ======================================== */
+
+/* Inline editor file upload */
+.inline-editor-file {
+    padding: 8px;
+    min-width: 250px;
+}
+
+/* Form file upload container */
+.form-file-upload {
+    position: relative;
+    width: 100%;
+}
+
+/* File dropzone */
+.file-dropzone {
+    border: 2px dashed var(--md-divider);
+    border-radius: 4px;
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: var(--md-transition);
+    background-color: var(--md-background);
+}
+
+.file-dropzone:hover {
+    border-color: var(--md-primary);
+    background-color: rgba(25, 118, 210, 0.04);
+}
+
+.file-dropzone.drag-over {
+    border-color: var(--md-primary);
+    background-color: rgba(25, 118, 210, 0.08);
+}
+
+.file-dropzone-text {
+    display: block;
+    margin-bottom: 10px;
+    color: var(--md-text-secondary);
+    font-size: 14px;
+}
+
+.file-select-btn {
+    background-color: var(--md-primary);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--md-transition);
+    text-transform: uppercase;
+}
+
+.file-select-btn:hover {
+    background-color: var(--md-primary-dark);
+}
+
+.file-select-btn:active {
+    background-color: var(--md-primary-dark);
+    transform: scale(0.98);
+}
+
+/* File preview */
+.file-preview {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px;
+    background-color: var(--md-background);
+    border: 1px solid var(--md-divider);
+    border-radius: 4px;
+    gap: 10px;
+}
+
+.file-name {
+    flex: 1;
+    color: var(--md-text-primary);
+    font-size: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.file-remove-btn {
+    background-color: transparent;
+    color: var(--md-text-secondary);
+    border: none;
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: var(--md-transition);
+}
+
+.file-remove-btn:hover {
+    background-color: var(--md-hover);
+    color: var(--md-text-primary);
+}
+
+.file-remove-btn:active {
+    background-color: rgba(0, 0, 0, 0.08);
+}
+
+/* File cell link */
+.file-cell {
+    color: var(--md-text-primary);
+}
+
+.file-link {
+    color: var(--md-primary);
+    text-decoration: none;
+    transition: var(--md-transition);
+}
+
+.file-link:hover {
+    color: var(--md-primary-dark);
+    text-decoration: underline;
+}
+
+/* Visual feedback for file editing active state */
+td:has(.inline-editor-file) {
+    background-color: rgba(25, 118, 210, 0.08) !important;
+    padding: 4px !important;
+}
