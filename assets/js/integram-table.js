@@ -5877,7 +5877,7 @@ class IntegramTable {
                 this.showToast('Загрузка библиотеки экспорта...', 'info');
 
                 try {
-                    await this.loadScript('https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js');
+                    await this.loadScript('/js/xlsx.full.min.js');
                 } catch (error) {
                     this.showToast('Ошибка загрузки библиотеки экспорта', 'error');
                     return;
