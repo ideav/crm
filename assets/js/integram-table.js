@@ -1313,26 +1313,27 @@ class IntegramTable {
                 const hasValue = value !== null && value !== undefined && value !== '';
                 let shouldShowEditIcon = hasValue && recordId && recordId !== '' && recordId !== '0';
 
-                if (window.INTEGRAM_DEBUG) {
-                    console.log(`  - hasValue: ${hasValue} (value: ${JSON.stringify(value)})`);
-                    console.log(`  - recordId: ${recordId}`);
-                    console.log(`  - Initial shouldShowEditIcon: ${shouldShowEditIcon}`);
-                }
-
-                // In report data source, hide edit icon when no corresponding ID column exists
-                if (shouldShowEditIcon && this.options.dataSource === 'report' && idColId === null) {
-                    shouldShowEditIcon = false;
-                    if (window.INTEGRAM_DEBUG) {
-                        console.log(`  - Report data source with no ID column -> shouldShowEditIcon: false`);
-                    }
-                }
                 // For table data source (data-source-type="table"), show edit icon when
                 // data-col-type (paramId) matches window.id (objectTableId)
                 const isTableDataSource = this.getDataSourceType() === 'table';
                 const colTypeMatchesTableId = String(column.paramId) === String(this.objectTableId);
 
                 if (window.INTEGRAM_DEBUG) {
+                    console.log(`  - hasValue: ${hasValue} (value: ${JSON.stringify(value)})`);
+                    console.log(`  - recordId: ${recordId}`);
+                    console.log(`  - Initial shouldShowEditIcon: ${shouldShowEditIcon}`);
                     console.log(`  - isTableDataSource: ${isTableDataSource} (dataSourceType: ${this.getDataSourceType()})`);
+                }
+
+                // In report data source (NOT table), hide edit icon when no corresponding ID column exists
+                if (shouldShowEditIcon && !isTableDataSource && this.getDataSourceType() === 'report' && idColId === null) {
+                    shouldShowEditIcon = false;
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log(`  - Report data source with no ID column -> shouldShowEditIcon: false`);
+                    }
+                }
+
+                if (window.INTEGRAM_DEBUG) {
                     console.log(`  - colTypeMatchesTableId: ${colTypeMatchesTableId} (paramId: ${column.paramId}, objectTableId: ${this.objectTableId})`);
                 }
 
