@@ -5595,8 +5595,12 @@ class IntegramTable {
             const existing = this.container.querySelector('.bulk-delete-confirm');
             if (existing) {
                 existing.remove();
+                btn.style.display = '';
                 return;
             }
+
+            // Hide delete button while confirmation is shown
+            btn.style.display = 'none';
 
             const confirmHtml = `
                 <div class="bulk-delete-confirm">
@@ -5614,6 +5618,7 @@ class IntegramTable {
             });
             confirmPopup.querySelector('.bulk-delete-cancel-btn').addEventListener('click', () => {
                 confirmPopup.remove();
+                btn.style.display = '';
             });
         }
 
