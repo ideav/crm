@@ -3700,20 +3700,38 @@ class IntegramTable {
                 }
                 // FILE field (file upload with drag-and-drop)
                 else if (baseFormat === 'FILE') {
-                    const currentFileName = reqValue ? (reqValue.split('/').pop() || reqValue) : '';
-                    const hasFile = reqValue && reqValue !== '';
+                    // Parse file link from HTML if present
+                    let fileHref = '';
+                    let fileName = '';
+                    let hasFile = false;
+
+                    if (reqValue && reqValue !== '') {
+                        // Check if value contains HTML link: <a target="_blank" href="/path/to/file">filename.ext</a>
+                        const linkMatch = reqValue.match(/<a[^>]*href=["']([^"']+)["'][^>]*>([^<]+)<\/a>/i);
+                        if (linkMatch) {
+                            fileHref = linkMatch[1];
+                            fileName = linkMatch[2];
+                            hasFile = true;
+                        } else {
+                            // Fallback: treat as plain file path
+                            fileHref = reqValue;
+                            fileName = reqValue.split('/').pop() || reqValue;
+                            hasFile = true;
+                        }
+                    }
+
                     html += `
-                        <div class="form-file-upload" data-req-id="${ req.id }">
+                        <div class="form-file-upload" data-req-id="${ req.id }" data-original-value="${ this.escapeHtml(reqValue) }">
                             <input type="file" class="file-input" id="field-${ req.id }-file" style="display: none;">
                             <div class="file-dropzone" style="${ hasFile ? 'display: none;' : '' }">
                                 <span class="file-dropzone-text">Перетащите файл сюда или нажмите для выбора</span>
                                 <button type="button" class="file-select-btn">Выбрать файл</button>
                             </div>
                             <div class="file-preview" style="${ hasFile ? 'display: flex;' : 'display: none;' }">
-                                <span class="file-name">${ this.escapeHtml(currentFileName) }</span>
+                                ${ fileHref ? `<a href="${ this.escapeHtml(fileHref) }" target="_blank" class="file-name file-link">${ this.escapeHtml(fileName) }</a>` : `<span class="file-name">${ this.escapeHtml(fileName) }</span>` }
                                 <button type="button" class="file-remove-btn" title="Удалить файл">×</button>
                             </div>
-                            <input type="hidden" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(reqValue) }" ${ isRequired ? 'required' : '' }>
+                            <input type="hidden" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(reqValue) }" ${ isRequired ? 'required' : '' } data-file-deleted="false">
                         </div>
                     `;
                 }
@@ -4291,7 +4309,19 @@ class IntegramTable {
                 // Remove file button
                 removeBtn.addEventListener('click', (e) => {
                     e.preventDefault();
-                    fileName.textContent = '';
+                    // Check if this is an existing file (has original value) or newly uploaded
+                    const originalValue = uploadContainer.dataset.originalValue || '';
+                    if (originalValue) {
+                        // Mark as deleted for existing files
+                        hiddenInput.dataset.fileDeleted = 'true';
+                    }
+                    // Clear UI
+                    const fileNameElement = preview.querySelector('.file-name');
+                    if (fileNameElement.tagName === 'A') {
+                        fileNameElement.outerHTML = `<span class="file-name"></span>`;
+                    } else {
+                        fileNameElement.textContent = '';
+                    }
                     dropzone.style.display = 'flex';
                     preview.style.display = 'none';
                     fileInput.value = '';
@@ -4307,17 +4337,27 @@ class IntegramTable {
             dropzoneText.textContent = 'Загрузка...';
 
             try {
-                // Upload file to server
-                const uploadedPath = await this.uploadFile(file);
+                // Store the file object in the upload container for later submission
+                uploadContainer._fileToUpload = file;
 
-                // Update UI
-                fileName.textContent = file.name;
+                // Update UI - replace link with plain text since it's a new upload
+                if (fileName.tagName === 'A') {
+                    fileName.outerHTML = `<span class="file-name">${ this.escapeHtml(file.name) }</span>`;
+                } else {
+                    fileName.textContent = file.name;
+                }
                 dropzone.style.display = 'none';
                 preview.style.display = 'flex';
-                hiddenInput.value = uploadedPath;
+
+                // Mark that a new file is selected (will be uploaded on save)
+                hiddenInput.value = file.name; // Store filename temporarily
+                hiddenInput.dataset.fileDeleted = 'false';
+                hiddenInput.dataset.hasNewFile = 'true';
+
+                dropzoneText.textContent = originalText;
             } catch (error) {
-                console.error('Error uploading file:', error);
-                this.showToast(`Ошибка загрузки файла: ${ error.message }`, 'error');
+                console.error('Error preparing file:', error);
+                this.showToast(`Ошибка подготовки файла: ${ error.message }`, 'error');
                 dropzoneText.textContent = originalText;
             }
         }
@@ -4881,51 +4921,190 @@ class IntegramTable {
                 return;
             }
 
-            const formData = new FormData(form);
-            const params = new URLSearchParams();
-
-            // Add XSRF token (global variable xsrf is initialized on the page)
-            if (typeof xsrf !== 'undefined') {
-                params.append('_xsrf', xsrf);
-            }
-
-            // Get main value before iterating form fields
-            const mainValue = formData.get('main');
-
-            // Add all form fields (skip 'main' since it's handled separately as t{typeId})
-            // When creating, skip empty parameters so server can fill defaults
-            // When editing, include all parameters to allow clearing fields
-            for (const [key, value] of formData.entries()) {
-                if (key === 'main') continue;
-                if (isCreate) {
-                    if (value !== '' && value !== null && value !== undefined) {
-                        params.append(key, value);
-                    }
-                } else {
-                    params.append(key, value);
-                }
-            }
-
             const apiBase = this.getApiBase();
-            let url;
-
-            if (isCreate) {
-                url = `${ apiBase }/_m_new/${ typeId }?JSON&up=${ parentId || 1 }`;
-                if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
-                    params.append(`t${ typeId }`, mainValue);
-                }
-            } else {
-                url = `${ apiBase }/_m_save/${ recordId }?JSON`;
-                params.append(`t${ typeId }`, mainValue);
-            }
 
             try {
+                // Step 1: Handle file deletions first (only for edit mode)
+                if (!isCreate) {
+                    const fileUploads = modal.querySelectorAll('.form-file-upload');
+                    for (const uploadContainer of fileUploads) {
+                        const reqId = uploadContainer.dataset.reqId;
+                        const hiddenInput = uploadContainer.querySelector(`#field-${ reqId }`);
+                        const originalValue = uploadContainer.dataset.originalValue || '';
+
+                        // Check if file was deleted
+                        if (hiddenInput.dataset.fileDeleted === 'true' && originalValue) {
+                            // Send deletion command: _m_set/{recordId}?JSON&t{reqId}=
+                            const deleteParams = new URLSearchParams();
+                            if (typeof xsrf !== 'undefined') {
+                                deleteParams.append('_xsrf', xsrf);
+                            }
+                            deleteParams.append(`t${ reqId }`, '');
+
+                            const deleteUrl = `${ apiBase }/_m_set/${ recordId }?JSON`;
+                            const deleteResponse = await fetch(deleteUrl, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/x-www-form-urlencoded'
+                                },
+                                body: deleteParams.toString()
+                            });
+
+                            if (!deleteResponse.ok) {
+                                throw new Error(`Ошибка удаления файла: ${ deleteResponse.statusText }`);
+                            }
+                        }
+                    }
+                }
+
+                // Step 2: Prepare form data for save
+                const fileUploads = modal.querySelectorAll('.form-file-upload');
+                let hasNewFiles = false;
+
+                // Check if there are new files to upload
+                for (const uploadContainer of fileUploads) {
+                    const reqId = uploadContainer.dataset.reqId;
+                    const hiddenInput = uploadContainer.querySelector(`#field-${ reqId }`);
+                    if (hiddenInput.dataset.hasNewFile === 'true' && uploadContainer._fileToUpload) {
+                        hasNewFiles = true;
+                        break;
+                    }
+                }
+
+                // Use FormData if there are file uploads, URLSearchParams otherwise
+                let requestBody;
+                let headers = {};
+
+                if (hasNewFiles) {
+                    // Use FormData for file uploads
+                    const formData = new FormData(form);
+                    requestBody = new FormData();
+
+                    // Add XSRF token
+                    if (typeof xsrf !== 'undefined') {
+                        requestBody.append('_xsrf', xsrf);
+                    }
+
+                    // Get main value
+                    const mainValue = formData.get('main');
+
+                    // Add main value as t{typeId}
+                    if (isCreate) {
+                        if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
+                            requestBody.append(`t${ typeId }`, mainValue);
+                        }
+                    } else {
+                        requestBody.append(`t${ typeId }`, mainValue);
+                    }
+
+                    // Add all form fields
+                    for (const [key, value] of formData.entries()) {
+                        if (key === 'main') continue;
+
+                        // Check if this is a file field
+                        const fieldMatch = key.match(/^t(\d+)$/);
+                        if (fieldMatch) {
+                            const reqId = fieldMatch[1];
+                            const uploadContainer = modal.querySelector(`.form-file-upload[data-req-id="${ reqId }"]`);
+
+                            if (uploadContainer) {
+                                const hiddenInput = uploadContainer.querySelector(`#field-${ reqId }`);
+
+                                // If there's a new file to upload
+                                if (hiddenInput.dataset.hasNewFile === 'true' && uploadContainer._fileToUpload) {
+                                    requestBody.append(key, uploadContainer._fileToUpload);
+                                    continue;
+                                }
+
+                                // If file was deleted, skip it (already handled above)
+                                if (hiddenInput.dataset.fileDeleted === 'true') {
+                                    continue;
+                                }
+
+                                // If it's an existing file, don't include it in the save
+                                const originalValue = uploadContainer.dataset.originalValue || '';
+                                if (originalValue && hiddenInput.dataset.hasNewFile !== 'true') {
+                                    continue;
+                                }
+                            }
+                        }
+
+                        // Add non-file fields
+                        if (isCreate) {
+                            if (value !== '' && value !== null && value !== undefined) {
+                                requestBody.append(key, value);
+                            }
+                        } else {
+                            requestBody.append(key, value);
+                        }
+                    }
+                } else {
+                    // Use URLSearchParams for non-file submissions
+                    const formData = new FormData(form);
+                    const params = new URLSearchParams();
+
+                    // Add XSRF token
+                    if (typeof xsrf !== 'undefined') {
+                        params.append('_xsrf', xsrf);
+                    }
+
+                    // Get main value
+                    const mainValue = formData.get('main');
+
+                    // Add all form fields (skip 'main' since it's handled separately as t{typeId})
+                    for (const [key, value] of formData.entries()) {
+                        if (key === 'main') continue;
+
+                        // Skip file fields that haven't changed
+                        const fieldMatch = key.match(/^t(\d+)$/);
+                        if (fieldMatch) {
+                            const reqId = fieldMatch[1];
+                            const uploadContainer = modal.querySelector(`.form-file-upload[data-req-id="${ reqId }"]`);
+
+                            if (uploadContainer) {
+                                const originalValue = uploadContainer.dataset.originalValue || '';
+                                const hiddenInput = uploadContainer.querySelector(`#field-${ reqId }`);
+
+                                // Skip existing files and deleted files
+                                if ((originalValue && hiddenInput.dataset.hasNewFile !== 'true') || hiddenInput.dataset.fileDeleted === 'true') {
+                                    continue;
+                                }
+                            }
+                        }
+
+                        if (isCreate) {
+                            if (value !== '' && value !== null && value !== undefined) {
+                                params.append(key, value);
+                            }
+                        } else {
+                            params.append(key, value);
+                        }
+                    }
+
+                    if (isCreate) {
+                        if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
+                            params.append(`t${ typeId }`, mainValue);
+                        }
+                    } else {
+                        params.append(`t${ typeId }`, mainValue);
+                    }
+
+                    requestBody = params.toString();
+                    headers['Content-Type'] = 'application/x-www-form-urlencoded';
+                }
+
+                // Step 3: Save the record
+                let url;
+                if (isCreate) {
+                    url = `${ apiBase }/_m_new/${ typeId }?JSON&up=${ parentId || 1 }`;
+                } else {
+                    url = `${ apiBase }/_m_save/${ recordId }?JSON`;
+                }
+
                 const response = await fetch(url, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded'
-                    },
-                    body: params.toString()
+                    headers: headers,
+                    body: requestBody
                 });
 
                 const text = await response.text();
