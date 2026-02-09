@@ -1,0 +1,41 @@
+{
+  "name": "@integram/mcp-server",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Model Context Protocol (MCP) server for Integram API - enables AI assistants to interact with Integram database",
+  "main": "index.js",
+  "bin": {
+    "integram-mcp": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "integram",
+    "ai",
+    "claude",
+    "anthropic",
+    "database",
+    "api"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.1",
+    "axios": "^1.7.9"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "Integram Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ideav/crm.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ideav/crm/issues"
+  },
+  "homepage": "https://github.com/ideav/crm#readme"
+}
