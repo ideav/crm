@@ -1834,7 +1834,7 @@ td:has(.inline-editor-file) {
     width: 36px !important;
     min-width: 36px !important;
     max-width: 36px !important;
-    text-align: center;
+    text-align: center !important;
     padding: 4px !important;
 }
 
