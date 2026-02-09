@@ -564,12 +564,44 @@ class IntegramTable {
          * Input format: [{i: 3598, u: 1, o: 0, r: ["val1", "val2", ...]}, ...]
          */
         async parseJsonDataArray(dataArray, append = false) {
-            // Extract typeId from the apiUrl (e.g., /object/3596/?JSON_OBJ -> 3596)
-            const typeIdMatch = this.options.apiUrl.match(/\/object\/(\d+)/);
-            if (!typeIdMatch) {
-                throw new Error('Cannot determine typeId from apiUrl for JSON_OBJ format');
+            // Extract typeId from the apiUrl
+            // Supports multiple URL formats:
+            // - /object/3596/?JSON_OBJ -> 3596
+            // - /metadata/332 -> 332
+            // - /crm/metadata/332 -> 332
+            // - /crm/object/3596/ -> 3596
+            let typeId = null;
+
+            // Try /object/{id} pattern first
+            const objectMatch = this.options.apiUrl.match(/\/object\/(\d+)/);
+            if (objectMatch) {
+                typeId = objectMatch[1];
             }
-            const typeId = typeIdMatch[1];
+
+            // Try /metadata/{id} pattern
+            if (!typeId) {
+                const metadataMatch = this.options.apiUrl.match(/\/metadata\/(\d+)/);
+                if (metadataMatch) {
+                    typeId = metadataMatch[1];
+                }
+            }
+
+            // Try to get from already stored objectTableId
+            if (!typeId && this.objectTableId) {
+                typeId = this.objectTableId;
+            }
+
+            // Try to extract from any /{database}/{endpoint}/{id} pattern
+            if (!typeId) {
+                const genericMatch = this.options.apiUrl.match(/\/(\d+)(?:\/|\?|$)/);
+                if (genericMatch) {
+                    typeId = genericMatch[1];
+                }
+            }
+
+            if (!typeId) {
+                throw new Error(`Cannot determine typeId from apiUrl: ${this.options.apiUrl}. Expected patterns: /object/{id}, /metadata/{id}, or /{id}`);
+            }
             this.objectTableId = typeId;  // Store table ID for _count=1 queries
 
             // Fetch metadata if columns are not yet loaded
@@ -1055,6 +1087,14 @@ class IntegramTable {
             let isEditable = this.editableColumns.has(column.id);
             let refValueId = null;  // Parsed reference ID from "id:Value" format
 
+            // Determine data-type attributes for issue #375
+            // data-type: base type in symbolic form (SHORT, NUMBER, DATE, DATETIME, BOOL, etc.)
+            // data-ref: "1" for reference/lookup fields
+            // data-array: "1" for multiselect/array fields
+            const isRefField = column.ref_id != null || (column.ref && column.ref !== 0);
+            const isArrayField = column.attrs && column.attrs.includes(':MULTI:');
+            const dataTypeAttrs = ` data-type="${format}"${isRefField ? ' data-ref="1"' : ''}${isArrayField ? ' data-array="1"' : ''}`;
+
             // In object format, reference fields return values as "id:Value"
             // Parse to extract the id and display only the Value part
             if (column.ref_id != null && value && typeof value === 'string') {
@@ -1129,14 +1169,14 @@ class IntegramTable {
                         const apiBase = this.getApiBase();
                         const fileName = value.split('/').pop() || value;
                         displayValue = `<a href="${ apiBase }/file/${ value }" target="_blank" class="file-link" title="Скачать файл">${ this.escapeHtml(fileName) }</a>`;
-                        return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.options.dataSource }"${ customStyle }>${ displayValue }</td>`;
+                        return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.options.dataSource }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
                     }
                     break;
                 case 'HTML':
-                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.options.dataSource }"${ customStyle }>${ displayValue }</td>`;
+                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.options.dataSource }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
                 case 'BUTTON':
                     displayValue = `<button class="btn btn-sm btn-primary">${ value || 'Действие' }</button>`;
-                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.options.dataSource }"${ customStyle }>${ displayValue }</td>`;
+                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.options.dataSource }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
             }
 
             let escapedValue = String(displayValue).replace(/&/g, '&amp;')
@@ -1291,7 +1331,7 @@ class IntegramTable {
                 }
             }
 
-            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.options.dataSource }"${ customStyle }${ editableAttrs }>${ escapedValue }</td>`;
+            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.options.dataSource }"${ dataTypeAttrs }${ customStyle }${ editableAttrs }>${ escapedValue }</td>`;
         }
 
         renderScrollCounter() {
