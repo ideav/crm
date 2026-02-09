@@ -6069,6 +6069,15 @@ class IntegramTable {
                     const format = col.format || 'SHORT';
                     let value = cellValue || '';
 
+                    // Issue #378: For reference fields, remove "id:" prefix from "id:Value" format
+                    const isRefField = col.ref_id != null || (col.ref && col.ref !== 0);
+                    if (isRefField && value && typeof value === 'string') {
+                        const colonIndex = value.indexOf(':');
+                        if (colonIndex > 0) {
+                            value = value.substring(colonIndex + 1);
+                        }
+                    }
+
                     // Convert special formats to plain text
                     switch (format) {
                         case 'BOOLEAN':
@@ -6106,6 +6115,15 @@ class IntegramTable {
                     const cellValue = row[this.columns.indexOf(col)];
                     const format = col.format || 'SHORT';
                     let value = cellValue || '';
+
+                    // Issue #378: For reference fields, remove "id:" prefix from "id:Value" format
+                    const isRefField = col.ref_id != null || (col.ref && col.ref !== 0);
+                    if (isRefField && value && typeof value === 'string') {
+                        const colonIndex = value.indexOf(':');
+                        if (colonIndex > 0) {
+                            value = value.substring(colonIndex + 1);
+                        }
+                    }
 
                     // Convert special formats to plain text
                     switch (format) {
