@@ -58,6 +58,8 @@ class IntegramTable {
             this.columnWidths = {};  // Map of column IDs to their widths in pixels
             this.metadataCache = {};  // Cache for metadata by type ID
             this.editableColumns = new Map();  // Map of column IDs to their corresponding ID column IDs
+            this.checkboxMode = false;  // Whether checkbox selection column is visible
+            this.selectedRows = new Set();  // Set of selected row indices
             this.globalMetadata = null;  // Global metadata for determining parent relationships
             this.currentEditingCell = null;  // Track currently editing cell
             this.sortColumn = null;  // Column ID being sorted (null = no sort)
@@ -823,6 +825,14 @@ class IntegramTable {
                                     </div>
                                 </div>
                             </div>
+                            <div class="integram-table-checkbox-toggle${ this.checkboxMode ? ' active' : '' }" onclick="window.${ instanceName }.toggleCheckboxMode()" title="Выбор строк в таблице">
+                                ☑
+                            </div>
+                            ${ this.checkboxMode && this.selectedRows.size > 0 ? `
+                            <button class="btn btn-sm btn-danger integram-bulk-delete-btn" id="${ instanceName }-bulk-delete-btn" onclick="window.${ instanceName }.showBulkDeleteConfirm(event)">
+                                Удалить (${ this.selectedRows.size })
+                            </button>
+                            ` : '' }
                             <div class="integram-table-settings" onclick="window.${ instanceName }.openTableSettings()" title="Настройка">
                                 ⚙️
                             </div>
@@ -835,6 +845,7 @@ class IntegramTable {
                         <table class="integram-table${ this.settings.compact ? ' compact' : '' }">
                         <thead>
                             <tr>
+                                ${ this.checkboxMode ? `<th class="checkbox-column-header"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.data.length > 0 && this.selectedRows.size === this.data.length ? 'checked' : '' }></th>` : '' }
                                 ${ orderedColumns.map(col => {
                                     const width = this.columnWidths[col.id];
                                     const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
@@ -858,13 +869,15 @@ class IntegramTable {
                             </tr>
                             ${ this.filtersEnabled ? `
                             <tr class="filter-row">
+                                ${ this.checkboxMode ? '<td class="checkbox-column-filter"></td>' : '' }
                                 ${ orderedColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('') }
                             </tr>
                             ` : '' }
                         </thead>
                         <tbody>
                             ${ this.data.map((row, rowIndex) => `
-                                <tr>
+                                <tr class="${ this.selectedRows.has(rowIndex) ? 'row-selected' : '' }">
+                                    ${ this.checkboxMode ? `<td class="checkbox-column-cell"><input type="checkbox" class="row-select-checkbox" data-row-index="${ rowIndex }" ${ this.selectedRows.has(rowIndex) ? 'checked' : '' }></td>` : '' }
                                     ${ orderedColumns.map((col, colIndex) => {
                                         const cellValue = row[this.columns.indexOf(col)];
                                         return this.renderCell(col, cellValue, rowIndex, colIndex);
@@ -1432,6 +1445,36 @@ class IntegramTable {
                     }
                 }
             });
+
+            // Checkbox selection handlers
+            if (this.checkboxMode) {
+                const selectAll = this.container.querySelector('.row-select-all');
+                if (selectAll) {
+                    selectAll.addEventListener('change', (e) => {
+                        if (e.target.checked) {
+                            for (let i = 0; i < this.data.length; i++) {
+                                this.selectedRows.add(i);
+                            }
+                        } else {
+                            this.selectedRows.clear();
+                        }
+                        this.render();
+                    });
+                }
+
+                const rowCheckboxes = this.container.querySelectorAll('.row-select-checkbox');
+                rowCheckboxes.forEach(cb => {
+                    cb.addEventListener('change', (e) => {
+                        const rowIndex = parseInt(e.target.dataset.rowIndex);
+                        if (e.target.checked) {
+                            this.selectedRows.add(rowIndex);
+                        } else {
+                            this.selectedRows.delete(rowIndex);
+                        }
+                        this.render();
+                    });
+                });
+            }
         }
 
         async startInlineEdit(cell) {
@@ -4266,11 +4309,13 @@ class IntegramTable {
                 // Click to select file
                 selectBtn.addEventListener('click', (e) => {
                     e.preventDefault();
+                    e.stopPropagation();
                     fileInput.click();
                 });
 
                 // Dropzone click
-                dropzone.addEventListener('click', () => {
+                dropzone.addEventListener('click', (e) => {
+                    e.stopPropagation();
                     fileInput.click();
                 });
 
@@ -4280,6 +4325,8 @@ class IntegramTable {
                     if (file) {
                         await this.handleFormFileSelection(file, uploadContainer, dropzone, preview, fileName, hiddenInput);
                     }
+                    // Reset file input so selecting the same file again triggers change
+                    fileInput.value = '';
                 });
 
                 // Drag and drop handlers
@@ -5378,11 +5425,13 @@ class IntegramTable {
             // Click to select file
             selectBtn.addEventListener('click', (e) => {
                 e.preventDefault();
+                e.stopPropagation();
                 fileInput.click();
             });
 
             // Dropzone click
-            dropzone.addEventListener('click', () => {
+            dropzone.addEventListener('click', (e) => {
+                e.stopPropagation();
                 fileInput.click();
             });
 
@@ -5392,6 +5441,8 @@ class IntegramTable {
                 if (file) {
                     await this.handleFileSelection(file, editor, dropzone, preview, fileName);
                 }
+                // Reset file input so selecting the same file again triggers change
+                fileInput.value = '';
             });
 
             // Drag and drop handlers
@@ -5515,6 +5566,184 @@ class IntegramTable {
         }
 
         /**
+         * Toggle checkbox selection mode
+         */
+        toggleCheckboxMode() {
+            this.checkboxMode = !this.checkboxMode;
+            if (!this.checkboxMode) {
+                this.selectedRows.clear();
+            }
+            this.render();
+        }
+
+        /**
+         * Show bulk delete confirmation
+         */
+        showBulkDeleteConfirm(event) {
+            if (event) {
+                event.stopPropagation();
+            }
+
+            const count = this.selectedRows.size;
+            if (count === 0) return;
+
+            // Create confirmation popup next to the delete button
+            const btn = event.target.closest('.integram-bulk-delete-btn');
+            if (!btn) return;
+
+            // Remove existing confirmation popup
+            const existing = this.container.querySelector('.bulk-delete-confirm');
+            if (existing) {
+                existing.remove();
+                return;
+            }
+
+            const confirmHtml = `
+                <div class="bulk-delete-confirm">
+                    <span>Удалить ${ count } записей?</span>
+                    <button class="btn btn-sm btn-danger bulk-delete-confirm-btn">Подтвердить удаление</button>
+                    <button class="btn btn-sm btn-outline-secondary bulk-delete-cancel-btn">Отмена</button>
+                </div>
+            `;
+
+            btn.insertAdjacentHTML('afterend', confirmHtml);
+
+            const confirmPopup = this.container.querySelector('.bulk-delete-confirm');
+            confirmPopup.querySelector('.bulk-delete-confirm-btn').addEventListener('click', () => {
+                this.bulkDelete();
+            });
+            confirmPopup.querySelector('.bulk-delete-cancel-btn').addEventListener('click', () => {
+                confirmPopup.remove();
+            });
+        }
+
+        /**
+         * Bulk delete selected rows
+         */
+        async bulkDelete() {
+            const selectedIndices = Array.from(this.selectedRows).sort((a, b) => a - b);
+            if (selectedIndices.length === 0) return;
+
+            // Collect record info for deletion
+            const records = [];
+            for (const rowIndex of selectedIndices) {
+                const rawItem = this.rawObjectData[rowIndex];
+                if (rawItem && rawItem.i) {
+                    const firstColValue = (rawItem.r && rawItem.r[0]) || '';
+                    records.push({ id: rawItem.i, value: firstColValue });
+                }
+            }
+
+            if (records.length === 0) {
+                this.showToast('Не удалось определить ID записей для удаления', 'error');
+                return;
+            }
+
+            // Show progress overlay
+            const apiBase = this.getApiBase();
+            const total = records.length;
+            let completed = 0;
+            const errors = [];
+
+            // Create progress modal
+            const progressId = `bulk-delete-progress-${ Date.now() }`;
+            const progressHtml = `
+                <div class="integram-modal-overlay" id="${ progressId }">
+                    <div class="integram-modal" style="max-width: 500px;">
+                        <div class="integram-modal-header">
+                            <h5>Удаление записей</h5>
+                        </div>
+                        <div class="integram-modal-body">
+                            <div class="bulk-delete-progress-bar-container">
+                                <div class="bulk-delete-progress-bar" style="width: 0%"></div>
+                            </div>
+                            <div class="bulk-delete-progress-text">Удалено: 0 / ${ total }</div>
+                            <div class="bulk-delete-errors" style="display: none;"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', progressHtml);
+
+            const progressOverlay = document.getElementById(progressId);
+            const progressBar = progressOverlay.querySelector('.bulk-delete-progress-bar');
+            const progressText = progressOverlay.querySelector('.bulk-delete-progress-text');
+            const errorsDiv = progressOverlay.querySelector('.bulk-delete-errors');
+
+            const updateProgress = () => {
+                const pct = Math.round((completed / total) * 100);
+                progressBar.style.width = `${ pct }%`;
+                progressText.textContent = `Удалено: ${ completed } / ${ total }`;
+            };
+
+            // Run all delete requests in parallel
+            const deletePromises = records.map(async (record) => {
+                try {
+                    const params = new URLSearchParams();
+                    if (typeof xsrf !== 'undefined') {
+                        params.append('_xsrf', xsrf);
+                    }
+
+                    const response = await fetch(`${ apiBase }/_m_del/${ record.id }`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: params.toString()
+                    });
+
+                    const text = await response.text();
+                    try {
+                        JSON.parse(text);
+                    } catch (parseErr) {
+                        // Invalid JSON response - report as warning but don't stop
+                        errors.push(`#${ record.id } : ${ record.value } : ${ text }`);
+                    }
+                } catch (err) {
+                    errors.push(`#${ record.id } : ${ record.value } : ${ err.message }`);
+                } finally {
+                    completed++;
+                    updateProgress();
+                }
+            });
+
+            await Promise.all(deletePromises);
+
+            // Show errors if any
+            if (errors.length > 0) {
+                errorsDiv.style.display = 'block';
+                errorsDiv.innerHTML = `<div class="alert alert-warning" style="max-height: 200px; overflow-y: auto; font-size: 12px; margin-top: 10px;">
+                    <strong>Предупреждения:</strong><br>
+                    ${ errors.map(e => this.escapeHtml(e)).join('<br>') }
+                </div>`;
+            }
+
+            // Update progress text
+            progressText.textContent = `Удаление завершено: ${ completed } / ${ total }`;
+
+            // Auto-close progress after 1.5s if no errors, else add close button
+            if (errors.length === 0) {
+                setTimeout(() => {
+                    progressOverlay.remove();
+                }, 1500);
+            } else {
+                const closeBtn = document.createElement('button');
+                closeBtn.className = 'btn btn-sm btn-primary';
+                closeBtn.style.marginTop = '10px';
+                closeBtn.textContent = 'Закрыть';
+                closeBtn.addEventListener('click', () => progressOverlay.remove());
+                progressOverlay.querySelector('.integram-modal-body').appendChild(closeBtn);
+            }
+
+            // Clear selection and reload data
+            this.selectedRows.clear();
+            this.data = [];
+            this.rawObjectData = [];
+            this.loadedRecords = 0;
+            this.hasMore = true;
+            this.totalRows = null;
+            await this.loadData(false);
+        }
+
+        /**
          * Toggle export menu visibility
          * @param {Event} event - Click event
          */
@@ -5620,9 +5849,15 @@ class IntegramTable {
                 let json;
                 const maxLimit = 1000000; // Request up to 1 million records in single request
 
-                if (this.options.dataSource === 'table') {
+                if (this.options.dataSource === 'table' || (this.objectTableId && !this.options.tableTypeId)) {
                     // Load data from table format
+                    // Use objectTableId if tableTypeId is not explicitly set (auto-detected JSON_OBJ format)
+                    const savedTableTypeId = this.options.tableTypeId;
+                    if (!this.options.tableTypeId && this.objectTableId) {
+                        this.options.tableTypeId = this.objectTableId;
+                    }
                     json = await this.loadDataFromTableForExport(0, maxLimit);
+                    this.options.tableTypeId = savedTableTypeId;
                 } else {
                     // Load data from report format
                     json = await this.loadDataFromReportForExport(0, maxLimit);
@@ -5669,8 +5904,18 @@ class IntegramTable {
                 params.set('ORDER', orderValue);
             }
 
-            const separator = this.options.apiUrl.includes('?') ? '&' : '?';
-            const response = await fetch(`${ this.options.apiUrl }${ separator }${ params }`);
+            // Strip existing LIMIT from apiUrl to avoid conflict with export LIMIT
+            let baseUrl = this.options.apiUrl;
+            if (baseUrl.includes('?')) {
+                const [path, queryString] = baseUrl.split('?');
+                const existingParams = new URLSearchParams(queryString);
+                existingParams.delete('LIMIT');
+                const remaining = existingParams.toString();
+                baseUrl = remaining ? `${ path }?${ remaining }` : path;
+            }
+
+            const separator = baseUrl.includes('?') ? '&' : '?';
+            const response = await fetch(`${ baseUrl }${ separator }${ params }`);
             const json = await response.json();
 
             // Check if this is object format
