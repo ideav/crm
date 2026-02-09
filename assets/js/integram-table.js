@@ -1082,9 +1082,16 @@ class IntegramTable {
         }
 
         renderCell(column, value, rowIndex, colIndex) {
-            // Use normalizeFormat to get correct display format from column.type
-            // (column.format is for filters, column.type is the actual base type ID)
-            const format = column.type ? this.normalizeFormat(column.type) : (column.format || 'SHORT');
+            // Determine display format:
+            // 1. For report data sources, column.format may already be a symbolic format like 'BOOLEAN'
+            // 2. For object/table data sources, use normalizeFormat(column.type) to convert type ID
+            // 3. Fall back to 'SHORT'
+            const validFormats = ['SHORT', 'CHARS', 'DATE', 'NUMBER', 'SIGNED', 'BOOLEAN',
+                                  'MEMO', 'DATETIME', 'FILE', 'HTML', 'BUTTON', 'PWD',
+                                  'GRANT', 'REPORT_COLUMN', 'PATH'];
+            const upperFormat = column.format ? String(column.format).toUpperCase() : '';
+            const format = validFormats.includes(upperFormat) ? upperFormat :
+                          (column.type ? this.normalizeFormat(column.type) : 'SHORT');
             let cellClass = '';
             let displayValue = value || '';
             let customStyle = '';
