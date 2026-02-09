@@ -1,0 +1,11 @@
+<div class="tasks-container">
+    <div id="tasks-table"
+         data-integram-table
+         data-api-url="/{_global_.z}/metadata/{_global_.id}"
+         data-page-size="20"
+         data-cookie-prefix="tasks-object"
+         data-title=""
+         data-instance-name="tasksTable"></div>
+</div>
+<link rel="stylesheet" href="/download/{_global_.z}/css/integram-table.css?16" />
+<script src="/download/{_global_.z}/js/integram-table.js?16"></script>
