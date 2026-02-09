@@ -5433,52 +5433,28 @@ class IntegramTable {
 
         /**
          * Load all data matching current filters for export
-         * Fetches data in batches until all records are loaded
+         * Requests all data in a single request with LIMIT=1000000
          * @returns {Promise<Array>} Array of all data rows
          */
         async loadAllDataForExport() {
-            const allRows = [];
-            let offset = 0;
-            const batchSize = 1000; // Load in batches of 1000 records
-            let hasMore = true;
+            try {
+                let json;
+                const maxLimit = 1000000; // Request up to 1 million records in single request
 
-            while (hasMore) {
-                try {
-                    let json;
-                    let newRows = [];
-
-                    if (this.options.dataSource === 'table') {
-                        // Load data from table format
-                        json = await this.loadDataFromTableForExport(offset, batchSize);
-                        newRows = json.rows || [];
-                    } else {
-                        // Load data from report format
-                        json = await this.loadDataFromReportForExport(offset, batchSize);
-                        newRows = json.rows || [];
-                    }
-
-                    // Add rows to result
-                    if (newRows.length > 0) {
-                        allRows.push(...newRows);
-                        offset += newRows.length;
-                    }
-
-                    // Check if we got fewer rows than requested (end of data)
-                    hasMore = newRows.length === batchSize;
-
-                    // Safety limit to prevent infinite loops (max 100k records)
-                    if (allRows.length >= 100000) {
-                        console.warn('Export limit reached: 100,000 records');
-                        hasMore = false;
-                    }
-
-                } catch (error) {
-                    console.error('Error loading export data:', error);
-                    throw error;
+                if (this.options.dataSource === 'table') {
+                    // Load data from table format
+                    json = await this.loadDataFromTableForExport(0, maxLimit);
+                } else {
+                    // Load data from report format
+                    json = await this.loadDataFromReportForExport(0, maxLimit);
                 }
-            }
 
-            return allRows;
+                return json.rows || [];
+
+            } catch (error) {
+                console.error('Error loading export data:', error);
+                throw error;
+            }
         }
 
         /**
