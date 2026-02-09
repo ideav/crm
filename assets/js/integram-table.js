@@ -1190,7 +1190,8 @@ class IntegramTable {
                     break;
                 case 'PWD':
                     cellClass = 'pwd-cell';
-                    displayValue = '******';
+                    // Only mask with asterisks if there's a value, show empty if empty
+                    displayValue = (value !== null && value !== undefined && value !== '') ? '******' : '';
                     break;
                 case 'FILE':
                     cellClass = 'file-cell';
@@ -6285,7 +6286,8 @@ class IntegramTable {
                             value = cellValue ? 'Да' : 'Нет';
                             break;
                         case 'PWD':
-                            value = '******';
+                            // Only mask with asterisks if there's a value
+                            value = (cellValue !== null && cellValue !== undefined && cellValue !== '') ? '******' : '';
                             break;
                         case 'HTML':
                         case 'BUTTON':
@@ -6332,7 +6334,8 @@ class IntegramTable {
                             value = cellValue ? 'Да' : 'Нет';
                             break;
                         case 'PWD':
-                            value = '******';
+                            // Only mask with asterisks if there's a value
+                            value = (cellValue !== null && cellValue !== undefined && cellValue !== '') ? '******' : '';
                             break;
                         case 'HTML':
                         case 'BUTTON':
