@@ -807,6 +807,22 @@ class IntegramTable {
                             <button class="btn btn-sm btn-outline-secondary mr-2" onclick="window.${ instanceName }.toggleFilters()">
                                 ${ this.filtersEnabled ? '✓' : '' } Фильтры
                             </button>
+                            <div class="integram-table-export-container">
+                                <button class="btn btn-sm btn-outline-secondary mr-2" onclick="window.${ instanceName }.toggleExportMenu(event)" title="Экспорт таблицы">
+                                    📥 Экспорт
+                                </button>
+                                <div class="integram-export-menu" id="${ instanceName }-export-menu" style="display: none;">
+                                    <div class="export-menu-item" onclick="window.${ instanceName }.exportTable('xlsx')">
+                                        <span class="export-icon">📊</span> XLSX (Excel)
+                                    </div>
+                                    <div class="export-menu-item" onclick="window.${ instanceName }.exportTable('xls')">
+                                        <span class="export-icon">📗</span> XLS (Excel 97-2003)
+                                    </div>
+                                    <div class="export-menu-item" onclick="window.${ instanceName }.exportTable('csv')">
+                                        <span class="export-icon">📄</span> CSV
+                                    </div>
+                                </div>
+                            </div>
                             <div class="integram-table-settings" onclick="window.${ instanceName }.openTableSettings()" title="Настройка">
                                 ⚙️
                             </div>
@@ -5036,6 +5052,476 @@ class IntegramTable {
                 toast.classList.add('fade-out');
                 setTimeout(() => toast.remove(), 300);
             });
+        }
+
+        /**
+         * Toggle export menu visibility
+         * @param {Event} event - Click event
+         */
+        toggleExportMenu(event) {
+            if (event) {
+                event.stopPropagation();
+            }
+
+            const menuId = `${ this.options.instanceName }-export-menu`;
+            const menu = document.getElementById(menuId);
+
+            if (!menu) return;
+
+            const isVisible = menu.style.display !== 'none';
+
+            // Hide all export menus first
+            document.querySelectorAll('.integram-export-menu').forEach(m => {
+                m.style.display = 'none';
+            });
+
+            if (!isVisible) {
+                menu.style.display = 'block';
+
+                // Close menu when clicking outside
+                setTimeout(() => {
+                    const closeHandler = (e) => {
+                        if (!menu.contains(e.target) && !e.target.closest('.integram-table-export-container')) {
+                            menu.style.display = 'none';
+                            document.removeEventListener('click', closeHandler);
+                        }
+                    };
+                    document.addEventListener('click', closeHandler);
+                }, 0);
+            }
+        }
+
+        /**
+         * Export table data to specified format
+         * Loads ALL data matching current filters before export
+         * @param {string} format - Export format: 'csv', 'xlsx', or 'xls'
+         */
+        async exportTable(format) {
+            // Hide export menu
+            const menuId = `${ this.options.instanceName }-export-menu`;
+            const menu = document.getElementById(menuId);
+            if (menu) {
+                menu.style.display = 'none';
+            }
+
+            try {
+                // Get visible columns in current order
+                const orderedColumns = this.columnOrder
+                    .map(id => this.columns.find(c => c.id === id))
+                    .filter(c => c && this.visibleColumns.includes(c.id));
+
+                if (orderedColumns.length === 0) {
+                    this.showToast('Нет видимых колонок для экспорта', 'error');
+                    return;
+                }
+
+                // Show loading message
+                this.showToast('Загрузка всех данных для экспорта...', 'info');
+
+                // Load all data matching current filters
+                const allData = await this.loadAllDataForExport();
+
+                if (allData.length === 0) {
+                    this.showToast('Нет данных для экспорта', 'error');
+                    return;
+                }
+
+                // Show progress message
+                this.showToast(`Экспорт ${ allData.length } записей...`, 'info');
+
+                // Prepare data for export
+                const exportData = this.prepareExportDataFromRows(allData, orderedColumns);
+
+                // Export based on format
+                switch (format.toLowerCase()) {
+                    case 'csv':
+                        this.exportToCSV(exportData, orderedColumns);
+                        break;
+                    case 'xlsx':
+                    case 'xls':
+                        await this.exportToExcel(exportData, orderedColumns, format);
+                        break;
+                    default:
+                        this.showToast(`Неподдерживаемый формат: ${ format }`, 'error');
+                }
+            } catch (error) {
+                console.error('Export error:', error);
+                this.showToast(`Ошибка экспорта: ${ error.message }`, 'error');
+            }
+        }
+
+        /**
+         * Load all data matching current filters for export
+         * Fetches data in batches until all records are loaded
+         * @returns {Promise<Array>} Array of all data rows
+         */
+        async loadAllDataForExport() {
+            const allRows = [];
+            let offset = 0;
+            const batchSize = 1000; // Load in batches of 1000 records
+            let hasMore = true;
+
+            while (hasMore) {
+                try {
+                    let json;
+                    let newRows = [];
+
+                    if (this.options.dataSource === 'table') {
+                        // Load data from table format
+                        json = await this.loadDataFromTableForExport(offset, batchSize);
+                        newRows = json.rows || [];
+                    } else {
+                        // Load data from report format
+                        json = await this.loadDataFromReportForExport(offset, batchSize);
+                        newRows = json.rows || [];
+                    }
+
+                    // Add rows to result
+                    if (newRows.length > 0) {
+                        allRows.push(...newRows);
+                        offset += newRows.length;
+                    }
+
+                    // Check if we got fewer rows than requested (end of data)
+                    hasMore = newRows.length === batchSize;
+
+                    // Safety limit to prevent infinite loops (max 100k records)
+                    if (allRows.length >= 100000) {
+                        console.warn('Export limit reached: 100,000 records');
+                        hasMore = false;
+                    }
+
+                } catch (error) {
+                    console.error('Error loading export data:', error);
+                    throw error;
+                }
+            }
+
+            return allRows;
+        }
+
+        /**
+         * Load data from report format for export
+         * @param {number} offset - Starting offset
+         * @param {number} limit - Number of records to fetch
+         * @returns {Promise<Object>} JSON response with rows
+         */
+        async loadDataFromReportForExport(offset, limit) {
+            const params = new URLSearchParams();
+
+            // Add LIMIT for pagination
+            const isMetadataUrl = /\/metadata\/\d+/.test(this.options.apiUrl);
+            if (!isMetadataUrl) {
+                params.set('LIMIT', `${ offset },${ limit }`);
+            }
+
+            // Apply current filters
+            const filters = this.filters || {};
+            Object.keys(filters).forEach(colId => {
+                const filter = filters[colId];
+                if (filter.value || filter.type === '%' || filter.type === '!%') {
+                    const column = this.columns.find(c => c.id === colId);
+                    if (column) {
+                        this.applyFilter(params, column, filter);
+                    }
+                }
+            });
+
+            // Add ORDER parameter for sorting
+            if (this.sortColumn !== null && this.sortDirection !== null) {
+                const orderValue = this.sortDirection === 'desc' ? `-${this.sortColumn}` : this.sortColumn;
+                params.set('ORDER', orderValue);
+            }
+
+            const separator = this.options.apiUrl.includes('?') ? '&' : '?';
+            const response = await fetch(`${ this.options.apiUrl }${ separator }${ params }`);
+            const json = await response.json();
+
+            // Check if this is object format
+            if (this.isObjectFormat(json)) {
+                return await this.parseObjectFormat(json, false);
+            }
+
+            // Check if response is JSON_OBJ array format
+            if (this.isJsonDataArrayFormat(json)) {
+                return await this.parseJsonDataArray(json, false);
+            }
+
+            // Transform column-based data to row-based data
+            const columnData = json.data || [];
+            let rows = [];
+
+            if (columnData.length > 0 && Array.isArray(columnData[0])) {
+                const numRows = columnData[0].length;
+                for (let rowIndex = 0; rowIndex < numRows; rowIndex++) {
+                    const row = [];
+                    for (let colIndex = 0; colIndex < columnData.length; colIndex++) {
+                        row.push(columnData[colIndex][rowIndex]);
+                    }
+                    rows.push(row);
+                }
+            } else {
+                rows = columnData;
+            }
+
+            return { rows, columns: json.columns || [] };
+        }
+
+        /**
+         * Load data from table format for export
+         * @param {number} offset - Starting offset
+         * @param {number} limit - Number of records to fetch
+         * @returns {Promise<Object>} JSON response with rows
+         */
+        async loadDataFromTableForExport(offset, limit) {
+            const params = new URLSearchParams();
+            params.set('JSON_OBJ', '1');
+            params.set('LIMIT', `${ offset },${ limit }`);
+
+            if (this.options.parentId) {
+                params.set('F_U', this.options.parentId);
+            }
+
+            // Apply current filters
+            const filters = this.filters || {};
+            Object.keys(filters).forEach(colId => {
+                const filter = filters[colId];
+                if (filter.value || filter.type === '%' || filter.type === '!%') {
+                    const column = this.columns.find(c => c.id === colId);
+                    if (column) {
+                        this.applyFilter(params, column, filter);
+                    }
+                }
+            });
+
+            // Add ORDER parameter for sorting
+            if (this.sortColumn !== null && this.sortDirection !== null) {
+                const orderValue = this.sortDirection === 'desc' ? `-${this.sortColumn}` : this.sortColumn;
+                params.set('ORDER', orderValue);
+            }
+
+            const apiBase = this.getApiBase();
+            const url = `${ apiBase }/object/${ this.options.tableTypeId }/?${ params }`;
+
+            const response = await fetch(url);
+            const json = await response.json();
+
+            // Parse JSON_OBJ format
+            if (this.isJsonDataArrayFormat(json)) {
+                return await this.parseJsonDataArray(json, false);
+            }
+
+            return { rows: [], columns: [] };
+        }
+
+        /**
+         * Prepare export data from raw rows
+         * @param {Array} rows - Array of data rows
+         * @param {Array} columns - Array of column definitions
+         * @returns {Array} Array of export data
+         */
+        prepareExportDataFromRows(rows, columns) {
+            return rows.map(row => {
+                const exportRow = [];
+                columns.forEach(col => {
+                    const cellValue = row[this.columns.indexOf(col)];
+                    const format = col.format || 'SHORT';
+                    let value = cellValue || '';
+
+                    // Convert special formats to plain text
+                    switch (format) {
+                        case 'BOOLEAN':
+                            value = cellValue ? 'Да' : 'Нет';
+                            break;
+                        case 'PWD':
+                            value = '******';
+                            break;
+                        case 'HTML':
+                        case 'BUTTON':
+                            // Strip HTML tags for export
+                            const tmp = document.createElement('div');
+                            tmp.innerHTML = String(value);
+                            value = tmp.textContent || tmp.innerText || '';
+                            break;
+                        default:
+                            value = String(value);
+                    }
+
+                    exportRow.push(value);
+                });
+                return exportRow;
+            });
+        }
+
+        /**
+         * Prepare data for export (convert to plain text values)
+         * @param {Array} columns - Array of column definitions
+         * @returns {Array} Array of data rows
+         */
+        prepareExportData(columns) {
+            return this.data.map(row => {
+                const exportRow = [];
+                columns.forEach(col => {
+                    const cellValue = row[this.columns.indexOf(col)];
+                    const format = col.format || 'SHORT';
+                    let value = cellValue || '';
+
+                    // Convert special formats to plain text
+                    switch (format) {
+                        case 'BOOLEAN':
+                            value = cellValue ? 'Да' : 'Нет';
+                            break;
+                        case 'PWD':
+                            value = '******';
+                            break;
+                        case 'HTML':
+                        case 'BUTTON':
+                            // Strip HTML tags for export
+                            const tmp = document.createElement('div');
+                            tmp.innerHTML = String(value);
+                            value = tmp.textContent || tmp.innerText || '';
+                            break;
+                        default:
+                            value = String(value);
+                    }
+
+                    exportRow.push(value);
+                });
+                return exportRow;
+            });
+        }
+
+        /**
+         * Export data to CSV format
+         * @param {Array} data - Array of data rows
+         * @param {Array} columns - Array of column definitions
+         */
+        exportToCSV(data, columns) {
+            // Prepare CSV content
+            const headers = columns.map(col => col.name);
+            const csvRows = [headers];
+
+            // Add data rows
+            data.forEach(row => {
+                const csvRow = row.map(cell => {
+                    // Escape quotes and wrap in quotes if contains comma, newline, or quote
+                    const cellStr = String(cell);
+                    if (cellStr.includes(',') || cellStr.includes('\n') || cellStr.includes('"')) {
+                        return '"' + cellStr.replace(/"/g, '""') + '"';
+                    }
+                    return cellStr;
+                });
+                csvRows.push(csvRow);
+            });
+
+            // Join rows with newlines
+            const csvContent = csvRows.map(row => row.join(',')).join('\n');
+
+            // Add BOM for proper UTF-8 encoding in Excel
+            const BOM = '\uFEFF';
+            const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+
+            // Download file
+            const filename = `${ this.options.title || 'table' }_${ new Date().toISOString().slice(0, 10) }.csv`;
+            this.downloadBlob(blob, filename);
+
+            this.showToast('CSV файл успешно экспортирован', 'success');
+        }
+
+        /**
+         * Export data to Excel format (XLSX or XLS)
+         * Uses SheetJS library loaded from CDN
+         * @param {Array} data - Array of data rows
+         * @param {Array} columns - Array of column definitions
+         * @param {string} format - 'xlsx' or 'xls'
+         */
+        async exportToExcel(data, columns, format) {
+            // Load SheetJS library if not already loaded
+            if (typeof XLSX === 'undefined') {
+                this.showToast('Загрузка библиотеки экспорта...', 'info');
+
+                try {
+                    await this.loadScript('https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js');
+                } catch (error) {
+                    this.showToast('Ошибка загрузки библиотеки экспорта', 'error');
+                    return;
+                }
+            }
+
+            // Prepare worksheet data
+            const headers = columns.map(col => col.name);
+            const wsData = [headers, ...data];
+
+            // Create workbook and worksheet
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+            // Auto-size columns
+            const colWidths = headers.map((header, idx) => {
+                const maxLength = Math.max(
+                    header.length,
+                    ...data.map(row => String(row[idx] || '').length)
+                );
+                return { wch: Math.min(maxLength + 2, 50) };
+            });
+            ws['!cols'] = colWidths;
+
+            // Add worksheet to workbook
+            XLSX.utils.book_append_sheet(wb, ws, 'Data');
+
+            // Determine file extension and type
+            const ext = format.toLowerCase();
+            const bookType = ext === 'xls' ? 'xls' : 'xlsx';
+
+            // Generate file
+            const filename = `${ this.options.title || 'table' }_${ new Date().toISOString().slice(0, 10) }.${ ext }`;
+            XLSX.writeFile(wb, filename, { bookType });
+
+            this.showToast(`${ ext.toUpperCase() } файл успешно экспортирован`, 'success');
+        }
+
+        /**
+         * Load external script dynamically
+         * @param {string} url - Script URL
+         * @returns {Promise} Promise that resolves when script is loaded
+         */
+        loadScript(url) {
+            return new Promise((resolve, reject) => {
+                // Check if script is already loaded or loading
+                const existing = document.querySelector(`script[src="${ url }"]`);
+                if (existing) {
+                    if (typeof XLSX !== 'undefined') {
+                        resolve();
+                    } else {
+                        existing.addEventListener('load', resolve);
+                        existing.addEventListener('error', reject);
+                    }
+                    return;
+                }
+
+                const script = document.createElement('script');
+                script.src = url;
+                script.async = true;
+                script.addEventListener('load', resolve);
+                script.addEventListener('error', () => reject(new Error(`Failed to load script: ${ url }`)));
+                document.head.appendChild(script);
+            });
+        }
+
+        /**
+         * Download blob as file
+         * @param {Blob} blob - Blob to download
+         * @param {string} filename - Filename
+         */
+        downloadBlob(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         }
     }
 

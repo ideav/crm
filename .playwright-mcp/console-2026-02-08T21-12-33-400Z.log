@@ -1,0 +1,8 @@
+[      91ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ https://localhost/experiments/metadata:0
+[      91ms] [ERROR] Error loading global metadata: TypeError: Failed to fetch
+    at IntegramTable.loadGlobalMetadata (http://localhost:8888/assets/js/integram-table.js:159:40)
+    at IntegramTable.init (http://localhost:8888/assets/js/integram-table.js:152:18)
+    at new IntegramTable (http://localhost:8888/assets/js/integram-table.js:115:18)
+    at http://localhost:8888/experiments/test-export-functionality.html:200:27 @ http://localhost:8888/assets/js/integram-table.js:171
+[      92ms] [ERROR] Error loading data: SyntaxError: Unexpected token '<', "<!DOCTYPE "... is not valid JSON @ http://localhost:8888/assets/js/integram-table.js:252
+[     108ms] [ERROR] Failed to load resource: the server responded with a status of 404 (File not found) @ http://localhost:8888/favicon.ico:0

@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Export Functionality - IntegramTable</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <style>
+        body {
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .test-container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
+
+        .integram-table-wrapper {
+            position: relative;
+            margin: 20px 0;
+        }
+
+        .integram-table-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .integram-table-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .integram-table-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .integram-table-settings {
+            cursor: pointer;
+            padding: 8px 12px;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+            font-size: 14px;
+        }
+
+        .integram-table-settings:hover {
+            background-color: #f0f0f0;
+        }
+
+        .integram-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .integram-table th {
+            background: #f8f9fa;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid #dee2e6;
+            border-right: 1px solid #e9ecef;
+        }
+
+        .integram-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #dee2e6;
+            border-right: 1px solid #e9ecef;
+        }
+
+        .integram-table tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        /* Export button and dropdown styles */
+        .integram-table-export-container {
+            position: relative;
+            display: inline-block;
+        }
+
+        .integram-export-menu {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            margin-top: 4px;
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            z-index: 1000;
+            min-width: 200px;
+        }
+
+        .export-menu-item {
+            padding: 10px 15px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            transition: background-color 0.2s;
+        }
+
+        .export-menu-item:hover {
+            background-color: #f8f9fa;
+        }
+
+        .export-menu-item:first-child {
+            border-top-left-radius: 4px;
+            border-top-right-radius: 4px;
+        }
+
+        .export-menu-item:last-child {
+            border-bottom-left-radius: 4px;
+            border-bottom-right-radius: 4px;
+        }
+
+        .export-icon {
+            margin-right: 10px;
+            font-size: 16px;
+        }
+
+        /* Toast notifications */
+        .integram-toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            background: #333;
+            color: white;
+            border-radius: 4px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            z-index: 10000;
+            cursor: pointer;
+            max-width: 400px;
+        }
+
+        .integram-toast-success {
+            background: #28a745;
+        }
+
+        .integram-toast-error {
+            background: #dc3545;
+        }
+
+        .integram-toast-info {
+            background: #17a2b8;
+        }
+
+        .integram-toast.fade-out {
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .info-panel {
+            background: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .info-panel h5 {
+            margin-top: 0;
+            color: #004085;
+        }
+
+        .info-panel ul {
+            margin-bottom: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="mb-4">Test Export Functionality</h1>
+
+        <div class="info-panel">
+            <h5>📥 Export Feature Test</h5>
+            <ul>
+                <li>Click the "📥 Экспорт" button to see the dropdown menu</li>
+                <li>Choose from three formats: XLSX (Excel), XLS (Excel 97-2003), or CSV</li>
+                <li>The table data will be exported with current visible columns only</li>
+                <li>Test data includes various formats: text, numbers, dates, and booleans</li>
+            </ul>
+        </div>
+
+        <div id="test-table"></div>
+    </div>
+
+    <script src="../assets/js/integram-table.js"></script>
+    <script>
+        // Create test instance with sample data
+        const testTable = new IntegramTable('test-table', {
+            title: 'Sample Data Table',
+            instanceName: 'testTable',
+            pageSize: 10,
+            dataSource: 'report'
+        });
+
+        // Manually set columns and data for testing
+        testTable.columns = [
+            { id: '1', name: 'ID', format: 'NUMBER' },
+            { id: '2', name: 'Название', format: 'CHARS' },
+            { id: '3', name: 'Описание', format: 'MEMO' },
+            { id: '4', name: 'Цена', format: 'NUMBER' },
+            { id: '5', name: 'Дата создания', format: 'DATE' },
+            { id: '6', name: 'Активно', format: 'BOOLEAN' }
+        ];
+
+        testTable.data = [
+            ['1', 'Товар 1', 'Описание товара 1', '1000', '01.01.2024', true],
+            ['2', 'Товар 2', 'Описание товара 2 с очень длинным текстом', '2500', '15.01.2024', true],
+            ['3', 'Товар 3', 'Краткое описание', '500', '20.02.2024', false],
+            ['4', 'Товар 4', 'Описание с запятой, точкой и "кавычками"', '3000', '05.03.2024', true],
+            ['5', 'Товар 5', 'Многострочное\nописание\nтовара', '1500', '10.04.2024', true],
+            ['6', 'Товар 6', 'Обычное описание', '800', '25.04.2024', false],
+            ['7', 'Товар 7', 'Еще одно описание', '1200', '01.05.2024', true],
+            ['8', 'Товар 8', 'Тест экспорта данных', '2000', '15.05.2024', true],
+            ['9', 'Товар 9', 'Проверка функционала', '3500', '20.06.2024', false],
+            ['10', 'Товар 10', 'Последняя запись', '900', '30.06.2024', true]
+        ];
+
+        testTable.columnOrder = ['1', '2', '3', '4', '5', '6'];
+        testTable.visibleColumns = ['1', '2', '3', '4', '5', '6'];
+        testTable.loadedRecords = 10;
+        testTable.totalRows = 10;
+        testTable.hasMore = false;
+
+        // Render the table
+        testTable.render();
+
+        console.log('Test table initialized with export functionality');
+    </script>
+</body>
+</html>
