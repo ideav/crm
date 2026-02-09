@@ -1257,29 +1257,53 @@ class IntegramTable {
                 // In object format, ALL columns use the record ID from rawObjectData
                 const isInObjectFormat = this.rawObjectData.length > 0 && this.objectTableId;
 
+                // TRACE: Log edit-icon decision process
+                if (window.INTEGRAM_DEBUG) {
+                    console.log(`[TRACE] Edit-icon decision for column ${column.id} (${column.name}), row ${rowIndex}:`);
+                    console.log(`  - isEditable: ${isEditable}`);
+                    console.log(`  - isInObjectFormat: ${isInObjectFormat}`);
+                    console.log(`  - rawObjectData.length: ${this.rawObjectData.length}`);
+                    console.log(`  - objectTableId: ${this.objectTableId}`);
+                    console.log(`  - column.paramId: ${column.paramId}`);
+                    console.log(`  - column.ref_id: ${column.ref_id}`);
+                    console.log(`  - idColId: ${idColId}`);
+                }
+
                 if (isInObjectFormat) {
                     // For reference fields with parsed "id:Value", use the reference id
                     if (refValueId && column.ref_id != null) {
                         recordId = refValueId;
                         typeId = column.ref || column.orig || column.type || '';
+                        if (window.INTEGRAM_DEBUG) {
+                            console.log(`  - Using reference field: recordId=${recordId}, typeId=${typeId}`);
+                        }
                     } else {
                         // For ALL columns in object format, use 'i' from rawObjectData
                         const rawItem = this.rawObjectData[rowIndex];
                         recordId = rawItem && rawItem.i ? String(rawItem.i) : '';
                         // For first column, use objectTableId; for requisites, use their orig or type
                         typeId = column.id === String(this.objectTableId) ? this.objectTableId : (column.orig || column.type || '');
+                        if (window.INTEGRAM_DEBUG) {
+                            console.log(`  - Using object format: recordId=${recordId}, typeId=${typeId}`);
+                        }
                     }
                 } else if (idColId !== null) {
                     // If we have an ID column reference, get the record ID from it
                     const idColIndex = this.columns.findIndex(c => c.id === idColId);
                     recordId = idColIndex !== -1 && this.data[rowIndex] ? this.data[rowIndex][idColIndex] : '';
                     typeId = column.orig || column.type || '';
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log(`  - Using ID column reference: recordId=${recordId}, typeId=${typeId}`);
+                    }
                 } else {
                     // No ID column - need to determine parent ID using the logic from the issue
                     // A) If first column: look for column with type={column.type} and name ending in ID
                     // B) If requisite: look for column with type={parent object id} and name ending in ID
                     recordId = this.determineParentRecordId(column, rowIndex);
                     typeId = column.orig || column.type || '';
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log(`  - Using determineParentRecordId: recordId=${recordId}, typeId=${typeId}`);
+                    }
                 }
 
                 const instanceName = this.options.instanceName;
@@ -1288,22 +1312,50 @@ class IntegramTable {
                 // Don't show edit icon in empty cells - no point editing nothing
                 const hasValue = value !== null && value !== undefined && value !== '';
                 let shouldShowEditIcon = hasValue && recordId && recordId !== '' && recordId !== '0';
+
+                if (window.INTEGRAM_DEBUG) {
+                    console.log(`  - hasValue: ${hasValue} (value: ${JSON.stringify(value)})`);
+                    console.log(`  - recordId: ${recordId}`);
+                    console.log(`  - Initial shouldShowEditIcon: ${shouldShowEditIcon}`);
+                }
+
                 // In report data source, hide edit icon when no corresponding ID column exists
                 if (shouldShowEditIcon && this.options.dataSource === 'report' && idColId === null) {
                     shouldShowEditIcon = false;
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log(`  - Report data source with no ID column -> shouldShowEditIcon: false`);
+                    }
                 }
                 // For table data source (data-source-type="table"), show edit icon when
                 // data-col-type (paramId) matches window.id (objectTableId)
                 const isTableDataSource = this.getDataSourceType() === 'table';
                 const colTypeMatchesTableId = String(column.paramId) === String(this.objectTableId);
+
+                if (window.INTEGRAM_DEBUG) {
+                    console.log(`  - isTableDataSource: ${isTableDataSource} (dataSourceType: ${this.getDataSourceType()})`);
+                    console.log(`  - colTypeMatchesTableId: ${colTypeMatchesTableId} (paramId: ${column.paramId}, objectTableId: ${this.objectTableId})`);
+                }
+
                 if (shouldShowEditIcon && isTableDataSource && colTypeMatchesTableId) {
                     // Table data source with matching col type - always show edit icon
                     // No further restrictions needed
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log(`  - Table data source with matching col type -> keeping shouldShowEditIcon: true`);
+                    }
                 } else if (shouldShowEditIcon && isInObjectFormat) {
                     // For object format data, restrict edit icon to first column or reference fields
                     const isFirstColumn = column.id === String(this.objectTableId);
                     const isReferenceField = column.ref_id != null;
+                    const prevValue = shouldShowEditIcon;
                     shouldShowEditIcon = isFirstColumn || isReferenceField;
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log(`  - Object format restrictions: isFirstColumn=${isFirstColumn} (column.id=${column.id}), isReferenceField=${isReferenceField}`);
+                        console.log(`  - shouldShowEditIcon: ${prevValue} -> ${shouldShowEditIcon}`);
+                    }
+                }
+
+                if (window.INTEGRAM_DEBUG) {
+                    console.log(`  - Final shouldShowEditIcon: ${shouldShowEditIcon}`);
                 }
 
                 if (shouldShowEditIcon) {
