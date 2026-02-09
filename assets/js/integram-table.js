@@ -5684,7 +5684,7 @@ class IntegramTable {
                         params.append('_xsrf', xsrf);
                     }
 
-                    const response = await fetch(`${ apiBase }/_m_del/${ record.id }`, {
+                    const response = await fetch(`${ apiBase }/_m_del/${ record.id }?JSON`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                         body: params.toString()
