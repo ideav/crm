@@ -1165,7 +1165,13 @@ class IntegramTable {
                 case 'FILE':
                     cellClass = 'file-cell';
                     if (value && value !== '') {
-                        // Display as a download link if value exists
+                        // Check if value is already an HTML anchor tag (from object/ endpoint)
+                        if (typeof value === 'string' && value.trim().startsWith('<a')) {
+                            // Value is already HTML link - add file-link class and render as-is
+                            displayValue = value.replace('<a', '<a class="file-link"');
+                            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
+                        }
+                        // Display as a download link if value is a path
                         const apiBase = this.getApiBase();
                         const fileName = value.split('/').pop() || value;
                         displayValue = `<a href="${ apiBase }/file/${ value }" target="_blank" class="file-link" title="Скачать файл">${ this.escapeHtml(fileName) }</a>`;
@@ -4043,6 +4049,13 @@ class IntegramTable {
                             if (datetimeObj && !isNaN(datetimeObj.getTime())) {
                                 return this.formatDateTimeDisplay(datetimeObj);
                             }
+                        }
+                        break;
+                    case 'FILE':
+                        // Check if value is already an HTML anchor tag (from object/ endpoint)
+                        if (typeof value === 'string' && value.trim().startsWith('<a')) {
+                            // Value is already HTML link - add file-link class and return as-is
+                            return value.replace('<a', '<a class="file-link"');
                         }
                         break;
                 }
