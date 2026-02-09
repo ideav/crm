@@ -1169,14 +1169,14 @@ class IntegramTable {
                         const apiBase = this.getApiBase();
                         const fileName = value.split('/').pop() || value;
                         displayValue = `<a href="${ apiBase }/file/${ value }" target="_blank" class="file-link" title="Скачать файл">${ this.escapeHtml(fileName) }</a>`;
-                        return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.options.dataSource }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
+                        return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
                     }
                     break;
                 case 'HTML':
-                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.options.dataSource }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
+                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
                 case 'BUTTON':
                     displayValue = `<button class="btn btn-sm btn-primary">${ value || 'Действие' }</button>`;
-                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.options.dataSource }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
+                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
             }
 
             let escapedValue = String(displayValue).replace(/&/g, '&amp;')
@@ -1331,7 +1331,7 @@ class IntegramTable {
                 }
             }
 
-            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.options.dataSource }"${ dataTypeAttrs }${ customStyle }${ editableAttrs }>${ escapedValue }</td>`;
+            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }${ editableAttrs }>${ escapedValue }</td>`;
         }
 
         renderScrollCounter() {
@@ -3467,6 +3467,22 @@ class IntegramTable {
             }
             // Fallback: remove everything after ? or last /
             return url.split('?')[0].replace(/\/[^\/]*$/, '');
+        }
+
+        /**
+         * Determine the data source type based on the API URL
+         * @returns {string} 'report' if URL contains /report/, 'table' if URL contains /metadata/
+         */
+        getDataSourceType() {
+            const url = this.options.apiUrl;
+            if (url && /\/report\//.test(url)) {
+                return 'report';
+            }
+            if (url && /\/metadata\//.test(url)) {
+                return 'table';
+            }
+            // Fallback to configured dataSource option
+            return this.options.dataSource;
         }
 
         parseAttrs(attrs) {
