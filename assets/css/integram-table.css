@@ -1806,3 +1806,93 @@ td:has(.inline-editor-file) {
     margin-right: 10px;
     font-size: 16px;
 }
+
+/* Checkbox selection mode */
+.integram-table-checkbox-toggle {
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 18px;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    transition: background-color 0.2s;
+}
+
+.integram-table-checkbox-toggle:hover {
+    background-color: var(--md-hover);
+}
+
+.integram-table-checkbox-toggle.active {
+    background-color: var(--md-selected);
+    color: var(--md-primary);
+}
+
+.checkbox-column-header,
+.checkbox-column-cell,
+.checkbox-column-filter {
+    width: 36px !important;
+    min-width: 36px !important;
+    max-width: 36px !important;
+    text-align: center;
+    padding: 4px !important;
+}
+
+.checkbox-column-header input[type="checkbox"],
+.checkbox-column-cell input[type="checkbox"] {
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+}
+
+tr.row-selected {
+    background-color: var(--md-selected) !important;
+}
+
+.integram-bulk-delete-btn {
+    margin-left: 4px;
+    font-size: 12px;
+}
+
+.bulk-delete-confirm {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 8px;
+    padding: 4px 8px;
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.bulk-delete-confirm-btn {
+    font-size: 12px !important;
+}
+
+.bulk-delete-cancel-btn {
+    font-size: 12px !important;
+}
+
+/* Bulk delete progress */
+.bulk-delete-progress-bar-container {
+    width: 100%;
+    height: 8px;
+    background: #e0e0e0;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 8px;
+}
+
+.bulk-delete-progress-bar {
+    height: 100%;
+    background: var(--md-primary, #1976d2);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.bulk-delete-progress-text {
+    text-align: center;
+    font-size: 14px;
+    color: var(--md-text-secondary);
+}
