@@ -5194,8 +5194,10 @@ class IntegramTable {
                     [`FR_${ columnId }`]: createdRecordId
                 });
 
-                const separator = this.options.apiUrl.includes('?') ? '&' : '?';
-                const response = await fetch(`${ this.options.apiUrl }${ separator }${ params }`);
+            // Construct clean URL without cached parameters to avoid export pagination issues
+            // Extract base URL without query parameters to ensure fresh request
+            const baseUrl = this.options.apiUrl.split('?')[0];
+            const response = await fetch(`${ baseUrl }?${ params }`);
                 const json = await response.json();
 
                 let newRow = null;
@@ -5620,7 +5622,11 @@ class IntegramTable {
                 let json;
                 const maxLimit = 1000000; // Request up to 1 million records in single request
 
-                if (this.options.dataSource === 'table') {
+                // Auto-detect data format from URL to ensure correct export function is used
+                // This fixes issue where dataSource='report' but API actually returns table/object format
+                const isObjectFormatUrl = /\/object\/\d+/.test(this.options.apiUrl);
+                
+                if (this.options.dataSource === 'table' || isObjectFormatUrl) {
                     // Load data from table format
                     json = await this.loadDataFromTableForExport(0, maxLimit);
                 } else {
