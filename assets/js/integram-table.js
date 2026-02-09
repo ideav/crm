@@ -482,7 +482,8 @@ class IntegramTable {
                         ref_id: req.ref_id || null,
                         orig: req.orig || null,
                         attrs: req.attrs || '',
-                        paramId: req.id // For cell editing: use t{req.id} for requisite columns
+                        paramId: req.id, // For cell editing: use t{req.id} for requisite columns
+                        arr_id: req.arr_id || null // For table requisites (subordinate tables)
                     });
                 });
             }
@@ -647,7 +648,8 @@ class IntegramTable {
                             ref_id: req.ref_id || null,
                             orig: req.orig || null,
                             attrs: req.attrs || '',
-                            paramId: req.id // For cell editing: use t{req.id} for requisite columns
+                            paramId: req.id, // For cell editing: use t{req.id} for requisite columns
+                            arr_id: req.arr_id || null // For table requisites (subordinate tables)
                         });
                     });
                 }
@@ -1120,6 +1122,24 @@ class IntegramTable {
             // Add editable class if this cell has an ID column
             if (isEditable) {
                 cellClass += ' editable-cell';
+            }
+
+            // Handle table requisites (subordinate tables) - display as link with table icon
+            if (column.arr_id) {
+                cellClass = 'subordinate-link-cell';
+                const count = value !== null && value !== undefined && value !== '' ? value : 0;
+                const instanceName = this.options.instanceName;
+                // Get the record ID from rawObjectData for this row
+                let recordId = null;
+                if (this.rawObjectData && this.rawObjectData[rowIndex]) {
+                    recordId = this.rawObjectData[rowIndex].i;
+                }
+                if (recordId) {
+                    displayValue = `<a href="#" class="subordinate-table-link" onclick="window.${ instanceName }.openSubordinateTableFromCell(event, ${ column.arr_id }, ${ recordId }); return false;" title="Открыть подчиненную таблицу"><span class="table-icon">📋</span><span class="subordinate-count">(${ count })</span></a>`;
+                } else {
+                    displayValue = `<span class="table-icon">📋</span><span class="subordinate-count">(${ count })</span>`;
+                }
+                return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }" data-arr-id="${ column.arr_id }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
             }
 
             switch (format) {
@@ -3934,6 +3954,72 @@ class IntegramTable {
             } catch (error) {
                 console.error('Error loading subordinate table:', error);
                 container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${ error.message }</div>`;
+            }
+        }
+
+        /**
+         * Open subordinate table from a cell click in the main table
+         * @param {Event} event - Click event
+         * @param {number} arrId - Subordinate table type ID
+         * @param {number} parentRecordId - Parent record ID
+         */
+        async openSubordinateTableFromCell(event, arrId, parentRecordId) {
+            event.preventDefault();
+            event.stopPropagation();
+
+            try {
+                // Fetch metadata for subordinate table
+                const metadata = await this.fetchMetadata(arrId);
+
+                // Create modal for subordinate table
+                const modalDepth = (window._integramModalDepth || 0) + 1;
+                window._integramModalDepth = modalDepth;
+                const baseZIndex = 1000 + (modalDepth * 10);
+
+                const overlay = document.createElement('div');
+                overlay.className = 'edit-form-overlay subordinate-modal-overlay';
+                overlay.style.zIndex = baseZIndex;
+                overlay.dataset.modalDepth = modalDepth;
+
+                const modal = document.createElement('div');
+                modal.className = 'edit-form-modal subordinate-modal expanded';
+                modal.style.zIndex = baseZIndex + 1;
+                modal.dataset.modalDepth = modalDepth;
+
+                const typeName = this.getMetadataName(metadata);
+
+                modal.innerHTML = `
+                    <div class="edit-form-header">
+                        <h5>${ typeName }</h5>
+                        <button class="edit-form-close subordinate-modal-close">×</button>
+                    </div>
+                    <div class="edit-form-body">
+                        <div class="subordinate-table-container">
+                            <div class="subordinate-table-loading">Загрузка...</div>
+                        </div>
+                    </div>
+                `;
+
+                document.body.appendChild(overlay);
+                document.body.appendChild(modal);
+
+                // Load subordinate table data
+                const container = modal.querySelector('.subordinate-table-container');
+                await this.loadSubordinateTable(container, arrId, parentRecordId, null);
+
+                // Close handler
+                const closeModal = () => {
+                    modal.remove();
+                    overlay.remove();
+                    window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+                };
+
+                modal.querySelector('.subordinate-modal-close').addEventListener('click', closeModal);
+                overlay.addEventListener('click', closeModal);
+
+            } catch (error) {
+                console.error('Error opening subordinate table:', error);
+                this.showToast(`Ошибка: ${ error.message }`, 'error');
             }
         }
 
