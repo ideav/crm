@@ -1756,7 +1756,8 @@ td:has(.inline-editor-reference) {
 td:has(.inline-editor-file) {
     background-color: rgba(25, 118, 210, 0.08) !important;
     padding: 4px !important;
-=======
+}
+/* =======
    Export Menu Styles
    ======================================== */
 
@@ -1804,5 +1805,4 @@ td:has(.inline-editor-file) {
 .export-icon {
     margin-right: 10px;
     font-size: 16px;
->>>>>>> main
 }
