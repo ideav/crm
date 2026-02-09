@@ -1151,8 +1151,8 @@ class IntegramTable {
                     break;
                 case 'BOOLEAN':
                     cellClass = 'boolean-cell';
-                    // Display as checkbox icon
-                    const boolValue = value === true || value === 1 || value === '1' || value === 'true' || value === 'Да';
+                    // Display as checkbox icon: any non-empty value = YES, empty = NO
+                    const boolValue = value !== null && value !== undefined && value !== '' && value !== 0 && value !== false;
                     displayValue = boolValue ? '<span class="boolean-check">✓</span>' : '<span class="boolean-uncheck">✗</span>';
                     return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }" data-base-type="BOOLEAN"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
                     break;
@@ -1821,7 +1821,8 @@ class IntegramTable {
                     editorHtml = `<input type="number" class="inline-editor inline-editor-number" value="${ escapedValue }" ${ format === 'SIGNED' ? 'step="0.01"' : '' }>`;
                     break;
                 case 'BOOLEAN':
-                    const isChecked = currentValue === 'Да' || currentValue === '1' || currentValue === 'true';
+                    // Any non-empty value = checked
+                    const isChecked = currentValue !== null && currentValue !== undefined && currentValue !== '' && currentValue !== '0' && currentValue !== 'false';
                     editorHtml = `<input type="checkbox" class="inline-editor inline-editor-checkbox" ${ isChecked ? 'checked' : '' }>`;
                     break;
                 case 'DATE':
@@ -2584,8 +2585,8 @@ class IntegramTable {
 
             switch (format) {
                 case 'BOOLEAN':
-                    // Display as checkbox icon
-                    const boolValue = newValue === '1' || newValue === 'true' || newValue === true;
+                    // Display as checkbox icon: any non-empty value = YES, empty = NO
+                    const boolValue = newValue !== null && newValue !== undefined && newValue !== '' && newValue !== '0' && newValue !== false;
                     displayValue = boolValue ? '<span class="boolean-check">✓</span>' : '<span class="boolean-uncheck">✗</span>';
                     break;
                 case 'DATE':
@@ -4127,8 +4128,8 @@ class IntegramTable {
 
                 switch (baseFormat) {
                     case 'BOOLEAN':
-                        // Display as checkbox icon
-                        const boolVal = value === true || value === 1 || value === '1' || value === 'true' || value === 'Да';
+                        // Display as checkbox icon: any non-empty value = YES, empty = NO
+                        const boolVal = value !== null && value !== undefined && value !== '' && value !== 0 && value !== false;
                         return boolVal ? '<span class="boolean-check">✓</span>' : '<span class="boolean-uncheck">✗</span>';
                     case 'DATE':
                         if (value) {
