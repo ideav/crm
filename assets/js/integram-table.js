@@ -1159,9 +1159,7 @@ class IntegramTable {
                 case 'BOOLEAN':
                     cellClass = 'boolean-cell';
                     // Display as checkbox icon: any non-empty value = YES, empty = NO
-                    const boolValue = value !== null && value !== undefined && value !== '' && value !== 0 && value !== false;
-                    displayValue = boolValue ? '<span class="boolean-check">✓</span>' : '<span class="boolean-uncheck">✗</span>';
-                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }" data-base-type="BOOLEAN"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
+                    // Don't return early - let code continue to editable logic
                     break;
                 case 'DATE':
                     cellClass = 'date-cell';
@@ -1217,14 +1215,24 @@ class IntegramTable {
                     return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
             }
 
-            let escapedValue = String(displayValue).replace(/&/g, '&amp;')
-                                                      .replace(/</g, '&lt;')
-                                                      .replace(/>/g, '&gt;')
-                                                      .replace(/"/g, '&quot;')
-                                                      .replace(/'/g, '&#039;');
+            let escapedValue;
+            let fullValueForEditing;
 
-            // Store full value for editing before truncation
-            let fullValueForEditing = escapedValue;
+            // BOOLEAN cells use HTML icons, so skip HTML escaping for them
+            if (format === 'BOOLEAN') {
+                const boolValue = value !== null && value !== undefined && value !== '' && value !== 0 && value !== false;
+                escapedValue = boolValue ? '<span class="boolean-check">✓</span>' : '<span class="boolean-uncheck">✗</span>';
+                // Store the original value for editing (1 or 0, or the actual value)
+                fullValueForEditing = boolValue ? '1' : '0';
+            } else {
+                escapedValue = String(displayValue).replace(/&/g, '&amp;')
+                                                          .replace(/</g, '&lt;')
+                                                          .replace(/>/g, '&gt;')
+                                                          .replace(/"/g, '&quot;')
+                                                          .replace(/'/g, '&#039;');
+                // Store full value for editing before truncation
+                fullValueForEditing = escapedValue;
+            }
 
             // Truncate long values if setting is enabled
             if (this.settings.truncateLongValues && escapedValue.length > 127) {
