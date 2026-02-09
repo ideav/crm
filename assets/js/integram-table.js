@@ -349,6 +349,11 @@ class IntegramTable {
                 const metadataResponse = await fetch(metadataUrl);
                 const metadata = await metadataResponse.json();
 
+                // Auto-set table title from metadata if not explicitly provided
+                if (!this.options.title && (metadata.val || metadata.value || metadata.name)) {
+                    this.options.title = metadata.val || metadata.value || metadata.name;
+                }
+
                 // Convert metadata to columns format
                 const columns = [];
 
@@ -441,6 +446,11 @@ class IntegramTable {
          * }
          */
         async parseObjectFormat(metadata, append = false) {
+            // Auto-set table title from metadata if not explicitly provided
+            if (!this.options.title && (metadata.val || metadata.value)) {
+                this.options.title = metadata.val || metadata.value;
+            }
+
             // Convert metadata to columns format
             const columns = [];
 
@@ -568,6 +578,11 @@ class IntegramTable {
                 const metadataUrl = `${ apiBase }/metadata/${ typeId }`;
                 const metadataResponse = await fetch(metadataUrl);
                 const metadata = await metadataResponse.json();
+
+                // Auto-set table title from metadata if not explicitly provided
+                if (!this.options.title && (metadata.val || metadata.value)) {
+                    this.options.title = metadata.val || metadata.value;
+                }
 
                 // Convert metadata to columns format
                 const columns = [];
