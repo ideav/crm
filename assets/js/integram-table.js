@@ -2660,11 +2660,16 @@ class IntegramTable {
             // Update the display value in the cell after successful save
             let displayValue = newValue;
 
+            let escapedValue;
+            let fullValueForEditing;
+
             switch (format) {
                 case 'BOOLEAN':
                     // Display as checkbox icon: any non-empty value = YES, empty = NO
                     const boolValue = newValue !== null && newValue !== undefined && newValue !== '' && newValue !== '0' && newValue !== false;
-                    displayValue = boolValue ? '<span class="boolean-check">✓</span>' : '<span class="boolean-uncheck">✗</span>';
+                    // For BOOLEAN, use HTML icon directly (no escaping) and store '1' or '0' for editing
+                    escapedValue = boolValue ? '<span class="boolean-check">✓</span>' : '<span class="boolean-uncheck">✗</span>';
+                    fullValueForEditing = boolValue ? '1' : '0';
                     break;
                 case 'DATE':
                     if (newValue) {
@@ -2673,6 +2678,13 @@ class IntegramTable {
                             displayValue = this.formatDateDisplay(dateObj);
                         }
                     }
+                    // Escape HTML and store for editing
+                    escapedValue = String(displayValue).replace(/&/g, '&amp;')
+                                                        .replace(/</g, '&lt;')
+                                                        .replace(/>/g, '&gt;')
+                                                        .replace(/"/g, '&quot;')
+                                                        .replace(/'/g, '&#039;');
+                    fullValueForEditing = escapedValue;
                     break;
                 case 'DATETIME':
                     if (newValue) {
@@ -2681,18 +2693,24 @@ class IntegramTable {
                             displayValue = this.formatDateTimeDisplay(datetimeObj);
                         }
                     }
+                    // Escape HTML and store for editing
+                    escapedValue = String(displayValue).replace(/&/g, '&amp;')
+                                                        .replace(/</g, '&lt;')
+                                                        .replace(/>/g, '&gt;')
+                                                        .replace(/"/g, '&quot;')
+                                                        .replace(/'/g, '&#039;');
+                    fullValueForEditing = escapedValue;
+                    break;
+                default:
+                    // Escape HTML and store for editing
+                    escapedValue = String(displayValue).replace(/&/g, '&amp;')
+                                                        .replace(/</g, '&lt;')
+                                                        .replace(/>/g, '&gt;')
+                                                        .replace(/"/g, '&quot;')
+                                                        .replace(/'/g, '&#039;');
+                    fullValueForEditing = escapedValue;
                     break;
             }
-
-            // Escape HTML and update
-            let escapedValue = String(displayValue).replace(/&/g, '&amp;')
-                                                    .replace(/</g, '&lt;')
-                                                    .replace(/>/g, '&gt;')
-                                                    .replace(/"/g, '&quot;')
-                                                    .replace(/'/g, '&#039;');
-
-            // Store full value before truncation
-            let fullValueForEditing = escapedValue;
 
             // Apply truncation if enabled
             if (this.settings.truncateLongValues && escapedValue.length > 127) {
