@@ -265,6 +265,30 @@
     text-align: center;
 }
 
+/* Boolean checkbox icon styles */
+.boolean-check {
+    color: #4caf50;
+    font-weight: bold;
+    font-size: 16px;
+}
+
+.boolean-uncheck {
+    color: #9e9e9e;
+    font-size: 14px;
+}
+
+/* Subordinate table boolean styles */
+.subordinate-table .boolean-check {
+    color: #4caf50;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+.subordinate-table .boolean-uncheck {
+    color: #9e9e9e;
+    font-size: 12px;
+}
+
 .integram-table .date-cell,
 .integram-table .datetime-cell {
     white-space: nowrap;
