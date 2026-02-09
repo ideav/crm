@@ -1082,7 +1082,9 @@ class IntegramTable {
         }
 
         renderCell(column, value, rowIndex, colIndex) {
-            const format = column.format || 'SHORT';
+            // Use normalizeFormat to get correct display format from column.type
+            // (column.format is for filters, column.type is the actual base type ID)
+            const format = column.type ? this.normalizeFormat(column.type) : (column.format || 'SHORT');
             let cellClass = '';
             let displayValue = value || '';
             let customStyle = '';
