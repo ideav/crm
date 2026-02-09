@@ -1285,9 +1285,14 @@ class IntegramTable {
                     shouldShowEditIcon = false;
                 }
                 if (shouldShowEditIcon && isInObjectFormat) {
+                    // For table data source (data-source-type="table"), show edit icon when
+                    // data-col-type (paramId) matches window.id (objectTableId)
+                    const isTableDataSource = this.getDataSourceType() === 'table';
+                    const colTypeMatchesTableId = String(column.paramId) === String(this.objectTableId);
                     const isFirstColumn = column.id === String(this.objectTableId);
                     const isReferenceField = column.ref_id != null;
-                    shouldShowEditIcon = isFirstColumn || isReferenceField;
+                    // Show edit icon for: first column, reference fields, or table source with matching col type
+                    shouldShowEditIcon = isFirstColumn || isReferenceField || (isTableDataSource && colTypeMatchesTableId);
                 }
 
                 if (shouldShowEditIcon) {
