@@ -133,13 +133,13 @@ class IntegramTable {
                 '9': 'DATE',       // Date
                 '13': 'NUMBER',    // Integer number
                 '14': 'SIGNED',    // Number with decimal part
-                '11': 'CHARS',     // Boolean (treat as string for filters)
+                '11': 'BOOLEAN',   // Boolean
                 '12': 'MEMO',      // Multiline text
                 '4': 'DATETIME',   // Date and time
-                '10': 'CHARS',     // File (treat as string for filters)
-                '2': 'CHARS',      // HTML (treat as string for filters)
-                '7': 'CHARS',      // Button (treat as string for filters)
-                '6': 'CHARS',      // Password (treat as string for filters)
+                '10': 'FILE',      // File
+                '2': 'HTML',       // HTML
+                '7': 'BUTTON',     // Button
+                '6': 'PWD',        // Password
                 '5': 'NUMBER',     // Grant (treat as number for filters)
                 '16': 'NUMBER',    // Report column (treat as number for filters)
                 '17': 'CHARS'      // Path (treat as string for filters)
