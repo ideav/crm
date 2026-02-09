@@ -1284,15 +1284,18 @@ class IntegramTable {
                 if (shouldShowEditIcon && this.options.dataSource === 'report' && idColId === null) {
                     shouldShowEditIcon = false;
                 }
-                if (shouldShowEditIcon && isInObjectFormat) {
-                    // For table data source (data-source-type="table"), show edit icon when
-                    // data-col-type (paramId) matches window.id (objectTableId)
-                    const isTableDataSource = this.getDataSourceType() === 'table';
-                    const colTypeMatchesTableId = String(column.paramId) === String(this.objectTableId);
+                // For table data source (data-source-type="table"), show edit icon when
+                // data-col-type (paramId) matches window.id (objectTableId)
+                const isTableDataSource = this.getDataSourceType() === 'table';
+                const colTypeMatchesTableId = String(column.paramId) === String(this.objectTableId);
+                if (shouldShowEditIcon && isTableDataSource && colTypeMatchesTableId) {
+                    // Table data source with matching col type - always show edit icon
+                    // No further restrictions needed
+                } else if (shouldShowEditIcon && isInObjectFormat) {
+                    // For object format data, restrict edit icon to first column or reference fields
                     const isFirstColumn = column.id === String(this.objectTableId);
                     const isReferenceField = column.ref_id != null;
-                    // Show edit icon for: first column, reference fields, or table source with matching col type
-                    shouldShowEditIcon = isFirstColumn || isReferenceField || (isTableDataSource && colTypeMatchesTableId);
+                    shouldShowEditIcon = isFirstColumn || isReferenceField;
                 }
 
                 if (shouldShowEditIcon) {
