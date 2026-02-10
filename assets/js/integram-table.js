@@ -3783,16 +3783,19 @@ class IntegramTable {
             document.body.appendChild(overlay);
             document.body.appendChild(modal);
 
-            // Store modal context for subordinate tables
-            this.currentEditModal = {
-                modal,
-                recordId,
-                typeId,
-                metadata,
-                recordData,
-                subordinateTables,
-                recordReqs
-            };
+            // Store modal context for subordinate tables - ONLY for the first level (parent form)
+            // Don't overwrite when opening subordinate record forms (nested modals)
+            if (modalDepth === 1) {
+                this.currentEditModal = {
+                    modal,
+                    recordId,
+                    typeId,
+                    metadata,
+                    recordData,
+                    subordinateTables,
+                    recordReqs
+                };
+            }
 
             // Attach tab switching handlers
             if (hasSubordinateTables) {
