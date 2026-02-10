@@ -4113,11 +4113,19 @@ class IntegramTable {
                 const container = modal.querySelector('.subordinate-table-container');
                 await this.loadSubordinateTable(container, arrId, parentRecordId, null);
 
+                // Track context so save handlers can refresh this subordinate table
+                this.cellSubordinateContext = {
+                    container,
+                    arrId,
+                    parentRecordId
+                };
+
                 // Close handler
                 const closeModal = () => {
                     modal.remove();
                     overlay.remove();
                     window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+                    this.cellSubordinateContext = null;
                 };
 
                 modal.querySelector('.subordinate-modal-close').addEventListener('click', closeModal);
@@ -4535,6 +4543,11 @@ class IntegramTable {
                                 }
                             }
                         }
+                    }
+
+                    // Reload subordinate table opened from cell
+                    if (this.cellSubordinateContext && this.cellSubordinateContext.arrId === arrId) {
+                        await this.loadSubordinateTable(this.cellSubordinateContext.container, arrId, parentRecordId);
                     }
 
                 } catch (error) {
@@ -5476,6 +5489,12 @@ class IntegramTable {
                             refreshedSubordinateTable = true;
                         }
                     }
+                }
+
+                // Check if we edited a record from a cell-opened subordinate table
+                if (!refreshedSubordinateTable && this.cellSubordinateContext && this.cellSubordinateContext.arrId === typeId) {
+                    await this.loadSubordinateTable(this.cellSubordinateContext.container, this.cellSubordinateContext.arrId, this.cellSubordinateContext.parentRecordId);
+                    refreshedSubordinateTable = true;
                 }
 
                 // If we didn't refresh a subordinate table, handle normal table refresh
