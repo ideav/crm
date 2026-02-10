@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calendar Test</title>
+    <link rel="stylesheet" href="/css/bootstrap.min.css">
+    <link rel="stylesheet" href="/css/css.css" />
+    <script src="/js/jquery.min.js"></script>
+    <script>
+        // Mock global variables for testing
+        var db = 'crm';
+        var xsrf = 'test-xsrf-token';
+        var id = '1';
+        var token = 'test-token';
+        var uid = '1';
+        window.db = db;
+        window.xsrf = xsrf;
+    </script>
+</head>
+<body>
+    <div class="content">
+        <!-- Include calendar template content -->
+        <style>
+    /* CSS Variables */
+    :root {
+        --primary-color: #2563eb;
+        --primary-hover: #1d4ed8;
+        --primary-light: #3b82f6;
+        --background: #f8fafc;
+        --surface: #ffffff;
+        --border-color: #e2e8f0;
+        --text-primary: #1e293b;
+        --text-secondary: #64748b;
+        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        --overdue-color: #dc2626;
+        --important-color: #f59e0b;
+    }
+
+    /* Calendar Container */
+    .calendar-container {
+        padding: 20px;
+        height: calc(100vh - 120px);
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* Control Panel */
+    .calendar-controls {
+        background-color: var(--surface);
+        padding: 16px;
+        margin-bottom: 16px;
+        border-radius: 8px;
+        box-shadow: var(--shadow-sm);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        align-items: center;
+    }
+
+    .calendar-control-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .calendar-control-label {
+        font-weight: 500;
+        color: var(--text-primary);
+        font-size: 0.875rem;
+    }
+
+    .calendar-select {
+        padding: 6px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border-color);
+        background-color: var(--surface);
+        font-size: 0.875rem;
+        color: var(--text-primary);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        min-width: 150px;
+    }
+
+    .calendar-select:hover {
+        border-color: var(--primary-color);
+    }
+
+    .calendar-select:focus {
+        outline: none;
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    .calendar-checkbox-label {
+        display: flex;
+        align-items: center;
+        cursor: pointer;
+        font-size: 0.875rem;
+        color: var(--text-primary);
+        gap: 6px;
+    }
+
+    .calendar-checkbox-label input[type="checkbox"] {
+        cursor: pointer;
+        width: 16px;
+        height: 16px;
+    }
+
+    .calendar-button {
+        padding: 6px 16px;
+        border-radius: 6px;
+        border: 1px solid var(--border-color);
+        background-color: var(--surface);
+        color: var(--text-primary);
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .calendar-button:hover {
+        background-color: var(--primary-color);
+        border-color: var(--primary-color);
+        color: white;
+    }
+
+    /* Overdue Section */
+    .overdue-section {
+        background-color: #fee2e2;
+        border: 1px solid #fca5a5;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 16px;
+        max-height: 200px;
+        overflow-y: auto;
+    }
+
+    .overdue-section h3 {
+        margin: 0 0 8px 0;
+        color: var(--overdue-color);
+        font-size: 1rem;
+        font-weight: 600;
+    }
+
+    .overdue-task-item {
+        background-color: white;
+        padding: 8px 12px;
+        margin-bottom: 6px;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .overdue-task-item:hover {
+        box-shadow: var(--shadow-sm);
+        transform: translateX(4px);
+    }
+
+    .overdue-task-icon {
+        font-size: 16px;
+    }
+
+    .overdue-task-info {
+        flex: 1;
+    }
+
+    .overdue-task-title {
+        font-weight: 600;
+        color: var(--text-primary);
+        font-size: 0.875rem;
+    }
+
+    .overdue-task-executor {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+    }
+
+    .overdue-task-date {
+        font-size: 0.75rem;
+        color: var(--overdue-color);
+        font-weight: 500;
+    }
+
+    /* Calendar Wrapper */
+    .calendar-wrapper {
+        flex: 1;
+        background-color: var(--surface);
+        border-radius: 8px;
+        box-shadow: var(--shadow-sm);
+        padding: 16px;
+        overflow: hidden;
+    }
+
+    #calendar {
+        height: 100%;
+    }
+
+    /* Loading indicator */
+    .loading {
+        text-align: center;
+        padding: 40px;
+        color: var(--text-secondary);
+    }
+
+    .loading-spinner {
+        border: 3px solid var(--border-color);
+        border-top: 3px solid var(--primary-color);
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 16px;
+    }
+
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+
+    .error {
+        background-color: #fee2e2;
+        color: #991b1b;
+        padding: 16px;
+        border-radius: 8px;
+        margin: 20px;
+    }
+</style>
+
+<!-- Overdue Tasks Section -->
+<div class="calendar-container">
+    <div id="overdue-section" class="overdue-section" style="display: none;">
+        <h3>⚠️ Просроченные задачи (<span id="overdue-count">0</span>)</h3>
+        <div id="overdue-list"></div>
+    </div>
+
+    <!-- Control Panel -->
+    <div class="calendar-controls">
+        <div class="calendar-control-group">
+            <label class="calendar-control-label">Исполнитель:</label>
+            <select id="executorFilter" class="calendar-select" onchange="applyFilters()">
+                <option value="">Все</option>
+            </select>
+        </div>
+
+        <div class="calendar-control-group">
+            <label class="calendar-control-label">Тип задачи:</label>
+            <select id="taskTypeFilter" class="calendar-select" onchange="applyFilters()">
+                <option value="">Все</option>
+            </select>
+        </div>
+
+        <div class="calendar-control-group">
+            <label class="calendar-control-label">Статус:</label>
+            <select id="statusFilter" class="calendar-select" onchange="applyFilters()">
+                <option value="">Все</option>
+            </select>
+        </div>
+
+        <div class="calendar-control-group">
+            <label class="calendar-checkbox-label">
+                <input type="checkbox" id="importantFilter" onchange="applyFilters()">
+                <span>Только важные</span>
+            </label>
+        </div>
+
+        <div class="calendar-control-group">
+            <button class="calendar-button" onclick="refreshCalendar()">🔄 Обновить</button>
+        </div>
+    </div>
+
+    <!-- Calendar -->
+    <div class="calendar-wrapper">
+        <div id="calendar"></div>
+    </div>
+</div>
+
+<!-- Include FullCalendar from CDN -->
+<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.css" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js"></script>
+
+<script>
+// Test with mock data
+console.log('Calendar test script loaded');
+console.log('db:', window.db);
+console.log('xsrf:', window.xsrf);
+</script>
+    </div>
+</body>
+</html>

@@ -1,0 +1,800 @@
+<style>
+    /* CSS Variables */
+    :root {
+        --primary-color: #2563eb;
+        --primary-hover: #1d4ed8;
+        --primary-light: #3b82f6;
+        --background: #f8fafc;
+        --surface: #ffffff;
+        --border-color: #e2e8f0;
+        --text-primary: #1e293b;
+        --text-secondary: #64748b;
+        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        --overdue-color: #dc2626;
+        --important-color: #f59e0b;
+    }
+
+    /* Calendar Container */
+    .calendar-container {
+        padding: 20px;
+        height: calc(100vh - 120px);
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* Control Panel */
+    .calendar-controls {
+        background-color: var(--surface);
+        padding: 16px;
+        margin-bottom: 16px;
+        border-radius: 8px;
+        box-shadow: var(--shadow-sm);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        align-items: center;
+    }
+
+    .calendar-control-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .calendar-control-label {
+        font-weight: 500;
+        color: var(--text-primary);
+        font-size: 0.875rem;
+    }
+
+    .calendar-select {
+        padding: 6px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border-color);
+        background-color: var(--surface);
+        font-size: 0.875rem;
+        color: var(--text-primary);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        min-width: 150px;
+    }
+
+    .calendar-select:hover {
+        border-color: var(--primary-color);
+    }
+
+    .calendar-select:focus {
+        outline: none;
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    .calendar-checkbox-label {
+        display: flex;
+        align-items: center;
+        cursor: pointer;
+        font-size: 0.875rem;
+        color: var(--text-primary);
+        gap: 6px;
+    }
+
+    .calendar-checkbox-label input[type="checkbox"] {
+        cursor: pointer;
+        width: 16px;
+        height: 16px;
+    }
+
+    .calendar-button {
+        padding: 6px 16px;
+        border-radius: 6px;
+        border: 1px solid var(--border-color);
+        background-color: var(--surface);
+        color: var(--text-primary);
+        font-size: 0.875rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .calendar-button:hover {
+        background-color: var(--primary-color);
+        border-color: var(--primary-color);
+        color: white;
+    }
+
+    /* Overdue Section */
+    .overdue-section {
+        background-color: #fee2e2;
+        border: 1px solid #fca5a5;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 16px;
+        max-height: 200px;
+        overflow-y: auto;
+    }
+
+    .overdue-section h3 {
+        margin: 0 0 8px 0;
+        color: var(--overdue-color);
+        font-size: 1rem;
+        font-weight: 600;
+    }
+
+    .overdue-task-item {
+        background-color: white;
+        padding: 8px 12px;
+        margin-bottom: 6px;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .overdue-task-item:hover {
+        box-shadow: var(--shadow-sm);
+        transform: translateX(4px);
+    }
+
+    .overdue-task-icon {
+        font-size: 16px;
+    }
+
+    .overdue-task-info {
+        flex: 1;
+    }
+
+    .overdue-task-title {
+        font-weight: 600;
+        color: var(--text-primary);
+        font-size: 0.875rem;
+    }
+
+    .overdue-task-executor {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+    }
+
+    .overdue-task-date {
+        font-size: 0.75rem;
+        color: var(--overdue-color);
+        font-weight: 500;
+    }
+
+    /* Calendar Wrapper */
+    .calendar-wrapper {
+        flex: 1;
+        background-color: var(--surface);
+        border-radius: 8px;
+        box-shadow: var(--shadow-sm);
+        padding: 16px;
+        overflow: hidden;
+    }
+
+    #calendar {
+        height: 100%;
+    }
+
+    /* FullCalendar Customization */
+    .fc {
+        font-family: inherit;
+    }
+
+    .fc-toolbar-title {
+        font-size: 1.5rem !important;
+        font-weight: 600 !important;
+        color: var(--text-primary) !important;
+    }
+
+    .fc-button {
+        background-color: var(--primary-color) !important;
+        border-color: var(--primary-color) !important;
+        color: white !important;
+        padding: 6px 12px !important;
+        border-radius: 6px !important;
+        font-weight: 500 !important;
+        transition: all 0.2s ease !important;
+    }
+
+    .fc-button:hover {
+        background-color: var(--primary-hover) !important;
+        border-color: var(--primary-hover) !important;
+    }
+
+    .fc-button:disabled {
+        background-color: var(--border-color) !important;
+        border-color: var(--border-color) !important;
+        color: var(--text-secondary) !important;
+    }
+
+    .fc-button-active {
+        background-color: var(--primary-hover) !important;
+        border-color: var(--primary-hover) !important;
+    }
+
+    .fc-today-button {
+        background-color: var(--surface) !important;
+        border-color: var(--border-color) !important;
+        color: var(--primary-color) !important;
+    }
+
+    .fc-today-button:hover {
+        background-color: var(--primary-color) !important;
+        border-color: var(--primary-color) !important;
+        color: white !important;
+    }
+
+    .fc .fc-daygrid-day.fc-day-today {
+        background-color: rgba(37, 99, 235, 0.1) !important;
+    }
+
+    .fc-event {
+        border: none !important;
+        padding: 2px 4px !important;
+        margin: 1px 0 !important;
+        border-radius: 3px !important;
+        cursor: pointer !important;
+        font-size: 0.75rem !important;
+    }
+
+    .fc-event-title {
+        font-weight: 500 !important;
+    }
+
+    .fc-timegrid-event {
+        border-left-width: 3px !important;
+    }
+
+    /* Event colors */
+    .fc-event.event-overdue {
+        background-color: var(--overdue-color) !important;
+        border-color: var(--overdue-color) !important;
+        color: white !important;
+    }
+
+    .fc-event.event-important {
+        background-color: var(--important-color) !important;
+        border-color: var(--important-color) !important;
+        color: white !important;
+    }
+
+    .fc-event.event-custom {
+        /* Custom color will be set inline */
+    }
+
+    /* Loading indicator */
+    .loading {
+        text-align: center;
+        padding: 40px;
+        color: var(--text-secondary);
+    }
+
+    .loading-spinner {
+        border: 3px solid var(--border-color);
+        border-top: 3px solid var(--primary-color);
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        margin: 0 auto 16px;
+    }
+
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+
+    /* Error */
+    .error {
+        background-color: #fee2e2;
+        color: #991b1b;
+        padding: 16px;
+        border-radius: 8px;
+        margin: 20px;
+    }
+
+    /* Task Type Icons */
+    .task-icon {
+        margin-right: 4px;
+    }
+
+    /* Tooltip Enhancement */
+    .fc-event:hover {
+        opacity: 0.9;
+        box-shadow: var(--shadow-md);
+    }
+
+    /* Mobile Responsive */
+    @media (max-width: 768px) {
+        .calendar-container {
+            padding: 10px;
+        }
+
+        .calendar-controls {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .calendar-control-group {
+            width: 100%;
+            justify-content: space-between;
+        }
+
+        .calendar-select {
+            min-width: auto;
+            flex: 1;
+        }
+
+        .fc-toolbar {
+            flex-direction: column !important;
+            gap: 8px !important;
+        }
+
+        .fc-toolbar-chunk {
+            display: flex;
+            justify-content: center;
+        }
+
+        .fc-event-title {
+            font-size: 0.7rem !important;
+        }
+    }
+</style>
+
+<!-- Overdue Tasks Section -->
+<div class="calendar-container">
+    <div id="overdue-section" class="overdue-section" style="display: none;">
+        <h3>⚠️ Просроченные задачи (<span id="overdue-count">0</span>)</h3>
+        <div id="overdue-list"></div>
+    </div>
+
+    <!-- Control Panel -->
+    <div class="calendar-controls">
+        <div class="calendar-control-group">
+            <label class="calendar-control-label">Исполнитель:</label>
+            <select id="executorFilter" class="calendar-select" onchange="applyFilters()">
+                <option value="">Все</option>
+            </select>
+        </div>
+
+        <div class="calendar-control-group">
+            <label class="calendar-control-label">Тип задачи:</label>
+            <select id="taskTypeFilter" class="calendar-select" onchange="applyFilters()">
+                <option value="">Все</option>
+            </select>
+        </div>
+
+        <div class="calendar-control-group">
+            <label class="calendar-control-label">Статус:</label>
+            <select id="statusFilter" class="calendar-select" onchange="applyFilters()">
+                <option value="">Все</option>
+            </select>
+        </div>
+
+        <div class="calendar-control-group">
+            <label class="calendar-checkbox-label">
+                <input type="checkbox" id="importantFilter" onchange="applyFilters()">
+                <span>Только важные</span>
+            </label>
+        </div>
+
+        <div class="calendar-control-group">
+            <button class="calendar-button" onclick="refreshCalendar()">🔄 Обновить</button>
+        </div>
+    </div>
+
+    <!-- Calendar -->
+    <div class="calendar-wrapper">
+        <div id="calendar"></div>
+    </div>
+</div>
+
+<!-- Include FullCalendar from CDN -->
+<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.css" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js"></script>
+
+<script>
+// Calendar functionality
+let calendar;
+let allTasks = [];
+let taskStatuses = [];
+let currentView = 'dayGridMonth'; // Default view
+let autoRefreshInterval;
+
+// Task type icons mapping
+const taskTypeIcons = {
+    'Звонок': '📞',
+    'Доработка CRM': '📄',
+    'Встреча': '⚙️',
+    'Email': '📤',
+    'Другое': '📝'
+};
+
+// Initialize calendar on page load
+document.addEventListener('DOMContentLoaded', function() {
+    initializeCalendar();
+    loadTaskStatuses();
+    loadTasks();
+    setupAutoRefresh();
+});
+
+// Initialize FullCalendar
+function initializeCalendar() {
+    const calendarEl = document.getElementById('calendar');
+
+    calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridMonth',
+        headerToolbar: {
+            left: 'prev,next today',
+            center: 'title',
+            right: 'dayGridMonth,timeGridWeek,timeGridDay'
+        },
+        locale: 'ru',
+        firstDay: 1, // Monday
+        slotMinTime: '08:00:00',
+        slotMaxTime: '20:00:00',
+        height: '100%',
+        editable: true,
+        eventDurationEditable: false,
+        eventStartEditable: true,
+        eventDrop: handleEventDrop,
+        eventClick: handleEventClick,
+        eventDidMount: handleEventDidMount,
+        datesSet: handleDatesSet,
+        buttonText: {
+            today: 'Сегодня',
+            month: 'Месяц',
+            week: 'Неделя',
+            day: 'День'
+        }
+    });
+
+    calendar.render();
+}
+
+// Load task statuses
+async function loadTaskStatuses() {
+    try {
+        const response = await fetch(`/${window.db}/object/3882/?JSON_OBJ`);
+        const data = await response.json();
+
+        if (Array.isArray(data)) {
+            taskStatuses = data;
+            populateStatusFilter();
+        }
+    } catch (error) {
+        console.error('Error loading task statuses:', error);
+    }
+}
+
+// Load tasks from API
+async function loadTasks() {
+    try {
+        // Get current view date range
+        const view = calendar.view;
+        const startDate = formatDateForAPI(view.activeStart);
+        const endDate = formatDateForAPI(view.activeEnd);
+
+        // Fetch tasks for the current date range
+        const response = await fetch(`/${window.db}/report/4283?JSON_KV&FR_date=${startDate}&TO_date=${endDate}`);
+        const data = await response.json();
+
+        if (Array.isArray(data)) {
+            allTasks = data;
+            populateFilters();
+            applyFilters();
+        } else {
+            console.error('Invalid tasks data format:', data);
+        }
+    } catch (error) {
+        console.error('Error loading tasks:', error);
+        showError('Ошибка загрузки задач: ' + error.message);
+    }
+}
+
+// Format date for API (DD.MM.YYYY)
+function formatDateForAPI(date) {
+    const d = new Date(date);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}.${month}.${year}`;
+}
+
+// Parse date from API format (DD.MM.YYYY HH:MM:SS)
+function parseDateFromAPI(dateStr) {
+    if (!dateStr) return null;
+
+    // Parse DD.MM.YYYY HH:MM:SS format
+    const parts = dateStr.split(' ');
+    if (parts.length < 1) return null;
+
+    const dateParts = parts[0].split('.');
+    if (dateParts.length !== 3) return null;
+
+    const day = parseInt(dateParts[0], 10);
+    const month = parseInt(dateParts[1], 10) - 1; // JS months are 0-indexed
+    const year = parseInt(dateParts[2], 10);
+
+    let hours = 0, minutes = 0, seconds = 0;
+    if (parts.length > 1) {
+        const timeParts = parts[1].split(':');
+        hours = parseInt(timeParts[0] || 0, 10);
+        minutes = parseInt(timeParts[1] || 0, 10);
+        seconds = parseInt(timeParts[2] || 0, 10);
+    }
+
+    return new Date(year, month, day, hours, minutes, seconds);
+}
+
+// Populate filters
+function populateFilters() {
+    // Extract unique executors
+    const executors = new Set();
+    const taskTypes = new Set();
+
+    allTasks.forEach(task => {
+        if (task['Исполнитель']) executors.add(task['Исполнитель']);
+        if (task['Тип задачи']) taskTypes.add(task['Тип задачи']);
+    });
+
+    // Populate executor filter
+    const executorFilter = document.getElementById('executorFilter');
+    executorFilter.innerHTML = '<option value="">Все</option>';
+    Array.from(executors).sort().forEach(executor => {
+        const option = document.createElement('option');
+        option.value = executor;
+        option.textContent = executor;
+        executorFilter.appendChild(option);
+    });
+
+    // Populate task type filter
+    const taskTypeFilter = document.getElementById('taskTypeFilter');
+    taskTypeFilter.innerHTML = '<option value="">Все</option>';
+    Array.from(taskTypes).sort().forEach(type => {
+        const option = document.createElement('option');
+        option.value = type;
+        option.textContent = type;
+        taskTypeFilter.appendChild(option);
+    });
+}
+
+// Populate status filter
+function populateStatusFilter() {
+    const statusFilter = document.getElementById('statusFilter');
+    statusFilter.innerHTML = '<option value="">Все</option>';
+
+    taskStatuses.forEach(status => {
+        const option = document.createElement('option');
+        option.value = status.i;
+        option.textContent = status.n;
+        statusFilter.appendChild(option);
+    });
+}
+
+// Apply filters and render events
+function applyFilters() {
+    const executorValue = document.getElementById('executorFilter').value;
+    const taskTypeValue = document.getElementById('taskTypeFilter').value;
+    const statusValue = document.getElementById('statusFilter').value;
+    const importantOnly = document.getElementById('importantFilter').checked;
+
+    // Filter tasks
+    const filteredTasks = allTasks.filter(task => {
+        if (executorValue && task['Исполнитель'] !== executorValue) return false;
+        if (taskTypeValue && task['Тип задачи'] !== taskTypeValue) return false;
+        if (statusValue && task['Статус'] !== statusValue) return false;
+        if (importantOnly && task['Важно'] !== 'X') return false;
+        return true;
+    });
+
+    // Convert to FullCalendar events
+    const events = filteredTasks.map(task => convertTaskToEvent(task));
+
+    // Update calendar
+    calendar.removeAllEvents();
+    calendar.addEventSource(events);
+
+    // Update overdue section
+    updateOverdueSection(filteredTasks);
+}
+
+// Convert task to FullCalendar event
+function convertTaskToEvent(task) {
+    const deadline = parseDateFromAPI(task['Срок']);
+    const now = new Date();
+    const isOverdue = deadline && deadline < now;
+    const isImportant = task['Важно'] === 'X';
+    const customColor = task['color'];
+
+    // Get task type icon
+    const taskType = task['Тип задачи'] || 'Другое';
+    const icon = taskTypeIcons[taskType] || taskTypeIcons['Другое'];
+
+    // Determine event color
+    let backgroundColor = '';
+    let classNames = [];
+
+    if (customColor) {
+        backgroundColor = customColor;
+        classNames.push('event-custom');
+    } else if (isOverdue) {
+        backgroundColor = 'var(--overdue-color)';
+        classNames.push('event-overdue');
+    } else if (isImportant) {
+        backgroundColor = 'var(--important-color)';
+        classNames.push('event-important');
+    } else {
+        backgroundColor = 'var(--primary-color)';
+    }
+
+    return {
+        id: task['ЗадачаID'],
+        title: `${icon} ${task['Задача'] || 'Без названия'}`,
+        start: deadline,
+        allDay: false,
+        backgroundColor: backgroundColor,
+        borderColor: backgroundColor,
+        classNames: classNames,
+        extendedProps: {
+            description: task['Описание'] || '',
+            client: task['Клиент'] || '',
+            executor: task['Исполнитель'] || '',
+            status: task['Статус'] || '',
+            taskType: taskType,
+            important: isImportant,
+            taskData: task
+        }
+    };
+}
+
+// Update overdue section
+function updateOverdueSection(tasks) {
+    const now = new Date();
+    const overdueTasks = tasks.filter(task => {
+        const deadline = parseDateFromAPI(task['Срок']);
+        return deadline && deadline < now && task['Статус'] !== 'Выполнена';
+    });
+
+    const overdueSection = document.getElementById('overdue-section');
+    const overdueCount = document.getElementById('overdue-count');
+    const overdueList = document.getElementById('overdue-list');
+
+    if (overdueTasks.length === 0) {
+        overdueSection.style.display = 'none';
+        return;
+    }
+
+    overdueSection.style.display = 'block';
+    overdueCount.textContent = overdueTasks.length;
+
+    overdueList.innerHTML = overdueTasks.map(task => {
+        const taskType = task['Тип задачи'] || 'Другое';
+        const icon = taskTypeIcons[taskType] || taskTypeIcons['Другое'];
+
+        return `
+            <div class="overdue-task-item" onclick="openTaskDetail('${task['ЗадачаID']}')">
+                <span class="overdue-task-icon">${icon}</span>
+                <div class="overdue-task-info">
+                    <div class="overdue-task-title">${task['Задача'] || 'Без названия'}</div>
+                    <div class="overdue-task-executor">${task['Исполнитель'] || ''}</div>
+                </div>
+                <div class="overdue-task-date">${task['Срок'] || ''}</div>
+            </div>
+        `;
+    }).join('');
+}
+
+// Handle event drop (drag and drop)
+async function handleEventDrop(info) {
+    const taskId = info.event.id;
+    const newDate = info.event.start;
+
+    // Format new date for API (DD.MM.YYYY HH:MM:SS)
+    const formattedDate = formatDateTimeForAPI(newDate);
+
+    try {
+        // Update task deadline via API
+        const formData = new FormData();
+        formData.append('_xsrf', window.xsrf);
+        formData.append('t3886', formattedDate); // Assuming t3886 is the field ID for deadline
+
+        const response = await fetch(`/${window.db}/_m_set/${taskId}/?JSON`, {
+            method: 'POST',
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (result.error) {
+            alert('Ошибка обновления: ' + result.error);
+            info.revert();
+        } else {
+            // Update local task data
+            const task = allTasks.find(t => t['ЗадачаID'] === taskId);
+            if (task) {
+                task['Срок'] = formattedDate;
+            }
+        }
+    } catch (error) {
+        console.error('Error updating task:', error);
+        alert('Ошибка обновления задачи');
+        info.revert();
+    }
+}
+
+// Format date and time for API (DD.MM.YYYY HH:MM:SS)
+function formatDateTimeForAPI(date) {
+    const d = new Date(date);
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    const seconds = String(d.getSeconds()).padStart(2, '0');
+    return `${day}.${month}.${year} ${hours}:${minutes}:${seconds}`;
+}
+
+// Handle event click
+function handleEventClick(info) {
+    const taskId = info.event.id;
+    openTaskDetail(taskId);
+}
+
+// Open task detail
+function openTaskDetail(taskId) {
+    // Open task in new window using form interface
+    window.open(`/${window.db}/form/3882/${taskId}`, `task_${taskId}`, 'width=800,height=600');
+}
+
+// Handle event mount (for tooltips)
+function handleEventDidMount(info) {
+    const props = info.event.extendedProps;
+
+    // Create tooltip content
+    const tooltipContent = `
+        <strong>${info.event.title}</strong><br>
+        ${props.client ? `Клиент: ${props.client}<br>` : ''}
+        ${props.executor ? `Исполнитель: ${props.executor}<br>` : ''}
+        ${props.description ? `Описание: ${props.description}<br>` : ''}
+    `;
+
+    // Set title attribute for native tooltip
+    info.el.setAttribute('title', tooltipContent.replace(/<br>/g, '\n').replace(/<\/?strong>/g, ''));
+}
+
+// Handle date range change
+function handleDatesSet(info) {
+    // Reload tasks when date range changes
+    loadTasks();
+}
+
+// Refresh calendar
+function refreshCalendar() {
+    loadTasks();
+}
+
+// Setup auto-refresh
+function setupAutoRefresh() {
+    // Refresh every 60 seconds
+    autoRefreshInterval = setInterval(() => {
+        loadTasks();
+    }, 60000);
+}
+
+// Show error
+function showError(message) {
+    const calendarEl = document.getElementById('calendar');
+    calendarEl.innerHTML = `<div class="error">${message}</div>`;
+}
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', function() {
+    if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+    }
+});
+</script>
