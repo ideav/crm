@@ -1221,7 +1221,7 @@ class IntegramTable {
 
             // BOOLEAN cells use HTML icons, so skip HTML escaping for them
             if (format === 'BOOLEAN') {
-                const boolValue = value !== null && value !== undefined && value !== '' && value !== 0 && value !== false;
+                const boolValue = value !== null && value !== undefined && value !== '' && value !== 0 && value !== '0' && value !== false;
                 escapedValue = boolValue ? '<span class="boolean-check">✓</span>' : '<span class="boolean-uncheck">✗</span>';
                 // Store the original value for editing (1 or 0, or the actual value)
                 fullValueForEditing = boolValue ? '1' : '0';
@@ -4224,7 +4224,7 @@ class IntegramTable {
                 switch (baseFormat) {
                     case 'BOOLEAN':
                         // Display as checkbox icon: any non-empty value = YES, empty = NO
-                        const boolVal = value !== null && value !== undefined && value !== '' && value !== 0 && value !== false;
+                        const boolVal = value !== null && value !== undefined && value !== '' && value !== 0 && value !== '0' && value !== false;
                         return boolVal ? '<span class="boolean-check">✓</span>' : '<span class="boolean-uncheck">✗</span>';
                     case 'DATE':
                         if (value) {
