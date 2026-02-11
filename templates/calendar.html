@@ -698,8 +698,8 @@ function populateExecutorFilter(executors) {
     if (Array.isArray(executors)) {
         executors.forEach(executor => {
             const option = document.createElement('option');
-            option.value = executor.k || executor.id || 'ПользовательID';
-            option.textContent = executor.v || executor.name || executor.k || 'Пользователь';
+            option.value = executor.k || executor.id || executor['ПользовательID'];
+            option.textContent = executor.v || executor.name || executor.k || executor['Пользователь'];
             executorFilter.appendChild(option);
         });
 
@@ -718,8 +718,8 @@ function populateTaskTypeFilter(taskTypes) {
     if (Array.isArray(taskTypes)) {
         taskTypes.forEach(type => {
             const option = document.createElement('option');
-            option.value = type.k || type.id || 'Тип задачиID';
-            option.textContent = type.v || type.name || type.k || 'Тип задачи';
+            option.value = type.k || type.id || type['Тип задачиID'];
+            option.textContent = type.v || type.name || type.k || type['Тип задачи'];
             taskTypeFilter.appendChild(option);
         });
     }
@@ -733,8 +733,8 @@ function populateStatusFilter(statuses) {
     if (Array.isArray(statuses)) {
         statuses.forEach(status => {
             const option = document.createElement('option');
-            option.value = status.k || status.id || 'Статус задачиID';
-            option.textContent = status.v || status.name || status.k || 'Статус задачи';
+            option.value = status.k || status.id || status['Статус задачиID'];
+            option.textContent = status.v || status.name || status.k || status['Статус задачи'];
             statusFilter.appendChild(option);
         });
     }
