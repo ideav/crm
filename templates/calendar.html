@@ -543,7 +543,7 @@ function collapseOverdueSection() {
 // Initialize calendar on page load
 document.addEventListener('DOMContentLoaded', function() {
     initializeCalendar();
-    loadTaskStatuses();
+    loadFilterOptions();
     loadTasks();
     setupAutoRefresh();
 });
@@ -582,18 +582,25 @@ function initializeCalendar() {
     calendar.render();
 }
 
-// Load task statuses
-async function loadTaskStatuses() {
+// Load all filter options from API
+async function loadFilterOptions() {
     try {
-        const response = await fetch(`/${ window.db }/object/3882/?JSON_OBJ`);
-        const data = await response.json();
+        // Load executors
+        const executorResponse = await fetch(`/${ window.db }/report/5230?JSON_KV`);
+        const executors = await executorResponse.json();
+        populateExecutorFilter(executors);
 
-        if (Array.isArray(data)) {
-            taskStatuses = data;
-            populateStatusFilter();
-        }
+        // Load task types
+        const taskTypeResponse = await fetch(`/${ window.db }/report/5241?JSON_KV`);
+        const taskTypes = await taskTypeResponse.json();
+        populateTaskTypeFilter(taskTypes);
+
+        // Load statuses
+        const statusResponse = await fetch(`/${ window.db }/report/6804?JSON_KV`);
+        const statuses = await statusResponse.json();
+        populateStatusFilter(statuses);
     } catch (error) {
-        console.error('Error loading task statuses:', error);
+        console.error('Error loading filter options:', error);
     }
 }
 
@@ -605,14 +612,40 @@ async function loadTasks() {
         const startDate = formatDateForAPI(view.activeStart);
         const endDate = formatDateForAPI(view.activeEnd);
 
-        // Fetch tasks for the current date range
-        const response = await fetch(`/${ window.db }/report/4283?JSON_KV&FR_date=${ startDate }&TO_date=${ endDate }`);
+        // Build query parameters with filters
+        let queryParams = `JSON_KV&FR_date=${ startDate }&TO_date=${ endDate }`;
+
+        // Add executor filter
+        const executorValue = document.getElementById('executorFilter').value;
+        if (executorValue) {
+            queryParams += `&FR_6814=${ encodeURIComponent(executorValue) }`;
+        }
+
+        // Add task type filter
+        const taskTypeValue = document.getElementById('taskTypeFilter').value;
+        if (taskTypeValue) {
+            queryParams += `&FR_6611=${ encodeURIComponent(taskTypeValue) }`;
+        }
+
+        // Add status filter
+        const statusValue = document.getElementById('statusFilter').value;
+        if (statusValue) {
+            queryParams += `&FR_6820=${ encodeURIComponent(statusValue) }`;
+        }
+
+        // Add important filter
+        const importantOnly = document.getElementById('importantFilter').checked;
+        if (importantOnly) {
+            queryParams += `&FR_6756=%`;
+        }
+
+        // Fetch tasks with filters applied on backend
+        const response = await fetch(`/${ window.db }/report/4283?${ queryParams }`);
         const data = await response.json();
 
         if (Array.isArray(data)) {
             allTasks = data;
-            populateFilters();
-            applyFilters();
+            renderEvents();
         } else {
             console.error('Invalid tasks data format:', data);
         }
@@ -657,76 +690,73 @@ function parseDateFromAPI(dateStr) {
     return new Date(year, month, day, hours, minutes, seconds);
 }
 
-// Populate filters
-function populateFilters() {
-    // Extract unique executors
-    const executors = new Set();
-    const taskTypes = new Set();
-
-    allTasks.forEach(task => {
-        if (task['Исполнитель']) executors.add(task['Исполнитель']);
-        if (task['Тип задачи']) taskTypes.add(task['Тип задачи']);
-    });
-
-    // Populate executor filter
+// Populate executor filter
+function populateExecutorFilter(executors) {
     const executorFilter = document.getElementById('executorFilter');
     executorFilter.innerHTML = '<option value="">Все</option>';
-    Array.from(executors).sort().forEach(executor => {
-        const option = document.createElement('option');
-        option.value = executor;
-        option.textContent = executor;
-        executorFilter.appendChild(option);
-    });
 
-    // Populate task type filter
+    if (Array.isArray(executors)) {
+        executors.forEach(executor => {
+            const option = document.createElement('option');
+            option.value = executor.k || executor.id;
+            option.textContent = executor.v || executor.name || executor.k;
+            executorFilter.appendChild(option);
+        });
+
+        // Set default to current user if available
+        if (window.uid) {
+            executorFilter.value = window.uid;
+        }
+    }
+}
+
+// Populate task type filter
+function populateTaskTypeFilter(taskTypes) {
     const taskTypeFilter = document.getElementById('taskTypeFilter');
     taskTypeFilter.innerHTML = '<option value="">Все</option>';
-    Array.from(taskTypes).sort().forEach(type => {
-        const option = document.createElement('option');
-        option.value = type;
-        option.textContent = type;
-        taskTypeFilter.appendChild(option);
-    });
+
+    if (Array.isArray(taskTypes)) {
+        taskTypes.forEach(type => {
+            const option = document.createElement('option');
+            option.value = type.k || type.id;
+            option.textContent = type.v || type.name || type.k;
+            taskTypeFilter.appendChild(option);
+        });
+    }
 }
 
 // Populate status filter
-function populateStatusFilter() {
+function populateStatusFilter(statuses) {
     const statusFilter = document.getElementById('statusFilter');
     statusFilter.innerHTML = '<option value="">Все</option>';
 
-    taskStatuses.forEach(status => {
-        const option = document.createElement('option');
-        option.value = status.i;
-        option.textContent = status.n;
-        statusFilter.appendChild(option);
-    });
+    if (Array.isArray(statuses)) {
+        statuses.forEach(status => {
+            const option = document.createElement('option');
+            option.value = status.k || status.id;
+            option.textContent = status.v || status.name || status.k;
+            statusFilter.appendChild(option);
+        });
+    }
 }
 
 // Apply filters and render events
 function applyFilters() {
-    const executorValue = document.getElementById('executorFilter').value;
-    const taskTypeValue = document.getElementById('taskTypeFilter').value;
-    const statusValue = document.getElementById('statusFilter').value;
-    const importantOnly = document.getElementById('importantFilter').checked;
+    // Since filters are now applied on the backend, reload tasks with new filters
+    loadTasks();
+}
 
-    // Filter tasks
-    const filteredTasks = allTasks.filter(task => {
-        if (executorValue && task['Исполнитель'] !== executorValue) return false;
-        if (taskTypeValue && task['Тип задачи'] !== taskTypeValue) return false;
-        if (statusValue && task['Статус'] !== statusValue) return false;
-        if (importantOnly && task['Важно'] !== 'X') return false;
-        return true;
-    });
-
+// Render events (called after tasks are loaded)
+function renderEvents() {
     // Convert to FullCalendar events
-    const events = filteredTasks.map(task => convertTaskToEvent(task));
+    const events = allTasks.map(task => convertTaskToEvent(task));
 
     // Update calendar
     calendar.removeAllEvents();
     calendar.addEventSource(events);
 
     // Update overdue section
-    updateOverdueSection(filteredTasks);
+    updateOverdueSection(allTasks);
 }
 
 // Convert task to FullCalendar event
