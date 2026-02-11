@@ -1,3 +1,6 @@
+<!-- Import IntegramTable CSS for edit form styles -->
+<link rel="stylesheet" href="/assets/css/integram-table.css">
+
 <style>
     /* CSS Variables */
     :root {
@@ -453,6 +456,9 @@
 <!-- Include FullCalendar locally -->
 <script src="/download/{_global_.z}/vendor/fullcalendar/index.global.min.js"></script>
 
+<!-- Include IntegramTable for edit form functionality -->
+<script src="/assets/js/integram-table.js"></script>
+
 <script>
 // Calendar functionality
 let calendar;
@@ -832,10 +838,39 @@ function handleEventClick(info) {
     openTaskDetail(taskId);
 }
 
-// Open task detail
-function openTaskDetail(taskId) {
-    // Open task in new window using form interface
-    window.open(`/${ window.db }/form/3882/${ taskId }`, `task_${ taskId }`, 'width=800,height=600');
+// Open task detail (Issue #425)
+async function openTaskDetail(taskId) {
+    // Create a temporary IntegramTable instance to use its edit form functionality
+    const tempContainer = document.createElement('div');
+    tempContainer.id = 'temp-table-container';
+    tempContainer.style.display = 'none';
+    document.body.appendChild(tempContainer);
+
+    try {
+        // Create IntegramTable instance with minimal configuration
+        const tempTable = new IntegramTable('temp-table-container', {
+            apiUrl: `/${ window.db }/report/0`,
+            instanceName: 'calendarTaskEdit'
+        });
+
+        // Task type ID is 3596 as per issue #425
+        const taskTypeId = 3596;
+
+        // Open edit form for the task
+        await tempTable.openEditForm(taskId, taskTypeId, 0);
+
+        // Clean up temp container after modal is opened
+        setTimeout(() => {
+            document.body.removeChild(tempContainer);
+        }, 100);
+    } catch (error) {
+        console.error('Error opening task edit form:', error);
+        alert('Ошибка при открытии формы редактирования задачи');
+        // Clean up on error
+        if (tempContainer.parentNode) {
+            document.body.removeChild(tempContainer);
+        }
+    }
 }
 
 // Handle event mount (for tooltips)
