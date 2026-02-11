@@ -113,6 +113,26 @@
         margin-bottom: 16px;
         max-height: 200px;
         overflow-y: auto;
+        transition: all 0.3s ease;
+    }
+
+    /* Collapsed State - Issue #423 */
+    .overdue-section.collapsed {
+        max-height: 48px;
+        overflow: hidden;
+        cursor: pointer;
+    }
+
+    .overdue-section.collapsed:hover {
+        background-color: #fecaca;
+    }
+
+    /* Expanded State - Issue #423 */
+    .overdue-section.expanded {
+        position: relative;
+        z-index: 1000;
+        max-height: 600px;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
     }
 
     .overdue-section h3 {
@@ -120,6 +140,19 @@
         color: var(--overdue-color);
         font-size: 1rem;
         font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        user-select: none;
+    }
+
+    .overdue-toggle-icon {
+        font-size: 0.875rem;
+        transition: transform 0.3s ease;
+    }
+
+    .overdue-section.expanded .overdue-toggle-icon {
+        transform: rotate(180deg);
     }
 
     .overdue-task-item {
@@ -132,6 +165,11 @@
         display: flex;
         align-items: center;
         gap: 8px;
+    }
+
+    /* Hide task items when collapsed */
+    .overdue-section.collapsed .overdue-task-item {
+        display: none;
     }
 
     .overdue-task-item:hover {
@@ -162,6 +200,22 @@
         font-size: 0.75rem;
         color: var(--overdue-color);
         font-weight: 500;
+    }
+
+    /* Backdrop for expanded overdue section */
+    .overdue-backdrop {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.1);
+        z-index: 999;
+        display: none;
+    }
+
+    .overdue-backdrop.active {
+        display: block;
     }
 
     /* Calendar Wrapper */
@@ -346,10 +400,14 @@
 
 <!-- Overdue Tasks Section -->
 <div class="calendar-container">
-    <div id="overdue-section" class="overdue-section" style="display: none;">
-        <h3>⚠️ Просроченные задачи (<span id="overdue-count">0</span>)</h3>
+    <div id="overdue-section" class="overdue-section collapsed" style="display: none;" onclick="toggleOverdueSection(event)">
+        <h3>
+            <span>⚠️ Просроченные задачи (<span id="overdue-count">0</span>)</span>
+            <span class="overdue-toggle-icon">▼</span>
+        </h3>
         <div id="overdue-list"></div>
     </div>
+    <div id="overdue-backdrop" class="overdue-backdrop" onclick="collapseOverdueSection()"></div>
 
     <!-- Control Panel -->
     <div class="calendar-controls">
@@ -412,6 +470,37 @@ const taskTypeIcons = {
     'Email': '📤',
     'Другое': '📝'
 };
+
+// Toggle overdue section collapsed/expanded (Issue #423)
+function toggleOverdueSection(event) {
+    // Don't toggle if clicking on a task item
+    if (event.target.closest('.overdue-task-item')) {
+        return;
+    }
+
+    const section = document.getElementById('overdue-section');
+    const backdrop = document.getElementById('overdue-backdrop');
+
+    if (section.classList.contains('collapsed')) {
+        section.classList.remove('collapsed');
+        section.classList.add('expanded');
+        backdrop.classList.add('active');
+    } else {
+        section.classList.remove('expanded');
+        section.classList.add('collapsed');
+        backdrop.classList.remove('active');
+    }
+}
+
+// Collapse overdue section
+function collapseOverdueSection() {
+    const section = document.getElementById('overdue-section');
+    const backdrop = document.getElementById('overdue-backdrop');
+
+    section.classList.remove('expanded');
+    section.classList.add('collapsed');
+    backdrop.classList.remove('active');
+}
 
 // Initialize calendar on page load
 document.addEventListener('DOMContentLoaded', function() {
