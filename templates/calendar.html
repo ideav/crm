@@ -107,46 +107,63 @@
         color: white;
     }
 
-    /* Overdue Section */
+    /* Overdue Section - Issue #428: Compact inline display */
     .overdue-section {
         background-color: #fee2e2;
         border: 1px solid #fca5a5;
         border-radius: 8px;
-        padding: 12px;
-        margin-bottom: 16px;
-        max-height: 200px;
-        overflow-y: auto;
+        padding: 8px 12px;
         transition: all 0.3s ease;
+        display: inline-block;
+        margin-left: auto;
     }
 
-    /* Collapsed State - Issue #423 */
+    /* Collapsed State - Issue #428: Compact button-like display */
     .overdue-section.collapsed {
-        max-height: 48px;
+        max-height: 38px;
         overflow: hidden;
         cursor: pointer;
+        white-space: nowrap;
     }
 
     .overdue-section.collapsed:hover {
         background-color: #fecaca;
     }
 
-    /* Expanded State - Issue #423 */
+    /* Expanded State - Issue #428: Full width overlay */
     .overdue-section.expanded {
-        position: relative;
+        position: fixed;
+        top: 120px;
+        left: 50%;
+        transform: translateX(-50%);
         z-index: 1000;
         max-height: 600px;
+        width: 90%;
+        max-width: 1200px;
+        overflow-y: auto;
         box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
     }
 
     .overdue-section h3 {
-        margin: 0 0 8px 0;
+        margin: 0;
         color: var(--overdue-color);
-        font-size: 1rem;
+        font-size: 0.875rem;
         font-weight: 600;
         display: flex;
         align-items: center;
         justify-content: space-between;
         user-select: none;
+    }
+
+    /* Issue #428: Compact title in collapsed state */
+    .overdue-section.collapsed h3 {
+        gap: 6px;
+    }
+
+    /* Issue #428: Full title in expanded state */
+    .overdue-section.expanded h3 {
+        font-size: 1rem;
+        margin-bottom: 12px;
     }
 
     .overdue-toggle-icon {
@@ -173,6 +190,14 @@
     /* Hide task items when collapsed */
     .overdue-section.collapsed .overdue-task-item {
         display: none;
+    }
+
+    /* Issue #428: Full width list when expanded */
+    .overdue-section.expanded #overdue-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 8px;
+        margin-top: 8px;
     }
 
     .overdue-task-item:hover {
@@ -401,17 +426,8 @@
     }
 </style>
 
-<!-- Overdue Tasks Section -->
+<!-- Calendar Container -->
 <div class="calendar-container">
-    <div id="overdue-section" class="overdue-section collapsed" style="display: none;" onclick="toggleOverdueSection(event)">
-        <h3>
-            <span>⚠️ Просроченные задачи (<span id="overdue-count">0</span>)</span>
-            <span class="overdue-toggle-icon">▼</span>
-        </h3>
-        <div id="overdue-list"></div>
-    </div>
-    <div id="overdue-backdrop" class="overdue-backdrop" onclick="collapseOverdueSection()"></div>
-
     <!-- Control Panel -->
     <div class="calendar-controls">
         <div class="calendar-control-group">
@@ -445,7 +461,24 @@
         <div class="calendar-control-group">
             <button class="calendar-button" onclick="refreshCalendar()">🔄 Обновить</button>
         </div>
+
+        <!-- Issue #427: Create Task Button -->
+        <div class="calendar-control-group">
+            <button class="calendar-button" onclick="createNewTask()" style="background-color: var(--primary-color); color: white;">+ Создать задачу</button>
+        </div>
+
+        <!-- Issue #428: Overdue Tasks - Compact Inline Display -->
+        <div id="overdue-section" class="overdue-section collapsed" style="display: none;" onclick="toggleOverdueSection(event)">
+            <h3>
+                <span>⚠️ Просрочено <span id="overdue-count">0</span></span>
+                <span class="overdue-toggle-icon">▼</span>
+            </h3>
+            <div id="overdue-list"></div>
+        </div>
     </div>
+
+    <!-- Overdue backdrop -->
+    <div id="overdue-backdrop" class="overdue-backdrop" onclick="collapseOverdueSection()"></div>
 
     <!-- Calendar -->
     <div class="calendar-wrapper">
@@ -866,6 +899,40 @@ async function openTaskDetail(taskId) {
     } catch (error) {
         console.error('Error opening task edit form:', error);
         alert('Ошибка при открытии формы редактирования задачи');
+        // Clean up on error
+        if (tempContainer.parentNode) {
+            document.body.removeChild(tempContainer);
+        }
+    }
+}
+
+// Create new task (Issue #427)
+async function createNewTask() {
+    const tempContainer = document.createElement('div');
+    tempContainer.id = 'temp-table-container-create';
+    tempContainer.style.display = 'none';
+    document.body.appendChild(tempContainer);
+
+    try {
+        // Create IntegramTable instance with minimal configuration
+        const tempTable = new IntegramTable('temp-table-container-create', {
+            apiUrl: `/${ window.db }/report/0`,
+            instanceName: 'calendarTaskCreate'
+        });
+
+        // Task type ID is 3596
+        const taskTypeId = 3596;
+
+        // Open create form (pass empty/null recordId to trigger create mode)
+        await tempTable.openEditForm(null, taskTypeId, 0);
+
+        // Clean up temp container after modal is opened
+        setTimeout(() => {
+            document.body.removeChild(tempContainer);
+        }, 100);
+    } catch (error) {
+        console.error('Error opening task create form:', error);
+        alert('Ошибка при открытии формы создания задачи');
         // Clean up on error
         if (tempContainer.parentNode) {
             document.body.removeChild(tempContainer);
