@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Issue #435 Fix - Empty apiUrl vs report/0</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .test-section h2 {
+            margin-top: 0;
+            color: #333;
+        }
+        .result {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 3px;
+        }
+        .success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .info {
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 3px;
+            overflow-x: auto;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            border: none;
+            border-radius: 3px;
+            background-color: #007bff;
+            color: white;
+            font-size: 14px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test for Issue #435 Fix</h1>
+    <p>This test verifies that using empty apiUrl doesn't cause report/0 requests.</p>
+
+    <div class="test-section">
+        <h2>Test 1: IntegramTable with Empty apiUrl</h2>
+        <p>This should use the fallback URL construction from window.location.pathname</p>
+        <div id="test1-container" style="display: none;"></div>
+        <button onclick="runTest1()">Run Test 1</button>
+        <div id="test1-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 2: IntegramTable getApiBase() Method</h2>
+        <p>Testing getApiBase() with various apiUrl configurations</p>
+        <button onclick="runTest2()">Run Test 2</button>
+        <div id="test2-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 3: Monitor Network Requests</h2>
+        <p>Check the browser's Network tab (F12) for any report/0 requests during initialization</p>
+        <div id="test3-result" class="info">
+            Open browser DevTools Network tab and check for requests to report/0.
+            There should be NO requests to report/0 after clicking the buttons above.
+        </div>
+    </div>
+
+    <!-- Mock window.db and window.xsrf -->
+    <script>
+        // Simulate the global variables typically set by the application
+        window.db = 'testdb';
+        window.xsrf = 'test-xsrf-token';
+        window.uid = 1;
+    </script>
+
+    <!-- Include IntegramTable -->
+    <script src="../assets/js/integram-table.js"></script>
+
+    <script>
+        // Override fetch to intercept and log all API calls
+        const originalFetch = window.fetch;
+        const fetchLog = [];
+
+        window.fetch = function(...args) {
+            const url = args[0];
+            fetchLog.push({
+                url: url,
+                timestamp: new Date().toISOString()
+            });
+
+            // Log to console
+            console.log('Fetch intercepted:', url);
+
+            // Check if it's a report/0 request
+            if (url.includes('report/0')) {
+                console.error('❌ INVALID REQUEST DETECTED: report/0');
+            }
+
+            // Return a mock response to prevent actual API calls
+            return Promise.resolve({
+                ok: true,
+                status: 200,
+                json: () => Promise.resolve({
+                    columns: [],
+                    data: []
+                }),
+                text: () => Promise.resolve('{}')
+            });
+        };
+
+        function runTest1() {
+            const resultDiv = document.getElementById('test1-result');
+            resultDiv.innerHTML = '<div class="info">Running test...</div>';
+
+            try {
+                // Clear fetch log
+                fetchLog.length = 0;
+
+                // Create IntegramTable instance with empty apiUrl (the fix)
+                const tempContainer = document.getElementById('test1-container');
+                const tempTable = new IntegramTable('test1-container', {
+                    apiUrl: '',
+                    instanceName: 'testTable1'
+                });
+
+                // Wait a bit for any async initialization
+                setTimeout(() => {
+                    const report0Requests = fetchLog.filter(log => log.url.includes('report/0'));
+
+                    let html = '<h3>Fetch Log:</h3><pre>' + JSON.stringify(fetchLog, null, 2) + '</pre>';
+
+                    if (report0Requests.length > 0) {
+                        html += '<div class="error">❌ FAILED: Found ' + report0Requests.length + ' request(s) to report/0</div>';
+                        html += '<pre>' + JSON.stringify(report0Requests, null, 2) + '</pre>';
+                    } else {
+                        html += '<div class="success">✅ PASSED: No report/0 requests detected</div>';
+                    }
+
+                    // Test getApiBase()
+                    const apiBase = tempTable.getApiBase();
+                    html += '<div class="info">getApiBase() returned: <code>' + apiBase + '</code></div>';
+
+                    resultDiv.innerHTML = html;
+                }, 1000);
+
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="error">Error: ' + error.message + '</div>';
+                console.error('Test 1 error:', error);
+            }
+        }
+
+        function runTest2() {
+            const resultDiv = document.getElementById('test2-result');
+
+            // Mock IntegramTable just to test getApiBase()
+            const testCases = [
+                { apiUrl: '', expected: 'Uses window.location fallback' },
+                { apiUrl: '/testdb/report/123', expected: '/testdb' },
+                { apiUrl: '/testdb/metadata/456', expected: '/testdb' },
+                { apiUrl: '/testdb/object/789', expected: '/testdb' },
+                { apiUrl: '/testdb/report/0', expected: '/testdb (but should not be used!)' }
+            ];
+
+            let html = '<h3>Test Cases:</h3>';
+
+            testCases.forEach((testCase, index) => {
+                // Create a temp instance with the test apiUrl
+                const container = document.createElement('div');
+                container.id = 'test2-temp-' + index;
+                container.style.display = 'none';
+                document.body.appendChild(container);
+
+                try {
+                    const table = new IntegramTable(container.id, {
+                        apiUrl: testCase.apiUrl
+                    });
+
+                    const result = table.getApiBase();
+                    const isReport0 = testCase.apiUrl.includes('report/0');
+
+                    html += '<div class="' + (isReport0 ? 'error' : 'success') + '">';
+                    html += '<strong>apiUrl:</strong> ' + (testCase.apiUrl || '(empty)') + '<br>';
+                    html += '<strong>getApiBase():</strong> ' + result + '<br>';
+                    html += '<strong>Expected:</strong> ' + testCase.expected;
+                    if (isReport0) {
+                        html += '<br><strong>⚠️ Note:</strong> report/0 should NOT be used in production!';
+                    }
+                    html += '</div>';
+
+                    // Clean up
+                    document.body.removeChild(container);
+                } catch (error) {
+                    html += '<div class="error">Error with apiUrl "' + testCase.apiUrl + '": ' + error.message + '</div>';
+                }
+            });
+
+            resultDiv.innerHTML = html;
+        }
+
+        // Log all fetch calls to console for debugging
+        console.log('Fetch interceptor installed. All fetch calls will be logged.');
+    </script>
+</body>
+</html>
