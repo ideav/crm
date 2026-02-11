@@ -960,6 +960,157 @@ class IntegramTable {
                     }
                 }
             }
+
+            // Handle overdue tasks (Issue #420)
+            this.handleOverdueTasks();
+        }
+
+        /**
+         * Detect and mark overdue tasks (Issue #420)
+         * Finds rows with date columns in the past and applies collapsed view styling
+         */
+        handleOverdueTasks() {
+            // Find date/datetime columns
+            const dateColumns = this.columns.filter(col =>
+                col.format === 'DATE' || col.format === 'DATETIME'
+            );
+
+            if (dateColumns.length === 0) return;
+
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            const tbody = this.container.querySelector('.integram-table tbody');
+            if (!tbody) return;
+
+            const rows = tbody.querySelectorAll('tr');
+
+            rows.forEach((row, rowIndex) => {
+                const rowData = this.data[rowIndex];
+                if (!rowData) return;
+
+                let isOverdue = false;
+
+                // Check all date columns for overdue dates
+                dateColumns.forEach(dateCol => {
+                    const colIndex = this.columns.indexOf(dateCol);
+                    const cellValue = rowData[colIndex];
+
+                    if (cellValue && typeof cellValue === 'string') {
+                        // Parse date - support both DD.MM.YYYY and YYYY-MM-DD formats
+                        let taskDate;
+                        if (cellValue.includes('.')) {
+                            const parts = cellValue.split('.').map(p => parseInt(p.trim()));
+                            if (parts.length >= 3) {
+                                taskDate = new Date(parts[2], parts[1] - 1, parts[0]);
+                            }
+                        } else if (cellValue.includes('-')) {
+                            taskDate = new Date(cellValue);
+                        }
+
+                        if (taskDate && !isNaN(taskDate.getTime())) {
+                            taskDate.setHours(0, 0, 0, 0);
+                            if (taskDate < today) {
+                                isOverdue = true;
+                            }
+                        }
+                    }
+                });
+
+                if (isOverdue) {
+                    row.classList.add('overdue-task', 'collapsed');
+                    row.setAttribute('data-row-index', rowIndex);
+                }
+            });
+
+            // Attach expand/collapse listeners
+            this.attachOverdueTaskListeners();
+
+            // Create backdrop element if it doesn't exist
+            if (!document.getElementById('overdue-task-backdrop')) {
+                const backdrop = document.createElement('div');
+                backdrop.id = 'overdue-task-backdrop';
+                backdrop.className = 'overdue-task-backdrop';
+                document.body.appendChild(backdrop);
+
+                backdrop.addEventListener('click', () => {
+                    this.collapseAllOverdueTasks();
+                });
+            }
+        }
+
+        /**
+         * Attach click listeners to overdue task rows for expand/collapse
+         */
+        attachOverdueTaskListeners() {
+            const overdueRows = this.container.querySelectorAll('.overdue-task');
+
+            overdueRows.forEach(row => {
+                // Remove old listener if exists
+                const newRow = row.cloneNode(true);
+                row.parentNode.replaceChild(newRow, row);
+
+                newRow.addEventListener('click', (e) => {
+                    // Don't trigger if clicking on a link, button, or input
+                    if (e.target.tagName === 'A' || e.target.tagName === 'BUTTON' ||
+                        e.target.tagName === 'INPUT' || e.target.closest('button') ||
+                        e.target.closest('a')) {
+                        return;
+                    }
+
+                    e.stopPropagation();
+                    this.toggleOverdueTask(newRow);
+                });
+            });
+        }
+
+        /**
+         * Toggle expand/collapse state of an overdue task row
+         * @param {HTMLElement} row - The table row element
+         */
+        toggleOverdueTask(row) {
+            const isCollapsed = row.classList.contains('collapsed');
+            const backdrop = document.getElementById('overdue-task-backdrop');
+
+            if (isCollapsed) {
+                // Collapse all other expanded tasks first
+                this.collapseAllOverdueTasks();
+
+                // Expand this task
+                row.classList.remove('collapsed');
+                row.classList.add('expanded');
+
+                // Show backdrop
+                if (backdrop) {
+                    backdrop.classList.add('active');
+                }
+            } else {
+                // Collapse this task
+                row.classList.remove('expanded');
+                row.classList.add('collapsed');
+
+                // Hide backdrop
+                if (backdrop) {
+                    backdrop.classList.remove('active');
+                }
+            }
+        }
+
+        /**
+         * Collapse all expanded overdue tasks
+         */
+        collapseAllOverdueTasks() {
+            const expandedRows = this.container.querySelectorAll('.overdue-task.expanded');
+            const backdrop = document.getElementById('overdue-task-backdrop');
+
+            expandedRows.forEach(row => {
+                row.classList.remove('expanded');
+                row.classList.add('collapsed');
+            });
+
+            if (backdrop) {
+                backdrop.classList.remove('active');
+            }
         }
 
         renderFilterCell(column, columnIndex = 0) {
