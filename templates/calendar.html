@@ -857,7 +857,7 @@ async function handleEventDrop(info) {
         // Update task deadline via API
         const formData = new FormData();
         formData.append('_xsrf', window.xsrf);
-        formData.append('t3886', formattedDate); // Assuming t3886 is the field ID for deadline
+        formData.append('t3888', formattedDate); // Assuming t3888 is the field ID for deadline
 
         const response = await fetch(`/${ window.db }/_m_set/${ taskId }/?JSON`, {
             method: 'POST',
