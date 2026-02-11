@@ -297,6 +297,10 @@
         border-color: var(--primary-hover) !important;
     }
 
+    .fc .fc-button-group {
+        gap: 2px;
+    }
+    
     .fc-today-button {
         background-color: var(--surface) !important;
         border-color: var(--border-color) !important;
@@ -433,14 +437,14 @@
         <div class="calendar-control-group">
             <label class="calendar-control-label">Исполнитель:</label>
             <select id="executorFilter" class="calendar-select" onchange="applyFilters()">
-                <option value="">Все</option>
+                <option value="%">Все</option>
             </select>
         </div>
 
         <div class="calendar-control-group">
             <label class="calendar-control-label">Тип задачи:</label>
             <select id="taskTypeFilter" class="calendar-select" onchange="applyFilters()">
-                <option value="%">Все</option>
+                <option value="">Все</option>
             </select>
         </div>
 
@@ -487,7 +491,7 @@
 </div>
 
 <!-- Include FullCalendar locally -->
-<script src="/download/{_global_.z}/vendor/fullcalendar/index.global.min.js"></script>
+<script src="/js/index.global.min.js"></script>
 
 <!-- Include IntegramTable for edit form functionality -->
 <script src="/download/{_global_.z}/js/integram-table.js"></script>
@@ -693,7 +697,7 @@ function parseDateFromAPI(dateStr) {
 // Populate executor filter
 function populateExecutorFilter(executors) {
     const executorFilter = document.getElementById('executorFilter');
-    executorFilter.innerHTML = '<option value="">Все</option>';
+    executorFilter.innerHTML = '<option value="%">Все</option>';
 
     if (Array.isArray(executors)) {
         executors.forEach(executor => {
