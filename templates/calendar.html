@@ -458,7 +458,7 @@ function initializeCalendar() {
 // Load task statuses
 async function loadTaskStatuses() {
     try {
-        const response = await fetch(`/${window.db}/object/3882/?JSON_OBJ`);
+        const response = await fetch(`/${ window.db }/object/3882/?JSON_OBJ`);
         const data = await response.json();
 
         if (Array.isArray(data)) {
@@ -479,7 +479,7 @@ async function loadTasks() {
         const endDate = formatDateForAPI(view.activeEnd);
 
         // Fetch tasks for the current date range
-        const response = await fetch(`/${window.db}/report/4283?JSON_KV&FR_date=${startDate}&TO_date=${endDate}`);
+        const response = await fetch(`/${ window.db }/report/4283?JSON_KV&FR_date=${ startDate }&TO_date=${ endDate }`);
         const data = await response.json();
 
         if (Array.isArray(data)) {
@@ -501,7 +501,7 @@ function formatDateForAPI(date) {
     const day = String(d.getDate()).padStart(2, '0');
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const year = d.getFullYear();
-    return `${day}.${month}.${year}`;
+    return `${ day }.${ month }.${ year }`;
 }
 
 // Parse date from API format (DD.MM.YYYY HH:MM:SS)
@@ -633,7 +633,7 @@ function convertTaskToEvent(task) {
 
     return {
         id: task['ЗадачаID'],
-        title: `${icon} ${task['Задача'] || 'Без названия'}`,
+        title: `${ icon } ${ task['Задача'] || 'Без названия' }`,
         start: deadline,
         allDay: false,
         backgroundColor: backgroundColor,
@@ -676,13 +676,13 @@ function updateOverdueSection(tasks) {
         const icon = taskTypeIcons[taskType] || taskTypeIcons['Другое'];
 
         return `
-            <div class="overdue-task-item" onclick="openTaskDetail('${task['ЗадачаID']}')">
-                <span class="overdue-task-icon">${icon}</span>
+            <div class="overdue-task-item" onclick="openTaskDetail('${ task['ЗадачаID'] }')">
+                <span class="overdue-task-icon">${ icon }</span>
                 <div class="overdue-task-info">
-                    <div class="overdue-task-title">${task['Задача'] || 'Без названия'}</div>
-                    <div class="overdue-task-executor">${task['Исполнитель'] || ''}</div>
+                    <div class="overdue-task-title">${ task['Задача'] || 'Без названия' }</div>
+                    <div class="overdue-task-executor">${ task['Исполнитель'] || '' }</div>
                 </div>
-                <div class="overdue-task-date">${task['Срок'] || ''}</div>
+                <div class="overdue-task-date">${ task['Срок'] || '' }</div>
             </div>
         `;
     }).join('');
@@ -702,7 +702,7 @@ async function handleEventDrop(info) {
         formData.append('_xsrf', window.xsrf);
         formData.append('t3886', formattedDate); // Assuming t3886 is the field ID for deadline
 
-        const response = await fetch(`/${window.db}/_m_set/${taskId}/?JSON`, {
+        const response = await fetch(`/${ window.db }/_m_set/${ taskId }/?JSON`, {
             method: 'POST',
             body: formData
         });
@@ -735,7 +735,7 @@ function formatDateTimeForAPI(date) {
     const hours = String(d.getHours()).padStart(2, '0');
     const minutes = String(d.getMinutes()).padStart(2, '0');
     const seconds = String(d.getSeconds()).padStart(2, '0');
-    return `${day}.${month}.${year} ${hours}:${minutes}:${seconds}`;
+    return `${ day }.${ month }.${ year } ${ hours }:${ minutes }:${ seconds }`;
 }
 
 // Handle event click
@@ -747,7 +747,7 @@ function handleEventClick(info) {
 // Open task detail
 function openTaskDetail(taskId) {
     // Open task in new window using form interface
-    window.open(`/${window.db}/form/3882/${taskId}`, `task_${taskId}`, 'width=800,height=600');
+    window.open(`/${ window.db }/form/3882/${ taskId }`, `task_${ taskId }`, 'width=800,height=600');
 }
 
 // Handle event mount (for tooltips)
@@ -756,10 +756,10 @@ function handleEventDidMount(info) {
 
     // Create tooltip content
     const tooltipContent = `
-        <strong>${info.event.title}</strong><br>
-        ${props.client ? `Клиент: ${props.client}<br>` : ''}
-        ${props.executor ? `Исполнитель: ${props.executor}<br>` : ''}
-        ${props.description ? `Описание: ${props.description}<br>` : ''}
+        <strong>${ info.event.title }</strong><br>
+        ${ props.client ? `Клиент: ${ props.client }<br>` : '' }
+        ${ props.executor ? `Исполнитель: ${ props.executor }<br>` : '' }
+        ${ props.description ? `Описание: ${ props.description }<br>` : '' }
     `;
 
     // Set title attribute for native tooltip
@@ -788,7 +788,7 @@ function setupAutoRefresh() {
 // Show error
 function showError(message) {
     const calendarEl = document.getElementById('calendar');
-    calendarEl.innerHTML = `<div class="error">${message}</div>`;
+    calendarEl.innerHTML = `<div class="error">${ message }</div>`;
 }
 
 // Cleanup on page unload
