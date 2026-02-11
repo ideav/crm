@@ -915,8 +915,8 @@ async function openTaskDetail(taskId) {
 
     try {
         // Create IntegramTable instance with minimal configuration
-        // Don't specify apiUrl - let it use fallback mechanism to construct from current page URL
         const tempTable = new IntegramTable('temp-table-container', {
+            apiUrl: `/${ window.db }/report/0`,
             instanceName: 'calendarTaskEdit'
         });
 
@@ -949,8 +949,8 @@ async function createNewTask() {
 
     try {
         // Create IntegramTable instance with minimal configuration
-        // Don't specify apiUrl - let it use fallback mechanism to construct from current page URL
         const tempTable = new IntegramTable('temp-table-container-create', {
+            apiUrl: `/${ window.db }/report/0`,
             instanceName: 'calendarTaskCreate'
         });
 
