@@ -1959,3 +1959,101 @@ tr.row-selected {
     font-size: 14px;
     color: var(--md-text-secondary);
 }
+
+/* ========================================
+   Overdue Tasks - Collapsed View (Issue #420)
+   ======================================== */
+
+/* Mark overdue task rows */
+.integram-table tbody tr.overdue-task {
+    background-color: #fff3e0;
+    border-left: 4px solid #ff9800;
+    position: relative;
+}
+
+/* Collapsed state - show only one line */
+.integram-table tbody tr.overdue-task.collapsed {
+    max-height: 48px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.integram-table tbody tr.overdue-task.collapsed:hover {
+    background-color: #ffe0b2;
+}
+
+/* Collapsed state - limit cell content to one line */
+.integram-table tbody tr.overdue-task.collapsed td {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+}
+
+/* Expanded state - overlay on top of other elements */
+.integram-table tbody tr.overdue-task.expanded {
+    position: relative;
+    z-index: 1000;
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+    background-color: #fff;
+    border: 2px solid #ff9800;
+}
+
+/* Expanded state - allow content to wrap */
+.integram-table tbody tr.overdue-task.expanded td {
+    white-space: normal;
+    max-width: none;
+    padding: 16px;
+}
+
+/* Expand/collapse indicator icon */
+.integram-table tbody tr.overdue-task.collapsed::before {
+    content: '▶';
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #ff9800;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.integram-table tbody tr.overdue-task.expanded::before {
+    content: '▼';
+    position: absolute;
+    left: 8px;
+    top: 16px;
+    color: #ff9800;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+/* Overdue badge/label */
+.overdue-badge {
+    display: inline-block;
+    background-color: #ff9800;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 500;
+    margin-left: 8px;
+    text-transform: uppercase;
+}
+
+/* Overlay backdrop when task is expanded */
+.overdue-task-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.1);
+    z-index: 999;
+    display: none;
+}
+
+.overdue-task-backdrop.active {
+    display: block;
+}
