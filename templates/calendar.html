@@ -917,7 +917,7 @@ async function openTaskDetail(taskId) {
         // Create IntegramTable instance with minimal configuration
         // Use report/4283 as apiUrl to properly initialize the table component (issue #437)
         const tempTable = new IntegramTable('temp-table-container', {
-            apiUrl: `/${ window.db }/report/4283`,
+            apiUrl: `/${ window.db }/report/4283?JSON_KV`,
             instanceName: 'calendarTaskEdit'
         });
 
@@ -952,7 +952,7 @@ async function createNewTask() {
         // Create IntegramTable instance with minimal configuration
         // Use report/4283 as apiUrl to properly initialize the table component (issue #437)
         const tempTable = new IntegramTable('temp-table-container-create', {
-            apiUrl: `/${ window.db }/report/4283`,
+            apiUrl: `/${ window.db }/report/4283?JSON_KV`,
             instanceName: 'calendarTaskCreate'
         });
 
