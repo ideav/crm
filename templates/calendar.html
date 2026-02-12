@@ -641,9 +641,10 @@ function collapseOverdueSection() {
 }
 
 // Initialize calendar on page load
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
     initializeCalendar();
-    loadFilterOptions();
+    // Issue #443: Load executors first, then tasks
+    await loadFilterOptions();
     loadTasks();
     setupAutoRefresh();
     // Issue #439: Setup search input blur handler after a short delay
@@ -887,9 +888,14 @@ function populateExecutorFilter(executors) {
             executorFilter.appendChild(option);
         });
 
-        // Set default to current user if available
+        // Issue #443: Set default to current user only if it exists in the dropdown
         if (window.uid) {
-            executorFilter.value = window.uid;
+            // Check if window.uid exists among the options
+            const uidExists = Array.from(executorFilter.options).some(option => option.value === window.uid);
+            if (uidExists) {
+                executorFilter.value = window.uid;
+            }
+            // If window.uid is not in the dropdown, leave "Все исполнители" selected (default)
         }
     }
 }
