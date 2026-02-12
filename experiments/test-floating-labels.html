@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Floating Labels - Issue 445</title>
+    <link rel="stylesheet" href="../assets/css/integram-table.css">
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+            background: #f5f5f5;
+            padding: 40px;
+        }
+        .test-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            font-size: 24px;
+            margin-bottom: 30px;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>Тест: Плавающие подписи с белым фоном (Issue #445)</h1>
+
+        <div class="edit-form">
+            <div class="form-group">
+                <label for="field-1">Клиент <span class="required">*</span></label>
+                <input type="text" class="form-control" id="field-1" value="АО &quot;БАИР&quot;">
+            </div>
+
+            <div class="form-group">
+                <label for="field-2">ИНН</label>
+                <input type="text" class="form-control" id="field-2" value="7704017596">
+            </div>
+
+            <div class="form-group">
+                <label for="field-3">Дата</label>
+                <input type="date" class="form-control" id="field-3" value="2025-01-14">
+            </div>
+
+            <div class="form-group">
+                <label for="field-4">Ответственный</label>
+                <input type="text" class="form-control" id="field-4" value="gregory">
+            </div>
+
+            <div class="form-group">
+                <label for="field-5">Скидка, %</label>
+                <input type="number" class="form-control" id="field-5" value="13">
+            </div>
+
+            <div class="form-group">
+                <label for="field-6">Партнер</label>
+                <input type="text" class="form-control" id="field-6" placeholder="Поиск...">
+            </div>
+
+            <div class="form-group">
+                <label for="field-7">Дистрибьютор</label>
+                <input type="text" class="form-control" id="field-7" placeholder="Поиск...">
+            </div>
+
+            <div class="form-group">
+                <label for="field-8">Комментарии</label>
+                <textarea class="form-control memo-field" id="field-8">Закупили "think cell"</textarea>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
