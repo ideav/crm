@@ -600,7 +600,7 @@ async function loadFilterOptions() {
         populateTaskTypeFilter(taskTypes);
 
         // Load statuses
-        const statusResponse = await fetch(`/${ window.db }/report/6804?JSON_KV`);
+        const statusResponse = await fetch(`/${ window.db }/report/Все%20статусы%20задач?JSON_KV`);
         const statuses = await statusResponse.json();
         populateStatusFilter(statuses);
     } catch (error) {
