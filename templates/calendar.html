@@ -622,25 +622,25 @@ async function loadTasks() {
         // Add executor filter
         const executorValue = document.getElementById('executorFilter').value;
         if (executorValue) {
-            queryParams += `&FR_6814=${ encodeURIComponent(executorValue) }`;
+            queryParams += `&FR_ИсполнительID=${ encodeURIComponent(executorValue) }`;
         }
 
         // Add task type filter
         const taskTypeValue = document.getElementById('taskTypeFilter').value;
         if (taskTypeValue) {
-            queryParams += `&FR_6611=${ encodeURIComponent(taskTypeValue) }`;
+            queryParams += `&FR_Тип%20задачи=${ encodeURIComponent(taskTypeValue) }`;
         }
 
         // Add status filter
         const statusValue = document.getElementById('statusFilter').value;
         if (statusValue) {
-            queryParams += `&FR_6820=${ encodeURIComponent(statusValue) }`;
+            queryParams += `&FR_Статус=${ encodeURIComponent(statusValue) }`;
         }
 
         // Add important filter
         const importantOnly = document.getElementById('importantFilter').checked;
         if (importantOnly) {
-            queryParams += `&FR_6765=%`;
+            queryParams += `&FR_Важно=%`;
         }
 
         // Fetch tasks with filters applied on backend
