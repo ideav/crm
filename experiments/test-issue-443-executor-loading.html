@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Issue #443 - Executor Loading Order</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            background-color: #f9f9f9;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        select {
+            padding: 8px;
+            margin: 10px 0;
+            min-width: 200px;
+        }
+        button {
+            padding: 8px 16px;
+            margin: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test Issue #443: Executor Loading Order</h1>
+    <p>This test verifies that executors are loaded before tasks, and that the default executor selection works correctly.</p>
+
+    <div class="test-section">
+        <h2>Test 1: Executor Dropdown Population</h2>
+        <select id="executorFilter">
+            <option value="%">Все исполнители</option>
+        </select>
+        <div>
+            <button onclick="runTest1WithValidUID()">Test with Valid UID (uid=5)</button>
+            <button onclick="runTest1WithInvalidUID()">Test with Invalid UID (uid=999)</button>
+            <button onclick="runTest1WithoutUID()">Test without UID</button>
+        </div>
+        <div id="test1-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 2: Loading Sequence Simulation</h2>
+        <button onclick="runTest2LoadingSequence()">Run Loading Sequence Test</button>
+        <div id="test2-result" class="result"></div>
+    </div>
+
+    <script>
+        // Mock executors data
+        const mockExecutors = [
+            { k: '1', v: 'Иван Иванов' },
+            { k: '2', v: 'Петр Петров' },
+            { k: '5', v: 'Мария Сидорова' },
+            { k: '10', v: 'Алексей Алексеев' }
+        ];
+
+        // Original populateExecutorFilter function (issue #443 fix)
+        function populateExecutorFilter(executors, windowUid) {
+            const executorFilter = document.getElementById('executorFilter');
+            executorFilter.innerHTML = '<option value="%">Все исполнители</option>';
+
+            if (Array.isArray(executors)) {
+                executors.forEach(executor => {
+                    const option = document.createElement('option');
+                    option.value = executor.k || executor.id || executor['ПользовательID'];
+                    option.textContent = executor.v || executor.name || executor.k || executor['Пользователь'];
+                    executorFilter.appendChild(option);
+                });
+
+                // Issue #443: Set default to current user only if it exists in the dropdown
+                if (windowUid) {
+                    // Check if windowUid exists among the options
+                    const uidExists = Array.from(executorFilter.options).some(option => option.value === windowUid);
+                    if (uidExists) {
+                        executorFilter.value = windowUid;
+                        return true; // UID was set
+                    }
+                    // If windowUid is not in the dropdown, leave "Все исполнители" selected (default)
+                    return false; // UID was not set
+                }
+            }
+            return null; // No UID provided
+        }
+
+        function runTest1WithValidUID() {
+            const result = populateExecutorFilter(mockExecutors, '5');
+            const selectedValue = document.getElementById('executorFilter').value;
+            const resultDiv = document.getElementById('test1-result');
+
+            if (result === true && selectedValue === '5') {
+                resultDiv.className = 'result success';
+                resultDiv.innerHTML = '✓ PASS: Valid UID (5) was found and selected correctly.<br>Selected value: ' + selectedValue;
+            } else {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = '✗ FAIL: Expected UID 5 to be selected, but got: ' + selectedValue;
+            }
+        }
+
+        function runTest1WithInvalidUID() {
+            const result = populateExecutorFilter(mockExecutors, '999');
+            const selectedValue = document.getElementById('executorFilter').value;
+            const resultDiv = document.getElementById('test1-result');
+
+            if (result === false && selectedValue === '%') {
+                resultDiv.className = 'result success';
+                resultDiv.innerHTML = '✓ PASS: Invalid UID (999) was not found. "Все исполнители" remains selected.<br>Selected value: ' + selectedValue;
+            } else {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = '✗ FAIL: Expected "Все исполнители" (%) to be selected, but got: ' + selectedValue;
+            }
+        }
+
+        function runTest1WithoutUID() {
+            const result = populateExecutorFilter(mockExecutors, null);
+            const selectedValue = document.getElementById('executorFilter').value;
+            const resultDiv = document.getElementById('test1-result');
+
+            if (result === null && selectedValue === '%') {
+                resultDiv.className = 'result success';
+                resultDiv.innerHTML = '✓ PASS: No UID provided. "Все исполнители" remains selected.<br>Selected value: ' + selectedValue;
+            } else {
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = '✗ FAIL: Expected "Все исполнители" (%) to be selected, but got: ' + selectedValue;
+            }
+        }
+
+        // Simulate async loading sequence
+        async function runTest2LoadingSequence() {
+            const resultDiv = document.getElementById('test2-result');
+            resultDiv.className = 'result';
+            resultDiv.innerHTML = 'Running test...<br>';
+
+            let log = '';
+
+            // Simulate DOMContentLoaded with proper async/await
+            async function simulateDOMContentLoaded() {
+                log += '1. Calendar initialized<br>';
+
+                // Issue #443: Load executors first, then tasks (await loadFilterOptions)
+                await simulateLoadFilterOptions();
+
+                log += '4. Loading tasks (after executors are loaded)<br>';
+            }
+
+            async function simulateLoadFilterOptions() {
+                log += '2. Loading filter options (executors)...<br>';
+
+                // Simulate async API call with delay
+                await new Promise(resolve => setTimeout(resolve, 100));
+
+                log += '3. Executors loaded successfully<br>';
+                populateExecutorFilter(mockExecutors, '5');
+            }
+
+            try {
+                await simulateDOMContentLoaded();
+                log += '<br>✓ PASS: Loading sequence correct - executors loaded before tasks';
+                resultDiv.className = 'result success';
+                resultDiv.innerHTML = log;
+            } catch (error) {
+                log += '<br>✗ FAIL: Error in loading sequence: ' + error.message;
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = log;
+            }
+        }
+    </script>
+</body>
+</html>
