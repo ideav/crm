@@ -319,6 +319,7 @@
         align-items: center;
         gap: 4px;
         margin-left: 8px;
+        vertical-align: middle;
     }
 
     .fc-search-icon {
@@ -331,6 +332,8 @@
         cursor: pointer !important;
         transition: all 0.2s ease !important;
         font-size: 14px;
+        line-height: 1.5;
+        vertical-align: middle;
     }
 
     .fc-search-icon:hover {
@@ -733,13 +736,12 @@ function hideSearchInput() {
     const wrapper = document.getElementById('search-input-wrapper');
     const input = document.getElementById('search-input');
 
-    // Only hide if input is empty
-    if (input.value.trim() === '') {
-        wrapper.classList.remove('active');
-        icon.style.display = 'inline-block';
-        searchQuery = '';
-        renderEvents(); // Re-render without search filter
-    }
+    // Clear input field and hide search (Issue #441)
+    input.value = '';
+    wrapper.classList.remove('active');
+    icon.style.display = 'inline-block';
+    searchQuery = '';
+    renderEvents(); // Re-render without search filter
 }
 
 // Issue #439: Handle blur event on search input
@@ -748,11 +750,12 @@ function setupSearchInputBlur() {
     if (input) {
         input.addEventListener('blur', function() {
             // Delay to allow click on close button
-            setTimeout(() => {
-                if (input.value.trim() === '') {
-                    hideSearchInput();
-                }
-            }, 200);
+            // Don't auto-hide on blur anymore since close button will handle it (Issue #441)
+            // setTimeout(() => {
+            //     if (input.value.trim() === '') {
+            //         hideSearchInput();
+            //     }
+            // }, 200);
         });
     }
 }
