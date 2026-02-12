@@ -628,7 +628,7 @@ async function loadTasks() {
         // Add task type filter
         const taskTypeValue = document.getElementById('taskTypeFilter').value;
         if (taskTypeValue) {
-            queryParams += `&FR_Тип%20задачи=${ encodeURIComponent(taskTypeValue) }`;
+            queryParams += `&FR_Тип%20задачиID=${ encodeURIComponent(taskTypeValue) }`;
         }
 
         // Add status filter
