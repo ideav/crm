@@ -634,7 +634,7 @@ async function loadTasks() {
         // Add status filter
         const statusValue = document.getElementById('statusFilter').value;
         if (statusValue) {
-            queryParams += `&FR_Статус=${ encodeURIComponent(statusValue) }`;
+            queryParams += `&FR_Статус%20задачиID=${ encodeURIComponent(statusValue) }`;
         }
 
         // Add important filter
