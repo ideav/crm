@@ -313,6 +313,99 @@
         color: white !important;
     }
 
+    /* Search functionality styles - Issue #439 */
+    .fc-search-container {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        margin-left: 8px;
+    }
+
+    .fc-search-icon {
+        background-color: var(--surface) !important;
+        border: 1px solid var(--border-color) !important;
+        color: var(--primary-color) !important;
+        padding: 6px 12px !important;
+        border-radius: 6px !important;
+        font-weight: 500 !important;
+        cursor: pointer !important;
+        transition: all 0.2s ease !important;
+        font-size: 14px;
+    }
+
+    .fc-search-icon:hover {
+        background-color: var(--primary-color) !important;
+        border-color: var(--primary-color) !important;
+        color: white !important;
+    }
+
+    .fc-search-input-wrapper {
+        display: none;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .fc-search-input-wrapper.active {
+        display: inline-flex;
+    }
+
+    .fc-search-input {
+        padding: 6px 12px;
+        border-radius: 6px;
+        border: 1px solid var(--border-color);
+        background-color: var(--surface);
+        font-size: 0.875rem;
+        color: var(--text-primary);
+        transition: all 0.2s ease;
+        width: 200px;
+    }
+
+    .fc-search-input:focus {
+        outline: none;
+        border-color: var(--primary-color);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    .fc-search-close {
+        background-color: var(--surface);
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+        padding: 6px 10px;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-size: 14px;
+    }
+
+    .fc-search-close:hover {
+        background-color: #fee2e2;
+        border-color: #fca5a5;
+        color: var(--overdue-color);
+    }
+
+    /* Highlight matched tasks - Issue #439 */
+    .fc-event.event-search-match {
+        box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.8) !important;
+        background: linear-gradient(135deg, var(--current-bg-color, var(--primary-color)) 0%, #fbbf24 100%) !important;
+    }
+
+    .fc-event.event-search-match.event-overdue {
+        --current-bg-color: var(--overdue-color);
+    }
+
+    .fc-event.event-search-match.event-important {
+        --current-bg-color: var(--important-color);
+    }
+
+    @keyframes pulse-yellow {
+        0%, 100% {
+            box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.8);
+        }
+        50% {
+            box-shadow: 0 0 0 6px rgba(250, 204, 21, 0.5);
+        }
+    }
+
     .fc .fc-daygrid-day.fc-day-today {
         background-color: rgba(37, 99, 235, 0.1) !important;
     }
@@ -503,6 +596,7 @@ let allTasks = [];
 let taskStatuses = [];
 let currentView = 'dayGridMonth'; // Default view
 let autoRefreshInterval;
+let searchQuery = ''; // Issue #439: Search query state
 
 // Task type icons mapping
 const taskTypeIcons = {
@@ -550,6 +644,8 @@ document.addEventListener('DOMContentLoaded', function() {
     loadFilterOptions();
     loadTasks();
     setupAutoRefresh();
+    // Issue #439: Setup search input blur handler after a short delay
+    setTimeout(setupSearchInputBlur, 500);
 });
 
 // Initialize FullCalendar
@@ -584,6 +680,88 @@ function initializeCalendar() {
     });
 
     calendar.render();
+
+    // Issue #439: Add search icon and input next to Today button
+    addSearchToToolbar();
+}
+
+// Issue #439: Add search functionality to calendar toolbar
+function addSearchToToolbar() {
+    // Find the Today button and add search UI next to it
+    const todayButton = document.querySelector('.fc-today-button');
+    if (!todayButton) return;
+
+    // Create search container
+    const searchContainer = document.createElement('div');
+    searchContainer.className = 'fc-search-container';
+    searchContainer.innerHTML = `
+        <button class="fc-search-icon" id="search-icon" onclick="showSearchInput()" title="Поиск задач">
+            🔍
+        </button>
+        <div class="fc-search-input-wrapper" id="search-input-wrapper">
+            <input
+                type="text"
+                class="fc-search-input"
+                id="search-input"
+                placeholder="Поиск по задачам..."
+                oninput="performSearch()"
+            />
+            <button class="fc-search-close" onclick="hideSearchInput()" title="Закрыть">
+                ✕
+            </button>
+        </div>
+    `;
+
+    // Insert after Today button
+    todayButton.parentNode.insertBefore(searchContainer, todayButton.nextSibling);
+}
+
+// Issue #439: Show search input and hide icon
+function showSearchInput() {
+    const icon = document.getElementById('search-icon');
+    const wrapper = document.getElementById('search-input-wrapper');
+    const input = document.getElementById('search-input');
+
+    icon.style.display = 'none';
+    wrapper.classList.add('active');
+    input.focus();
+}
+
+// Issue #439: Hide search input and show icon
+function hideSearchInput() {
+    const icon = document.getElementById('search-icon');
+    const wrapper = document.getElementById('search-input-wrapper');
+    const input = document.getElementById('search-input');
+
+    // Only hide if input is empty
+    if (input.value.trim() === '') {
+        wrapper.classList.remove('active');
+        icon.style.display = 'inline-block';
+        searchQuery = '';
+        renderEvents(); // Re-render without search filter
+    }
+}
+
+// Issue #439: Handle blur event on search input
+function setupSearchInputBlur() {
+    const input = document.getElementById('search-input');
+    if (input) {
+        input.addEventListener('blur', function() {
+            // Delay to allow click on close button
+            setTimeout(() => {
+                if (input.value.trim() === '') {
+                    hideSearchInput();
+                }
+            }, 200);
+        });
+    }
+}
+
+// Issue #439: Perform search and highlight matched tasks
+function performSearch() {
+    const input = document.getElementById('search-input');
+    searchQuery = input ? input.value.trim().toLowerCase() : '';
+    renderEvents();
 }
 
 // Load all filter options from API
@@ -752,8 +930,14 @@ function applyFilters() {
 
 // Render events (called after tasks are loaded)
 function renderEvents() {
+    // Issue #439: Filter tasks based on search query
+    let tasksToRender = allTasks;
+    if (searchQuery) {
+        tasksToRender = allTasks.filter(task => taskMatchesSearch(task, searchQuery));
+    }
+
     // Convert to FullCalendar events
-    const events = allTasks.map(task => convertTaskToEvent(task));
+    const events = tasksToRender.map(task => convertTaskToEvent(task));
 
     // Update calendar
     calendar.removeAllEvents();
@@ -761,6 +945,27 @@ function renderEvents() {
 
     // Update overdue section
     updateOverdueSection(allTasks);
+}
+
+// Issue #439: Check if task matches search query (search in all fields)
+function taskMatchesSearch(task, query) {
+    if (!query) return true;
+
+    // Search in all task fields
+    const searchableFields = [
+        task['Задача'],
+        task['Описание'],
+        task['Клиент'],
+        task['Исполнитель'],
+        task['Статус'],
+        task['Тип задачи'],
+        task['Срок']
+    ];
+
+    return searchableFields.some(field => {
+        if (!field) return false;
+        return String(field).toLowerCase().includes(query);
+    });
 }
 
 // Convert task to FullCalendar event
@@ -790,6 +995,11 @@ function convertTaskToEvent(task) {
         classNames.push('event-important');
     } else {
         backgroundColor = 'var(--primary-color)';
+    }
+
+    // Issue #439: Add highlight class if task matches search
+    if (searchQuery && taskMatchesSearch(task, searchQuery)) {
+        classNames.push('event-search-match');
     }
 
     return {
