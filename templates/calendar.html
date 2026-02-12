@@ -531,14 +531,13 @@
     <!-- Control Panel -->
     <div class="calendar-controls">
         <div class="calendar-control-group">
-            <label class="calendar-control-label">Исполнитель:</label>
             <select id="executorFilter" class="calendar-select" onchange="applyFilters()">
-                <option value="%">Все</option>
+                <option value="%">Все исполнители</option>
             </select>
         </div>
 
         <div class="calendar-control-group">
-            <label class="calendar-control-label">Тип задачи:</label>
+            <label class="calendar-control-label">Тип:</label>
             <select id="taskTypeFilter" class="calendar-select" onchange="applyFilters()">
                 <option value="">Все</option>
             </select>
@@ -564,7 +563,7 @@
 
         <!-- Issue #427: Create Task Button -->
         <div class="calendar-control-group">
-            <button class="calendar-button" onclick="createNewTask()" style="background-color: var(--primary-color); color: white;">+ Создать задачу</button>
+            <button class="calendar-button" onclick="createNewTask()" style="background-color: var(--primary-color); color: white;">+ Задача</button>
         </div>
 
         <!-- Issue #428: Overdue Tasks - Compact Inline Display -->
@@ -878,7 +877,7 @@ function parseDateFromAPI(dateStr) {
 // Populate executor filter
 function populateExecutorFilter(executors) {
     const executorFilter = document.getElementById('executorFilter');
-    executorFilter.innerHTML = '<option value="%">Все</option>';
+    executorFilter.innerHTML = '<option value="%">Все исполнители</option>';
 
     if (Array.isArray(executors)) {
         executors.forEach(executor => {
