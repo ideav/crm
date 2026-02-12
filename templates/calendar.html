@@ -622,7 +622,7 @@ async function loadTasks() {
         // Add executor filter
         const executorValue = document.getElementById('executorFilter').value;
         if (executorValue) {
-            queryParams += `&FR_ИсполнительID=${ encodeURIComponent(executorValue) }`;
+            queryParams += `&FR_ИсполнительID=${ encodeURIComponent(executorValue) }&FR_Исполнитель=%`;
         }
 
         // Add task type filter
