@@ -253,7 +253,7 @@ class IntegramTable {
                 this.render();
             } catch (error) {
                 console.error('Error loading data:', error);
-                if (!append) {
+                if (!append && this.container) {
                     this.container.innerHTML = `<div class="alert alert-danger">Ошибка загрузки данных: ${ error.message }</div>`;
                 }
             } finally {
@@ -426,6 +426,10 @@ class IntegramTable {
          */
         isObjectFormat(json) {
             // Object format has id, type but not columns, data
+            // First check if json is a valid object
+            if (!json || typeof json !== 'object') {
+                return false;
+            }
             return json.hasOwnProperty('id') &&
                    json.hasOwnProperty('type') &&
                    !json.hasOwnProperty('columns') &&
@@ -824,6 +828,12 @@ class IntegramTable {
         }
 
         render() {
+            // Guard against missing container
+            if (!this.container) {
+                console.error('Cannot render: container element not found');
+                return;
+            }
+
             // Preserve focus state before re-rendering
             const focusedElement = document.activeElement;
             let focusState = null;
@@ -2812,6 +2822,8 @@ class IntegramTable {
         checkAndLoadMore() {
             // Check if table fits entirely on screen and there are more records
             setTimeout(() => {
+                // First check if container exists
+                if (!this.container) return;
                 const tableWrapper = this.container.querySelector('.integram-table-wrapper');
                 if (!tableWrapper || this.isLoading || !this.hasMore) return;
 
