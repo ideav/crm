@@ -1895,85 +1895,50 @@ function loadTaskTypesList(){
     xhr.send();
 }
 
-function openAddRecordModal(statusId, statusName){
+async function openAddRecordModal(statusId, statusName){
     currentStatusId = statusId;
     currentStatusName = statusName;
 
-    // Load type metadata for Client (type 332) using the /metadata endpoint
-    var typeXhr = new XMLHttpRequest();
-    typeXhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/metadata/332', true);
-    typeXhr.onload = function(){
-        if(typeXhr.status === 200){
-            try{
-                var metadata = JSON.parse(typeXhr.responseText);
+    // Create a hidden temporary container for IntegramTable
+    var tempContainer = document.createElement('div');
+    tempContainer.id = 'temp-kanban-add-container';
+    tempContainer.style.display = 'none';
+    document.body.appendChild(tempContainer);
 
-                // Create a temporary table instance to use its form rendering
-                var apiBase = 'https://' + window.location.hostname + '/' + db;
-                var tempOptions = {
-                    instanceName: 'tempAddClientTable',
-                    apiUrl: apiBase + '/type/332',
-                    pageSize: 20
-                };
+    try {
+        // Create a proper IntegramTable instance
+        var tempTable = new IntegramTable('temp-kanban-add-container', {
+            apiUrl: '/' + db + '/report/0',
+            instanceName: 'kanbanAddClient'
+        });
 
-                // Create a wrapper object that delegates to IntegramTable prototype
-                var tempTable = Object.create(IntegramTable.prototype);
-                tempTable.options = tempOptions;
-                tempTable.metadataCache = {};
-                tempTable.settings = { compact: false, pageSize: 20, truncateLongValues: true };
-                // Initialize properties to prevent undefined values in requests
-                tempTable.sortColumn = null;
-                tempTable.sortDirection = null;
-                tempTable.loadedRecords = 0;
-                tempTable.data = [];
-                tempTable.hasMore = true;
-                tempTable.totalRows = null;
+        // Override loadData to trigger kanban reload after save
+        tempTable.loadData = function() {
+            loadKanbanData();
+            return Promise.resolve();
+        };
 
-                // Create a mock record data with the status pre-set in the requisites
-                var recordData = {
-                    obj: {id: null, val: ''},
-                    reqs: {
-                        4874: {
-                            value: statusId,
-                            base: 332,
-                            order: 0
-                        }
-                    }
-                };
+        // Open create form for type 332 (Client)
+        await tempTable.openEditForm(null, 332, 0);
 
-                // Use IntegramTable's form rendering for creating a new client with specified status
-                tempTable.renderEditFormModal(metadata, recordData, true, 332);
-
-                // After the form is rendered, verify the status field was set correctly
-                setTimeout(function(){
-                    // The status field (requisite 4874) should be rendered with the correct structure
-                    // For reference fields, the hidden input is: <input type="hidden" id="field-4874" name="t4874" value="...">
-                    var statusHiddenInput = document.querySelector('#field-4874');
-                    if(statusHiddenInput){
-                        // Verify the value is set
-                        if(!statusHiddenInput.value || statusHiddenInput.value === ''){
-                            statusHiddenInput.value = statusId;
-                        }
-
-                        // Also update the search input display if it exists (for reference fields)
-                        var statusSearchInput = document.querySelector('#field-4874-search');
-                        if(statusSearchInput){
-                            // Find the status name from the dropdown options (will be loaded by loadReferenceOptions)
-                            // This will be populated automatically by the reference field loader
-                        }
-                    }
-                }, 200);
-            } catch(e){
-                console.error('Error rendering form:', e);
-                alert('Ошибка при подготовке формы: ' + e.message);
-            }
-        } else {
-            alert('Ошибка загрузки метаданных типа');
+        // Set the status field (requisite 4874) immediately after form renders
+        // loadReferenceOptions runs async and will pick up this value to display the label
+        var hiddenInput = document.querySelector('input.form-ref-value[name="t4874"]');
+        if (hiddenInput) {
+            hiddenInput.value = statusId;
         }
-    };
-    typeXhr.onerror = function(){
-        alert('Ошибка сети при загрузке метаданных');
-    };
-    typeXhr.send();
+
+        // Clean up temp container
+        setTimeout(function(){
+            var el = document.getElementById('temp-kanban-add-container');
+            if (el) el.remove();
+        }, 200);
+    } catch(e) {
+        console.error('Error opening add record form:', e);
+        alert('Ошибка при подготовке формы: ' + e.message);
+        var el = document.getElementById('temp-kanban-add-container');
+        if (el) el.remove();
+    }
 }
 
 function closeAddRecordModal(){
