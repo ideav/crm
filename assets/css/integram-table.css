@@ -884,6 +884,21 @@
     background-color: var(--md-selected);
 }
 
+.edit-form-footer .btn-danger {
+    background-color: #d32f2f;
+    color: white;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.edit-form-footer .btn-danger:hover {
+    background-color: #b71c1c;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.25);
+}
+
+.edit-form-footer .btn-danger:active {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
 /* Subordinate table indicator */
 .subordinate-table-indicator {
     display: flex;
@@ -1244,6 +1259,48 @@
 
 .form-field-settings-footer .btn-secondary:active {
     background-color: var(--md-selected);
+}
+
+.form-field-settings-item {
+    cursor: grab;
+}
+
+.form-field-settings-item.dragging {
+    opacity: 0.4;
+}
+
+.form-field-settings-item.drag-over {
+    border-top: 2px solid var(--md-primary, #1976d2);
+}
+
+.form-field-settings-item .drag-handle {
+    margin-right: 8px;
+    color: var(--md-text-secondary, #666);
+    cursor: grab;
+    font-size: 14px;
+    user-select: none;
+}
+
+.form-field-settings-extra {
+    padding: 12px 24px;
+    border-top: 1px solid var(--md-divider, #e0e0e0);
+}
+
+.form-field-settings-extra label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    margin: 0;
+    font-size: 14px;
+    color: var(--md-text-primary);
+    user-select: none;
+}
+
+.form-field-settings-extra input[type="checkbox"] {
+    margin-right: 16px;
+    cursor: pointer;
+    width: 18px;
+    height: 18px;
 }
 
 /* ========================================

@@ -3785,6 +3785,7 @@ class IntegramTable {
                         ⚙️
                     </button>
                     <div class="edit-form-footer-buttons">
+                        ${ !isCreate ? '<button type="button" class="btn btn-danger" id="delete-record-btn" style="display:none;">Удалить</button>' : '' }
                         <button type="button" class="btn btn-primary" id="save-record-btn">Сохранить</button>
                         <button type="button" class="btn btn-secondary" data-close-modal="true">Отмена</button>
                     </div>
@@ -3840,6 +3841,21 @@ class IntegramTable {
                 this.saveRecord(modal, isCreate, recordId, typeId, parentId, columnId);
             });
 
+            // Attach delete handler (edit mode only)
+            if (!isCreate) {
+                const deleteBtn = modal.querySelector('#delete-record-btn');
+                if (deleteBtn) {
+                    // Show/hide based on saved setting
+                    const showDelete = this.loadFormShowDelete(typeId);
+                    if (showDelete) {
+                        deleteBtn.style.display = '';
+                    }
+                    deleteBtn.addEventListener('click', () => {
+                        this.deleteRecord(modal, recordId, typeId);
+                    });
+                }
+            }
+
             // Close modal helper function
             const closeModal = () => {
                 modal.remove();
@@ -3888,7 +3904,21 @@ class IntegramTable {
                 </div>
             `;
 
-            regularFields.forEach(req => {
+            // Sort fields by saved order if available
+            const savedFieldOrder = this.loadFormFieldOrder(typeId);
+            const sortedFields = [...regularFields];
+            if (savedFieldOrder.length > 0) {
+                sortedFields.sort((a, b) => {
+                    const idxA = savedFieldOrder.indexOf(String(a.id));
+                    const idxB = savedFieldOrder.indexOf(String(b.id));
+                    if (idxA === -1 && idxB === -1) return 0;
+                    if (idxA === -1) return 1;
+                    if (idxB === -1) return -1;
+                    return idxA - idxB;
+                });
+            }
+
+            sortedFields.forEach(req => {
                 const attrs = this.parseAttrs(req.attrs);
                 const fieldName = attrs.alias || req.val;
                 const reqValue = recordReqs[req.id] ? recordReqs[req.id].value : '';
@@ -5148,28 +5178,44 @@ class IntegramTable {
             modal.className = 'form-field-settings-modal';
 
             const visibleFields = this.loadFormFieldVisibility(typeId);
+            const savedOrder = this.loadFormFieldOrder(typeId);
+            const showDelete = this.loadFormShowDelete(typeId);
+
+            // Sort requisites by saved order (if any), preserving original order for unsaved ones
+            const reqs = metadata.reqs || [];
+            const sortedReqs = [...reqs];
+            if (savedOrder.length > 0) {
+                sortedReqs.sort((a, b) => {
+                    const idxA = savedOrder.indexOf(String(a.id));
+                    const idxB = savedOrder.indexOf(String(b.id));
+                    if (idxA === -1 && idxB === -1) return 0;
+                    if (idxA === -1) return 1;
+                    if (idxB === -1) return -1;
+                    return idxA - idxB;
+                });
+            }
 
             let modalHtml = `
                 <div class="form-field-settings-header">
-                    <h5>Настройка видимости полей</h5>
+                    <h5>Настройка полей формы</h5>
                     <button class="form-field-settings-close">&times;</button>
                 </div>
                 <div class="form-field-settings-body">
-                    <p class="form-field-settings-info">Выберите поля, которые должны отображаться в форме редактирования:</p>
+                    <p class="form-field-settings-info">Перетаскивайте поля для изменения порядка, снимите галку для скрытия:</p>
                     <div class="form-field-settings-list">
             `;
 
-            // Add checkbox for each requisite
-            const reqs = metadata.reqs || [];
-            reqs.forEach(req => {
+            // Add draggable checkbox for each requisite
+            sortedReqs.forEach(req => {
                 const attrs = this.parseAttrs(req.attrs);
                 const fieldName = attrs.alias || req.val;
                 const fieldId = req.id;
-                const isChecked = visibleFields[fieldId] !== false; // Default to visible
+                const isChecked = visibleFields[fieldId] !== false;
 
                 modalHtml += `
-                    <div class="form-field-settings-item">
+                    <div class="form-field-settings-item" draggable="true" data-field-id="${ fieldId }">
                         <label>
+                            <span class="drag-handle">☰</span>
                             <input type="checkbox"
                                    class="form-field-visibility-checkbox"
                                    data-field-id="${ fieldId }"
@@ -5183,6 +5229,12 @@ class IntegramTable {
             modalHtml += `
                     </div>
                 </div>
+                <div class="form-field-settings-extra">
+                    <label>
+                        <input type="checkbox" id="form-show-delete-checkbox" ${ showDelete ? 'checked' : '' }>
+                        <span>Показывать кнопку «Удалить»</span>
+                    </label>
+                </div>
                 <div class="form-field-settings-footer">
                     <button type="button" class="btn btn-primary form-field-settings-save">Сохранить</button>
                     <button type="button" class="btn btn-secondary form-field-settings-cancel">Отмена</button>
@@ -5192,6 +5244,39 @@ class IntegramTable {
             modal.innerHTML = modalHtml;
             document.body.appendChild(overlay);
             document.body.appendChild(modal);
+
+            // Drag-and-drop reordering
+            const list = modal.querySelector('.form-field-settings-list');
+            let dragItem = null;
+
+            list.addEventListener('dragstart', (e) => {
+                dragItem = e.target.closest('.form-field-settings-item');
+                if (dragItem) dragItem.classList.add('dragging');
+            });
+
+            list.addEventListener('dragend', () => {
+                if (dragItem) dragItem.classList.remove('dragging');
+                list.querySelectorAll('.form-field-settings-item').forEach(el => el.classList.remove('drag-over'));
+                dragItem = null;
+            });
+
+            list.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                const target = e.target.closest('.form-field-settings-item');
+                if (target && target !== dragItem) {
+                    list.querySelectorAll('.form-field-settings-item').forEach(el => el.classList.remove('drag-over'));
+                    target.classList.add('drag-over');
+                }
+            });
+
+            list.addEventListener('drop', (e) => {
+                e.preventDefault();
+                const target = e.target.closest('.form-field-settings-item');
+                if (target && target !== dragItem && dragItem) {
+                    list.insertBefore(dragItem, target);
+                }
+                list.querySelectorAll('.form-field-settings-item').forEach(el => el.classList.remove('drag-over'));
+            });
 
             // Attach handlers
             const closeBtn = modal.querySelector('.form-field-settings-close');
@@ -5208,21 +5293,36 @@ class IntegramTable {
             overlay.addEventListener('click', closeModal);
 
             saveBtn.addEventListener('click', () => {
+                // Save visibility
                 const checkboxes = modal.querySelectorAll('.form-field-visibility-checkbox');
                 const visibility = {};
-
                 checkboxes.forEach(checkbox => {
                     const fieldId = checkbox.dataset.fieldId;
                     visibility[fieldId] = checkbox.checked;
                 });
-
                 this.saveFormFieldVisibility(typeId, visibility);
+
+                // Save field order
+                const items = modal.querySelectorAll('.form-field-settings-item');
+                const order = Array.from(items).map(item => item.dataset.fieldId);
+                this.saveFormFieldOrder(typeId, order);
+
+                // Save show delete setting
+                const showDeleteCheckbox = modal.querySelector('#form-show-delete-checkbox');
+                this.saveFormShowDelete(typeId, showDeleteCheckbox.checked);
+
                 closeModal();
 
-                // Reload the edit form if it's open
+                // Apply settings to the edit form if it's open
                 const editFormModal = document.querySelector('.edit-form-modal');
                 if (editFormModal) {
                     this.applyFormFieldSettings(editFormModal, typeId);
+
+                    // Update delete button visibility
+                    const deleteBtn = editFormModal.querySelector('#delete-record-btn');
+                    if (deleteBtn) {
+                        deleteBtn.style.display = showDeleteCheckbox.checked ? '' : 'none';
+                    }
                 }
             });
         }
@@ -5250,17 +5350,92 @@ class IntegramTable {
             return {}; // Default: all fields visible
         }
 
+        saveFormFieldOrder(typeId, order) {
+            const cookieName = `${ this.options.cookiePrefix }-form-order-${ typeId }`;
+            document.cookie = `${ cookieName }=${ JSON.stringify(order) }; path=/; max-age=31536000`;
+        }
+
+        loadFormFieldOrder(typeId) {
+            const cookieName = `${ this.options.cookiePrefix }-form-order-${ typeId }`;
+            const cookies = document.cookie.split(';');
+            const cookie = cookies.find(c => c.trim().startsWith(`${ cookieName }=`));
+            if (cookie) {
+                try {
+                    return JSON.parse(cookie.split('=')[1]);
+                } catch (e) {
+                    return [];
+                }
+            }
+            return [];
+        }
+
         applyFormFieldSettings(modal, typeId) {
             const visibility = this.loadFormFieldVisibility(typeId);
+            const order = this.loadFormFieldOrder(typeId);
 
+            // Apply visibility
             Object.entries(visibility).forEach(([fieldId, isVisible]) => {
                 if (!isVisible) {
                     const formGroup = modal.querySelector(`#field-${ fieldId }`)?.closest('.form-group');
                     if (formGroup) {
                         formGroup.style.display = 'none';
                     }
+                } else {
+                    const formGroup = modal.querySelector(`#field-${ fieldId }`)?.closest('.form-group');
+                    if (formGroup) {
+                        formGroup.style.display = '';
+                    }
                 }
             });
+
+            // Apply field order by reordering form-group elements within the form
+            if (order.length > 0) {
+                const form = modal.querySelector('#edit-form');
+                if (form) {
+                    const tabContent = form.querySelector('[data-tab-content="attributes"]') || form;
+                    const formGroups = Array.from(tabContent.querySelectorAll('.form-group'));
+
+                    // Build a map of fieldId -> form-group element
+                    const groupMap = {};
+                    formGroups.forEach(group => {
+                        // Find the field input inside to get its ID
+                        const input = group.querySelector('[id^="field-"]');
+                        if (input) {
+                            const match = input.id.match(/^field-(.+?)(-search|-picker)?$/);
+                            if (match) {
+                                groupMap[match[1]] = group;
+                            }
+                        }
+                    });
+
+                    // Reorder: append groups in the saved order, then append any remaining
+                    const orderedGroups = [];
+                    const usedIds = new Set();
+                    order.forEach(fieldId => {
+                        if (groupMap[fieldId]) {
+                            orderedGroups.push(groupMap[fieldId]);
+                            usedIds.add(fieldId);
+                        }
+                    });
+                    // Append remaining groups that weren't in the saved order
+                    formGroups.forEach(group => {
+                        const input = group.querySelector('[id^="field-"]');
+                        if (input) {
+                            const match = input.id.match(/^field-(.+?)(-search|-picker)?$/);
+                            if (match && !usedIds.has(match[1])) {
+                                orderedGroups.push(group);
+                            }
+                        } else {
+                            orderedGroups.push(group); // Keep groups without field IDs (e.g., main field)
+                        }
+                    });
+
+                    // Re-append in order (moves existing DOM nodes)
+                    orderedGroups.forEach(group => {
+                        tabContent.appendChild(group);
+                    });
+                }
+            }
         }
 
         async saveRecord(modal, isCreate, recordId, typeId, parentId, columnId = null) {
@@ -5540,6 +5715,65 @@ class IntegramTable {
                 console.error('Error saving record:', error);
                 this.showToast(`Ошибка сохранения: ${ error.message }`, 'error');
             }
+        }
+
+        async deleteRecord(modal, recordId, typeId) {
+            if (!confirm('Вы уверены, что хотите удалить эту запись?')) {
+                return;
+            }
+
+            const apiBase = this.getApiBase();
+
+            try {
+                const params = new URLSearchParams();
+                if (typeof xsrf !== 'undefined') {
+                    params.append('_xsrf', xsrf);
+                }
+
+                const response = await fetch(`${ apiBase }/_m_del/${ recordId }?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Ошибка удаления: ${ response.statusText }`);
+                }
+
+                // Close modal
+                modal.remove();
+                if (modal._overlayElement) {
+                    modal._overlayElement.remove();
+                }
+                window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+
+                this.showToast('Запись удалена', 'success');
+
+                // Reload table data
+                this.data = [];
+                this.loadedRecords = 0;
+                this.hasMore = true;
+                this.totalRows = null;
+                await this.loadData(false);
+            } catch (error) {
+                console.error('Error deleting record:', error);
+                this.showToast(`Ошибка удаления: ${ error.message }`, 'error');
+            }
+        }
+
+        saveFormShowDelete(typeId, show) {
+            const cookieName = `${ this.options.cookiePrefix }-form-show-delete-${ typeId }`;
+            document.cookie = `${ cookieName }=${ show ? '1' : '0' }; path=/; max-age=31536000`;
+        }
+
+        loadFormShowDelete(typeId) {
+            const cookieName = `${ this.options.cookiePrefix }-form-show-delete-${ typeId }`;
+            const cookies = document.cookie.split(';');
+            const cookie = cookies.find(c => c.trim().startsWith(`${ cookieName }=`));
+            if (cookie) {
+                return cookie.split('=')[1].trim() === '1';
+            }
+            return false; // Hidden by default
         }
 
         async refreshWithNewRecord(columnId, createdRecordId) {
