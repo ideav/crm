@@ -1957,6 +1957,26 @@ function closeAddRecordModal(){
     currentStatusName = null;
 }
 
+// Auto-create deal when a product filter is selected and a new client is created
+document.addEventListener('integram-record-saved', function(e) {
+    var detail = e.detail;
+    if (detail.isCreate && String(detail.typeId) === String(clientTypeId) && currentProductId !== 'all') {
+        var params = new URLSearchParams();
+        params.append('t449', currentProductId);
+        params.append('_xsrf', xsrf);
+
+        fetch('/' + db + '/_m_new/' + dealTypeId + '?JSON&up=' + detail.recordId, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: params.toString()
+        }).then(function() {
+            console.log('Deal auto-created for client', detail.recordId, 'with product', currentProductId);
+        }).catch(function(err) {
+            console.error('Error auto-creating deal:', err);
+        });
+    }
+});
+
 function submitAddRecord(){
     // Get form values
     var name = $('#recordName').val().trim();

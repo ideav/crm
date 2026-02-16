@@ -5660,6 +5660,12 @@ class IntegramTable {
                 // Show success message
                 this.showToast('Запись успешно сохранена', 'success');
 
+                // Dispatch event for external listeners
+                const savedId = isCreate ? (result.id || result.i || null) : recordId;
+                document.dispatchEvent(new CustomEvent('integram-record-saved', {
+                    detail: { isCreate, recordId: savedId, typeId, result }
+                }));
+
                 // Check if we edited a record from a subordinate table
                 let refreshedSubordinateTable = false;
                 if (!isCreate && this.currentEditModal && this.currentEditModal.subordinateTables) {
