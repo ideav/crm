@@ -1896,42 +1896,45 @@ function loadTaskTypesList(){
     xhr.send();
 }
 
+function getKanbanFormTable() {
+    if (!kanbanFormTable) {
+        var tempContainer = document.createElement('div');
+        tempContainer.id = 'temp-kanban-form-container';
+        tempContainer.style.display = 'none';
+        document.body.appendChild(tempContainer);
+
+        // Temporarily override init to prevent unnecessary network requests
+        var origInit = IntegramTable.prototype.init;
+        IntegramTable.prototype.init = function() {
+            this.loadColumnState();
+            this.loadSettings();
+        };
+
+        kanbanFormTable = new IntegramTable('temp-kanban-form-container', {
+            apiUrl: '/' + db + '/type/' + clientTypeId,
+            instanceName: 'kanbanClientForm'
+        });
+
+        IntegramTable.prototype.init = origInit;
+
+        // Override loadData to trigger kanban reload after save
+        kanbanFormTable.loadData = function() {
+            loadKanbanData();
+            return Promise.resolve();
+        };
+    }
+    return kanbanFormTable;
+}
+
 async function openAddRecordModal(statusId, statusName){
     currentStatusId = statusId;
     currentStatusName = statusName;
 
     try {
-        // Create the IntegramTable instance once and reuse it (caches metadata)
-        if (!kanbanFormTable) {
-            var tempContainer = document.createElement('div');
-            tempContainer.id = 'temp-kanban-add-container';
-            tempContainer.style.display = 'none';
-            document.body.appendChild(tempContainer);
-
-            // Temporarily override init to prevent unnecessary report/0 request
-            var origInit = IntegramTable.prototype.init;
-            IntegramTable.prototype.init = function() {
-                this.loadColumnState();
-                this.loadSettings();
-            };
-
-            kanbanFormTable = new IntegramTable('temp-kanban-add-container', {
-                apiUrl: '/' + db + '/type/332',
-                instanceName: 'kanbanAddClient'
-            });
-
-            // Restore original init
-            IntegramTable.prototype.init = origInit;
-
-            // Override loadData to trigger kanban reload after save
-            kanbanFormTable.loadData = function() {
-                loadKanbanData();
-                return Promise.resolve();
-            };
-        }
+        var table = getKanbanFormTable();
 
         // Open create form for type 332 (Client) — metadata is cached after first call
-        await kanbanFormTable.openEditForm(null, 332, 0);
+        await table.openEditForm(null, clientTypeId, 0);
 
         // Set the status field (requisite 4874) immediately after form renders
         // loadReferenceOptions runs async and will pick up this value to display the label
@@ -2110,71 +2113,21 @@ var currentEditClientId = null;
 var clientMetadataCache = null;
 var clientTypeId = 332;  // Client type ID
 
-function openClientEditForm(clientId){
-    currentEditClientId = clientId;
+async function openClientEditForm(clientId){
+    currentEditClientId = null;
 
-    // Load client data using IntegramTable form
-    var xhr = new XMLHttpRequest();
-    xhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/edit_obj/' + clientId + '?JSON', true);
-    xhr.onload = function(){
-        if(xhr.status === 200){
-            try{
-                var recordData = JSON.parse(xhr.responseText);
+    try {
+        var table = getKanbanFormTable();
 
-                // Load type metadata using the /metadata endpoint
-                var typeXhr = new XMLHttpRequest();
-                typeXhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/metadata/' + clientTypeId, true);
-                typeXhr.onload = function(){
-                    if(typeXhr.status === 200){
-                        try{
-                            var metadata = JSON.parse(typeXhr.responseText);
+        // Hide the old modal if it exists
+        $('#editClientModal').removeClass('active');
 
-                            // Hide the old modal if it exists
-                            $('#editClientModal').removeClass('active');
-
-                            // Create a temporary table instance to use its form rendering
-                            var apiBase = 'https://' + window.location.hostname + '/' + db;
-                            var tempOptions = {
-                                instanceName: 'tempClientTable',
-                                apiUrl: apiBase + '/type/' + clientTypeId,
-                                pageSize: 20
-                            };
-
-                            // Create a wrapper object that delegates to IntegramTable prototype
-                            var tempTable = Object.create(IntegramTable.prototype);
-                            tempTable.options = tempOptions;
-                            tempTable.metadataCache = {};
-                            tempTable.settings = { compact: false, pageSize: 20, truncateLongValues: true };
-                            // Initialize properties to prevent undefined values in requests
-                            tempTable.sortColumn = null;
-                            tempTable.sortDirection = null;
-                            tempTable.loadedRecords = 0;
-                            tempTable.data = [];
-                            tempTable.hasMore = true;
-                            tempTable.totalRows = null;
-
-                            // Use IntegramTable's form rendering
-                            tempTable.renderEditFormModal(metadata, recordData, false, clientTypeId);
-                        } catch(e){
-                            console.error('Error rendering form:', e);
-                            alert('Ошибка при подготовке формы: ' + e.message);
-                        }
-                    } else {
-                        alert('Ошибка загрузки метаданных типа');
-                    }
-                };
-                typeXhr.send();
-            } catch(e){
-                alert('Ошибка парсинга данных: ' + e.message);
-            }
-        } else {
-            alert('Ошибка загрузки данных клиента: ' + xhr.status);
-        }
-    };
-    xhr.onerror = function(){
-        alert('Ошибка сети при загрузке данных');
-    };
-    xhr.send();
+        // Open edit form — metadata is cached after first call, kanban reloads after save
+        await table.openEditForm(clientId, clientTypeId, 0);
+    } catch(e) {
+        console.error('Error opening edit form:', e);
+        alert('Ошибка при подготовке формы: ' + e.message);
+    }
 }
 
 function closeEditClientModal(){
