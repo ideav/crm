@@ -1049,6 +1049,7 @@ var managersData = [];
 var taskTypesData = [];
 var currentStatusId = null;
 var currentStatusName = null;
+var kanbanFormTable = null; // Reusable IntegramTable instance for add/edit forms
 var currentFilterType = 'sales'; // 'sales' or 'partners'
 var currentProductId = 'all'; // 'all' or specific product ID
 var currentManagerId = null; // Selected manager ID, defaults to window.uid
@@ -1899,27 +1900,38 @@ async function openAddRecordModal(statusId, statusName){
     currentStatusId = statusId;
     currentStatusName = statusName;
 
-    // Create a hidden temporary container for IntegramTable
-    var tempContainer = document.createElement('div');
-    tempContainer.id = 'temp-kanban-add-container';
-    tempContainer.style.display = 'none';
-    document.body.appendChild(tempContainer);
-
     try {
-        // Create a proper IntegramTable instance
-        var tempTable = new IntegramTable('temp-kanban-add-container', {
-            apiUrl: '/' + db + '/report/0',
-            instanceName: 'kanbanAddClient'
-        });
+        // Create the IntegramTable instance once and reuse it (caches metadata)
+        if (!kanbanFormTable) {
+            var tempContainer = document.createElement('div');
+            tempContainer.id = 'temp-kanban-add-container';
+            tempContainer.style.display = 'none';
+            document.body.appendChild(tempContainer);
 
-        // Override loadData to trigger kanban reload after save
-        tempTable.loadData = function() {
-            loadKanbanData();
-            return Promise.resolve();
-        };
+            // Temporarily override init to prevent unnecessary report/0 request
+            var origInit = IntegramTable.prototype.init;
+            IntegramTable.prototype.init = function() {
+                this.loadColumnState();
+                this.loadSettings();
+            };
 
-        // Open create form for type 332 (Client)
-        await tempTable.openEditForm(null, 332, 0);
+            kanbanFormTable = new IntegramTable('temp-kanban-add-container', {
+                apiUrl: '/' + db + '/type/332',
+                instanceName: 'kanbanAddClient'
+            });
+
+            // Restore original init
+            IntegramTable.prototype.init = origInit;
+
+            // Override loadData to trigger kanban reload after save
+            kanbanFormTable.loadData = function() {
+                loadKanbanData();
+                return Promise.resolve();
+            };
+        }
+
+        // Open create form for type 332 (Client) — metadata is cached after first call
+        await kanbanFormTable.openEditForm(null, 332, 0);
 
         // Set the status field (requisite 4874) immediately after form renders
         // loadReferenceOptions runs async and will pick up this value to display the label
@@ -1927,17 +1939,9 @@ async function openAddRecordModal(statusId, statusName){
         if (hiddenInput) {
             hiddenInput.value = statusId;
         }
-
-        // Clean up temp container
-        setTimeout(function(){
-            var el = document.getElementById('temp-kanban-add-container');
-            if (el) el.remove();
-        }, 200);
     } catch(e) {
         console.error('Error opening add record form:', e);
         alert('Ошибка при подготовке формы: ' + e.message);
-        var el = document.getElementById('temp-kanban-add-container');
-        if (el) el.remove();
     }
 }
 
