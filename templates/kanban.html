@@ -1053,6 +1053,10 @@ var currentFilterType = 'sales'; // 'sales' or 'partners'
 var currentProductId = 'all'; // 'all' or specific product ID
 var currentManagerId = null; // Selected manager ID, defaults to window.uid
 var searchQuery = ''; // Quick search query
+// Type IDs used throughout the kanban board
+var clientTypeId = 332;  // Client type ID
+var taskTypeId = 3596;  // Task type ID (Задача для команды)
+var dealTypeId = 430;  // Deal type ID (Сделка)
 // Check if there's a saved manager ID in cookie
 var savedManagerId = getCookie('kanban_manager_id');
 currentManagerId = savedManagerId;
@@ -1899,9 +1903,9 @@ function openAddRecordModal(statusId, statusName){
     currentStatusId = statusId;
     currentStatusName = statusName;
 
-    // Load type metadata for Client (type 332) using the /metadata endpoint
+    // Load type metadata for Client using the /metadata endpoint
     var typeXhr = new XMLHttpRequest();
-    typeXhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/metadata/332', true);
+    typeXhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/metadata/' + clientTypeId, true);
     typeXhr.onload = function(){
         if(typeXhr.status === 200){
             try{
@@ -1911,7 +1915,7 @@ function openAddRecordModal(statusId, statusName){
                 var apiBase = 'https://' + window.location.hostname + '/' + db;
                 var tempOptions = {
                     instanceName: 'tempAddClientTable',
-                    apiUrl: apiBase + '/type/332',
+                    apiUrl: apiBase + '/type/' + clientTypeId,
                     pageSize: 20
                 };
 
@@ -1934,14 +1938,14 @@ function openAddRecordModal(statusId, statusName){
                     reqs: {
                         4874: {
                             value: statusId,
-                            base: 332,
+                            base: clientTypeId,
                             order: 0
                         }
                     }
                 };
 
                 // Use IntegramTable's form rendering for creating a new client with specified status
-                tempTable.renderEditFormModal(metadata, recordData, true, 332);
+                tempTable.renderEditFormModal(metadata, recordData, true, clientTypeId);
 
                 // After the form is rendered, verify the status field was set correctly
                 setTimeout(function(){
@@ -2026,14 +2030,14 @@ function submitAddRecord(){
     // Disable submit button
     $('#submitButton').prop('disabled', true).text('Сохранение...');
 
-    // Prepare POST data for client (EntityID = 332)
-    var entityId = 332;
+    // Prepare POST data for client
+    var entityId = clientTypeId;
     var inn = $('#recordInn').val().trim();
     var distributorId = $('#recordDistributor').val();
     var contact = $('#recordContact').val().trim();
     var amount = $('#recordAmount').val().trim();
 
-    var postData = 't332=' + encodeURIComponent(name) +
+    var postData = 't' + clientTypeId + '=' + encodeURIComponent(name) +
                    '&t4874=' + encodeURIComponent(currentStatusId) +
                    '&_xsrf=' + xsrf;
 
@@ -2139,7 +2143,6 @@ function loadEditFormStatuses(){
 // Client edit modal functionality
 var currentEditClientId = null;
 var clientMetadataCache = null;
-var clientTypeId = 332;  // Client type ID
 
 function openClientEditForm(clientId){
     currentEditClientId = clientId;
@@ -2217,7 +2220,6 @@ function closeEditClientModal(){
 // Task creation modal functionality
 var currentTaskLeadId = null;
 var currentTaskButton = null;
-var taskTypeId = 3596;  // Task type ID (Задача для команды)
 
 function openTaskCreateForm(leadId, button){
     currentTaskLeadId = leadId;
@@ -2416,7 +2418,6 @@ function updateTaskCount(leadId){
 // Deal creation modal functionality
 var currentDealLeadId = null;
 var currentDealButton = null;
-var dealTypeId = 430;  // Deal type ID (Сделка)
 
 function openDealCreateForm(leadId, button){
     currentDealLeadId = leadId;
