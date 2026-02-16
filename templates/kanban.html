@@ -1911,7 +1911,8 @@ function openAddRecordModal(statusId, statusName){
                 var apiBase = 'https://' + window.location.hostname + '/' + db;
                 var tempOptions = {
                     instanceName: 'tempAddClientTable',
-                    apiUrl: apiBase + '/type/332'
+                    apiUrl: apiBase + '/type/332',
+                    pageSize: 20
                 };
 
                 // Create a wrapper object that delegates to IntegramTable prototype
@@ -2166,7 +2167,8 @@ function openClientEditForm(clientId){
                             var apiBase = 'https://' + window.location.hostname + '/' + db;
                             var tempOptions = {
                                 instanceName: 'tempClientTable',
-                                apiUrl: apiBase + '/type/' + clientTypeId
+                                apiUrl: apiBase + '/type/' + clientTypeId,
+                                pageSize: 20
                             };
 
                             // Create a wrapper object that delegates to IntegramTable prototype
