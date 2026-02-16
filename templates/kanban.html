@@ -1439,17 +1439,17 @@ function renderCard(task){
     // Add contact icons at bottom right (vertically stacked)
     html += '<div class="kanban-card-contacts">';
 
+    // Date above contact icons (without "Дата:" label)
+    if(task['Дата']){
+        html += '<div class="kanban-card-date">' + task['Дата'] + '</div>';
+    }
+
     // Phone icon (on top)
     var hasPhone = task['Телефон'] && task['Телефон'].trim() !== '';
     if(hasPhone){
         html += '<span class="kanban-card-contact-icon active" title="' + task['Телефон'] + '" onclick="copyContact(\'' + task['Телефон'] + '\', \'phone\', event)">📞</span>';
     } else {
         html += '<span class="kanban-card-contact-icon inactive" title="Телефон недоступен">📞</span>';
-    }
-
-    // Date above contact icons (without "Дата:" label)
-    if(task['Дата']){
-        html += '<div class="kanban-card-date">' + task['Дата'] + '</div>';
     }
 
     // Email icon (below)
