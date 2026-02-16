@@ -5408,11 +5408,18 @@ class IntegramTable {
                         }
                     });
 
-                    // Reorder: append groups in the saved order, then append any remaining
+                    // Ensure the first column (main field) is always at the top
+                    const mainGroup = groupMap['main'];
                     const orderedGroups = [];
                     const usedIds = new Set();
+                    if (mainGroup) {
+                        orderedGroups.push(mainGroup);
+                        usedIds.add('main');
+                    }
+
+                    // Reorder: append groups in the saved order, then append any remaining
                     order.forEach(fieldId => {
-                        if (groupMap[fieldId]) {
+                        if (groupMap[fieldId] && !usedIds.has(fieldId)) {
                             orderedGroups.push(groupMap[fieldId]);
                             usedIds.add(fieldId);
                         }
@@ -5425,8 +5432,8 @@ class IntegramTable {
                             if (match && !usedIds.has(match[1])) {
                                 orderedGroups.push(group);
                             }
-                        } else {
-                            orderedGroups.push(group); // Keep groups without field IDs (e.g., main field)
+                        } else if (!orderedGroups.includes(group)) {
+                            orderedGroups.push(group);
                         }
                     });
 
