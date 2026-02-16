@@ -1447,17 +1447,17 @@ function renderCard(task){
         html += '<span class="kanban-card-contact-icon inactive" title="Телефон недоступен">📞</span>';
     }
 
+    // Date above contact icons (without "Дата:" label)
+    if(task['Дата']){
+        html += '<div class="kanban-card-date">' + task['Дата'] + '</div>';
+    }
+
     // Email icon (below)
     var hasEmail = task['Email'] && task['Email'].trim() !== '';
     if(hasEmail){
         html += '<span class="kanban-card-contact-icon active" title="' + task['Email'] + '" onclick="copyContact(\'' + task['Email'] + '\', \'email\', event)">📧</span>';
     } else {
         html += '<span class="kanban-card-contact-icon inactive" title="Email недоступен">📧</span>';
-    }
-
-    // Date below contact icons (without "Дата:" label)
-    if(task['Дата']){
-        html += '<div class="kanban-card-date">' + task['Дата'] + '</div>';
     }
 
     html += '</div>';
