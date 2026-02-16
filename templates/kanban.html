@@ -1919,28 +1919,48 @@ function openAddRecordModal(statusId, statusName){
                 tempTable.options = tempOptions;
                 tempTable.metadataCache = {};
                 tempTable.settings = { compact: false, pageSize: 20, truncateLongValues: true };
+                // Initialize properties to prevent undefined values in requests
+                tempTable.sortColumn = null;
+                tempTable.sortDirection = null;
+                tempTable.loadedRecords = 0;
+                tempTable.data = [];
+                tempTable.hasMore = true;
+                tempTable.totalRows = null;
 
-                // Create a mock record data with the status pre-set
+                // Create a mock record data with the status pre-set in the requisites
                 var recordData = {
                     obj: {id: null, val: ''},
-                    reqs: {}
+                    reqs: {
+                        4874: {
+                            value: statusId,
+                            base: 332,
+                            order: 0
+                        }
+                    }
                 };
 
                 // Use IntegramTable's form rendering for creating a new client with specified status
                 tempTable.renderEditFormModal(metadata, recordData, true, 332);
 
-                // After the form is rendered, set the status field to the kanban status
+                // After the form is rendered, verify the status field was set correctly
                 setTimeout(function(){
-                    // Try to find and set the status field (requisite 4874 is the status field)
-                    var statusField = document.querySelector('[data-requisite-id="4874"]');
-                    if(statusField){
-                        // If it's a select, set the value
-                        var select = statusField.querySelector('select');
-                        if(select){
-                            select.value = statusId;
+                    // The status field (requisite 4874) should be rendered with the correct structure
+                    // For reference fields, the hidden input is: <input type="hidden" id="field-4874" name="t4874" value="...">
+                    var statusHiddenInput = document.querySelector('#field-4874');
+                    if(statusHiddenInput){
+                        // Verify the value is set
+                        if(!statusHiddenInput.value || statusHiddenInput.value === ''){
+                            statusHiddenInput.value = statusId;
+                        }
+
+                        // Also update the search input display if it exists (for reference fields)
+                        var statusSearchInput = document.querySelector('#field-4874-search');
+                        if(statusSearchInput){
+                            // Find the status name from the dropdown options (will be loaded by loadReferenceOptions)
+                            // This will be populated automatically by the reference field loader
                         }
                     }
-                }, 100);
+                }, 200);
             } catch(e){
                 console.error('Error rendering form:', e);
                 alert('Ошибка при подготовке формы: ' + e.message);
@@ -2154,6 +2174,13 @@ function openClientEditForm(clientId){
                             tempTable.options = tempOptions;
                             tempTable.metadataCache = {};
                             tempTable.settings = { compact: false, pageSize: 20, truncateLongValues: true };
+                            // Initialize properties to prevent undefined values in requests
+                            tempTable.sortColumn = null;
+                            tempTable.sortDirection = null;
+                            tempTable.loadedRecords = 0;
+                            tempTable.data = [];
+                            tempTable.hasMore = true;
+                            tempTable.totalRows = null;
 
                             // Use IntegramTable's form rendering
                             tempTable.renderEditFormModal(metadata, recordData, false, clientTypeId);
