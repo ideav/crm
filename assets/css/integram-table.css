@@ -1367,7 +1367,7 @@
 }
 
 .subordinate-table-toolbar {
-    padding: 12px 0;
+    padding: 0;
     display: flex;
     justify-content: flex-start;
     gap: 8px;
