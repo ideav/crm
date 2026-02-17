@@ -4179,31 +4179,76 @@ class IntegramTable {
             }
         }
 
-        renderSubordinateTable(container, metadata, data, arrId, parentRecordId) {
+        renderSubordinateTable(container, metadata, data, arrId, parentRecordId, sortState = null, searchTerm = '') {
             const instanceName = this.options.instanceName;
-            const rows = Array.isArray(data) ? data : [];
+            let rows = Array.isArray(data) ? [...data] : [];
+            const reqs = metadata.reqs || [];
+
+            // Initialize sort state if not provided (multi-column sorting support)
+            // sortState is an array of {colIndex, direction} objects, sorted by priority
+            if (!sortState) {
+                sortState = [];
+            }
+
+            // Store original data and state on container for re-rendering
+            container._subordinateData = data;
+            container._subordinateMetadata = metadata;
+            container._subordinateArrId = arrId;
+            container._subordinateParentRecordId = parentRecordId;
+            container._subordinateSortState = sortState;
+            container._subordinateSearchTerm = searchTerm;
+
+            // Build column info for sorting (includes type information)
+            const columns = [
+                { name: this.getMetadataName(metadata), type: metadata.type, index: 0 }
+            ];
+            reqs.forEach((req, idx) => {
+                const attrs = this.parseAttrs(req.attrs);
+                columns.push({
+                    name: attrs.alias || req.val,
+                    type: req.type,
+                    index: idx + 1,
+                    arr_id: req.arr_id
+                });
+            });
+
+            // Apply multi-column sorting (client-side)
+            if (sortState.length > 0) {
+                rows = this.sortSubordinateRows(rows, sortState, columns);
+            }
+
+            // Apply search filter (client-side)
+            if (searchTerm && searchTerm.trim() !== '') {
+                rows = this.filterSubordinateRows(rows, searchTerm.trim(), columns);
+            }
 
             let html = `
                 <div class="subordinate-table-toolbar">
                     <button type="button" class="btn btn-sm btn-primary subordinate-add-btn" data-arr-id="${ arrId }" data-parent-id="${ parentRecordId }">
                         + Добавить
                     </button>
+                    <div class="subordinate-search-wrapper">
+                        <input type="text" class="subordinate-search-input" placeholder="Поиск..." value="${ this.escapeHtml(searchTerm) }">
+                        <button type="button" class="subordinate-search-clear" title="Очистить поиск"${ searchTerm ? '' : ' style="display: none;"' }>×</button>
+                    </div>
                 </div>
             `;
 
             if (rows.length === 0) {
-                html += `<div class="subordinate-table-empty">Нет записей</div>`;
+                const emptyMessage = searchTerm ? 'Ничего не найдено' : 'Нет записей';
+                html += `<div class="subordinate-table-empty">${ emptyMessage }</div>`;
             } else {
-                const reqs = metadata.reqs || [];
-
                 html += `<div class="subordinate-table-wrapper"><table class="subordinate-table"><thead><tr>`;
 
-                // Header: main value column + requisite columns
-                html += `<th>${ this.getMetadataName(metadata) }</th>`;
-                reqs.forEach(req => {
-                    const attrs = this.parseAttrs(req.attrs);
-                    const fieldName = attrs.alias || req.val;
-                    html += `<th>${ fieldName }</th>`;
+                // Header: main value column + requisite columns (with sort indicators)
+                columns.forEach((col, colIdx) => {
+                    // Find sort state for this column
+                    const sortInfo = sortState.find(s => s.colIndex === colIdx);
+                    const sortIndicator = sortInfo ? (sortInfo.direction === 'asc' ? ' ▲' : ' ▼') : '';
+                    const sortPriority = sortInfo ? sortState.indexOf(sortInfo) + 1 : '';
+                    const priorityBadge = sortState.length > 1 && sortPriority ? `<span class="subordinate-sort-priority">${ sortPriority }</span>` : '';
+
+                    html += `<th class="subordinate-sortable-header" data-col-index="${ colIdx }">${ col.name }${ sortIndicator }${ priorityBadge }</th>`;
                 });
 
                 html += `</tr></thead><tbody>`;
@@ -4217,23 +4262,25 @@ class IntegramTable {
 
                     // First column (main value) - clickable to edit
                     const mainValue = values[0] || '';
-                    // Pass metadata type information for proper formatting
                     const mainFieldInfo = { type: metadata.type };
-                    const displayMainValue = this.formatSubordinateCellValue(mainValue, mainFieldInfo);
+                    let displayMainValue = this.formatSubordinateCellValue(mainValue, mainFieldInfo);
+                    if (searchTerm) {
+                        displayMainValue = this.highlightSearchTerm(displayMainValue, searchTerm);
+                    }
                     html += `<td class="subordinate-cell-clickable" data-row-id="${ rowId }" data-type-id="${ arrId }">${ displayMainValue }</td>`;
 
                     // Other columns
                     reqs.forEach((req, idx) => {
-                        // values[0] is main value, requisites start from index 1
                         const cellValue = values[idx + 1] !== undefined ? values[idx + 1] : '';
 
-                        // Check if this requisite has subordinate tables (arr_id)
                         if (req.arr_id) {
-                            // Show just the count in parentheses
                             const count = typeof cellValue === 'number' ? cellValue : (cellValue || 0);
                             html += `<td class="subordinate-nested-count">(${ count })</td>`;
                         } else {
-                            const displayValue = this.formatSubordinateCellValue(cellValue, req);
+                            let displayValue = this.formatSubordinateCellValue(cellValue, req);
+                            if (searchTerm) {
+                                displayValue = this.highlightSearchTerm(displayValue, searchTerm);
+                            }
                             html += `<td>${ displayValue }</td>`;
                         }
                     });
@@ -4263,6 +4310,216 @@ class IntegramTable {
                     this.createSubordinateRecord(arrId, parentRecordId);
                 });
             }
+
+            // Attach sortable column header handlers
+            const sortableHeaders = container.querySelectorAll('.subordinate-sortable-header');
+            sortableHeaders.forEach(th => {
+                th.addEventListener('click', () => {
+                    const colIndex = parseInt(th.dataset.colIndex, 10);
+                    this.handleSubordinateSort(container, colIndex);
+                });
+            });
+
+            // Attach search input handler
+            const searchInput = container.querySelector('.subordinate-search-input');
+            const searchClear = container.querySelector('.subordinate-search-clear');
+
+            if (searchInput) {
+                let debounceTimer;
+                searchInput.addEventListener('input', (e) => {
+                    const newSearchTerm = e.target.value;
+                    searchClear.style.display = newSearchTerm ? '' : 'none';
+
+                    // Debounce search to avoid excessive re-renders
+                    clearTimeout(debounceTimer);
+                    debounceTimer = setTimeout(() => {
+                        this.renderSubordinateTable(
+                            container,
+                            container._subordinateMetadata,
+                            container._subordinateData,
+                            container._subordinateArrId,
+                            container._subordinateParentRecordId,
+                            container._subordinateSortState,
+                            newSearchTerm
+                        );
+                    }, 200);
+                });
+            }
+
+            if (searchClear) {
+                searchClear.addEventListener('click', () => {
+                    this.renderSubordinateTable(
+                        container,
+                        container._subordinateMetadata,
+                        container._subordinateData,
+                        container._subordinateArrId,
+                        container._subordinateParentRecordId,
+                        container._subordinateSortState,
+                        ''
+                    );
+                });
+            }
+        }
+
+        /**
+         * Handle column sort click in subordinate table
+         * Implements 3-state sorting: no sort -> asc -> desc -> no sort
+         * Supports multi-column sorting with priority
+         */
+        handleSubordinateSort(container, colIndex) {
+            let sortState = container._subordinateSortState || [];
+            const existingIdx = sortState.findIndex(s => s.colIndex === colIndex);
+
+            if (existingIdx === -1) {
+                // Column not sorted - add as ascending (highest priority = last in array)
+                sortState.push({ colIndex, direction: 'asc' });
+            } else {
+                const existing = sortState[existingIdx];
+                if (existing.direction === 'asc') {
+                    // Currently ascending - switch to descending
+                    sortState[existingIdx].direction = 'desc';
+                } else {
+                    // Currently descending - remove sort
+                    sortState.splice(existingIdx, 1);
+                }
+            }
+
+            // Re-render with new sort state
+            this.renderSubordinateTable(
+                container,
+                container._subordinateMetadata,
+                container._subordinateData,
+                container._subordinateArrId,
+                container._subordinateParentRecordId,
+                sortState,
+                container._subordinateSearchTerm || ''
+            );
+        }
+
+        /**
+         * Sort subordinate table rows (multi-column support)
+         */
+        sortSubordinateRows(rows, sortState, columns) {
+            return [...rows].sort((a, b) => {
+                for (const sort of sortState) {
+                    const col = columns[sort.colIndex];
+                    const valA = (a.r || [])[sort.colIndex];
+                    const valB = (b.r || [])[sort.colIndex];
+
+                    const comparison = this.compareSubordinateValues(valA, valB, col.type);
+                    if (comparison !== 0) {
+                        return sort.direction === 'asc' ? comparison : -comparison;
+                    }
+                }
+                return 0;
+            });
+        }
+
+        /**
+         * Compare two values for sorting, respecting their type
+         */
+        compareSubordinateValues(a, b, type) {
+            // Handle null/undefined/empty
+            const aEmpty = a === null || a === undefined || a === '';
+            const bEmpty = b === null || b === undefined || b === '';
+
+            if (aEmpty && bEmpty) return 0;
+            if (aEmpty) return 1;  // Empty values go to end
+            if (bEmpty) return -1;
+
+            const baseFormat = this.normalizeFormat(type);
+
+            // For reference values (id:label format), extract the label for comparison
+            let valA = a;
+            let valB = b;
+            if (typeof a === 'string' && a.includes(':')) {
+                const parts = a.split(':');
+                if (parts.length >= 2 && !isNaN(parseInt(parts[0]))) {
+                    valA = parts.slice(1).join(':');
+                }
+            }
+            if (typeof b === 'string' && b.includes(':')) {
+                const parts = b.split(':');
+                if (parts.length >= 2 && !isNaN(parseInt(parts[0]))) {
+                    valB = parts.slice(1).join(':');
+                }
+            }
+
+            switch (baseFormat) {
+                case 'NUMBER':
+                case 'SIGNED':
+                    const numA = parseFloat(valA);
+                    const numB = parseFloat(valB);
+                    if (!isNaN(numA) && !isNaN(numB)) {
+                        return numA - numB;
+                    }
+                    break;
+                case 'DATE':
+                    const dateA = this.parseDDMMYYYY(String(valA));
+                    const dateB = this.parseDDMMYYYY(String(valB));
+                    if (dateA && dateB) {
+                        return dateA.getTime() - dateB.getTime();
+                    }
+                    break;
+                case 'DATETIME':
+                    const dtA = this.parseDDMMYYYYHHMMSS(String(valA));
+                    const dtB = this.parseDDMMYYYYHHMMSS(String(valB));
+                    if (dtA && dtB) {
+                        return dtA.getTime() - dtB.getTime();
+                    }
+                    break;
+                case 'BOOLEAN':
+                    const boolA = valA !== null && valA !== undefined && valA !== '' && valA !== 0 && valA !== '0' && valA !== false;
+                    const boolB = valB !== null && valB !== undefined && valB !== '' && valB !== 0 && valB !== '0' && valB !== false;
+                    return (boolA === boolB) ? 0 : (boolA ? -1 : 1);
+            }
+
+            // Default: string comparison (case-insensitive)
+            return String(valA).toLowerCase().localeCompare(String(valB).toLowerCase(), 'ru');
+        }
+
+        /**
+         * Filter subordinate table rows by search term (searches all fields)
+         */
+        filterSubordinateRows(rows, searchTerm, columns) {
+            const term = searchTerm.toLowerCase();
+            return rows.filter(row => {
+                const values = row.r || [];
+                return values.some((val, idx) => {
+                    if (val === null || val === undefined) return false;
+
+                    // For reference values, extract the label
+                    let searchVal = String(val);
+                    if (typeof val === 'string' && val.includes(':')) {
+                        const parts = val.split(':');
+                        if (parts.length >= 2 && !isNaN(parseInt(parts[0]))) {
+                            searchVal = parts.slice(1).join(':');
+                        }
+                    }
+
+                    return searchVal.toLowerCase().includes(term);
+                });
+            });
+        }
+
+        /**
+         * Highlight search term in text (for display)
+         */
+        highlightSearchTerm(text, searchTerm) {
+            if (!searchTerm || !text) return text;
+
+            // Don't highlight inside HTML tags
+            const term = searchTerm.toLowerCase();
+            const textLower = text.toLowerCase();
+
+            if (!textLower.includes(term)) return text;
+
+            // Simple highlight - replace matches with highlighted version
+            // Using a case-insensitive regex with capturing group
+            const escapedTerm = searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`(${escapedTerm})`, 'gi');
+
+            return text.replace(regex, '<mark class="subordinate-search-highlight">$1</mark>');
         }
 
         formatSubordinateCellValue(value, req) {
