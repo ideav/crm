@@ -5286,7 +5286,7 @@ class IntegramTable {
 
                     const refReqId = targetWrapper.dataset.refId;
 
-                    watchedHiddenInput.addEventListener('change', async () => {
+                    const applyHook = async () => {
                         const isEmpty = !watchedHiddenInput.value;
                         targetWrapper._extraParams = isEmpty ? (hook.onEmpty || {}) : (hook.onFilled || {});
                         try {
@@ -5298,7 +5298,11 @@ class IntegramTable {
                         } catch (error) {
                             console.error('Error reloading reference options for hook target:', error);
                         }
-                    });
+                    };
+
+                    watchedHiddenInput.addEventListener('change', applyHook);
+                    // Also apply immediately on form open based on current watched field value
+                    applyHook();
                 }
             }
         }
