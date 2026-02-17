@@ -3576,7 +3576,17 @@ class IntegramTable {
                 window.integramTableOverrides.ddls &&
                 window.integramTableOverrides.ddls[requisiteId] !== undefined) {
                 const overrideUrlRaw = window.integramTableOverrides.ddls[requisiteId];
-                const overrideUrl = overrideUrlRaw.startsWith('http') ? overrideUrlRaw : `${ apiBase }/${ overrideUrlRaw }`;
+                let overrideUrl = overrideUrlRaw.startsWith('http') ? overrideUrlRaw : `${ apiBase }/${ overrideUrlRaw }`;
+
+                // Apply extraParams from fieldHooks to the override URL
+                if (extraParams && Object.keys(extraParams).length > 0) {
+                    const url = new URL(overrideUrl, window.location.origin);
+                    for (const [key, value] of Object.entries(extraParams)) {
+                        url.searchParams.set(key, value);
+                    }
+                    overrideUrl = url.toString();
+                }
+
                 const overrideResponse = await fetch(overrideUrl);
 
                 if (!overrideResponse.ok) {
