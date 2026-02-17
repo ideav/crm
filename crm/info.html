@@ -1,0 +1,116 @@
+<style>
+/* Info.html Workspace Styles */
+
+.quick-links-container {
+    background: white;
+    padding: 10px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.quick-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.quick-link-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 9px;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    text-decoration: none;
+    color: #495057;
+    font-size: 14px;
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.quick-link-badge:hover {
+    background: #e9ecef;
+    border-color: #adb5bd;
+    text-decoration: none;
+    color: #212529;
+    transform: translateY(-2px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.quick-link-badge.X {
+    background: #fff5f5;
+    border-color: #f8d7da;
+    color: #721c24;
+}
+
+.quick-link-badge.X:hover {
+    background: #ffe5e5;
+    border-color: #f5c6cb;
+}
+
+.quick-link-badge .icon {
+    margin-right: 6px;
+    font-size: 16px;
+}
+
+.quick-link-badge.X .icon {
+    color: #dc3545;
+}
+
+.tasks-container {
+    background: white;
+    padding: 0 10px 0 10px;
+    margin: 0;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+
+.loading {
+    text-align: center;
+    padding: 40px;
+    color: #6c757d;
+}
+
+.loading-spinner {
+    display: inline-block;
+    width: 40px;
+    height: 40px;
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #007bff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+</style>
+
+<!-- Quick Links Section -->
+<div class="quick-links-container">
+    <div id="quick-links" class="quick-links">
+        <!-- Begin:Мои отчеты -->
+            <a href="/{_global_.z}/info/{ЗапросID}" title="{Запрос}" class="quick-link-badge {приоритет}" id="ql{ЗапросID}" target="{ЗапросID}"><span class="icon hidden{приоритет}">⚡</span>
+                {Запрос}
+            </a>
+        <!-- End:Мои отчеты -->
+    </div>
+</div>
+
+<!-- Tasks Section -->
+<div class="tasks-container">
+    <div id="tasks-table"
+         data-integram-table
+         data-api-url="/{_global_.z}/report/{_global_.id}?JSON"
+         data-page-size="20"
+         data-cookie-prefix="tasks-table"
+         data-title=" "
+         data-instance-name="tasksTable"></div>
+</div>
+<script>
+    $('#tasks-table').attr('data-title',$('#ql{_global_.id}').attr('title')||'Задачи');
+</script>
+<link rel="stylesheet" href="/css/integram-table.css?3" />
+<script src="/js/integram-table.js?3"></script>
