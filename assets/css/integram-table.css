@@ -749,7 +749,7 @@
 }
 
 .edit-form-body {
-    padding: 20px;
+    padding: 12px;
     overflow-y: auto;
     flex: 1;
 }
@@ -1380,7 +1380,7 @@
 
 .subordinate-table-wrapper {
     overflow-x: auto;
-    margin-top: 8px;
+    margin-top: 12px;
 }
 
 .subordinate-table {
