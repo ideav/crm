@@ -667,38 +667,6 @@
         color: var(--text-secondary);
     }
 
-    /* Toggle switch styles */
-    .kanban-toggle {
-        display: inline-flex;
-        background-color: var(--background);
-        border-radius: 6px;
-        padding: 2px;
-        gap: 2px;
-    }
-
-    .kanban-toggle-option {
-        padding: 6px 16px;
-        border-radius: 4px;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: var(--text-secondary);
-        background-color: transparent;
-        border: none;
-        white-space: nowrap;
-    }
-
-    .kanban-toggle-option:hover {
-        color: var(--text-primary);
-    }
-
-    .kanban-toggle-option.active {
-        background-color: var(--primary-color);
-        color: white;
-        box-shadow: var(--shadow-sm);
-    }
-
     /* Radio button styles */
     .kanban-radio-group {
         display: flex;
@@ -906,12 +874,6 @@
         <input type="text" id="quickSearch" class="kanban-search-input" placeholder="Быстрый поиск" oninput="performQuickSearch()">
     </div>
     <div class="kanban-control-group">
-        <div class="kanban-toggle">
-            <button class="kanban-toggle-option" id="toggleSales" onclick="setFilterType('sales')">Продажи</button>
-            <button class="kanban-toggle-option" id="togglePartners" onclick="setFilterType('partners')">Партнеры</button>
-        </div>
-    </div>
-    <div class="kanban-control-group">
         <select id="managerSelect" class="kanban-select" onchange="onManagerChange()">
             <!-- Will be populated dynamically -->
         </select>
@@ -946,12 +908,6 @@
                 <div class="kanban-form-group">
                     <label class="kanban-form-label">Статус</label>
                     <div class="kanban-form-static" id="recordStatus"></div>
-                </div>
-                <div class="kanban-form-group">
-                    <label class="kanban-form-label required">Партнер</label>
-                    <select class="kanban-form-select" id="recordPartner" name="recordPartner">
-                        <option value="">Выберите партнера</option>
-                    </select>
                 </div>
                 <div class="kanban-form-group">
                     <label class="kanban-form-label">Дистрибьютор</label>
@@ -1047,14 +1003,12 @@ var statusesDataLoaded = false;
 var editFormStatusesData = []; // Statuses for edit form (all statuses, unfiltered)
 var sourcesData = [];
 var distributorsData = [];
-var partnersData = [];
 var productsData = [];
 var managersData = [];
 var taskTypesData = [];
 var currentStatusId = null;
 var currentStatusName = null;
 var kanbanFormTable = null; // Reusable IntegramTable instance for add/edit forms
-var currentFilterType = 'sales'; // 'sales' or 'partners'
 var currentProductId = 'all'; // 'all' or specific product ID
 var currentManagerId = null; // Selected manager ID, defaults to window.uid
 var searchQuery = ''; // Quick search query
@@ -1085,19 +1039,6 @@ function getCookie(name) {
         if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length, c.length);
     }
     return null;
-}
-
-// Set filter type (sales/partners)
-function setFilterType(type) {
-    currentFilterType = type;
-    setCookie('kanban_filter_type', type, 365);
-
-    // Update toggle UI
-    $('#toggleSales').toggleClass('active', type === 'sales');
-    $('#togglePartners').toggleClass('active', type === 'partners');
-
-    // Reload kanban data
-    loadKanbanData();
 }
 
 // Set product filter
@@ -1193,20 +1134,11 @@ function populateProductRadios() {
 
 // Restore user preferences from cookies
 function restoreUserPreferences() {
-    var savedFilterType = getCookie('kanban_filter_type');
     var savedProductId = getCookie('kanban_product_id');
-
-    if (savedFilterType) {
-        currentFilterType = savedFilterType;
-    }
 
     if (savedProductId) {
         currentProductId = savedProductId;
     }
-
-    // Update toggle UI
-    $('#toggleSales').toggleClass('active', currentFilterType === 'sales');
-    $('#togglePartners').toggleClass('active', currentFilterType === 'partners');
 }
 
 // Helper function to lighten a color by a percentage
@@ -1254,9 +1186,6 @@ function loadKanbanData(){
     var tasksReportId = '3769';
     var statusesReportId = '3796';
 
-    // Build FR_partners parameter based on current filter type
-    var frPartnersValue = currentFilterType === 'partners' ? '%25' : '!%25';
-
     // Build FR_product parameter if a specific product is selected
     var productParam = '';
     if (currentProductId !== 'all') {
@@ -1269,7 +1198,7 @@ console.log('loadKanbanData');
 
     // Load tasks
     var xhr1 = new XMLHttpRequest();
-    xhr1.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + tasksReportId + '?JSON_KV&FR_partners=' + frPartnersValue + productParam + managerParam, true);
+    xhr1.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + tasksReportId + '?JSON_KV' + productParam + managerParam, true);
     xhr1.onload = function(){
         if(xhr1.status === 200){
             try{
@@ -1290,7 +1219,7 @@ console.log('loadKanbanData');
 
     // Load statuses
     var xhr2 = new XMLHttpRequest();
-    xhr2.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + statusesReportId + '?JSON_KV&FR_partners=' + frPartnersValue + productParam + managerParam, true);
+    xhr2.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + statusesReportId + '?JSON_KV' + productParam + managerParam, true);
     xhr2.onload = function(){
         if(xhr2.status === 200){
             try{
@@ -1729,7 +1658,7 @@ function copyContact(value, type, event){
     }, 1500);
 }
 
-// Load sources, distributors, and partners data
+// Load sources and distributors data
 function loadSourcesAndDistributors(){
     // Load sources
     var xhr1 = new XMLHttpRequest();
@@ -1771,25 +1700,6 @@ function loadSourcesAndDistributors(){
     };
     xhr2.send();
 
-    // Load partners
-    var xhr3 = new XMLHttpRequest();
-    xhr3.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/5089?JSON_KV', true);
-    xhr3.onload = function(){
-        if(xhr3.status === 200){
-            try{
-                partnersData = JSON.parse(xhr3.responseText);
-                populatePartnersDropdown();
-            } catch(e){
-                console.error('Error parsing partners data:', e);
-            }
-        } else {
-            console.error('Error loading partners:', xhr3.status);
-        }
-    };
-    xhr3.onerror = function(){
-        console.error('Network error loading partners');
-    };
-    xhr3.send();
 }
 
 function populateSourcesDropdown(){
@@ -1810,17 +1720,6 @@ function populateDistributorsDropdown(){
         var option = $('<option></option>');
         option.val(distributor['ДистрибьюторID']);
         option.text(distributor['Дистрибьютор']);
-        select.append(option);
-    });
-}
-
-function populatePartnersDropdown(){
-    var select = $('#recordPartner');
-    select.find('option:not(:first)').remove();
-    partnersData.forEach(function(partner){
-        var option = $('<option></option>');
-        option.val(partner['ПартнерID']);
-        option.text(partner['Партнер']);
         select.append(option);
     });
 }
@@ -1987,7 +1886,6 @@ function submitAddRecord(){
     // Get form values
     var name = $('#recordName').val().trim();
     var sourceId = $('#recordSource').val();
-    var partnerId = $('#recordPartner').val();
     var phone = $('#recordPhone').val().trim();
     var email = $('#recordEmail').val().trim();
 
@@ -2006,12 +1904,6 @@ function submitAddRecord(){
         $('#recordSource').addClass('error');
         hasError = true;
     }
-/*
-    if(!partnerId){
-        $('#recordPartner').addClass('error');
-        hasError = true;
-    }
-*/
     if(!phone && !email){
         $('#recordPhone').addClass('error');
         $('#recordEmail').addClass('error');
@@ -2019,7 +1911,7 @@ function submitAddRecord(){
     }
 
     if(hasError){
-        alert('Пожалуйста, заполните все обязательные поля:\n- Название\n- Партнер\n- Источник\n- Телефон или Email');
+        alert('Пожалуйста, заполните все обязательные поля:\n- Название\n- Источник\n- Телефон или Email');
         return;
     }
 
@@ -2039,9 +1931,6 @@ function submitAddRecord(){
 
     if(inn){
         postData += '&t637=' + encodeURIComponent(inn);
-    }
-    if(partnerId){
-        postData += '&t443=' + encodeURIComponent(partnerId);
     }
     if(distributorId){
         postData += '&t4862=' + encodeURIComponent(distributorId);
@@ -2123,7 +2012,7 @@ $(document).ready(function(){
 // Load all statuses for edit form (unfiltered)
 function loadEditFormStatuses(){
     var xhr = new XMLHttpRequest();
-    xhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/3796?JSON_KV&FR_partners=%25', true);
+    xhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/3796?JSON_KV', true);
     xhr.onload = function(){
         if(xhr.status === 200){
             try{
@@ -2409,17 +2298,6 @@ function renderDealCreateForm(){
     html += '<input type="number" class="kanban-edit-form-input" id="dealAmount" name="t5309" min="0" step="0.01">';
     html += '</div>';
 
-    // Partner field (Партнер)
-    html += '<div class="kanban-edit-form-group">';
-    html += '<label class="kanban-edit-form-label">Партнер</label>';
-    html += '<select class="kanban-edit-form-select" id="dealPartner" name="t479">';
-    html += '<option value="">Выберите партнера</option>';
-    partnersData.forEach(function(partner){
-        html += '<option value="' + partner['ПартнерID'] + '">' + partner['Партнер'] + '</option>';
-    });
-    html += '</select>';
-    html += '</div>';
-
     // Note field (Примечание)
     html += '<div class="kanban-edit-form-group">';
     html += '<label class="kanban-edit-form-label">Примечание</label>';
@@ -2468,12 +2346,6 @@ function submitCreateDeal(){
     var note = $('#dealNote').val();
     if(note){
         postData += '&t636=' + encodeURIComponent(note);
-    }
-
-    // Add partner (t479)
-    var partnerId = $('#dealPartner').val();
-    if(partnerId){
-        postData += '&t479=' + encodeURIComponent(partnerId);
     }
 
     postData += '&_xsrf=' + xsrf;
