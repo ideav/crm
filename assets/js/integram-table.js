@@ -3570,6 +3570,48 @@ class IntegramTable {
 
         async fetchReferenceOptions(requisiteId, recordId = 0, searchQuery = '') {
             const apiBase = this.getApiBase();
+
+            // Check for override URL in integramTableOverrides.ddls
+            if (window.integramTableOverrides &&
+                window.integramTableOverrides.ddls &&
+                window.integramTableOverrides.ddls[requisiteId] !== undefined) {
+                const overrideUrlRaw = window.integramTableOverrides.ddls[requisiteId];
+                const overrideUrl = overrideUrlRaw.startsWith('http') ? overrideUrlRaw : `${ apiBase }/${ overrideUrlRaw }`;
+                const overrideResponse = await fetch(overrideUrl);
+
+                if (!overrideResponse.ok) {
+                    throw new Error(`Failed to fetch reference options: ${ overrideResponse.statusText }`);
+                }
+
+                const overrideText = await overrideResponse.text();
+
+                try {
+                    const overrideData = JSON.parse(overrideText);
+
+                    if (!Array.isArray(overrideData) || overrideData.length === 0) {
+                        return {};
+                    }
+
+                    // Find the ID field (ends with 'ID') and derive the label field (without 'ID' suffix)
+                    const idField = Object.keys(overrideData[0]).find(key => key.endsWith('ID'));
+                    if (!idField) {
+                        throw new Error('No ID field found in override response');
+                    }
+                    const labelField = idField.slice(0, -2);
+
+                    const result = {};
+                    for (const item of overrideData) {
+                        result[item[idField]] = item[labelField];
+                    }
+                    return result;
+                } catch (e) {
+                    if (e.message && (e.message.includes('error') || e.message.includes('ID field'))) {
+                        throw e;
+                    }
+                    throw new Error(`Invalid JSON response from override URL: ${ overrideText }`);
+                }
+            }
+
             const params = new URLSearchParams({
                 JSON: '',
                 LIMIT: '50'
