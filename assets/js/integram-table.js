@@ -3568,7 +3568,7 @@ class IntegramTable {
             }
         }
 
-        async fetchReferenceOptions(requisiteId, recordId = 0, searchQuery = '') {
+        async fetchReferenceOptions(requisiteId, recordId = 0, searchQuery = '', extraParams = {}) {
             const apiBase = this.getApiBase();
 
             // Check for override URL in integramTableOverrides.ddls
@@ -3622,6 +3622,9 @@ class IntegramTable {
             }
             if (searchQuery) {
                 params.append('q', searchQuery);
+            }
+            for (const [key, value] of Object.entries(extraParams)) {
+                params.set(key, value);
             }
 
             const url = `${ apiBase }/_ref_reqs/${ requisiteId }?${ params }`;
@@ -5164,7 +5167,7 @@ class IntegramTable {
                                 // If not all fetched, re-query from server
                                 if (!wrapper._allOptionsFetched) {
                                     try {
-                                        const serverOptions = await this.fetchReferenceOptions(refReqId, recordId, searchText);
+                                        const serverOptions = await this.fetchReferenceOptions(refReqId, recordId, searchText, wrapper._extraParams || {});
                                         wrapper._referenceOptions = serverOptions;
                                         this.renderFormReferenceOptions(dropdown, serverOptions, hiddenInput, searchInput);
                                     } catch (error) {
@@ -5222,6 +5225,7 @@ class IntegramTable {
                             hiddenInput.value = option.dataset.id;
                             searchInput.value = option.dataset.text;
                             dropdown.style.display = 'none';
+                            hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
                         }
                     });
 
@@ -5234,6 +5238,7 @@ class IntegramTable {
                             searchInput.value = '';
                             this.renderFormReferenceOptions(dropdown, wrapper._referenceOptions, hiddenInput, searchInput);
                             dropdown.style.display = 'block';
+                            hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
                         });
                     }
 
@@ -5257,6 +5262,43 @@ class IntegramTable {
                 } catch (error) {
                     console.error('Error loading reference options:', error);
                     dropdown.innerHTML = '<div class="inline-editor-reference-empty">Ошибка загрузки</div>';
+                }
+            }
+
+            // Set up field hooks from integramTableOverrides.fieldHooks
+            // Hook format:
+            //   { watch: 443, target: 4874, onEmpty: { FR_partners: '%' }, onFilled: { FR_partners: '!%' } }
+            // When the watched field changes, extra params are applied to target field's dropdown query.
+            const hooks = window.integramTableOverrides && window.integramTableOverrides.fieldHooks;
+            if (hooks && Array.isArray(hooks)) {
+                for (const hook of hooks) {
+                    const watchId = String(hook.watch);
+                    const targetId = String(hook.target);
+                    const watchedWrapper = container.querySelector(`.form-reference-editor[data-ref-id="${ watchId }"]`);
+                    const targetWrapper = container.querySelector(`.form-reference-editor[data-ref-id="${ targetId }"]`);
+                    if (!watchedWrapper || !targetWrapper) continue;
+
+                    const watchedHiddenInput = watchedWrapper.querySelector('.form-ref-value');
+                    const targetHiddenInput = targetWrapper.querySelector('.form-ref-value');
+                    const targetSearchInput = targetWrapper.querySelector('.form-ref-search');
+                    const targetDropdown = targetWrapper.querySelector('.form-ref-dropdown');
+                    if (!watchedHiddenInput || !targetHiddenInput || !targetSearchInput || !targetDropdown) continue;
+
+                    const refReqId = targetWrapper.dataset.refId;
+
+                    watchedHiddenInput.addEventListener('change', async () => {
+                        const isEmpty = !watchedHiddenInput.value;
+                        targetWrapper._extraParams = isEmpty ? (hook.onEmpty || {}) : (hook.onFilled || {});
+                        try {
+                            const options = await this.fetchReferenceOptions(refReqId, recordId, '', targetWrapper._extraParams);
+                            targetWrapper._referenceOptions = options;
+                            targetWrapper._allOptionsFetched = Object.keys(options).length < 50;
+                            this.renderFormReferenceOptions(targetDropdown, options, targetHiddenInput, targetSearchInput);
+                            targetDropdown.style.display = 'none';
+                        } catch (error) {
+                            console.error('Error reloading reference options for hook target:', error);
+                        }
+                    });
                 }
             }
         }
