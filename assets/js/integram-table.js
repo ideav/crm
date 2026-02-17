@@ -293,6 +293,9 @@ class IntegramTable {
                 params.set('ORDER', orderValue);
             }
 
+            // Forward GET parameters from page URL (issue #476)
+            this.appendPageUrlParams(params);
+
             const separator = this.options.apiUrl.includes('?') ? '&' : '?';
             const response = await fetch(`${ this.options.apiUrl }${ separator }${ params }`);
             const json = await response.json();
@@ -399,6 +402,12 @@ class IntegramTable {
             if (this.sortColumn !== null && this.sortDirection !== null) {
                 const orderValue = this.sortDirection === 'desc' ? `-${this.sortColumn}` : this.sortColumn;
                 dataUrl += `&ORDER=${ orderValue }`;
+            }
+
+            // Forward GET parameters from page URL (issue #476)
+            const pageParams = this.getPageUrlParams();
+            if (pageParams.toString()) {
+                dataUrl += `&${ pageParams.toString() }`;
             }
 
             const dataResponse = await fetch(dataUrl);
@@ -523,6 +532,12 @@ class IntegramTable {
             if (this.sortColumn !== null && this.sortDirection !== null) {
                 const orderValue = this.sortDirection === 'desc' ? `-${this.sortColumn}` : this.sortColumn;
                 dataUrl += `&ORDER=${ orderValue }`;
+            }
+
+            // Forward GET parameters from page URL (issue #476)
+            const pageParams = this.getPageUrlParams();
+            if (pageParams.toString()) {
+                dataUrl += `&${ pageParams.toString() }`;
             }
 
             // Fetch data
@@ -700,6 +715,9 @@ class IntegramTable {
                         params.set('F_U', this.options.parentId);
                     }
 
+                    // Forward GET parameters from page URL (issue #476)
+                    this.appendPageUrlParams(params);
+
                     countUrl = `${ apiBase }/object/${ this.objectTableId }/?JSON_OBJ&${ params }`;
                 } else {
                     // Report format: use RECORD_COUNT=1 on the report URL
@@ -717,6 +735,9 @@ class IntegramTable {
                             }
                         }
                     });
+
+                    // Forward GET parameters from page URL (issue #476)
+                    this.appendPageUrlParams(params);
 
                     const separator = this.options.apiUrl.includes('?') ? '&' : '?';
                     countUrl = `${ this.options.apiUrl }${ separator }${ params }`;
@@ -3626,6 +3647,41 @@ class IntegramTable {
             return this.options.dataSource;
         }
 
+        /**
+         * Get GET parameters from the current page URL to forward to API requests.
+         * Excludes parameters that are already handled internally (parentId, F_U, up).
+         * @returns {URLSearchParams} Parameters to append to API requests
+         */
+        getPageUrlParams() {
+            const pageParams = new URLSearchParams(window.location.search);
+            const forwardParams = new URLSearchParams();
+
+            // Parameters to exclude (already handled internally or could conflict)
+            const excludeParams = new Set(['parentId', 'F_U', 'up', 'LIMIT', 'ORDER', 'RECORD_COUNT', '_count', 'JSON_OBJ', 'JSON']);
+
+            for (const [key, value] of pageParams.entries()) {
+                if (!excludeParams.has(key)) {
+                    forwardParams.append(key, value);
+                }
+            }
+
+            return forwardParams;
+        }
+
+        /**
+         * Append page URL parameters to an existing URLSearchParams object.
+         * @param {URLSearchParams} params - The params object to append to
+         */
+        appendPageUrlParams(params) {
+            const pageParams = this.getPageUrlParams();
+            for (const [key, value] of pageParams.entries()) {
+                // Only append if not already set (avoid duplicates)
+                if (!params.has(key)) {
+                    params.append(key, value);
+                }
+            }
+        }
+
         parseAttrs(attrs) {
             const result = {
                 required: false,
@@ -6054,6 +6110,9 @@ class IntegramTable {
                     [`FR_${ columnId }`]: createdRecordId
                 });
 
+                // Forward GET parameters from page URL (issue #476)
+                this.appendPageUrlParams(params);
+
                 const separator = this.options.apiUrl.includes('?') ? '&' : '?';
                 const response = await fetch(`${ this.options.apiUrl }${ separator }${ params }`);
                 const json = await response.json();
@@ -6722,6 +6781,9 @@ class IntegramTable {
                 params.set('ORDER', orderValue);
             }
 
+            // Forward GET parameters from page URL (issue #476)
+            this.appendPageUrlParams(params);
+
             // Strip existing LIMIT from apiUrl to avoid conflict with export LIMIT
             let baseUrl = this.options.apiUrl;
             if (baseUrl.includes('?')) {
@@ -6798,6 +6860,9 @@ class IntegramTable {
                 const orderValue = this.sortDirection === 'desc' ? `-${this.sortColumn}` : this.sortColumn;
                 params.set('ORDER', orderValue);
             }
+
+            // Forward GET parameters from page URL (issue #476)
+            this.appendPageUrlParams(params);
 
             const apiBase = this.getApiBase();
             const url = `${ apiBase }/object/${ this.options.tableTypeId }/?${ params }`;
