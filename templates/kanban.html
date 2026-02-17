@@ -1042,6 +1042,8 @@
 // Kanban functionality
 var kanbanData = [];
 var statusesData = [];
+var tasksDataLoaded = false;
+var statusesDataLoaded = false;
 var editFormStatusesData = []; // Statuses for edit form (all statuses, unfiltered)
 var sourcesData = [];
 var distributorsData = [];
@@ -1245,6 +1247,8 @@ function lightenColor(color, percent) {
 
 function loadKanbanData(){
     $('#kanban').html('<div class="loading">Загрузка данных канбана...</div>');
+    tasksDataLoaded = false;
+    statusesDataLoaded = false;
 
     // Use fixed report IDs
     var tasksReportId = '3769';
@@ -1270,6 +1274,7 @@ console.log('loadKanbanData');
         if(xhr1.status === 200){
             try{
                 kanbanData = JSON.parse(xhr1.responseText);
+                tasksDataLoaded = true;
                 checkDataLoaded();
             } catch(e){
                 showError('Ошибка парсинга данных задач: ' + e.message);
@@ -1290,6 +1295,7 @@ console.log('loadKanbanData');
         if(xhr2.status === 200){
             try{
                 statusesData = JSON.parse(xhr2.responseText);
+                statusesDataLoaded = true;
                 checkDataLoaded();
             } catch(e){
                 showError('Ошибка парсинга данных статусов: ' + e.message);
@@ -1305,8 +1311,8 @@ console.log('loadKanbanData');
 }
 
 function checkDataLoaded(){
-    // Render kanban if we have statuses data, even if kanbanData is empty
-    if(statusesData.length > 0){
+    // Render kanban when both requests have completed, even if data is empty
+    if(tasksDataLoaded && statusesDataLoaded){
         renderKanban();
     }
 }
