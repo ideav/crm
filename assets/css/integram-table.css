@@ -126,7 +126,7 @@
     border-left: none;
     border-right: 1px solid rgba(0, 0, 0, 0.06);
     position: sticky;
-    top: 0;
+    top: 49px;
     z-index: 10;
     cursor: move;
     user-select: none;
@@ -309,9 +309,7 @@
     border-bottom: 1px solid var(--md-divider);
     border-right: 1px solid rgba(0, 0, 0, 0.06);
     position: sticky;
-    /* top: 44px;
-    height: 40px;
-    min-height: 40px; */
+    top: 93px;
     z-index: 9;
     vertical-align: middle;
 }
