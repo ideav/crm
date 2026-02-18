@@ -1035,10 +1035,26 @@
 </div>
 
 <!-- Include IntegramTable component -->
-<link rel="stylesheet" href="/css/integram-table.css?1">
-<script src="/js/integram-table.js?2"></script>
+<link rel="stylesheet" href="/css/integram-table.css">
+<script src="/js/integram-table.js"></script>
 
 <script>
+// Overrides
+var integramTableOverrides = {
+  'ddls': {
+    638: 'report/5230?JSON_KV',
+    4874: 'report/3796?JSON_KV'
+  },
+  fieldHooks: [
+    {
+      watch: 443,                       // data-ref-id of the field to watch
+      target: 4874,                     // data-ref-id of the field whose options change
+      onEmpty: { FR_partners: '!%' },    // extra query params when watched field is empty
+      onFilled: { FR_partners: '%' }   // extra query params when watched field has a value
+    }
+  ]
+};
+
 // Kanban functionality
 var kanbanData = [];
 var statusesData = [];
