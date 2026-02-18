@@ -292,10 +292,12 @@
     }
 
     .kanban-card-date {
+        position: absolute;
+        top: 6px;
+        right: 6px;
         font-size: 0.75rem;
         color: var(--text-secondary);
         text-align: right;
-        margin-top: 4px;
     }
 
     .kanban-card-tasks-button {
@@ -1458,13 +1460,13 @@ function renderCard(task){
         html += '<div class="kanban-card-amount">' + task['Сумма'] + ' ₽</div>';
     }
 
-    // Add contact icons at bottom right (vertically stacked)
-    html += '<div class="kanban-card-contacts">';
-
-    // Date above contact icons (without "Дата:" label)
+    // Date in top-right corner of the card
     if(task['Дата']){
         html += '<div class="kanban-card-date">' + task['Дата'] + '</div>';
     }
+
+    // Add contact icons at bottom right (vertically stacked)
+    html += '<div class="kanban-card-contacts">';
 
     // Phone icon (on top)
     var hasPhone = task['Телефон'] && task['Телефон'].trim() !== '';
