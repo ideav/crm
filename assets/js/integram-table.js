@@ -2105,10 +2105,10 @@ class IntegramTable {
                 const clearButton = cell.querySelector('.inline-editor-reference-clear');
                 const addButton = cell.querySelector('.inline-editor-reference-add');
 
-                // Store original options for filtering
+                // Store original options for filtering (array of [id, text] tuples)
                 this.currentEditingCell.referenceOptions = options;
                 // Track if all options have been fetched (50+ means we only got first 50)
-                this.currentEditingCell.allOptionsFetched = Object.keys(options).length < 50;
+                this.currentEditingCell.allOptionsFetched = options.length < 50;
 
                 // Focus the search input
                 searchInput.focus();
@@ -2269,8 +2269,9 @@ class IntegramTable {
         }
 
         renderReferenceOptions(options, currentValue) {
+            // options is an array of [id, text] tuples
             // Filter out current value from options
-            const filteredOptions = Object.entries(options).filter(([id, text]) => text !== currentValue);
+            const filteredOptions = options.filter(([id, text]) => text !== currentValue);
 
             if (filteredOptions.length === 0) {
                 return '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
@@ -2283,16 +2284,11 @@ class IntegramTable {
         }
 
         filterReferenceOptions(options, searchText, currentValue) {
+            // options is an array of [id, text] tuples
             const lowerSearch = searchText.toLowerCase();
-            const filtered = {};
-
-            for (const [id, text] of Object.entries(options)) {
-                if (text !== currentValue && text.toLowerCase().includes(lowerSearch)) {
-                    filtered[id] = text;
-                }
-            }
-
-            return filtered;
+            return options.filter(([id, text]) =>
+                text !== currentValue && text.toLowerCase().includes(lowerSearch)
+            );
         }
 
         async saveReferenceEdit(selectedId, selectedText) {
@@ -3599,7 +3595,7 @@ class IntegramTable {
                     const overrideData = JSON.parse(overrideText);
 
                     if (!Array.isArray(overrideData) || overrideData.length === 0) {
-                        return {};
+                        return [];
                     }
 
                     // Find the ID field (ends with 'ID') and derive the label field (without 'ID' suffix)
@@ -3609,11 +3605,8 @@ class IntegramTable {
                     }
                     const labelField = idField.slice(0, -2);
 
-                    const result = {};
-                    for (const item of overrideData) {
-                        result[item[idField]] = item[labelField];
-                    }
-                    return result;
+                    // Return array of [id, text] tuples to preserve server order
+                    return overrideData.map(item => [String(item[idField]), item[labelField]]);
                 } catch (e) {
                     if (e.message && (e.message.includes('error') || e.message.includes('ID field'))) {
                         throw e;
@@ -3654,13 +3647,36 @@ class IntegramTable {
                     throw new Error(data.error);
                 }
 
-                return data;
+                // Parse JSON text to extract key-value pairs in original server order
+                // (JavaScript objects with numeric string keys iterate in numeric order, not insertion order)
+                return this.parseJsonObjectAsArray(text);
             } catch (e) {
                 if (e.message && e.message.includes('error')) {
                     throw e;
                 }
                 throw new Error(`Invalid JSON response: ${ text }`);
             }
+        }
+
+        /**
+         * Parse JSON object text into an array of [key, value] tuples preserving original order.
+         * This is necessary because JavaScript objects reorder numeric string keys.
+         * @param {string} jsonText - JSON text representing an object
+         * @returns {Array<[string, string]>} Array of [id, text] tuples in original order
+         */
+        parseJsonObjectAsArray(jsonText) {
+            const result = [];
+            // Match "key": "value" or "key": value patterns, preserving order
+            const regex = /"([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|([^,}\s]+))/g;
+            let match;
+            while ((match = regex.exec(jsonText)) !== null) {
+                const key = match[1].replace(/\\(.)/g, '$1'); // Unescape
+                const value = match[2] !== undefined
+                    ? match[2].replace(/\\(.)/g, '$1')  // String value, unescape
+                    : match[3];  // Non-string value (number, boolean, null)
+                result.push([key, value]);
+            }
+            return result;
         }
 
         getMetadataName(metadata) {
@@ -5130,9 +5146,9 @@ class IntegramTable {
                 try {
                     const options = await this.fetchReferenceOptions(refReqId, recordId);
 
-                    // Store options data on the wrapper
+                    // Store options data on the wrapper (array of [id, text] tuples)
                     wrapper._referenceOptions = options;
-                    wrapper._allOptionsFetched = Object.keys(options).length < 50;
+                    wrapper._allOptionsFetched = options.length < 50;
 
                     // Render options (hidden by default, shown on focus)
                     this.renderFormReferenceOptions(dropdown, options, hiddenInput, searchInput);
@@ -5140,9 +5156,9 @@ class IntegramTable {
 
                     // Set current value if exists
                     if (hiddenInput.value) {
-                        const currentLabel = options[hiddenInput.value];
-                        if (currentLabel) {
-                            searchInput.value = currentLabel;
+                        const currentOption = options.find(([id]) => id === hiddenInput.value);
+                        if (currentOption) {
+                            searchInput.value = currentOption[1];
                         }
                     }
 
@@ -5165,13 +5181,10 @@ class IntegramTable {
                             if (searchText === '') {
                                 this.renderFormReferenceOptions(dropdown, wrapper._referenceOptions, hiddenInput, searchInput);
                             } else {
-                                // Filter locally first
-                                const filtered = {};
-                                for (const [id, text] of Object.entries(wrapper._referenceOptions)) {
-                                    if (text.toLowerCase().includes(searchText.toLowerCase())) {
-                                        filtered[id] = text;
-                                    }
-                                }
+                                // Filter locally first (options is array of [id, text] tuples)
+                                const filtered = wrapper._referenceOptions.filter(([id, text]) =>
+                                    text.toLowerCase().includes(searchText.toLowerCase())
+                                );
                                 this.renderFormReferenceOptions(dropdown, filtered, hiddenInput, searchInput);
 
                                 // If not all fetched, re-query from server
@@ -5302,7 +5315,7 @@ class IntegramTable {
                         try {
                             const options = await this.fetchReferenceOptions(refReqId, recordId, '', targetWrapper._extraParams);
                             targetWrapper._referenceOptions = options;
-                            targetWrapper._allOptionsFetched = Object.keys(options).length < 50;
+                            targetWrapper._allOptionsFetched = options.length < 50;
                             this.renderFormReferenceOptions(targetDropdown, options, targetHiddenInput, targetSearchInput);
                             targetDropdown.style.display = 'none';
                         } catch (error) {
@@ -5318,16 +5331,15 @@ class IntegramTable {
         }
 
         renderFormReferenceOptions(dropdown, options, hiddenInput, searchInput) {
+            // options is an array of [id, text] tuples
             dropdown.innerHTML = '';
 
-            const entries = Object.entries(options);
-
-            if (entries.length === 0) {
+            if (options.length === 0) {
                 dropdown.innerHTML = '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
                 return;
             }
 
-            entries.forEach(([id, text]) => {
+            options.forEach(([id, text]) => {
                 const escapedText = this.escapeHtml(text);
                 const optionDiv = document.createElement('div');
                 optionDiv.className = 'inline-editor-reference-option';
