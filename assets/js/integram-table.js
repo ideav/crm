@@ -1561,6 +1561,10 @@ class IntegramTable {
         /**
          * Render grouped table rows (issue #502)
          * Creates rows with merged group cells on the left side
+         *
+         * Issue #531: Group cells use a blue left border (via CSS .group-cell class)
+         * to visually distinguish grouping columns from regular data columns
+         * (which have gray borders). This helps users understand the table structure.
          */
         renderGroupedRows(orderedColumns, instanceName) {
             if (!this.groupedData || this.groupedData.length === 0) {
