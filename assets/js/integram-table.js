@@ -6081,6 +6081,12 @@ class IntegramTable {
                     throw new Error(result.error);
                 }
 
+                // Check for warning - show modal and stay in edit mode
+                if (result.warning) {
+                    this.showWarningModal(result.warning);
+                    return;
+                }
+
                 // Close modal
                 modal.remove();
                 if (modal._overlayElement) {
@@ -6545,6 +6551,42 @@ class IntegramTable {
             toast.addEventListener('click', () => {
                 toast.classList.add('fade-out');
                 setTimeout(() => toast.remove(), 300);
+            });
+        }
+
+        showWarningModal(message) {
+            const modalId = `warning-modal-${ Date.now() }`;
+            const modalHtml = `
+                <div class="integram-modal-overlay" id="${ modalId }">
+                    <div class="integram-modal" style="max-width: 500px;">
+                        <div class="integram-modal-header">
+                            <h5>Предупреждение</h5>
+                        </div>
+                        <div class="integram-modal-body">
+                            <div class="alert alert-warning" style="margin: 0;">
+                                ${ this.escapeHtml(message) }
+                            </div>
+                        </div>
+                        <div class="integram-modal-footer" style="padding: 15px; text-align: right;">
+                            <button type="button" class="btn btn-primary" data-close-warning-modal="true">OK</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+            const overlay = document.getElementById(modalId);
+            const closeBtn = overlay.querySelector('[data-close-warning-modal="true"]');
+
+            closeBtn.addEventListener('click', () => {
+                overlay.remove();
+            });
+
+            // Also close on click outside the modal
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) {
+                    overlay.remove();
+                }
             });
         }
 
