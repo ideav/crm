@@ -427,6 +427,25 @@ class IntegramTable {
                 dataUrl += `&F_U=${ this.options.parentId }`;
             }
 
+            // Apply filters if any (issue #508)
+            const filters = this.filters || {};
+            const filterParams = new URLSearchParams();
+
+            Object.keys(filters).forEach(colId => {
+                const filter = filters[colId];
+                if (filter.value || filter.type === '%' || filter.type === '!%') {
+                    const column = this.columns.find(c => c.id === colId);
+                    if (column) {
+                        this.applyFilter(filterParams, column, filter);
+                    }
+                }
+            });
+
+            // Add filter parameters to URL
+            if (filterParams.toString()) {
+                dataUrl += `&${ filterParams.toString() }`;
+            }
+
             // Add ORDER parameter for sorting
             if (this.sortColumn !== null && this.sortDirection !== null) {
                 const orderValue = this.sortDirection === 'desc' ? `-${this.sortColumn}` : this.sortColumn;
