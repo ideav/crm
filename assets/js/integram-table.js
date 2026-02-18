@@ -1558,7 +1558,10 @@ class IntegramTable {
                     // This row has group cells to render (starts new groups)
                     rowInfo.groupCells.forEach(groupCell => {
                         const column = this.columns.find(c => c.id === groupCell.colId);
-                        const cellValue = groupCell.value;
+                        // Issue #504: Use displayValue (parsed from "id:Value") if available, otherwise parse raw value
+                        const cellValue = groupCell.displayValue !== undefined
+                            ? groupCell.displayValue
+                            : this.parseReferenceDisplayValue(groupCell.value, column);
                         const rowspan = groupCell.rowspan > 1 ? ` rowspan="${ groupCell.rowspan }"` : '';
 
                         // Render the group cell with special styling
@@ -3615,6 +3618,7 @@ class IntegramTable {
         /**
          * Process data for grouping (issue #502)
          * Sorts data by grouping columns and creates group structure
+         * Issue #504: Handle reference values in "id:Value" format for grouping
          */
         processGroupedData() {
             if (!this.groupingEnabled || this.groupingColumns.length === 0) {
@@ -3622,25 +3626,31 @@ class IntegramTable {
                 return;
             }
 
-            // Get column indices for grouping columns
-            const groupColIndices = this.groupingColumns.map(colId => {
-                return this.columns.findIndex(c => c.id === colId);
-            }).filter(idx => idx !== -1);
+            // Get column indices and column objects for grouping columns
+            const groupColInfo = this.groupingColumns.map(colId => {
+                const colIdx = this.columns.findIndex(c => c.id === colId);
+                return { index: colIdx, column: this.columns[colIdx] };
+            }).filter(info => info.index !== -1);
 
-            if (groupColIndices.length === 0) {
+            if (groupColInfo.length === 0) {
                 this.groupedData = [];
                 return;
             }
 
-            // Sort data by grouping columns
-            const sortedData = [...this.data].sort((a, b) => {
-                for (const colIdx of groupColIndices) {
-                    const valA = a[colIdx] || '';
-                    const valB = b[colIdx] || '';
+            // Helper to get display value for grouping (handles reference "id:Value" format)
+            const getDisplayValue = (value, column) => {
+                return this.parseReferenceDisplayValue(value, column);
+            };
 
-                    // Convert to string for comparison
-                    const strA = String(valA).toLowerCase();
-                    const strB = String(valB).toLowerCase();
+            // Sort data by grouping columns (using display values for reference fields)
+            const sortedData = [...this.data].sort((a, b) => {
+                for (const info of groupColInfo) {
+                    const valA = a[info.index] || '';
+                    const valB = b[info.index] || '';
+
+                    // Issue #504: Parse reference values for proper comparison
+                    const strA = getDisplayValue(valA, info.column).toLowerCase();
+                    const strB = getDisplayValue(valB, info.column).toLowerCase();
 
                     if (strA < strB) return -1;
                     if (strA > strB) return 1;
@@ -3651,15 +3661,21 @@ class IntegramTable {
             // Create grouped structure
             // Each row gets info about which group cells should be displayed (rowspan)
             this.groupedData = [];
-            let prevGroupValues = [];
+            let prevGroupDisplayValues = [];  // Store display values for comparison
 
             sortedData.forEach((row, rowIndex) => {
-                const groupValues = groupColIndices.map(colIdx => row[colIdx] || '');
+                // Issue #504: Get display values for grouping (handles reference "id:Value" format)
+                const groupDisplayValues = groupColInfo.map(info => {
+                    const rawValue = row[info.index] || '';
+                    return getDisplayValue(rawValue, info.column);
+                });
+                // Also keep raw values for storing in groupCells
+                const groupRawValues = groupColInfo.map(info => row[info.index] || '');
 
-                // Determine which group levels changed
+                // Determine which group levels changed (compare display values)
                 let changedLevel = -1;
-                for (let i = 0; i < groupValues.length; i++) {
-                    if (groupValues[i] !== prevGroupValues[i]) {
+                for (let i = 0; i < groupDisplayValues.length; i++) {
+                    if (groupDisplayValues[i] !== prevGroupDisplayValues[i]) {
                         changedLevel = i;
                         break;
                     }
@@ -3675,16 +3691,19 @@ class IntegramTable {
                 // If this is first row or group value changed, calculate rowspan
                 if (rowIndex === 0 || changedLevel !== -1) {
                     // Count how many rows share each group value
-                    for (let level = (changedLevel === -1 ? 0 : changedLevel); level < groupColIndices.length; level++) {
-                        const colIdx = groupColIndices[level];
+                    for (let level = (changedLevel === -1 ? 0 : changedLevel); level < groupColInfo.length; level++) {
+                        const info = groupColInfo[level];
                         let rowspan = 1;
 
-                        // Count subsequent rows with same value at this level
+                        // Count subsequent rows with same display value at this level
                         for (let j = rowIndex + 1; j < sortedData.length; j++) {
-                            // Check if all previous levels match
+                            // Check if all previous levels match (using display values)
                             let allMatch = true;
                             for (let k = 0; k <= level; k++) {
-                                if (sortedData[j][groupColIndices[k]] !== groupValues[k]) {
+                                const checkInfo = groupColInfo[k];
+                                const checkRawValue = sortedData[j][checkInfo.index] || '';
+                                const checkDisplayValue = getDisplayValue(checkRawValue, checkInfo.column);
+                                if (checkDisplayValue !== groupDisplayValues[k]) {
                                     allMatch = false;
                                     break;
                                 }
@@ -3698,15 +3717,16 @@ class IntegramTable {
 
                         rowInfo.groupCells.push({
                             colId: this.groupingColumns[level],
-                            colIndex: colIdx,
-                            value: groupValues[level],
+                            colIndex: info.index,
+                            value: groupRawValues[level],  // Keep raw value
+                            displayValue: groupDisplayValues[level],  // Add parsed display value
                             rowspan: rowspan
                         });
                     }
                 }
 
                 this.groupedData.push(rowInfo);
-                prevGroupValues = groupValues;
+                prevGroupDisplayValues = groupDisplayValues;
             });
 
             // Replace data with sorted data for rendering
@@ -6989,6 +7009,35 @@ class IntegramTable {
                               .replace(/>/g, '&gt;')
                               .replace(/"/g, '&quot;')
                               .replace(/'/g, '&#039;');
+        }
+
+        /**
+         * Parse reference field value in "id:Value" format and return display value
+         * For reference fields, values come as "id:DisplayText" where id is the record ID
+         * This method extracts and returns only the DisplayText part for display/comparison
+         * Issue #504: Handle reference values in grouping fields
+         *
+         * @param {string} value - The raw value, possibly in "id:Value" format
+         * @param {Object} column - The column definition object
+         * @returns {string} - The display value (without id: prefix for reference fields)
+         */
+        parseReferenceDisplayValue(value, column) {
+            if (value === null || value === undefined) return '';
+
+            const strValue = String(value);
+
+            // Check if this is a reference field (has ref_id or non-zero ref)
+            const isRefField = column && (column.ref_id != null || (column.ref && column.ref !== 0));
+
+            if (isRefField && strValue) {
+                const colonIndex = strValue.indexOf(':');
+                if (colonIndex > 0) {
+                    // Return only the display value part (after the colon)
+                    return strValue.substring(colonIndex + 1);
+                }
+            }
+
+            return strValue;
         }
 
         showToast(message, type = 'info') {
