@@ -65,6 +65,11 @@ class IntegramTable {
             this.sortColumn = null;  // Column ID being sorted (null = no sort)
             this.sortDirection = null;  // 'asc' or 'desc' (null = no sort)
 
+            // Track URL parameters that have been overridden by user filters (issue #500)
+            // When a user sets a filter for a field that came as a GET parameter,
+            // we remove it from URL and stop forwarding it to API requests
+            this.overriddenUrlParams = new Set();
+
             // Table settings
             this.settings = {
                 compact: false,  // false = spacious (default), true = compact
@@ -1556,6 +1561,9 @@ class IntegramTable {
                     }
                     this.filters[colId].value = input.value;
 
+                    // Check if this filter overrides URL GET parameters (issue #500)
+                    this.handleFilterOverride(colId, input.value);
+
                     // Debounce the API call to avoid too many requests
                     clearTimeout(this.filterTimeout);
                     this.filterTimeout = setTimeout(() => {
@@ -2995,6 +3003,10 @@ class IntegramTable {
                     target.textContent = symbol;
                     menu.remove();
 
+                    // Check if this filter overrides URL GET parameters (issue #500)
+                    // This handles filter type changes, including Empty/Not Empty filters
+                    this.handleFilterOverride(columnId, this.filters[columnId].value || symbol);
+
                     // For Empty (%) and Not Empty (!%) filters, clear input and apply immediately
                     if (symbol === '%' || symbol === '!%') {
                         this.filters[columnId].value = '';
@@ -3721,6 +3733,7 @@ class IntegramTable {
         /**
          * Get GET parameters from the current page URL to forward to API requests.
          * Excludes parameters that are already handled internally (parentId, F_U, up).
+         * Also excludes parameters that have been overridden by user filters (issue #500).
          * @returns {URLSearchParams} Parameters to append to API requests
          */
         getPageUrlParams() {
@@ -3731,12 +3744,55 @@ class IntegramTable {
             const excludeParams = new Set(['parentId', 'F_U', 'up', 'LIMIT', 'ORDER', 'RECORD_COUNT', '_count', 'JSON_OBJ', 'JSON']);
 
             for (const [key, value] of pageParams.entries()) {
-                if (!excludeParams.has(key)) {
-                    forwardParams.append(key, value);
-                }
+                // Skip excluded params
+                if (excludeParams.has(key)) continue;
+
+                // Skip params that have been overridden by user filters (issue #500)
+                if (this.overriddenUrlParams.has(key)) continue;
+
+                forwardParams.append(key, value);
             }
 
             return forwardParams;
+        }
+
+        /**
+         * Check if a column's filter corresponds to URL GET parameters and handle override.
+         * When user sets a filter for a field that came from URL parameters:
+         * 1. Mark those parameters as overridden (won't be forwarded to API)
+         * 2. Remove them from the browser URL using history.replaceState
+         * @param {string} colId - The column ID being filtered
+         * @param {string} filterValue - The new filter value
+         */
+        handleFilterOverride(colId, filterValue) {
+            // URL parameter patterns for this column: FR_{colId}, TO_{colId}
+            const urlParams = new URLSearchParams(window.location.search);
+            const paramsToRemove = [];
+
+            // Check for FR_ and TO_ parameters for this column
+            for (const [key, value] of urlParams.entries()) {
+                if (key === `FR_${colId}` || key === `TO_${colId}`) {
+                    paramsToRemove.push(key);
+                }
+            }
+
+            // If there are URL parameters for this column and user is setting a filter
+            if (paramsToRemove.length > 0 && (filterValue || filterValue === '')) {
+                // Mark these parameters as overridden
+                paramsToRemove.forEach(key => {
+                    this.overriddenUrlParams.add(key);
+                });
+
+                // Remove these parameters from the browser URL
+                const newUrlParams = new URLSearchParams(window.location.search);
+                paramsToRemove.forEach(key => {
+                    newUrlParams.delete(key);
+                });
+
+                // Update browser URL without reloading the page
+                const newUrl = window.location.pathname + (newUrlParams.toString() ? '?' + newUrlParams.toString() : '');
+                window.history.replaceState({}, '', newUrl);
+            }
         }
 
         /**
