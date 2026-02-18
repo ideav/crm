@@ -3841,7 +3841,8 @@ class IntegramTable {
             modal._overlayElement = overlay;
 
             const typeName = this.getMetadataName(metadata);
-            const title = isCreate ? `Создание: ${ typeName }` : `Редактирование: ${ typeName }`;
+            const firstColumnValue = !isCreate && recordData && recordData.obj ? recordData.obj.val : null;
+            const title = isCreate ? `Создание: ${ typeName }` : `Редактирование: ${ firstColumnValue || typeName }`;
             const instanceName = this.options.instanceName;
             const recordId = recordData && recordData.obj ? recordData.obj.id : null;
 
