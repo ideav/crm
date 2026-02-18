@@ -62,6 +62,7 @@ class IntegramTable {
             this.selectedRows = new Set();  // Set of selected row indices
             this.globalMetadata = null;  // Global metadata for determining parent relationships
             this.currentEditingCell = null;  // Track currently editing cell
+            this.pendingCellClick = null;  // Track pending cell click for focus preservation (issue #518)
             this.sortColumn = null;  // Column ID being sorted (null = no sort)
             this.sortDirection = null;  // 'asc' or 'desc' (null = no sort)
 
@@ -2225,6 +2226,7 @@ class IntegramTable {
             };
 
             // Enter to save (except for textarea and file upload)
+            // Tab/Shift+Tab to navigate between cells, Up/Down arrows to navigate vertically (issue #518)
             if (format !== 'MEMO' && format !== 'FILE') {
                 editor.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter') {
@@ -2233,10 +2235,24 @@ class IntegramTable {
                     } else if (e.key === 'Escape') {
                         e.preventDefault();
                         cancelEdit();
+                    } else if (e.key === 'Tab') {
+                        // Tab / Shift+Tab: navigate to next/previous editable cell (issue #518)
+                        e.preventDefault();
+                        const direction = e.shiftKey ? 'prev' : 'next';
+                        this.saveAndNavigate(direction, saveEdit, cancelEdit);
+                    } else if (e.key === 'ArrowUp') {
+                        // Arrow Up: navigate to cell above (issue #518)
+                        e.preventDefault();
+                        this.saveAndNavigate('up', saveEdit, cancelEdit);
+                    } else if (e.key === 'ArrowDown') {
+                        // Arrow Down: navigate to cell below (issue #518)
+                        e.preventDefault();
+                        this.saveAndNavigate('down', saveEdit, cancelEdit);
                     }
                 });
             } else if (format === 'MEMO') {
                 // For textarea: Ctrl+Enter to save, Escape to cancel
+                // Tab/Shift+Tab to navigate, Up/Down without Ctrl do nothing (allow cursor movement)
                 editor.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter' && e.ctrlKey) {
                         e.preventDefault();
@@ -2244,14 +2260,25 @@ class IntegramTable {
                     } else if (e.key === 'Escape') {
                         e.preventDefault();
                         cancelEdit();
+                    } else if (e.key === 'Tab') {
+                        // Tab / Shift+Tab: navigate to next/previous editable cell (issue #518)
+                        e.preventDefault();
+                        const direction = e.shiftKey ? 'prev' : 'next';
+                        this.saveAndNavigate(direction, saveEdit, cancelEdit);
                     }
+                    // Note: ArrowUp/Down allowed for cursor movement in textarea
                 });
             } else if (format === 'FILE') {
-                // For file upload: Escape to cancel only
+                // For file upload: Escape to cancel only, Tab to navigate
                 editor.addEventListener('keydown', (e) => {
                     if (e.key === 'Escape') {
                         e.preventDefault();
                         cancelEdit();
+                    } else if (e.key === 'Tab') {
+                        // Tab / Shift+Tab: navigate to next/previous editable cell (issue #518)
+                        e.preventDefault();
+                        const direction = e.shiftKey ? 'prev' : 'next';
+                        this.saveAndNavigate(direction, saveEdit, cancelEdit);
                     }
                 });
             }
@@ -2261,6 +2288,14 @@ class IntegramTable {
                 const outsideClickHandler = (e) => {
                     if (!cell.contains(e.target)) {
                         document.removeEventListener('click', outsideClickHandler);
+
+                        // Check if click is on another editable cell - preserve focus (issue #518)
+                        const clickedCell = e.target.closest('td[data-editable="true"]');
+                        if (clickedCell && clickedCell !== cell) {
+                            // Remember the clicked cell to edit after save completes
+                            this.pendingCellClick = clickedCell;
+                        }
+
                         saveEdit();
                     }
                 };
@@ -2411,6 +2446,22 @@ class IntegramTable {
                 }
 
                 // Handle keyboard navigation
+                // Closure to capture cancelEdit and saveEdit functions for Tab navigation (issue #518)
+                const cancelEdit = () => {
+                    this.cancelInlineEdit(originalContent);
+                };
+                const saveEditRef = async () => {
+                    // Select first option if available, otherwise just cancel
+                    const firstOption = dropdown.querySelector('.inline-editor-reference-option');
+                    if (firstOption) {
+                        const selectedId = firstOption.dataset.id;
+                        const selectedText = firstOption.dataset.text;
+                        await this.saveReferenceEdit(selectedId, selectedText);
+                    } else {
+                        cancelEdit();
+                    }
+                };
+
                 searchInput.addEventListener('keydown', (e) => {
                     if (e.key === 'Escape') {
                         e.preventDefault();
@@ -2430,6 +2481,11 @@ class IntegramTable {
                         if (firstOption) {
                             firstOption.focus();
                         }
+                    } else if (e.key === 'Tab') {
+                        // Tab / Shift+Tab: navigate to next/previous editable cell (issue #518)
+                        e.preventDefault();
+                        const direction = e.shiftKey ? 'prev' : 'next';
+                        this.saveAndNavigate(direction, saveEditRef, cancelEdit);
                     }
                 });
 
@@ -2456,6 +2512,11 @@ class IntegramTable {
                     } else if (e.key === 'Escape') {
                         e.preventDefault();
                         this.cancelInlineEdit(originalContent);
+                    } else if (e.key === 'Tab') {
+                        // Tab / Shift+Tab: navigate to next/previous editable cell (issue #518)
+                        e.preventDefault();
+                        const direction = e.shiftKey ? 'prev' : 'next';
+                        this.saveAndNavigate(direction, saveEditRef, cancelEdit);
                     }
                 });
 
@@ -2470,6 +2531,14 @@ class IntegramTable {
                         }
                         if (!cell.contains(e.target)) {
                             document.removeEventListener('click', outsideClickHandler);
+
+                            // Check if click is on another editable cell - preserve focus (issue #518)
+                            const clickedCell = e.target.closest('td[data-editable="true"]');
+                            if (clickedCell && clickedCell !== cell) {
+                                // Remember the clicked cell to edit after cancel completes
+                                this.pendingCellClick = clickedCell;
+                            }
+
                             this.cancelInlineEdit(originalContent);
                         }
                     };
@@ -2567,6 +2636,13 @@ class IntegramTable {
                     document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
                 }
                 this.currentEditingCell = null;
+
+                // Navigate to pending cell if set (issue #518)
+                if (this.pendingCellClick) {
+                    const targetCell = this.pendingCellClick;
+                    this.pendingCellClick = null;
+                    this.navigateToCell(targetCell);
+                }
             }
         }
 
@@ -2937,6 +3013,13 @@ class IntegramTable {
                     document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
                 }
                 this.currentEditingCell = null;
+
+                // Navigate to pending cell if set (issue #518)
+                if (this.pendingCellClick) {
+                    const targetCell = this.pendingCellClick;
+                    this.pendingCellClick = null;
+                    this.navigateToCell(targetCell);
+                }
             }
         }
 
@@ -3067,6 +3150,145 @@ class IntegramTable {
             }
 
             this.currentEditingCell = null;
+
+            // Navigate to pending cell if set (issue #518)
+            if (this.pendingCellClick) {
+                const targetCell = this.pendingCellClick;
+                this.pendingCellClick = null;
+                this.navigateToCell(targetCell);
+            }
+        }
+
+        /**
+         * Find all editable cells in the table (issue #518)
+         * Returns array of TD elements with data-editable="true"
+         */
+        getEditableCells() {
+            return Array.from(this.container.querySelectorAll('td[data-editable="true"]'));
+        }
+
+        /**
+         * Find the next editable cell after the current one (issue #518)
+         * Moves to the next cell in the same row, then wraps to the next row
+         * @param {HTMLElement} currentCell - The currently focused cell
+         * @returns {HTMLElement|null} - The next editable cell or null if none
+         */
+        findNextEditableCell(currentCell) {
+            const editableCells = this.getEditableCells();
+            if (editableCells.length === 0) return null;
+
+            const currentIndex = editableCells.indexOf(currentCell);
+            if (currentIndex === -1) return editableCells[0];
+
+            // Get next cell (wrap to start if at end)
+            const nextIndex = (currentIndex + 1) % editableCells.length;
+            return editableCells[nextIndex];
+        }
+
+        /**
+         * Find the previous editable cell before the current one (issue #518)
+         * Moves to the previous cell in the same row, then wraps to the previous row
+         * @param {HTMLElement} currentCell - The currently focused cell
+         * @returns {HTMLElement|null} - The previous editable cell or null if none
+         */
+        findPreviousEditableCell(currentCell) {
+            const editableCells = this.getEditableCells();
+            if (editableCells.length === 0) return null;
+
+            const currentIndex = editableCells.indexOf(currentCell);
+            if (currentIndex === -1) return editableCells[editableCells.length - 1];
+
+            // Get previous cell (wrap to end if at start)
+            const prevIndex = (currentIndex - 1 + editableCells.length) % editableCells.length;
+            return editableCells[prevIndex];
+        }
+
+        /**
+         * Find the editable cell above the current one in the same column (issue #518)
+         * @param {HTMLElement} currentCell - The currently focused cell
+         * @returns {HTMLElement|null} - The cell above or null if none
+         */
+        findCellAbove(currentCell) {
+            const currentRowIndex = parseInt(currentCell.dataset.rowIndex);
+            const currentColId = currentCell.dataset.colId;
+
+            if (isNaN(currentRowIndex) || currentRowIndex <= 0) return null;
+
+            // Find the editable cell in the same column, one row above
+            const targetRowIndex = currentRowIndex - 1;
+            const cellAbove = this.container.querySelector(
+                `td[data-editable="true"][data-row-index="${targetRowIndex}"][data-col-id="${currentColId}"]`
+            );
+
+            return cellAbove;
+        }
+
+        /**
+         * Find the editable cell below the current one in the same column (issue #518)
+         * @param {HTMLElement} currentCell - The currently focused cell
+         * @returns {HTMLElement|null} - The cell below or null if none
+         */
+        findCellBelow(currentCell) {
+            const currentRowIndex = parseInt(currentCell.dataset.rowIndex);
+            const currentColId = currentCell.dataset.colId;
+
+            if (isNaN(currentRowIndex)) return null;
+
+            // Find the editable cell in the same column, one row below
+            const targetRowIndex = currentRowIndex + 1;
+            const cellBelow = this.container.querySelector(
+                `td[data-editable="true"][data-row-index="${targetRowIndex}"][data-col-id="${currentColId}"]`
+            );
+
+            return cellBelow;
+        }
+
+        /**
+         * Navigate to a different editable cell after saving/canceling (issue #518)
+         * @param {HTMLElement} targetCell - The cell to navigate to
+         */
+        navigateToCell(targetCell) {
+            if (!targetCell) return;
+
+            // Small delay to ensure DOM is updated after save
+            setTimeout(() => {
+                this.startInlineEdit(targetCell);
+            }, 50);
+        }
+
+        /**
+         * Save the current edit and navigate to a target cell (issue #518)
+         * @param {string} direction - 'next', 'prev', 'up', or 'down'
+         * @param {Function} saveEdit - The save function to call
+         * @param {Function} cancelEdit - The cancel function (for unchanged values)
+         */
+        async saveAndNavigate(direction, saveEdit, cancelEdit) {
+            if (!this.currentEditingCell) return;
+
+            const currentCell = this.currentEditingCell.cell;
+            let targetCell = null;
+
+            // Find target cell based on direction
+            switch (direction) {
+                case 'next':
+                    targetCell = this.findNextEditableCell(currentCell);
+                    break;
+                case 'prev':
+                    targetCell = this.findPreviousEditableCell(currentCell);
+                    break;
+                case 'up':
+                    targetCell = this.findCellAbove(currentCell);
+                    break;
+                case 'down':
+                    targetCell = this.findCellBelow(currentCell);
+                    break;
+            }
+
+            // Store target for navigation after save completes
+            this.pendingCellClick = targetCell;
+
+            // Trigger save (which will check pendingCellClick and navigate)
+            await saveEdit();
         }
 
         attachScrollListener() {
