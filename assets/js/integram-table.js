@@ -3123,7 +3123,10 @@ class IntegramTable {
             const { cell } = this.currentEditingCell;
 
             // Restore original content
-            if (originalContent) {
+            // Note: Use typeof check instead of truthiness check because originalContent
+            // can be an empty string '' when the cell was originally empty (issue #520).
+            // Empty string is falsy in JavaScript, but we still want to restore it.
+            if (typeof originalContent === 'string') {
                 cell.innerHTML = originalContent;
             } else {
                 // Fallback: re-render the cell
