@@ -3115,8 +3115,16 @@ class IntegramTable {
             }
 
             // Update data attribute with full value for editing
-            if (fullValueForEditing) {
-                cell.setAttribute('data-full-value', fullValueForEditing);
+            // Fix for issue #527: When clearing a cell (empty string), we must remove
+            // the data-full-value attribute. Otherwise the old value persists and
+            // appears when the cell is edited again. Empty string is falsy in JS,
+            // so we use typeof check instead of truthiness.
+            if (typeof fullValueForEditing === 'string') {
+                if (fullValueForEditing === '') {
+                    cell.removeAttribute('data-full-value');
+                } else {
+                    cell.setAttribute('data-full-value', fullValueForEditing);
+                }
             }
 
             // Restore edit icon if present
