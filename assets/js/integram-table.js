@@ -3972,18 +3972,66 @@ class IntegramTable {
                 return this.parseReferenceDisplayValue(value, column);
             };
 
+            // Issue #529: Compare values considering the base type of the groupable column
+            // Dates should be compared as dates, numbers as numbers
+            const compareGroupingValues = (valA, valB, column) => {
+                // Handle null/undefined/empty
+                const aEmpty = valA === null || valA === undefined || valA === '';
+                const bEmpty = valB === null || valB === undefined || valB === '';
+
+                if (aEmpty && bEmpty) return 0;
+                if (aEmpty) return 1;  // Empty values go to end
+                if (bEmpty) return -1;
+
+                // Get the base type of the column
+                const baseFormat = this.normalizeFormat(column.type);
+
+                // For reference values (id:label format), extract the label for comparison
+                let displayA = getDisplayValue(valA, column);
+                let displayB = getDisplayValue(valB, column);
+
+                switch (baseFormat) {
+                    case 'NUMBER':
+                    case 'SIGNED':
+                        const numA = parseFloat(displayA);
+                        const numB = parseFloat(displayB);
+                        if (!isNaN(numA) && !isNaN(numB)) {
+                            return numA - numB;
+                        }
+                        break;
+                    case 'DATE':
+                        const dateA = this.parseDDMMYYYY(String(displayA));
+                        const dateB = this.parseDDMMYYYY(String(displayB));
+                        if (dateA && dateB) {
+                            return dateA.getTime() - dateB.getTime();
+                        }
+                        break;
+                    case 'DATETIME':
+                        const dtA = this.parseDDMMYYYYHHMMSS(String(displayA));
+                        const dtB = this.parseDDMMYYYYHHMMSS(String(displayB));
+                        if (dtA && dtB) {
+                            return dtA.getTime() - dtB.getTime();
+                        }
+                        break;
+                    case 'BOOLEAN':
+                        const boolA = displayA !== null && displayA !== undefined && displayA !== '' && displayA !== 0 && displayA !== '0' && displayA !== false;
+                        const boolB = displayB !== null && displayB !== undefined && displayB !== '' && displayB !== 0 && displayB !== '0' && displayB !== false;
+                        return (boolA === boolB) ? 0 : (boolA ? -1 : 1);
+                }
+
+                // Default: string comparison (case-insensitive)
+                return String(displayA).toLowerCase().localeCompare(String(displayB).toLowerCase(), 'ru');
+            };
+
             // Sort data by grouping columns (using display values for reference fields)
             const sortedData = [...this.data].sort((a, b) => {
                 for (const info of groupColInfo) {
-                    const valA = a[info.index] || '';
-                    const valB = b[info.index] || '';
+                    const valA = a[info.index];
+                    const valB = b[info.index];
 
-                    // Issue #504: Parse reference values for proper comparison
-                    const strA = getDisplayValue(valA, info.column).toLowerCase();
-                    const strB = getDisplayValue(valB, info.column).toLowerCase();
-
-                    if (strA < strB) return -1;
-                    if (strA > strB) return 1;
+                    // Issue #529: Use type-aware comparison
+                    const comparison = compareGroupingValues(valA, valB, info.column);
+                    if (comparison !== 0) return comparison;
                 }
                 return 0;
             });
