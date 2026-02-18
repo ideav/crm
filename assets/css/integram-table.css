@@ -2257,21 +2257,28 @@ tr.row-selected {
     vertical-align: middle;
 }
 
-/* Group cell styles (merged cells on the left) */
+/* Group cell styles (merged cells on the left)
+ * Issue #531: Group cells use BLUE borders to visually distinguish
+ * grouping columns from regular data columns (which have gray borders).
+ * This visual distinction helps users understand which columns are
+ * being used for data grouping at a glance.
+ */
 .group-cell {
     background-color: rgba(25, 118, 210, 0.04);
     font-weight: 500;
     color: var(--md-text-primary, rgba(0, 0, 0, 0.87));
     vertical-align: top;
-    border-right: 2px solid var(--md-primary, #1976d2);
+    border-right: 2px solid var(--md-primary, #1976d2);  /* Blue right border for grouping columns */
     padding: 12px 16px;
     position: relative;
 }
 
-/* First group cell has thicker left border */
+/* First group cell has thicker left border
+ * This creates a visual "bracket" effect showing the grouping hierarchy
+ */
 .group-cell:first-child,
 .integram-table td.group-cell:first-of-type {
-    border-left: 3px solid var(--md-primary, #1976d2);
+    border-left: 3px solid var(--md-primary, #1976d2);  /* Blue left border for grouping columns */
 }
 
 /* Nested grouping levels get slightly different shading */
