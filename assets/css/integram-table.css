@@ -2182,3 +2182,128 @@ tr.row-selected {
     color: var(--md-primary-dark, #1565c0);
     text-decoration: underline;
 }
+
+/* ========================================
+   Grouping Mode Styles (issue #502)
+   ======================================== */
+
+/* Grouping settings modal */
+.grouping-settings-modal {
+    max-width: 500px;
+}
+
+.grouping-columns-list {
+    max-height: 350px;
+    overflow-y: auto;
+}
+
+.grouping-column-item {
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.grouping-column-item:hover {
+    background-color: var(--md-hover, rgba(0, 0, 0, 0.04));
+}
+
+/* Order badge in grouping settings */
+.grouping-order-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    margin-right: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: white;
+    background-color: var(--md-primary, #1976d2);
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+/* Group header styles */
+.integram-table th.group-header {
+    background-color: rgba(25, 118, 210, 0.08);
+    border-bottom-color: var(--md-primary, #1976d2);
+}
+
+/* Grouping header badge (order indicator in table header) */
+.grouping-header-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    margin-right: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    color: white;
+    background-color: var(--md-primary, #1976d2);
+    border-radius: 50%;
+    vertical-align: middle;
+}
+
+/* Group cell styles (merged cells on the left) */
+.group-cell {
+    background-color: rgba(25, 118, 210, 0.04);
+    font-weight: 500;
+    color: var(--md-text-primary, rgba(0, 0, 0, 0.87));
+    vertical-align: top;
+    border-right: 2px solid var(--md-primary, #1976d2);
+    padding: 12px 16px;
+    position: relative;
+}
+
+/* First group cell has thicker left border */
+.group-cell:first-child,
+.integram-table td.group-cell:first-of-type {
+    border-left: 3px solid var(--md-primary, #1976d2);
+}
+
+/* Nested grouping levels get slightly different shading */
+.group-cell[data-group-level="1"] {
+    background-color: rgba(25, 118, 210, 0.06);
+}
+
+.group-cell[data-group-level="2"] {
+    background-color: rgba(25, 118, 210, 0.08);
+}
+
+.group-cell[data-group-level="3"] {
+    background-color: rgba(25, 118, 210, 0.10);
+}
+
+/* Ensure proper alignment for grouped rows */
+.integram-table tbody tr:has(.group-cell) {
+    border-top: 1px solid var(--md-divider, rgba(0, 0, 0, 0.12));
+}
+
+/* Sticky group cells for horizontal scrolling */
+.group-cell {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+}
+
+/* Second group cell offset for sticky positioning */
+.group-cell + .group-cell {
+    position: sticky;
+    z-index: 1;
+}
+
+/* Scroll counter in grouping mode */
+.scroll-counter.grouping-mode {
+    background-color: rgba(25, 118, 210, 0.08);
+    border-left: 3px solid var(--md-primary, #1976d2);
+}
+
+/* Compact mode adjustments for grouping */
+.integram-table.compact .group-cell {
+    padding: 6px 10px;
+}
+
+/* Hover state for grouped rows */
+.integram-table tbody tr:has(.group-cell):hover .group-cell {
+    background-color: rgba(25, 118, 210, 0.12);
+}
