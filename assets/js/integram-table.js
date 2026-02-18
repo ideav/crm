@@ -161,6 +161,7 @@ class IntegramTable {
         init() {
             this.loadColumnState();
             this.loadSettings();
+            this.loadConfigFromUrl();  // Load filters, groups, sorting from URL (issue #510)
             this.loadGlobalMetadata();  // Load metadata once at initialization
             this.loadData();
         }
@@ -909,6 +910,14 @@ class IntegramTable {
                     <div class="integram-table-header">
                         ${ this.options.title ? `<div class="integram-table-title">${ this.options.title }</div>` : '' }
                         <div class="integram-table-controls">
+                            ${ this.hasActiveFiltersOrGroups() ? `
+                            <button class="btn btn-sm btn-outline-secondary mr-2" onclick="window.${ instanceName }.copyConfigUrl()" title="Скопировать ссылку с текущими фильтрами и группами">
+                                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle;">
+                                    <path d="M10 2H6C5.44772 2 5 2.44772 5 3V4H4C3.44772 4 3 4.44772 3 5V13C3 13.5523 3.44772 14 4 14H10C10.5523 14 11 13.5523 11 13V12H12C12.5523 12 13 11.5523 13 11V5L10 2Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                                    <path d="M5 4V3C5 2.44772 5.44772 2 6 2H9.5L13 5.5V11C13 11.5523 12.5523 12 12 12H11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+                                </svg>
+                            </button>
+                            ` : '' }
                             ${ this.groupingEnabled ? `
                             <button class="btn btn-sm btn-outline-secondary mr-1" onclick="window.${ instanceName }.clearGrouping()" title="Очистить группировку">
                                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle;">
@@ -3741,6 +3750,217 @@ class IntegramTable {
                 // For other filters, check if value is not empty
                 return filter.value && filter.value.trim() !== '';
             });
+        }
+
+        /**
+         * Check if table has any active filters or grouping enabled (issue #510)
+         * Used to determine whether to show the "Share link" button
+         * @returns {boolean} True if there are active filters or grouping
+         */
+        hasActiveFiltersOrGroups() {
+            return this.hasActiveFilters() || (this.groupingEnabled && this.groupingColumns.length > 0);
+        }
+
+        /**
+         * Generate URL with current table configuration (issue #510)
+         * Includes filters and grouping settings that can be shared
+         * @returns {string} URL with configuration parameters
+         */
+        getConfigUrl() {
+            const url = new URL(window.location.href);
+
+            // Remove existing _itc parameter if present (table config)
+            url.searchParams.delete('_itc');
+
+            // Build configuration object
+            const config = {};
+
+            // Add filters
+            if (this.hasActiveFilters()) {
+                config.f = {};
+                Object.keys(this.filters).forEach(colId => {
+                    const filter = this.filters[colId];
+                    if (filter && (filter.value || filter.type === '%' || filter.type === '!%')) {
+                        config.f[colId] = {
+                            t: filter.type,
+                            v: filter.value || ''
+                        };
+                    }
+                });
+            }
+
+            // Add grouping columns
+            if (this.groupingEnabled && this.groupingColumns.length > 0) {
+                config.g = this.groupingColumns;
+            }
+
+            // Add sorting
+            if (this.sortColumn !== null && this.sortDirection !== null) {
+                config.s = {
+                    c: this.sortColumn,
+                    d: this.sortDirection
+                };
+            }
+
+            // Encode configuration as base64 to keep URL clean
+            // Using encodeURIComponent for URL safety
+            const configJson = JSON.stringify(config);
+            const configEncoded = btoa(encodeURIComponent(configJson));
+
+            url.searchParams.set('_itc', configEncoded);
+
+            return url.toString();
+        }
+
+        /**
+         * Copy current table configuration URL to clipboard (issue #510)
+         * Shows a notification when copied successfully
+         */
+        copyConfigUrl() {
+            const url = this.getConfigUrl();
+
+            // Try using modern Clipboard API first
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(url).then(() => {
+                    this.showCopyNotification('Ссылка скопирована в буфер обмена');
+                }).catch(err => {
+                    console.error('Failed to copy URL:', err);
+                    this.fallbackCopyToClipboard(url);
+                });
+            } else {
+                this.fallbackCopyToClipboard(url);
+            }
+        }
+
+        /**
+         * Fallback method to copy text to clipboard (issue #510)
+         * Uses a temporary textarea element for older browsers
+         * @param {string} text - Text to copy
+         */
+        fallbackCopyToClipboard(text) {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-9999px';
+            textArea.style.top = '0';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    this.showCopyNotification('Ссылка скопирована в буфер обмена');
+                } else {
+                    this.showCopyNotification('Не удалось скопировать ссылку', true);
+                }
+            } catch (err) {
+                console.error('Fallback copy failed:', err);
+                this.showCopyNotification('Не удалось скопировать ссылку', true);
+            }
+
+            document.body.removeChild(textArea);
+        }
+
+        /**
+         * Show a notification message (issue #510)
+         * @param {string} message - Message to display
+         * @param {boolean} isError - Whether this is an error message
+         */
+        showCopyNotification(message, isError = false) {
+            // Remove any existing notifications
+            document.querySelectorAll('.integram-copy-notification').forEach(n => n.remove());
+
+            const notification = document.createElement('div');
+            notification.className = 'integram-copy-notification' + (isError ? ' error' : '');
+            notification.textContent = message;
+            notification.style.cssText = `
+                position: fixed;
+                bottom: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                padding: 10px 20px;
+                background-color: ${isError ? '#dc3545' : '#28a745'};
+                color: white;
+                border-radius: 4px;
+                font-size: 14px;
+                z-index: 10000;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+                animation: fadeInOut 2s ease-in-out;
+            `;
+
+            // Add animation keyframes if not already present
+            if (!document.getElementById('integram-copy-notification-styles')) {
+                const style = document.createElement('style');
+                style.id = 'integram-copy-notification-styles';
+                style.textContent = `
+                    @keyframes fadeInOut {
+                        0% { opacity: 0; transform: translateX(-50%) translateY(20px); }
+                        15% { opacity: 1; transform: translateX(-50%) translateY(0); }
+                        85% { opacity: 1; transform: translateX(-50%) translateY(0); }
+                        100% { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+
+            document.body.appendChild(notification);
+
+            // Remove notification after animation completes
+            setTimeout(() => {
+                notification.remove();
+            }, 2000);
+        }
+
+        /**
+         * Load table configuration from URL parameters (issue #510)
+         * Called during initialization to restore saved filters and groups
+         */
+        loadConfigFromUrl() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const configEncoded = urlParams.get('_itc');
+
+            if (!configEncoded) {
+                return;
+            }
+
+            try {
+                // Decode configuration
+                const configJson = decodeURIComponent(atob(configEncoded));
+                const config = JSON.parse(configJson);
+
+                // Restore filters
+                if (config.f && typeof config.f === 'object') {
+                    this.filters = {};
+                    Object.keys(config.f).forEach(colId => {
+                        const filterConfig = config.f[colId];
+                        if (filterConfig) {
+                            this.filters[colId] = {
+                                type: filterConfig.t || '^',
+                                value: filterConfig.v || ''
+                            };
+                        }
+                    });
+                    // Enable filters panel if there are any filters
+                    if (Object.keys(this.filters).length > 0) {
+                        this.filtersEnabled = true;
+                    }
+                }
+
+                // Restore grouping
+                if (config.g && Array.isArray(config.g) && config.g.length > 0) {
+                    this.groupingEnabled = true;
+                    this.groupingColumns = config.g;
+                }
+
+                // Restore sorting
+                if (config.s && config.s.c) {
+                    this.sortColumn = config.s.c;
+                    this.sortDirection = config.s.d || 'asc';
+                }
+            } catch (e) {
+                console.error('Error loading table configuration from URL:', e);
+            }
         }
 
         clearAllFilters() {
