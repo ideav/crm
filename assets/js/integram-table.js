@@ -6082,8 +6082,9 @@ class IntegramTable {
                 }
 
                 // Check for warning - show modal and stay in edit mode
+                // Pass result.obj to show a link to the existing/found record if available
                 if (result.warning) {
-                    this.showWarningModal(result.warning);
+                    this.showWarningModal(result.warning, result.obj || null);
                     return;
                 }
 
@@ -6554,8 +6555,21 @@ class IntegramTable {
             });
         }
 
-        showWarningModal(message) {
+        showWarningModal(message, objId = null) {
             const modalId = `warning-modal-${ Date.now() }`;
+            const apiBase = this.getApiBase();
+
+            // Build link HTML if objId is provided
+            let linkHtml = '';
+            if (objId) {
+                const editUrl = `${ apiBase }/edit_obj/${ objId }`;
+                linkHtml = `
+                    <a href="${ editUrl }" target="_blank" class="integram-modal-link">
+                        Открыть найденную запись ↗
+                    </a>
+                `;
+            }
+
             const modalHtml = `
                 <div class="integram-modal-overlay" id="${ modalId }">
                     <div class="integram-modal" style="max-width: 500px;">
@@ -6566,6 +6580,7 @@ class IntegramTable {
                             <div class="alert alert-warning" style="margin: 0;">
                                 ${ this.escapeHtml(message) }
                             </div>
+                            ${ linkHtml }
                         </div>
                         <div class="integram-modal-footer" style="padding: 15px; text-align: right;">
                             <button type="button" class="btn btn-primary" data-close-warning-modal="true">OK</button>

@@ -2106,8 +2106,9 @@ function submitAddRecord(){
                 console.log('Record created:', response);
 
                 // Check for warning in response - show it and stay in edit mode
+                // Pass response.obj to show a link to the found record if available
                 if(response.warning && response.warning !== ''){
-                    alert('Предупреждение: ' + response.warning);
+                    showKanbanWarningModal(response.warning, response.obj || null);
                     // Don't close modal, stay in edit mode
                     return;
                 }
@@ -2132,6 +2133,62 @@ function submitAddRecord(){
         alert('Ошибка сети при создании записи');
     };
     xhr.send(postData);
+}
+
+// Show warning modal with optional link to found record
+function showKanbanWarningModal(message, objId){
+    var modalId = 'kanban-warning-modal-' + Date.now();
+
+    // Build link HTML if objId is provided
+    var linkHtml = '';
+    if(objId){
+        var editUrl = '/' + db + '/edit_obj/' + objId;
+        linkHtml = '<a href="' + editUrl + '" target="_blank" class="integram-modal-link" style="display: block; margin-top: 12px; color: #1976d2; text-decoration: none; font-weight: 500;">Открыть найденную запись ↗</a>';
+    }
+
+    var modalHtml = '' +
+        '<div class="integram-modal-overlay" id="' + modalId + '">' +
+            '<div class="integram-modal" style="max-width: 500px;">' +
+                '<div class="integram-modal-header">' +
+                    '<h5>Предупреждение</h5>' +
+                '</div>' +
+                '<div class="integram-modal-body">' +
+                    '<div class="alert alert-warning" style="margin: 0;">' +
+                        escapeHtmlForModal(message) +
+                    '</div>' +
+                    linkHtml +
+                '</div>' +
+                '<div class="integram-modal-footer" style="padding: 15px; text-align: right;">' +
+                    '<button type="button" class="btn btn-primary" data-close-warning-modal="true">OK</button>' +
+                '</div>' +
+            '</div>' +
+        '</div>';
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    var overlay = document.getElementById(modalId);
+    var closeBtn = overlay.querySelector('[data-close-warning-modal="true"]');
+
+    closeBtn.addEventListener('click', function(){
+        overlay.remove();
+    });
+
+    // Also close on click outside the modal
+    overlay.addEventListener('click', function(e){
+        if(e.target === overlay){
+            overlay.remove();
+        }
+    });
+}
+
+// Helper function to escape HTML for warning modal
+function escapeHtmlForModal(text){
+    if(text === null || text === undefined) return '';
+    return String(text).replace(/&/g, '&amp;')
+                       .replace(/</g, '&lt;')
+                       .replace(/>/g, '&gt;')
+                       .replace(/"/g, '&quot;')
+                       .replace(/'/g, '&#039;');
 }
 
 // Close modal when clicking outside

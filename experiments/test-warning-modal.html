@@ -103,19 +103,19 @@
     </style>
 </head>
 <body>
-    <h1>Test Warning Modal - Issue #494</h1>
-    <p>Testing the warning modal functionality for record creation.</p>
+    <h1>Test Warning Modal - Issue #494 / #496</h1>
+    <p>Testing the warning modal functionality for record creation, with hyperlink support (Issue #496).</p>
 
     <div class="test-section">
-        <h3>Test 1: Show Warning Modal</h3>
-        <p>Click to simulate a server response with a warning message.</p>
+        <h3>Test 1: Show Warning Modal (without link)</h3>
+        <p>Click to simulate a server response with a warning message but no found record link.</p>
         <button onclick="testWarningModal()">Test Warning Modal</button>
     </div>
 
     <div class="test-section">
-        <h3>Test 2: Simulate Save with Warning Response</h3>
-        <p>Click to simulate the full save flow where server returns a warning.</p>
-        <button onclick="testSaveWithWarning()">Test Save with Warning</button>
+        <h3>Test 2: Simulate Save with Warning + Link to Found Record (Issue #496)</h3>
+        <p>Click to simulate the save flow where server returns a warning AND an obj ID for the found record.</p>
+        <button onclick="testSaveWithWarning()">Test Save with Warning + Link</button>
         <div id="result" class="result-box" style="display:none;"></div>
     </div>
 
@@ -136,9 +136,21 @@
                               .replace(/'/g, '&#039;');
         }
 
-        // The showWarningModal function as implemented
-        function showWarningModal(message) {
+        // The showWarningModal function as implemented (updated with objId support)
+        function showWarningModal(message, objId = null) {
             const modalId = `warning-modal-${ Date.now() }`;
+
+            // Build link HTML if objId is provided
+            let linkHtml = '';
+            if (objId) {
+                const editUrl = `/demo/edit_obj/${ objId }`;
+                linkHtml = `
+                    <a href="${ editUrl }" target="_blank" class="integram-modal-link" style="display: block; margin-top: 12px; color: #1976d2; text-decoration: none; font-weight: 500;">
+                        Открыть найденную запись ↗
+                    </a>
+                `;
+            }
+
             const modalHtml = `
                 <div class="integram-modal-overlay" id="${ modalId }">
                     <div class="integram-modal" style="max-width: 500px;">
@@ -149,6 +161,7 @@
                             <div class="alert alert-warning" style="margin: 0;">
                                 ${ escapeHtml(message) }
                             </div>
+                            ${ linkHtml }
                         </div>
                         <div class="integram-modal-footer" style="padding: 15px; text-align: right;">
                             <button type="button" class="btn btn-primary" data-close-warning-modal="true">OK</button>
@@ -173,25 +186,26 @@
             });
         }
 
-        // Test 1: Direct modal test
+        // Test 1: Direct modal test (without link)
         function testWarningModal() {
             showWarningModal('Клиент с таким номером телефона уже существует. Пожалуйста, проверьте данные.');
         }
 
-        // Test 2: Simulate save with warning
+        // Test 2: Simulate save with warning and link to existing record
         function testSaveWithWarning() {
-            // Simulate server response
+            // Simulate server response with obj field (ID of found record)
             const mockResponse = {
                 id: 123,
-                warning: 'Внимание: запись создана, но обнаружены дубликаты. Пожалуйста, проверьте данные.'
+                warning: 'Внимание: запись создана, но обнаружены дубликаты. Пожалуйста, проверьте данные.',
+                obj: 456 // ID of the existing/found record
             };
 
             document.getElementById('result').style.display = 'block';
             document.getElementById('result').textContent = 'Server response:\n' + JSON.stringify(mockResponse, null, 2);
 
-            // Check for warning (this is the new logic)
+            // Check for warning (this is the new logic with objId support)
             if (mockResponse.warning) {
-                showWarningModal(mockResponse.warning);
+                showWarningModal(mockResponse.warning, mockResponse.obj || null);
                 console.log('Warning detected - form should stay open (not closed)');
                 return; // This is the key - we return early, keeping the form open
             }
@@ -208,7 +222,7 @@
 
             // Check for warning (this is the new logic)
             if (mockResponse.warning) {
-                showWarningModal(mockResponse.warning);
+                showWarningModal(mockResponse.warning, mockResponse.obj || null);
                 return;
             }
 
