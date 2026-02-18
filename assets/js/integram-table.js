@@ -2284,6 +2284,9 @@ class IntegramTable {
             }
 
             // Click outside to save (with small delay to avoid immediate trigger)
+            // Capture currentEditingCell reference before setTimeout to detect if it
+            // changed (e.g. arrow key navigation completed) before the 100ms fires (issue #525)
+            const editingCellRef = this.currentEditingCell;
             setTimeout(() => {
                 const outsideClickHandler = (e) => {
                     if (!cell.contains(e.target)) {
@@ -2301,8 +2304,15 @@ class IntegramTable {
                 };
                 document.addEventListener('click', outsideClickHandler);
 
-                // Store handler reference to clean up if canceled
-                this.currentEditingCell.outsideClickHandler = outsideClickHandler;
+                // Store handler reference to clean up if canceled.
+                // Guard against null: currentEditingCell may have been cleared by a fast
+                // save triggered by arrow-key navigation before this 100ms timeout fires (issue #525).
+                if (this.currentEditingCell === editingCellRef && this.currentEditingCell !== null) {
+                    this.currentEditingCell.outsideClickHandler = outsideClickHandler;
+                } else {
+                    // Edit was already finished; remove the listener immediately so it doesn't linger
+                    document.removeEventListener('click', outsideClickHandler);
+                }
             }, 100);
         }
 
@@ -2521,6 +2531,9 @@ class IntegramTable {
                 });
 
                 // Click outside to cancel (with small delay to avoid immediate trigger)
+                // Capture currentEditingCell reference before setTimeout to detect if it
+                // changed (e.g. arrow key navigation completed) before the 100ms fires (issue #525)
+                const editingCellRef = this.currentEditingCell;
                 setTimeout(() => {
                     const outsideClickHandler = (e) => {
                         // Don't cancel if clicking inside reference creation modal
@@ -2543,7 +2556,15 @@ class IntegramTable {
                         }
                     };
                     document.addEventListener('click', outsideClickHandler);
-                    this.currentEditingCell.outsideClickHandler = outsideClickHandler;
+
+                    // Guard against null: currentEditingCell may have been cleared by a fast
+                    // save triggered by arrow-key navigation before this 100ms timeout fires (issue #525).
+                    if (this.currentEditingCell === editingCellRef && this.currentEditingCell !== null) {
+                        this.currentEditingCell.outsideClickHandler = outsideClickHandler;
+                    } else {
+                        // Edit was already finished; remove the listener immediately so it doesn't linger
+                        document.removeEventListener('click', outsideClickHandler);
+                    }
                 }, 100);
 
             } catch (error) {
