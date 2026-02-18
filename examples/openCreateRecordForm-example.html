@@ -107,7 +107,19 @@ openCreateRecordForm(3600, 1, {
     </div>
 
     <div class="example-section">
-        <h3>Example 4: Usage in Event Handlers</h3>
+        <h3>Example 4: With Parent Record Info</h3>
+        <pre><code>// When parentId is not 1 (root), the form will show parent record name
+// The parent name is fetched from edit_obj/{parentId}?JSON API endpoint
+openCreateRecordForm(3596, 6837);
+// Result: Form header shows "Создание: [Type]" with subtitle "в: АО Эллипс"</code></pre>
+        <button class="btn" onclick="openCreateRecordForm(3596, 6837)">Try It (with parent)</button>
+        <p style="margin-top: 10px; font-size: 14px; color: #666;">
+            <em>Note: The parent record name is displayed in the form header subtitle when parentId ≠ 1</em>
+        </p>
+    </div>
+
+    <div class="example-section">
+        <h3>Example 5: Usage in Event Handlers</h3>
         <pre><code>&lt;button onclick="openCreateRecordForm(3596, getParentId())"&gt;
     Создать запись
 &lt;/button&gt;
