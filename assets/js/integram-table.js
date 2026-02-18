@@ -75,6 +75,11 @@ class IntegramTable {
             // we remove it from URL and stop forwarding it to API requests
             this.overriddenUrlParams = new Set();
 
+            // Track whether configuration (column order/visibility) was loaded from URL (issue #514)
+            // When true, changes to column state will NOT be saved to cookies
+            // but can still be copied as a shareable URL
+            this.configFromUrl = false;
+
             // Table settings
             this.settings = {
                 compact: false,  // false = spacious (default), true = compact
@@ -3862,6 +3867,16 @@ class IntegramTable {
                 };
             }
 
+            // Add column order (issue #514)
+            if (this.columnOrder && this.columnOrder.length > 0) {
+                config.o = this.columnOrder;
+            }
+
+            // Add visible columns (issue #514)
+            if (this.visibleColumns && this.visibleColumns.length > 0) {
+                config.v = this.visibleColumns;
+            }
+
             // Encode configuration as base64 to keep URL clean
             // Using encodeURIComponent for URL safety
             const configJson = JSON.stringify(config);
@@ -4018,6 +4033,18 @@ class IntegramTable {
                     this.sortColumn = config.s.c;
                     this.sortDirection = config.s.d || 'asc';
                 }
+
+                // Restore column order (issue #514)
+                if (config.o && Array.isArray(config.o) && config.o.length > 0) {
+                    this.columnOrder = config.o;
+                    this.configFromUrl = true;  // Mark that config came from URL
+                }
+
+                // Restore visible columns (issue #514)
+                if (config.v && Array.isArray(config.v) && config.v.length > 0) {
+                    this.visibleColumns = config.v;
+                    this.configFromUrl = true;  // Mark that config came from URL
+                }
             } catch (e) {
                 console.error('Error loading table configuration from URL:', e);
             }
@@ -4086,6 +4113,12 @@ class IntegramTable {
         }
 
         saveColumnState() {
+            // Skip saving to cookies if config was loaded from URL (issue #514)
+            // User can still copy current config as a shareable URL
+            if (this.configFromUrl) {
+                return;
+            }
+
             const state = {
                 order: this.columnOrder,
                 visible: this.visibleColumns,
