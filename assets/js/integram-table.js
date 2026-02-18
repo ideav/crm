@@ -3988,7 +3988,14 @@ class IntegramTable {
                 if (bEmpty) return -1;
 
                 // Get the base type of the column
-                const baseFormat = this.normalizeFormat(column.type);
+                // Issue #535: Use column.format first (report data has format like 'DATE' directly),
+                // fall back to normalizeFormat(column.type) for object data with numeric type IDs
+                const validFormats = ['SHORT', 'CHARS', 'DATE', 'NUMBER', 'SIGNED', 'BOOLEAN',
+                                      'MEMO', 'DATETIME', 'FILE', 'HTML', 'BUTTON', 'PWD',
+                                      'GRANT', 'REPORT_COLUMN', 'PATH'];
+                const upperFormat = column.format ? String(column.format).toUpperCase() : '';
+                const baseFormat = validFormats.includes(upperFormat) ? upperFormat :
+                                  (column.type ? this.normalizeFormat(column.type) : 'SHORT');
 
                 // For reference values (id:label format), extract the label for comparison
                 let displayA = getDisplayValue(valA, column);
