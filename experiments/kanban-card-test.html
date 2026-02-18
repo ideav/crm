@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Kanban Card Test - Date Position</title>
+<style>
+:root {
+    --surface: #ffffff;
+    --text-primary: #1e293b;
+    --text-secondary: #64748b;
+    --primary-color: #1976d2;
+}
+
+.kanban-card {
+    background-color: var(--surface);
+    max-width: 322px;
+    border: none;
+    border-radius: 4px;
+    padding: 16px;
+    padding-right: 44px; /* Make space for vertical icons on the right */
+    margin-bottom: 12px;
+    cursor: move;
+    position: relative; /* Enable absolute positioning for icons */
+    box-shadow: 0 2px 1px -1px rgba(0,0,0,0.2),
+                0 1px 1px 0 rgba(0,0,0,0.14),
+                0 1px 3px 0 rgba(0,0,0,0.12);
+}
+
+.kanban-card-title-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.kanban-card-title {
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--text-primary);
+    text-decoration: none;
+    cursor: pointer;
+    flex: 1;
+}
+
+.kanban-card-external-link {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.875rem;
+    padding: 2px 4px;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.kanban-card-field {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.kanban-card-field-label {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.kanban-card-amount {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--primary-color);
+    margin-top: 8px;
+}
+
+.kanban-card-contacts {
+    position: absolute;
+    bottom: 6px;
+    right: 6px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 3px;
+}
+
+.kanban-card-contact-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+}
+
+.kanban-card-contact-icon.active {
+    background-color: rgba(25, 118, 210, 0.15);
+    color: #1976d2;
+    cursor: pointer;
+}
+
+.kanban-card-contact-icon.inactive {
+    background-color: rgba(226, 232, 240, 0.5);
+    color: rgba(148, 163, 184, 0.5);
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* NEW: Date positioned at top-right corner of the card */
+.kanban-card-date {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-align: right;
+}
+
+body {
+    background: #f0f4f8;
+    padding: 20px;
+    font-family: Arial, sans-serif;
+}
+h2 { color: #333; }
+</style>
+</head>
+<body>
+<h2>Kanban Card - Date in Top-Right Corner</h2>
+
+<!-- Card WITH date -->
+<div class="kanban-card">
+    <!-- Date in top-right corner -->
+    <div class="kanban-card-date">15.02.2026</div>
+
+    <div class="kanban-card-title-row">
+        <span class="kanban-card-title">ООО «Пример Компании»</span>
+        <a href="#" class="kanban-card-external-link">↗</a>
+    </div>
+
+    <div class="kanban-card-field"><span class="kanban-card-field-label">Контакт:</span> Иванов Иван Иванович</div>
+    <div class="kanban-card-field"><span class="kanban-card-field-label">Примечание:</span> Важный клиент</div>
+
+    <div class="kanban-card-amount">150 000 ₽</div>
+
+    <!-- Contact icons at bottom right -->
+    <div class="kanban-card-contacts">
+        <span class="kanban-card-contact-icon active" title="+7 (999) 123-45-67">📞</span>
+        <span class="kanban-card-contact-icon active" title="example@mail.ru">📧</span>
+    </div>
+</div>
+
+<!-- Card WITHOUT date -->
+<div class="kanban-card">
+    <div class="kanban-card-title-row">
+        <span class="kanban-card-title">ИП Петров П.П.</span>
+        <a href="#" class="kanban-card-external-link">↗</a>
+    </div>
+
+    <div class="kanban-card-field"><span class="kanban-card-field-label">Контакт:</span> Петров Пётр</div>
+
+    <!-- Contact icons at bottom right -->
+    <div class="kanban-card-contacts">
+        <span class="kanban-card-contact-icon inactive" title="Телефон недоступен">📞</span>
+        <span class="kanban-card-contact-icon inactive" title="Email недоступен">📧</span>
+    </div>
+</div>
+
+</body>
+</html>
