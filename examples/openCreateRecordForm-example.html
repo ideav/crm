@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>openCreateRecordForm Example</title>
+    <link rel="stylesheet" href="../assets/css/integram-table.css">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #333;
+        }
+        .example-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #f9f9f9;
+        }
+        .example-section h3 {
+            margin-top: 0;
+        }
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        code {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px 0;
+        }
+        .btn:hover {
+            background: #0056b3;
+        }
+        .note {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            padding: 10px 15px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>openCreateRecordForm - Global Function Example</h1>
+
+    <p>This example demonstrates how to use the <code>openCreateRecordForm()</code> function
+    to open a record creation form from anywhere on the page.</p>
+
+    <div class="example-section">
+        <h3>Function Signature</h3>
+        <pre><code>openCreateRecordForm(tableTypeId, parentId, fieldValues)</code></pre>
+
+        <h4>Parameters:</h4>
+        <ul>
+            <li><strong>tableTypeId</strong> (required): ID of the table in which to create the record</li>
+            <li><strong>parentId</strong> (required): Parent ID to pass in the "up" parameter</li>
+            <li><strong>fieldValues</strong> (optional): Object with field values to pre-fill, in format <code>{'t{fieldId}': value}</code></li>
+        </ul>
+    </div>
+
+    <div class="example-section">
+        <h3>Example 1: Basic Usage</h3>
+        <pre><code>// Open form to create a record in table 3596 with parent ID 1
+openCreateRecordForm(3596, 1);</code></pre>
+        <button class="btn" onclick="openCreateRecordForm(3596, 1)">Try It</button>
+    </div>
+
+    <div class="example-section">
+        <h3>Example 2: With Pre-filled Values</h3>
+        <pre><code>// Open form with pre-filled field values
+openCreateRecordForm(3596, 1, {
+    't3888': 357,           // Reference field (e.g., status ID)
+    't3886': 'Отказались'   // Text field
+});</code></pre>
+        <button class="btn" onclick="openCreateRecordForm(3596, 1, {'t3888': 357, 't3886': 'Отказались'})">Try It</button>
+    </div>
+
+    <div class="example-section">
+        <h3>Example 3: Dynamic Values</h3>
+        <pre><code>// You can also compute values dynamically
+const today = new Date().toLocaleDateString('ru-RU');
+const userId = getCurrentUserId(); // Your function to get user ID
+
+openCreateRecordForm(3600, 1, {
+    't3601': today,
+    't3602': userId,
+    't3603': 'Автоматически созданная запись'
+});</code></pre>
+    </div>
+
+    <div class="example-section">
+        <h3>Example 4: Usage in Event Handlers</h3>
+        <pre><code>&lt;button onclick="openCreateRecordForm(3596, getParentId())"&gt;
+    Создать запись
+&lt;/button&gt;
+
+&lt;a href="#" onclick="openCreateRecordForm(3596, 1, getDefaultValues()); return false;"&gt;
+    Создать с предзаполнением
+&lt;/a&gt;</code></pre>
+    </div>
+
+    <div class="note">
+        <strong>Note:</strong> This example requires a connection to a running Integram server
+        to actually fetch metadata and create records. The buttons above will attempt to
+        connect to the server based on the current page URL.
+    </div>
+
+    <script src="../assets/js/integram-table.js"></script>
+</body>
+</html>

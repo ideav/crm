@@ -7306,6 +7306,756 @@ if (typeof window !== 'undefined') {
     window.reloadAllIntegramTables = reloadAllIntegramTables;
 }
 
+/**
+ * Global function to open a record creation form from anywhere on the page.
+ * This function can be called independently of any IntegramTable instance.
+ *
+ * @param {number|string} tableTypeId - Required. ID of the table in which to create the record.
+ * @param {number|string} parentId - Required. Parent ID to pass in the "up" parameter when creating the record.
+ * @param {Object} [fieldValues={}] - Optional. Object with field values to pre-fill on the form.
+ *                                    Keys should be in format "t{fieldId}", e.g. {'t3888': 357, 't3886': 'Отказались'}.
+ *
+ * @example
+ * // Open form to create a record in table 3596 with parent 1
+ * openCreateRecordForm(3596, 1);
+ *
+ * @example
+ * // Open form with pre-filled field values
+ * openCreateRecordForm(3596, 1, {'t3888': 357, 't3886': 'Отказались'});
+ */
+async function openCreateRecordForm(tableTypeId, parentId, fieldValues = {}) {
+    if (!tableTypeId) {
+        console.error('openCreateRecordForm: tableTypeId is required');
+        return;
+    }
+    if (!parentId && parentId !== 0) {
+        console.error('openCreateRecordForm: parentId is required');
+        return;
+    }
+
+    try {
+        // Determine API base from current page URL
+        const pathParts = window.location.pathname.split('/');
+        let apiBase = '';
+        if (pathParts.length >= 2 && pathParts[1]) {
+            apiBase = window.location.origin + '/' + pathParts[1];
+        }
+
+        if (!apiBase) {
+            console.error('openCreateRecordForm: Could not determine API base URL');
+            return;
+        }
+
+        // Fetch metadata for the table type
+        const metadataUrl = `${apiBase}/metadata/${tableTypeId}`;
+        const metadataResponse = await fetch(metadataUrl);
+
+        if (!metadataResponse.ok) {
+            throw new Error(`Failed to fetch metadata: ${metadataResponse.statusText}`);
+        }
+
+        const metadata = await metadataResponse.json();
+
+        // Convert fieldValues to recordData format for pre-filling
+        // Input: {'t3888': 357, 't3886': 'Отказались'}
+        // Output: {obj: {val: ''}, reqs: {3888: {value: 357}, 3886: {value: 'Отказались'}}}
+        const recordData = {
+            obj: { val: '', parent: parentId },
+            reqs: {}
+        };
+
+        // Check if main field (t{tableTypeId}) is in fieldValues
+        const mainFieldKey = `t${tableTypeId}`;
+        if (fieldValues[mainFieldKey] !== undefined) {
+            recordData.obj.val = fieldValues[mainFieldKey];
+        }
+
+        // Process other field values
+        for (const [key, value] of Object.entries(fieldValues)) {
+            // Match t{fieldId} format
+            const match = key.match(/^t(\d+)$/);
+            if (match) {
+                const fieldId = match[1];
+                // Skip main field as it's handled separately
+                if (fieldId !== String(tableTypeId)) {
+                    recordData.reqs[fieldId] = { value: value };
+                }
+            }
+        }
+
+        // Create the modal using a minimal helper class instance
+        // This reuses the existing form rendering logic from IntegramTable
+        const helper = new IntegramCreateFormHelper(apiBase, tableTypeId, parentId);
+        helper.renderCreateFormModal(metadata, recordData, fieldValues);
+
+    } catch (error) {
+        console.error('openCreateRecordForm: Error opening form:', error);
+        // Show error toast if available
+        if (typeof showToast === 'function') {
+            showToast(`Ошибка: ${error.message}`, 'error');
+        } else {
+            alert(`Ошибка: ${error.message}`);
+        }
+    }
+}
+
+/**
+ * Helper class for rendering create form modals independently of IntegramTable instances.
+ * This allows openCreateRecordForm to work without requiring an existing table on the page.
+ */
+class IntegramCreateFormHelper {
+    constructor(apiBase, tableTypeId, parentId) {
+        this.apiBase = apiBase;
+        this.tableTypeId = tableTypeId;
+        this.parentId = parentId;
+        this.metadataCache = {};
+    }
+
+    escapeHtml(text) {
+        if (text === null || text === undefined) return '';
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    getMetadataName(metadata) {
+        return metadata.val || metadata.name || metadata.title || `Тип #${metadata.id || '?'}`;
+    }
+
+    parseAttrs(attrs) {
+        const result = {
+            required: false,
+            multi: false,
+            alias: null
+        };
+
+        if (!attrs) return result;
+
+        result.required = attrs.includes(':!NULL:');
+        result.multi = attrs.includes(':MULTI:');
+
+        const aliasMatch = attrs.match(/:ALIAS=(.*?):/);
+        if (aliasMatch) {
+            result.alias = aliasMatch[1];
+        }
+
+        return result;
+    }
+
+    normalizeFormat(baseTypeId) {
+        const validFormats = ['SHORT', 'CHARS', 'DATE', 'NUMBER', 'SIGNED', 'BOOLEAN',
+                              'MEMO', 'DATETIME', 'FILE', 'HTML', 'BUTTON', 'PWD',
+                              'GRANT', 'REPORT_COLUMN', 'PATH'];
+
+        const upperTypeId = String(baseTypeId).toUpperCase();
+
+        if (validFormats.includes(upperTypeId)) {
+            return upperTypeId;
+        }
+
+        // Map numeric type IDs to format names
+        const formatMap = {
+            '3': 'SHORT',
+            '8': 'CHARS',
+            '9': 'DATE',
+            '13': 'NUMBER',
+            '14': 'SIGNED',
+            '11': 'BOOLEAN',
+            '12': 'MEMO',
+            '4': 'DATETIME',
+            '10': 'FILE',
+            '2': 'HTML',
+            '7': 'BUTTON',
+            '6': 'PWD',
+            '5': 'GRANT',
+            '16': 'REPORT_COLUMN',
+            '17': 'PATH'
+        };
+        return formatMap[String(baseTypeId)] || 'SHORT';
+    }
+
+    formatDateForHtml5(dateStr, includeTime = false) {
+        if (!dateStr) return '';
+
+        // Handle DD.MM.YYYY format
+        const dateParts = dateStr.split(' ')[0].split('.');
+        if (dateParts.length === 3) {
+            const [day, month, year] = dateParts;
+            if (includeTime) {
+                const timeParts = dateStr.split(' ')[1] || '00:00';
+                return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${timeParts}`;
+            }
+            return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+        }
+
+        return dateStr;
+    }
+
+    formatDateForInput(dateStr, includeTime = false) {
+        if (!dateStr) return '';
+        return dateStr;
+    }
+
+    showToast(message, type = 'info') {
+        // Try to use existing toast function if available
+        if (typeof window.showToast === 'function') {
+            window.showToast(message, type);
+            return;
+        }
+
+        // Create a simple toast notification
+        const toast = document.createElement('div');
+        toast.className = `integram-toast integram-toast-${type}`;
+        toast.textContent = message;
+        toast.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 24px;
+            border-radius: 4px;
+            color: white;
+            z-index: 10000;
+            font-family: sans-serif;
+            font-size: 14px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            background-color: ${type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#17a2b8'};
+        `;
+        document.body.appendChild(toast);
+
+        setTimeout(() => {
+            toast.remove();
+        }, 3000);
+    }
+
+    renderCreateFormModal(metadata, recordData, fieldValues) {
+        // Track modal depth for z-index stacking
+        if (!window._integramModalDepth) {
+            window._integramModalDepth = 0;
+        }
+        window._integramModalDepth++;
+        const modalDepth = window._integramModalDepth;
+        const baseZIndex = 1000 + (modalDepth * 10);
+
+        const overlay = document.createElement('div');
+        overlay.className = 'edit-form-overlay';
+        overlay.style.zIndex = baseZIndex;
+        overlay.dataset.modalDepth = modalDepth;
+
+        const modal = document.createElement('div');
+        modal.className = 'edit-form-modal';
+        modal.style.zIndex = baseZIndex + 1;
+        modal.dataset.modalDepth = modalDepth;
+        modal.dataset.overlayRef = 'true';
+
+        // Add cascade offset for nested modals (6px per level)
+        const cascadeOffset = (modalDepth - 1) * 6;
+        modal.style.transform = `translate(calc(-50% + ${cascadeOffset}px), calc(-50% + ${cascadeOffset}px))`;
+
+        // Store reference to overlay on modal for proper cleanup
+        modal._overlayElement = overlay;
+
+        const typeName = this.getMetadataName(metadata);
+        const title = `Создание: ${typeName}`;
+
+        // Render the form
+        const reqs = metadata.reqs || [];
+        const recordReqs = recordData && recordData.reqs ? recordData.reqs : {};
+        const regularFields = reqs.filter(req => !req.arr_id);
+
+        // Build attributes form HTML
+        let attributesHtml = this.renderAttributesForm(metadata, recordData, regularFields, recordReqs, fieldValues);
+
+        let formHtml = `
+            <div class="edit-form-header">
+                <h5>${title}</h5>
+                <button class="edit-form-close" data-close-modal="true">×</button>
+            </div>
+            <div class="edit-form-body">
+                <div class="edit-form-tab-content active" data-tab-content="attributes">
+                    <form id="edit-form" class="edit-form">
+                        ${attributesHtml}
+                    </form>
+                </div>
+            </div>
+            <div class="edit-form-footer">
+                <div class="edit-form-footer-buttons">
+                    <button type="button" class="btn btn-primary" id="save-record-btn">Сохранить</button>
+                    <button type="button" class="btn btn-secondary" data-close-modal="true">Отмена</button>
+                </div>
+            </div>
+        `;
+
+        modal.innerHTML = formHtml;
+        document.body.appendChild(overlay);
+        document.body.appendChild(modal);
+
+        // Load reference options for dropdowns
+        this.loadReferenceOptions(metadata.reqs, modal, fieldValues);
+
+        // Attach date/datetime picker handlers
+        this.attachDatePickerHandlers(modal);
+
+        // Attach file upload handlers
+        this.attachFormFileUploadHandlers(modal);
+
+        // Attach save handler
+        const saveBtn = modal.querySelector('#save-record-btn');
+        saveBtn.addEventListener('click', () => {
+            this.saveRecord(modal, metadata);
+        });
+
+        // Close modal helper function
+        const closeModal = () => {
+            modal.remove();
+            overlay.remove();
+            window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+        };
+
+        // Attach close handlers to buttons with data-close-modal attribute
+        modal.querySelectorAll('[data-close-modal="true"]').forEach(btn => {
+            btn.addEventListener('click', closeModal);
+        });
+
+        overlay.addEventListener('click', closeModal);
+    }
+
+    renderAttributesForm(metadata, recordData, regularFields, recordReqs, fieldValues) {
+        let html = '';
+
+        // Main value field
+        const typeName = this.getMetadataName(metadata);
+        const mainValue = recordData && recordData.obj ? recordData.obj.val || '' : '';
+
+        html += `
+            <div class="form-group">
+                <label for="field-main">${typeName} <span class="required">*</span></label>
+                <input type="text" class="form-control" id="field-main" name="main" value="${this.escapeHtml(mainValue)}" required>
+            </div>
+        `;
+
+        // Render requisite fields
+        regularFields.forEach(req => {
+            const attrs = this.parseAttrs(req.attrs);
+            const fieldName = attrs.alias || req.val;
+            const reqValue = recordReqs[req.id] ? recordReqs[req.id].value || '' : '';
+            const baseTypeId = recordReqs[req.id] ? recordReqs[req.id].base || req.type : req.type;
+            const baseFormat = this.normalizeFormat(baseTypeId);
+            const isRequired = attrs.required;
+
+            html += `<div class="form-group">`;
+            html += `<label for="field-${req.id}">${fieldName}${isRequired ? ' <span class="required">*</span>' : ''}</label>`;
+
+            // Reference field (searchable dropdown)
+            if (req.ref_id) {
+                const currentValue = reqValue || '';
+                html += `
+                    <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}">
+                        <div class="inline-editor-reference form-ref-editor-box">
+                            <div class="inline-editor-reference-header">
+                                <input type="text"
+                                       class="inline-editor-reference-search form-ref-search"
+                                       id="field-${req.id}-search"
+                                       placeholder="Поиск..."
+                                       autocomplete="off">
+                                <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button">×</button>
+                            </div>
+                            <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${req.id}-dropdown">
+                                <div class="inline-editor-reference-empty">Загрузка...</div>
+                            </div>
+                        </div>
+                        <input type="hidden"
+                               class="form-ref-value"
+                               id="field-${req.id}"
+                               name="t${req.id}"
+                               value="${this.escapeHtml(currentValue)}"
+                               data-ref-id="${req.id}">
+                    </div>
+                `;
+            }
+            // Boolean field
+            else if (baseFormat === 'BOOLEAN') {
+                const isChecked = reqValue ? 'checked' : '';
+                html += `<input type="checkbox" id="field-${req.id}" name="t${req.id}" value="1" ${isChecked}>`;
+            }
+            // Date field
+            else if (baseFormat === 'DATE') {
+                const dateValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, false) : '';
+                const dateValueDisplay = reqValue ? this.formatDateForInput(reqValue, false) : '';
+                html += `<input type="date" class="form-control date-picker" id="field-${req.id}-picker" value="${this.escapeHtml(dateValueHtml5)}" ${isRequired ? 'required' : ''} data-target="field-${req.id}">`;
+                html += `<input type="hidden" id="field-${req.id}" name="t${req.id}" value="${this.escapeHtml(dateValueDisplay)}">`;
+            }
+            // DateTime field
+            else if (baseFormat === 'DATETIME') {
+                const dateTimeValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, true) : '';
+                const dateTimeValueDisplay = reqValue ? this.formatDateForInput(reqValue, true) : '';
+                html += `<input type="datetime-local" class="form-control datetime-picker" id="field-${req.id}-picker" value="${this.escapeHtml(dateTimeValueHtml5)}" ${isRequired ? 'required' : ''} data-target="field-${req.id}">`;
+                html += `<input type="hidden" id="field-${req.id}" name="t${req.id}" value="${this.escapeHtml(dateTimeValueDisplay)}">`;
+            }
+            // MEMO field (multi-line text)
+            else if (baseFormat === 'MEMO') {
+                html += `<textarea class="form-control memo-field" id="field-${req.id}" name="t${req.id}" rows="4" ${isRequired ? 'required' : ''}>${this.escapeHtml(reqValue)}</textarea>`;
+            }
+            // FILE field
+            else if (baseFormat === 'FILE') {
+                html += `
+                    <div class="form-file-upload" data-req-id="${req.id}" data-original-value="">
+                        <input type="file" class="file-input" id="field-${req.id}-file" style="display: none;">
+                        <div class="file-dropzone">
+                            <span class="file-dropzone-text">Перетащите файл сюда или нажмите для выбора</span>
+                            <button type="button" class="file-select-btn">Выбрать файл</button>
+                        </div>
+                        <div class="file-preview" style="display: none;">
+                            <span class="file-name"></span>
+                            <button type="button" class="file-remove-btn" title="Удалить файл">×</button>
+                        </div>
+                        <input type="hidden" id="field-${req.id}" name="t${req.id}" value="" ${isRequired ? 'required' : ''} data-file-deleted="false">
+                    </div>
+                `;
+            }
+            // Regular text field
+            else {
+                html += `<input type="text" class="form-control" id="field-${req.id}" name="t${req.id}" value="${this.escapeHtml(reqValue)}" ${isRequired ? 'required' : ''}>`;
+            }
+
+            html += `</div>`;
+        });
+
+        return html;
+    }
+
+    async loadReferenceOptions(reqs, modal, fieldValues) {
+        if (!reqs) return;
+
+        for (const req of reqs) {
+            if (!req.ref_id) continue;
+
+            const dropdown = modal.querySelector(`#field-${req.id}-dropdown`);
+            const hiddenInput = modal.querySelector(`#field-${req.id}`);
+            const searchInput = modal.querySelector(`#field-${req.id}-search`);
+
+            if (!dropdown || !hiddenInput) continue;
+
+            try {
+                const url = `${this.apiBase}/_ref_reqs/${req.id}?JSON&LIMIT=50`;
+                const response = await fetch(url);
+                const data = await response.json();
+
+                // Parse options - data is an object {id: text, ...}
+                let optionsHtml = '';
+                const entries = Object.entries(data);
+
+                if (entries.length === 0) {
+                    optionsHtml = '<div class="inline-editor-reference-empty">Нет данных</div>';
+                } else {
+                    entries.forEach(([id, text]) => {
+                        optionsHtml += `<div class="inline-editor-reference-option" data-value="${this.escapeHtml(id)}">${this.escapeHtml(text)}</div>`;
+                    });
+                }
+
+                dropdown.innerHTML = optionsHtml;
+
+                // Check if this field has a pre-filled value from fieldValues
+                const fieldKey = `t${req.id}`;
+                const prefilledValue = fieldValues[fieldKey];
+
+                if (prefilledValue !== undefined) {
+                    hiddenInput.value = prefilledValue;
+                    // Find and display the text for this value
+                    const text = data[prefilledValue];
+                    if (text && searchInput) {
+                        searchInput.value = text;
+                    }
+                }
+
+                // Attach click handlers for options
+                dropdown.querySelectorAll('.inline-editor-reference-option').forEach(option => {
+                    option.addEventListener('click', () => {
+                        const value = option.dataset.value;
+                        const text = option.textContent;
+                        hiddenInput.value = value;
+                        if (searchInput) {
+                            searchInput.value = text;
+                        }
+                        dropdown.style.display = 'none';
+                    });
+                });
+
+                // Attach search handler
+                if (searchInput) {
+                    searchInput.addEventListener('focus', () => {
+                        dropdown.style.display = 'block';
+                    });
+
+                    searchInput.addEventListener('input', () => {
+                        const query = searchInput.value.toLowerCase();
+                        dropdown.querySelectorAll('.inline-editor-reference-option').forEach(option => {
+                            const text = option.textContent.toLowerCase();
+                            option.style.display = text.includes(query) ? '' : 'none';
+                        });
+                    });
+                }
+
+                // Attach clear button handler
+                const clearBtn = modal.querySelector(`#field-${req.id}-search`)?.closest('.inline-editor-reference-header')?.querySelector('.form-ref-clear');
+                if (clearBtn) {
+                    clearBtn.addEventListener('click', () => {
+                        hiddenInput.value = '';
+                        if (searchInput) {
+                            searchInput.value = '';
+                        }
+                    });
+                }
+
+            } catch (error) {
+                console.error(`Error loading reference options for field ${req.id}:`, error);
+                dropdown.innerHTML = '<div class="inline-editor-reference-empty">Ошибка загрузки</div>';
+            }
+        }
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.form-reference-editor')) {
+                modal.querySelectorAll('.form-ref-dropdown').forEach(dropdown => {
+                    dropdown.style.display = 'none';
+                });
+            }
+        });
+    }
+
+    attachDatePickerHandlers(modal) {
+        // Handle date pickers
+        modal.querySelectorAll('.date-picker').forEach(picker => {
+            picker.addEventListener('change', () => {
+                const targetId = picker.dataset.target;
+                const hiddenInput = modal.querySelector(`#${targetId}`);
+                if (hiddenInput && picker.value) {
+                    // Convert YYYY-MM-DD to DD.MM.YYYY
+                    const [year, month, day] = picker.value.split('-');
+                    hiddenInput.value = `${day}.${month}.${year}`;
+                } else if (hiddenInput) {
+                    hiddenInput.value = '';
+                }
+            });
+        });
+
+        // Handle datetime pickers
+        modal.querySelectorAll('.datetime-picker').forEach(picker => {
+            picker.addEventListener('change', () => {
+                const targetId = picker.dataset.target;
+                const hiddenInput = modal.querySelector(`#${targetId}`);
+                if (hiddenInput && picker.value) {
+                    // Convert YYYY-MM-DDTHH:MM to DD.MM.YYYY HH:MM
+                    const [datePart, timePart] = picker.value.split('T');
+                    const [year, month, day] = datePart.split('-');
+                    hiddenInput.value = `${day}.${month}.${year} ${timePart}`;
+                } else if (hiddenInput) {
+                    hiddenInput.value = '';
+                }
+            });
+        });
+    }
+
+    attachFormFileUploadHandlers(modal) {
+        modal.querySelectorAll('.form-file-upload').forEach(container => {
+            const fileInput = container.querySelector('.file-input');
+            const dropzone = container.querySelector('.file-dropzone');
+            const preview = container.querySelector('.file-preview');
+            const fileName = container.querySelector('.file-name');
+            const removeBtn = container.querySelector('.file-remove-btn');
+            const selectBtn = container.querySelector('.file-select-btn');
+            const hiddenInput = container.querySelector('input[type="hidden"]');
+
+            if (selectBtn) {
+                selectBtn.addEventListener('click', () => fileInput.click());
+            }
+
+            if (dropzone) {
+                dropzone.addEventListener('click', () => fileInput.click());
+
+                dropzone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    dropzone.classList.add('dragover');
+                });
+
+                dropzone.addEventListener('dragleave', () => {
+                    dropzone.classList.remove('dragover');
+                });
+
+                dropzone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    dropzone.classList.remove('dragover');
+                    if (e.dataTransfer.files.length > 0) {
+                        fileInput.files = e.dataTransfer.files;
+                        fileInput.dispatchEvent(new Event('change'));
+                    }
+                });
+            }
+
+            if (fileInput) {
+                fileInput.addEventListener('change', () => {
+                    if (fileInput.files.length > 0) {
+                        const file = fileInput.files[0];
+                        container._fileToUpload = file;
+                        hiddenInput.dataset.hasNewFile = 'true';
+                        fileName.textContent = file.name;
+                        dropzone.style.display = 'none';
+                        preview.style.display = 'flex';
+                    }
+                });
+            }
+
+            if (removeBtn) {
+                removeBtn.addEventListener('click', () => {
+                    container._fileToUpload = null;
+                    hiddenInput.dataset.hasNewFile = 'false';
+                    hiddenInput.value = '';
+                    fileInput.value = '';
+                    fileName.textContent = '';
+                    dropzone.style.display = '';
+                    preview.style.display = 'none';
+                });
+            }
+        });
+    }
+
+    async saveRecord(modal, metadata) {
+        const form = modal.querySelector('#edit-form');
+
+        if (!form.checkValidity()) {
+            form.reportValidity();
+            return;
+        }
+
+        try {
+            // Check for file uploads
+            const fileUploads = modal.querySelectorAll('.form-file-upload');
+            let hasNewFiles = false;
+
+            for (const uploadContainer of fileUploads) {
+                if (uploadContainer._fileToUpload) {
+                    hasNewFiles = true;
+                    break;
+                }
+            }
+
+            // Prepare request body
+            let requestBody;
+            let headers = {};
+
+            const formData = new FormData(form);
+
+            if (hasNewFiles) {
+                requestBody = new FormData();
+
+                // Add XSRF token
+                if (typeof xsrf !== 'undefined') {
+                    requestBody.append('_xsrf', xsrf);
+                }
+
+                // Get main value
+                const mainValue = formData.get('main');
+                if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
+                    requestBody.append(`t${this.tableTypeId}`, mainValue);
+                }
+
+                // Add all form fields
+                for (const [key, value] of formData.entries()) {
+                    if (key === 'main') continue;
+
+                    // Check if this is a file field
+                    const fieldMatch = key.match(/^t(\d+)$/);
+                    if (fieldMatch) {
+                        const reqId = fieldMatch[1];
+                        const uploadContainer = modal.querySelector(`.form-file-upload[data-req-id="${reqId}"]`);
+
+                        if (uploadContainer && uploadContainer._fileToUpload) {
+                            requestBody.append(key, uploadContainer._fileToUpload);
+                            continue;
+                        }
+                    }
+
+                    if (value !== '' && value !== null && value !== undefined) {
+                        requestBody.append(key, value);
+                    }
+                }
+            } else {
+                const params = new URLSearchParams();
+
+                // Add XSRF token
+                if (typeof xsrf !== 'undefined') {
+                    params.append('_xsrf', xsrf);
+                }
+
+                // Get main value
+                const mainValue = formData.get('main');
+
+                // Add all form fields
+                for (const [key, value] of formData.entries()) {
+                    if (key === 'main') continue;
+                    if (value !== '' && value !== null && value !== undefined) {
+                        params.append(key, value);
+                    }
+                }
+
+                if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
+                    params.append(`t${this.tableTypeId}`, mainValue);
+                }
+
+                requestBody = params.toString();
+                headers['Content-Type'] = 'application/x-www-form-urlencoded';
+            }
+
+            // Create the record
+            const url = `${this.apiBase}/_m_new/${this.tableTypeId}?JSON&up=${this.parentId || 1}`;
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: headers,
+                body: requestBody
+            });
+
+            const text = await response.text();
+            let result;
+
+            try {
+                result = JSON.parse(text);
+            } catch (e) {
+                throw new Error(`Invalid response: ${text}`);
+            }
+
+            if (result.error) {
+                throw new Error(result.error);
+            }
+
+            // Success - close modal
+            this.showToast('Запись создана', 'success');
+
+            // Close modal
+            modal._overlayElement?.remove();
+            modal.remove();
+            window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+
+            // Reload any IntegramTable instances on the page
+            if (typeof reloadAllIntegramTables === 'function') {
+                reloadAllIntegramTables();
+            }
+
+        } catch (error) {
+            console.error('Error saving record:', error);
+            this.showToast(`Ошибка: ${error.message}`, 'error');
+        }
+    }
+}
+
+// Make openCreateRecordForm globally accessible
+if (typeof window !== 'undefined') {
+    window.openCreateRecordForm = openCreateRecordForm;
+    window.IntegramCreateFormHelper = IntegramCreateFormHelper;
+}
+
 // Auto-initialize tables from data attributes
 function autoInitTables() {
     const tables = document.querySelectorAll('[data-integram-table]');
