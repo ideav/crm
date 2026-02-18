@@ -726,6 +726,19 @@
     letter-spacing: 0.15px;
 }
 
+.edit-form-header-titles {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.edit-form-parent-subtitle {
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--md-text-secondary);
+    letter-spacing: 0.1px;
+}
+
 .edit-form-close {
     background: none;
     border: none;

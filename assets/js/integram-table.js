@@ -7911,10 +7911,32 @@ async function openCreateRecordForm(tableTypeId, parentId, fieldValues = {}) {
             }
         }
 
+        // Fetch parent info if parentId is not 1 (root)
+        let parentInfo = null;
+        if (String(parentId) !== '1') {
+            try {
+                const parentUrl = `${apiBase}/edit_obj/${parentId}?JSON`;
+                const parentResponse = await fetch(parentUrl);
+                if (parentResponse.ok) {
+                    const parentData = await parentResponse.json();
+                    if (parentData && parentData.obj && parentData.obj.val) {
+                        parentInfo = {
+                            id: parentData.obj.id,
+                            val: parentData.obj.val,
+                            typ_name: parentData.obj.typ_name
+                        };
+                    }
+                }
+            } catch (parentError) {
+                // Silently fail - parent info is optional, form should still work
+                console.warn('openCreateRecordForm: Could not fetch parent info:', parentError);
+            }
+        }
+
         // Create the modal using a minimal helper class instance
         // This reuses the existing form rendering logic from IntegramTable
         const helper = new IntegramCreateFormHelper(apiBase, tableTypeId, parentId);
-        helper.renderCreateFormModal(metadata, recordData, fieldValues);
+        helper.renderCreateFormModal(metadata, recordData, fieldValues, parentInfo);
 
     } catch (error) {
         console.error('openCreateRecordForm: Error opening form:', error);
@@ -8058,7 +8080,7 @@ class IntegramCreateFormHelper {
         }, 3000);
     }
 
-    renderCreateFormModal(metadata, recordData, fieldValues) {
+    renderCreateFormModal(metadata, recordData, fieldValues, parentInfo = null) {
         // Track modal depth for z-index stacking
         if (!window._integramModalDepth) {
             window._integramModalDepth = 0;
@@ -8088,6 +8110,13 @@ class IntegramCreateFormHelper {
         const typeName = this.getMetadataName(metadata);
         const title = `Создание: ${typeName}`;
 
+        // Build parent info subtitle HTML if parentInfo is provided
+        let parentSubtitleHtml = '';
+        if (parentInfo && parentInfo.val) {
+            const escapedParentVal = this.escapeHtml(parentInfo.val);
+            parentSubtitleHtml = `<div class="edit-form-parent-subtitle">в: ${escapedParentVal}</div>`;
+        }
+
         // Render the form
         const reqs = metadata.reqs || [];
         const recordReqs = recordData && recordData.reqs ? recordData.reqs : {};
@@ -8098,7 +8127,10 @@ class IntegramCreateFormHelper {
 
         let formHtml = `
             <div class="edit-form-header">
-                <h5>${title}</h5>
+                <div class="edit-form-header-titles">
+                    <h5>${title}</h5>
+                    ${parentSubtitleHtml}
+                </div>
                 <button class="edit-form-close" data-close-modal="true">×</button>
             </div>
             <div class="edit-form-body">
