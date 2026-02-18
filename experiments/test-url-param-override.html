@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: URL Parameter Override (Issue #500)</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-container { margin-bottom: 20px; padding: 15px; border: 1px solid #ccc; }
+        .test-title { font-weight: bold; margin-bottom: 10px; }
+        .log { background-color: #f5f5f5; padding: 10px; white-space: pre-wrap; font-family: monospace; max-height: 300px; overflow-y: auto; }
+        .pass { color: green; }
+        .fail { color: red; }
+        button { margin: 5px; padding: 10px 20px; }
+    </style>
+</head>
+<body>
+    <h1>Test: URL Parameter Override (Issue #500)</h1>
+    <p>This test verifies that GET parameters are removed from the URL and API requests when user overrides them with filters.</p>
+
+    <div class="test-container">
+        <div class="test-title">Test Instructions</div>
+        <ol>
+            <li>Open this page with URL parameters, e.g.: <code>?FR_123=testValue&FR_456=anotherValue</code></li>
+            <li>The mock IntegramTable will be initialized with these parameters</li>
+            <li>When you call <code>handleFilterOverride('123', 'newValue')</code>, it should:
+                <ul>
+                    <li>Add 'FR_123' to overriddenUrlParams Set</li>
+                    <li>Remove 'FR_123' from browser URL</li>
+                    <li>Exclude 'FR_123' from getPageUrlParams() results</li>
+                </ul>
+            </li>
+        </ol>
+    </div>
+
+    <div class="test-container">
+        <div class="test-title">Controls</div>
+        <button onclick="runAllTests()">Run All Tests</button>
+        <button onclick="setupTestUrl()">Setup Test URL</button>
+    </div>
+
+    <div class="test-container">
+        <div class="test-title">Current URL</div>
+        <div id="currentUrl"></div>
+    </div>
+
+    <div class="test-container">
+        <div class="test-title">Test Results</div>
+        <div id="results" class="log"></div>
+    </div>
+
+    <script>
+        // Mock IntegramTable class with only the relevant methods for testing
+        class MockIntegramTable {
+            constructor() {
+                this.overriddenUrlParams = new Set();
+                this.filters = {};
+            }
+
+            getPageUrlParams() {
+                const pageParams = new URLSearchParams(window.location.search);
+                const forwardParams = new URLSearchParams();
+                const excludeParams = new Set(['parentId', 'F_U', 'up', 'LIMIT', 'ORDER', 'RECORD_COUNT', '_count', 'JSON_OBJ', 'JSON']);
+
+                for (const [key, value] of pageParams.entries()) {
+                    if (excludeParams.has(key)) continue;
+                    if (this.overriddenUrlParams.has(key)) continue;
+                    forwardParams.append(key, value);
+                }
+
+                return forwardParams;
+            }
+
+            handleFilterOverride(colId, filterValue) {
+                const urlParams = new URLSearchParams(window.location.search);
+                const paramsToRemove = [];
+
+                for (const [key, value] of urlParams.entries()) {
+                    if (key === `FR_${colId}` || key === `TO_${colId}`) {
+                        paramsToRemove.push(key);
+                    }
+                }
+
+                if (paramsToRemove.length > 0 && (filterValue || filterValue === '')) {
+                    paramsToRemove.forEach(key => {
+                        this.overriddenUrlParams.add(key);
+                    });
+
+                    const newUrlParams = new URLSearchParams(window.location.search);
+                    paramsToRemove.forEach(key => {
+                        newUrlParams.delete(key);
+                    });
+
+                    const newUrl = window.location.pathname + (newUrlParams.toString() ? '?' + newUrlParams.toString() : '');
+                    window.history.replaceState({}, '', newUrl);
+                }
+            }
+        }
+
+        let table;
+        let results = [];
+
+        function log(message, isPass = null) {
+            const line = isPass === null
+                ? message
+                : (isPass ? `[PASS] ${message}` : `[FAIL] ${message}`);
+            results.push(line);
+            document.getElementById('results').innerHTML = results.map(r =>
+                r.startsWith('[PASS]') ? `<span class="pass">${r}</span>` :
+                r.startsWith('[FAIL]') ? `<span class="fail">${r}</span>` : r
+            ).join('\n');
+        }
+
+        function updateUrlDisplay() {
+            document.getElementById('currentUrl').textContent = window.location.href;
+        }
+
+        function setupTestUrl() {
+            // Setup URL with test parameters
+            const testUrl = window.location.pathname + '?FR_123=testValue&FR_456=anotherValue&TO_123=rangeEnd';
+            window.history.replaceState({}, '', testUrl);
+            updateUrlDisplay();
+            log('Setup test URL with parameters: FR_123, FR_456, TO_123');
+            table = new MockIntegramTable();
+            log('Created new MockIntegramTable instance');
+        }
+
+        function runAllTests() {
+            results = [];
+
+            // Setup test environment
+            log('=== Starting Test Suite ===\n');
+
+            // Test 1: Setup URL with parameters
+            setupTestUrl();
+            log('');
+
+            // Test 2: Initial getPageUrlParams should return all filter params
+            log('Test 1: Initial getPageUrlParams returns all filter params');
+            const initialParams = table.getPageUrlParams();
+            const hasInitialFR123 = initialParams.has('FR_123');
+            const hasInitialFR456 = initialParams.has('FR_456');
+            const hasInitialTO123 = initialParams.has('TO_123');
+            log(`  FR_123 present: ${hasInitialFR123}`, hasInitialFR123);
+            log(`  FR_456 present: ${hasInitialFR456}`, hasInitialFR456);
+            log(`  TO_123 present: ${hasInitialTO123}`, hasInitialTO123);
+            log('');
+
+            // Test 3: Override column 123 filter
+            log('Test 2: Override column 123 filter');
+            table.handleFilterOverride('123', 'userValue');
+            log(`  overriddenUrlParams contains FR_123: ${table.overriddenUrlParams.has('FR_123')}`, table.overriddenUrlParams.has('FR_123'));
+            log(`  overriddenUrlParams contains TO_123: ${table.overriddenUrlParams.has('TO_123')}`, table.overriddenUrlParams.has('TO_123'));
+
+            // Check URL was updated
+            const urlAfterOverride = new URLSearchParams(window.location.search);
+            const urlStillHasFR123 = urlAfterOverride.has('FR_123');
+            const urlStillHasTO123 = urlAfterOverride.has('TO_123');
+            const urlStillHasFR456 = urlAfterOverride.has('FR_456');
+            log(`  URL no longer has FR_123: ${!urlStillHasFR123}`, !urlStillHasFR123);
+            log(`  URL no longer has TO_123: ${!urlStillHasTO123}`, !urlStillHasTO123);
+            log(`  URL still has FR_456: ${urlStillHasFR456}`, urlStillHasFR456);
+            updateUrlDisplay();
+            log('');
+
+            // Test 4: getPageUrlParams should exclude overridden params
+            log('Test 3: getPageUrlParams excludes overridden params');
+            const paramsAfterOverride = table.getPageUrlParams();
+            const hasOverriddenFR123 = paramsAfterOverride.has('FR_123');
+            const hasOverriddenTO123 = paramsAfterOverride.has('TO_123');
+            const hasRemainingFR456 = paramsAfterOverride.has('FR_456');
+            log(`  FR_123 NOT in forwarded params: ${!hasOverriddenFR123}`, !hasOverriddenFR123);
+            log(`  TO_123 NOT in forwarded params: ${!hasOverriddenTO123}`, !hasOverriddenTO123);
+            log(`  FR_456 still in forwarded params: ${hasRemainingFR456}`, hasRemainingFR456);
+            log('');
+
+            // Test 5: Empty filter value should still trigger override
+            log('Test 4: Empty filter value triggers override');
+            setupTestUrl(); // Reset
+            table.handleFilterOverride('123', '');
+            const emptyOverrideWorks = table.overriddenUrlParams.has('FR_123');
+            log(`  Empty value triggers override: ${emptyOverrideWorks}`, emptyOverrideWorks);
+            updateUrlDisplay();
+            log('');
+
+            log('=== Test Suite Complete ===');
+        }
+
+        // Initialize
+        updateUrlDisplay();
+        table = new MockIntegramTable();
+    </script>
+</body>
+</html>
