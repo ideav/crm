@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Issue #514 - Column Config in URL</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        .test { margin: 10px 0; padding: 10px; border: 1px solid #ccc; }
+        .pass { background-color: #d4edda; }
+        .fail { background-color: #f8d7da; }
+    </style>
+</head>
+<body>
+    <h1>Test Issue #514: Column Order and Visibility in URL Config</h1>
+    <div id="results"></div>
+
+    <script>
+        // Simulated IntegramTable class with relevant methods for testing
+        class IntegramTable {
+            constructor() {
+                this.columnOrder = [];
+                this.visibleColumns = [];
+                this.filters = {};
+                this.groupingEnabled = false;
+                this.groupingColumns = [];
+                this.sortColumn = null;
+                this.sortDirection = null;
+                this.configFromUrl = false;
+            }
+
+            hasActiveFilters() {
+                return Object.values(this.filters).some(filter => {
+                    if (!filter) return false;
+                    if (filter.type === '%' || filter.type === '!%') return true;
+                    return filter.value && filter.value.trim() !== '';
+                });
+            }
+
+            getConfigUrl() {
+                const url = new URL(window.location.href);
+                url.searchParams.delete('_itc');
+
+                const config = {};
+
+                if (this.hasActiveFilters()) {
+                    config.f = {};
+                    Object.keys(this.filters).forEach(colId => {
+                        const filter = this.filters[colId];
+                        if (filter && (filter.value || filter.type === '%' || filter.type === '!%')) {
+                            config.f[colId] = {
+                                t: filter.type,
+                                v: filter.value || ''
+                            };
+                        }
+                    });
+                }
+
+                if (this.groupingEnabled && this.groupingColumns.length > 0) {
+                    config.g = this.groupingColumns;
+                }
+
+                if (this.sortColumn !== null && this.sortDirection !== null) {
+                    config.s = {
+                        c: this.sortColumn,
+                        d: this.sortDirection
+                    };
+                }
+
+                // Issue #514: Add column order
+                if (this.columnOrder && this.columnOrder.length > 0) {
+                    config.o = this.columnOrder;
+                }
+
+                // Issue #514: Add visible columns
+                if (this.visibleColumns && this.visibleColumns.length > 0) {
+                    config.v = this.visibleColumns;
+                }
+
+                const configJson = JSON.stringify(config);
+                const configEncoded = btoa(encodeURIComponent(configJson));
+
+                url.searchParams.set('_itc', configEncoded);
+
+                return url.toString();
+            }
+
+            loadConfigFromUrl(urlString) {
+                const url = new URL(urlString);
+                const configEncoded = url.searchParams.get('_itc');
+
+                if (!configEncoded) {
+                    return;
+                }
+
+                try {
+                    const configJson = decodeURIComponent(atob(configEncoded));
+                    const config = JSON.parse(configJson);
+
+                    if (config.f && typeof config.f === 'object') {
+                        this.filters = {};
+                        Object.keys(config.f).forEach(colId => {
+                            const filterConfig = config.f[colId];
+                            if (filterConfig) {
+                                this.filters[colId] = {
+                                    type: filterConfig.t || '^',
+                                    value: filterConfig.v || ''
+                                };
+                            }
+                        });
+                    }
+
+                    if (config.g && Array.isArray(config.g) && config.g.length > 0) {
+                        this.groupingEnabled = true;
+                        this.groupingColumns = config.g;
+                    }
+
+                    if (config.s && config.s.c) {
+                        this.sortColumn = config.s.c;
+                        this.sortDirection = config.s.d || 'asc';
+                    }
+
+                    // Issue #514: Restore column order
+                    if (config.o && Array.isArray(config.o) && config.o.length > 0) {
+                        this.columnOrder = config.o;
+                        this.configFromUrl = true;
+                    }
+
+                    // Issue #514: Restore visible columns
+                    if (config.v && Array.isArray(config.v) && config.v.length > 0) {
+                        this.visibleColumns = config.v;
+                        this.configFromUrl = true;
+                    }
+                } catch (e) {
+                    console.error('Error loading table configuration from URL:', e);
+                }
+            }
+
+            saveColumnState() {
+                // Issue #514: Skip saving to cookies if config was loaded from URL
+                if (this.configFromUrl) {
+                    return false; // Did not save
+                }
+                return true; // Would save (simulated)
+            }
+        }
+
+        // Run tests
+        const results = document.getElementById('results');
+
+        function test(name, fn) {
+            const div = document.createElement('div');
+            div.className = 'test';
+            try {
+                fn();
+                div.className += ' pass';
+                div.innerHTML = '✓ ' + name;
+            } catch (e) {
+                div.className += ' fail';
+                div.innerHTML = '✗ ' + name + ': ' + e.message;
+            }
+            results.appendChild(div);
+        }
+
+        function assert(condition, message) {
+            if (!condition) throw new Error(message || 'Assertion failed');
+        }
+
+        // Test 1: Column order is included in URL
+        test('Column order is included in getConfigUrl()', () => {
+            const table = new IntegramTable();
+            table.columnOrder = ['col1', 'col2', 'col3'];
+            const url = table.getConfigUrl();
+            assert(url.includes('_itc='), 'URL should include _itc parameter');
+
+            const urlObj = new URL(url);
+            const config = JSON.parse(decodeURIComponent(atob(urlObj.searchParams.get('_itc'))));
+            assert(config.o, 'Config should have "o" (order) property');
+            assert(config.o.length === 3, 'Column order should have 3 items');
+            assert(config.o[0] === 'col1', 'First column should be col1');
+        });
+
+        // Test 2: Visible columns are included in URL
+        test('Visible columns are included in getConfigUrl()', () => {
+            const table = new IntegramTable();
+            table.visibleColumns = ['col1', 'col3'];
+            const url = table.getConfigUrl();
+
+            const urlObj = new URL(url);
+            const config = JSON.parse(decodeURIComponent(atob(urlObj.searchParams.get('_itc'))));
+            assert(config.v, 'Config should have "v" (visible) property');
+            assert(config.v.length === 2, 'Visible columns should have 2 items');
+            assert(config.v.includes('col1') && config.v.includes('col3'), 'Visible columns should be col1 and col3');
+        });
+
+        // Test 3: Column order is restored from URL
+        test('Column order is restored from URL', () => {
+            const table1 = new IntegramTable();
+            table1.columnOrder = ['A', 'B', 'C'];
+            const url = table1.getConfigUrl();
+
+            const table2 = new IntegramTable();
+            table2.loadConfigFromUrl(url);
+            assert(table2.columnOrder.length === 3, 'Column order should be restored');
+            assert(table2.columnOrder[0] === 'A', 'First column should be A');
+            assert(table2.configFromUrl === true, 'configFromUrl flag should be set');
+        });
+
+        // Test 4: Visible columns are restored from URL
+        test('Visible columns are restored from URL', () => {
+            const table1 = new IntegramTable();
+            table1.visibleColumns = ['X', 'Y'];
+            const url = table1.getConfigUrl();
+
+            const table2 = new IntegramTable();
+            table2.loadConfigFromUrl(url);
+            assert(table2.visibleColumns.length === 2, 'Visible columns should be restored');
+            assert(table2.visibleColumns.includes('X'), 'X should be visible');
+            assert(table2.configFromUrl === true, 'configFromUrl flag should be set');
+        });
+
+        // Test 5: Config from URL prevents saving to cookies
+        test('Config from URL prevents saveColumnState()', () => {
+            const table = new IntegramTable();
+            table.configFromUrl = true;
+            const saved = table.saveColumnState();
+            assert(saved === false, 'Should not save when configFromUrl is true');
+        });
+
+        // Test 6: Normal config allows saving to cookies
+        test('Normal config allows saveColumnState()', () => {
+            const table = new IntegramTable();
+            table.configFromUrl = false;
+            const saved = table.saveColumnState();
+            assert(saved === true, 'Should save when configFromUrl is false');
+        });
+
+        // Test 7: URL has higher priority - demonstrated by load order
+        test('URL config has higher priority than cookies', () => {
+            // Simulate: cookies loaded first
+            const table = new IntegramTable();
+            table.columnOrder = ['cookie1', 'cookie2'];
+            table.visibleColumns = ['cookie1'];
+
+            // Then URL loaded (overwrites)
+            const table1 = new IntegramTable();
+            table1.columnOrder = ['url1', 'url2', 'url3'];
+            table1.visibleColumns = ['url2', 'url3'];
+            const url = table1.getConfigUrl();
+
+            table.loadConfigFromUrl(url);
+            assert(table.columnOrder[0] === 'url1', 'URL config should override cookie config');
+            assert(table.visibleColumns.includes('url2'), 'URL visible columns should override cookies');
+        });
+
+        // Test 8: Filters still work along with column config
+        test('Filters and column config work together', () => {
+            const table1 = new IntegramTable();
+            table1.columnOrder = ['A', 'B'];
+            table1.visibleColumns = ['A'];
+            table1.filters = { 'A': { type: '^', value: 'test' } };
+            const url = table1.getConfigUrl();
+
+            const table2 = new IntegramTable();
+            table2.loadConfigFromUrl(url);
+
+            assert(table2.columnOrder.length === 2, 'Column order restored');
+            assert(table2.visibleColumns.length === 1, 'Visible columns restored');
+            assert(table2.filters['A'].value === 'test', 'Filter restored');
+        });
+
+        console.log('All tests completed!');
+    </script>
+</body>
+</html>
