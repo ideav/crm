@@ -2483,9 +2483,10 @@ class IntegramTable {
                         }
                     } else if (e.key === 'Tab') {
                         // Tab / Shift+Tab: navigate to next/previous editable cell (issue #518)
+                        // Fix for issue #523: Don't select first option on Tab, just cancel and navigate
                         e.preventDefault();
                         const direction = e.shiftKey ? 'prev' : 'next';
-                        this.saveAndNavigate(direction, saveEditRef, cancelEdit);
+                        this.saveAndNavigate(direction, cancelEdit, cancelEdit);
                     }
                 });
 
@@ -2514,9 +2515,10 @@ class IntegramTable {
                         this.cancelInlineEdit(originalContent);
                     } else if (e.key === 'Tab') {
                         // Tab / Shift+Tab: navigate to next/previous editable cell (issue #518)
+                        // Fix for issue #523: Don't select first option on Tab, just cancel and navigate
                         e.preventDefault();
                         const direction = e.shiftKey ? 'prev' : 'next';
-                        this.saveAndNavigate(direction, saveEditRef, cancelEdit);
+                        this.saveAndNavigate(direction, cancelEdit, cancelEdit);
                     }
                 });
 
