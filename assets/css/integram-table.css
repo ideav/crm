@@ -2118,3 +2118,67 @@ tr.row-selected {
     font-size: 14px;
     color: var(--md-text-secondary);
 }
+
+/* ========================================
+   Warning Modal Styles (integram-modal-overlay)
+   ======================================== */
+
+.integram-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+}
+
+.integram-modal {
+    background: var(--md-surface, white);
+    border-radius: 4px;
+    box-shadow: var(--md-elevation-4, 0 14px 28px rgba(0, 0, 0, 0.25), 0 10px 10px rgba(0, 0, 0, 0.22));
+    max-width: 500px;
+    width: 90%;
+    font-family: 'Roboto', sans-serif;
+}
+
+.integram-modal-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--md-divider, #e5e5e5);
+}
+
+.integram-modal-header h5 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 500;
+    color: var(--md-text-primary, rgba(0, 0, 0, 0.87));
+    letter-spacing: 0.15px;
+}
+
+.integram-modal-body {
+    padding: 24px;
+}
+
+.integram-modal-footer {
+    padding: 16px 24px;
+    text-align: right;
+    border-top: 1px solid var(--md-divider, #e5e5e5);
+}
+
+/* Warning modal link to existing record */
+.integram-modal-link {
+    display: block;
+    margin-top: 12px;
+    color: var(--md-primary, #1976d2);
+    text-decoration: none;
+    font-weight: 500;
+    transition: var(--md-transition, all 0.3s cubic-bezier(0.4, 0, 0.2, 1));
+}
+
+.integram-modal-link:hover {
+    color: var(--md-primary-dark, #1565c0);
+    text-decoration: underline;
+}
