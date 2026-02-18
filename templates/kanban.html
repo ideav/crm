@@ -1475,10 +1475,11 @@ function renderCard(task){
     // Use fixed FR parameter
     var tasksUrl = '';
     if(task['ЛидID']){
-        tasksUrl = '/' + db + '/object/3596?FR_4547=@' + task['ЛидID'];
+        tasksUrl = '/' + db + '/table/3596?FR_4547=@' + task['ЛидID'];
     }
 
     html += '<div class="kanban-card-tasks-row">';
+    // if(tasksCount > 0 && tasksUrl){
     if(tasksCount > 0 && tasksUrl){
         html += '<a href="' + tasksUrl + '" target="tasks" class="kanban-card-tasks-button ' + buttonClass + '" data-lead-id="' + task['ЛидID'] + '" onclick="event.stopPropagation();">';
         html += 'Задачи:&nbsp;<span class="tasks-count">' + tasksCount + '</span>';
@@ -2354,7 +2355,7 @@ function updateTaskCount(leadId){
                 // Convert span to anchor with link
                 var card = taskButton.closest('.kanban-card');
                 var cardLeadId = card.data('lead-id');
-                var tasksUrl = '/' + db + '/object/3596?FR_4547=@' + cardLeadId;
+                var tasksUrl = '/' + db + '/table/3596?FR_4547=@' + cardLeadId;
 
                 var newButton = $('<a href="' + tasksUrl + '" target="tasks" class="kanban-card-tasks-button has-tasks" data-lead-id="' + leadId + '" onclick="event.stopPropagation();">Задачи: <span class="tasks-count">' + newCount + '</span></a>');
                 taskButton.replaceWith(newButton);
