@@ -65,6 +65,11 @@ class IntegramTable {
             this.sortColumn = null;  // Column ID being sorted (null = no sort)
             this.sortDirection = null;  // 'asc' or 'desc' (null = no sort)
 
+            // Grouping mode (issue #502)
+            this.groupingEnabled = false;  // Whether grouping mode is active
+            this.groupingColumns = [];  // Array of column IDs to group by, in order
+            this.groupedData = [];  // Processed data with grouping information
+
             // Track URL parameters that have been overridden by user filters (issue #500)
             // When a user sets a filter for a field that came as a GET parameter,
             // we remove it from URL and stop forwarding it to API requests
@@ -203,18 +208,28 @@ class IntegramTable {
 
                 this.columns = json.columns || [];
 
+                // In grouping mode, disable infinite scroll and use all data (up to 1000)
+                const isGroupingMode = this.groupingEnabled && this.groupingColumns.length > 0;
+
                 // Check if there are more records (we requested pageSize + 1)
-                this.hasMore = newRows.length > this.options.pageSize;
+                // In grouping mode, we fetched up to 1000 records at once
+                if (isGroupingMode) {
+                    // Grouping mode: no pagination, show all fetched data
+                    this.hasMore = false;
+                } else {
+                    this.hasMore = newRows.length > this.options.pageSize;
+                }
 
                 // Keep only pageSize records; also trim rawData to stay aligned
+                // In grouping mode, keep all data (up to 1000)
                 let rawData = json.rawData || [];
-                if (this.hasMore) {
+                if (!isGroupingMode && this.hasMore) {
                     newRows = newRows.slice(0, this.options.pageSize);
                     rawData = rawData.slice(0, this.options.pageSize);
                 }
 
                 // Append or replace data
-                if (append) {
+                if (append && !isGroupingMode) {
                     this.data = this.data.concat(newRows);
                     // Append raw object data if present
                     if (rawData.length > 0) {
@@ -232,6 +247,11 @@ class IntegramTable {
                 // Auto-set total count if we've reached the end
                 if (!this.hasMore && this.totalRows === null) {
                     this.totalRows = this.loadedRecords;
+                }
+
+                // Process grouping if enabled (issue #502)
+                if (isGroupingMode) {
+                    this.processGroupedData();
                 }
 
                 // Process columns to hide ID and Style suffixes
@@ -270,8 +290,10 @@ class IntegramTable {
 
         async loadDataFromReport(append = false) {
             // Original report-based data loading logic
-            const requestSize = this.options.pageSize + 1;
-            const offset = append ? this.loadedRecords : 0;
+            // In grouping mode, use LIMIT=1000 and disable scrolling (issue #502)
+            const isGroupingMode = this.groupingEnabled && this.groupingColumns.length > 0;
+            const requestSize = isGroupingMode ? 1000 : (this.options.pageSize + 1);
+            const offset = (append && !isGroupingMode) ? this.loadedRecords : 0;
 
             const params = new URLSearchParams();
 
@@ -347,8 +369,10 @@ class IntegramTable {
 
             this.objectTableId = this.options.tableTypeId;  // Store table ID for _count=1 queries
 
-            const requestSize = this.options.pageSize + 1;
-            const offset = append ? this.loadedRecords : 0;
+            // In grouping mode, use LIMIT=1000 and disable scrolling (issue #502)
+            const isGroupingMode = this.groupingEnabled && this.groupingColumns.length > 0;
+            const requestSize = isGroupingMode ? 1000 : (this.options.pageSize + 1);
+            const offset = (append && !isGroupingMode) ? this.loadedRecords : 0;
 
             // First load, fetch metadata to get column information
             if (this.columns.length === 0) {
@@ -510,8 +534,10 @@ class IntegramTable {
             const apiBase = this.getApiBase();
             const tableId = metadata.id;
             this.objectTableId = tableId;  // Store table ID for _count=1 queries
-            const requestSize = this.options.pageSize + 1;
-            const offset = append ? this.loadedRecords : 0;
+            // In grouping mode, use LIMIT=1000 and disable scrolling (issue #502)
+            const isGroupingMode = this.groupingEnabled && this.groupingColumns.length > 0;
+            const requestSize = isGroupingMode ? 1000 : (this.options.pageSize + 1);
+            const offset = (append && !isGroupingMode) ? this.loadedRecords : 0;
             let dataUrl = `${ apiBase }/object/${ tableId }/?JSON_OBJ&LIMIT=${ offset },${ requestSize }`;
 
             // Apply filters if any
@@ -883,6 +909,17 @@ class IntegramTable {
                     <div class="integram-table-header">
                         ${ this.options.title ? `<div class="integram-table-title">${ this.options.title }</div>` : '' }
                         <div class="integram-table-controls">
+                            ${ this.groupingEnabled ? `
+                            <button class="btn btn-sm btn-outline-secondary mr-1" onclick="window.${ instanceName }.clearGrouping()" title="Очистить группировку">
+                                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle;">
+                                    <circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                                    <path d="M5 5L11 11M11 5L5 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                                </svg>
+                            </button>
+                            ` : '' }
+                            <button class="btn btn-sm btn-outline-secondary mr-2" onclick="window.${ instanceName }.openGroupingSettings()">
+                                ${ this.groupingEnabled ? '✓' : '' } Группы
+                            </button>
                             ${ this.hasActiveFilters() ? `
                             <button class="btn btn-sm btn-outline-secondary mr-1" onclick="window.${ instanceName }.clearAllFilters()" title="Очистить фильтры">
                                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle;">
@@ -931,44 +968,53 @@ class IntegramTable {
                         <thead>
                             <tr>
                                 ${ this.checkboxMode ? `<th class="checkbox-column-header"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.data.length > 0 && this.selectedRows.size === this.data.length ? 'checked' : '' }></th>` : '' }
-                                ${ orderedColumns.map(col => {
-                                    const width = this.columnWidths[col.id];
-                                    const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
-                                    const addButtonHtml = this.shouldShowAddButton(col) ?
-                                        `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись">+</button>` : '';
+                                ${ this.groupingEnabled && this.groupingColumns.length > 0 ?
+                                    this.renderGroupedHeaders(orderedColumns, instanceName) :
+                                    orderedColumns.map(col => {
+                                        const width = this.columnWidths[col.id];
+                                        const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
+                                        const addButtonHtml = this.shouldShowAddButton(col) ?
+                                            `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись">+</button>` : '';
 
-                                    // Add sort indicator if this column is sorted
-                                    let sortIndicator = '';
-                                    if (this.sortColumn === col.id) {
-                                        sortIndicator = this.sortDirection === 'asc' ? '▲ ' : '▼ ';
-                                    }
+                                        // Add sort indicator if this column is sorted
+                                        let sortIndicator = '';
+                                        if (this.sortColumn === col.id) {
+                                            sortIndicator = this.sortDirection === 'asc' ? '▲ ' : '▼ ';
+                                        }
 
-                                    return `
-                                    <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
-                                        <span class="column-header-content" data-column-id="${ col.id }">${ sortIndicator }${ col.name }</span>
-                                        ${ addButtonHtml }
-                                        <div class="column-resize-handle" data-column-id="${ col.id }"></div>
-                                    </th>
-                                `;
-                                }).join('') }
+                                        return `
+                                        <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
+                                            <span class="column-header-content" data-column-id="${ col.id }">${ sortIndicator }${ col.name }</span>
+                                            ${ addButtonHtml }
+                                            <div class="column-resize-handle" data-column-id="${ col.id }"></div>
+                                        </th>
+                                    `;
+                                    }).join('')
+                                }
                             </tr>
                             ${ this.filtersEnabled ? `
                             <tr class="filter-row">
                                 ${ this.checkboxMode ? '<td class="checkbox-column-filter"></td>' : '' }
-                                ${ orderedColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('') }
+                                ${ this.groupingEnabled && this.groupingColumns.length > 0 ?
+                                    this.renderGroupedFilterRow(orderedColumns) :
+                                    orderedColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('')
+                                }
                             </tr>
                             ` : '' }
                         </thead>
                         <tbody>
-                            ${ this.data.map((row, rowIndex) => `
-                                <tr class="${ this.selectedRows.has(rowIndex) ? 'row-selected' : '' }">
-                                    ${ this.checkboxMode ? `<td class="checkbox-column-cell"><input type="checkbox" class="row-select-checkbox" data-row-index="${ rowIndex }" ${ this.selectedRows.has(rowIndex) ? 'checked' : '' }></td>` : '' }
-                                    ${ orderedColumns.map((col, colIndex) => {
-                                        const cellValue = row[this.columns.indexOf(col)];
-                                        return this.renderCell(col, cellValue, rowIndex, colIndex);
-                                    }).join('') }
-                                </tr>
-                            `).join('') }
+                            ${ this.groupingEnabled && this.groupedData.length > 0 ?
+                                this.renderGroupedRows(orderedColumns, instanceName) :
+                                this.data.map((row, rowIndex) => `
+                                    <tr class="${ this.selectedRows.has(rowIndex) ? 'row-selected' : '' }">
+                                        ${ this.checkboxMode ? `<td class="checkbox-column-cell"><input type="checkbox" class="row-select-checkbox" data-row-index="${ rowIndex }" ${ this.selectedRows.has(rowIndex) ? 'checked' : '' }></td>` : '' }
+                                        ${ orderedColumns.map((col, colIndex) => {
+                                            const cellValue = row[this.columns.indexOf(col)];
+                                            return this.renderCell(col, cellValue, rowIndex, colIndex);
+                                        }).join('') }
+                                    </tr>
+                                `).join('')
+                            }
                         </tbody>
                         </table>
                     </div>
@@ -1476,6 +1522,132 @@ class IntegramTable {
             }
 
             return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }${ editableAttrs }>${ escapedValue }</td>`;
+        }
+
+        /**
+         * Render grouped table rows (issue #502)
+         * Creates rows with merged group cells on the left side
+         */
+        renderGroupedRows(orderedColumns, instanceName) {
+            if (!this.groupedData || this.groupedData.length === 0) {
+                return '';
+            }
+
+            // Get the set of grouping column IDs for quick lookup
+            const groupingColumnSet = new Set(this.groupingColumns);
+
+            // Determine columns that are NOT grouping columns (shown on the right)
+            const nonGroupingColumns = orderedColumns.filter(col => !groupingColumnSet.has(col.id));
+
+            // Build rows HTML
+            let rowsHtml = '';
+
+            this.groupedData.forEach((rowInfo, rowIndex) => {
+                const row = rowInfo.data;
+                const selectedClass = this.selectedRows.has(rowInfo.originalIndex) ? 'row-selected' : '';
+
+                rowsHtml += `<tr class="${ selectedClass }">`;
+
+                // Add checkbox column if enabled
+                if (this.checkboxMode) {
+                    rowsHtml += `<td class="checkbox-column-cell"><input type="checkbox" class="row-select-checkbox" data-row-index="${ rowInfo.originalIndex }" ${ this.selectedRows.has(rowInfo.originalIndex) ? 'checked' : '' }></td>`;
+                }
+
+                // Render group cells (with rowspan if this row starts a new group)
+                if (rowInfo.groupCells.length > 0) {
+                    // This row has group cells to render (starts new groups)
+                    rowInfo.groupCells.forEach(groupCell => {
+                        const column = this.columns.find(c => c.id === groupCell.colId);
+                        const cellValue = groupCell.value;
+                        const rowspan = groupCell.rowspan > 1 ? ` rowspan="${ groupCell.rowspan }"` : '';
+
+                        // Render the group cell with special styling
+                        rowsHtml += `<td class="group-cell"${ rowspan } data-group-column="${ groupCell.colId }">`;
+                        rowsHtml += this.escapeHtml(String(cellValue || ''));
+                        rowsHtml += `</td>`;
+                    });
+                }
+                // If no groupCells, it means this row is part of an existing group
+                // and the cells are already rendered with rowspan in a previous row
+
+                // Render non-grouping columns (all other data columns)
+                nonGroupingColumns.forEach((col, colIndex) => {
+                    const dataIndex = this.columns.indexOf(col);
+                    const cellValue = row[dataIndex];
+                    rowsHtml += this.renderCell(col, cellValue, rowInfo.originalIndex, colIndex);
+                });
+
+                rowsHtml += `</tr>`;
+            });
+
+            return rowsHtml;
+        }
+
+        /**
+         * Render table headers in grouped mode (issue #502)
+         * Shows grouping columns first, then non-grouping columns
+         */
+        renderGroupedHeaders(orderedColumns, instanceName) {
+            const groupingColumnSet = new Set(this.groupingColumns);
+
+            // Get grouping columns in their specified order
+            const groupingCols = this.groupingColumns
+                .map(colId => this.columns.find(c => c.id === colId))
+                .filter(col => col && this.visibleColumns.includes(col.id));
+
+            // Get non-grouping columns
+            const nonGroupingCols = orderedColumns.filter(col => !groupingColumnSet.has(col.id));
+
+            // Combine: grouping columns first, then non-grouping
+            const allCols = [...groupingCols, ...nonGroupingCols];
+
+            return allCols.map(col => {
+                const width = this.columnWidths[col.id];
+                const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
+                const addButtonHtml = this.shouldShowAddButton(col) ?
+                    `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись">+</button>` : '';
+
+                // Add sort indicator if this column is sorted
+                let sortIndicator = '';
+                if (this.sortColumn === col.id) {
+                    sortIndicator = this.sortDirection === 'asc' ? '▲ ' : '▼ ';
+                }
+
+                // Add grouping indicator
+                const isGroupingCol = groupingColumnSet.has(col.id);
+                const groupingClass = isGroupingCol ? ' group-header' : '';
+                const groupingOrder = isGroupingCol ? this.groupingColumns.indexOf(col.id) + 1 : '';
+                const groupingBadge = isGroupingCol ? `<span class="grouping-header-badge">${ groupingOrder }</span>` : '';
+
+                return `
+                    <th data-column-id="${ col.id }" draggable="true"${ widthStyle } class="${ groupingClass }">
+                        <span class="column-header-content" data-column-id="${ col.id }">${ groupingBadge }${ sortIndicator }${ col.name }</span>
+                        ${ addButtonHtml }
+                        <div class="column-resize-handle" data-column-id="${ col.id }"></div>
+                    </th>
+                `;
+            }).join('');
+        }
+
+        /**
+         * Render filter row in grouped mode (issue #502)
+         * Shows grouping column filters first, then non-grouping column filters
+         */
+        renderGroupedFilterRow(orderedColumns) {
+            const groupingColumnSet = new Set(this.groupingColumns);
+
+            // Get grouping columns in their specified order
+            const groupingCols = this.groupingColumns
+                .map(colId => this.columns.find(c => c.id === colId))
+                .filter(col => col && this.visibleColumns.includes(col.id));
+
+            // Get non-grouping columns
+            const nonGroupingCols = orderedColumns.filter(col => !groupingColumnSet.has(col.id));
+
+            // Combine: grouping columns first, then non-grouping
+            const allCols = [...groupingCols, ...nonGroupingCols];
+
+            return allCols.map((col, idx) => this.renderFilterCell(col, idx)).join('');
         }
 
         renderScrollCounter() {
@@ -3307,6 +3479,238 @@ class IntegramTable {
         toggleFilters() {
             this.filtersEnabled = !this.filtersEnabled;
             this.render();
+        }
+
+        /**
+         * Open grouping settings modal (issue #502)
+         * Allows user to select columns to group by and their order
+         */
+        openGroupingSettings() {
+            const overlay = document.createElement('div');
+            overlay.className = 'column-settings-overlay';
+
+            const modal = document.createElement('div');
+            modal.className = 'column-settings-modal grouping-settings-modal';
+
+            // Get columns that can be grouped (exclude ID columns and style columns)
+            const groupableColumns = this.columns.filter(col =>
+                !this.idColumns.has(col.id) &&
+                !Object.values(this.styleColumns).includes(col.id)
+            );
+
+            modal.innerHTML = `
+                <h5>Настройка группировки</h5>
+                <p style="color: var(--md-text-secondary); font-size: 14px; margin-bottom: 15px;">
+                    Выберите поля для группировки. Порядок выбора определяет вложенность групп.
+                </p>
+                <div class="column-settings-list grouping-columns-list" style="max-height: 300px; overflow-y: auto;">
+                    ${ groupableColumns.map((col, idx) => {
+                        const isSelected = this.groupingColumns.includes(col.id);
+                        const order = isSelected ? this.groupingColumns.indexOf(col.id) + 1 : '';
+                        return `
+                            <div class="column-settings-item grouping-column-item" data-column-id="${ col.id }">
+                                <label>
+                                    <input type="checkbox"
+                                           data-column-id="${ col.id }"
+                                           ${ isSelected ? 'checked' : '' }>
+                                    <span class="grouping-order-badge" style="${ isSelected ? '' : 'display: none;' }">${ order }</span>
+                                    ${ col.name }
+                                </label>
+                            </div>
+                        `;
+                    }).join('') }
+                </div>
+                <div style="text-align: right; margin-top: 15px;">
+                    <button class="btn btn-primary mr-2" id="apply-grouping-btn">Применить</button>
+                    <button class="btn btn-secondary" id="close-grouping-btn">Закрыть</button>
+                </div>
+            `;
+
+            document.body.appendChild(overlay);
+            document.body.appendChild(modal);
+
+            // Track selection order within the modal
+            let selectedOrder = [...this.groupingColumns];
+
+            // Update order badges
+            const updateOrderBadges = () => {
+                modal.querySelectorAll('.grouping-column-item').forEach(item => {
+                    const colId = item.dataset.columnId;
+                    const badge = item.querySelector('.grouping-order-badge');
+                    const checkbox = item.querySelector('input[type="checkbox"]');
+                    const idx = selectedOrder.indexOf(colId);
+                    if (idx !== -1) {
+                        badge.textContent = idx + 1;
+                        badge.style.display = '';
+                        checkbox.checked = true;
+                    } else {
+                        badge.style.display = 'none';
+                        checkbox.checked = false;
+                    }
+                });
+            };
+
+            // Handle checkbox changes
+            modal.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                cb.addEventListener('change', (e) => {
+                    const colId = cb.dataset.columnId;
+                    if (cb.checked) {
+                        if (!selectedOrder.includes(colId)) {
+                            selectedOrder.push(colId);
+                        }
+                    } else {
+                        selectedOrder = selectedOrder.filter(id => id !== colId);
+                    }
+                    updateOrderBadges();
+                });
+            });
+
+            // Apply grouping
+            modal.querySelector('#apply-grouping-btn').addEventListener('click', () => {
+                this.groupingColumns = [...selectedOrder];
+                this.groupingEnabled = this.groupingColumns.length > 0;
+
+                // If grouping is enabled, reload data with LIMIT=1000
+                if (this.groupingEnabled) {
+                    this.data = [];
+                    this.loadedRecords = 0;
+                    this.hasMore = true;
+                    this.totalRows = null;
+                    this.loadData(false);
+                } else {
+                    // Just re-render if grouping is disabled
+                    this.render();
+                }
+
+                modal.remove();
+                overlay.remove();
+            });
+
+            // Close modal
+            const closeModal = () => {
+                modal.remove();
+                overlay.remove();
+            };
+
+            modal.querySelector('#close-grouping-btn').addEventListener('click', closeModal);
+            overlay.addEventListener('click', closeModal);
+        }
+
+        /**
+         * Clear grouping and return to normal table view (issue #502)
+         */
+        clearGrouping() {
+            this.groupingEnabled = false;
+            this.groupingColumns = [];
+            this.groupedData = [];
+
+            // Reload data with normal pagination
+            this.data = [];
+            this.loadedRecords = 0;
+            this.hasMore = true;
+            this.totalRows = null;
+            this.loadData(false);
+        }
+
+        /**
+         * Process data for grouping (issue #502)
+         * Sorts data by grouping columns and creates group structure
+         */
+        processGroupedData() {
+            if (!this.groupingEnabled || this.groupingColumns.length === 0) {
+                this.groupedData = [];
+                return;
+            }
+
+            // Get column indices for grouping columns
+            const groupColIndices = this.groupingColumns.map(colId => {
+                return this.columns.findIndex(c => c.id === colId);
+            }).filter(idx => idx !== -1);
+
+            if (groupColIndices.length === 0) {
+                this.groupedData = [];
+                return;
+            }
+
+            // Sort data by grouping columns
+            const sortedData = [...this.data].sort((a, b) => {
+                for (const colIdx of groupColIndices) {
+                    const valA = a[colIdx] || '';
+                    const valB = b[colIdx] || '';
+
+                    // Convert to string for comparison
+                    const strA = String(valA).toLowerCase();
+                    const strB = String(valB).toLowerCase();
+
+                    if (strA < strB) return -1;
+                    if (strA > strB) return 1;
+                }
+                return 0;
+            });
+
+            // Create grouped structure
+            // Each row gets info about which group cells should be displayed (rowspan)
+            this.groupedData = [];
+            let prevGroupValues = [];
+
+            sortedData.forEach((row, rowIndex) => {
+                const groupValues = groupColIndices.map(colIdx => row[colIdx] || '');
+
+                // Determine which group levels changed
+                let changedLevel = -1;
+                for (let i = 0; i < groupValues.length; i++) {
+                    if (groupValues[i] !== prevGroupValues[i]) {
+                        changedLevel = i;
+                        break;
+                    }
+                }
+
+                // Create row info
+                const rowInfo = {
+                    originalIndex: this.data.indexOf(row),
+                    data: row,
+                    groupCells: []  // Which group cells to render (with rowspan)
+                };
+
+                // If this is first row or group value changed, calculate rowspan
+                if (rowIndex === 0 || changedLevel !== -1) {
+                    // Count how many rows share each group value
+                    for (let level = (changedLevel === -1 ? 0 : changedLevel); level < groupColIndices.length; level++) {
+                        const colIdx = groupColIndices[level];
+                        let rowspan = 1;
+
+                        // Count subsequent rows with same value at this level
+                        for (let j = rowIndex + 1; j < sortedData.length; j++) {
+                            // Check if all previous levels match
+                            let allMatch = true;
+                            for (let k = 0; k <= level; k++) {
+                                if (sortedData[j][groupColIndices[k]] !== groupValues[k]) {
+                                    allMatch = false;
+                                    break;
+                                }
+                            }
+                            if (allMatch) {
+                                rowspan++;
+                            } else {
+                                break;
+                            }
+                        }
+
+                        rowInfo.groupCells.push({
+                            colId: this.groupingColumns[level],
+                            colIndex: colIdx,
+                            value: groupValues[level],
+                            rowspan: rowspan
+                        });
+                    }
+                }
+
+                this.groupedData.push(rowInfo);
+                prevGroupValues = groupValues;
+            });
+
+            // Replace data with sorted data for rendering
+            this.data = sortedData;
         }
 
         hasActiveFilters() {
