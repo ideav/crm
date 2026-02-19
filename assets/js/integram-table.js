@@ -814,6 +814,16 @@ class IntegramTable {
             }
         }
 
+        /**
+         * Get the default filter type symbol for a given column format.
+         * NUMBER, SIGNED, DATE, DATETIME use '=' (equals) by default (issue #539).
+         * All other types use '^' (starts with) by default.
+         */
+        getDefaultFilterType(format) {
+            const equalDefaultFormats = ['NUMBER', 'SIGNED', 'DATE', 'DATETIME'];
+            return equalDefaultFormats.includes(format) ? '=' : '^';
+        }
+
         applyFilter(params, column, filter) {
             const type = filter.type || '^';
             const value = filter.value;
@@ -1085,7 +1095,7 @@ class IntegramTable {
 
         renderFilterCell(column, columnIndex = 0) {
             const format = column.format || 'SHORT';
-            const currentFilter = this.filters[column.id] || { type: '^', value: '' };
+            const currentFilter = this.filters[column.id] || { type: this.getDefaultFilterType(format), value: '' };
             const placeholder = columnIndex === 0 ? 'Фильтр...' : '';
 
             return `
@@ -1775,7 +1785,9 @@ class IntegramTable {
                 input.addEventListener('input', (e) => {
                     const colId = input.dataset.columnId;
                     if (!this.filters[colId]) {
-                        this.filters[colId] = { type: '^', value: '' };
+                        const col = this.columns.find(c => c.id === colId);
+                        const fmt = col ? (col.format || 'SHORT') : 'SHORT';
+                        this.filters[colId] = { type: this.getDefaultFilterType(fmt), value: '' };
                     }
                     this.filters[colId].value = input.value;
 
@@ -3511,7 +3523,7 @@ class IntegramTable {
                 opt.addEventListener('click', () => {
                     const symbol = opt.dataset.symbol;
                     if (!this.filters[columnId]) {
-                        this.filters[columnId] = { type: '^', value: '' };
+                        this.filters[columnId] = { type: this.getDefaultFilterType(format), value: '' };
                     }
                     this.filters[columnId].type = symbol;
                     target.textContent = symbol;
