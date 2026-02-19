@@ -211,6 +211,10 @@ class IntegramTable {
                     // Load data from report format (default behavior)
                     json = await this.loadDataFromReport(append);
                     newRows = json.rows || [];
+                    // Auto-set table title from report header if not explicitly provided (issue #537)
+                    if (!this.options.title && json.header) {
+                        this.options.title = json.header;
+                    }
                 }
 
                 this.columns = json.columns || [];
@@ -364,7 +368,8 @@ class IntegramTable {
 
             return {
                 columns: json.columns || [],
-                rows: rows
+                rows: rows,
+                header: json.header || null
             };
         }
 
