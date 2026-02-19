@@ -4088,8 +4088,11 @@ class IntegramTable {
                 }
 
                 // Create row info
+                // Issue #541: Use the sorted position (rowIndex) as originalIndex.
+                // After processGroupedData(), this.data is replaced with sortedData,
+                // so rowIndex (the position in sortedData) correctly maps to this.data[rowIndex].
                 const rowInfo = {
-                    originalIndex: this.data.indexOf(row),
+                    originalIndex: rowIndex,
                     data: row,
                     groupCells: []  // Which group cells to render (with rowspan)
                 };
