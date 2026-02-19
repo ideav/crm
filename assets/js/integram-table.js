@@ -1609,7 +1609,7 @@ class IntegramTable {
                 // Render group cells (with rowspan if this row starts a new group)
                 if (rowInfo.groupCells.length > 0) {
                     // This row has group cells to render (starts new groups)
-                    rowInfo.groupCells.forEach(groupCell => {
+                    rowInfo.groupCells.forEach((groupCell, groupCellIndex) => {
                         const column = this.columns.find(c => c.id === groupCell.colId);
                         // Issue #504: Use displayValue (parsed from "id:Value") if available, otherwise parse raw value
                         const cellValue = groupCell.displayValue !== undefined
@@ -1617,9 +1617,18 @@ class IntegramTable {
                             : this.parseReferenceDisplayValue(groupCell.value, column);
                         const rowspan = groupCell.rowspan > 1 ? ` rowspan="${ groupCell.rowspan }"` : '';
 
+                        // Issue #543: Add create button for grouped cells when data source is object/table
+                        // Get the level of this grouped cell (0-based index in groupingColumns)
+                        const groupLevel = this.groupingColumns.indexOf(groupCell.colId);
+                        const showAddButton = this.shouldShowGroupedCellAddButton();
+                        const addButtonHtml = showAddButton
+                            ? `<button class="group-cell-add-btn" onclick="window.${ instanceName }.openGroupedCellCreateForm(${ rowIndex }, ${ groupLevel })" title="Создать запись">+</button>`
+                            : '';
+
                         // Render the group cell with special styling
                         rowsHtml += `<td class="group-cell"${ rowspan } data-group-column="${ groupCell.colId }">`;
-                        rowsHtml += this.escapeHtml(String(cellValue || ''));
+                        rowsHtml += `<span class="group-cell-content">${ this.escapeHtml(String(cellValue || '')) }</span>`;
+                        rowsHtml += addButtonHtml;
                         rowsHtml += `</td>`;
                     });
                 }
@@ -4585,6 +4594,103 @@ class IntegramTable {
 
             } catch (error) {
                 console.error('Error opening create form from column header:', error);
+                this.showToast(`Ошибка: ${ error.message }`, 'error');
+            }
+        }
+
+        /**
+         * Check if the add button should be shown in grouped cells (issue #543)
+         * The button is shown only when data source is object/table format
+         * @returns {boolean} - True if the button should be shown
+         */
+        shouldShowGroupedCellAddButton() {
+            // Check if this is object/table format
+            const isObjectFormat = (this.rawObjectData && this.rawObjectData.length > 0 && this.objectTableId)
+                || this.options.dataSource === 'table';
+
+            return isObjectFormat;
+        }
+
+        /**
+         * Open create record form from a grouped cell with prefilled values (issue #543)
+         * Prefills attributes from the current cell and all grouping cells to the left
+         *
+         * @param {number} rowIndex - Index of the row in groupedData
+         * @param {number} groupLevel - Level of the grouping column (0-based, from left to right)
+         */
+        async openGroupedCellCreateForm(rowIndex, groupLevel) {
+            try {
+                // Get the row info from groupedData
+                const rowInfo = this.groupedData[rowIndex];
+                if (!rowInfo) {
+                    console.error('openGroupedCellCreateForm: Invalid rowIndex', rowIndex);
+                    this.showToast('Ошибка: строка не найдена', 'error');
+                    return;
+                }
+
+                // Find the table type ID (objectTableId for object format)
+                const tableTypeId = this.objectTableId || this.options.tableTypeId;
+                if (!tableTypeId) {
+                    console.error('openGroupedCellCreateForm: No table type ID found');
+                    this.showToast('Ошибка: не найден тип таблицы', 'error');
+                    return;
+                }
+
+                // Build prefilled values from grouping columns (current and all to the left)
+                const fieldValues = {};
+
+                // Iterate through grouping columns from 0 to groupLevel (inclusive)
+                for (let level = 0; level <= groupLevel; level++) {
+                    const colId = this.groupingColumns[level];
+                    const column = this.columns.find(c => c.id === colId);
+                    if (!column) continue;
+
+                    // Get the column's data index
+                    const dataIndex = this.columns.indexOf(column);
+                    if (dataIndex === -1) continue;
+
+                    // Get the raw value from the row data
+                    const rawValue = rowInfo.data[dataIndex];
+                    if (rawValue === undefined || rawValue === null || rawValue === '') continue;
+
+                    // For reference fields, extract the ID part from "id:Value" format
+                    const isRefField = column.ref_id != null || (column.ref && column.ref !== 0);
+                    let valueToUse = rawValue;
+
+                    if (isRefField && typeof rawValue === 'string') {
+                        const colonIndex = rawValue.indexOf(':');
+                        if (colonIndex > 0) {
+                            // Use only the ID part for prefilling reference fields
+                            valueToUse = rawValue.substring(0, colonIndex);
+                        }
+                    }
+
+                    // Use column.paramId or column.id as the field key
+                    // In object format, column.paramId contains the metadata field ID
+                    const fieldId = column.paramId || colId;
+                    fieldValues[`t${ fieldId }`] = valueToUse;
+                }
+
+                // Determine parent ID
+                // In object format, try to get parent from rawObjectData
+                let parentId = 1;
+                if (this.rawObjectData && this.rawObjectData[rowInfo.originalIndex]) {
+                    const rawItem = this.rawObjectData[rowInfo.originalIndex];
+                    if (rawItem.u) {
+                        parentId = rawItem.u;
+                    }
+                }
+
+                // Use the global openCreateRecordForm function
+                if (typeof openCreateRecordForm === 'function') {
+                    await openCreateRecordForm(tableTypeId, parentId, fieldValues);
+                } else {
+                    console.error('openGroupedCellCreateForm: openCreateRecordForm is not available');
+                    this.showToast('Ошибка: функция создания записи недоступна', 'error');
+                }
+
+            } catch (error) {
+                console.error('Error opening create form from grouped cell:', error);
                 this.showToast(`Ошибка: ${ error.message }`, 'error');
             }
         }
