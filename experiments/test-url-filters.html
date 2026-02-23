@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test URL Filters - Issue #547</title>
+    <link rel="stylesheet" href="../assets/css/integram-table.css">
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 20px;
+        }
+        .test-section {
+            margin-bottom: 30px;
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+        .test-link {
+            display: block;
+            margin: 10px 0;
+            padding: 8px 12px;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            text-decoration: none;
+            color: #333;
+        }
+        .test-link:hover {
+            background: #e0e0e0;
+        }
+        .output {
+            margin-top: 10px;
+            padding: 10px;
+            background: #fff;
+            border: 1px solid #ccc;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test URL Filters - Issue #547</h1>
+
+    <div class="test-section">
+        <h2>Test Links (click to test URL parameters)</h2>
+        <a class="test-link" href="?FR_1=test%">FR_1=test% (starts with "test")</a>
+        <a class="test-link" href="?FR_1=%test%">FR_1=%test% (contains "test")</a>
+        <a class="test-link" href="?FR_1=%test">FR_1=%test (ends with "test")</a>
+        <a class="test-link" href="?FR_1=test">FR_1=test (equals "test")</a>
+        <a class="test-link" href="?FR_1=!test">FR_1=!test (not equals "test")</a>
+        <a class="test-link" href="?FR_1=%">FR_1=% (not empty)</a>
+        <a class="test-link" href="?FR_1=!%">FR_1=!% (empty)</a>
+        <a class="test-link" href="?FR_2=>=100">FR_2=>=100 (greater or equal 100)</a>
+        <a class="test-link" href="?FR_2=<=100">FR_2=<=100 (less or equal 100)</a>
+        <a class="test-link" href="?FR_2=100&TO_2=200">FR_2=100&TO_2=200 (range 100-200)</a>
+        <a class="test-link" href="?FR_1=IN(a,b,c)">FR_1=IN(a,b,c) (in list)</a>
+    </div>
+
+    <div class="test-section">
+        <h2>Current URL Parameters</h2>
+        <div class="output" id="url-params"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Parsed Filters</h2>
+        <div class="output" id="parsed-filters"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Table Container</h2>
+        <div id="test-table"></div>
+    </div>
+
+    <script src="../assets/js/integram-table.js"></script>
+    <script>
+        // Display current URL parameters
+        document.getElementById('url-params').textContent = window.location.search || '(no parameters)';
+
+        // Test parseFilterValue function
+        const testTable = {
+            filterTypes: {
+                'CHARS': [
+                    { symbol: '^', name: 'начинается с...', format: 'FR_{ T }={ X }%' },
+                    { symbol: '=', name: 'равно', format: 'FR_{ T }={ X }' },
+                    { symbol: '≠', name: 'не равно', format: 'FR_{ T }=!{ X }' },
+                    { symbol: '~', name: 'содержит', format: 'FR_{ T }=%{ X }%' },
+                    { symbol: '!', name: 'не содержит', format: 'FR_{ T }=!%{ X }%' },
+                    { symbol: '!^', name: 'не начинается', format: 'FR_{ T }=!%{ X }' },
+                    { symbol: '%', name: 'не пустое', format: 'FR_{ T }=%' },
+                    { symbol: '!%', name: 'пустое', format: 'FR_{ T }=!%' },
+                    { symbol: '(,)', name: 'в списке', format: 'FR_{ T }=IN({ X })' },
+                    { symbol: '$', name: 'заканчивается', format: 'FR_{ T }=%{ X }' }
+                ]
+            }
+        };
+
+        // Mock parseFilterValue for testing
+        function parseFilterValue(rawValue) {
+            if (!rawValue || rawValue === '') {
+                return { type: '^', value: '' };
+            }
+            if (rawValue === '%') {
+                return { type: '%', value: '' };
+            }
+            if (rawValue === '!%') {
+                return { type: '!%', value: '' };
+            }
+            const inMatch = rawValue.match(/^IN\((.+)\)$/);
+            if (inMatch) {
+                return { type: '(,)', value: inMatch[1] };
+            }
+            if (rawValue.startsWith('!')) {
+                const innerValue = rawValue.substring(1);
+                if (innerValue.startsWith('%') && innerValue.endsWith('%')) {
+                    return { type: '!', value: innerValue.slice(1, -1) };
+                }
+                if (innerValue.startsWith('%') && !innerValue.endsWith('%')) {
+                    return { type: '!^', value: innerValue.substring(1) };
+                }
+                return { type: '≠', value: innerValue };
+            }
+            if (rawValue.startsWith('>=')) {
+                return { type: '≥', value: rawValue.substring(2) };
+            }
+            if (rawValue.startsWith('<=')) {
+                return { type: '≤', value: rawValue.substring(2) };
+            }
+            if (rawValue.startsWith('%') && rawValue.endsWith('%') && rawValue.length > 2) {
+                return { type: '~', value: rawValue.slice(1, -1) };
+            }
+            if (rawValue.startsWith('%') && !rawValue.endsWith('%')) {
+                return { type: '$', value: rawValue.substring(1) };
+            }
+            if (rawValue.endsWith('%') && !rawValue.startsWith('%')) {
+                return { type: '^', value: rawValue.slice(0, -1) };
+            }
+            return { type: '=', value: rawValue };
+        }
+
+        // Parse URL and display results
+        const urlParams = new URLSearchParams(window.location.search);
+        const parsedFilters = {};
+
+        for (const [key, value] of urlParams.entries()) {
+            if (key.startsWith('FR_')) {
+                const colId = key.substring(3);
+                parsedFilters[colId] = parseFilterValue(value);
+                parsedFilters[colId].rawValue = value;
+            } else if (key.startsWith('TO_')) {
+                const colId = key.substring(3);
+                if (parsedFilters[colId]) {
+                    parsedFilters[colId].type = '...';
+                    parsedFilters[colId].value = parsedFilters[colId].value + ',' + value;
+                    parsedFilters[colId].toValue = value;
+                }
+            }
+        }
+
+        document.getElementById('parsed-filters').textContent =
+            JSON.stringify(parsedFilters, null, 2) || '(no filters)';
+    </script>
+</body>
+</html>

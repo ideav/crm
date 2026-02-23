@@ -76,6 +76,10 @@ class IntegramTable {
             // we remove it from URL and stop forwarding it to API requests
             this.overriddenUrlParams = new Set();
 
+            // Track URL filter parameters (FR_*, TO_*) for issue #547
+            // These are parsed from URL and displayed in the filter row
+            this.urlFilters = {};  // Map of column IDs to { type, value } parsed from URL params
+
             // Track whether configuration (column order/visibility) was loaded from URL (issue #514)
             // When true, changes to column state will NOT be saved to cookies
             // but can still be copied as a shareable URL
@@ -280,6 +284,12 @@ class IntegramTable {
                     this.visibleColumns = this.columns.filter(c => !this.idColumns.has(c.id)).map(c => c.id);
                 } else {
                     this.visibleColumns = validVisible;
+                }
+
+                // Parse URL filter parameters on initial load (issue #547)
+                // This must be done after columns are loaded so we can match column IDs
+                if (!append && Object.keys(this.urlFilters).length === 0) {
+                    this.parseUrlFiltersFromParams();
                 }
 
                 if (this.options.onDataLoad) {
@@ -1012,6 +1022,7 @@ class IntegramTable {
                             </div>
                         </div>
                     </div>
+                    ${ this.renderHiddenFilterBadges() }
                     <div class="integram-table-container">
                         <table class="integram-table${ this.settings.compact ? ' compact' : '' }">
                         <thead>
@@ -4394,9 +4405,296 @@ class IntegramTable {
             }
         }
 
+        /**
+         * Parse URL GET parameters for filter values (FR_*, TO_*) - issue #547
+         * Called after columns are loaded to populate filters from URL params.
+         * Detects filter type based on the parameter value format.
+         */
+        parseUrlFiltersFromParams() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlFilters = {};
+
+            // Parameters to exclude (handled elsewhere)
+            const excludeParams = new Set(['parentId', 'F_U', 'up', 'LIMIT', 'ORDER', 'RECORD_COUNT', '_count', 'JSON_OBJ', 'JSON', '_itc']);
+
+            for (const [key, value] of urlParams.entries()) {
+                if (excludeParams.has(key)) continue;
+
+                // Check for FR_ prefix
+                if (key.startsWith('FR_')) {
+                    const colId = key.substring(3);  // Remove 'FR_' prefix
+                    const parsed = this.parseFilterValue(value);
+                    urlFilters[colId] = {
+                        type: parsed.type,
+                        value: parsed.value,
+                        paramKey: key
+                    };
+                }
+                // Check for TO_ prefix (range filter second part)
+                else if (key.startsWith('TO_')) {
+                    const colId = key.substring(3);  // Remove 'TO_' prefix
+                    // If we already have a FR_ for this column, combine into range
+                    if (urlFilters[colId]) {
+                        urlFilters[colId].type = '...';
+                        urlFilters[colId].value = `${urlFilters[colId].value},${value}`;
+                        urlFilters[colId].toParamKey = key;
+                    }
+                }
+            }
+
+            this.urlFilters = urlFilters;
+
+            // If we have URL filters, populate this.filters and enable filter row
+            if (Object.keys(urlFilters).length > 0) {
+                Object.keys(urlFilters).forEach(colId => {
+                    const urlFilter = urlFilters[colId];
+                    this.filters[colId] = {
+                        type: urlFilter.type,
+                        value: urlFilter.value
+                    };
+                });
+                this.filtersEnabled = true;
+            }
+        }
+
+        /**
+         * Parse a filter value from URL to determine filter type and actual value.
+         * Based on format patterns from this.filterTypes.
+         * @param {string} rawValue - The raw value from URL parameter
+         * @returns {{ type: string, value: string }} Filter type symbol and extracted value
+         */
+        parseFilterValue(rawValue) {
+            if (!rawValue || rawValue === '') {
+                return { type: '^', value: '' };
+            }
+
+            // Check for empty/not empty filters
+            if (rawValue === '%') {
+                return { type: '%', value: '' };
+            }
+            if (rawValue === '!%') {
+                return { type: '!%', value: '' };
+            }
+
+            // Check for IN() list filter: IN(val1,val2,...)
+            const inMatch = rawValue.match(/^IN\((.+)\)$/);
+            if (inMatch) {
+                return { type: '(,)', value: inMatch[1] };
+            }
+
+            // Check for "not equals" filter: !value
+            if (rawValue.startsWith('!')) {
+                const innerValue = rawValue.substring(1);
+                // Check if it's "not contains": !%value%
+                if (innerValue.startsWith('%') && innerValue.endsWith('%')) {
+                    return { type: '!', value: innerValue.slice(1, -1) };
+                }
+                // Check if it's "not starts with": !%value (ends with %, starts with !%)
+                if (innerValue.startsWith('%') && !innerValue.endsWith('%')) {
+                    return { type: '!^', value: innerValue.substring(1) };
+                }
+                // Simple "not equals": !value
+                return { type: '≠', value: innerValue };
+            }
+
+            // Check for comparison operators: >=, <=, >, <
+            if (rawValue.startsWith('>=')) {
+                return { type: '≥', value: rawValue.substring(2) };
+            }
+            if (rawValue.startsWith('<=')) {
+                return { type: '≤', value: rawValue.substring(2) };
+            }
+            // Note: > and < are less common as URL values may use different encoding
+            // The format uses FR_{T}>{X} but the value itself doesn't include >
+            // After parsing in applyFilter, it becomes just the value
+
+            // Check for "contains" filter: %value%
+            if (rawValue.startsWith('%') && rawValue.endsWith('%') && rawValue.length > 2) {
+                return { type: '~', value: rawValue.slice(1, -1) };
+            }
+
+            // Check for "ends with" filter: %value (starts with %, doesn't end with %)
+            if (rawValue.startsWith('%') && !rawValue.endsWith('%')) {
+                return { type: '$', value: rawValue.substring(1) };
+            }
+
+            // Check for "starts with" filter: value%
+            if (rawValue.endsWith('%') && !rawValue.startsWith('%')) {
+                return { type: '^', value: rawValue.slice(0, -1) };
+            }
+
+            // Default: equals
+            return { type: '=', value: rawValue };
+        }
+
+        /**
+         * Check if there are any URL filter parameters that apply to hidden columns.
+         * @returns {Array} Array of { colId, colName, filter } for hidden column filters
+         */
+        getHiddenColumnFilters() {
+            const hiddenFilters = [];
+
+            Object.keys(this.urlFilters).forEach(colId => {
+                const urlFilter = this.urlFilters[colId];
+                const column = this.columns.find(c => c.id === colId);
+
+                // Check if column is hidden (not in visibleColumns) or doesn't exist
+                const isHidden = !column || !this.visibleColumns.includes(colId);
+
+                if (isHidden) {
+                    const colName = column ? column.name : colId;
+                    hiddenFilters.push({
+                        colId: colId,
+                        colName: colName,
+                        filter: urlFilter
+                    });
+                }
+            });
+
+            return hiddenFilters;
+        }
+
+        /**
+         * Check if there are any URL filter parameters present.
+         * @returns {boolean} True if there are URL filters
+         */
+        hasUrlFilters() {
+            return Object.keys(this.urlFilters).length > 0;
+        }
+
+        /**
+         * Remove a specific URL filter and update browser URL.
+         * @param {string} colId - Column ID to remove filter for
+         */
+        removeUrlFilter(colId) {
+            const urlFilter = this.urlFilters[colId];
+            if (!urlFilter) return;
+
+            // Remove from urlFilters
+            delete this.urlFilters[colId];
+
+            // Remove from filters
+            delete this.filters[colId];
+
+            // Mark as overridden so it won't be forwarded to API
+            if (urlFilter.paramKey) {
+                this.overriddenUrlParams.add(urlFilter.paramKey);
+            }
+            if (urlFilter.toParamKey) {
+                this.overriddenUrlParams.add(urlFilter.toParamKey);
+            }
+
+            // Update browser URL
+            const newUrlParams = new URLSearchParams(window.location.search);
+            if (urlFilter.paramKey) {
+                newUrlParams.delete(urlFilter.paramKey);
+            }
+            if (urlFilter.toParamKey) {
+                newUrlParams.delete(urlFilter.toParamKey);
+            }
+
+            const newUrl = window.location.pathname + (newUrlParams.toString() ? '?' + newUrlParams.toString() : '');
+            window.history.replaceState({}, '', newUrl);
+
+            // Reload data with updated filters
+            this.data = [];
+            this.loadedRecords = 0;
+            this.hasMore = true;
+            this.totalRows = null;
+            this.loadData(false);
+        }
+
+        /**
+         * Clear all URL filters and remove them from URL.
+         */
+        clearAllUrlFilters() {
+            // Collect all URL filter param keys
+            const paramsToRemove = [];
+            Object.values(this.urlFilters).forEach(urlFilter => {
+                if (urlFilter.paramKey) paramsToRemove.push(urlFilter.paramKey);
+                if (urlFilter.toParamKey) paramsToRemove.push(urlFilter.toParamKey);
+            });
+
+            // Mark all as overridden
+            paramsToRemove.forEach(key => this.overriddenUrlParams.add(key));
+
+            // Clear urlFilters
+            this.urlFilters = {};
+
+            // Clear corresponding filters
+            this.filters = {};
+
+            // Update browser URL
+            const newUrlParams = new URLSearchParams(window.location.search);
+            paramsToRemove.forEach(key => newUrlParams.delete(key));
+
+            const newUrl = window.location.pathname + (newUrlParams.toString() ? '?' + newUrlParams.toString() : '');
+            window.history.replaceState({}, '', newUrl);
+
+            // Reload data
+            this.data = [];
+            this.loadedRecords = 0;
+            this.hasMore = true;
+            this.totalRows = null;
+            this.loadData(false);
+        }
+
+        /**
+         * Render badges for filters on hidden columns (issue #547).
+         * These appear above the table to show filters for columns not currently visible.
+         * @returns {string} HTML for hidden filter badges
+         */
+        renderHiddenFilterBadges() {
+            const hiddenFilters = this.getHiddenColumnFilters();
+            if (hiddenFilters.length === 0) return '';
+
+            const instanceName = this.options.instanceName;
+            const badges = hiddenFilters.map(hf => {
+                const filterTypeSymbol = hf.filter.type || '^';
+                const filterValue = hf.filter.value || '';
+                const displayValue = filterValue ? `${filterTypeSymbol} ${filterValue}` : filterTypeSymbol;
+
+                return `
+                    <span class="hidden-filter-badge" data-col-id="${hf.colId}">
+                        <span class="hidden-filter-badge-name">${hf.colName}</span>
+                        <span class="hidden-filter-badge-value">${displayValue}</span>
+                        <span class="hidden-filter-badge-remove" onclick="window.${instanceName}.removeUrlFilter('${hf.colId}')" title="Удалить фильтр">×</span>
+                    </span>
+                `;
+            }).join('');
+
+            return `
+                <div class="hidden-filter-badges-container">
+                    ${badges}
+                </div>
+            `;
+        }
+
         clearAllFilters() {
             // Clear all filters
             this.filters = {};
+
+            // Also clear URL filters and remove from browser URL (issue #547)
+            if (this.hasUrlFilters()) {
+                const paramsToRemove = [];
+                Object.values(this.urlFilters).forEach(urlFilter => {
+                    if (urlFilter.paramKey) paramsToRemove.push(urlFilter.paramKey);
+                    if (urlFilter.toParamKey) paramsToRemove.push(urlFilter.toParamKey);
+                });
+
+                // Mark as overridden
+                paramsToRemove.forEach(key => this.overriddenUrlParams.add(key));
+
+                // Update browser URL
+                const newUrlParams = new URLSearchParams(window.location.search);
+                paramsToRemove.forEach(key => newUrlParams.delete(key));
+
+                const newUrl = window.location.pathname + (newUrlParams.toString() ? '?' + newUrlParams.toString() : '');
+                window.history.replaceState({}, '', newUrl);
+
+                // Clear urlFilters
+                this.urlFilters = {};
+            }
 
             // Reset data and load from beginning
             this.data = [];

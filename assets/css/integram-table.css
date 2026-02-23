@@ -2375,3 +2375,59 @@ tr.row-selected {
     box-shadow: var(--md-elevation-1, 0 1px 3px rgba(0,0,0,0.12));
     transform: translateY(-50%) scale(0.95);
 }
+
+/* Hidden filter badges container (issue #547)
+ * Displays filters for columns that are not visible in the table
+ */
+.hidden-filter-badges-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px;
+    background-color: rgba(255, 193, 7, 0.1);
+    border-bottom: 1px solid rgba(255, 193, 7, 0.3);
+}
+
+/* Individual hidden filter badge */
+.hidden-filter-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    background-color: rgba(255, 193, 7, 0.2);
+    border: 1px solid rgba(255, 193, 7, 0.5);
+    border-radius: 4px;
+    font-size: 13px;
+    color: rgba(0, 0, 0, 0.87);
+}
+
+.hidden-filter-badge-name {
+    font-weight: 500;
+    color: rgba(0, 0, 0, 0.7);
+}
+
+.hidden-filter-badge-value {
+    font-family: monospace;
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.87);
+    background-color: rgba(255, 255, 255, 0.5);
+    padding: 1px 4px;
+    border-radius: 2px;
+}
+
+.hidden-filter-badge-remove {
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: bold;
+    color: rgba(0, 0, 0, 0.5);
+    line-height: 1;
+    padding: 0 2px;
+    margin-left: 2px;
+    border-radius: 2px;
+    transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.hidden-filter-badge-remove:hover {
+    color: #d32f2f;
+    background-color: rgba(211, 47, 47, 0.1);
+}
