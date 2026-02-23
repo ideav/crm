@@ -76,7 +76,7 @@ class IntegramTable {
             // we remove it from URL and stop forwarding it to API requests
             this.overriddenUrlParams = new Set();
 
-            // Track URL filter parameters (FR_*, TO_*) for issue #547
+            // Track URL filter parameters (FR_*, TO_*, F_*) for issue #547, #549
             // These are parsed from URL and displayed in the filter row
             this.urlFilters = {};  // Map of column IDs to { type, value } parsed from URL params
 
@@ -4406,9 +4406,13 @@ class IntegramTable {
         }
 
         /**
-         * Parse URL GET parameters for filter values (FR_*, TO_*) - issue #547
+         * Parse URL GET parameters for filter values (FR_*, TO_*, F_*) - issue #547, issue #549
          * Called after columns are loaded to populate filters from URL params.
          * Detects filter type based on the parameter value format.
+         * Supports three prefix formats:
+         *   - FR_ : standard filter prefix
+         *   - TO_ : range filter second part (used with FR_)
+         *   - F_  : alternative filter prefix (same behavior as FR_)
          */
         parseUrlFiltersFromParams() {
             const urlParams = new URLSearchParams(window.location.search);
@@ -4430,10 +4434,21 @@ class IntegramTable {
                         paramKey: key
                     };
                 }
+                // Check for F_ prefix (alternative filter format) - issue #549
+                // Note: F_U is excluded above as it's used for parentId
+                else if (key.startsWith('F_')) {
+                    const colId = key.substring(2);  // Remove 'F_' prefix
+                    const parsed = this.parseFilterValue(value);
+                    urlFilters[colId] = {
+                        type: parsed.type,
+                        value: parsed.value,
+                        paramKey: key
+                    };
+                }
                 // Check for TO_ prefix (range filter second part)
                 else if (key.startsWith('TO_')) {
                     const colId = key.substring(3);  // Remove 'TO_' prefix
-                    // If we already have a FR_ for this column, combine into range
+                    // If we already have a FR_ or F_ for this column, combine into range
                     if (urlFilters[colId]) {
                         urlFilters[colId].type = '...';
                         urlFilters[colId].value = `${urlFilters[colId].value},${value}`;
@@ -5241,13 +5256,13 @@ class IntegramTable {
          * @param {string} filterValue - The new filter value
          */
         handleFilterOverride(colId, filterValue) {
-            // URL parameter patterns for this column: FR_{colId}, TO_{colId}
+            // URL parameter patterns for this column: FR_{colId}, TO_{colId}, F_{colId} (issue #549)
             const urlParams = new URLSearchParams(window.location.search);
             const paramsToRemove = [];
 
-            // Check for FR_ and TO_ parameters for this column
+            // Check for FR_, TO_, and F_ parameters for this column
             for (const [key, value] of urlParams.entries()) {
-                if (key === `FR_${colId}` || key === `TO_${colId}`) {
+                if (key === `FR_${colId}` || key === `TO_${colId}` || key === `F_${colId}`) {
                     paramsToRemove.push(key);
                 }
             }
