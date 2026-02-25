@@ -1108,6 +1108,8 @@ class IntegramTable {
             const format = column.format || 'SHORT';
             const currentFilter = this.filters[column.id] || { type: this.getDefaultFilterType(format), value: '' };
             const placeholder = columnIndex === 0 ? 'Фильтр...' : '';
+            // Use displayValue (resolved text label) when available, otherwise use raw value (issue #551)
+            const displayValue = currentFilter.displayValue !== undefined ? currentFilter.displayValue : currentFilter.value;
 
             return `
                 <td>
@@ -1118,7 +1120,7 @@ class IntegramTable {
                         <input type="text"
                                class="filter-input-with-icon"
                                data-column-id="${ column.id }"
-                               value="${ currentFilter.value }"
+                               value="${ displayValue }"
                                placeholder="${ placeholder }">
                     </div>
                 </td>
@@ -1810,6 +1812,8 @@ class IntegramTable {
                         this.filters[colId] = { type: this.getDefaultFilterType(fmt), value: '' };
                     }
                     this.filters[colId].value = input.value;
+                    // Clear displayValue: user is now entering their own filter, not the resolved label (issue #551)
+                    delete this.filters[colId].displayValue;
 
                     // Check if this filter overrides URL GET parameters (issue #500)
                     this.handleFilterOverride(colId, input.value);
@@ -4433,6 +4437,11 @@ class IntegramTable {
                         value: parsed.value,
                         paramKey: key
                     };
+                    // Store ref ID info for @id-based filters (issue #551)
+                    if (parsed.isRefId) {
+                        urlFilters[colId].isRefId = true;
+                        urlFilters[colId].refId = parsed.refId;
+                    }
                 }
                 // Check for F_ prefix (alternative filter format) - issue #549
                 // Note: F_U is excluded above as it's used for parentId
@@ -4444,6 +4453,11 @@ class IntegramTable {
                         value: parsed.value,
                         paramKey: key
                     };
+                    // Store ref ID info for @id-based filters (issue #551)
+                    if (parsed.isRefId) {
+                        urlFilters[colId].isRefId = true;
+                        urlFilters[colId].refId = parsed.refId;
+                    }
                 }
                 // Check for TO_ prefix (range filter second part)
                 else if (key.startsWith('TO_')) {
@@ -4469,7 +4483,53 @@ class IntegramTable {
                     };
                 });
                 this.filtersEnabled = true;
+
+                // Resolve @id-based filters to display labels (issue #551)
+                // This is done asynchronously after setting up filters
+                this.resolveRefIdUrlFilters();
             }
+        }
+
+        /**
+         * Resolve @id-based URL filter values to human-readable text labels (issue #551).
+         * For each URL filter with @{id} format (e.g. FR_4547=@6753), calls _ref_reqs/{colId}
+         * to get the list of options, then finds the matching option by ID and stores the
+         * text label as displayValue on the filter. The displayValue is shown in the filter
+         * input instead of the raw @id value.
+         *
+         * If the user modifies or resets the filter, the displayValue is cleared
+         * and the user's actual input is used instead.
+         */
+        resolveRefIdUrlFilters() {
+            const refIdFilters = Object.entries(this.urlFilters).filter(([, f]) => f.isRefId);
+            if (refIdFilters.length === 0) return;
+
+            refIdFilters.forEach(async ([colId, urlFilter]) => {
+                try {
+                    const options = await this.fetchReferenceOptions(colId);
+                    // Find the option whose ID matches the refId from the URL filter
+                    const match = options.find(([id]) => String(id) === String(urlFilter.refId));
+                    if (match) {
+                        const [, label] = match;
+                        // Only update displayValue if the filter has not been overridden by the user
+                        if (this.filters[colId] && this.filters[colId].value === urlFilter.value) {
+                            this.filters[colId].displayValue = label;
+                            // Update the filter input in the DOM if it is already rendered
+                            const input = this.container
+                                ? this.container.querySelector(`.filter-input-with-icon[data-column-id="${colId}"]`)
+                                : null;
+                            if (input && input.value === urlFilter.value) {
+                                input.value = label;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Non-fatal: if we cannot resolve the label, keep the raw @id value
+                    if (window.INTEGRAM_DEBUG) {
+                        console.warn(`[resolveRefIdUrlFilters] Could not resolve ref options for column ${colId}:`, e);
+                    }
+                }
+            });
         }
 
         /**
@@ -4489,6 +4549,13 @@ class IntegramTable {
             }
             if (rawValue === '!%') {
                 return { type: '!%', value: '' };
+            }
+
+            // Check for ID-based filter: @{id} means filter by record ID, not by text value (issue #551)
+            // Example: FR_4547=@6753 means filter column 4547 by record ID 6753
+            const refIdMatch = rawValue.match(/^@(\d+)$/);
+            if (refIdMatch) {
+                return { type: '=', value: rawValue, isRefId: true, refId: refIdMatch[1] };
             }
 
             // Check for IN() list filter: IN(val1,val2,...)
@@ -4666,8 +4733,12 @@ class IntegramTable {
             const instanceName = this.options.instanceName;
             const badges = hiddenFilters.map(hf => {
                 const filterTypeSymbol = hf.filter.type || '^';
-                const filterValue = hf.filter.value || '';
-                const displayValue = filterValue ? `${filterTypeSymbol} ${filterValue}` : filterTypeSymbol;
+                // Use resolved text label for @id-based filters when available (issue #551)
+                const activeFilter = this.filters[hf.colId];
+                const resolvedLabel = activeFilter && activeFilter.displayValue !== undefined
+                    ? activeFilter.displayValue
+                    : (hf.filter.value || '');
+                const displayValue = resolvedLabel ? `${filterTypeSymbol} ${resolvedLabel}` : filterTypeSymbol;
 
                 return `
                     <span class="hidden-filter-badge" data-col-id="${hf.colId}">
