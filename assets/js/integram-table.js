@@ -4973,13 +4973,51 @@ class IntegramTable {
 
                 const metadata = this.metadataCache[typeId];
 
-                // Render create form (recordData = null for create mode)
-                this.renderEditFormModal(metadata, null, true, typeId, columnId);
+                // Pre-fill reference fields from URL @id filters (issue #553)
+                // When URL has FR_{colId}=@{id}, auto-select that id in the create form
+                const prefillReqs = this.buildRefIdPrefillFromUrlFilters(metadata);
+                const createRecordData = prefillReqs ? { obj: { val: '', parent: 1 }, reqs: prefillReqs } : null;
+
+                // Render create form with pre-filled values from URL filters
+                this.renderEditFormModal(metadata, createRecordData, true, typeId, columnId);
 
             } catch (error) {
                 console.error('Error opening create form from column header:', error);
                 this.showToast(`Ошибка: ${ error.message }`, 'error');
             }
+        }
+
+        /**
+         * Build recordData.reqs pre-fill map from URL @id-based filters (issue #553).
+         * For each URL filter with isRefId=true (e.g. FR_4547=@6753), checks if the
+         * metadata has a matching requisite (req.id === colId). If so, adds
+         * { value: refId } to the reqs map so the create form pre-selects that value.
+         *
+         * @param {Object} metadata - Table metadata with reqs array
+         * @returns {Object|null} reqs map {reqId: {value: refId}} or null if nothing to pre-fill
+         */
+        buildRefIdPrefillFromUrlFilters(metadata) {
+            if (!this.urlFilters || !metadata || !metadata.reqs) return null;
+
+            const reqs = {};
+            let hasPrefill = false;
+
+            for (const [colId, urlFilter] of Object.entries(this.urlFilters)) {
+                if (!urlFilter.isRefId || !urlFilter.refId) continue;
+
+                // Check if this colId matches a requisite in the metadata
+                const matchingReq = metadata.reqs.find(req => String(req.id) === String(colId) && req.ref_id);
+                if (matchingReq) {
+                    reqs[colId] = { value: String(urlFilter.refId) };
+                    hasPrefill = true;
+
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log(`[buildRefIdPrefillFromUrlFilters] Pre-filling field ${colId} with refId=${urlFilter.refId}`);
+                    }
+                }
+            }
+
+            return hasPrefill ? reqs : null;
         }
 
         /**
