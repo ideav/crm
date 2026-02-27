@@ -961,7 +961,7 @@ class IntegramTable {
                         ${ this.options.title ? `<div class="integram-table-title">${ this.options.title }</div>` : '' }
                         <div class="integram-table-controls">
                             ${ this.hasActiveFiltersOrGroups() ? `
-                            <button class="btn btn-sm btn-outline-secondary mr-2" onclick="window.${ instanceName }.copyConfigUrl()" title="Скопировать ссылку с текущими фильтрами и группами">
+                            <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.copyConfigUrl()" title="Скопировать ссылку с текущими фильтрами и группами">
                                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle;">
                                     <path d="M10 2H6C5.44772 2 5 2.44772 5 3V4H4C3.44772 4 3 4.44772 3 5V13C3 13.5523 3.44772 14 4 14H10C10.5523 14 11 13.5523 11 13V12H12C12.5523 12 13 11.5523 13 11V5L10 2Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
                                     <path d="M5 4V3C5 2.44772 5.44772 2 6 2H9.5L13 5.5V11C13 11.5523 12.5523 12 12 12H11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
@@ -969,29 +969,29 @@ class IntegramTable {
                             </button>
                             ` : '' }
                             ${ this.groupingEnabled ? `
-                            <button class="btn btn-sm btn-outline-secondary mr-1" onclick="window.${ instanceName }.clearGrouping()" title="Очистить группировку">
+                            <button class="btn btn-sm btn-outline-secondary me-1" onclick="window.${ instanceName }.clearGrouping()" title="Очистить группировку">
                                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle;">
                                     <circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/>
                                     <path d="M5 5L11 11M11 5L5 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                                 </svg>
                             </button>
                             ` : '' }
-                            <button class="btn btn-sm btn-outline-secondary mr-2" onclick="window.${ instanceName }.openGroupingSettings()">
+                            <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.openGroupingSettings()">
                                 ${ this.groupingEnabled ? '✓' : '' } Группы
                             </button>
                             ${ this.hasActiveFilters() ? `
-                            <button class="btn btn-sm btn-outline-secondary mr-1" onclick="window.${ instanceName }.clearAllFilters()" title="Очистить фильтры">
+                            <button class="btn btn-sm btn-outline-secondary me-1" onclick="window.${ instanceName }.clearAllFilters()" title="Очистить фильтры">
                                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle;">
                                     <circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/>
                                     <path d="M5 5L11 11M11 5L5 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
                                 </svg>
                             </button>
                             ` : '' }
-                            <button class="btn btn-sm btn-outline-secondary mr-2" onclick="window.${ instanceName }.toggleFilters()">
+                            <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.toggleFilters()">
                                 ${ this.filtersEnabled ? '✓' : '' } Фильтры
                             </button>
                             <div class="integram-table-export-container">
-                                <button class="btn btn-sm btn-outline-secondary mr-2" onclick="window.${ instanceName }.toggleExportMenu(event)" title="Экспорт таблицы">
+                                <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.toggleExportMenu(event)" title="Экспорт таблицы">
                                     📥 Экспорт
                                 </button>
                                 <div class="integram-export-menu" id="${ instanceName }-export-menu" style="display: none;">
@@ -3899,7 +3899,7 @@ class IntegramTable {
                     }).join('') }
                 </div>
                 <div style="text-align: right; margin-top: 15px;">
-                    <button class="btn btn-primary mr-2" id="apply-grouping-btn">Применить</button>
+                    <button class="btn btn-primary me-2" id="apply-grouping-btn">Применить</button>
                     <button class="btn btn-secondary" id="close-grouping-btn">Закрыть</button>
                 </div>
             `;
