@@ -3647,7 +3647,7 @@ class IntegramTable {
                         </div>
                     `).join('') }
                 </div>
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px;">
+                <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: 15px; gap: 10px;">
                     <button class="btn btn-primary" id="add-column-btn-${instanceName}">Добавить колонку</button>
                     <button class="btn btn-secondary" onclick="window.${ instanceName }.closeColumnSettings()">Закрыть</button>
                 </div>
@@ -3685,8 +3685,8 @@ class IntegramTable {
         }
 
         /**
-         * Show form to add a new column (issue #565)
-         * Displays inputs for column name, base type, list value checkbox, and multiselect checkbox
+         * Show form to add a new column (issue #565, #567)
+         * Displays a modal dialog with inputs for column name, base type, list value checkbox, and multiselect checkbox
          */
         showAddColumnForm(parentModal) {
             const instanceName = this.options.instanceName;
@@ -3704,72 +3704,79 @@ class IntegramTable {
                 { id: 10, name: 'Файл' }
             ];
 
-            // Create form container
-            const formContainer = document.createElement('div');
-            formContainer.id = `add-column-form-${instanceName}`;
-            formContainer.style.cssText = 'margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 4px; border: 1px solid #dee2e6;';
+            // Create modal overlay (issue #567: make the form a modal)
+            const modalOverlay = document.createElement('div');
+            modalOverlay.className = 'add-column-modal-overlay';
+            modalOverlay.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.32); z-index: 1001; backdrop-filter: blur(2px);';
 
-            formContainer.innerHTML = `
-                <h6 style="margin-bottom: 15px; font-weight: 600;">Добавить новую колонку</h6>
-                <div style="margin-bottom: 12px;">
-                    <label style="display: block; margin-bottom: 4px; font-weight: 500;">Имя колонки:</label>
-                    <input type="text" id="new-column-name-${instanceName}" class="form-control" placeholder="Введите имя колонки" style="width: 100%;">
+            // Create modal container
+            const modal = document.createElement('div');
+            modal.className = 'add-column-modal';
+            modal.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; padding: 20px; border-radius: 4px; box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22); z-index: 1002; max-width: 450px; width: 90%;';
+
+            modal.innerHTML = `
+                <h5 style="margin: 0 0 20px 0; font-weight: 500; font-size: 20px;">Добавить новую колонку</h5>
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px;">Имя колонки:</label>
+                    <input type="text" id="new-column-name-${instanceName}" class="form-control" placeholder="Введите имя колонки" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 14px; box-sizing: border-box;">
                 </div>
-                <div style="margin-bottom: 12px;">
-                    <label style="display: block; margin-bottom: 4px; font-weight: 500;">Базовый тип:</label>
-                    <select id="new-column-type-${instanceName}" class="form-control" style="width: 100%;">
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px;">Базовый тип:</label>
+                    <select id="new-column-type-${instanceName}" class="form-control" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 14px; box-sizing: border-box;">
                         ${baseTypes.map(t => `<option value="${t.id}">${t.name}</option>`).join('')}
                     </select>
                 </div>
-                <div style="margin-bottom: 12px;">
-                    <label style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="new-column-list-${instanceName}" style="margin-right: 8px;">
+                <div style="margin-bottom: 16px;">
+                    <label style="display: flex; align-items: center; cursor: pointer; font-size: 14px;">
+                        <input type="checkbox" id="new-column-list-${instanceName}" style="margin-right: 10px; width: 18px; height: 18px;">
                         Списочное значение (справочник)
                     </label>
                 </div>
-                <div style="margin-bottom: 12px; display: none;" id="multiselect-container-${instanceName}">
-                    <label style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="new-column-multiselect-${instanceName}" style="margin-right: 8px;">
+                <div style="margin-bottom: 16px; display: none;" id="multiselect-container-${instanceName}">
+                    <label style="display: flex; align-items: center; cursor: pointer; font-size: 14px;">
+                        <input type="checkbox" id="new-column-multiselect-${instanceName}" style="margin-right: 10px; width: 18px; height: 18px;">
                         Разрешить мультивыбор (выбор нескольких значений)
                     </label>
                 </div>
-                <div style="display: flex; gap: 10px;">
-                    <button class="btn btn-success" id="create-column-btn-${instanceName}">Создать</button>
+                <div id="add-column-error-${instanceName}" style="color: #dc3545; margin-bottom: 16px; display: none; font-size: 14px;"></div>
+                <div style="display: flex; justify-content: flex-end; gap: 10px;">
                     <button class="btn btn-secondary" id="cancel-add-column-btn-${instanceName}">Отмена</button>
+                    <button class="btn btn-success" id="create-column-btn-${instanceName}">Создать</button>
                 </div>
-                <div id="add-column-error-${instanceName}" style="color: #dc3545; margin-top: 10px; display: none;"></div>
             `;
 
-            // Insert form before the buttons container
-            const buttonsContainer = parentModal.querySelector('div[style*="justify-content"]');
-            if (buttonsContainer) {
-                buttonsContainer.parentNode.insertBefore(formContainer, buttonsContainer);
-            } else {
-                parentModal.appendChild(formContainer);
-            }
+            document.body.appendChild(modalOverlay);
+            document.body.appendChild(modal);
+
+            // Close modal function
+            const closeAddColumnModal = () => {
+                modalOverlay.remove();
+                modal.remove();
+            };
+
+            // Close on overlay click
+            modalOverlay.addEventListener('click', closeAddColumnModal);
 
             // Show/hide multiselect option based on list checkbox
-            const listCheckbox = formContainer.querySelector(`#new-column-list-${instanceName}`);
-            const multiselectContainer = formContainer.querySelector(`#multiselect-container-${instanceName}`);
+            const listCheckbox = modal.querySelector(`#new-column-list-${instanceName}`);
+            const multiselectContainer = modal.querySelector(`#multiselect-container-${instanceName}`);
             listCheckbox.addEventListener('change', () => {
                 multiselectContainer.style.display = listCheckbox.checked ? 'block' : 'none';
                 if (!listCheckbox.checked) {
-                    formContainer.querySelector(`#new-column-multiselect-${instanceName}`).checked = false;
+                    modal.querySelector(`#new-column-multiselect-${instanceName}`).checked = false;
                 }
             });
 
             // Cancel button handler
-            formContainer.querySelector(`#cancel-add-column-btn-${instanceName}`).addEventListener('click', () => {
-                formContainer.remove();
-            });
+            modal.querySelector(`#cancel-add-column-btn-${instanceName}`).addEventListener('click', closeAddColumnModal);
 
             // Create button handler
-            formContainer.querySelector(`#create-column-btn-${instanceName}`).addEventListener('click', async () => {
-                const columnName = formContainer.querySelector(`#new-column-name-${instanceName}`).value.trim();
-                const baseTypeId = parseInt(formContainer.querySelector(`#new-column-type-${instanceName}`).value);
+            modal.querySelector(`#create-column-btn-${instanceName}`).addEventListener('click', async () => {
+                const columnName = modal.querySelector(`#new-column-name-${instanceName}`).value.trim();
+                const baseTypeId = parseInt(modal.querySelector(`#new-column-type-${instanceName}`).value);
                 const isListValue = listCheckbox.checked;
-                const isMultiselect = formContainer.querySelector(`#new-column-multiselect-${instanceName}`).checked;
-                const errorDiv = formContainer.querySelector(`#add-column-error-${instanceName}`);
+                const isMultiselect = modal.querySelector(`#new-column-multiselect-${instanceName}`).checked;
+                const errorDiv = modal.querySelector(`#add-column-error-${instanceName}`);
 
                 // Validate
                 if (!columnName) {
@@ -3781,8 +3788,8 @@ class IntegramTable {
                 errorDiv.style.display = 'none';
 
                 // Disable buttons during creation
-                const createBtn = formContainer.querySelector(`#create-column-btn-${instanceName}`);
-                const cancelBtn = formContainer.querySelector(`#cancel-add-column-btn-${instanceName}`);
+                const createBtn = modal.querySelector(`#create-column-btn-${instanceName}`);
+                const cancelBtn = modal.querySelector(`#cancel-add-column-btn-${instanceName}`);
                 createBtn.disabled = true;
                 cancelBtn.disabled = true;
                 createBtn.textContent = 'Создание...';
@@ -3791,7 +3798,7 @@ class IntegramTable {
                     const result = await this.createColumn(columnName, baseTypeId, isListValue, isMultiselect);
 
                     if (result.success) {
-                        // Add new column to the column settings list
+                        // Add new column to the column settings list in the parent modal
                         const columnList = parentModal.querySelector(`#column-settings-list-${instanceName}`);
                         if (columnList) {
                             const newItem = document.createElement('div');
@@ -3837,8 +3844,8 @@ class IntegramTable {
                         this.saveColumnState();
                         this.render();
 
-                        // Remove the form but keep the modal open
-                        formContainer.remove();
+                        // Close the add column modal but keep the parent column settings modal open
+                        closeAddColumnModal();
                     } else {
                         errorDiv.textContent = result.error || 'Ошибка при создании колонки';
                         errorDiv.style.display = 'block';
@@ -3857,7 +3864,16 @@ class IntegramTable {
             });
 
             // Focus on the name input
-            formContainer.querySelector(`#new-column-name-${instanceName}`).focus();
+            modal.querySelector(`#new-column-name-${instanceName}`).focus();
+
+            // Close on Escape key
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    closeAddColumnModal();
+                    document.removeEventListener('keydown', handleEscape);
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
         }
 
         /**
