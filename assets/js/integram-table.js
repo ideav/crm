@@ -264,7 +264,7 @@ class IntegramTable {
 
                 // Build links
                 const parentTypeLink = `/${ dbName }/table/${ parentTypeId }`;
-                const parentRecordLink = `/${ dbName }/table/${ parentRecordId }`;
+                const parentRecordLink = `/${ dbName }/edit_obj/${ parentRecordId }`;
 
                 return `<div class="integram-table-title"><a href="${ parentTypeLink }" class="integram-title-link">${ parentTypeName }</a> <a href="${ parentRecordLink }" class="integram-title-link">${ parentVal }</a>${ currentTitle ? ': ' + currentTitle : '' }</div>`;
             }
