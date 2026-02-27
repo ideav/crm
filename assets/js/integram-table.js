@@ -3635,7 +3635,7 @@ class IntegramTable {
 
             modal.innerHTML = `
                 <h5>Настройки колонок</h5>
-                <div class="column-settings-list">
+                <div class="column-settings-list" id="column-settings-list-${instanceName}">
                     ${ this.columns.map(col => `
                         <div class="column-settings-item">
                             <label>
@@ -3647,13 +3647,20 @@ class IntegramTable {
                         </div>
                     `).join('') }
                 </div>
-                <div style="text-align: right; margin-top: 15px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px;">
+                    <button class="btn btn-primary" id="add-column-btn-${instanceName}">Добавить колонку</button>
                     <button class="btn btn-secondary" onclick="window.${ instanceName }.closeColumnSettings()">Закрыть</button>
                 </div>
             `;
 
             document.body.appendChild(overlay);
             document.body.appendChild(modal);
+
+            // Attach add column button handler
+            const addColumnBtn = modal.querySelector(`#add-column-btn-${instanceName}`);
+            if (addColumnBtn) {
+                addColumnBtn.addEventListener('click', () => this.showAddColumnForm(modal));
+            }
 
             modal.querySelectorAll('input[type="checkbox"]').forEach(cb => {
                 cb.addEventListener('change', (e) => {
@@ -3675,6 +3682,317 @@ class IntegramTable {
 
         closeColumnSettings() {
             document.querySelectorAll('.column-settings-overlay, .column-settings-modal').forEach(el => el.remove());
+        }
+
+        /**
+         * Show form to add a new column (issue #565)
+         * Displays inputs for column name, base type, list value checkbox, and multiselect checkbox
+         */
+        showAddColumnForm(parentModal) {
+            const instanceName = this.options.instanceName;
+
+            // Base types available for selection
+            const baseTypes = [
+                { id: 3, name: 'Короткая строка (до 127 символов)' },
+                { id: 8, name: 'Строка без ограничения длины' },
+                { id: 9, name: 'Дата' },
+                { id: 13, name: 'Целое число' },
+                { id: 14, name: 'Число с десятичной частью' },
+                { id: 11, name: 'Логическое значение (Да / Нет)' },
+                { id: 12, name: 'Многострочный текст' },
+                { id: 4, name: 'Дата и время' },
+                { id: 10, name: 'Файл' }
+            ];
+
+            // Create form container
+            const formContainer = document.createElement('div');
+            formContainer.id = `add-column-form-${instanceName}`;
+            formContainer.style.cssText = 'margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 4px; border: 1px solid #dee2e6;';
+
+            formContainer.innerHTML = `
+                <h6 style="margin-bottom: 15px; font-weight: 600;">Добавить новую колонку</h6>
+                <div style="margin-bottom: 12px;">
+                    <label style="display: block; margin-bottom: 4px; font-weight: 500;">Имя колонки:</label>
+                    <input type="text" id="new-column-name-${instanceName}" class="form-control" placeholder="Введите имя колонки" style="width: 100%;">
+                </div>
+                <div style="margin-bottom: 12px;">
+                    <label style="display: block; margin-bottom: 4px; font-weight: 500;">Базовый тип:</label>
+                    <select id="new-column-type-${instanceName}" class="form-control" style="width: 100%;">
+                        ${baseTypes.map(t => `<option value="${t.id}">${t.name}</option>`).join('')}
+                    </select>
+                </div>
+                <div style="margin-bottom: 12px;">
+                    <label style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="new-column-list-${instanceName}" style="margin-right: 8px;">
+                        Списочное значение (справочник)
+                    </label>
+                </div>
+                <div style="margin-bottom: 12px; display: none;" id="multiselect-container-${instanceName}">
+                    <label style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="new-column-multiselect-${instanceName}" style="margin-right: 8px;">
+                        Разрешить мультивыбор (выбор нескольких значений)
+                    </label>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn btn-success" id="create-column-btn-${instanceName}">Создать</button>
+                    <button class="btn btn-secondary" id="cancel-add-column-btn-${instanceName}">Отмена</button>
+                </div>
+                <div id="add-column-error-${instanceName}" style="color: #dc3545; margin-top: 10px; display: none;"></div>
+            `;
+
+            // Insert form before the buttons container
+            const buttonsContainer = parentModal.querySelector('div[style*="justify-content"]');
+            if (buttonsContainer) {
+                buttonsContainer.parentNode.insertBefore(formContainer, buttonsContainer);
+            } else {
+                parentModal.appendChild(formContainer);
+            }
+
+            // Show/hide multiselect option based on list checkbox
+            const listCheckbox = formContainer.querySelector(`#new-column-list-${instanceName}`);
+            const multiselectContainer = formContainer.querySelector(`#multiselect-container-${instanceName}`);
+            listCheckbox.addEventListener('change', () => {
+                multiselectContainer.style.display = listCheckbox.checked ? 'block' : 'none';
+                if (!listCheckbox.checked) {
+                    formContainer.querySelector(`#new-column-multiselect-${instanceName}`).checked = false;
+                }
+            });
+
+            // Cancel button handler
+            formContainer.querySelector(`#cancel-add-column-btn-${instanceName}`).addEventListener('click', () => {
+                formContainer.remove();
+            });
+
+            // Create button handler
+            formContainer.querySelector(`#create-column-btn-${instanceName}`).addEventListener('click', async () => {
+                const columnName = formContainer.querySelector(`#new-column-name-${instanceName}`).value.trim();
+                const baseTypeId = parseInt(formContainer.querySelector(`#new-column-type-${instanceName}`).value);
+                const isListValue = listCheckbox.checked;
+                const isMultiselect = formContainer.querySelector(`#new-column-multiselect-${instanceName}`).checked;
+                const errorDiv = formContainer.querySelector(`#add-column-error-${instanceName}`);
+
+                // Validate
+                if (!columnName) {
+                    errorDiv.textContent = 'Введите имя колонки';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+
+                errorDiv.style.display = 'none';
+
+                // Disable buttons during creation
+                const createBtn = formContainer.querySelector(`#create-column-btn-${instanceName}`);
+                const cancelBtn = formContainer.querySelector(`#cancel-add-column-btn-${instanceName}`);
+                createBtn.disabled = true;
+                cancelBtn.disabled = true;
+                createBtn.textContent = 'Создание...';
+
+                try {
+                    const result = await this.createColumn(columnName, baseTypeId, isListValue, isMultiselect);
+
+                    if (result.success) {
+                        // Add new column to the column settings list
+                        const columnList = parentModal.querySelector(`#column-settings-list-${instanceName}`);
+                        if (columnList) {
+                            const newItem = document.createElement('div');
+                            newItem.className = 'column-settings-item';
+                            newItem.innerHTML = `
+                                <label>
+                                    <input type="checkbox" data-column-id="${result.columnId}" checked>
+                                    ${this.escapeHtml(columnName)}
+                                </label>
+                            `;
+                            columnList.appendChild(newItem);
+
+                            // Add event listener for the new checkbox
+                            const newCheckbox = newItem.querySelector('input[type="checkbox"]');
+                            newCheckbox.addEventListener('change', () => {
+                                const colId = newCheckbox.dataset.columnId;
+                                if (newCheckbox.checked) {
+                                    if (!this.visibleColumns.includes(colId)) {
+                                        this.visibleColumns.push(colId);
+                                    }
+                                } else {
+                                    this.visibleColumns = this.visibleColumns.filter(id => id !== colId);
+                                }
+                                this.saveColumnState();
+                                this.render();
+                            });
+                        }
+
+                        // Add column to the table's internal state
+                        this.columns.push({
+                            id: String(result.columnId),
+                            name: columnName,
+                            type: baseTypeId,
+                            paramId: result.termId
+                        });
+
+                        // Make the column visible
+                        if (!this.visibleColumns.includes(String(result.columnId))) {
+                            this.visibleColumns.push(String(result.columnId));
+                        }
+
+                        // Save state and re-render
+                        this.saveColumnState();
+                        this.render();
+
+                        // Remove the form but keep the modal open
+                        formContainer.remove();
+                    } else {
+                        errorDiv.textContent = result.error || 'Ошибка при создании колонки';
+                        errorDiv.style.display = 'block';
+                        createBtn.disabled = false;
+                        cancelBtn.disabled = false;
+                        createBtn.textContent = 'Создать';
+                    }
+                } catch (error) {
+                    console.error('Error creating column:', error);
+                    errorDiv.textContent = error.message || 'Ошибка при создании колонки';
+                    errorDiv.style.display = 'block';
+                    createBtn.disabled = false;
+                    cancelBtn.disabled = false;
+                    createBtn.textContent = 'Создать';
+                }
+            });
+
+            // Focus on the name input
+            formContainer.querySelector(`#new-column-name-${instanceName}`).focus();
+        }
+
+        /**
+         * Create a new column via API (issue #565)
+         * @param {string} columnName - Name of the new column
+         * @param {number} baseTypeId - Base type ID (3, 4, 8, 9, 10, 11, 12, 13, 14)
+         * @param {boolean} isListValue - Whether this is a list/lookup column
+         * @param {boolean} isMultiselect - Whether multiple values can be selected (only for list columns)
+         * @returns {Promise<{success: boolean, columnId?: string, termId?: string, error?: string}>}
+         */
+        async createColumn(columnName, baseTypeId, isListValue, isMultiselect) {
+            const apiBase = this.getApiBase();
+            const tableId = this.objectTableId || this.options.tableTypeId;
+
+            if (!tableId) {
+                return { success: false, error: 'Не удалось определить ID таблицы' };
+            }
+
+            try {
+                // Step 1: Create term with the base type
+                const termParams = new URLSearchParams();
+                termParams.append('val', columnName);
+                termParams.append('t', baseTypeId);
+                if (typeof xsrf !== 'undefined') {
+                    termParams.append('_xsrf', xsrf);
+                }
+                // For list values, add unique=1 flag
+                if (isListValue) {
+                    termParams.append('unique', '1');
+                }
+
+                const termResponse = await fetch(`${apiBase}/_d_new?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: termParams.toString()
+                });
+
+                if (!termResponse.ok) {
+                    return { success: false, error: `Ошибка создания термина: ${termResponse.status}` };
+                }
+
+                const termResult = await termResponse.json();
+
+                // Check for API error
+                if (Array.isArray(termResult) && termResult[0]?.error) {
+                    return { success: false, error: termResult[0].error };
+                }
+
+                const termId = termResult.obj;
+                if (!termId) {
+                    return { success: false, error: 'Не получен ID термина' };
+                }
+
+                let typeIdToAdd = termId;
+
+                // Step 2: For list values, create a reference to the term
+                if (isListValue) {
+                    const refParams = new URLSearchParams();
+                    if (typeof xsrf !== 'undefined') {
+                        refParams.append('_xsrf', xsrf);
+                    }
+
+                    const refResponse = await fetch(`${apiBase}/_d_ref/${termId}?JSON`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: refParams.toString()
+                    });
+
+                    if (!refResponse.ok) {
+                        return { success: false, error: `Ошибка создания ссылки: ${refResponse.status}` };
+                    }
+
+                    const refResult = await refResponse.json();
+
+                    if (Array.isArray(refResult) && refResult[0]?.error) {
+                        return { success: false, error: refResult[0].error };
+                    }
+
+                    typeIdToAdd = refResult.obj;
+                    if (!typeIdToAdd) {
+                        return { success: false, error: 'Не получен ID ссылки' };
+                    }
+                }
+
+                // Step 3: Add the term/reference as a column (requisite) to the table
+                const reqParams = new URLSearchParams();
+                reqParams.append('t', typeIdToAdd);
+                if (typeof xsrf !== 'undefined') {
+                    reqParams.append('_xsrf', xsrf);
+                }
+
+                const reqResponse = await fetch(`${apiBase}/_d_req/${tableId}?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: reqParams.toString()
+                });
+
+                if (!reqResponse.ok) {
+                    return { success: false, error: `Ошибка добавления колонки: ${reqResponse.status}` };
+                }
+
+                const reqResult = await reqResponse.json();
+
+                if (Array.isArray(reqResult) && reqResult[0]?.error) {
+                    return { success: false, error: reqResult[0].error };
+                }
+
+                const columnId = reqResult.id;
+                if (!columnId) {
+                    return { success: false, error: 'Не получен ID колонки' };
+                }
+
+                // Step 4: If multiselect is enabled for list values, toggle the multi flag
+                if (isListValue && isMultiselect) {
+                    const multiParams = new URLSearchParams();
+                    if (typeof xsrf !== 'undefined') {
+                        multiParams.append('_xsrf', xsrf);
+                    }
+
+                    await fetch(`${apiBase}/_d_multi/${columnId}?JSON`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: multiParams.toString()
+                    });
+                }
+
+                return {
+                    success: true,
+                    columnId: String(columnId),
+                    termId: String(termId)
+                };
+            } catch (error) {
+                console.error('Error in createColumn:', error);
+                return { success: false, error: error.message };
+            }
         }
 
         openTableSettings() {
