@@ -867,6 +867,11 @@
     cursor: pointer;
     transition: var(--md-transition);
     font-family: 'Roboto', sans-serif;
+    min-height: 40px;
+    line-height: 1.4;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .edit-form-footer .btn-primary {
@@ -1244,6 +1249,11 @@
     cursor: pointer;
     transition: var(--md-transition);
     font-family: 'Roboto', sans-serif;
+    min-height: 40px;
+    line-height: 1.4;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .form-field-settings-footer .btn-primary {
@@ -1383,12 +1393,16 @@
     padding: 0;
     display: flex;
     justify-content: flex-start;
+    align-items: center;
     gap: 8px;
 }
 
 .subordinate-add-btn {
     font-size: 13px;
     padding: 6px 16px;
+    height: 32px;
+    line-height: 1.4;
+    white-space: nowrap;
 }
 
 .subordinate-table-wrapper {
@@ -1520,6 +1534,7 @@
     align-items: center;
     flex: 1;
     max-width: 250px;
+    height: 32px;
 }
 
 .subordinate-search-input {
@@ -1532,6 +1547,8 @@
     color: var(--md-text-primary);
     background: var(--md-surface);
     transition: var(--md-transition);
+    height: 32px;
+    box-sizing: border-box;
 }
 
 .subordinate-search-input:focus {
