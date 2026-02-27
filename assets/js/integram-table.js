@@ -264,9 +264,9 @@ class IntegramTable {
 
                 // Build links
                 const parentTypeLink = `/${ dbName }/table/${ parentTypeId }`;
-                const parentRecordLink = `/${ dbName }/table/${ parentRecordId }`;
+                // Parent record link is now a clickable span that opens modal edit form (issue #575)
 
-                return `<div class="integram-table-title"><a href="${ parentTypeLink }" class="integram-title-link">${ parentTypeName }</a> <a href="${ parentRecordLink }" class="integram-title-link">${ parentVal }</a>${ currentTitle ? ': ' + currentTitle : '' }</div>`;
+                return `<div class="integram-table-title"><a href="${ parentTypeLink }" class="integram-title-link">${ parentTypeName }</a> <span class="integram-title-link integram-parent-record-link" data-parent-record-id="${ parentRecordId }" data-parent-type-id="${ parentTypeId }" style="cursor: pointer;">${ parentVal }</span>${ currentTitle ? ': ' + currentTitle : '' }</div>`;
             }
 
             // No parent info, just show the title
@@ -1885,6 +1885,19 @@ class IntegramTable {
                 // Make header content look clickable
                 span.style.cursor = 'pointer';
             });
+
+            // Add click handler for parent record link to open modal edit form (issue #575)
+            const parentRecordLink = this.container.querySelector('.integram-parent-record-link');
+            if (parentRecordLink) {
+                parentRecordLink.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const parentRecordId = parentRecordLink.dataset.parentRecordId;
+                    const parentTypeId = parentRecordLink.dataset.parentTypeId;
+                    if (parentRecordId && parentTypeId) {
+                        this.openEditForm(parentRecordId, parentTypeId, 0);
+                    }
+                });
+            }
 
             const filterIcons = this.container.querySelectorAll('.filter-icon-inside');
             filterIcons.forEach(icon => {
