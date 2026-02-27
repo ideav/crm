@@ -761,6 +761,46 @@
     background: var(--md-hover);
 }
 
+/* Edit form header title row with record ID and table link (issue #563) */
+.edit-form-header-title-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.edit-form-record-id {
+    font-size: 14px;
+    font-weight: 400;
+    color: #999;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.edit-form-record-id:hover {
+    color: #666;
+}
+
+.edit-form-table-link {
+    color: #999;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border-radius: 4px;
+    transition: color 0.2s ease, background-color 0.2s ease;
+    text-decoration: none;
+}
+
+.edit-form-table-link:hover {
+    color: #666;
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+.edit-form-table-link svg {
+    display: block;
+}
+
 .edit-form-body {
     padding: 12px;
     overflow-y: auto;

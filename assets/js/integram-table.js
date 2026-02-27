@@ -17,9 +17,10 @@ class IntegramTable {
         constructor(containerId, options = {}) {
             this.container = document.getElementById(containerId);
 
-            // Check URL parameters for parentId
+            // Check URL parameters for parentId and recordId (issue #563)
             const urlParams = new URLSearchParams(window.location.search);
             const urlParentId = urlParams.get('parentId') || urlParams.get('F_U') || urlParams.get('up');
+            const urlRecordId = urlParams.get('F_I');  // Record ID filter from URL (issue #563)
 
             this.options = {
                 apiUrl: options.apiUrl || '',
@@ -33,6 +34,7 @@ class IntegramTable {
                 dataSource: options.dataSource || 'report',  // 'report' or 'table'
                 tableTypeId: options.tableTypeId || null,   // Required for dataSource='table'
                 parentId: options.parentId || urlParentId || null,  // Parent ID for table data source
+                recordId: options.recordId || urlRecordId || null,  // Record ID filter for table data source (issue #563)
                 debug: options.debug || false  // Enable debug tracing
             };
 
@@ -449,6 +451,11 @@ class IntegramTable {
                 dataUrl += `&F_U=${ this.options.parentId }`;
             }
 
+            // Add record ID filter if present (issue #563)
+            if (this.options.recordId) {
+                dataUrl += `&F_I=${ this.options.recordId }`;
+            }
+
             // Apply filters if any (issue #508)
             const filters = this.filters || {};
             const filterParams = new URLSearchParams();
@@ -580,6 +587,16 @@ class IntegramTable {
             const requestSize = isGroupingMode ? 1000 : (this.options.pageSize + 1);
             const offset = (append && !isGroupingMode) ? this.loadedRecords : 0;
             let dataUrl = `${ apiBase }/object/${ tableId }/?JSON_OBJ&LIMIT=${ offset },${ requestSize }`;
+
+            // Add parent ID filter if present (issue #563)
+            if (this.options.parentId) {
+                dataUrl += `&F_U=${ this.options.parentId }`;
+            }
+
+            // Add record ID filter if present (issue #563)
+            if (this.options.recordId) {
+                dataUrl += `&F_I=${ this.options.recordId }`;
+            }
 
             // Apply filters if any
             const filters = this.filters || {};
@@ -4423,7 +4440,8 @@ class IntegramTable {
             const urlFilters = {};
 
             // Parameters to exclude (handled elsewhere)
-            const excludeParams = new Set(['parentId', 'F_U', 'up', 'LIMIT', 'ORDER', 'RECORD_COUNT', '_count', 'JSON_OBJ', 'JSON', '_itc']);
+            // F_I added for issue #563
+            const excludeParams = new Set(['parentId', 'F_U', 'F_I', 'up', 'LIMIT', 'ORDER', 'RECORD_COUNT', '_count', 'JSON_OBJ', 'JSON', '_itc']);
 
             for (const [key, value] of urlParams.entries()) {
                 if (excludeParams.has(key)) continue;
@@ -5341,7 +5359,8 @@ class IntegramTable {
             const forwardParams = new URLSearchParams();
 
             // Parameters to exclude (already handled internally or could conflict)
-            const excludeParams = new Set(['parentId', 'F_U', 'up', 'LIMIT', 'ORDER', 'RECORD_COUNT', '_count', 'JSON_OBJ', 'JSON']);
+            // F_I added for issue #563
+            const excludeParams = new Set(['parentId', 'F_U', 'F_I', 'up', 'LIMIT', 'ORDER', 'RECORD_COUNT', '_count', 'JSON_OBJ', 'JSON']);
 
             for (const [key, value] of pageParams.entries()) {
                 // Skip excluded params
@@ -5501,6 +5520,28 @@ class IntegramTable {
             const title = isCreate ? `Создание: ${ typeName }` : `Редактирование: ${ firstColumnValue || typeName }`;
             const instanceName = this.options.instanceName;
             const recordId = recordData && recordData.obj ? recordData.obj.id : null;
+            const parentId = recordData && recordData.obj ? recordData.obj.parent : 1;
+
+            // Build record ID and table link HTML for edit mode (issue #563)
+            let recordIdHtml = '';
+            if (!isCreate && recordId) {
+                // Extract database name from URL path
+                const pathParts = window.location.pathname.split('/');
+                const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+                // Build table URL with filters: /{dbName}/table/{typeId}?F_U={parentId}&F_I={recordId}
+                const tableUrl = `/${dbName}/table/${typeId}?F_U=${parentId || 1}&F_I=${recordId}`;
+
+                recordIdHtml = `
+                    <span class="edit-form-record-id" onclick="window.${instanceName}.copyRecordIdToClipboard('${recordId}')" title="Скопировать ID">#${recordId}</span>
+                    <a href="${tableUrl}" class="edit-form-table-link" title="Открыть в таблице" target="_blank">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="2" y="2" width="12" height="12" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                            <line x1="2" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5"/>
+                            <line x1="6" y1="6" x2="6" y2="14" stroke="currentColor" stroke-width="1.5"/>
+                        </svg>
+                    </a>
+                `;
+            }
 
             // Separate regular fields from subordinate tables
             const reqs = metadata.reqs || [];
@@ -5539,7 +5580,10 @@ class IntegramTable {
 
             let formHtml = `
                 <div class="edit-form-header">
-                    <h5>${ title }</h5>
+                    <div class="edit-form-header-title-row">
+                        <h5>${ title }</h5>
+                        ${ recordIdHtml }
+                    </div>
                     <button class="edit-form-close" data-close-modal="true">×</button>
                 </div>
                 ${ tabsHtml }
@@ -5619,7 +5663,6 @@ class IntegramTable {
 
             // Attach save handler
             const saveBtn = modal.querySelector('#save-record-btn');
-            const parentId = recordData && recordData.obj ? recordData.obj.parent : 1;
 
             saveBtn.addEventListener('click', () => {
                 this.saveRecord(modal, isCreate, recordId, typeId, parentId, columnId);
@@ -8306,6 +8349,21 @@ class IntegramTable {
             toast.addEventListener('click', () => {
                 toast.classList.add('fade-out');
                 setTimeout(() => toast.remove(), 300);
+            });
+        }
+
+        /**
+         * Copy record ID to clipboard (issue #563)
+         * @param {string} recordId - The record ID to copy
+         */
+        copyRecordIdToClipboard(recordId) {
+            if (!recordId) return;
+
+            navigator.clipboard.writeText(String(recordId)).then(() => {
+                this.showToast(`ID #${recordId} скопирован`, 'success');
+            }).catch(err => {
+                console.error('Failed to copy record ID:', err);
+                this.showToast('Не удалось скопировать ID', 'error');
             });
         }
 
