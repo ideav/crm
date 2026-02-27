@@ -558,6 +558,18 @@
     cursor: pointer;
 }
 
+/* Column settings modal buttons - prevent Bootstrap 5.3 from stretching buttons (issue #569) */
+.column-settings-modal .btn {
+    flex: 0 0 auto;
+    width: auto;
+}
+
+/* Add column modal buttons - prevent Bootstrap 5.3 from stretching buttons (issue #569) */
+.add-column-modal .btn {
+    flex: 0 0 auto;
+    width: auto;
+}
+
 .table-settings-item {
     padding: 12px 12px 12px 8px;
     border-bottom: 1px solid #f0f0f0;

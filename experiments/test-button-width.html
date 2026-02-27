@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Test Button Width Fix (Issue #569)</title>
+    <!-- Bootstrap 5.3 CDN for testing -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Our custom CSS -->
+    <link rel="stylesheet" href="../assets/css/integram-table.css">
+    <style>
+        body {
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-container {
+            margin: 20px 0;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h2 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+        .result-status {
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .pass { color: green; }
+        .fail { color: red; }
+    </style>
+</head>
+<body>
+    <h1>Issue #569: Button Width Fix Test</h1>
+
+    <div class="test-container">
+        <h2>Before Fix (without our CSS classes)</h2>
+        <p>This shows the broken behavior - buttons might stretch:</p>
+        <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: 15px; gap: 10px; background: #f8f9fa; padding: 15px; border-radius: 4px;">
+            <button class="btn btn-primary">Добавить колонку</button>
+            <button class="btn btn-secondary">Закрыть</button>
+        </div>
+    </div>
+
+    <div class="test-container">
+        <h2>After Fix (with column-settings-modal class)</h2>
+        <p>This should show proper button sizes:</p>
+        <div class="column-settings-modal" style="position: relative; transform: none; max-width: 600px; margin: 0;">
+            <h5>Настройки колонок</h5>
+            <div class="column-settings-list" style="max-height: 200px;">
+                <div class="column-settings-item">
+                    <label>
+                        <input type="checkbox" checked>
+                        Пользователь
+                    </label>
+                </div>
+                <div class="column-settings-item">
+                    <label>
+                        <input type="checkbox" checked>
+                        Роль
+                    </label>
+                </div>
+                <div class="column-settings-item">
+                    <label>
+                        <input type="checkbox" checked>
+                        Email
+                    </label>
+                </div>
+            </div>
+            <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: 15px; gap: 10px;">
+                <button class="btn btn-primary">Добавить колонку</button>
+                <button class="btn btn-secondary">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-container">
+        <h2>Add Column Modal (with add-column-modal class)</h2>
+        <p>This should also show proper button sizes:</p>
+        <div class="add-column-modal" style="position: relative; transform: none; max-width: 450px; margin: 0; padding: 20px; background: #fff; border-radius: 4px; box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22);">
+            <h5 style="margin: 0 0 20px 0; font-weight: 500; font-size: 20px;">Добавить новую колонку</h5>
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px;">Имя колонки:</label>
+                <input type="text" class="form-control" placeholder="Введите имя колонки" style="width: 100%;">
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                <button class="btn btn-secondary">Отмена</button>
+                <button class="btn btn-success">Создать</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-container">
+        <h2>Test Result</h2>
+        <div id="test-result">Running test...</div>
+    </div>
+
+    <script>
+        // Visual verification test
+        window.onload = function() {
+            const resultDiv = document.getElementById('test-result');
+
+            // Get buttons from the fixed container
+            const modalButtons = document.querySelectorAll('.column-settings-modal .btn');
+            let allButtonsCorrect = true;
+            let details = [];
+
+            modalButtons.forEach((btn, index) => {
+                const rect = btn.getBoundingClientRect();
+                const computedStyle = window.getComputedStyle(btn);
+                const flex = computedStyle.flex;
+                const width = rect.width;
+
+                // A properly sized button should be narrower than 300px
+                // and flex should be "0 0 auto"
+                const isCorrectWidth = width < 300;
+                const isCorrectFlex = flex === '0 0 auto';
+
+                details.push(`Button ${index + 1}: width=${Math.round(width)}px, flex="${flex}", correct=${isCorrectWidth && isCorrectFlex}`);
+
+                if (!isCorrectWidth || !isCorrectFlex) {
+                    allButtonsCorrect = false;
+                }
+            });
+
+            if (allButtonsCorrect) {
+                resultDiv.innerHTML = `<span class="pass">✓ PASS</span><br>Buttons have correct sizing.<br><pre>${details.join('\n')}</pre>`;
+            } else {
+                resultDiv.innerHTML = `<span class="fail">✗ FAIL</span><br>Some buttons may still be stretched.<br><pre>${details.join('\n')}</pre>`;
+            }
+        };
+    </script>
+</body>
+</html>
