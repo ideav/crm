@@ -78,6 +78,18 @@
     letter-spacing: 0.15px;
 }
 
+/* Parent info links in title (issue #571) */
+.integram-title-link {
+    color: var(--md-primary);
+    text-decoration: none;
+    transition: var(--md-transition);
+}
+
+.integram-title-link:hover {
+    text-decoration: underline;
+    color: var(--md-primary-dark, #1565c0);
+}
+
 .integram-table-controls {
     display: flex;
     align-items: center;

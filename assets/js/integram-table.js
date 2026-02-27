@@ -68,6 +68,9 @@ class IntegramTable {
             this.sortColumn = null;  // Column ID being sorted (null = no sort)
             this.sortDirection = null;  // 'asc' or 'desc' (null = no sort)
 
+            // Parent info for displaying breadcrumb-like title (issue #571)
+            this.parentInfo = null;  // { id, val, typ, typ_name } from edit_obj/{parentId}?JSON
+
             // Grouping mode (issue #502)
             this.groupingEnabled = false;  // Whether grouping mode is active
             this.groupingColumns = [];  // Array of column IDs to group by, in order
@@ -175,6 +178,7 @@ class IntegramTable {
             this.loadSettings();
             this.loadConfigFromUrl();  // Load filters, groups, sorting from URL (issue #510)
             this.loadGlobalMetadata();  // Load metadata once at initialization
+            this.loadParentInfo();  // Load parent info for breadcrumb title (issue #571)
             this.loadData();
         }
 
@@ -196,6 +200,77 @@ class IntegramTable {
             } catch (error) {
                 console.error('Error loading global metadata:', error);
             }
+        }
+
+        /**
+         * Load parent info when F_U filter is present and > 1 (issue #571)
+         * Fetches parent record data from edit_obj/{parentId}?JSON
+         * Used to display breadcrumb-like title: "{parent table name} {record value}: {current table name}"
+         */
+        async loadParentInfo() {
+            try {
+                // Only fetch parent info if parentId is numeric and > 1
+                const parentId = parseInt(this.options.parentId, 10);
+                if (!parentId || parentId <= 1) {
+                    return;
+                }
+
+                const apiBase = this.getApiBase();
+                const response = await fetch(`${ apiBase }/edit_obj/${ parentId }?JSON`);
+                if (!response.ok) {
+                    console.error('Failed to fetch parent info:', response.status);
+                    return;
+                }
+                const data = await response.json();
+                if (data && data.obj) {
+                    this.parentInfo = {
+                        id: data.obj.id,
+                        val: data.obj.val,
+                        typ: data.obj.typ,
+                        typ_name: data.obj.typ_name
+                    };
+                    // Re-render if data is already loaded, so the title updates
+                    if (this.columns.length > 0) {
+                        this.render();
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading parent info:', error);
+            }
+        }
+
+        /**
+         * Generate title HTML with parent info breadcrumb (issue #571)
+         * Format: "{parent table name} {record value}: {current table name}"
+         * Where {parent table name} links to table/{parent type id}
+         * And {record value} links to table/{parent record id}
+         */
+        renderTitleHtml() {
+            if (!this.options.title && !this.parentInfo) {
+                return '';
+            }
+
+            // Extract database name from URL path for building links
+            const pathParts = window.location.pathname.split('/');
+            const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+
+            // If we have parent info, show breadcrumb-style title
+            if (this.parentInfo) {
+                const parentTypeName = this.escapeHtml(this.parentInfo.typ_name || '');
+                const parentVal = this.escapeHtml(this.parentInfo.val || '');
+                const parentTypeId = this.parentInfo.typ || '';
+                const parentRecordId = this.parentInfo.id || '';
+                const currentTitle = this.escapeHtml(this.options.title || '');
+
+                // Build links
+                const parentTypeLink = `/${ dbName }/table/${ parentTypeId }`;
+                const parentRecordLink = `/${ dbName }/table/${ parentRecordId }`;
+
+                return `<div class="integram-table-title"><a href="${ parentTypeLink }" class="integram-title-link">${ parentTypeName }</a> <a href="${ parentRecordLink }" class="integram-title-link">${ parentVal }</a>${ currentTitle ? ': ' + currentTitle : '' }</div>`;
+            }
+
+            // No parent info, just show the title
+            return `<div class="integram-table-title">${ this.escapeHtml(this.options.title) }</div>`;
         }
 
         async loadData(append = false) {
@@ -975,7 +1050,7 @@ class IntegramTable {
             let html = `
                 <div class="integram-table-wrapper">
                     <div class="integram-table-header">
-                        ${ this.options.title ? `<div class="integram-table-title">${ this.options.title }</div>` : '' }
+                        ${ this.renderTitleHtml() }
                         <div class="integram-table-controls">
                             ${ this.hasActiveFiltersOrGroups() ? `
                             <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.copyConfigUrl()" title="Скопировать ссылку с текущими фильтрами и группами">
