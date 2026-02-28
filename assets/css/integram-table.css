@@ -1472,6 +1472,28 @@
     white-space: nowrap;
 }
 
+/* Subordinate table link icon - positioned on the right side (issue #589) */
+.subordinate-table-link {
+    margin-left: auto;
+    color: #999;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border-radius: 4px;
+    transition: color 0.2s ease, background-color 0.2s ease;
+    text-decoration: none;
+}
+
+.subordinate-table-link:hover {
+    color: #666;
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+.subordinate-table-link svg {
+    display: block;
+}
+
 .subordinate-table-wrapper {
     overflow-x: auto;
     margin-top: 12px;
