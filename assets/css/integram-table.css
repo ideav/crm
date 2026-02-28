@@ -1461,7 +1461,10 @@
     gap: 8px;
 }
 
+/* Subordinate table add button - prevent Bootstrap 5.3 from stretching (issue #579) */
 .subordinate-add-btn {
+    flex: 0 0 auto;
+    width: auto;
     font-size: 13px;
     padding: 6px 16px;
     height: 32px;
