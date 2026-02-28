@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Test Subordinate Add Button Width Fix (Issue #579)</title>
+    <!-- Bootstrap 5.3 CDN for testing -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Our custom CSS -->
+    <link rel="stylesheet" href="../assets/css/integram-table.css">
+    <style>
+        body {
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-container {
+            margin: 20px 0;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h2 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+        .result-status {
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .pass { color: green; }
+        .fail { color: red; }
+
+        /* Simulating the edit-form-modal container */
+        .mock-modal {
+            position: relative;
+            transform: none;
+            max-width: 800px;
+            margin: 0;
+            padding: 20px;
+            background: #fff;
+            border-radius: 4px;
+            box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22);
+        }
+        .mock-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #e0e0e0;
+            margin-bottom: 15px;
+        }
+        .mock-modal-title {
+            font-size: 20px;
+            font-weight: 500;
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Issue #579: Subordinate Add Button Width Fix Test</h1>
+    <p>The ".subordinate-add-btn" button should NOT stretch to full width inside flex containers.</p>
+
+    <div class="test-container">
+        <h2>Before Fix (without our CSS fix - simulated)</h2>
+        <p>This simulates the broken behavior where Bootstrap 5.3 causes buttons in flex containers to stretch:</p>
+        <div class="mock-modal">
+            <div class="mock-modal-header">
+                <h5 class="mock-modal-title">Объекты</h5>
+                <button type="button" style="background: none; border: none; font-size: 24px; color: #666;">×</button>
+            </div>
+            <div style="display: flex; justify-content: flex-start; align-items: center; gap: 8px;">
+                <!-- Button WITHOUT the fix - using flex: 1 to simulate stretched behavior -->
+                <button type="button" class="btn btn-sm btn-primary" style="flex: 1 1 0%;" id="broken-btn">
+                    + Добавить
+                </button>
+                <div style="position: relative; flex: 1; max-width: 250px; height: 32px;">
+                    <input type="text" placeholder="Поиск..." style="width: 100%; padding: 6px 32px 6px 12px; border: 1px solid #ddd; border-radius: 4px; height: 32px;">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-container">
+        <h2>After Fix (with subordinate-add-btn class)</h2>
+        <p>This shows the proper button sizing with our CSS fix:</p>
+        <div class="mock-modal">
+            <div class="mock-modal-header">
+                <h5 class="mock-modal-title">Объекты</h5>
+                <button type="button" style="background: none; border: none; font-size: 24px; color: #666;">×</button>
+            </div>
+            <div class="subordinate-table-toolbar">
+                <button type="button" class="btn btn-sm btn-primary subordinate-add-btn" id="fixed-btn">
+                    + Добавить
+                </button>
+                <div class="subordinate-search-wrapper">
+                    <input type="text" class="subordinate-search-input" placeholder="Поиск...">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-container">
+        <h2>Full Subordinate Table Example</h2>
+        <p>Demonstrating the button in context with a subordinate table:</p>
+        <div class="mock-modal" style="max-width: 900px;">
+            <div class="mock-modal-header">
+                <h5 class="mock-modal-title">Объекты</h5>
+                <button type="button" style="background: none; border: none; font-size: 24px; color: #666;">×</button>
+            </div>
+            <div class="subordinate-table-toolbar">
+                <button type="button" class="btn btn-sm btn-primary subordinate-add-btn" id="table-btn">
+                    + Добавить
+                </button>
+                <div class="subordinate-search-wrapper">
+                    <input type="text" class="subordinate-search-input" placeholder="Поиск...">
+                    <button type="button" class="subordinate-search-clear" style="display: none;">×</button>
+                </div>
+            </div>
+            <div class="subordinate-table-wrapper">
+                <table class="subordinate-table">
+                    <thead>
+                        <tr>
+                            <th>Объекты</th>
+                            <th>Доступ</th>
+                            <th>Маска</th>
+                            <th>EXPORT</th>
+                            <th>DELETE</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>*** Type editor ***</td>
+                            <td>WRITE</td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td>*** All objects ***</td>
+                            <td>WRITE</td>
+                            <td></td>
+                            <td><span class="boolean-check">✓</span></td>
+                            <td><span class="boolean-check">✓</span></td>
+                        </tr>
+                        <tr>
+                            <td>*** Files ***</td>
+                            <td>WRITE</td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-container">
+        <h2>Test Result</h2>
+        <div id="test-result">Running test...</div>
+    </div>
+
+    <script>
+        // Visual verification test
+        window.onload = function() {
+            const resultDiv = document.getElementById('test-result');
+
+            const fixedBtn = document.getElementById('fixed-btn');
+            const tableBtn = document.getElementById('table-btn');
+            const brokenBtn = document.getElementById('broken-btn');
+
+            let details = [];
+            let allCorrect = true;
+
+            // Check the broken button (should be stretched)
+            const brokenRect = brokenBtn.getBoundingClientRect();
+            const brokenStyle = window.getComputedStyle(brokenBtn);
+            details.push(`Broken button (simulated): width=${Math.round(brokenRect.width)}px, flex="${brokenStyle.flex}"`);
+
+            // Check the fixed buttons
+            [fixedBtn, tableBtn].forEach((btn, index) => {
+                const rect = btn.getBoundingClientRect();
+                const computedStyle = window.getComputedStyle(btn);
+                const flex = computedStyle.flex;
+                const width = rect.width;
+
+                // A properly sized button should be narrower than 200px
+                // and flex should be "0 0 auto"
+                const isCorrectWidth = width < 200;
+                const isCorrectFlex = flex === '0 0 auto';
+
+                const btnName = index === 0 ? 'Fixed button' : 'Table button';
+                details.push(`${btnName}: width=${Math.round(width)}px, flex="${flex}", correct=${isCorrectWidth && isCorrectFlex}`);
+
+                if (!isCorrectWidth || !isCorrectFlex) {
+                    allCorrect = false;
+                }
+            });
+
+            if (allCorrect) {
+                resultDiv.innerHTML = `<span class="pass">✓ PASS</span><br>Subordinate add buttons have correct sizing.<br><pre>${details.join('\n')}</pre>`;
+            } else {
+                resultDiv.innerHTML = `<span class="fail">✗ FAIL</span><br>Some buttons may still be stretched.<br><pre>${details.join('\n')}</pre>`;
+            }
+        };
+    </script>
+</body>
+</html>
