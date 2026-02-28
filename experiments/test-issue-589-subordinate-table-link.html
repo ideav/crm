@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Issue #589 - Subordinate Table Link</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        .test-case {
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        h2 {
+            margin-top: 0;
+        }
+
+        /* Copy of subordinate-table-toolbar styles */
+        .subordinate-table-toolbar {
+            padding: 0;
+            display: flex;
+            justify-content: flex-start;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .subordinate-add-btn {
+            flex: 0 0 auto;
+            width: auto;
+            font-size: 13px;
+            padding: 6px 16px;
+            height: 32px;
+            line-height: 1.4;
+            white-space: nowrap;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .subordinate-search-wrapper {
+            display: flex;
+            align-items: center;
+            position: relative;
+        }
+
+        .subordinate-search-input {
+            padding: 6px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .subordinate-search-clear {
+            position: absolute;
+            right: 8px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: #999;
+        }
+
+        /* New subordinate table link styles (issue #589) */
+        .subordinate-table-link {
+            margin-left: auto;
+            color: #999;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4px;
+            border-radius: 4px;
+            transition: color 0.2s ease, background-color 0.2s ease;
+            text-decoration: none;
+        }
+
+        .subordinate-table-link:hover {
+            color: #666;
+            background-color: rgba(0, 0, 0, 0.05);
+        }
+
+        .subordinate-table-link svg {
+            display: block;
+        }
+
+        /* Original edit-form-table-link for comparison */
+        .edit-form-table-link {
+            color: #999;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4px;
+            border-radius: 4px;
+            transition: color 0.2s ease, background-color 0.2s ease;
+            text-decoration: none;
+        }
+
+        .edit-form-table-link:hover {
+            color: #666;
+            background-color: rgba(0, 0, 0, 0.05);
+        }
+
+        .edit-form-table-link svg {
+            display: block;
+        }
+
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+
+        .pass {
+            color: green;
+        }
+
+        .fail {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test Issue #589 - Subordinate Table Link</h1>
+    <p>Testing the addition of a link icon in the subordinate table toolbar that opens the table with a filter by parent record.</p>
+
+    <div class="test-case">
+        <h2>Test 1: Visual Appearance</h2>
+        <p>The subordinate table toolbar with the new link icon on the right:</p>
+
+        <div class="subordinate-table-toolbar" style="border: 1px dashed #ccc; padding: 10px;">
+            <button type="button" class="subordinate-add-btn" data-arr-id="42" data-parent-id="123">
+                + Добавить
+            </button>
+            <div class="subordinate-search-wrapper">
+                <input type="text" class="subordinate-search-input" placeholder="Поиск..." value="">
+                <button type="button" class="subordinate-search-clear" title="Очистить поиск" style="display: none;">×</button>
+            </div>
+            <a href="/testdb/table/42?F_U=123" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="2" y="2" width="12" height="12" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                    <line x1="2" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5"/>
+                    <line x1="6" y1="6" x2="6" y2="14" stroke="currentColor" stroke-width="1.5"/>
+                </svg>
+            </a>
+        </div>
+
+        <div class="result" id="test1-result"></div>
+    </div>
+
+    <div class="test-case">
+        <h2>Test 2: Icon Comparison</h2>
+        <p>Comparing the new subordinate-table-link with the existing edit-form-table-link:</p>
+
+        <div style="display: flex; gap: 20px; align-items: center;">
+            <div>
+                <p><strong>edit-form-table-link (original):</strong></p>
+                <a href="#" class="edit-form-table-link" title="Открыть в таблице">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="2" y="2" width="12" height="12" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                        <line x1="2" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5"/>
+                        <line x1="6" y1="6" x2="6" y2="14" stroke="currentColor" stroke-width="1.5"/>
+                    </svg>
+                </a>
+            </div>
+            <div>
+                <p><strong>subordinate-table-link (new):</strong></p>
+                <a href="#" class="subordinate-table-link" title="Открыть в таблице" style="margin-left: 0;">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="2" y="2" width="12" height="12" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                        <line x1="2" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5"/>
+                        <line x1="6" y1="6" x2="6" y2="14" stroke="currentColor" stroke-width="1.5"/>
+                    </svg>
+                </a>
+            </div>
+        </div>
+
+        <div class="result" id="test2-result"></div>
+    </div>
+
+    <div class="test-case">
+        <h2>Test 3: URL Generation</h2>
+        <p>Testing the URL format for the subordinate table link:</p>
+
+        <div class="result" id="test3-result"></div>
+    </div>
+
+    <script>
+        // Test 1: Check if the link is positioned correctly
+        (function() {
+            const toolbar = document.querySelector('.subordinate-table-toolbar');
+            const link = toolbar.querySelector('.subordinate-table-link');
+            const linkStyle = window.getComputedStyle(link);
+
+            const result = document.getElementById('test1-result');
+
+            if (linkStyle.marginLeft === 'auto' || link.offsetLeft > toolbar.offsetWidth / 2) {
+                result.innerHTML = '<span class="pass">✓ PASS:</span> Link icon is positioned on the right side of the toolbar';
+            } else {
+                result.innerHTML = '<span class="fail">✗ FAIL:</span> Link icon is not positioned correctly';
+            }
+        })();
+
+        // Test 2: Check if icons look the same
+        (function() {
+            const original = document.querySelector('.edit-form-table-link');
+            const newLink = document.querySelector('.subordinate-table-link');
+
+            const originalStyle = window.getComputedStyle(original);
+            const newStyle = window.getComputedStyle(newLink);
+
+            const result = document.getElementById('test2-result');
+
+            if (originalStyle.color === newStyle.color &&
+                originalStyle.padding === newStyle.padding &&
+                originalStyle.borderRadius === newStyle.borderRadius) {
+                result.innerHTML = '<span class="pass">✓ PASS:</span> Both icons have consistent styling (color, padding, border-radius)';
+            } else {
+                result.innerHTML = '<span class="fail">✗ FAIL:</span> Icons have different styling';
+            }
+        })();
+
+        // Test 3: URL generation
+        (function() {
+            // Simulate URL generation logic
+            const testCases = [
+                { pathname: '/testdb/table/1', arrId: 42, parentId: 123, expected: '/testdb/table/42?F_U=123' },
+                { pathname: '/mycrm/edit/5', arrId: 10, parentId: 999, expected: '/mycrm/table/10?F_U=999' },
+                { pathname: '/db/view/record', arrId: 55, parentId: 1, expected: '/db/table/55?F_U=1' }
+            ];
+
+            let allPassed = true;
+            let html = '';
+
+            testCases.forEach((tc, idx) => {
+                const pathParts = tc.pathname.split('/');
+                const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+                const generatedUrl = `/${dbName}/table/${tc.arrId}?F_U=${tc.parentId}`;
+
+                const passed = generatedUrl === tc.expected;
+                allPassed = allPassed && passed;
+
+                html += `<div>Test ${idx + 1}: pathname="${tc.pathname}" → URL="${generatedUrl}" `;
+                html += passed ? '<span class="pass">✓ PASS</span>' : `<span class="fail">✗ FAIL (expected: ${tc.expected})</span>`;
+                html += '</div>';
+            });
+
+            document.getElementById('test3-result').innerHTML = html;
+        })();
+    </script>
+</body>
+</html>

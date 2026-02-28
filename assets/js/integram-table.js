@@ -6708,6 +6708,11 @@ class IntegramTable {
                 rows = this.filterSubordinateRows(rows, searchTerm.trim(), columns);
             }
 
+            // Build table URL for subordinate table link (issue #589)
+            const pathParts = window.location.pathname.split('/');
+            const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+            const subordinateTableUrl = `/${dbName}/table/${arrId}?F_U=${parentRecordId}`;
+
             let html = `
                 <div class="subordinate-table-toolbar">
                     <button type="button" class="btn btn-sm btn-primary subordinate-add-btn" data-arr-id="${ arrId }" data-parent-id="${ parentRecordId }">
@@ -6717,6 +6722,13 @@ class IntegramTable {
                         <input type="text" class="subordinate-search-input" placeholder="Поиск..." value="${ this.escapeHtml(searchTerm) }">
                         <button type="button" class="subordinate-search-clear" title="Очистить поиск"${ searchTerm ? '' : ' style="display: none;"' }>×</button>
                     </div>
+                    <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="2" y="2" width="12" height="12" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                            <line x1="2" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5"/>
+                            <line x1="6" y1="6" x2="6" y2="14" stroke="currentColor" stroke-width="1.5"/>
+                        </svg>
+                    </a>
                 </div>
             `;
 
