@@ -6175,6 +6175,24 @@ class IntegramTable {
                 mainFieldHtml = `<input type="number" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required step="0.01">`;
             } else if (mainFieldType === 'MEMO') {
                 mainFieldHtml = `<textarea class="form-control memo-field" id="field-main" name="main" rows="4" required>${ this.escapeHtml(mainValue) }</textarea>`;
+            } else if (mainFieldType === 'GRANT') {
+                // GRANT field (dropdown with options from GET grants API - issue #581)
+                mainFieldHtml = `
+                    <select class="form-control form-grant-select" id="field-main" name="main" required data-grant-type="grant">
+                        <option value="">Загрузка...</option>
+                    </select>
+                `;
+                // Store current value for later selection after options load
+                mainFieldHtml += `<input type="hidden" id="field-main-current-value" value="${ this.escapeHtml(mainValue) }">`;
+            } else if (mainFieldType === 'REPORT_COLUMN') {
+                // REPORT_COLUMN field (dropdown with options from GET rep_cols API - issue #581)
+                mainFieldHtml = `
+                    <select class="form-control form-grant-select" id="field-main" name="main" required data-grant-type="rep_col">
+                        <option value="">Загрузка...</option>
+                    </select>
+                `;
+                // Store current value for later selection after options load
+                mainFieldHtml += `<input type="hidden" id="field-main-current-value" value="${ this.escapeHtml(mainValue) }">`;
             } else {
                 // Default: text input (SHORT, CHARS, etc.)
                 mainFieldHtml = `<input type="text" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required>`;
@@ -10024,6 +10042,24 @@ class IntegramCreateFormHelper {
             mainFieldHtml = `<input type="number" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required step="0.01">`;
         } else if (mainFieldType === 'MEMO') {
             mainFieldHtml = `<textarea class="form-control memo-field" id="field-main" name="main" rows="4" required>${ this.escapeHtml(mainValue) }</textarea>`;
+        } else if (mainFieldType === 'GRANT') {
+            // GRANT field (dropdown with options from GET grants API - issue #581)
+            mainFieldHtml = `
+                <select class="form-control form-grant-select" id="field-main" name="main" required data-grant-type="grant">
+                    <option value="">Загрузка...</option>
+                </select>
+            `;
+            // Store current value for later selection after options load
+            mainFieldHtml += `<input type="hidden" id="field-main-current-value" value="${ this.escapeHtml(mainValue) }">`;
+        } else if (mainFieldType === 'REPORT_COLUMN') {
+            // REPORT_COLUMN field (dropdown with options from GET rep_cols API - issue #581)
+            mainFieldHtml = `
+                <select class="form-control form-grant-select" id="field-main" name="main" required data-grant-type="rep_col">
+                    <option value="">Загрузка...</option>
+                </select>
+            `;
+            // Store current value for later selection after options load
+            mainFieldHtml += `<input type="hidden" id="field-main-current-value" value="${ this.escapeHtml(mainValue) }">`;
         } else {
             // Default: text input (SHORT, CHARS, etc.)
             mainFieldHtml = `<input type="text" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required>`;
