@@ -6152,6 +6152,8 @@ class IntegramTable {
             // Main value field - render according to base type
             const typeName = this.getMetadataName(metadata);
             const mainValue = recordData && recordData.obj ? recordData.obj.val : '';
+            // For GRANT/REPORT_COLUMN fields, use term from API response for dropdown pre-selection (issue #583)
+            const mainTermValue = recordData && recordData.obj && recordData.obj.term !== undefined ? recordData.obj.term : '';
             const mainFieldType = this.normalizeFormat(metadata.type);
 
             // Build main field HTML based on its type
@@ -6182,8 +6184,8 @@ class IntegramTable {
                         <option value="">Загрузка...</option>
                     </select>
                 `;
-                // Store current value for later selection after options load
-                mainFieldHtml += `<input type="hidden" id="field-main-current-value" value="${ this.escapeHtml(mainValue) }">`;
+                // Store current value (term) for later selection after options load (issue #583)
+                mainFieldHtml += `<input type="hidden" id="field-main-current-value" value="${ this.escapeHtml(mainTermValue) }">`;
             } else if (mainFieldType === 'REPORT_COLUMN') {
                 // REPORT_COLUMN field (dropdown with options from GET rep_cols API - issue #581)
                 mainFieldHtml = `
@@ -6191,8 +6193,8 @@ class IntegramTable {
                         <option value="">Загрузка...</option>
                     </select>
                 `;
-                // Store current value for later selection after options load
-                mainFieldHtml += `<input type="hidden" id="field-main-current-value" value="${ this.escapeHtml(mainValue) }">`;
+                // Store current value (term) for later selection after options load (issue #583)
+                mainFieldHtml += `<input type="hidden" id="field-main-current-value" value="${ this.escapeHtml(mainTermValue) }">`;
             } else {
                 // Default: text input (SHORT, CHARS, etc.)
                 mainFieldHtml = `<input type="text" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required>`;
@@ -7566,7 +7568,8 @@ class IntegramTable {
                     if (Array.isArray(options)) {
                         options.forEach(opt => {
                             // Options may be in format: { id: "...", val: "..." } or { id: "...", value: "..." }
-                            const optId = opt.id || opt.i || '';
+                            // Use nullish check to properly handle "0" as a valid ID (issue #583)
+                            const optId = (opt.id !== undefined && opt.id !== null) ? opt.id : ((opt.i !== undefined && opt.i !== null) ? opt.i : '');
                             const optVal = opt.val || opt.value || opt.name || opt.v || '';
                             const option = document.createElement('option');
                             option.value = optId;
@@ -10019,6 +10022,8 @@ class IntegramCreateFormHelper {
         // Main value field - render according to base type
         const typeName = this.getMetadataName(metadata);
         const mainValue = recordData && recordData.obj ? recordData.obj.val || '' : '';
+        // For GRANT/REPORT_COLUMN fields, use term from API response for dropdown pre-selection (issue #583)
+        const mainTermValue = recordData && recordData.obj && recordData.obj.term !== undefined ? recordData.obj.term : '';
         const mainFieldType = this.normalizeFormat(metadata.type);
 
         // Build main field HTML based on its type
@@ -10049,8 +10054,8 @@ class IntegramCreateFormHelper {
                     <option value="">Загрузка...</option>
                 </select>
             `;
-            // Store current value for later selection after options load
-            mainFieldHtml += `<input type="hidden" id="field-main-current-value" value="${ this.escapeHtml(mainValue) }">`;
+            // Store current value (term) for later selection after options load (issue #583)
+            mainFieldHtml += `<input type="hidden" id="field-main-current-value" value="${ this.escapeHtml(mainTermValue) }">`;
         } else if (mainFieldType === 'REPORT_COLUMN') {
             // REPORT_COLUMN field (dropdown with options from GET rep_cols API - issue #581)
             mainFieldHtml = `
@@ -10058,8 +10063,8 @@ class IntegramCreateFormHelper {
                     <option value="">Загрузка...</option>
                 </select>
             `;
-            // Store current value for later selection after options load
-            mainFieldHtml += `<input type="hidden" id="field-main-current-value" value="${ this.escapeHtml(mainValue) }">`;
+            // Store current value (term) for later selection after options load (issue #583)
+            mainFieldHtml += `<input type="hidden" id="field-main-current-value" value="${ this.escapeHtml(mainTermValue) }">`;
         } else {
             // Default: text input (SHORT, CHARS, etc.)
             mainFieldHtml = `<input type="text" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required>`;
@@ -10219,7 +10224,8 @@ class IntegramCreateFormHelper {
                 if (Array.isArray(options)) {
                     options.forEach(opt => {
                         // Options may be in format: { id: "...", val: "..." } or { id: "...", value: "..." }
-                        const optId = opt.id || opt.i || '';
+                        // Use nullish check to properly handle "0" as a valid ID (issue #583)
+                        const optId = (opt.id !== undefined && opt.id !== null) ? opt.id : ((opt.i !== undefined && opt.i !== null) ? opt.i : '');
                         const optVal = opt.val || opt.value || opt.name || opt.v || '';
                         const option = document.createElement('option');
                         option.value = optId;
