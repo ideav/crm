@@ -4247,11 +4247,15 @@ class IntegramTable {
                         multiParams.append('_xsrf', xsrf);
                     }
 
-                    await fetch(`${apiBase}/_d_multi/${columnId}?JSON`, {
+                    const multiResponse = await fetch(`${apiBase}/_d_multi/${columnId}?JSON`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                         body: multiParams.toString()
                     });
+
+                    if (!multiResponse.ok) {
+                        console.warn(`Warning: Failed to enable multiselect for column ${columnId}: ${multiResponse.status}`);
+                    }
                 }
 
                 return {
