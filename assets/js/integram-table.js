@@ -3807,9 +3807,10 @@ class IntegramTable {
 
             modal.innerHTML = `
                 <h5 style="margin: 0 0 20px 0; font-weight: 500; font-size: 20px;">Добавить новую колонку</h5>
-                <div style="margin-bottom: 16px;">
+                <div style="margin-bottom: 16px; position: relative;">
                     <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px;">Имя колонки:</label>
-                    <input type="text" id="new-column-name-${instanceName}" class="form-control" placeholder="Введите имя колонки" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 14px; box-sizing: border-box;">
+                    <input type="text" id="new-column-name-${instanceName}" class="form-control" placeholder="Введите имя колонки" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 14px; box-sizing: border-box;" autocomplete="off">
+                    <div id="column-name-suggestions-${instanceName}" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #dee2e6; border-radius: 4px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-height: 250px; overflow-y: auto; z-index: 1003;"></div>
                 </div>
                 <div style="margin-bottom: 16px;">
                     <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px;">Базовый тип:</label>
@@ -3831,8 +3832,8 @@ class IntegramTable {
                 </div>
                 <div id="add-column-error-${instanceName}" style="color: #dc3545; margin-bottom: 16px; display: none; font-size: 14px;"></div>
                 <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                    <button class="btn btn-primary" id="create-column-btn-${instanceName}">Создать</button>
                     <button class="btn btn-secondary" id="cancel-add-column-btn-${instanceName}">Отмена</button>
-                    <button class="btn btn-success" id="create-column-btn-${instanceName}">Создать</button>
                 </div>
             `;
 
@@ -3855,6 +3856,144 @@ class IntegramTable {
                 multiselectContainer.style.display = listCheckbox.checked ? 'block' : 'none';
                 if (!listCheckbox.checked) {
                     modal.querySelector(`#new-column-multiselect-${instanceName}`).checked = false;
+                }
+            });
+
+            // Metadata search for column name suggestions (issue #585)
+            const nameInput = modal.querySelector(`#new-column-name-${instanceName}`);
+            const suggestionsDiv = modal.querySelector(`#column-name-suggestions-${instanceName}`);
+            const typeSelect = modal.querySelector(`#new-column-type-${instanceName}`);
+
+            // Get base type name by id
+            const getBaseTypeName = (typeId) => {
+                const type = baseTypes.find(t => t.id === parseInt(typeId));
+                return type ? type.name : `Тип ${typeId}`;
+            };
+
+            // Search metadata and return matching items
+            const searchMetadata = (searchTerm) => {
+                if (!this.globalMetadata || !searchTerm || searchTerm.length < 1) {
+                    return [];
+                }
+
+                const term = searchTerm.toLowerCase();
+                const results = [];
+
+                // Search in top-level metadata items (tables)
+                for (const item of this.globalMetadata) {
+                    const name = item.val || item.value || item.name || '';
+                    if (name.toLowerCase().includes(term)) {
+                        // Add as regular suggestion
+                        results.push({
+                            name: name,
+                            type: item.type || item.id,
+                            isReference: false,
+                            source: 'table',
+                            item: item
+                        });
+
+                        // If item has "referenced" key, add additional suggestion as "Справочник {Name}"
+                        if (item.referenced) {
+                            results.push({
+                                name: name,
+                                type: item.type || item.id,
+                                isReference: true,
+                                source: 'table',
+                                item: item
+                            });
+                        }
+                    }
+
+                    // Also check if "Справочник {name}" matches the search term
+                    if (item.referenced && `справочник ${name}`.toLowerCase().includes(term)) {
+                        // Check if we haven't already added this reference suggestion
+                        const alreadyAdded = results.some(r => r.isReference && r.name === name);
+                        if (!alreadyAdded) {
+                            results.push({
+                                name: name,
+                                type: item.type || item.id,
+                                isReference: true,
+                                source: 'table',
+                                item: item
+                            });
+                        }
+                    }
+
+                    // Search in reqs (requisites) of this item
+                    if (item.reqs && Array.isArray(item.reqs)) {
+                        for (const req of item.reqs) {
+                            const reqName = req.val || req.value || req.name || '';
+                            if (reqName.toLowerCase().includes(term)) {
+                                results.push({
+                                    name: reqName,
+                                    type: req.type,
+                                    isReference: false,
+                                    source: 'requisite',
+                                    item: req
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // Return top 10 results
+                return results.slice(0, 10);
+            };
+
+            // Render suggestions dropdown
+            const renderSuggestions = (suggestions) => {
+                if (suggestions.length === 0) {
+                    suggestionsDiv.style.display = 'none';
+                    return;
+                }
+
+                suggestionsDiv.innerHTML = suggestions.map((s, idx) => {
+                    const typeName = getBaseTypeName(s.type);
+                    const displayName = s.isReference ? `Справочник ${s.name}` : s.name;
+                    return `<div class="column-suggestion-item" data-index="${idx}" style="padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #eee; font-size: 14px;" onmouseover="this.style.backgroundColor='#f5f5f5'" onmouseout="this.style.backgroundColor='transparent'">
+                        ${this.escapeHtml(displayName)} <span style="color: #888;">(${this.escapeHtml(typeName)})</span>
+                    </div>`;
+                }).join('');
+
+                suggestionsDiv.style.display = 'block';
+
+                // Add click handlers for suggestions
+                suggestionsDiv.querySelectorAll('.column-suggestion-item').forEach((el, idx) => {
+                    el.addEventListener('click', () => {
+                        const suggestion = suggestions[idx];
+                        // Fill the name field (use original name without "Справочник" prefix)
+                        nameInput.value = suggestion.name;
+
+                        // Set the base type
+                        typeSelect.value = suggestion.type;
+
+                        // If reference suggestion, check the list checkbox
+                        if (suggestion.isReference) {
+                            listCheckbox.checked = true;
+                            multiselectContainer.style.display = 'block';
+                        }
+
+                        // Hide suggestions
+                        suggestionsDiv.style.display = 'none';
+                    });
+                });
+            };
+
+            // Input event for search
+            nameInput.addEventListener('input', () => {
+                const value = nameInput.value.trim();
+                if (value.length >= 1) {
+                    const suggestions = searchMetadata(value);
+                    renderSuggestions(suggestions);
+                } else {
+                    suggestionsDiv.style.display = 'none';
+                }
+            });
+
+            // Hide suggestions when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!nameInput.contains(e.target) && !suggestionsDiv.contains(e.target)) {
+                    suggestionsDiv.style.display = 'none';
                 }
             });
 
