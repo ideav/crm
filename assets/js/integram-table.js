@@ -3878,40 +3878,56 @@ class IntegramTable {
 
                 const term = searchTerm.toLowerCase();
                 const results = [];
+                // Track seen suggestions to prevent duplicates (issue #587)
+                const seen = new Set();
+
+                // Helper to create unique key for deduplication
+                const getKey = (name, type, isReference) => `${name.toLowerCase()}|${type}|${isReference}`;
 
                 // Search in top-level metadata items (tables)
                 for (const item of this.globalMetadata) {
                     const name = item.val || item.value || item.name || '';
                     if (name.toLowerCase().includes(term)) {
-                        // Add as regular suggestion
-                        results.push({
-                            name: name,
-                            type: item.type || item.id,
-                            isReference: false,
-                            source: 'table',
-                            item: item
-                        });
-
-                        // If item has "referenced" key, add additional suggestion as "Справочник {Name}"
-                        if (item.referenced) {
+                        const type = item.type || item.id;
+                        const key = getKey(name, type, false);
+                        // Add as regular suggestion if not already seen
+                        if (!seen.has(key)) {
+                            seen.add(key);
                             results.push({
                                 name: name,
-                                type: item.type || item.id,
-                                isReference: true,
+                                type: type,
+                                isReference: false,
                                 source: 'table',
                                 item: item
                             });
+                        }
+
+                        // If item has "referenced" key, add additional suggestion as "Справочник {Name}"
+                        if (item.referenced) {
+                            const refKey = getKey(name, type, true);
+                            if (!seen.has(refKey)) {
+                                seen.add(refKey);
+                                results.push({
+                                    name: name,
+                                    type: type,
+                                    isReference: true,
+                                    source: 'table',
+                                    item: item
+                                });
+                            }
                         }
                     }
 
                     // Also check if "Справочник {name}" matches the search term
                     if (item.referenced && `справочник ${name}`.toLowerCase().includes(term)) {
+                        const type = item.type || item.id;
+                        const refKey = getKey(name, type, true);
                         // Check if we haven't already added this reference suggestion
-                        const alreadyAdded = results.some(r => r.isReference && r.name === name);
-                        if (!alreadyAdded) {
+                        if (!seen.has(refKey)) {
+                            seen.add(refKey);
                             results.push({
                                 name: name,
-                                type: item.type || item.id,
+                                type: type,
                                 isReference: true,
                                 source: 'table',
                                 item: item
@@ -3924,13 +3940,18 @@ class IntegramTable {
                         for (const req of item.reqs) {
                             const reqName = req.val || req.value || req.name || '';
                             if (reqName.toLowerCase().includes(term)) {
-                                results.push({
-                                    name: reqName,
-                                    type: req.type,
-                                    isReference: false,
-                                    source: 'requisite',
-                                    item: req
-                                });
+                                const reqType = req.type;
+                                const reqKey = getKey(reqName, reqType, false);
+                                if (!seen.has(reqKey)) {
+                                    seen.add(reqKey);
+                                    results.push({
+                                        name: reqName,
+                                        type: reqType,
+                                        isReference: false,
+                                        source: 'requisite',
+                                        item: req
+                                    });
+                                }
                             }
                         }
                     }
@@ -3967,10 +3988,13 @@ class IntegramTable {
                         // Set the base type
                         typeSelect.value = suggestion.type;
 
-                        // If reference suggestion, check the list checkbox
+                        // If reference suggestion, check the list checkbox; otherwise uncheck it (issue #587)
                         if (suggestion.isReference) {
                             listCheckbox.checked = true;
                             multiselectContainer.style.display = 'block';
+                        } else {
+                            listCheckbox.checked = false;
+                            multiselectContainer.style.display = 'none';
                         }
 
                         // Hide suggestions
