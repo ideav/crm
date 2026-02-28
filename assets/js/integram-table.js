@@ -2989,6 +2989,9 @@ class IntegramTable {
             // Load reference options for dropdown fields
             this.loadReferenceOptions(regularFields, parentRecordId, modal);
 
+            // Load GRANT and REPORT_COLUMN dropdown options (issue #577)
+            this.loadGrantAndReportColumnOptions(modal);
+
             // Attach date/datetime picker handlers
             this.attachDatePickerHandlers(modal);
 
@@ -6068,6 +6071,9 @@ class IntegramTable {
             // Load reference options for dropdowns (scoped to this modal)
             this.loadReferenceOptions(metadata.reqs, recordId || 0, modal);
 
+            // Load GRANT and REPORT_COLUMN dropdown options (issue #577)
+            this.loadGrantAndReportColumnOptions(modal);
+
             // Attach date/datetime picker handlers
             this.attachDatePickerHandlers(modal);
 
@@ -6299,6 +6305,26 @@ class IntegramTable {
                             <input type="hidden" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(reqValue) }" ${ isRequired ? 'required' : '' } data-file-deleted="false">
                         </div>
                     `;
+                }
+                // GRANT field (dropdown with options from GET grants API - issue #577)
+                else if (baseFormat === 'GRANT') {
+                    html += `
+                        <select class="form-control form-grant-select" id="field-${ req.id }" name="t${ req.id }" ${ isRequired ? 'required' : '' } data-grant-type="grant">
+                            <option value="">Загрузка...</option>
+                        </select>
+                    `;
+                    // Store current value for later selection after options load
+                    html += `<input type="hidden" id="field-${ req.id }-current-value" value="${ this.escapeHtml(reqValue) }">`;
+                }
+                // REPORT_COLUMN field (dropdown with options from GET rep_cols API - issue #577)
+                else if (baseFormat === 'REPORT_COLUMN') {
+                    html += `
+                        <select class="form-control form-grant-select" id="field-${ req.id }" name="t${ req.id }" ${ isRequired ? 'required' : '' } data-grant-type="rep_col">
+                            <option value="">Загрузка...</option>
+                        </select>
+                    `;
+                    // Store current value for later selection after options load
+                    html += `<input type="hidden" id="field-${ req.id }-current-value" value="${ this.escapeHtml(reqValue) }">`;
                 }
                 // Regular text field
                 else {
@@ -7028,6 +7054,9 @@ class IntegramTable {
             // Load reference options (scoped to this modal)
             this.loadReferenceOptions(regularFields, 0, modal);
 
+            // Load GRANT and REPORT_COLUMN dropdown options (issue #577)
+            this.loadGrantAndReportColumnOptions(modal);
+
             // Attach date picker handlers
             this.attachDatePickerHandlers(modal);
 
@@ -7480,6 +7509,69 @@ class IntegramTable {
             }
         }
 
+        /**
+         * Load GRANT and REPORT_COLUMN dropdown options from API (issue #577)
+         * GRANT fields use GET /grants endpoint
+         * REPORT_COLUMN fields use GET /rep_cols endpoint
+         */
+        async loadGrantAndReportColumnOptions(modalElement) {
+            const container = modalElement || document;
+            const grantSelects = container.querySelectorAll('.form-grant-select');
+
+            for (const select of grantSelects) {
+                const grantType = select.dataset.grantType;
+                const fieldId = select.id;
+                const currentValueInput = container.querySelector(`#${ fieldId }-current-value`);
+                const currentValue = currentValueInput ? currentValueInput.value : '';
+
+                try {
+                    const apiBase = this.getApiBase();
+                    let apiUrl;
+
+                    if (grantType === 'grant') {
+                        apiUrl = `${ apiBase }/grants`;
+                    } else if (grantType === 'rep_col') {
+                        apiUrl = `${ apiBase }/rep_cols`;
+                    } else {
+                        continue;
+                    }
+
+                    const response = await fetch(apiUrl);
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${ response.status }`);
+                    }
+                    const options = await response.json();
+
+                    // Clear loading option and populate with fetched options
+                    select.innerHTML = '<option value="">-- Выберите --</option>';
+
+                    if (Array.isArray(options)) {
+                        options.forEach(opt => {
+                            // Options may be in format: { id: "...", val: "..." } or { id: "...", value: "..." }
+                            const optId = opt.id || opt.i || '';
+                            const optVal = opt.val || opt.value || opt.name || opt.v || '';
+                            const option = document.createElement('option');
+                            option.value = optId;
+                            option.textContent = optVal;
+                            if (String(optId) === String(currentValue)) {
+                                option.selected = true;
+                            }
+                            select.appendChild(option);
+                        });
+                    }
+
+                    // Remove the hidden current value input after loading
+                    if (currentValueInput) {
+                        currentValueInput.remove();
+                    }
+
+                } catch (error) {
+                    console.error(`Error loading ${ grantType } options:`, error);
+                    select.innerHTML = '<option value="">Ошибка загрузки</option>';
+                }
+            }
+        }
+
         renderFormReferenceOptions(dropdown, options, hiddenInput, searchInput) {
             // options is an array of [id, text] tuples
             dropdown.innerHTML = '';
@@ -7670,6 +7762,9 @@ class IntegramTable {
 
             // Load reference options for dropdown fields
             this.loadReferenceOptions(regularFields, parentRecordId, modal);
+
+            // Load GRANT and REPORT_COLUMN dropdown options (issue #577)
+            this.loadGrantAndReportColumnOptions(modal);
 
             // Attach date/datetime picker handlers
             this.attachDatePickerHandlers(modal);
@@ -9861,6 +9956,9 @@ class IntegramCreateFormHelper {
         // Load reference options for dropdowns
         this.loadReferenceOptions(metadata.reqs, modal, fieldValues);
 
+        // Load GRANT and REPORT_COLUMN dropdown options (issue #577)
+        this.loadGrantAndReportColumnOptions(modal);
+
         // Attach date/datetime picker handlers
         this.attachDatePickerHandlers(modal);
 
@@ -10017,6 +10115,26 @@ class IntegramCreateFormHelper {
                     </div>
                 `;
             }
+            // GRANT field (dropdown with options from GET grants API - issue #577)
+            else if (baseFormat === 'GRANT') {
+                html += `
+                    <select class="form-control form-grant-select" id="field-${req.id}" name="t${req.id}" ${isRequired ? 'required' : ''} data-grant-type="grant">
+                        <option value="">Загрузка...</option>
+                    </select>
+                `;
+                // Store current value for later selection after options load
+                html += `<input type="hidden" id="field-${req.id}-current-value" value="${this.escapeHtml(reqValue)}">`;
+            }
+            // REPORT_COLUMN field (dropdown with options from GET rep_cols API - issue #577)
+            else if (baseFormat === 'REPORT_COLUMN') {
+                html += `
+                    <select class="form-control form-grant-select" id="field-${req.id}" name="t${req.id}" ${isRequired ? 'required' : ''} data-grant-type="rep_col">
+                        <option value="">Загрузка...</option>
+                    </select>
+                `;
+                // Store current value for later selection after options load
+                html += `<input type="hidden" id="field-${req.id}-current-value" value="${this.escapeHtml(reqValue)}">`;
+            }
             // Regular text field
             else {
                 html += `<input type="text" class="form-control" id="field-${req.id}" name="t${req.id}" value="${this.escapeHtml(reqValue)}" ${isRequired ? 'required' : ''}>`;
@@ -10026,6 +10144,67 @@ class IntegramCreateFormHelper {
         });
 
         return html;
+    }
+
+    /**
+     * Load GRANT and REPORT_COLUMN dropdown options from API (issue #577)
+     * GRANT fields use GET /grants endpoint
+     * REPORT_COLUMN fields use GET /rep_cols endpoint
+     */
+    async loadGrantAndReportColumnOptions(modal) {
+        const grantSelects = modal.querySelectorAll('.form-grant-select');
+
+        for (const select of grantSelects) {
+            const grantType = select.dataset.grantType;
+            const fieldId = select.id;
+            const currentValueInput = modal.querySelector(`#${ fieldId }-current-value`);
+            const currentValue = currentValueInput ? currentValueInput.value : '';
+
+            try {
+                let apiUrl;
+
+                if (grantType === 'grant') {
+                    apiUrl = `${ this.apiBase }/grants`;
+                } else if (grantType === 'rep_col') {
+                    apiUrl = `${ this.apiBase }/rep_cols`;
+                } else {
+                    continue;
+                }
+
+                const response = await fetch(apiUrl);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${ response.status }`);
+                }
+                const options = await response.json();
+
+                // Clear loading option and populate with fetched options
+                select.innerHTML = '<option value="">-- Выберите --</option>';
+
+                if (Array.isArray(options)) {
+                    options.forEach(opt => {
+                        // Options may be in format: { id: "...", val: "..." } or { id: "...", value: "..." }
+                        const optId = opt.id || opt.i || '';
+                        const optVal = opt.val || opt.value || opt.name || opt.v || '';
+                        const option = document.createElement('option');
+                        option.value = optId;
+                        option.textContent = optVal;
+                        if (String(optId) === String(currentValue)) {
+                            option.selected = true;
+                        }
+                        select.appendChild(option);
+                    });
+                }
+
+                // Remove the hidden current value input after loading
+                if (currentValueInput) {
+                    currentValueInput.remove();
+                }
+
+            } catch (error) {
+                console.error(`Error loading ${ grantType } options:`, error);
+                select.innerHTML = '<option value="">Ошибка загрузки</option>';
+            }
+        }
     }
 
     async loadReferenceOptions(reqs, modal, fieldValues) {
