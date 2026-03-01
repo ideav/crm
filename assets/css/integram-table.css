@@ -2144,6 +2144,7 @@ td:has(.inline-editor-file) {
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
     z-index: 1000;
     min-width: 200px;
+    font-size: 13px;
 }
 
 .export-menu-item {
