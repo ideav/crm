@@ -17,9 +17,10 @@ class IntegramTable {
         constructor(containerId, options = {}) {
             this.container = document.getElementById(containerId);
 
-            // Check URL parameters for parentId
+            // Check URL parameters for parentId and recordId (issue #563)
             const urlParams = new URLSearchParams(window.location.search);
             const urlParentId = urlParams.get('parentId') || urlParams.get('F_U') || urlParams.get('up');
+            const urlRecordId = urlParams.get('F_I');  // Record ID filter from URL (issue #563)
 
             this.options = {
                 apiUrl: options.apiUrl || '',
@@ -33,6 +34,7 @@ class IntegramTable {
                 dataSource: options.dataSource || 'report',  // 'report' or 'table'
                 tableTypeId: options.tableTypeId || null,   // Required for dataSource='table'
                 parentId: options.parentId || urlParentId || null,  // Parent ID for table data source
+                recordId: options.recordId || urlRecordId || null,  // Record ID filter for table data source (issue #563)
                 debug: options.debug || false  // Enable debug tracing
             };
 
@@ -57,13 +59,38 @@ class IntegramTable {
             this.idColumns = new Set();  // Set of hidden ID column IDs
             this.columnWidths = {};  // Map of column IDs to their widths in pixels
             this.metadataCache = {};  // Cache for metadata by type ID
+            this.grantOptionsCache = null;  // Cache for GRANT dropdown options (issue #607)
+            this.reportColumnOptionsCache = null;  // Cache for REPORT_COLUMN dropdown options (issue #607)
             this.editableColumns = new Map();  // Map of column IDs to their corresponding ID column IDs
             this.checkboxMode = false;  // Whether checkbox selection column is visible
             this.selectedRows = new Set();  // Set of selected row indices
             this.globalMetadata = null;  // Global metadata for determining parent relationships
             this.currentEditingCell = null;  // Track currently editing cell
+            this.pendingCellClick = null;  // Track pending cell click for focus preservation (issue #518)
             this.sortColumn = null;  // Column ID being sorted (null = no sort)
             this.sortDirection = null;  // 'asc' or 'desc' (null = no sort)
+
+            // Parent info for displaying breadcrumb-like title (issue #571)
+            this.parentInfo = null;  // { id, val, typ, typ_name } from edit_obj/{parentId}?JSON
+
+            // Grouping mode (issue #502)
+            this.groupingEnabled = false;  // Whether grouping mode is active
+            this.groupingColumns = [];  // Array of column IDs to group by, in order
+            this.groupedData = [];  // Processed data with grouping information
+
+            // Track URL parameters that have been overridden by user filters (issue #500)
+            // When a user sets a filter for a field that came as a GET parameter,
+            // we remove it from URL and stop forwarding it to API requests
+            this.overriddenUrlParams = new Set();
+
+            // Track URL filter parameters (FR_*, TO_*, F_*) for issue #547, #549
+            // These are parsed from URL and displayed in the filter row
+            this.urlFilters = {};  // Map of column IDs to { type, value } parsed from URL params
+
+            // Track whether configuration (column order/visibility) was loaded from URL (issue #514)
+            // When true, changes to column state will NOT be saved to cookies
+            // but can still be copied as a shareable URL
+            this.configFromUrl = false;
 
             // Table settings
             this.settings = {
@@ -113,6 +140,8 @@ class IntegramTable {
             this.filterTypes['MEMO'] = this.filterTypes['CHARS'];
             this.filterTypes['DATETIME'] = this.filterTypes['DATE'];
             this.filterTypes['SIGNED'] = this.filterTypes['NUMBER'];
+            this.filterTypes['GRANT'] = this.filterTypes['NUMBER'];
+            this.filterTypes['REPORT_COLUMN'] = this.filterTypes['NUMBER'];
 
             this.init();
         }
@@ -140,8 +169,8 @@ class IntegramTable {
                 '2': 'HTML',       // HTML
                 '7': 'BUTTON',     // Button
                 '6': 'PWD',        // Password
-                '5': 'NUMBER',     // Grant (treat as number for filters)
-                '16': 'NUMBER',    // Report column (treat as number for filters)
+                '5': 'GRANT',      // Grant (dropdown select)
+                '16': 'REPORT_COLUMN', // Report column (dropdown select)
                 '17': 'CHARS'      // Path (treat as string for filters)
             };
 
@@ -151,7 +180,9 @@ class IntegramTable {
         init() {
             this.loadColumnState();
             this.loadSettings();
+            this.loadConfigFromUrl();  // Load filters, groups, sorting from URL (issue #510)
             this.loadGlobalMetadata();  // Load metadata once at initialization
+            this.loadParentInfo();  // Load parent info for breadcrumb title (issue #571)
             this.loadData();
         }
 
@@ -175,6 +206,77 @@ class IntegramTable {
             }
         }
 
+        /**
+         * Load parent info when F_U filter is present and > 1 (issue #571)
+         * Fetches parent record data from edit_obj/{parentId}?JSON
+         * Used to display breadcrumb-like title: "{parent table name} {record value}: {current table name}"
+         */
+        async loadParentInfo() {
+            try {
+                // Only fetch parent info if parentId is numeric and > 1
+                const parentId = parseInt(this.options.parentId, 10);
+                if (!parentId || parentId <= 1) {
+                    return;
+                }
+
+                const apiBase = this.getApiBase();
+                const response = await fetch(`${ apiBase }/edit_obj/${ parentId }?JSON`);
+                if (!response.ok) {
+                    console.error('Failed to fetch parent info:', response.status);
+                    return;
+                }
+                const data = await response.json();
+                if (data && data.obj) {
+                    this.parentInfo = {
+                        id: data.obj.id,
+                        val: data.obj.val,
+                        typ: data.obj.typ,
+                        typ_name: data.obj.typ_name
+                    };
+                    // Re-render if data is already loaded, so the title updates
+                    if (this.columns.length > 0) {
+                        this.render();
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading parent info:', error);
+            }
+        }
+
+        /**
+         * Generate title HTML with parent info breadcrumb (issue #571)
+         * Format: "{parent table name} {record value}: {current table name}"
+         * Where {parent table name} links to table/{parent type id}
+         * And {record value} links to table/{parent record id}
+         */
+        renderTitleHtml() {
+            if (!this.options.title && !this.parentInfo) {
+                return '';
+            }
+
+            // Extract database name from URL path for building links
+            const pathParts = window.location.pathname.split('/');
+            const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+
+            // If we have parent info, show breadcrumb-style title
+            if (this.parentInfo) {
+                const parentTypeName = this.escapeHtml(this.parentInfo.typ_name || '');
+                const parentVal = this.escapeHtml(this.parentInfo.val || '');
+                const parentTypeId = this.parentInfo.typ || '';
+                const parentRecordId = this.parentInfo.id || '';
+                const currentTitle = this.escapeHtml(this.options.title || '');
+
+                // Build links
+                const parentTypeLink = `/${ dbName }/table/${ parentTypeId }`;
+                // Parent record link is now a clickable span that opens modal edit form (issue #575)
+
+                return `<div class="integram-table-title"><a href="${ parentTypeLink }" class="integram-title-link">${ parentTypeName }</a> <span class="integram-title-link integram-parent-record-link" data-parent-record-id="${ parentRecordId }" data-parent-type-id="${ parentTypeId }" style="cursor: pointer;">${ parentVal }</span>${ currentTitle ? ': ' + currentTitle : '' }</div>`;
+            }
+
+            // No parent info, just show the title
+            return `<div class="integram-table-title">${ this.escapeHtml(this.options.title) }</div>`;
+        }
+
         async loadData(append = false) {
             if (this.isLoading || (!append && !this.hasMore && this.loadedRecords > 0)) {
                 return;
@@ -194,22 +296,36 @@ class IntegramTable {
                     // Load data from report format (default behavior)
                     json = await this.loadDataFromReport(append);
                     newRows = json.rows || [];
+                    // Auto-set table title from report header if not explicitly provided (issue #537)
+                    if (!this.options.title && json.header) {
+                        this.options.title = json.header;
+                    }
                 }
 
                 this.columns = json.columns || [];
 
+                // In grouping mode, disable infinite scroll and use all data (up to 1000)
+                const isGroupingMode = this.groupingEnabled && this.groupingColumns.length > 0;
+
                 // Check if there are more records (we requested pageSize + 1)
-                this.hasMore = newRows.length > this.options.pageSize;
+                // In grouping mode, we fetched up to 1000 records at once
+                if (isGroupingMode) {
+                    // Grouping mode: no pagination, show all fetched data
+                    this.hasMore = false;
+                } else {
+                    this.hasMore = newRows.length > this.options.pageSize;
+                }
 
                 // Keep only pageSize records; also trim rawData to stay aligned
+                // In grouping mode, keep all data (up to 1000)
                 let rawData = json.rawData || [];
-                if (this.hasMore) {
+                if (!isGroupingMode && this.hasMore) {
                     newRows = newRows.slice(0, this.options.pageSize);
                     rawData = rawData.slice(0, this.options.pageSize);
                 }
 
                 // Append or replace data
-                if (append) {
+                if (append && !isGroupingMode) {
                     this.data = this.data.concat(newRows);
                     // Append raw object data if present
                     if (rawData.length > 0) {
@@ -229,6 +345,11 @@ class IntegramTable {
                     this.totalRows = this.loadedRecords;
                 }
 
+                // Process grouping if enabled (issue #502)
+                if (isGroupingMode) {
+                    this.processGroupedData();
+                }
+
                 // Process columns to hide ID and Style suffixes
                 this.processColumnVisibility();
 
@@ -244,6 +365,12 @@ class IntegramTable {
                     this.visibleColumns = this.columns.filter(c => !this.idColumns.has(c.id)).map(c => c.id);
                 } else {
                     this.visibleColumns = validVisible;
+                }
+
+                // Parse URL filter parameters on initial load (issue #547)
+                // This must be done after columns are loaded so we can match column IDs
+                if (!append && Object.keys(this.urlFilters).length === 0) {
+                    this.parseUrlFiltersFromParams();
                 }
 
                 if (this.options.onDataLoad) {
@@ -265,8 +392,10 @@ class IntegramTable {
 
         async loadDataFromReport(append = false) {
             // Original report-based data loading logic
-            const requestSize = this.options.pageSize + 1;
-            const offset = append ? this.loadedRecords : 0;
+            // In grouping mode, use LIMIT=1000 and disable scrolling (issue #502)
+            const isGroupingMode = this.groupingEnabled && this.groupingColumns.length > 0;
+            const requestSize = isGroupingMode ? 1000 : (this.options.pageSize + 1);
+            const offset = (append && !isGroupingMode) ? this.loadedRecords : 0;
 
             const params = new URLSearchParams();
 
@@ -330,7 +459,8 @@ class IntegramTable {
 
             return {
                 columns: json.columns || [],
-                rows: rows
+                rows: rows,
+                header: json.header || null
             };
         }
 
@@ -342,8 +472,10 @@ class IntegramTable {
 
             this.objectTableId = this.options.tableTypeId;  // Store table ID for _count=1 queries
 
-            const requestSize = this.options.pageSize + 1;
-            const offset = append ? this.loadedRecords : 0;
+            // In grouping mode, use LIMIT=1000 and disable scrolling (issue #502)
+            const isGroupingMode = this.groupingEnabled && this.groupingColumns.length > 0;
+            const requestSize = isGroupingMode ? 1000 : (this.options.pageSize + 1);
+            const offset = (append && !isGroupingMode) ? this.loadedRecords : 0;
 
             // First load, fetch metadata to get column information
             if (this.columns.length === 0) {
@@ -396,6 +528,30 @@ class IntegramTable {
 
             if (this.options.parentId) {
                 dataUrl += `&F_U=${ this.options.parentId }`;
+            }
+
+            // Add record ID filter if present (issue #563)
+            if (this.options.recordId) {
+                dataUrl += `&F_I=${ this.options.recordId }`;
+            }
+
+            // Apply filters if any (issue #508)
+            const filters = this.filters || {};
+            const filterParams = new URLSearchParams();
+
+            Object.keys(filters).forEach(colId => {
+                const filter = filters[colId];
+                if (filter.value || filter.type === '%' || filter.type === '!%') {
+                    const column = this.columns.find(c => c.id === colId);
+                    if (column) {
+                        this.applyFilter(filterParams, column, filter);
+                    }
+                }
+            });
+
+            // Add filter parameters to URL
+            if (filterParams.toString()) {
+                dataUrl += `&${ filterParams.toString() }`;
             }
 
             // Add ORDER parameter for sorting
@@ -505,9 +661,21 @@ class IntegramTable {
             const apiBase = this.getApiBase();
             const tableId = metadata.id;
             this.objectTableId = tableId;  // Store table ID for _count=1 queries
-            const requestSize = this.options.pageSize + 1;
-            const offset = append ? this.loadedRecords : 0;
+            // In grouping mode, use LIMIT=1000 and disable scrolling (issue #502)
+            const isGroupingMode = this.groupingEnabled && this.groupingColumns.length > 0;
+            const requestSize = isGroupingMode ? 1000 : (this.options.pageSize + 1);
+            const offset = (append && !isGroupingMode) ? this.loadedRecords : 0;
             let dataUrl = `${ apiBase }/object/${ tableId }/?JSON_OBJ&LIMIT=${ offset },${ requestSize }`;
+
+            // Add parent ID filter if present (issue #563)
+            if (this.options.parentId) {
+                dataUrl += `&F_U=${ this.options.parentId }`;
+            }
+
+            // Add record ID filter if present (issue #563)
+            if (this.options.recordId) {
+                dataUrl += `&F_I=${ this.options.recordId }`;
+            }
 
             // Apply filters if any
             const filters = this.filters || {};
@@ -752,6 +920,16 @@ class IntegramTable {
             }
         }
 
+        /**
+         * Get the default filter type symbol for a given column format.
+         * NUMBER, SIGNED, DATE, DATETIME use '=' (equals) by default (issue #539).
+         * All other types use '^' (starts with) by default.
+         */
+        getDefaultFilterType(format) {
+            const equalDefaultFormats = ['NUMBER', 'SIGNED', 'DATE', 'DATETIME'];
+            return equalDefaultFormats.includes(format) ? '=' : '^';
+        }
+
         applyFilter(params, column, filter) {
             const type = filter.type || '^';
             const value = filter.value;
@@ -876,18 +1054,31 @@ class IntegramTable {
             let html = `
                 <div class="integram-table-wrapper">
                     <div class="integram-table-header">
-                        ${ this.options.title ? `<div class="integram-table-title">${ this.options.title }</div>` : '' }
+                        ${ this.renderTitleHtml() }
                         <div class="integram-table-controls">
-                            ${ this.hasActiveFilters() ? `
-                            <button class="btn btn-sm btn-outline-secondary mr-1" onclick="window.${ instanceName }.clearAllFilters()" title="Очистить фильтры">
+                            ${ this.hasActiveFiltersOrGroups() ? `
+                            <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.copyConfigUrl()" title="Скопировать ссылку с текущими фильтрами и группами">
+                                <i class="pi pi-copy" style="vertical-align: middle;"></i>
+                            </button>
+                            ` : '' }
+                            ${ this.groupingEnabled ? `
+                            <button class="btn btn-sm btn-outline-secondary me-1" onclick="window.${ instanceName }.clearGrouping()" title="Очистить группировку">
                                 <i class="pi pi-filter-slash" style="vertical-align: middle;"></i>
                             </button>
                             ` : '' }
-                            <button class="btn btn-sm btn-outline-secondary mr-2" onclick="window.${ instanceName }.toggleFilters()">
+                            <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.openGroupingSettings()">
+                                ${ this.groupingEnabled ? '<i class="pi pi-check"></i>' : '' } Группы
+                            </button>
+                            ${ this.hasActiveFilters() ? `
+                            <button class="btn btn-sm btn-outline-secondary me-1" onclick="window.${ instanceName }.clearAllFilters()" title="Очистить фильтры">
+                                <i class="pi pi-filter-slash" style="vertical-align: middle;"></i>
+                            </button>
+                            ` : '' }
+                            <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.toggleFilters()">
                                 ${ this.filtersEnabled ? '<i class="pi pi-check"></i>' : '' } Фильтры
                             </button>
                             <div class="integram-table-export-container">
-                                <button class="btn btn-sm btn-outline-secondary mr-2" onclick="window.${ instanceName }.toggleExportMenu(event)" title="Экспорт таблицы">
+                                <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.toggleExportMenu(event)" title="Экспорт таблицы">
                                     <i class="pi pi-download"></i> Экспорт
                                 </button>
                                 <div class="integram-export-menu" id="${ instanceName }-export-menu" style="display: none;">
@@ -918,49 +1109,59 @@ class IntegramTable {
                             </div>
                         </div>
                     </div>
+                    ${ this.renderHiddenFilterBadges() }
                     <div class="integram-table-container">
                         <table class="integram-table${ this.settings.compact ? ' compact' : '' }">
                         <thead>
                             <tr>
                                 ${ this.checkboxMode ? `<th class="checkbox-column-header"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.data.length > 0 && this.selectedRows.size === this.data.length ? 'checked' : '' }></th>` : '' }
-                                ${ orderedColumns.map(col => {
-                                    const width = this.columnWidths[col.id];
-                                    const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
-                                    const addButtonHtml = this.shouldShowAddButton(col) ?
-                                        `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
+                                ${ this.groupingEnabled && this.groupingColumns.length > 0 ?
+                                    this.renderGroupedHeaders(orderedColumns, instanceName) :
+                                    orderedColumns.map(col => {
+                                        const width = this.columnWidths[col.id];
+                                        const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
+                                        const addButtonHtml = this.shouldShowAddButton(col) ?
+                                            `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
 
-                                    // Add sort indicator if this column is sorted
-                                    let sortIndicator = '';
-                                    if (this.sortColumn === col.id) {
-                                        sortIndicator = this.sortDirection === 'asc' ? '<i class="pi pi-sort-amount-up-alt" style="font-size:0.75em;"></i> ' : '<i class="pi pi-sort-amount-down" style="font-size:0.75em;"></i> ';
-                                    }
+                                        // Add sort indicator if this column is sorted
+                                        let sortIndicator = '';
+                                        if (this.sortColumn === col.id) {
+                                            sortIndicator = this.sortDirection === 'asc' ? '<i class="pi pi-sort-amount-up-alt" style="font-size:0.75em;"></i> ' : '<i class="pi pi-sort-amount-down" style="font-size:0.75em;"></i> ';
+                                        }
 
-                                    return `
-                                    <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
-                                        <span class="column-header-content" data-column-id="${ col.id }">${ sortIndicator }${ col.name }</span>
-                                        ${ addButtonHtml }
-                                        <div class="column-resize-handle" data-column-id="${ col.id }"></div>
-                                    </th>
-                                `;
-                                }).join('') }
+                                        return `
+                                        <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
+                                            <span class="column-header-content" data-column-id="${ col.id }">${ sortIndicator }${ col.name }</span>
+                                            ${ addButtonHtml }
+                                            <div class="column-resize-handle" data-column-id="${ col.id }"></div>
+                                        </th>
+                                    `;
+                                    }).join('')
+                                }
                             </tr>
                             ${ this.filtersEnabled ? `
                             <tr class="filter-row">
                                 ${ this.checkboxMode ? '<td class="checkbox-column-filter"></td>' : '' }
-                                ${ orderedColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('') }
+                                ${ this.groupingEnabled && this.groupingColumns.length > 0 ?
+                                    this.renderGroupedFilterRow(orderedColumns) :
+                                    orderedColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('')
+                                }
                             </tr>
                             ` : '' }
                         </thead>
                         <tbody>
-                            ${ this.data.map((row, rowIndex) => `
-                                <tr class="${ this.selectedRows.has(rowIndex) ? 'row-selected' : '' }">
-                                    ${ this.checkboxMode ? `<td class="checkbox-column-cell"><input type="checkbox" class="row-select-checkbox" data-row-index="${ rowIndex }" ${ this.selectedRows.has(rowIndex) ? 'checked' : '' }></td>` : '' }
-                                    ${ orderedColumns.map((col, colIndex) => {
-                                        const cellValue = row[this.columns.indexOf(col)];
-                                        return this.renderCell(col, cellValue, rowIndex, colIndex);
-                                    }).join('') }
-                                </tr>
-                            `).join('') }
+                            ${ this.groupingEnabled && this.groupedData.length > 0 ?
+                                this.renderGroupedRows(orderedColumns, instanceName) :
+                                this.data.map((row, rowIndex) => `
+                                    <tr class="${ this.selectedRows.has(rowIndex) ? 'row-selected' : '' }">
+                                        ${ this.checkboxMode ? `<td class="checkbox-column-cell"><input type="checkbox" class="row-select-checkbox" data-row-index="${ rowIndex }" ${ this.selectedRows.has(rowIndex) ? 'checked' : '' }></td>` : '' }
+                                        ${ orderedColumns.map((col, colIndex) => {
+                                            const cellValue = row[this.columns.indexOf(col)];
+                                            return this.renderCell(col, cellValue, rowIndex, colIndex);
+                                        }).join('') }
+                                    </tr>
+                                `).join('')
+                            }
                         </tbody>
                         </table>
                     </div>
@@ -992,8 +1193,10 @@ class IntegramTable {
 
         renderFilterCell(column, columnIndex = 0) {
             const format = column.format || 'SHORT';
-            const currentFilter = this.filters[column.id] || { type: '^', value: '' };
+            const currentFilter = this.filters[column.id] || { type: this.getDefaultFilterType(format), value: '' };
             const placeholder = columnIndex === 0 ? 'Фильтр...' : '';
+            // Use displayValue (resolved text label) when available, otherwise use raw value (issue #551)
+            const displayValue = currentFilter.displayValue !== undefined ? currentFilter.displayValue : currentFilter.value;
 
             return `
                 <td>
@@ -1004,7 +1207,7 @@ class IntegramTable {
                         <input type="text"
                                class="filter-input-with-icon"
                                data-column-id="${ column.id }"
-                               value="${ currentFilter.value }"
+                               value="${ displayValue }"
                                placeholder="${ placeholder }">
                     </div>
                 </td>
@@ -1470,6 +1673,148 @@ class IntegramTable {
             return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }${ editableAttrs }>${ escapedValue }</td>`;
         }
 
+        /**
+         * Render grouped table rows (issue #502)
+         * Creates rows with merged group cells on the left side
+         *
+         * Issue #531: Group cells use a blue left border (via CSS .group-cell class)
+         * to visually distinguish grouping columns from regular data columns
+         * (which have gray borders). This helps users understand the table structure.
+         */
+        renderGroupedRows(orderedColumns, instanceName) {
+            if (!this.groupedData || this.groupedData.length === 0) {
+                return '';
+            }
+
+            // Get the set of grouping column IDs for quick lookup
+            const groupingColumnSet = new Set(this.groupingColumns);
+
+            // Determine columns that are NOT grouping columns (shown on the right)
+            const nonGroupingColumns = orderedColumns.filter(col => !groupingColumnSet.has(col.id));
+
+            // Build rows HTML
+            let rowsHtml = '';
+
+            this.groupedData.forEach((rowInfo, rowIndex) => {
+                const row = rowInfo.data;
+                const selectedClass = this.selectedRows.has(rowInfo.originalIndex) ? 'row-selected' : '';
+
+                rowsHtml += `<tr class="${ selectedClass }">`;
+
+                // Add checkbox column if enabled
+                if (this.checkboxMode) {
+                    rowsHtml += `<td class="checkbox-column-cell"><input type="checkbox" class="row-select-checkbox" data-row-index="${ rowInfo.originalIndex }" ${ this.selectedRows.has(rowInfo.originalIndex) ? 'checked' : '' }></td>`;
+                }
+
+                // Render group cells (with rowspan if this row starts a new group)
+                if (rowInfo.groupCells.length > 0) {
+                    // This row has group cells to render (starts new groups)
+                    rowInfo.groupCells.forEach((groupCell, groupCellIndex) => {
+                        const column = this.columns.find(c => c.id === groupCell.colId);
+                        // Issue #504: Use displayValue (parsed from "id:Value") if available, otherwise parse raw value
+                        const cellValue = groupCell.displayValue !== undefined
+                            ? groupCell.displayValue
+                            : this.parseReferenceDisplayValue(groupCell.value, column);
+                        const rowspan = groupCell.rowspan > 1 ? ` rowspan="${ groupCell.rowspan }"` : '';
+
+                        // Issue #543: Add create button for grouped cells when data source is object/table
+                        // Get the level of this grouped cell (0-based index in groupingColumns)
+                        const groupLevel = this.groupingColumns.indexOf(groupCell.colId);
+                        const showAddButton = this.shouldShowGroupedCellAddButton();
+                        const addButtonHtml = showAddButton
+                            ? `<button class="group-cell-add-btn" onclick="window.${ instanceName }.openGroupedCellCreateForm(${ rowIndex }, ${ groupLevel })" title="Создать запись"><i class="pi pi-plus"></i></button>`
+                            : '';
+
+                        // Render the group cell with special styling
+                        rowsHtml += `<td class="group-cell"${ rowspan } data-group-column="${ groupCell.colId }">`;
+                        rowsHtml += `<span class="group-cell-content">${ this.escapeHtml(String(cellValue || '')) }</span>`;
+                        rowsHtml += addButtonHtml;
+                        rowsHtml += `</td>`;
+                    });
+                }
+                // If no groupCells, it means this row is part of an existing group
+                // and the cells are already rendered with rowspan in a previous row
+
+                // Render non-grouping columns (all other data columns)
+                nonGroupingColumns.forEach((col, colIndex) => {
+                    const dataIndex = this.columns.indexOf(col);
+                    const cellValue = row[dataIndex];
+                    rowsHtml += this.renderCell(col, cellValue, rowInfo.originalIndex, colIndex);
+                });
+
+                rowsHtml += `</tr>`;
+            });
+
+            return rowsHtml;
+        }
+
+        /**
+         * Render table headers in grouped mode (issue #502)
+         * Shows grouping columns first, then non-grouping columns
+         */
+        renderGroupedHeaders(orderedColumns, instanceName) {
+            const groupingColumnSet = new Set(this.groupingColumns);
+
+            // Get grouping columns in their specified order
+            const groupingCols = this.groupingColumns
+                .map(colId => this.columns.find(c => c.id === colId))
+                .filter(col => col && this.visibleColumns.includes(col.id));
+
+            // Get non-grouping columns
+            const nonGroupingCols = orderedColumns.filter(col => !groupingColumnSet.has(col.id));
+
+            // Combine: grouping columns first, then non-grouping
+            const allCols = [...groupingCols, ...nonGroupingCols];
+
+            return allCols.map(col => {
+                const width = this.columnWidths[col.id];
+                const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
+                const addButtonHtml = this.shouldShowAddButton(col) ?
+                    `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
+
+                // Add sort indicator if this column is sorted
+                let sortIndicator = '';
+                if (this.sortColumn === col.id) {
+                    sortIndicator = this.sortDirection === 'asc' ? '<i class="pi pi-sort-amount-up-alt" style="font-size:0.75em;"></i> ' : '<i class="pi pi-sort-amount-down" style="font-size:0.75em;"></i> ';
+                }
+
+                // Add grouping indicator
+                const isGroupingCol = groupingColumnSet.has(col.id);
+                const groupingClass = isGroupingCol ? ' group-header' : '';
+                const groupingOrder = isGroupingCol ? this.groupingColumns.indexOf(col.id) + 1 : '';
+                const groupingBadge = isGroupingCol ? `<span class="grouping-header-badge">${ groupingOrder }</span>` : '';
+
+                return `
+                    <th data-column-id="${ col.id }" draggable="true"${ widthStyle } class="${ groupingClass }">
+                        <span class="column-header-content" data-column-id="${ col.id }">${ groupingBadge }${ sortIndicator }${ col.name }</span>
+                        ${ addButtonHtml }
+                        <div class="column-resize-handle" data-column-id="${ col.id }"></div>
+                    </th>
+                `;
+            }).join('');
+        }
+
+        /**
+         * Render filter row in grouped mode (issue #502)
+         * Shows grouping column filters first, then non-grouping column filters
+         */
+        renderGroupedFilterRow(orderedColumns) {
+            const groupingColumnSet = new Set(this.groupingColumns);
+
+            // Get grouping columns in their specified order
+            const groupingCols = this.groupingColumns
+                .map(colId => this.columns.find(c => c.id === colId))
+                .filter(col => col && this.visibleColumns.includes(col.id));
+
+            // Get non-grouping columns
+            const nonGroupingCols = orderedColumns.filter(col => !groupingColumnSet.has(col.id));
+
+            // Combine: grouping columns first, then non-grouping
+            const allCols = [...groupingCols, ...nonGroupingCols];
+
+            return allCols.map((col, idx) => this.renderFilterCell(col, idx)).join('');
+        }
+
         renderScrollCounter() {
             const instanceName = this.options.instanceName;
             const totalDisplay = this.totalRows === null
@@ -1536,6 +1881,19 @@ class IntegramTable {
                 span.style.cursor = 'pointer';
             });
 
+            // Add click handler for parent record link to open modal edit form (issue #575)
+            const parentRecordLink = this.container.querySelector('.integram-parent-record-link');
+            if (parentRecordLink) {
+                parentRecordLink.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const parentRecordId = parentRecordLink.dataset.parentRecordId;
+                    const parentTypeId = parentRecordLink.dataset.parentTypeId;
+                    if (parentRecordId && parentTypeId) {
+                        this.openEditForm(parentRecordId, parentTypeId, 0);
+                    }
+                });
+            }
+
             const filterIcons = this.container.querySelectorAll('.filter-icon-inside');
             filterIcons.forEach(icon => {
                 icon.addEventListener('click', (e) => {
@@ -1549,9 +1907,16 @@ class IntegramTable {
                 input.addEventListener('input', (e) => {
                     const colId = input.dataset.columnId;
                     if (!this.filters[colId]) {
-                        this.filters[colId] = { type: '^', value: '' };
+                        const col = this.columns.find(c => c.id === colId);
+                        const fmt = col ? (col.format || 'SHORT') : 'SHORT';
+                        this.filters[colId] = { type: this.getDefaultFilterType(fmt), value: '' };
                     }
                     this.filters[colId].value = input.value;
+                    // Clear displayValue: user is now entering their own filter, not the resolved label (issue #551)
+                    delete this.filters[colId].displayValue;
+
+                    // Check if this filter overrides URL GET parameters (issue #500)
+                    this.handleFilterOverride(colId, input.value);
 
                     // Debounce the API call to avoid too many requests
                     clearTimeout(this.filterTimeout);
@@ -1956,6 +2321,22 @@ class IntegramTable {
                         </div>
                     `;
                     break;
+                case 'GRANT':
+                    // GRANT field - dropdown with options from GET /grants API (issue #601)
+                    editorHtml = `
+                        <select class="inline-editor inline-editor-select inline-editor-grant" data-grant-type="grant">
+                            <option value="">Загрузка...</option>
+                        </select>
+                    `;
+                    break;
+                case 'REPORT_COLUMN':
+                    // REPORT_COLUMN field - dropdown with options from GET /rep_cols API (issue #601)
+                    editorHtml = `
+                        <select class="inline-editor inline-editor-select inline-editor-grant" data-grant-type="rep_col">
+                            <option value="">Загрузка...</option>
+                        </select>
+                    `;
+                    break;
                 default:
                     // SHORT, CHARS, etc. - text input
                     editorHtml = `<input type="text" class="inline-editor inline-editor-text" value="${ escapedValue }">`;
@@ -1969,8 +2350,13 @@ class IntegramTable {
                 this.attachFileUploadHandlers(editor, currentValue);
             }
 
+            // Special handling for GRANT and REPORT_COLUMN types (issue #601)
+            if (format === 'GRANT' || format === 'REPORT_COLUMN') {
+                this.loadInlineGrantOptions(editor, currentValue, format);
+            }
+
             // Focus the editor
-            if (format !== 'FILE') {
+            if (format !== 'FILE' && format !== 'GRANT' && format !== 'REPORT_COLUMN') {
                 editor.focus();
                 if (editor.select) {
                     editor.select();
@@ -1989,6 +2375,12 @@ class IntegramTable {
                 } else if (format === 'FILE') {
                     // For FILE type, the value is stored in data attribute by file upload handler
                     newValue = editor.dataset.fileValue || '';
+                } else if (format === 'GRANT' || format === 'REPORT_COLUMN') {
+                    // For GRANT/REPORT_COLUMN: save the ID to API, display the text in cell (issue #601)
+                    newValue = editor.value;
+                    // Store display text for updateCellDisplay
+                    const selectedOption = editor.options[editor.selectedIndex];
+                    this.currentEditingCell.displayText = selectedOption ? selectedOption.textContent : '';
                 } else {
                     newValue = editor.value;
                 }
@@ -2006,6 +2398,8 @@ class IntegramTable {
             };
 
             // Enter to save (except for textarea and file upload)
+            // Tab/Shift+Tab to navigate between cells, Up/Down arrows to navigate vertically (issue #518)
+            // For select elements (GRANT/REPORT_COLUMN), allow ArrowUp/ArrowDown for option navigation (issue #601)
             if (format !== 'MEMO' && format !== 'FILE') {
                 editor.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter') {
@@ -2014,10 +2408,26 @@ class IntegramTable {
                     } else if (e.key === 'Escape') {
                         e.preventDefault();
                         cancelEdit();
+                    } else if (e.key === 'Tab') {
+                        // Tab / Shift+Tab: navigate to next/previous editable cell (issue #518)
+                        e.preventDefault();
+                        const direction = e.shiftKey ? 'prev' : 'next';
+                        this.saveAndNavigate(direction, saveEdit, cancelEdit);
+                    } else if (e.key === 'ArrowUp' && format !== 'GRANT' && format !== 'REPORT_COLUMN') {
+                        // Arrow Up: navigate to cell above (issue #518)
+                        // Skip for GRANT/REPORT_COLUMN selects - let them use arrows for option navigation (issue #601)
+                        e.preventDefault();
+                        this.saveAndNavigate('up', saveEdit, cancelEdit);
+                    } else if (e.key === 'ArrowDown' && format !== 'GRANT' && format !== 'REPORT_COLUMN') {
+                        // Arrow Down: navigate to cell below (issue #518)
+                        // Skip for GRANT/REPORT_COLUMN selects - let them use arrows for option navigation (issue #601)
+                        e.preventDefault();
+                        this.saveAndNavigate('down', saveEdit, cancelEdit);
                     }
                 });
             } else if (format === 'MEMO') {
                 // For textarea: Ctrl+Enter to save, Escape to cancel
+                // Tab/Shift+Tab to navigate, Up/Down without Ctrl do nothing (allow cursor movement)
                 editor.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter' && e.ctrlKey) {
                         e.preventDefault();
@@ -2025,30 +2435,59 @@ class IntegramTable {
                     } else if (e.key === 'Escape') {
                         e.preventDefault();
                         cancelEdit();
+                    } else if (e.key === 'Tab') {
+                        // Tab / Shift+Tab: navigate to next/previous editable cell (issue #518)
+                        e.preventDefault();
+                        const direction = e.shiftKey ? 'prev' : 'next';
+                        this.saveAndNavigate(direction, saveEdit, cancelEdit);
                     }
+                    // Note: ArrowUp/Down allowed for cursor movement in textarea
                 });
             } else if (format === 'FILE') {
-                // For file upload: Escape to cancel only
+                // For file upload: Escape to cancel only, Tab to navigate
                 editor.addEventListener('keydown', (e) => {
                     if (e.key === 'Escape') {
                         e.preventDefault();
                         cancelEdit();
+                    } else if (e.key === 'Tab') {
+                        // Tab / Shift+Tab: navigate to next/previous editable cell (issue #518)
+                        e.preventDefault();
+                        const direction = e.shiftKey ? 'prev' : 'next';
+                        this.saveAndNavigate(direction, saveEdit, cancelEdit);
                     }
                 });
             }
 
             // Click outside to save (with small delay to avoid immediate trigger)
+            // Capture currentEditingCell reference before setTimeout to detect if it
+            // changed (e.g. arrow key navigation completed) before the 100ms fires (issue #525)
+            const editingCellRef = this.currentEditingCell;
             setTimeout(() => {
                 const outsideClickHandler = (e) => {
                     if (!cell.contains(e.target)) {
                         document.removeEventListener('click', outsideClickHandler);
+
+                        // Check if click is on another editable cell - preserve focus (issue #518)
+                        const clickedCell = e.target.closest('td[data-editable="true"]');
+                        if (clickedCell && clickedCell !== cell) {
+                            // Remember the clicked cell to edit after save completes
+                            this.pendingCellClick = clickedCell;
+                        }
+
                         saveEdit();
                     }
                 };
                 document.addEventListener('click', outsideClickHandler);
 
-                // Store handler reference to clean up if canceled
-                this.currentEditingCell.outsideClickHandler = outsideClickHandler;
+                // Store handler reference to clean up if canceled.
+                // Guard against null: currentEditingCell may have been cleared by a fast
+                // save triggered by arrow-key navigation before this 100ms timeout fires (issue #525).
+                if (this.currentEditingCell === editingCellRef && this.currentEditingCell !== null) {
+                    this.currentEditingCell.outsideClickHandler = outsideClickHandler;
+                } else {
+                    // Edit was already finished; remove the listener immediately so it doesn't linger
+                    document.removeEventListener('click', outsideClickHandler);
+                }
             }, 100);
         }
 
@@ -2102,10 +2541,10 @@ class IntegramTable {
                 const clearButton = cell.querySelector('.inline-editor-reference-clear');
                 const addButton = cell.querySelector('.inline-editor-reference-add');
 
-                // Store original options for filtering
+                // Store original options for filtering (array of [id, text] tuples)
                 this.currentEditingCell.referenceOptions = options;
                 // Track if all options have been fetched (50+ means we only got first 50)
-                this.currentEditingCell.allOptionsFetched = Object.keys(options).length < 50;
+                this.currentEditingCell.allOptionsFetched = options.length < 50;
 
                 // Focus the search input
                 searchInput.focus();
@@ -2192,6 +2631,22 @@ class IntegramTable {
                 }
 
                 // Handle keyboard navigation
+                // Closure to capture cancelEdit and saveEdit functions for Tab navigation (issue #518)
+                const cancelEdit = () => {
+                    this.cancelInlineEdit(originalContent);
+                };
+                const saveEditRef = async () => {
+                    // Select first option if available, otherwise just cancel
+                    const firstOption = dropdown.querySelector('.inline-editor-reference-option');
+                    if (firstOption) {
+                        const selectedId = firstOption.dataset.id;
+                        const selectedText = firstOption.dataset.text;
+                        await this.saveReferenceEdit(selectedId, selectedText);
+                    } else {
+                        cancelEdit();
+                    }
+                };
+
                 searchInput.addEventListener('keydown', (e) => {
                     if (e.key === 'Escape') {
                         e.preventDefault();
@@ -2211,6 +2666,12 @@ class IntegramTable {
                         if (firstOption) {
                             firstOption.focus();
                         }
+                    } else if (e.key === 'Tab') {
+                        // Tab / Shift+Tab: navigate to next/previous editable cell (issue #518)
+                        // Fix for issue #523: Don't select first option on Tab, just cancel and navigate
+                        e.preventDefault();
+                        const direction = e.shiftKey ? 'prev' : 'next';
+                        this.saveAndNavigate(direction, cancelEdit, cancelEdit);
                     }
                 });
 
@@ -2237,10 +2698,19 @@ class IntegramTable {
                     } else if (e.key === 'Escape') {
                         e.preventDefault();
                         this.cancelInlineEdit(originalContent);
+                    } else if (e.key === 'Tab') {
+                        // Tab / Shift+Tab: navigate to next/previous editable cell (issue #518)
+                        // Fix for issue #523: Don't select first option on Tab, just cancel and navigate
+                        e.preventDefault();
+                        const direction = e.shiftKey ? 'prev' : 'next';
+                        this.saveAndNavigate(direction, cancelEdit, cancelEdit);
                     }
                 });
 
                 // Click outside to cancel (with small delay to avoid immediate trigger)
+                // Capture currentEditingCell reference before setTimeout to detect if it
+                // changed (e.g. arrow key navigation completed) before the 100ms fires (issue #525)
+                const editingCellRef = this.currentEditingCell;
                 setTimeout(() => {
                     const outsideClickHandler = (e) => {
                         // Don't cancel if clicking inside reference creation modal
@@ -2251,11 +2721,27 @@ class IntegramTable {
                         }
                         if (!cell.contains(e.target)) {
                             document.removeEventListener('click', outsideClickHandler);
+
+                            // Check if click is on another editable cell - preserve focus (issue #518)
+                            const clickedCell = e.target.closest('td[data-editable="true"]');
+                            if (clickedCell && clickedCell !== cell) {
+                                // Remember the clicked cell to edit after cancel completes
+                                this.pendingCellClick = clickedCell;
+                            }
+
                             this.cancelInlineEdit(originalContent);
                         }
                     };
                     document.addEventListener('click', outsideClickHandler);
-                    this.currentEditingCell.outsideClickHandler = outsideClickHandler;
+
+                    // Guard against null: currentEditingCell may have been cleared by a fast
+                    // save triggered by arrow-key navigation before this 100ms timeout fires (issue #525).
+                    if (this.currentEditingCell === editingCellRef && this.currentEditingCell !== null) {
+                        this.currentEditingCell.outsideClickHandler = outsideClickHandler;
+                    } else {
+                        // Edit was already finished; remove the listener immediately so it doesn't linger
+                        document.removeEventListener('click', outsideClickHandler);
+                    }
                 }, 100);
 
             } catch (error) {
@@ -2266,8 +2752,9 @@ class IntegramTable {
         }
 
         renderReferenceOptions(options, currentValue) {
+            // options is an array of [id, text] tuples
             // Filter out current value from options
-            const filteredOptions = Object.entries(options).filter(([id, text]) => text !== currentValue);
+            const filteredOptions = options.filter(([id, text]) => text !== currentValue);
 
             if (filteredOptions.length === 0) {
                 return '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
@@ -2280,16 +2767,11 @@ class IntegramTable {
         }
 
         filterReferenceOptions(options, searchText, currentValue) {
+            // options is an array of [id, text] tuples
             const lowerSearch = searchText.toLowerCase();
-            const filtered = {};
-
-            for (const [id, text] of Object.entries(options)) {
-                if (text !== currentValue && text.toLowerCase().includes(lowerSearch)) {
-                    filtered[id] = text;
-                }
-            }
-
-            return filtered;
+            return options.filter(([id, text]) =>
+                text !== currentValue && text.toLowerCase().includes(lowerSearch)
+            );
         }
 
         async saveReferenceEdit(selectedId, selectedText) {
@@ -2352,6 +2834,13 @@ class IntegramTable {
                     document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
                 }
                 this.currentEditingCell = null;
+
+                // Navigate to pending cell if set (issue #518)
+                if (this.pendingCellClick) {
+                    const targetCell = this.pendingCellClick;
+                    this.pendingCellClick = null;
+                    this.navigateToCell(targetCell);
+                }
             }
         }
 
@@ -2411,10 +2900,48 @@ class IntegramTable {
             const reqs = metadata.reqs || [];
             const regularFields = reqs.filter(req => !req.arr_id);
 
+            // Get current date/datetime for default values
+            const now = new Date();
+            const currentDateHtml5 = now.toISOString().split('T')[0]; // YYYY-MM-DD
+            const minutes = Math.round(now.getMinutes() / 5) * 5; // Round to 5 minutes
+            now.setMinutes(minutes);
+            const currentDateTimeHtml5 = now.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
+            const currentDateDisplay = now.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.'); // DD.MM.YYYY
+            const currentDateTimeDisplay = currentDateDisplay + ' ' + now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); // DD.MM.YYYY HH:MM
+
+            // Determine main field type
+            const mainFieldType = this.normalizeFormat(metadata.type);
+
+            // Build main field HTML based on its type
+            let mainFieldHtml = '';
+            if (mainFieldType === 'BOOLEAN') {
+                const isChecked = initialValue ? 'checked' : '';
+                mainFieldHtml = `<input type="checkbox" id="field-main-ref-create" name="main" value="1" ${ isChecked }>`;
+            } else if (mainFieldType === 'DATE') {
+                const dateValueHtml5 = initialValue ? this.formatDateForHtml5(initialValue, false) : currentDateHtml5;
+                const dateValueDisplay = initialValue ? this.formatDateForInput(initialValue, false) : currentDateDisplay;
+                mainFieldHtml = `<input type="date" class="form-control date-picker" id="field-main-ref-create-picker" required data-target="field-main-ref-create" value="${ this.escapeHtml(dateValueHtml5) }">`;
+                mainFieldHtml += `<input type="hidden" id="field-main-ref-create" name="main" value="${ this.escapeHtml(dateValueDisplay) }">`;
+            } else if (mainFieldType === 'DATETIME') {
+                const dateTimeValueHtml5 = initialValue ? this.formatDateForHtml5(initialValue, true) : currentDateTimeHtml5;
+                const dateTimeValueDisplay = initialValue ? this.formatDateForInput(initialValue, true) : currentDateTimeDisplay;
+                mainFieldHtml = `<input type="datetime-local" class="form-control datetime-picker" id="field-main-ref-create-picker" required data-target="field-main-ref-create" value="${ this.escapeHtml(dateTimeValueHtml5) }">`;
+                mainFieldHtml += `<input type="hidden" id="field-main-ref-create" name="main" value="${ this.escapeHtml(dateTimeValueDisplay) }">`;
+            } else if (mainFieldType === 'NUMBER') {
+                mainFieldHtml = `<input type="number" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required>`;
+            } else if (mainFieldType === 'SIGNED') {
+                mainFieldHtml = `<input type="number" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required step="0.01">`;
+            } else if (mainFieldType === 'MEMO') {
+                mainFieldHtml = `<textarea class="form-control memo-field" id="field-main-ref-create" name="main" rows="4" required>${ this.escapeHtml(initialValue) }</textarea>`;
+            } else {
+                // Default: text input (SHORT, CHARS, etc.)
+                mainFieldHtml = `<input type="text" class="form-control" id="field-main-ref-create" name="main" value="${this.escapeHtml(initialValue)}" required>`;
+            }
+
             let attributesHtml = `
                 <div class="form-group">
                     <label for="field-main-ref-create">${typeName} <span class="required">*</span></label>
-                    <input type="text" class="form-control" id="field-main-ref-create" name="main" value="${this.escapeHtml(initialValue)}" required>
+                    ${ mainFieldHtml }
                 </div>
             `;
 
@@ -2487,6 +3014,12 @@ class IntegramTable {
             // Load reference options for dropdown fields
             this.loadReferenceOptions(regularFields, parentRecordId, modal);
 
+            // Load GRANT and REPORT_COLUMN dropdown options (issue #577)
+            this.loadGrantAndReportColumnOptions(modal);
+
+            // Attach date/datetime picker handlers
+            this.attachDatePickerHandlers(modal);
+
             // Attach save handler
             const saveBtn = modal.querySelector('#save-record-ref-btn');
             saveBtn.addEventListener('click', async () => {
@@ -2506,6 +3039,20 @@ class IntegramTable {
             });
 
             overlay.addEventListener('click', closeModal);
+
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    // Only close if this modal is the topmost one
+                    const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
+                    const maxDepth = window._integramModalDepth || 0;
+                    if (currentDepth === maxDepth) {
+                        closeModal();
+                        document.removeEventListener('keydown', handleEscape);
+                    }
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
         }
 
         async saveRecordForReference(modal, typeId, parentRecordId) {
@@ -2666,7 +3213,11 @@ class IntegramTable {
                 }
 
                 // Update the cell display with the new value
-                this.updateCellDisplay(cell, newValue, this.currentEditingCell.format);
+                // For GRANT/REPORT_COLUMN, use the display text instead of the ID (issue #601)
+                const displayValue = (this.currentEditingCell.format === 'GRANT' || this.currentEditingCell.format === 'REPORT_COLUMN')
+                    ? (this.currentEditingCell.displayText || newValue)
+                    : newValue;
+                this.updateCellDisplay(cell, displayValue, this.currentEditingCell.format);
 
                 this.showToast('Изменения сохранены', 'success');
 
@@ -2681,6 +3232,13 @@ class IntegramTable {
                     document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
                 }
                 this.currentEditingCell = null;
+
+                // Navigate to pending cell if set (issue #518)
+                if (this.pendingCellClick) {
+                    const targetCell = this.pendingCellClick;
+                    this.pendingCellClick = null;
+                    this.navigateToCell(targetCell);
+                }
             }
         }
 
@@ -2729,6 +3287,20 @@ class IntegramTable {
                                                         .replace(/'/g, '&#039;');
                     fullValueForEditing = escapedValue;
                     break;
+                case 'GRANT':
+                case 'REPORT_COLUMN':
+                    // For GRANT/REPORT_COLUMN: newValue is the display text (issue #601)
+                    // Store the selected ID in data-full-value for next edit (from currentEditingCell)
+                    escapedValue = String(newValue).replace(/&/g, '&amp;')
+                                                    .replace(/</g, '&lt;')
+                                                    .replace(/>/g, '&gt;')
+                                                    .replace(/"/g, '&quot;')
+                                                    .replace(/'/g, '&#039;');
+                    // Use the saved ID from currentEditingCell for future editing
+                    // The saveInlineEdit method stores displayText, and the actual newValue (ID) is what was sent to API
+                    // We need to get the ID that was saved - it's available via data-col-value or will be set separately
+                    fullValueForEditing = escapedValue; // This will be overridden later if we have the ID
+                    break;
                 default:
                     // Escape HTML and store for editing
                     escapedValue = String(displayValue).replace(/&/g, '&amp;')
@@ -2753,8 +3325,16 @@ class IntegramTable {
             }
 
             // Update data attribute with full value for editing
-            if (fullValueForEditing) {
-                cell.setAttribute('data-full-value', fullValueForEditing);
+            // Fix for issue #527: When clearing a cell (empty string), we must remove
+            // the data-full-value attribute. Otherwise the old value persists and
+            // appears when the cell is edited again. Empty string is falsy in JS,
+            // so we use typeof check instead of truthiness.
+            if (typeof fullValueForEditing === 'string') {
+                if (fullValueForEditing === '') {
+                    cell.removeAttribute('data-full-value');
+                } else {
+                    cell.setAttribute('data-full-value', fullValueForEditing);
+                }
             }
 
             // Restore edit icon if present
@@ -2784,7 +3364,10 @@ class IntegramTable {
             const { cell } = this.currentEditingCell;
 
             // Restore original content
-            if (originalContent) {
+            // Note: Use typeof check instead of truthiness check because originalContent
+            // can be an empty string '' when the cell was originally empty (issue #520).
+            // Empty string is falsy in JavaScript, but we still want to restore it.
+            if (typeof originalContent === 'string') {
                 cell.innerHTML = originalContent;
             } else {
                 // Fallback: re-render the cell
@@ -2811,6 +3394,145 @@ class IntegramTable {
             }
 
             this.currentEditingCell = null;
+
+            // Navigate to pending cell if set (issue #518)
+            if (this.pendingCellClick) {
+                const targetCell = this.pendingCellClick;
+                this.pendingCellClick = null;
+                this.navigateToCell(targetCell);
+            }
+        }
+
+        /**
+         * Find all editable cells in the table (issue #518)
+         * Returns array of TD elements with data-editable="true"
+         */
+        getEditableCells() {
+            return Array.from(this.container.querySelectorAll('td[data-editable="true"]'));
+        }
+
+        /**
+         * Find the next editable cell after the current one (issue #518)
+         * Moves to the next cell in the same row, then wraps to the next row
+         * @param {HTMLElement} currentCell - The currently focused cell
+         * @returns {HTMLElement|null} - The next editable cell or null if none
+         */
+        findNextEditableCell(currentCell) {
+            const editableCells = this.getEditableCells();
+            if (editableCells.length === 0) return null;
+
+            const currentIndex = editableCells.indexOf(currentCell);
+            if (currentIndex === -1) return editableCells[0];
+
+            // Get next cell (wrap to start if at end)
+            const nextIndex = (currentIndex + 1) % editableCells.length;
+            return editableCells[nextIndex];
+        }
+
+        /**
+         * Find the previous editable cell before the current one (issue #518)
+         * Moves to the previous cell in the same row, then wraps to the previous row
+         * @param {HTMLElement} currentCell - The currently focused cell
+         * @returns {HTMLElement|null} - The previous editable cell or null if none
+         */
+        findPreviousEditableCell(currentCell) {
+            const editableCells = this.getEditableCells();
+            if (editableCells.length === 0) return null;
+
+            const currentIndex = editableCells.indexOf(currentCell);
+            if (currentIndex === -1) return editableCells[editableCells.length - 1];
+
+            // Get previous cell (wrap to end if at start)
+            const prevIndex = (currentIndex - 1 + editableCells.length) % editableCells.length;
+            return editableCells[prevIndex];
+        }
+
+        /**
+         * Find the editable cell above the current one in the same column (issue #518)
+         * @param {HTMLElement} currentCell - The currently focused cell
+         * @returns {HTMLElement|null} - The cell above or null if none
+         */
+        findCellAbove(currentCell) {
+            const currentRowIndex = parseInt(currentCell.dataset.rowIndex);
+            const currentColId = currentCell.dataset.colId;
+
+            if (isNaN(currentRowIndex) || currentRowIndex <= 0) return null;
+
+            // Find the editable cell in the same column, one row above
+            const targetRowIndex = currentRowIndex - 1;
+            const cellAbove = this.container.querySelector(
+                `td[data-editable="true"][data-row-index="${targetRowIndex}"][data-col-id="${currentColId}"]`
+            );
+
+            return cellAbove;
+        }
+
+        /**
+         * Find the editable cell below the current one in the same column (issue #518)
+         * @param {HTMLElement} currentCell - The currently focused cell
+         * @returns {HTMLElement|null} - The cell below or null if none
+         */
+        findCellBelow(currentCell) {
+            const currentRowIndex = parseInt(currentCell.dataset.rowIndex);
+            const currentColId = currentCell.dataset.colId;
+
+            if (isNaN(currentRowIndex)) return null;
+
+            // Find the editable cell in the same column, one row below
+            const targetRowIndex = currentRowIndex + 1;
+            const cellBelow = this.container.querySelector(
+                `td[data-editable="true"][data-row-index="${targetRowIndex}"][data-col-id="${currentColId}"]`
+            );
+
+            return cellBelow;
+        }
+
+        /**
+         * Navigate to a different editable cell after saving/canceling (issue #518)
+         * @param {HTMLElement} targetCell - The cell to navigate to
+         */
+        navigateToCell(targetCell) {
+            if (!targetCell) return;
+
+            // Small delay to ensure DOM is updated after save
+            setTimeout(() => {
+                this.startInlineEdit(targetCell);
+            }, 50);
+        }
+
+        /**
+         * Save the current edit and navigate to a target cell (issue #518)
+         * @param {string} direction - 'next', 'prev', 'up', or 'down'
+         * @param {Function} saveEdit - The save function to call
+         * @param {Function} cancelEdit - The cancel function (for unchanged values)
+         */
+        async saveAndNavigate(direction, saveEdit, cancelEdit) {
+            if (!this.currentEditingCell) return;
+
+            const currentCell = this.currentEditingCell.cell;
+            let targetCell = null;
+
+            // Find target cell based on direction
+            switch (direction) {
+                case 'next':
+                    targetCell = this.findNextEditableCell(currentCell);
+                    break;
+                case 'prev':
+                    targetCell = this.findPreviousEditableCell(currentCell);
+                    break;
+                case 'up':
+                    targetCell = this.findCellAbove(currentCell);
+                    break;
+                case 'down':
+                    targetCell = this.findCellBelow(currentCell);
+                    break;
+            }
+
+            // Store target for navigation after save completes
+            this.pendingCellClick = targetCell;
+
+            // Trigger save (which will check pendingCellClick and navigate)
+            await saveEdit();
         }
 
         attachScrollListener() {
@@ -2990,11 +3712,15 @@ class IntegramTable {
                 opt.addEventListener('click', () => {
                     const symbol = opt.dataset.symbol;
                     if (!this.filters[columnId]) {
-                        this.filters[columnId] = { type: '^', value: '' };
+                        this.filters[columnId] = { type: this.getDefaultFilterType(format), value: '' };
                     }
                     this.filters[columnId].type = symbol;
                     target.textContent = symbol;
                     menu.remove();
+
+                    // Check if this filter overrides URL GET parameters (issue #500)
+                    // This handles filter type changes, including Empty/Not Empty filters
+                    this.handleFilterOverride(columnId, this.filters[columnId].value || symbol);
 
                     // For Empty (%) and Not Empty (!%) filters, clear input and apply immediately
                     if (symbol === '%' || symbol === '!%') {
@@ -3057,7 +3783,7 @@ class IntegramTable {
 
             modal.innerHTML = `
                 <h5>Настройки колонок</h5>
-                <div class="column-settings-list">
+                <div class="column-settings-list" id="column-settings-list-${instanceName}">
                     ${ this.columns.map(col => `
                         <div class="column-settings-item">
                             <label>
@@ -3069,13 +3795,20 @@ class IntegramTable {
                         </div>
                     `).join('') }
                 </div>
-                <div style="text-align: right; margin-top: 15px;">
+                <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: 15px; gap: 10px;">
+                    <button class="btn btn-primary" id="add-column-btn-${instanceName}">Добавить колонку</button>
                     <button class="btn btn-secondary" onclick="window.${ instanceName }.closeColumnSettings()">Закрыть</button>
                 </div>
             `;
 
             document.body.appendChild(overlay);
             document.body.appendChild(modal);
+
+            // Attach add column button handler
+            const addColumnBtn = modal.querySelector(`#add-column-btn-${instanceName}`);
+            if (addColumnBtn) {
+                addColumnBtn.addEventListener('click', () => this.showAddColumnForm(modal));
+            }
 
             modal.querySelectorAll('input[type="checkbox"]').forEach(cb => {
                 cb.addEventListener('change', (e) => {
@@ -3093,10 +3826,513 @@ class IntegramTable {
             });
 
             overlay.addEventListener('click', () => this.closeColumnSettings());
+
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    this.closeColumnSettings();
+                    document.removeEventListener('keydown', handleEscape);
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
         }
 
         closeColumnSettings() {
             document.querySelectorAll('.column-settings-overlay, .column-settings-modal').forEach(el => el.remove());
+        }
+
+        /**
+         * Show form to add a new column (issue #565, #567)
+         * Displays a modal dialog with inputs for column name, base type, list value checkbox, and multiselect checkbox
+         */
+        showAddColumnForm(parentModal) {
+            const instanceName = this.options.instanceName;
+
+            // Base types available for selection
+            const baseTypes = [
+                { id: 3, name: 'Короткая строка (до 127 символов)' },
+                { id: 8, name: 'Строка без ограничения длины' },
+                { id: 9, name: 'Дата' },
+                { id: 13, name: 'Целое число' },
+                { id: 14, name: 'Число с десятичной частью' },
+                { id: 11, name: 'Логическое значение (Да / Нет)' },
+                { id: 12, name: 'Многострочный текст' },
+                { id: 4, name: 'Дата и время' },
+                { id: 10, name: 'Файл' }
+            ];
+
+            // Create modal overlay (issue #567: make the form a modal)
+            const modalOverlay = document.createElement('div');
+            modalOverlay.className = 'add-column-modal-overlay';
+            modalOverlay.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.32); z-index: 1001; backdrop-filter: blur(2px);';
+
+            // Create modal container
+            const modal = document.createElement('div');
+            modal.className = 'add-column-modal';
+            modal.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; padding: 20px; border-radius: 4px; box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22); z-index: 1002; max-width: 450px; width: 90%;';
+
+            modal.innerHTML = `
+                <h5 style="margin: 0 0 20px 0; font-weight: 500; font-size: 20px;">Добавить новую колонку</h5>
+                <div style="margin-bottom: 16px; position: relative;">
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px;">Имя колонки:</label>
+                    <input type="text" id="new-column-name-${instanceName}" class="form-control" placeholder="Введите имя колонки" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 14px; box-sizing: border-box;" autocomplete="off">
+                    <div id="column-name-suggestions-${instanceName}" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #dee2e6; border-radius: 4px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-height: 250px; overflow-y: auto; z-index: 1003;"></div>
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px;">Базовый тип:</label>
+                    <select id="new-column-type-${instanceName}" class="form-control" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 14px; box-sizing: border-box;">
+                        ${baseTypes.map(t => `<option value="${t.id}">${t.name}</option>`).join('')}
+                    </select>
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <label style="display: flex; align-items: center; cursor: pointer; font-size: 14px;">
+                        <input type="checkbox" id="new-column-list-${instanceName}" style="margin-right: 10px; width: 18px; height: 18px;">
+                        Списочное значение (справочник)
+                    </label>
+                </div>
+                <div style="margin-bottom: 16px; display: none;" id="multiselect-container-${instanceName}">
+                    <label style="display: flex; align-items: center; cursor: pointer; font-size: 14px;">
+                        <input type="checkbox" id="new-column-multiselect-${instanceName}" style="margin-right: 10px; width: 18px; height: 18px;">
+                        Разрешить мультивыбор (выбор нескольких значений)
+                    </label>
+                </div>
+                <div id="add-column-error-${instanceName}" style="color: #dc3545; margin-bottom: 16px; display: none; font-size: 14px;"></div>
+                <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                    <button class="btn btn-primary" id="create-column-btn-${instanceName}">Создать</button>
+                    <button class="btn btn-secondary" id="cancel-add-column-btn-${instanceName}">Отмена</button>
+                </div>
+            `;
+
+            document.body.appendChild(modalOverlay);
+            document.body.appendChild(modal);
+
+            // Close modal function
+            const closeAddColumnModal = () => {
+                modalOverlay.remove();
+                modal.remove();
+            };
+
+            // Close on overlay click
+            modalOverlay.addEventListener('click', closeAddColumnModal);
+
+            // Show/hide multiselect option based on list checkbox
+            const listCheckbox = modal.querySelector(`#new-column-list-${instanceName}`);
+            const multiselectContainer = modal.querySelector(`#multiselect-container-${instanceName}`);
+            listCheckbox.addEventListener('change', () => {
+                multiselectContainer.style.display = listCheckbox.checked ? 'block' : 'none';
+                if (!listCheckbox.checked) {
+                    modal.querySelector(`#new-column-multiselect-${instanceName}`).checked = false;
+                }
+            });
+
+            // Metadata search for column name suggestions (issue #585)
+            const nameInput = modal.querySelector(`#new-column-name-${instanceName}`);
+            const suggestionsDiv = modal.querySelector(`#column-name-suggestions-${instanceName}`);
+            const typeSelect = modal.querySelector(`#new-column-type-${instanceName}`);
+
+            // Get base type name by id
+            const getBaseTypeName = (typeId) => {
+                const type = baseTypes.find(t => t.id === parseInt(typeId));
+                return type ? type.name : `Тип ${typeId}`;
+            };
+
+            // Search metadata and return matching items
+            const searchMetadata = (searchTerm) => {
+                if (!this.globalMetadata || !searchTerm || searchTerm.length < 1) {
+                    return [];
+                }
+
+                const term = searchTerm.toLowerCase();
+                const results = [];
+                // Track seen suggestions to prevent duplicates (issue #587)
+                const seen = new Set();
+
+                // Helper to create unique key for deduplication
+                const getKey = (name, type, isReference) => `${name.toLowerCase()}|${type}|${isReference}`;
+
+                // Search in top-level metadata items (tables)
+                for (const item of this.globalMetadata) {
+                    const name = item.val || item.value || item.name || '';
+                    if (name.toLowerCase().includes(term)) {
+                        const type = item.type || item.id;
+                        const key = getKey(name, type, false);
+                        // Add as regular suggestion if not already seen
+                        if (!seen.has(key)) {
+                            seen.add(key);
+                            results.push({
+                                name: name,
+                                type: type,
+                                isReference: false,
+                                source: 'table',
+                                item: item
+                            });
+                        }
+
+                        // If item has "referenced" key, add additional suggestion as "Справочник {Name}"
+                        if (item.referenced) {
+                            const refKey = getKey(name, type, true);
+                            if (!seen.has(refKey)) {
+                                seen.add(refKey);
+                                results.push({
+                                    name: name,
+                                    type: type,
+                                    isReference: true,
+                                    source: 'table',
+                                    item: item
+                                });
+                            }
+                        }
+                    }
+
+                    // Also check if "Справочник {name}" matches the search term
+                    if (item.referenced && `справочник ${name}`.toLowerCase().includes(term)) {
+                        const type = item.type || item.id;
+                        const refKey = getKey(name, type, true);
+                        // Check if we haven't already added this reference suggestion
+                        if (!seen.has(refKey)) {
+                            seen.add(refKey);
+                            results.push({
+                                name: name,
+                                type: type,
+                                isReference: true,
+                                source: 'table',
+                                item: item
+                            });
+                        }
+                    }
+
+                    // Search in reqs (requisites) of this item
+                    if (item.reqs && Array.isArray(item.reqs)) {
+                        for (const req of item.reqs) {
+                            const reqName = req.val || req.value || req.name || '';
+                            if (reqName.toLowerCase().includes(term)) {
+                                const reqType = req.type;
+                                const reqKey = getKey(reqName, reqType, false);
+                                if (!seen.has(reqKey)) {
+                                    seen.add(reqKey);
+                                    results.push({
+                                        name: reqName,
+                                        type: reqType,
+                                        isReference: false,
+                                        source: 'requisite',
+                                        item: req
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Return top 10 results
+                return results.slice(0, 10);
+            };
+
+            // Render suggestions dropdown
+            const renderSuggestions = (suggestions) => {
+                if (suggestions.length === 0) {
+                    suggestionsDiv.style.display = 'none';
+                    return;
+                }
+
+                suggestionsDiv.innerHTML = suggestions.map((s, idx) => {
+                    const typeName = getBaseTypeName(s.type);
+                    const displayName = s.isReference ? `Справочник ${s.name}` : s.name;
+                    return `<div class="column-suggestion-item" data-index="${idx}" style="padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #eee; font-size: 14px;" onmouseover="this.style.backgroundColor='#f5f5f5'" onmouseout="this.style.backgroundColor='transparent'">
+                        ${this.escapeHtml(displayName)} <span style="color: #888;">(${this.escapeHtml(typeName)})</span>
+                    </div>`;
+                }).join('');
+
+                suggestionsDiv.style.display = 'block';
+
+                // Add click handlers for suggestions
+                suggestionsDiv.querySelectorAll('.column-suggestion-item').forEach((el, idx) => {
+                    el.addEventListener('click', () => {
+                        const suggestion = suggestions[idx];
+                        // Fill the name field (use original name without "Справочник" prefix)
+                        nameInput.value = suggestion.name;
+
+                        // Set the base type
+                        typeSelect.value = suggestion.type;
+
+                        // If reference suggestion, check the list checkbox; otherwise uncheck it (issue #587)
+                        if (suggestion.isReference) {
+                            listCheckbox.checked = true;
+                            multiselectContainer.style.display = 'block';
+                        } else {
+                            listCheckbox.checked = false;
+                            multiselectContainer.style.display = 'none';
+                        }
+
+                        // Hide suggestions
+                        suggestionsDiv.style.display = 'none';
+                    });
+                });
+            };
+
+            // Input event for search
+            nameInput.addEventListener('input', () => {
+                const value = nameInput.value.trim();
+                if (value.length >= 1) {
+                    const suggestions = searchMetadata(value);
+                    renderSuggestions(suggestions);
+                } else {
+                    suggestionsDiv.style.display = 'none';
+                }
+            });
+
+            // Hide suggestions when clicking outside
+            document.addEventListener('click', (e) => {
+                if (!nameInput.contains(e.target) && !suggestionsDiv.contains(e.target)) {
+                    suggestionsDiv.style.display = 'none';
+                }
+            });
+
+            // Cancel button handler
+            modal.querySelector(`#cancel-add-column-btn-${instanceName}`).addEventListener('click', closeAddColumnModal);
+
+            // Create button handler
+            modal.querySelector(`#create-column-btn-${instanceName}`).addEventListener('click', async () => {
+                const columnName = modal.querySelector(`#new-column-name-${instanceName}`).value.trim();
+                const baseTypeId = parseInt(modal.querySelector(`#new-column-type-${instanceName}`).value);
+                const isListValue = listCheckbox.checked;
+                const isMultiselect = modal.querySelector(`#new-column-multiselect-${instanceName}`).checked;
+                const errorDiv = modal.querySelector(`#add-column-error-${instanceName}`);
+
+                // Validate
+                if (!columnName) {
+                    errorDiv.textContent = 'Введите имя колонки';
+                    errorDiv.style.display = 'block';
+                    return;
+                }
+
+                errorDiv.style.display = 'none';
+
+                // Disable buttons during creation
+                const createBtn = modal.querySelector(`#create-column-btn-${instanceName}`);
+                const cancelBtn = modal.querySelector(`#cancel-add-column-btn-${instanceName}`);
+                createBtn.disabled = true;
+                cancelBtn.disabled = true;
+                createBtn.textContent = 'Создание...';
+
+                try {
+                    const result = await this.createColumn(columnName, baseTypeId, isListValue, isMultiselect);
+
+                    if (result.success) {
+                        // Add new column to the column settings list in the parent modal
+                        const columnList = parentModal.querySelector(`#column-settings-list-${instanceName}`);
+                        if (columnList) {
+                            const newItem = document.createElement('div');
+                            newItem.className = 'column-settings-item';
+                            newItem.innerHTML = `
+                                <label>
+                                    <input type="checkbox" data-column-id="${result.columnId}" checked>
+                                    ${this.escapeHtml(columnName)}
+                                </label>
+                            `;
+                            columnList.appendChild(newItem);
+
+                            // Add event listener for the new checkbox
+                            const newCheckbox = newItem.querySelector('input[type="checkbox"]');
+                            newCheckbox.addEventListener('change', () => {
+                                const colId = newCheckbox.dataset.columnId;
+                                if (newCheckbox.checked) {
+                                    if (!this.visibleColumns.includes(colId)) {
+                                        this.visibleColumns.push(colId);
+                                    }
+                                } else {
+                                    this.visibleColumns = this.visibleColumns.filter(id => id !== colId);
+                                }
+                                this.saveColumnState();
+                                this.render();
+                            });
+                        }
+
+                        // Add column to the table's internal state
+                        this.columns.push({
+                            id: String(result.columnId),
+                            name: columnName,
+                            type: baseTypeId,
+                            paramId: result.termId
+                        });
+
+                        // Make the column visible
+                        if (!this.visibleColumns.includes(String(result.columnId))) {
+                            this.visibleColumns.push(String(result.columnId));
+                        }
+
+                        // Save state and re-render
+                        this.saveColumnState();
+                        this.render();
+
+                        // Close the add column modal but keep the parent column settings modal open
+                        closeAddColumnModal();
+                    } else {
+                        errorDiv.textContent = result.error || 'Ошибка при создании колонки';
+                        errorDiv.style.display = 'block';
+                        createBtn.disabled = false;
+                        cancelBtn.disabled = false;
+                        createBtn.textContent = 'Создать';
+                    }
+                } catch (error) {
+                    console.error('Error creating column:', error);
+                    errorDiv.textContent = error.message || 'Ошибка при создании колонки';
+                    errorDiv.style.display = 'block';
+                    createBtn.disabled = false;
+                    cancelBtn.disabled = false;
+                    createBtn.textContent = 'Создать';
+                }
+            });
+
+            // Focus on the name input
+            modal.querySelector(`#new-column-name-${instanceName}`).focus();
+
+            // Close on Escape key
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    closeAddColumnModal();
+                    document.removeEventListener('keydown', handleEscape);
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
+        }
+
+        /**
+         * Create a new column via API (issue #565)
+         * @param {string} columnName - Name of the new column
+         * @param {number} baseTypeId - Base type ID (3, 4, 8, 9, 10, 11, 12, 13, 14)
+         * @param {boolean} isListValue - Whether this is a list/lookup column
+         * @param {boolean} isMultiselect - Whether multiple values can be selected (only for list columns)
+         * @returns {Promise<{success: boolean, columnId?: string, termId?: string, error?: string}>}
+         */
+        async createColumn(columnName, baseTypeId, isListValue, isMultiselect) {
+            const apiBase = this.getApiBase();
+            const tableId = this.objectTableId || this.options.tableTypeId;
+
+            if (!tableId) {
+                return { success: false, error: 'Не удалось определить ID таблицы' };
+            }
+
+            try {
+                // Step 1: Create term with the base type
+                const termParams = new URLSearchParams();
+                termParams.append('val', columnName);
+                termParams.append('t', baseTypeId);
+                if (typeof xsrf !== 'undefined') {
+                    termParams.append('_xsrf', xsrf);
+                }
+                // For list values, add unique=1 flag
+                if (isListValue) {
+                    termParams.append('unique', '1');
+                }
+
+                const termResponse = await fetch(`${apiBase}/_d_new?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: termParams.toString()
+                });
+
+                if (!termResponse.ok) {
+                    return { success: false, error: `Ошибка создания термина: ${termResponse.status}` };
+                }
+
+                const termResult = await termResponse.json();
+
+                // Check for API error
+                if (Array.isArray(termResult) && termResult[0]?.error) {
+                    return { success: false, error: termResult[0].error };
+                }
+
+                const termId = termResult.obj;
+                if (!termId) {
+                    return { success: false, error: 'Не получен ID термина' };
+                }
+
+                let typeIdToAdd = termId;
+
+                // Step 2: For list values, create a reference to the term
+                if (isListValue) {
+                    const refParams = new URLSearchParams();
+                    if (typeof xsrf !== 'undefined') {
+                        refParams.append('_xsrf', xsrf);
+                    }
+
+                    const refResponse = await fetch(`${apiBase}/_d_ref/${termId}?JSON`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: refParams.toString()
+                    });
+
+                    if (!refResponse.ok) {
+                        return { success: false, error: `Ошибка создания ссылки: ${refResponse.status}` };
+                    }
+
+                    const refResult = await refResponse.json();
+
+                    if (Array.isArray(refResult) && refResult[0]?.error) {
+                        return { success: false, error: refResult[0].error };
+                    }
+
+                    typeIdToAdd = refResult.obj;
+                    if (!typeIdToAdd) {
+                        return { success: false, error: 'Не получен ID ссылки' };
+                    }
+                }
+
+                // Step 3: Add the term/reference as a column (requisite) to the table
+                const reqParams = new URLSearchParams();
+                reqParams.append('t', typeIdToAdd);
+                if (typeof xsrf !== 'undefined') {
+                    reqParams.append('_xsrf', xsrf);
+                }
+
+                const reqResponse = await fetch(`${apiBase}/_d_req/${tableId}?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: reqParams.toString()
+                });
+
+                if (!reqResponse.ok) {
+                    return { success: false, error: `Ошибка добавления колонки: ${reqResponse.status}` };
+                }
+
+                const reqResult = await reqResponse.json();
+
+                if (Array.isArray(reqResult) && reqResult[0]?.error) {
+                    return { success: false, error: reqResult[0].error };
+                }
+
+                const columnId = reqResult.id;
+                if (!columnId) {
+                    return { success: false, error: 'Не получен ID колонки' };
+                }
+
+                // Step 4: If multiselect is enabled for list values, toggle the multi flag
+                if (isListValue && isMultiselect) {
+                    const multiParams = new URLSearchParams();
+                    if (typeof xsrf !== 'undefined') {
+                        multiParams.append('_xsrf', xsrf);
+                    }
+
+                    const multiResponse = await fetch(`${apiBase}/_d_multi/${columnId}?JSON`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: multiParams.toString()
+                    });
+
+                    if (!multiResponse.ok) {
+                        console.warn(`Warning: Failed to enable multiselect for column ${columnId}: ${multiResponse.status}`);
+                    }
+                }
+
+                return {
+                    success: true,
+                    columnId: String(columnId),
+                    termId: String(termId)
+                };
+            } catch (error) {
+                console.error('Error in createColumn:', error);
+                return { success: false, error: error.message };
+            }
         }
 
         openTableSettings() {
@@ -3230,6 +4466,15 @@ class IntegramTable {
             });
 
             overlay.addEventListener('click', () => this.closeTableSettings());
+
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    this.closeTableSettings();
+                    document.removeEventListener('keydown', handleEscape);
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
         }
 
         closeTableSettings() {
@@ -3291,11 +4536,337 @@ class IntegramTable {
                 modal.remove();
                 overlay.remove();
             });
+
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    modal.remove();
+                    overlay.remove();
+                    document.removeEventListener('keydown', handleEscape);
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
         }
 
         toggleFilters() {
             this.filtersEnabled = !this.filtersEnabled;
             this.render();
+        }
+
+        /**
+         * Open grouping settings modal (issue #502)
+         * Allows user to select columns to group by and their order
+         */
+        openGroupingSettings() {
+            const overlay = document.createElement('div');
+            overlay.className = 'column-settings-overlay';
+
+            const modal = document.createElement('div');
+            modal.className = 'column-settings-modal grouping-settings-modal';
+
+            // Get columns that can be grouped (exclude ID columns and style columns)
+            const groupableColumns = this.columns.filter(col =>
+                !this.idColumns.has(col.id) &&
+                !Object.values(this.styleColumns).includes(col.id)
+            );
+
+            modal.innerHTML = `
+                <h5>Настройка группировки</h5>
+                <p style="color: var(--md-text-secondary); font-size: 14px; margin-bottom: 15px;">
+                    Выберите поля для группировки. Порядок выбора определяет вложенность групп.
+                </p>
+                <div class="column-settings-list grouping-columns-list" style="max-height: 300px; overflow-y: auto;">
+                    ${ groupableColumns.map((col, idx) => {
+                        const isSelected = this.groupingColumns.includes(col.id);
+                        const order = isSelected ? this.groupingColumns.indexOf(col.id) + 1 : '';
+                        return `
+                            <div class="column-settings-item grouping-column-item" data-column-id="${ col.id }">
+                                <label>
+                                    <input type="checkbox"
+                                           data-column-id="${ col.id }"
+                                           ${ isSelected ? 'checked' : '' }>
+                                    <span class="grouping-order-badge" style="${ isSelected ? '' : 'display: none;' }">${ order }</span>
+                                    ${ col.name }
+                                </label>
+                            </div>
+                        `;
+                    }).join('') }
+                </div>
+                <div style="text-align: right; margin-top: 15px;">
+                    <button class="btn btn-primary me-2" id="apply-grouping-btn">Применить</button>
+                    <button class="btn btn-secondary" id="close-grouping-btn">Закрыть</button>
+                </div>
+            `;
+
+            document.body.appendChild(overlay);
+            document.body.appendChild(modal);
+
+            // Track selection order within the modal
+            let selectedOrder = [...this.groupingColumns];
+
+            // Update order badges
+            const updateOrderBadges = () => {
+                modal.querySelectorAll('.grouping-column-item').forEach(item => {
+                    const colId = item.dataset.columnId;
+                    const badge = item.querySelector('.grouping-order-badge');
+                    const checkbox = item.querySelector('input[type="checkbox"]');
+                    const idx = selectedOrder.indexOf(colId);
+                    if (idx !== -1) {
+                        badge.textContent = idx + 1;
+                        badge.style.display = '';
+                        checkbox.checked = true;
+                    } else {
+                        badge.style.display = 'none';
+                        checkbox.checked = false;
+                    }
+                });
+            };
+
+            // Handle checkbox changes
+            modal.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                cb.addEventListener('change', (e) => {
+                    const colId = cb.dataset.columnId;
+                    if (cb.checked) {
+                        if (!selectedOrder.includes(colId)) {
+                            selectedOrder.push(colId);
+                        }
+                    } else {
+                        selectedOrder = selectedOrder.filter(id => id !== colId);
+                    }
+                    updateOrderBadges();
+                });
+            });
+
+            // Apply grouping
+            modal.querySelector('#apply-grouping-btn').addEventListener('click', () => {
+                this.groupingColumns = [...selectedOrder];
+                this.groupingEnabled = this.groupingColumns.length > 0;
+
+                // If grouping is enabled, reload data with LIMIT=1000
+                if (this.groupingEnabled) {
+                    this.data = [];
+                    this.loadedRecords = 0;
+                    this.hasMore = true;
+                    this.totalRows = null;
+                    this.loadData(false);
+                } else {
+                    // Just re-render if grouping is disabled
+                    this.render();
+                }
+
+                modal.remove();
+                overlay.remove();
+            });
+
+            // Close modal
+            const closeModal = () => {
+                modal.remove();
+                overlay.remove();
+            };
+
+            modal.querySelector('#close-grouping-btn').addEventListener('click', closeModal);
+            overlay.addEventListener('click', closeModal);
+
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    closeModal();
+                    document.removeEventListener('keydown', handleEscape);
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
+        }
+
+        /**
+         * Clear grouping and return to normal table view (issue #502)
+         */
+        clearGrouping() {
+            this.groupingEnabled = false;
+            this.groupingColumns = [];
+            this.groupedData = [];
+
+            // Reload data with normal pagination
+            this.data = [];
+            this.loadedRecords = 0;
+            this.hasMore = true;
+            this.totalRows = null;
+            this.loadData(false);
+        }
+
+        /**
+         * Process data for grouping (issue #502)
+         * Sorts data by grouping columns and creates group structure
+         * Issue #504: Handle reference values in "id:Value" format for grouping
+         */
+        processGroupedData() {
+            if (!this.groupingEnabled || this.groupingColumns.length === 0) {
+                this.groupedData = [];
+                return;
+            }
+
+            // Get column indices and column objects for grouping columns
+            const groupColInfo = this.groupingColumns.map(colId => {
+                const colIdx = this.columns.findIndex(c => c.id === colId);
+                return { index: colIdx, column: this.columns[colIdx] };
+            }).filter(info => info.index !== -1);
+
+            if (groupColInfo.length === 0) {
+                this.groupedData = [];
+                return;
+            }
+
+            // Helper to get display value for grouping (handles reference "id:Value" format)
+            const getDisplayValue = (value, column) => {
+                return this.parseReferenceDisplayValue(value, column);
+            };
+
+            // Issue #529: Compare values considering the base type of the groupable column
+            // Dates should be compared as dates, numbers as numbers
+            const compareGroupingValues = (valA, valB, column) => {
+                // Handle null/undefined/empty
+                const aEmpty = valA === null || valA === undefined || valA === '';
+                const bEmpty = valB === null || valB === undefined || valB === '';
+
+                if (aEmpty && bEmpty) return 0;
+                if (aEmpty) return 1;  // Empty values go to end
+                if (bEmpty) return -1;
+
+                // Get the base type of the column
+                // Issue #535: Use column.format first (report data has format like 'DATE' directly),
+                // fall back to normalizeFormat(column.type) for object data with numeric type IDs
+                const validFormats = ['SHORT', 'CHARS', 'DATE', 'NUMBER', 'SIGNED', 'BOOLEAN',
+                                      'MEMO', 'DATETIME', 'FILE', 'HTML', 'BUTTON', 'PWD',
+                                      'GRANT', 'REPORT_COLUMN', 'PATH'];
+                const upperFormat = column.format ? String(column.format).toUpperCase() : '';
+                const baseFormat = validFormats.includes(upperFormat) ? upperFormat :
+                                  (column.type ? this.normalizeFormat(column.type) : 'SHORT');
+
+                // For reference values (id:label format), extract the label for comparison
+                let displayA = getDisplayValue(valA, column);
+                let displayB = getDisplayValue(valB, column);
+
+                switch (baseFormat) {
+                    case 'NUMBER':
+                    case 'SIGNED':
+                        const numA = parseFloat(displayA);
+                        const numB = parseFloat(displayB);
+                        if (!isNaN(numA) && !isNaN(numB)) {
+                            return numA - numB;
+                        }
+                        break;
+                    case 'DATE':
+                        const dateA = this.parseDDMMYYYY(String(displayA));
+                        const dateB = this.parseDDMMYYYY(String(displayB));
+                        if (dateA && dateB) {
+                            return dateA.getTime() - dateB.getTime();
+                        }
+                        break;
+                    case 'DATETIME':
+                        const dtA = this.parseDDMMYYYYHHMMSS(String(displayA));
+                        const dtB = this.parseDDMMYYYYHHMMSS(String(displayB));
+                        if (dtA && dtB) {
+                            return dtA.getTime() - dtB.getTime();
+                        }
+                        break;
+                    case 'BOOLEAN':
+                        const boolA = displayA !== null && displayA !== undefined && displayA !== '' && displayA !== 0 && displayA !== '0' && displayA !== false;
+                        const boolB = displayB !== null && displayB !== undefined && displayB !== '' && displayB !== 0 && displayB !== '0' && displayB !== false;
+                        return (boolA === boolB) ? 0 : (boolA ? -1 : 1);
+                }
+
+                // Default: string comparison (case-insensitive)
+                return String(displayA).toLowerCase().localeCompare(String(displayB).toLowerCase(), 'ru');
+            };
+
+            // Sort data by grouping columns (using display values for reference fields)
+            const sortedData = [...this.data].sort((a, b) => {
+                for (const info of groupColInfo) {
+                    const valA = a[info.index];
+                    const valB = b[info.index];
+
+                    // Issue #529: Use type-aware comparison
+                    const comparison = compareGroupingValues(valA, valB, info.column);
+                    if (comparison !== 0) return comparison;
+                }
+                return 0;
+            });
+
+            // Create grouped structure
+            // Each row gets info about which group cells should be displayed (rowspan)
+            this.groupedData = [];
+            let prevGroupDisplayValues = [];  // Store display values for comparison
+
+            sortedData.forEach((row, rowIndex) => {
+                // Issue #504: Get display values for grouping (handles reference "id:Value" format)
+                const groupDisplayValues = groupColInfo.map(info => {
+                    const rawValue = row[info.index] || '';
+                    return getDisplayValue(rawValue, info.column);
+                });
+                // Also keep raw values for storing in groupCells
+                const groupRawValues = groupColInfo.map(info => row[info.index] || '');
+
+                // Determine which group levels changed (compare display values)
+                let changedLevel = -1;
+                for (let i = 0; i < groupDisplayValues.length; i++) {
+                    if (groupDisplayValues[i] !== prevGroupDisplayValues[i]) {
+                        changedLevel = i;
+                        break;
+                    }
+                }
+
+                // Create row info
+                // Issue #541: Use the sorted position (rowIndex) as originalIndex.
+                // After processGroupedData(), this.data is replaced with sortedData,
+                // so rowIndex (the position in sortedData) correctly maps to this.data[rowIndex].
+                const rowInfo = {
+                    originalIndex: rowIndex,
+                    data: row,
+                    groupCells: []  // Which group cells to render (with rowspan)
+                };
+
+                // If this is first row or group value changed, calculate rowspan
+                if (rowIndex === 0 || changedLevel !== -1) {
+                    // Count how many rows share each group value
+                    for (let level = (changedLevel === -1 ? 0 : changedLevel); level < groupColInfo.length; level++) {
+                        const info = groupColInfo[level];
+                        let rowspan = 1;
+
+                        // Count subsequent rows with same display value at this level
+                        for (let j = rowIndex + 1; j < sortedData.length; j++) {
+                            // Check if all previous levels match (using display values)
+                            let allMatch = true;
+                            for (let k = 0; k <= level; k++) {
+                                const checkInfo = groupColInfo[k];
+                                const checkRawValue = sortedData[j][checkInfo.index] || '';
+                                const checkDisplayValue = getDisplayValue(checkRawValue, checkInfo.column);
+                                if (checkDisplayValue !== groupDisplayValues[k]) {
+                                    allMatch = false;
+                                    break;
+                                }
+                            }
+                            if (allMatch) {
+                                rowspan++;
+                            } else {
+                                break;
+                            }
+                        }
+
+                        rowInfo.groupCells.push({
+                            colId: this.groupingColumns[level],
+                            colIndex: info.index,
+                            value: groupRawValues[level],  // Keep raw value
+                            displayValue: groupDisplayValues[level],  // Add parsed display value
+                            rowspan: rowspan
+                        });
+                    }
+                }
+
+                this.groupedData.push(rowInfo);
+                prevGroupDisplayValues = groupDisplayValues;
+            });
+
+            // Replace data with sorted data for rendering
+            this.data = sortedData;
         }
 
         hasActiveFilters() {
@@ -3308,9 +4879,612 @@ class IntegramTable {
             });
         }
 
+        /**
+         * Check if table has any active filters or grouping enabled (issue #510)
+         * Used to determine whether to show the "Share link" button
+         * @returns {boolean} True if there are active filters or grouping
+         */
+        hasActiveFiltersOrGroups() {
+            return this.hasActiveFilters() || (this.groupingEnabled && this.groupingColumns.length > 0);
+        }
+
+        /**
+         * Generate URL with current table configuration (issue #510)
+         * Includes filters and grouping settings that can be shared
+         * @returns {string} URL with configuration parameters
+         */
+        getConfigUrl() {
+            const url = new URL(window.location.href);
+
+            // Remove existing _itc parameter if present (table config)
+            url.searchParams.delete('_itc');
+
+            // Build configuration object
+            const config = {};
+
+            // Add filters
+            if (this.hasActiveFilters()) {
+                config.f = {};
+                Object.keys(this.filters).forEach(colId => {
+                    const filter = this.filters[colId];
+                    if (filter && (filter.value || filter.type === '%' || filter.type === '!%')) {
+                        config.f[colId] = {
+                            t: filter.type,
+                            v: filter.value || ''
+                        };
+                    }
+                });
+            }
+
+            // Add grouping columns
+            if (this.groupingEnabled && this.groupingColumns.length > 0) {
+                config.g = this.groupingColumns;
+            }
+
+            // Add sorting
+            if (this.sortColumn !== null && this.sortDirection !== null) {
+                config.s = {
+                    c: this.sortColumn,
+                    d: this.sortDirection
+                };
+            }
+
+            // Add column order (issue #514)
+            if (this.columnOrder && this.columnOrder.length > 0) {
+                config.o = this.columnOrder;
+            }
+
+            // Add visible columns (issue #514)
+            if (this.visibleColumns && this.visibleColumns.length > 0) {
+                config.v = this.visibleColumns;
+            }
+
+            // Encode configuration as base64 to keep URL clean
+            // Using encodeURIComponent for URL safety
+            const configJson = JSON.stringify(config);
+            const configEncoded = btoa(encodeURIComponent(configJson));
+
+            url.searchParams.set('_itc', configEncoded);
+
+            return url.toString();
+        }
+
+        /**
+         * Copy current table configuration URL to clipboard (issue #510)
+         * Shows a notification when copied successfully
+         */
+        copyConfigUrl() {
+            const url = this.getConfigUrl();
+
+            // Try using modern Clipboard API first
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(url).then(() => {
+                    this.showCopyNotification('Ссылка скопирована в буфер обмена');
+                }).catch(err => {
+                    console.error('Failed to copy URL:', err);
+                    this.fallbackCopyToClipboard(url);
+                });
+            } else {
+                this.fallbackCopyToClipboard(url);
+            }
+        }
+
+        /**
+         * Fallback method to copy text to clipboard (issue #510)
+         * Uses a temporary textarea element for older browsers
+         * @param {string} text - Text to copy
+         */
+        fallbackCopyToClipboard(text) {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-9999px';
+            textArea.style.top = '0';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    this.showCopyNotification('Ссылка скопирована в буфер обмена');
+                } else {
+                    this.showCopyNotification('Не удалось скопировать ссылку', true);
+                }
+            } catch (err) {
+                console.error('Fallback copy failed:', err);
+                this.showCopyNotification('Не удалось скопировать ссылку', true);
+            }
+
+            document.body.removeChild(textArea);
+        }
+
+        /**
+         * Show a notification message (issue #510)
+         * @param {string} message - Message to display
+         * @param {boolean} isError - Whether this is an error message
+         */
+        showCopyNotification(message, isError = false) {
+            // Remove any existing notifications
+            document.querySelectorAll('.integram-copy-notification').forEach(n => n.remove());
+
+            const notification = document.createElement('div');
+            notification.className = 'integram-copy-notification' + (isError ? ' error' : '');
+            notification.textContent = message;
+            notification.style.cssText = `
+                position: fixed;
+                bottom: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                padding: 10px 20px;
+                background-color: ${isError ? '#dc3545' : '#28a745'};
+                color: white;
+                border-radius: 4px;
+                font-size: 14px;
+                z-index: 10000;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+                animation: fadeInOut 2s ease-in-out;
+            `;
+
+            // Add animation keyframes if not already present
+            if (!document.getElementById('integram-copy-notification-styles')) {
+                const style = document.createElement('style');
+                style.id = 'integram-copy-notification-styles';
+                style.textContent = `
+                    @keyframes fadeInOut {
+                        0% { opacity: 0; transform: translateX(-50%) translateY(20px); }
+                        15% { opacity: 1; transform: translateX(-50%) translateY(0); }
+                        85% { opacity: 1; transform: translateX(-50%) translateY(0); }
+                        100% { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+
+            document.body.appendChild(notification);
+
+            // Remove notification after animation completes
+            setTimeout(() => {
+                notification.remove();
+            }, 2000);
+        }
+
+        /**
+         * Load table configuration from URL parameters (issue #510)
+         * Called during initialization to restore saved filters and groups
+         */
+        loadConfigFromUrl() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const configEncoded = urlParams.get('_itc');
+
+            if (!configEncoded) {
+                return;
+            }
+
+            try {
+                // Decode configuration
+                const configJson = decodeURIComponent(atob(configEncoded));
+                const config = JSON.parse(configJson);
+
+                // Restore filters
+                if (config.f && typeof config.f === 'object') {
+                    this.filters = {};
+                    Object.keys(config.f).forEach(colId => {
+                        const filterConfig = config.f[colId];
+                        if (filterConfig) {
+                            this.filters[colId] = {
+                                type: filterConfig.t || '^',
+                                value: filterConfig.v || ''
+                            };
+                        }
+                    });
+                    // Enable filters panel if there are any filters
+                    if (Object.keys(this.filters).length > 0) {
+                        this.filtersEnabled = true;
+                    }
+                }
+
+                // Restore grouping
+                if (config.g && Array.isArray(config.g) && config.g.length > 0) {
+                    this.groupingEnabled = true;
+                    this.groupingColumns = config.g;
+                }
+
+                // Restore sorting
+                if (config.s && config.s.c) {
+                    this.sortColumn = config.s.c;
+                    this.sortDirection = config.s.d || 'asc';
+                }
+
+                // Restore column order (issue #514)
+                if (config.o && Array.isArray(config.o) && config.o.length > 0) {
+                    this.columnOrder = config.o;
+                    this.configFromUrl = true;  // Mark that config came from URL
+                }
+
+                // Restore visible columns (issue #514)
+                if (config.v && Array.isArray(config.v) && config.v.length > 0) {
+                    this.visibleColumns = config.v;
+                    this.configFromUrl = true;  // Mark that config came from URL
+                }
+            } catch (e) {
+                console.error('Error loading table configuration from URL:', e);
+            }
+        }
+
+        /**
+         * Parse URL GET parameters for filter values (FR_*, TO_*, F_*) - issue #547, issue #549
+         * Called after columns are loaded to populate filters from URL params.
+         * Detects filter type based on the parameter value format.
+         * Supports three prefix formats:
+         *   - FR_ : standard filter prefix
+         *   - TO_ : range filter second part (used with FR_)
+         *   - F_  : alternative filter prefix (same behavior as FR_)
+         */
+        parseUrlFiltersFromParams() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlFilters = {};
+
+            // Parameters to exclude (handled elsewhere)
+            // F_I added for issue #563
+            const excludeParams = new Set(['parentId', 'F_U', 'F_I', 'up', 'LIMIT', 'ORDER', 'RECORD_COUNT', '_count', 'JSON_OBJ', 'JSON', '_itc']);
+
+            for (const [key, value] of urlParams.entries()) {
+                if (excludeParams.has(key)) continue;
+
+                // Check for FR_ prefix
+                if (key.startsWith('FR_')) {
+                    const colId = key.substring(3);  // Remove 'FR_' prefix
+                    const parsed = this.parseFilterValue(value);
+                    urlFilters[colId] = {
+                        type: parsed.type,
+                        value: parsed.value,
+                        paramKey: key
+                    };
+                    // Store ref ID info for @id-based filters (issue #551)
+                    if (parsed.isRefId) {
+                        urlFilters[colId].isRefId = true;
+                        urlFilters[colId].refId = parsed.refId;
+                    }
+                }
+                // Check for F_ prefix (alternative filter format) - issue #549
+                // Note: F_U is excluded above as it's used for parentId
+                else if (key.startsWith('F_')) {
+                    const colId = key.substring(2);  // Remove 'F_' prefix
+                    const parsed = this.parseFilterValue(value);
+                    urlFilters[colId] = {
+                        type: parsed.type,
+                        value: parsed.value,
+                        paramKey: key
+                    };
+                    // Store ref ID info for @id-based filters (issue #551)
+                    if (parsed.isRefId) {
+                        urlFilters[colId].isRefId = true;
+                        urlFilters[colId].refId = parsed.refId;
+                    }
+                }
+                // Check for TO_ prefix (range filter second part)
+                else if (key.startsWith('TO_')) {
+                    const colId = key.substring(3);  // Remove 'TO_' prefix
+                    // If we already have a FR_ or F_ for this column, combine into range
+                    if (urlFilters[colId]) {
+                        urlFilters[colId].type = '...';
+                        urlFilters[colId].value = `${urlFilters[colId].value},${value}`;
+                        urlFilters[colId].toParamKey = key;
+                    }
+                }
+            }
+
+            this.urlFilters = urlFilters;
+
+            // If we have URL filters, populate this.filters and enable filter row
+            if (Object.keys(urlFilters).length > 0) {
+                Object.keys(urlFilters).forEach(colId => {
+                    const urlFilter = urlFilters[colId];
+                    this.filters[colId] = {
+                        type: urlFilter.type,
+                        value: urlFilter.value
+                    };
+                });
+                this.filtersEnabled = true;
+
+                // Resolve @id-based filters to display labels (issue #551)
+                // This is done asynchronously after setting up filters
+                this.resolveRefIdUrlFilters();
+            }
+        }
+
+        /**
+         * Resolve @id-based URL filter values to human-readable text labels (issue #551).
+         * For each URL filter with @{id} format (e.g. FR_4547=@6753), calls _ref_reqs/{colId}
+         * to get the list of options, then finds the matching option by ID and stores the
+         * text label as displayValue on the filter. The displayValue is shown in the filter
+         * input instead of the raw @id value.
+         *
+         * If the user modifies or resets the filter, the displayValue is cleared
+         * and the user's actual input is used instead.
+         */
+        resolveRefIdUrlFilters() {
+            const refIdFilters = Object.entries(this.urlFilters).filter(([, f]) => f.isRefId);
+            if (refIdFilters.length === 0) return;
+
+            refIdFilters.forEach(async ([colId, urlFilter]) => {
+                try {
+                    const options = await this.fetchReferenceOptions(colId);
+                    // Find the option whose ID matches the refId from the URL filter
+                    const match = options.find(([id]) => String(id) === String(urlFilter.refId));
+                    if (match) {
+                        const [, label] = match;
+                        // Only update displayValue if the filter has not been overridden by the user
+                        if (this.filters[colId] && this.filters[colId].value === urlFilter.value) {
+                            this.filters[colId].displayValue = label;
+                            // Update the filter input in the DOM if it is already rendered
+                            const input = this.container
+                                ? this.container.querySelector(`.filter-input-with-icon[data-column-id="${colId}"]`)
+                                : null;
+                            if (input && input.value === urlFilter.value) {
+                                input.value = label;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // Non-fatal: if we cannot resolve the label, keep the raw @id value
+                    if (window.INTEGRAM_DEBUG) {
+                        console.warn(`[resolveRefIdUrlFilters] Could not resolve ref options for column ${colId}:`, e);
+                    }
+                }
+            });
+        }
+
+        /**
+         * Parse a filter value from URL to determine filter type and actual value.
+         * Based on format patterns from this.filterTypes.
+         * @param {string} rawValue - The raw value from URL parameter
+         * @returns {{ type: string, value: string }} Filter type symbol and extracted value
+         */
+        parseFilterValue(rawValue) {
+            if (!rawValue || rawValue === '') {
+                return { type: '^', value: '' };
+            }
+
+            // Check for empty/not empty filters
+            if (rawValue === '%') {
+                return { type: '%', value: '' };
+            }
+            if (rawValue === '!%') {
+                return { type: '!%', value: '' };
+            }
+
+            // Check for ID-based filter: @{id} means filter by record ID, not by text value (issue #551)
+            // Example: FR_4547=@6753 means filter column 4547 by record ID 6753
+            const refIdMatch = rawValue.match(/^@(\d+)$/);
+            if (refIdMatch) {
+                return { type: '=', value: rawValue, isRefId: true, refId: refIdMatch[1] };
+            }
+
+            // Check for IN() list filter: IN(val1,val2,...)
+            const inMatch = rawValue.match(/^IN\((.+)\)$/);
+            if (inMatch) {
+                return { type: '(,)', value: inMatch[1] };
+            }
+
+            // Check for "not equals" filter: !value
+            if (rawValue.startsWith('!')) {
+                const innerValue = rawValue.substring(1);
+                // Check if it's "not contains": !%value%
+                if (innerValue.startsWith('%') && innerValue.endsWith('%')) {
+                    return { type: '!', value: innerValue.slice(1, -1) };
+                }
+                // Check if it's "not starts with": !%value (ends with %, starts with !%)
+                if (innerValue.startsWith('%') && !innerValue.endsWith('%')) {
+                    return { type: '!^', value: innerValue.substring(1) };
+                }
+                // Simple "not equals": !value
+                return { type: '≠', value: innerValue };
+            }
+
+            // Check for comparison operators: >=, <=, >, <
+            if (rawValue.startsWith('>=')) {
+                return { type: '≥', value: rawValue.substring(2) };
+            }
+            if (rawValue.startsWith('<=')) {
+                return { type: '≤', value: rawValue.substring(2) };
+            }
+            // Note: > and < are less common as URL values may use different encoding
+            // The format uses FR_{T}>{X} but the value itself doesn't include >
+            // After parsing in applyFilter, it becomes just the value
+
+            // Check for "contains" filter: %value%
+            if (rawValue.startsWith('%') && rawValue.endsWith('%') && rawValue.length > 2) {
+                return { type: '~', value: rawValue.slice(1, -1) };
+            }
+
+            // Check for "ends with" filter: %value (starts with %, doesn't end with %)
+            if (rawValue.startsWith('%') && !rawValue.endsWith('%')) {
+                return { type: '$', value: rawValue.substring(1) };
+            }
+
+            // Check for "starts with" filter: value%
+            if (rawValue.endsWith('%') && !rawValue.startsWith('%')) {
+                return { type: '^', value: rawValue.slice(0, -1) };
+            }
+
+            // Default: equals
+            return { type: '=', value: rawValue };
+        }
+
+        /**
+         * Check if there are any URL filter parameters that apply to hidden columns.
+         * @returns {Array} Array of { colId, colName, filter } for hidden column filters
+         */
+        getHiddenColumnFilters() {
+            const hiddenFilters = [];
+
+            Object.keys(this.urlFilters).forEach(colId => {
+                const urlFilter = this.urlFilters[colId];
+                const column = this.columns.find(c => c.id === colId);
+
+                // Check if column is hidden (not in visibleColumns) or doesn't exist
+                const isHidden = !column || !this.visibleColumns.includes(colId);
+
+                if (isHidden) {
+                    const colName = column ? column.name : colId;
+                    hiddenFilters.push({
+                        colId: colId,
+                        colName: colName,
+                        filter: urlFilter
+                    });
+                }
+            });
+
+            return hiddenFilters;
+        }
+
+        /**
+         * Check if there are any URL filter parameters present.
+         * @returns {boolean} True if there are URL filters
+         */
+        hasUrlFilters() {
+            return Object.keys(this.urlFilters).length > 0;
+        }
+
+        /**
+         * Remove a specific URL filter and update browser URL.
+         * @param {string} colId - Column ID to remove filter for
+         */
+        removeUrlFilter(colId) {
+            const urlFilter = this.urlFilters[colId];
+            if (!urlFilter) return;
+
+            // Remove from urlFilters
+            delete this.urlFilters[colId];
+
+            // Remove from filters
+            delete this.filters[colId];
+
+            // Mark as overridden so it won't be forwarded to API
+            if (urlFilter.paramKey) {
+                this.overriddenUrlParams.add(urlFilter.paramKey);
+            }
+            if (urlFilter.toParamKey) {
+                this.overriddenUrlParams.add(urlFilter.toParamKey);
+            }
+
+            // Update browser URL
+            const newUrlParams = new URLSearchParams(window.location.search);
+            if (urlFilter.paramKey) {
+                newUrlParams.delete(urlFilter.paramKey);
+            }
+            if (urlFilter.toParamKey) {
+                newUrlParams.delete(urlFilter.toParamKey);
+            }
+
+            const newUrl = window.location.pathname + (newUrlParams.toString() ? '?' + newUrlParams.toString() : '');
+            window.history.replaceState({}, '', newUrl);
+
+            // Reload data with updated filters
+            this.data = [];
+            this.loadedRecords = 0;
+            this.hasMore = true;
+            this.totalRows = null;
+            this.loadData(false);
+        }
+
+        /**
+         * Clear all URL filters and remove them from URL.
+         */
+        clearAllUrlFilters() {
+            // Collect all URL filter param keys
+            const paramsToRemove = [];
+            Object.values(this.urlFilters).forEach(urlFilter => {
+                if (urlFilter.paramKey) paramsToRemove.push(urlFilter.paramKey);
+                if (urlFilter.toParamKey) paramsToRemove.push(urlFilter.toParamKey);
+            });
+
+            // Mark all as overridden
+            paramsToRemove.forEach(key => this.overriddenUrlParams.add(key));
+
+            // Clear urlFilters
+            this.urlFilters = {};
+
+            // Clear corresponding filters
+            this.filters = {};
+
+            // Update browser URL
+            const newUrlParams = new URLSearchParams(window.location.search);
+            paramsToRemove.forEach(key => newUrlParams.delete(key));
+
+            const newUrl = window.location.pathname + (newUrlParams.toString() ? '?' + newUrlParams.toString() : '');
+            window.history.replaceState({}, '', newUrl);
+
+            // Reload data
+            this.data = [];
+            this.loadedRecords = 0;
+            this.hasMore = true;
+            this.totalRows = null;
+            this.loadData(false);
+        }
+
+        /**
+         * Render badges for filters on hidden columns (issue #547).
+         * These appear above the table to show filters for columns not currently visible.
+         * @returns {string} HTML for hidden filter badges
+         */
+        renderHiddenFilterBadges() {
+            const hiddenFilters = this.getHiddenColumnFilters();
+            if (hiddenFilters.length === 0) return '';
+
+            const instanceName = this.options.instanceName;
+            const badges = hiddenFilters.map(hf => {
+                const filterTypeSymbol = hf.filter.type || '^';
+                // Use resolved text label for @id-based filters when available (issue #551)
+                const activeFilter = this.filters[hf.colId];
+                const resolvedLabel = activeFilter && activeFilter.displayValue !== undefined
+                    ? activeFilter.displayValue
+                    : (hf.filter.value || '');
+                const displayValue = resolvedLabel ? `${filterTypeSymbol} ${resolvedLabel}` : filterTypeSymbol;
+
+                return `
+                    <span class="hidden-filter-badge" data-col-id="${hf.colId}">
+                        <span class="hidden-filter-badge-name">${hf.colName}</span>
+                        <span class="hidden-filter-badge-value">${displayValue}</span>
+                        <span class="hidden-filter-badge-remove" onclick="window.${instanceName}.removeUrlFilter('${hf.colId}')" title="Удалить фильтр"><i class="pi pi-times"></i></span>
+                    </span>
+                `;
+            }).join('');
+
+            return `
+                <div class="hidden-filter-badges-container">
+                    ${badges}
+                </div>
+            `;
+        }
+
         clearAllFilters() {
             // Clear all filters
             this.filters = {};
+
+            // Also clear URL filters and remove from browser URL (issue #547)
+            if (this.hasUrlFilters()) {
+                const paramsToRemove = [];
+                Object.values(this.urlFilters).forEach(urlFilter => {
+                    if (urlFilter.paramKey) paramsToRemove.push(urlFilter.paramKey);
+                    if (urlFilter.toParamKey) paramsToRemove.push(urlFilter.toParamKey);
+                });
+
+                // Mark as overridden
+                paramsToRemove.forEach(key => this.overriddenUrlParams.add(key));
+
+                // Update browser URL
+                const newUrlParams = new URLSearchParams(window.location.search);
+                paramsToRemove.forEach(key => newUrlParams.delete(key));
+
+                const newUrl = window.location.pathname + (newUrlParams.toString() ? '?' + newUrlParams.toString() : '');
+                window.history.replaceState({}, '', newUrl);
+
+                // Clear urlFilters
+                this.urlFilters = {};
+            }
 
             // Reset data and load from beginning
             this.data = [];
@@ -3371,6 +5545,12 @@ class IntegramTable {
         }
 
         saveColumnState() {
+            // Skip saving to cookies if config was loaded from URL (issue #514)
+            // User can still copy current config as a shareable URL
+            if (this.configFromUrl) {
+                return;
+            }
+
             const state = {
                 order: this.columnOrder,
                 visible: this.visibleColumns,
@@ -3497,11 +5677,146 @@ class IntegramTable {
 
                 const metadata = this.metadataCache[typeId];
 
-                // Render create form (recordData = null for create mode)
-                this.renderEditFormModal(metadata, null, true, typeId, columnId);
+                // Pre-fill reference fields from URL @id filters (issue #553)
+                // When URL has FR_{colId}=@{id}, auto-select that id in the create form
+                const prefillReqs = this.buildRefIdPrefillFromUrlFilters(metadata);
+                const createRecordData = prefillReqs ? { obj: { val: '', parent: 1 }, reqs: prefillReqs } : null;
+
+                // Render create form with pre-filled values from URL filters
+                this.renderEditFormModal(metadata, createRecordData, true, typeId, columnId);
 
             } catch (error) {
                 console.error('Error opening create form from column header:', error);
+                this.showToast(`Ошибка: ${ error.message }`, 'error');
+            }
+        }
+
+        /**
+         * Build recordData.reqs pre-fill map from URL @id-based filters (issue #553).
+         * For each URL filter with isRefId=true (e.g. FR_4547=@6753), checks if the
+         * metadata has a matching requisite (req.id === colId). If so, adds
+         * { value: refId } to the reqs map so the create form pre-selects that value.
+         *
+         * @param {Object} metadata - Table metadata with reqs array
+         * @returns {Object|null} reqs map {reqId: {value: refId}} or null if nothing to pre-fill
+         */
+        buildRefIdPrefillFromUrlFilters(metadata) {
+            if (!this.urlFilters || !metadata || !metadata.reqs) return null;
+
+            const reqs = {};
+            let hasPrefill = false;
+
+            for (const [colId, urlFilter] of Object.entries(this.urlFilters)) {
+                if (!urlFilter.isRefId || !urlFilter.refId) continue;
+
+                // Check if this colId matches a requisite in the metadata
+                const matchingReq = metadata.reqs.find(req => String(req.id) === String(colId) && req.ref_id);
+                if (matchingReq) {
+                    reqs[colId] = { value: String(urlFilter.refId) };
+                    hasPrefill = true;
+
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log(`[buildRefIdPrefillFromUrlFilters] Pre-filling field ${colId} with refId=${urlFilter.refId}`);
+                    }
+                }
+            }
+
+            return hasPrefill ? reqs : null;
+        }
+
+        /**
+         * Check if the add button should be shown in grouped cells (issue #543)
+         * The button is shown only when data source is object/table format
+         * @returns {boolean} - True if the button should be shown
+         */
+        shouldShowGroupedCellAddButton() {
+            // Check if this is object/table format
+            const isObjectFormat = (this.rawObjectData && this.rawObjectData.length > 0 && this.objectTableId)
+                || this.options.dataSource === 'table';
+
+            return isObjectFormat;
+        }
+
+        /**
+         * Open create record form from a grouped cell with prefilled values (issue #543)
+         * Prefills attributes from the current cell and all grouping cells to the left
+         *
+         * @param {number} rowIndex - Index of the row in groupedData
+         * @param {number} groupLevel - Level of the grouping column (0-based, from left to right)
+         */
+        async openGroupedCellCreateForm(rowIndex, groupLevel) {
+            try {
+                // Get the row info from groupedData
+                const rowInfo = this.groupedData[rowIndex];
+                if (!rowInfo) {
+                    console.error('openGroupedCellCreateForm: Invalid rowIndex', rowIndex);
+                    this.showToast('Ошибка: строка не найдена', 'error');
+                    return;
+                }
+
+                // Find the table type ID (objectTableId for object format)
+                const tableTypeId = this.objectTableId || this.options.tableTypeId;
+                if (!tableTypeId) {
+                    console.error('openGroupedCellCreateForm: No table type ID found');
+                    this.showToast('Ошибка: не найден тип таблицы', 'error');
+                    return;
+                }
+
+                // Build prefilled values from grouping columns (current and all to the left)
+                const fieldValues = {};
+
+                // Iterate through grouping columns from 0 to groupLevel (inclusive)
+                for (let level = 0; level <= groupLevel; level++) {
+                    const colId = this.groupingColumns[level];
+                    const column = this.columns.find(c => c.id === colId);
+                    if (!column) continue;
+
+                    // Get the column's data index
+                    const dataIndex = this.columns.indexOf(column);
+                    if (dataIndex === -1) continue;
+
+                    // Get the raw value from the row data
+                    const rawValue = rowInfo.data[dataIndex];
+                    if (rawValue === undefined || rawValue === null || rawValue === '') continue;
+
+                    // For reference fields, extract the ID part from "id:Value" format
+                    const isRefField = column.ref_id != null || (column.ref && column.ref !== 0);
+                    let valueToUse = rawValue;
+
+                    if (isRefField && typeof rawValue === 'string') {
+                        const colonIndex = rawValue.indexOf(':');
+                        if (colonIndex > 0) {
+                            // Use only the ID part for prefilling reference fields
+                            valueToUse = rawValue.substring(0, colonIndex);
+                        }
+                    }
+
+                    // Use column.paramId or column.id as the field key
+                    // In object format, column.paramId contains the metadata field ID
+                    const fieldId = column.paramId || colId;
+                    fieldValues[`t${ fieldId }`] = valueToUse;
+                }
+
+                // Determine parent ID
+                // In object format, try to get parent from rawObjectData
+                let parentId = 1;
+                if (this.rawObjectData && this.rawObjectData[rowInfo.originalIndex]) {
+                    const rawItem = this.rawObjectData[rowInfo.originalIndex];
+                    if (rawItem.u) {
+                        parentId = rawItem.u;
+                    }
+                }
+
+                // Use the global openCreateRecordForm function
+                if (typeof openCreateRecordForm === 'function') {
+                    await openCreateRecordForm(tableTypeId, parentId, fieldValues);
+                } else {
+                    console.error('openGroupedCellCreateForm: openCreateRecordForm is not available');
+                    this.showToast('Ошибка: функция создания записи недоступна', 'error');
+                }
+
+            } catch (error) {
+                console.error('Error opening create form from grouped cell:', error);
                 this.showToast(`Ошибка: ${ error.message }`, 'error');
             }
         }
@@ -3573,7 +5888,17 @@ class IntegramTable {
                 window.integramTableOverrides.ddls &&
                 window.integramTableOverrides.ddls[requisiteId] !== undefined) {
                 const overrideUrlRaw = window.integramTableOverrides.ddls[requisiteId];
-                const overrideUrl = overrideUrlRaw.startsWith('http') ? overrideUrlRaw : `${ apiBase }/${ overrideUrlRaw }`;
+                let overrideUrl = overrideUrlRaw.startsWith('http') ? overrideUrlRaw : `${ apiBase }/${ overrideUrlRaw }`;
+
+                // Apply extraParams from fieldHooks to the override URL
+                if (extraParams && Object.keys(extraParams).length > 0) {
+                    const url = new URL(overrideUrl, window.location.origin);
+                    for (const [key, value] of Object.entries(extraParams)) {
+                        url.searchParams.set(key, value);
+                    }
+                    overrideUrl = url.toString();
+                }
+
                 const overrideResponse = await fetch(overrideUrl);
 
                 if (!overrideResponse.ok) {
@@ -3586,7 +5911,7 @@ class IntegramTable {
                     const overrideData = JSON.parse(overrideText);
 
                     if (!Array.isArray(overrideData) || overrideData.length === 0) {
-                        return {};
+                        return [];
                     }
 
                     // Find the ID field (ends with 'ID') and derive the label field (without 'ID' suffix)
@@ -3596,11 +5921,8 @@ class IntegramTable {
                     }
                     const labelField = idField.slice(0, -2);
 
-                    const result = {};
-                    for (const item of overrideData) {
-                        result[item[idField]] = item[labelField];
-                    }
-                    return result;
+                    // Return array of [id, text] tuples to preserve server order
+                    return overrideData.map(item => [String(item[idField]), item[labelField]]);
                 } catch (e) {
                     if (e.message && (e.message.includes('error') || e.message.includes('ID field'))) {
                         throw e;
@@ -3641,13 +5963,36 @@ class IntegramTable {
                     throw new Error(data.error);
                 }
 
-                return data;
+                // Parse JSON text to extract key-value pairs in original server order
+                // (JavaScript objects with numeric string keys iterate in numeric order, not insertion order)
+                return this.parseJsonObjectAsArray(text);
             } catch (e) {
                 if (e.message && e.message.includes('error')) {
                     throw e;
                 }
                 throw new Error(`Invalid JSON response: ${ text }`);
             }
+        }
+
+        /**
+         * Parse JSON object text into an array of [key, value] tuples preserving original order.
+         * This is necessary because JavaScript objects reorder numeric string keys.
+         * @param {string} jsonText - JSON text representing an object
+         * @returns {Array<[string, string]>} Array of [id, text] tuples in original order
+         */
+        parseJsonObjectAsArray(jsonText) {
+            const result = [];
+            // Match "key": "value" or "key": value patterns, preserving order
+            const regex = /"([^"\\]*(?:\\.[^"\\]*)*)"\s*:\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|([^,}\s]+))/g;
+            let match;
+            while ((match = regex.exec(jsonText)) !== null) {
+                const key = match[1].replace(/\\(.)/g, '$1'); // Unescape
+                const value = match[2] !== undefined
+                    ? match[2].replace(/\\(.)/g, '$1')  // String value, unescape
+                    : match[3];  // Non-string value (number, boolean, null)
+                result.push([key, value]);
+            }
+            return result;
         }
 
         getMetadataName(metadata) {
@@ -3692,6 +6037,7 @@ class IntegramTable {
         /**
          * Get GET parameters from the current page URL to forward to API requests.
          * Excludes parameters that are already handled internally (parentId, F_U, up).
+         * Also excludes parameters that have been overridden by user filters (issue #500).
          * @returns {URLSearchParams} Parameters to append to API requests
          */
         getPageUrlParams() {
@@ -3699,15 +6045,59 @@ class IntegramTable {
             const forwardParams = new URLSearchParams();
 
             // Parameters to exclude (already handled internally or could conflict)
-            const excludeParams = new Set(['parentId', 'F_U', 'up', 'LIMIT', 'ORDER', 'RECORD_COUNT', '_count', 'JSON_OBJ', 'JSON']);
+            // F_I added for issue #563
+            const excludeParams = new Set(['parentId', 'F_U', 'F_I', 'up', 'LIMIT', 'ORDER', 'RECORD_COUNT', '_count', 'JSON_OBJ', 'JSON']);
 
             for (const [key, value] of pageParams.entries()) {
-                if (!excludeParams.has(key)) {
-                    forwardParams.append(key, value);
-                }
+                // Skip excluded params
+                if (excludeParams.has(key)) continue;
+
+                // Skip params that have been overridden by user filters (issue #500)
+                if (this.overriddenUrlParams.has(key)) continue;
+
+                forwardParams.append(key, value);
             }
 
             return forwardParams;
+        }
+
+        /**
+         * Check if a column's filter corresponds to URL GET parameters and handle override.
+         * When user sets a filter for a field that came from URL parameters:
+         * 1. Mark those parameters as overridden (won't be forwarded to API)
+         * 2. Remove them from the browser URL using history.replaceState
+         * @param {string} colId - The column ID being filtered
+         * @param {string} filterValue - The new filter value
+         */
+        handleFilterOverride(colId, filterValue) {
+            // URL parameter patterns for this column: FR_{colId}, TO_{colId}, F_{colId} (issue #549)
+            const urlParams = new URLSearchParams(window.location.search);
+            const paramsToRemove = [];
+
+            // Check for FR_, TO_, and F_ parameters for this column
+            for (const [key, value] of urlParams.entries()) {
+                if (key === `FR_${colId}` || key === `TO_${colId}` || key === `F_${colId}`) {
+                    paramsToRemove.push(key);
+                }
+            }
+
+            // If there are URL parameters for this column and user is setting a filter
+            if (paramsToRemove.length > 0 && (filterValue || filterValue === '')) {
+                // Mark these parameters as overridden
+                paramsToRemove.forEach(key => {
+                    this.overriddenUrlParams.add(key);
+                });
+
+                // Remove these parameters from the browser URL
+                const newUrlParams = new URLSearchParams(window.location.search);
+                paramsToRemove.forEach(key => {
+                    newUrlParams.delete(key);
+                });
+
+                // Update browser URL without reloading the page
+                const newUrl = window.location.pathname + (newUrlParams.toString() ? '?' + newUrlParams.toString() : '');
+                window.history.replaceState({}, '', newUrl);
+            }
         }
 
         /**
@@ -3812,9 +6202,28 @@ class IntegramTable {
             modal._overlayElement = overlay;
 
             const typeName = this.getMetadataName(metadata);
-            const title = isCreate ? `Создание: ${ typeName }` : `Редактирование: ${ typeName }`;
+            const firstColumnValue = !isCreate && recordData && recordData.obj ? recordData.obj.val : null;
+            const title = isCreate ? `Создание: ${ typeName }` : `Редактирование: ${ firstColumnValue || typeName }`;
             const instanceName = this.options.instanceName;
             const recordId = recordData && recordData.obj ? recordData.obj.id : null;
+            const parentId = recordData && recordData.obj ? recordData.obj.parent : 1;
+
+            // Build record ID and table link HTML for edit mode (issue #563)
+            let recordIdHtml = '';
+            if (!isCreate && recordId) {
+                // Extract database name from URL path
+                const pathParts = window.location.pathname.split('/');
+                const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+                // Build table URL with filters: /{dbName}/table/{typeId}?F_U={parentId}&F_I={recordId}
+                const tableUrl = `/${dbName}/table/${typeId}?F_U=${parentId || 1}&F_I=${recordId}`;
+
+                recordIdHtml = `
+                    <span class="edit-form-record-id" onclick="window.${instanceName}.copyRecordIdToClipboard('${recordId}')" title="Скопировать ID">#${recordId}</span>
+                    <a href="${tableUrl}" class="edit-form-table-link" title="Открыть в таблице" target="_blank">
+                        <i class="pi pi-table"></i>
+                    </a>
+                `;
+            }
 
             // Separate regular fields from subordinate tables
             const reqs = metadata.reqs || [];
@@ -3853,7 +6262,10 @@ class IntegramTable {
 
             let formHtml = `
                 <div class="edit-form-header">
-                    <h5>${ title }</h5>
+                    <div class="edit-form-header-title-row">
+                        <h5>${ title }</h5>
+                        ${ recordIdHtml }
+                    </div>
                     <button class="edit-form-close" data-close-modal="true"><i class="pi pi-times"></i></button>
                 </div>
                 ${ tabsHtml }
@@ -3916,6 +6328,9 @@ class IntegramTable {
             // Load reference options for dropdowns (scoped to this modal)
             this.loadReferenceOptions(metadata.reqs, recordId || 0, modal);
 
+            // Load GRANT and REPORT_COLUMN dropdown options (issue #577)
+            this.loadGrantAndReportColumnOptions(modal);
+
             // Attach date/datetime picker handlers
             this.attachDatePickerHandlers(modal);
 
@@ -3933,7 +6348,6 @@ class IntegramTable {
 
             // Attach save handler
             const saveBtn = modal.querySelector('#save-record-btn');
-            const parentId = recordData && recordData.obj ? recordData.obj.parent : 1;
 
             saveBtn.addEventListener('click', () => {
                 this.saveRecord(modal, isCreate, recordId, typeId, parentId, columnId);
@@ -3970,6 +6384,20 @@ class IntegramTable {
             });
 
             overlay.addEventListener('click', closeModal);
+
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    // Only close if this modal is the topmost one
+                    const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
+                    const maxDepth = window._integramModalDepth || 0;
+                    if (currentDepth === maxDepth) {
+                        closeModal();
+                        document.removeEventListener('keydown', handleEscape);
+                    }
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
         }
 
         renderAttributesForm(metadata, recordData, regularFields, recordReqs, isCreate = false, typeId = null) {
@@ -3992,13 +6420,61 @@ class IntegramTable {
                 currentDateTimeDisplay = currentDateDisplay + ' ' + now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); // DD.MM.YYYY HH:MM
             }
 
-            // Main value field
+            // Main value field - render according to base type
             const typeName = this.getMetadataName(metadata);
             const mainValue = recordData && recordData.obj ? recordData.obj.val : '';
+            // For GRANT/REPORT_COLUMN fields, use term from API response for dropdown pre-selection (issue #583)
+            const mainTermValue = recordData && recordData.obj && recordData.obj.term !== undefined ? recordData.obj.term : '';
+            const mainFieldType = this.normalizeFormat(metadata.type);
+
+            // Build main field HTML based on its type
+            let mainFieldHtml = '';
+            if (mainFieldType === 'BOOLEAN') {
+                const isChecked = mainValue ? 'checked' : '';
+                mainFieldHtml = `<input type="checkbox" id="field-main" name="main" value="1" ${ isChecked }>`;
+            } else if (mainFieldType === 'DATE') {
+                const dateValueHtml5 = mainValue ? this.formatDateForHtml5(mainValue, false) : (isCreate ? currentDateHtml5 : '');
+                const dateValueDisplay = mainValue ? this.formatDateForInput(mainValue, false) : (isCreate ? currentDateDisplay : '');
+                mainFieldHtml = `<input type="date" class="form-control date-picker" id="field-main-picker" required data-target="field-main" value="${ this.escapeHtml(dateValueHtml5) }">`;
+                mainFieldHtml += `<input type="hidden" id="field-main" name="main" value="${ this.escapeHtml(dateValueDisplay) }">`;
+            } else if (mainFieldType === 'DATETIME') {
+                const dateTimeValueHtml5 = mainValue ? this.formatDateForHtml5(mainValue, true) : (isCreate ? currentDateTimeHtml5 : '');
+                const dateTimeValueDisplay = mainValue ? this.formatDateForInput(mainValue, true) : (isCreate ? currentDateTimeDisplay : '');
+                mainFieldHtml = `<input type="datetime-local" class="form-control datetime-picker" id="field-main-picker" required data-target="field-main" value="${ this.escapeHtml(dateTimeValueHtml5) }">`;
+                mainFieldHtml += `<input type="hidden" id="field-main" name="main" value="${ this.escapeHtml(dateTimeValueDisplay) }">`;
+            } else if (mainFieldType === 'NUMBER') {
+                mainFieldHtml = `<input type="number" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required>`;
+            } else if (mainFieldType === 'SIGNED') {
+                mainFieldHtml = `<input type="number" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required step="0.01">`;
+            } else if (mainFieldType === 'MEMO') {
+                mainFieldHtml = `<textarea class="form-control memo-field" id="field-main" name="main" rows="4" required>${ this.escapeHtml(mainValue) }</textarea>`;
+            } else if (mainFieldType === 'GRANT') {
+                // GRANT field (dropdown with options from GET grants API - issue #581)
+                mainFieldHtml = `
+                    <select class="form-control form-grant-select" id="field-main" name="main" required data-grant-type="grant">
+                        <option value="">Загрузка...</option>
+                    </select>
+                `;
+                // Store current value (term) for later selection after options load (issue #583)
+                mainFieldHtml += `<input type="hidden" id="field-main-current-value" value="${ this.escapeHtml(mainTermValue) }">`;
+            } else if (mainFieldType === 'REPORT_COLUMN') {
+                // REPORT_COLUMN field (dropdown with options from GET rep_cols API - issue #581)
+                mainFieldHtml = `
+                    <select class="form-control form-grant-select" id="field-main" name="main" required data-grant-type="rep_col">
+                        <option value="">Загрузка...</option>
+                    </select>
+                `;
+                // Store current value (term) for later selection after options load (issue #583)
+                mainFieldHtml += `<input type="hidden" id="field-main-current-value" value="${ this.escapeHtml(mainTermValue) }">`;
+            } else {
+                // Default: text input (SHORT, CHARS, etc.)
+                mainFieldHtml = `<input type="text" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required>`;
+            }
+
             html += `
                 <div class="form-group">
                     <label for="field-main">${ typeName } <span class="required">*</span></label>
-                    <input type="text" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required>
+                    ${ mainFieldHtml }
                 </div>
             `;
 
@@ -4121,6 +6597,26 @@ class IntegramTable {
                         </div>
                     `;
                 }
+                // GRANT field (dropdown with options from GET grants API - issue #577)
+                else if (baseFormat === 'GRANT') {
+                    html += `
+                        <select class="form-control form-grant-select" id="field-${ req.id }" name="t${ req.id }" ${ isRequired ? 'required' : '' } data-grant-type="grant">
+                            <option value="">Загрузка...</option>
+                        </select>
+                    `;
+                    // Store current value for later selection after options load
+                    html += `<input type="hidden" id="field-${ req.id }-current-value" value="${ this.escapeHtml(reqValue) }">`;
+                }
+                // REPORT_COLUMN field (dropdown with options from GET rep_cols API - issue #577)
+                else if (baseFormat === 'REPORT_COLUMN') {
+                    html += `
+                        <select class="form-control form-grant-select" id="field-${ req.id }" name="t${ req.id }" ${ isRequired ? 'required' : '' } data-grant-type="rep_col">
+                            <option value="">Загрузка...</option>
+                        </select>
+                    `;
+                    // Store current value for later selection after options load
+                    html += `<input type="hidden" id="field-${ req.id }-current-value" value="${ this.escapeHtml(reqValue) }">`;
+                }
                 // Regular text field
                 else {
                     html += `<input type="text" class="form-control" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(reqValue) }" ${ isRequired ? 'required' : '' }>`;
@@ -4185,8 +6681,11 @@ class IntegramTable {
             container.innerHTML = '<div class="subordinate-table-loading">Загрузка...</div>';
 
             try {
-                // Fetch metadata for subordinate table
-                const metadata = await this.fetchMetadata(arrId);
+                // Fetch metadata for subordinate table (use cache to avoid redundant requests)
+                if (!this.metadataCache[arrId]) {
+                    this.metadataCache[arrId] = await this.fetchMetadata(arrId);
+                }
+                const metadata = this.metadataCache[arrId];
 
                 // Fetch data for subordinate table
                 const apiBase = this.getApiBase();
@@ -4214,8 +6713,11 @@ class IntegramTable {
             event.stopPropagation();
 
             try {
-                // Fetch metadata for subordinate table
-                const metadata = await this.fetchMetadata(arrId);
+                // Fetch metadata for subordinate table (use cache to avoid redundant requests)
+                if (!this.metadataCache[arrId]) {
+                    this.metadataCache[arrId] = await this.fetchMetadata(arrId);
+                }
+                const metadata = this.metadataCache[arrId];
 
                 // Create modal for subordinate table
                 const modalDepth = (window._integramModalDepth || 0) + 1;
@@ -4271,6 +6773,20 @@ class IntegramTable {
                 modal.querySelector('.subordinate-modal-close').addEventListener('click', closeModal);
                 overlay.addEventListener('click', closeModal);
 
+                // Close on Escape key (issue #595)
+                const handleEscape = (e) => {
+                    if (e.key === 'Escape') {
+                        // Only close if this modal is the topmost one
+                        const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
+                        const maxDepth = window._integramModalDepth || 0;
+                        if (currentDepth === maxDepth) {
+                            closeModal();
+                            document.removeEventListener('keydown', handleEscape);
+                        }
+                    }
+                };
+                document.addEventListener('keydown', handleEscape);
+
             } catch (error) {
                 console.error('Error opening subordinate table:', error);
                 this.showToast(`Ошибка: ${ error.message }`, 'error');
@@ -4320,6 +6836,11 @@ class IntegramTable {
                 rows = this.filterSubordinateRows(rows, searchTerm.trim(), columns);
             }
 
+            // Build table URL for subordinate table link (issue #589)
+            const pathParts = window.location.pathname.split('/');
+            const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+            const subordinateTableUrl = `/${dbName}/table/${arrId}?F_U=${parentRecordId}`;
+
             let html = `
                 <div class="subordinate-table-toolbar">
                     <button type="button" class="btn btn-sm btn-primary subordinate-add-btn" data-arr-id="${ arrId }" data-parent-id="${ parentRecordId }">
@@ -4329,6 +6850,9 @@ class IntegramTable {
                         <input type="text" class="subordinate-search-input" placeholder="Поиск..." value="${ this.escapeHtml(searchTerm) }">
                         <button type="button" class="subordinate-search-clear" title="Очистить поиск"${ searchTerm ? '' : ' style="display: none;"' }><i class="pi pi-times"></i></button>
                     </div>
+                    <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
+                        <i class="pi pi-table"></i>
+                    </a>
                 </div>
             `;
 
@@ -4388,6 +6912,11 @@ class IntegramTable {
 
                 html += `</tbody></table></div>`;
             }
+
+            // Save search input focus state before re-rendering (issue #593)
+            const oldSearchInput = container.querySelector('.subordinate-search-input');
+            const wasSearchFocused = oldSearchInput && document.activeElement === oldSearchInput;
+            const cursorPosition = wasSearchFocused ? oldSearchInput.selectionStart : 0;
 
             container.innerHTML = html;
 
@@ -4456,6 +6985,16 @@ class IntegramTable {
                         ''
                     );
                 });
+            }
+
+            // Restore search input focus after re-rendering (issue #593)
+            if (wasSearchFocused && searchInput) {
+                searchInput.focus();
+                // Restore cursor position
+                if (typeof searchInput.setSelectionRange === 'function') {
+                    const newPos = Math.min(cursorPosition, searchInput.value.length);
+                    searchInput.setSelectionRange(newPos, newPos);
+                }
             }
         }
 
@@ -4748,6 +7287,20 @@ class IntegramTable {
                 mainFieldHtml = `<input type="number" class="form-control" id="sub-field-main" name="main" value="" required ${ mainFieldType === 'SIGNED' ? 'step="0.01"' : '' }>`;
             } else if (mainFieldType === 'MEMO') {
                 mainFieldHtml = `<textarea class="form-control memo-field" id="sub-field-main" name="main" rows="4" required></textarea>`;
+            } else if (mainFieldType === 'GRANT') {
+                // GRANT field (dropdown with options from GET grants API - issue #593)
+                mainFieldHtml = `
+                    <select class="form-control form-grant-select" id="sub-field-main" name="main" required data-grant-type="grant">
+                        <option value="">Загрузка...</option>
+                    </select>
+                `;
+            } else if (mainFieldType === 'REPORT_COLUMN') {
+                // REPORT_COLUMN field (dropdown with options from GET rep_cols API - issue #593)
+                mainFieldHtml = `
+                    <select class="form-control form-grant-select" id="sub-field-main" name="main" required data-grant-type="rep_col">
+                        <option value="">Загрузка...</option>
+                    </select>
+                `;
             } else {
                 // Default: text input (SHORT, CHARS, etc.)
                 mainFieldHtml = `<input type="text" class="form-control" id="sub-field-main" name="main" value="" required>`;
@@ -4824,6 +7377,22 @@ class IntegramTable {
                 else if (baseFormat === 'MEMO') {
                     formHtml += `<textarea class="form-control memo-field" id="sub-field-${ req.id }" name="t${ req.id }" rows="4" ${ isRequired ? 'required' : '' }></textarea>`;
                 }
+                // GRANT field (dropdown with options from GET grants API - issue #593)
+                else if (baseFormat === 'GRANT') {
+                    formHtml += `
+                        <select class="form-control form-grant-select" id="sub-field-${ req.id }" name="t${ req.id }" ${ isRequired ? 'required' : '' } data-grant-type="grant">
+                            <option value="">Загрузка...</option>
+                        </select>
+                    `;
+                }
+                // REPORT_COLUMN field (dropdown with options from GET rep_cols API - issue #593)
+                else if (baseFormat === 'REPORT_COLUMN') {
+                    formHtml += `
+                        <select class="form-control form-grant-select" id="sub-field-${ req.id }" name="t${ req.id }" ${ isRequired ? 'required' : '' } data-grant-type="rep_col">
+                            <option value="">Загрузка...</option>
+                        </select>
+                    `;
+                }
                 else {
                     formHtml += `<input type="text" class="form-control" id="sub-field-${ req.id }" name="t${ req.id }" value="" ${ isRequired ? 'required' : '' }>`;
                 }
@@ -4849,6 +7418,9 @@ class IntegramTable {
             // Load reference options (scoped to this modal)
             this.loadReferenceOptions(regularFields, 0, modal);
 
+            // Load GRANT and REPORT_COLUMN dropdown options (issue #577)
+            this.loadGrantAndReportColumnOptions(modal);
+
             // Attach date picker handlers
             this.attachDatePickerHandlers(modal);
 
@@ -4866,6 +7438,20 @@ class IntegramTable {
             modal.querySelector('.subordinate-cancel-btn').addEventListener('click', closeModal);
             overlay.addEventListener('click', closeModal);
 
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    // Only close if this modal is the topmost one
+                    const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
+                    const maxDepth = window._integramModalDepth || 0;
+                    if (currentDepth === maxDepth) {
+                        closeModal();
+                        document.removeEventListener('keydown', handleEscape);
+                    }
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
+
             // Save handler
             modal.querySelector('#subordinate-save-btn').addEventListener('click', async () => {
                 const form = modal.querySelector('#subordinate-edit-form');
@@ -4882,16 +7468,21 @@ class IntegramTable {
                     params.append('_xsrf', xsrf);
                 }
 
+                // Get main value before iterating form fields
+                const mainValue = formData.get('main');
+
                 // Skip empty parameters when creating so server can fill defaults
+                // Skip 'main' since it's handled separately as t{arrId}
                 for (const [key, value] of formData.entries()) {
+                    if (key === 'main') continue;
                     if (value !== '' && value !== null && value !== undefined) {
                         params.append(key, value);
                     }
                 }
 
-                const mainValue = formData.get('main');
+                // Add main value as t{arrId} parameter (issue #597)
                 if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
-                    params.append('t0', mainValue);
+                    params.append(`t${ arrId }`, mainValue);
                 }
 
                 const apiBase = this.getApiBase();
@@ -5117,9 +7708,9 @@ class IntegramTable {
                 try {
                     const options = await this.fetchReferenceOptions(refReqId, recordId);
 
-                    // Store options data on the wrapper
+                    // Store options data on the wrapper (array of [id, text] tuples)
                     wrapper._referenceOptions = options;
-                    wrapper._allOptionsFetched = Object.keys(options).length < 50;
+                    wrapper._allOptionsFetched = options.length < 50;
 
                     // Render options (hidden by default, shown on focus)
                     this.renderFormReferenceOptions(dropdown, options, hiddenInput, searchInput);
@@ -5127,9 +7718,9 @@ class IntegramTable {
 
                     // Set current value if exists
                     if (hiddenInput.value) {
-                        const currentLabel = options[hiddenInput.value];
-                        if (currentLabel) {
-                            searchInput.value = currentLabel;
+                        const currentOption = options.find(([id]) => id === hiddenInput.value);
+                        if (currentOption) {
+                            searchInput.value = currentOption[1];
                         }
                     }
 
@@ -5152,13 +7743,10 @@ class IntegramTable {
                             if (searchText === '') {
                                 this.renderFormReferenceOptions(dropdown, wrapper._referenceOptions, hiddenInput, searchInput);
                             } else {
-                                // Filter locally first
-                                const filtered = {};
-                                for (const [id, text] of Object.entries(wrapper._referenceOptions)) {
-                                    if (text.toLowerCase().includes(searchText.toLowerCase())) {
-                                        filtered[id] = text;
-                                    }
-                                }
+                                // Filter locally first (options is array of [id, text] tuples)
+                                const filtered = wrapper._referenceOptions.filter(([id, text]) =>
+                                    text.toLowerCase().includes(searchText.toLowerCase())
+                                );
                                 this.renderFormReferenceOptions(dropdown, filtered, hiddenInput, searchInput);
 
                                 // If not all fetched, re-query from server
@@ -5289,7 +7877,7 @@ class IntegramTable {
                         try {
                             const options = await this.fetchReferenceOptions(refReqId, recordId, '', targetWrapper._extraParams);
                             targetWrapper._referenceOptions = options;
-                            targetWrapper._allOptionsFetched = Object.keys(options).length < 50;
+                            targetWrapper._allOptionsFetched = options.length < 50;
                             this.renderFormReferenceOptions(targetDropdown, options, targetHiddenInput, targetSearchInput);
                             targetDropdown.style.display = 'none';
                         } catch (error) {
@@ -5304,17 +7892,170 @@ class IntegramTable {
             }
         }
 
+        /**
+         * Fetch GRANT or REPORT_COLUMN options from cache or API (issue #607)
+         * @param {string} grantType - 'grant' or 'rep_col'
+         * @returns {Promise<Array>} - Array of options
+         */
+        async fetchGrantOrReportColumnOptions(grantType) {
+            // Check cache first (issue #607)
+            if (grantType === 'grant' && this.grantOptionsCache !== null) {
+                return this.grantOptionsCache;
+            }
+            if (grantType === 'rep_col' && this.reportColumnOptionsCache !== null) {
+                return this.reportColumnOptionsCache;
+            }
+
+            const apiBase = this.getApiBase();
+            let apiUrl;
+
+            if (grantType === 'grant') {
+                apiUrl = `${ apiBase }/grants`;
+            } else if (grantType === 'rep_col') {
+                apiUrl = `${ apiBase }/rep_cols`;
+            } else {
+                return [];
+            }
+
+            const response = await fetch(apiUrl);
+            if (!response.ok) {
+                throw new Error(`HTTP ${ response.status }`);
+            }
+            const options = await response.json();
+
+            // Store in cache (issue #607)
+            if (grantType === 'grant') {
+                this.grantOptionsCache = options;
+            } else if (grantType === 'rep_col') {
+                this.reportColumnOptionsCache = options;
+            }
+
+            return options;
+        }
+
+        /**
+         * Load GRANT and REPORT_COLUMN dropdown options from API (issue #577)
+         * Uses cache to avoid re-fetching on each call (issue #607)
+         * GRANT fields use GET /grants endpoint
+         * REPORT_COLUMN fields use GET /rep_cols endpoint
+         */
+        async loadGrantAndReportColumnOptions(modalElement) {
+            const container = modalElement || document;
+            const grantSelects = container.querySelectorAll('.form-grant-select');
+
+            for (const select of grantSelects) {
+                const grantType = select.dataset.grantType;
+                const fieldId = select.id;
+                const currentValueInput = container.querySelector(`#${ fieldId }-current-value`);
+                const currentValue = currentValueInput ? currentValueInput.value : '';
+
+                try {
+                    // Use cached options or fetch from API (issue #607)
+                    const options = await this.fetchGrantOrReportColumnOptions(grantType);
+
+                    // Clear loading option and populate with fetched options
+                    select.innerHTML = '<option value="">-- Выберите --</option>';
+
+                    if (Array.isArray(options)) {
+                        options.forEach(opt => {
+                            // Options may be in format: { id: "...", val: "..." } or { id: "...", value: "..." }
+                            // Use nullish check to properly handle "0" as a valid ID (issue #583)
+                            const optId = (opt.id !== undefined && opt.id !== null) ? opt.id : ((opt.i !== undefined && opt.i !== null) ? opt.i : '');
+                            const optVal = opt.val || opt.value || opt.name || opt.v || '';
+                            const option = document.createElement('option');
+                            option.value = optId;
+                            option.textContent = optVal;
+                            if (String(optId) === String(currentValue)) {
+                                option.selected = true;
+                            }
+                            select.appendChild(option);
+                        });
+                    }
+
+                    // Remove the hidden current value input after loading
+                    if (currentValueInput) {
+                        currentValueInput.remove();
+                    }
+
+                } catch (error) {
+                    console.error(`Error loading ${ grantType } options:`, error);
+                    select.innerHTML = '<option value="">Ошибка загрузки</option>';
+                }
+            }
+        }
+
+        /**
+         * Load GRANT or REPORT_COLUMN dropdown options for inline editor (issue #601)
+         * @param {HTMLSelectElement} selectElement - The select element to populate
+         * @param {string} currentValue - The current cell value (display text or ID)
+         * @param {string} format - 'GRANT' or 'REPORT_COLUMN'
+         */
+        /**
+         * Load GRANT or REPORT_COLUMN dropdown options for inline editor (issue #601)
+         * Uses cache to avoid re-fetching on each call (issue #607)
+         * @param {HTMLSelectElement} selectElement - The select element to populate
+         * @param {string} currentValue - The current cell value (display text or ID)
+         * @param {string} format - 'GRANT' or 'REPORT_COLUMN'
+         */
+        async loadInlineGrantOptions(selectElement, currentValue, format) {
+            try {
+                // Map format to grantType for the cache method (issue #607)
+                const grantType = format === 'GRANT' ? 'grant' : (format === 'REPORT_COLUMN' ? 'rep_col' : null);
+                if (!grantType) {
+                    return;
+                }
+
+                // Use cached options or fetch from API (issue #607)
+                const options = await this.fetchGrantOrReportColumnOptions(grantType);
+
+                // Clear loading option and populate with fetched options
+                selectElement.innerHTML = '<option value="">-- Выберите --</option>';
+
+                let selectedId = null;
+
+                if (Array.isArray(options)) {
+                    options.forEach(opt => {
+                        // Options may be in format: { id: "...", val: "..." } or { id: "...", value: "..." }
+                        // Use nullish check to properly handle "0" as a valid ID
+                        const optId = (opt.id !== undefined && opt.id !== null) ? opt.id : ((opt.i !== undefined && opt.i !== null) ? opt.i : '');
+                        const optVal = opt.val || opt.value || opt.name || opt.v || '';
+                        const option = document.createElement('option');
+                        option.value = optId;
+                        option.textContent = optVal;
+                        // Pre-select if currentValue matches either ID or display text (issue #601)
+                        // Cell may contain display text (from initial load) or ID (from data attribute)
+                        if (String(optId) === String(currentValue) || String(optVal) === String(currentValue)) {
+                            option.selected = true;
+                            selectedId = optId;
+                        }
+                        selectElement.appendChild(option);
+                    });
+                }
+
+                // Store the original ID for comparison when saving (in case currentValue was display text)
+                if (selectedId !== null) {
+                    this.currentEditingCell.originalValue = String(selectedId);
+                }
+
+                // Focus the select after loading options
+                selectElement.focus();
+
+            } catch (error) {
+                console.error(`Error loading inline ${ format } options:`, error);
+                selectElement.innerHTML = '<option value="">Ошибка загрузки</option>';
+            }
+        }
+
         renderFormReferenceOptions(dropdown, options, hiddenInput, searchInput) {
+            // options is an array of [id, text] tuples
             dropdown.innerHTML = '';
 
-            const entries = Object.entries(options);
-
-            if (entries.length === 0) {
+            if (options.length === 0) {
                 dropdown.innerHTML = '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
                 return;
             }
 
-            entries.forEach(([id, text]) => {
+            options.forEach(([id, text]) => {
                 const escapedText = this.escapeHtml(text);
                 const optionDiv = document.createElement('div');
                 optionDiv.className = 'inline-editor-reference-option';
@@ -5383,10 +8124,48 @@ class IntegramTable {
             const reqs = metadata.reqs || [];
             const regularFields = reqs.filter(req => !req.arr_id);
 
+            // Get current date/datetime for default values
+            const now = new Date();
+            const currentDateHtml5 = now.toISOString().split('T')[0]; // YYYY-MM-DD
+            const minutes = Math.round(now.getMinutes() / 5) * 5; // Round to 5 minutes
+            now.setMinutes(minutes);
+            const currentDateTimeHtml5 = now.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
+            const currentDateDisplay = now.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.'); // DD.MM.YYYY
+            const currentDateTimeDisplay = currentDateDisplay + ' ' + now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); // DD.MM.YYYY HH:MM
+
+            // Determine main field type
+            const mainFieldType = this.normalizeFormat(metadata.type);
+
+            // Build main field HTML based on its type
+            let mainFieldHtml = '';
+            if (mainFieldType === 'BOOLEAN') {
+                const isChecked = initialValue ? 'checked' : '';
+                mainFieldHtml = `<input type="checkbox" id="field-main-form-ref-create" name="main" value="1" ${ isChecked }>`;
+            } else if (mainFieldType === 'DATE') {
+                const dateValueHtml5 = initialValue ? this.formatDateForHtml5(initialValue, false) : currentDateHtml5;
+                const dateValueDisplay = initialValue ? this.formatDateForInput(initialValue, false) : currentDateDisplay;
+                mainFieldHtml = `<input type="date" class="form-control date-picker" id="field-main-form-ref-create-picker" required data-target="field-main-form-ref-create" value="${ this.escapeHtml(dateValueHtml5) }">`;
+                mainFieldHtml += `<input type="hidden" id="field-main-form-ref-create" name="main" value="${ this.escapeHtml(dateValueDisplay) }">`;
+            } else if (mainFieldType === 'DATETIME') {
+                const dateTimeValueHtml5 = initialValue ? this.formatDateForHtml5(initialValue, true) : currentDateTimeHtml5;
+                const dateTimeValueDisplay = initialValue ? this.formatDateForInput(initialValue, true) : currentDateTimeDisplay;
+                mainFieldHtml = `<input type="datetime-local" class="form-control datetime-picker" id="field-main-form-ref-create-picker" required data-target="field-main-form-ref-create" value="${ this.escapeHtml(dateTimeValueHtml5) }">`;
+                mainFieldHtml += `<input type="hidden" id="field-main-form-ref-create" name="main" value="${ this.escapeHtml(dateTimeValueDisplay) }">`;
+            } else if (mainFieldType === 'NUMBER') {
+                mainFieldHtml = `<input type="number" class="form-control" id="field-main-form-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required>`;
+            } else if (mainFieldType === 'SIGNED') {
+                mainFieldHtml = `<input type="number" class="form-control" id="field-main-form-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required step="0.01">`;
+            } else if (mainFieldType === 'MEMO') {
+                mainFieldHtml = `<textarea class="form-control memo-field" id="field-main-form-ref-create" name="main" rows="4" required>${ this.escapeHtml(initialValue) }</textarea>`;
+            } else {
+                // Default: text input (SHORT, CHARS, etc.)
+                mainFieldHtml = `<input type="text" class="form-control" id="field-main-form-ref-create" name="main" value="${this.escapeHtml(initialValue)}" required>`;
+            }
+
             let attributesHtml = `
                 <div class="form-group">
                     <label for="field-main-form-ref-create">${typeName} <span class="required">*</span></label>
-                    <input type="text" class="form-control" id="field-main-form-ref-create" name="main" value="${this.escapeHtml(initialValue)}" required>
+                    ${ mainFieldHtml }
                 </div>
             `;
 
@@ -5458,6 +8237,12 @@ class IntegramTable {
             // Load reference options for dropdown fields
             this.loadReferenceOptions(regularFields, parentRecordId, modal);
 
+            // Load GRANT and REPORT_COLUMN dropdown options (issue #577)
+            this.loadGrantAndReportColumnOptions(modal);
+
+            // Attach date/datetime picker handlers
+            this.attachDatePickerHandlers(modal);
+
             // Attach save handler
             const saveBtn = modal.querySelector('#save-form-ref-btn');
             saveBtn.addEventListener('click', async () => {
@@ -5476,6 +8261,20 @@ class IntegramTable {
             });
 
             overlay.addEventListener('click', closeModal);
+
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    // Only close if this modal is the topmost one
+                    const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
+                    const maxDepth = window._integramModalDepth || 0;
+                    if (currentDepth === maxDepth) {
+                        closeModal();
+                        document.removeEventListener('keydown', handleEscape);
+                    }
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
         }
 
         async saveRecordForFormReference(modal, overlay, typeId, parentRecordId, hiddenInput, searchInput, wrapper, dropdown) {
@@ -5689,6 +8488,15 @@ class IntegramTable {
             closeBtn.addEventListener('click', closeModal);
             cancelBtn.addEventListener('click', closeModal);
             overlay.addEventListener('click', closeModal);
+
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    closeModal();
+                    document.removeEventListener('keydown', handleEscape);
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
 
             saveBtn.addEventListener('click', () => {
                 // Save visibility
@@ -6055,6 +8863,13 @@ class IntegramTable {
                     throw new Error(result.error);
                 }
 
+                // Check for warning - show modal and stay in edit mode
+                // Pass result.obj to show a link to the existing/found record if available
+                if (result.warning) {
+                    this.showWarningModal(result.warning, result.obj || null);
+                    return;
+                }
+
                 // Close modal
                 modal.remove();
                 if (modal._overlayElement) {
@@ -6090,7 +8905,8 @@ class IntegramTable {
                 }
 
                 // Check if we edited a record from a cell-opened subordinate table
-                if (!refreshedSubordinateTable && this.cellSubordinateContext && this.cellSubordinateContext.arrId === typeId) {
+                // Use == for type coercion since typeId from dataset is a string, while arrId may be a number
+                if (!refreshedSubordinateTable && this.cellSubordinateContext && this.cellSubordinateContext.arrId == typeId) {
                     await this.loadSubordinateTable(this.cellSubordinateContext.container, this.cellSubordinateContext.arrId, this.cellSubordinateContext.parentRecordId);
                     refreshedSubordinateTable = true;
                 }
@@ -6129,7 +8945,9 @@ class IntegramTable {
         }
 
         async deleteRecord(modal, recordId, typeId) {
-            if (!confirm('Вы уверены, что хотите удалить эту запись?')) {
+            // Show custom confirmation modal instead of native confirm()
+            const confirmed = await this.showDeleteConfirmModal();
+            if (!confirmed) {
                 return;
             }
 
@@ -6160,16 +8978,96 @@ class IntegramTable {
 
                 this.showToast('Запись удалена', 'success');
 
-                // Reload table data
-                this.data = [];
-                this.loadedRecords = 0;
-                this.hasMore = true;
-                this.totalRows = null;
-                await this.loadData(false);
+                // Check if we deleted a record from a subordinate table and refresh it
+                let refreshedSubordinateTable = false;
+                if (this.currentEditModal && this.currentEditModal.subordinateTables) {
+                    // Find which subordinate table this record belongs to (by matching typeId with arr_id)
+                    const subordinateTable = this.currentEditModal.subordinateTables.find(st => st.arr_id === typeId);
+
+                    if (subordinateTable) {
+                        // Reload the specific subordinate table
+                        const tabContent = this.currentEditModal.modal.querySelector(`[data-tab-content="sub-${ subordinateTable.id }"]`);
+                        if (tabContent) {
+                            tabContent.dataset.loaded = '';
+                            await this.loadSubordinateTable(tabContent, subordinateTable.arr_id, this.currentEditModal.recordId);
+                            tabContent.dataset.loaded = 'true';
+                            refreshedSubordinateTable = true;
+                        }
+                    }
+                }
+
+                // Check if we deleted a record from a cell-opened subordinate table
+                // Use == for type coercion since typeId from dataset is a string, while arrId may be a number
+                if (!refreshedSubordinateTable && this.cellSubordinateContext && this.cellSubordinateContext.arrId == typeId) {
+                    await this.loadSubordinateTable(this.cellSubordinateContext.container, this.cellSubordinateContext.arrId, this.cellSubordinateContext.parentRecordId);
+                    refreshedSubordinateTable = true;
+                }
+
+                // If we didn't refresh a subordinate table, reload main table data
+                if (!refreshedSubordinateTable) {
+                    this.data = [];
+                    this.loadedRecords = 0;
+                    this.hasMore = true;
+                    this.totalRows = null;
+                    await this.loadData(false);
+                }
             } catch (error) {
                 console.error('Error deleting record:', error);
                 this.showToast(`Ошибка удаления: ${ error.message }`, 'error');
             }
+        }
+
+        /**
+         * Show a custom modal confirmation dialog for delete action
+         * @returns {Promise<boolean>} - true if user confirmed, false otherwise
+         */
+        showDeleteConfirmModal() {
+            return new Promise((resolve) => {
+                const modalId = `delete-confirm-${ Date.now() }`;
+                const modalHtml = `
+                    <div class="integram-modal-overlay" id="${ modalId }">
+                        <div class="integram-modal" style="max-width: 400px;">
+                            <div class="integram-modal-header">
+                                <h5>Подтверждение удаления</h5>
+                            </div>
+                            <div class="integram-modal-body">
+                                <p style="margin: 0;">Вы уверены, что хотите удалить эту запись?</p>
+                            </div>
+                            <div class="integram-modal-footer">
+                                <button type="button" class="btn btn-secondary delete-confirm-cancel-btn" style="margin-right: 8px;">Отмена</button>
+                                <button type="button" class="btn btn-danger delete-confirm-ok-btn">Удалить</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+                const confirmModal = document.getElementById(modalId);
+
+                const cleanup = (result) => {
+                    confirmModal.remove();
+                    resolve(result);
+                };
+
+                confirmModal.querySelector('.delete-confirm-ok-btn').addEventListener('click', () => cleanup(true));
+                confirmModal.querySelector('.delete-confirm-cancel-btn').addEventListener('click', () => cleanup(false));
+
+                // Close on overlay click (outside modal content)
+                confirmModal.addEventListener('click', (e) => {
+                    if (e.target === confirmModal) {
+                        cleanup(false);
+                    }
+                });
+
+                // Close on Escape key
+                const handleEscape = (e) => {
+                    if (e.key === 'Escape') {
+                        document.removeEventListener('keydown', handleEscape);
+                        cleanup(false);
+                    }
+                };
+                document.addEventListener('keydown', handleEscape);
+            });
         }
 
         saveFormShowDelete(typeId, show) {
@@ -6498,6 +9396,35 @@ class IntegramTable {
                               .replace(/'/g, '&#039;');
         }
 
+        /**
+         * Parse reference field value in "id:Value" format and return display value
+         * For reference fields, values come as "id:DisplayText" where id is the record ID
+         * This method extracts and returns only the DisplayText part for display/comparison
+         * Issue #504: Handle reference values in grouping fields
+         *
+         * @param {string} value - The raw value, possibly in "id:Value" format
+         * @param {Object} column - The column definition object
+         * @returns {string} - The display value (without id: prefix for reference fields)
+         */
+        parseReferenceDisplayValue(value, column) {
+            if (value === null || value === undefined) return '';
+
+            const strValue = String(value);
+
+            // Check if this is a reference field (has ref_id or non-zero ref)
+            const isRefField = column && (column.ref_id != null || (column.ref && column.ref !== 0));
+
+            if (isRefField && strValue) {
+                const colonIndex = strValue.indexOf(':');
+                if (colonIndex > 0) {
+                    // Return only the display value part (after the colon)
+                    return strValue.substring(colonIndex + 1);
+                }
+            }
+
+            return strValue;
+        }
+
         showToast(message, type = 'info') {
             // Remove existing toasts
             const existingToasts = document.querySelectorAll('.integram-toast');
@@ -6520,6 +9447,80 @@ class IntegramTable {
                 toast.classList.add('fade-out');
                 setTimeout(() => toast.remove(), 300);
             });
+        }
+
+        /**
+         * Copy record ID to clipboard (issue #563)
+         * @param {string} recordId - The record ID to copy
+         */
+        copyRecordIdToClipboard(recordId) {
+            if (!recordId) return;
+
+            navigator.clipboard.writeText(String(recordId)).then(() => {
+                this.showToast(`ID #${recordId} скопирован`, 'success');
+            }).catch(err => {
+                console.error('Failed to copy record ID:', err);
+                this.showToast('Не удалось скопировать ID', 'error');
+            });
+        }
+
+        showWarningModal(message, objId = null) {
+            const modalId = `warning-modal-${ Date.now() }`;
+            const apiBase = this.getApiBase();
+
+            // Build link HTML if objId is provided
+            let linkHtml = '';
+            if (objId) {
+                const editUrl = `${ apiBase }/edit_obj/${ objId }`;
+                linkHtml = `
+                    <a href="${ editUrl }" target="_blank" class="integram-modal-link">
+                        Открыть найденную запись ↗
+                    </a>
+                `;
+            }
+
+            const modalHtml = `
+                <div class="integram-modal-overlay" id="${ modalId }">
+                    <div class="integram-modal" style="max-width: 500px;">
+                        <div class="integram-modal-header">
+                            <h5>Предупреждение</h5>
+                        </div>
+                        <div class="integram-modal-body">
+                            <div class="alert alert-warning" style="margin: 0;">
+                                ${ this.escapeHtml(message) }
+                            </div>
+                            ${ linkHtml }
+                        </div>
+                        <div class="integram-modal-footer" style="padding: 15px; text-align: right;">
+                            <button type="button" class="btn btn-primary" data-close-warning-modal="true">OK</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+            const overlay = document.getElementById(modalId);
+            const closeBtn = overlay.querySelector('[data-close-warning-modal="true"]');
+
+            closeBtn.addEventListener('click', () => {
+                overlay.remove();
+            });
+
+            // Also close on click outside the modal
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) {
+                    overlay.remove();
+                }
+            });
+
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    overlay.remove();
+                    document.removeEventListener('keydown', handleEscape);
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
         }
 
         /**
@@ -7221,6 +10222,973 @@ function reloadAllIntegramTables() {
 // Make the function globally accessible
 if (typeof window !== 'undefined') {
     window.reloadAllIntegramTables = reloadAllIntegramTables;
+}
+
+/**
+ * Global function to open a record creation form from anywhere on the page.
+ * This function can be called independently of any IntegramTable instance.
+ *
+ * @param {number|string} tableTypeId - Required. ID of the table in which to create the record.
+ * @param {number|string} parentId - Required. Parent ID to pass in the "up" parameter when creating the record.
+ * @param {Object} [fieldValues={}] - Optional. Object with field values to pre-fill on the form.
+ *                                    Keys should be in format "t{fieldId}", e.g. {'t3888': 357, 't3886': 'Отказались'}.
+ *
+ * @example
+ * // Open form to create a record in table 3596 with parent 1
+ * openCreateRecordForm(3596, 1);
+ *
+ * @example
+ * // Open form with pre-filled field values
+ * openCreateRecordForm(3596, 1, {'t3888': 357, 't3886': 'Отказались'});
+ */
+async function openCreateRecordForm(tableTypeId, parentId, fieldValues = {}) {
+    if (!tableTypeId) {
+        console.error('openCreateRecordForm: tableTypeId is required');
+        return;
+    }
+    if (!parentId && parentId !== 0) {
+        console.error('openCreateRecordForm: parentId is required');
+        return;
+    }
+
+    try {
+        // Determine API base from current page URL
+        const pathParts = window.location.pathname.split('/');
+        let apiBase = '';
+        if (pathParts.length >= 2 && pathParts[1]) {
+            apiBase = window.location.origin + '/' + pathParts[1];
+        }
+
+        if (!apiBase) {
+            console.error('openCreateRecordForm: Could not determine API base URL');
+            return;
+        }
+
+        // Fetch metadata for the table type
+        const metadataUrl = `${apiBase}/metadata/${tableTypeId}`;
+        const metadataResponse = await fetch(metadataUrl);
+
+        if (!metadataResponse.ok) {
+            throw new Error(`Failed to fetch metadata: ${metadataResponse.statusText}`);
+        }
+
+        const metadata = await metadataResponse.json();
+
+        // Convert fieldValues to recordData format for pre-filling
+        // Input: {'t3888': 357, 't3886': 'Отказались'}
+        // Output: {obj: {val: ''}, reqs: {3888: {value: 357}, 3886: {value: 'Отказались'}}}
+        const recordData = {
+            obj: { val: '', parent: parentId },
+            reqs: {}
+        };
+
+        // Check if main field (t{tableTypeId}) is in fieldValues
+        const mainFieldKey = `t${tableTypeId}`;
+        if (fieldValues[mainFieldKey] !== undefined) {
+            recordData.obj.val = fieldValues[mainFieldKey];
+        }
+
+        // Process other field values
+        for (const [key, value] of Object.entries(fieldValues)) {
+            // Match t{fieldId} format
+            const match = key.match(/^t(\d+)$/);
+            if (match) {
+                const fieldId = match[1];
+                // Skip main field as it's handled separately
+                if (fieldId !== String(tableTypeId)) {
+                    recordData.reqs[fieldId] = { value: value };
+                }
+            }
+        }
+
+        // Fetch parent info if parentId is not 1 (root)
+        let parentInfo = null;
+        if (String(parentId) !== '1') {
+            try {
+                const parentUrl = `${apiBase}/edit_obj/${parentId}?JSON`;
+                const parentResponse = await fetch(parentUrl);
+                if (parentResponse.ok) {
+                    const parentData = await parentResponse.json();
+                    if (parentData && parentData.obj && parentData.obj.val) {
+                        parentInfo = {
+                            id: parentData.obj.id,
+                            val: parentData.obj.val,
+                            typ_name: parentData.obj.typ_name
+                        };
+                    }
+                }
+            } catch (parentError) {
+                // Silently fail - parent info is optional, form should still work
+                console.warn('openCreateRecordForm: Could not fetch parent info:', parentError);
+            }
+        }
+
+        // Create the modal using a minimal helper class instance
+        // This reuses the existing form rendering logic from IntegramTable
+        const helper = new IntegramCreateFormHelper(apiBase, tableTypeId, parentId);
+        helper.renderCreateFormModal(metadata, recordData, fieldValues, parentInfo);
+
+    } catch (error) {
+        console.error('openCreateRecordForm: Error opening form:', error);
+        // Show error toast if available
+        if (typeof showToast === 'function') {
+            showToast(`Ошибка: ${error.message}`, 'error');
+        } else {
+            alert(`Ошибка: ${error.message}`);
+        }
+    }
+}
+
+/**
+ * Helper class for rendering create form modals independently of IntegramTable instances.
+ * This allows openCreateRecordForm to work without requiring an existing table on the page.
+ */
+class IntegramCreateFormHelper {
+    constructor(apiBase, tableTypeId, parentId) {
+        this.apiBase = apiBase;
+        this.tableTypeId = tableTypeId;
+        this.parentId = parentId;
+        this.metadataCache = {};
+        this.grantOptionsCache = null;  // Cache for GRANT dropdown options (issue #607)
+        this.reportColumnOptionsCache = null;  // Cache for REPORT_COLUMN dropdown options (issue #607)
+    }
+
+    escapeHtml(text) {
+        if (text === null || text === undefined) return '';
+        return String(text)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    getMetadataName(metadata) {
+        return metadata.val || metadata.name || metadata.title || `Тип #${metadata.id || '?'}`;
+    }
+
+    parseAttrs(attrs) {
+        const result = {
+            required: false,
+            multi: false,
+            alias: null
+        };
+
+        if (!attrs) return result;
+
+        result.required = attrs.includes(':!NULL:');
+        result.multi = attrs.includes(':MULTI:');
+
+        const aliasMatch = attrs.match(/:ALIAS=(.*?):/);
+        if (aliasMatch) {
+            result.alias = aliasMatch[1];
+        }
+
+        return result;
+    }
+
+    normalizeFormat(baseTypeId) {
+        const validFormats = ['SHORT', 'CHARS', 'DATE', 'NUMBER', 'SIGNED', 'BOOLEAN',
+                              'MEMO', 'DATETIME', 'FILE', 'HTML', 'BUTTON', 'PWD',
+                              'GRANT', 'REPORT_COLUMN', 'PATH'];
+
+        const upperTypeId = String(baseTypeId).toUpperCase();
+
+        if (validFormats.includes(upperTypeId)) {
+            return upperTypeId;
+        }
+
+        // Map numeric type IDs to format names
+        const formatMap = {
+            '3': 'SHORT',
+            '8': 'CHARS',
+            '9': 'DATE',
+            '13': 'NUMBER',
+            '14': 'SIGNED',
+            '11': 'BOOLEAN',
+            '12': 'MEMO',
+            '4': 'DATETIME',
+            '10': 'FILE',
+            '2': 'HTML',
+            '7': 'BUTTON',
+            '6': 'PWD',
+            '5': 'GRANT',
+            '16': 'REPORT_COLUMN',
+            '17': 'PATH'
+        };
+        return formatMap[String(baseTypeId)] || 'SHORT';
+    }
+
+    formatDateForHtml5(dateStr, includeTime = false) {
+        if (!dateStr) return '';
+
+        // Handle DD.MM.YYYY format
+        const dateParts = dateStr.split(' ')[0].split('.');
+        if (dateParts.length === 3) {
+            const [day, month, year] = dateParts;
+            if (includeTime) {
+                const timeParts = dateStr.split(' ')[1] || '00:00';
+                return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${timeParts}`;
+            }
+            return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+        }
+
+        return dateStr;
+    }
+
+    formatDateForInput(dateStr, includeTime = false) {
+        if (!dateStr) return '';
+        return dateStr;
+    }
+
+    showToast(message, type = 'info') {
+        // Try to use existing toast function if available
+        if (typeof window.showToast === 'function') {
+            window.showToast(message, type);
+            return;
+        }
+
+        // Create a simple toast notification
+        const toast = document.createElement('div');
+        toast.className = `integram-toast integram-toast-${type}`;
+        toast.textContent = message;
+        toast.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 24px;
+            border-radius: 4px;
+            color: white;
+            z-index: 10000;
+            font-family: sans-serif;
+            font-size: 14px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            background-color: ${type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#17a2b8'};
+        `;
+        document.body.appendChild(toast);
+
+        setTimeout(() => {
+            toast.remove();
+        }, 3000);
+    }
+
+    renderCreateFormModal(metadata, recordData, fieldValues, parentInfo = null) {
+        // Track modal depth for z-index stacking
+        if (!window._integramModalDepth) {
+            window._integramModalDepth = 0;
+        }
+        window._integramModalDepth++;
+        const modalDepth = window._integramModalDepth;
+        const baseZIndex = 1000 + (modalDepth * 10);
+
+        const overlay = document.createElement('div');
+        overlay.className = 'edit-form-overlay';
+        overlay.style.zIndex = baseZIndex;
+        overlay.dataset.modalDepth = modalDepth;
+
+        const modal = document.createElement('div');
+        modal.className = 'edit-form-modal';
+        modal.style.zIndex = baseZIndex + 1;
+        modal.dataset.modalDepth = modalDepth;
+        modal.dataset.overlayRef = 'true';
+
+        // Add cascade offset for nested modals (6px per level)
+        const cascadeOffset = (modalDepth - 1) * 6;
+        modal.style.transform = `translate(calc(-50% + ${cascadeOffset}px), calc(-50% + ${cascadeOffset}px))`;
+
+        // Store reference to overlay on modal for proper cleanup
+        modal._overlayElement = overlay;
+
+        const typeName = this.getMetadataName(metadata);
+        const title = `Создание: ${typeName}`;
+
+        // Build parent info subtitle HTML if parentInfo is provided
+        let parentSubtitleHtml = '';
+        if (parentInfo && parentInfo.val) {
+            const escapedParentVal = this.escapeHtml(parentInfo.val);
+            parentSubtitleHtml = `<div class="edit-form-parent-subtitle">в: ${escapedParentVal}</div>`;
+        }
+
+        // Render the form
+        const reqs = metadata.reqs || [];
+        const recordReqs = recordData && recordData.reqs ? recordData.reqs : {};
+        const regularFields = reqs.filter(req => !req.arr_id);
+
+        // Build attributes form HTML
+        let attributesHtml = this.renderAttributesForm(metadata, recordData, regularFields, recordReqs, fieldValues);
+
+        let formHtml = `
+            <div class="edit-form-header">
+                <div class="edit-form-header-titles">
+                    <h5>${title}</h5>
+                    ${parentSubtitleHtml}
+                </div>
+                <button class="edit-form-close" data-close-modal="true"><i class="pi pi-times"></i></button>
+            </div>
+            <div class="edit-form-body">
+                <div class="edit-form-tab-content active" data-tab-content="attributes">
+                    <form id="edit-form" class="edit-form">
+                        ${attributesHtml}
+                    </form>
+                </div>
+            </div>
+            <div class="edit-form-footer">
+                <div class="edit-form-footer-buttons">
+                    <button type="button" class="btn btn-primary" id="save-record-btn">Сохранить</button>
+                    <button type="button" class="btn btn-secondary" data-close-modal="true">Отмена</button>
+                </div>
+            </div>
+        `;
+
+        modal.innerHTML = formHtml;
+        document.body.appendChild(overlay);
+        document.body.appendChild(modal);
+
+        // Load reference options for dropdowns
+        this.loadReferenceOptions(metadata.reqs, modal, fieldValues);
+
+        // Load GRANT and REPORT_COLUMN dropdown options (issue #577)
+        this.loadGrantAndReportColumnOptions(modal);
+
+        // Attach date/datetime picker handlers
+        this.attachDatePickerHandlers(modal);
+
+        // Attach file upload handlers
+        this.attachFormFileUploadHandlers(modal);
+
+        // Attach save handler
+        const saveBtn = modal.querySelector('#save-record-btn');
+        saveBtn.addEventListener('click', () => {
+            this.saveRecord(modal, metadata);
+        });
+
+        // Close modal helper function
+        const closeModal = () => {
+            modal.remove();
+            overlay.remove();
+            window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+        };
+
+        // Attach close handlers to buttons with data-close-modal attribute
+        modal.querySelectorAll('[data-close-modal="true"]').forEach(btn => {
+            btn.addEventListener('click', closeModal);
+        });
+
+        overlay.addEventListener('click', closeModal);
+
+        // Close on Escape key (issue #595)
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                // Only close if this modal is the topmost one
+                const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
+                const maxDepth = window._integramModalDepth || 0;
+                if (currentDepth === maxDepth) {
+                    closeModal();
+                    document.removeEventListener('keydown', handleEscape);
+                }
+            }
+        };
+        document.addEventListener('keydown', handleEscape);
+    }
+
+    renderAttributesForm(metadata, recordData, regularFields, recordReqs, fieldValues) {
+        let html = '';
+
+        // Get current date/datetime for default values (since this is create mode)
+        const now = new Date();
+        const currentDateHtml5 = now.toISOString().split('T')[0]; // YYYY-MM-DD
+        const minutes = Math.round(now.getMinutes() / 5) * 5; // Round to 5 minutes
+        now.setMinutes(minutes);
+        const currentDateTimeHtml5 = now.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
+        const currentDateDisplay = now.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.'); // DD.MM.YYYY
+        const currentDateTimeDisplay = currentDateDisplay + ' ' + now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); // DD.MM.YYYY HH:MM
+
+        // Main value field - render according to base type
+        const typeName = this.getMetadataName(metadata);
+        const mainValue = recordData && recordData.obj ? recordData.obj.val || '' : '';
+        // For GRANT/REPORT_COLUMN fields, use term from API response for dropdown pre-selection (issue #583)
+        const mainTermValue = recordData && recordData.obj && recordData.obj.term !== undefined ? recordData.obj.term : '';
+        const mainFieldType = this.normalizeFormat(metadata.type);
+
+        // Build main field HTML based on its type
+        let mainFieldHtml = '';
+        if (mainFieldType === 'BOOLEAN') {
+            const isChecked = mainValue ? 'checked' : '';
+            mainFieldHtml = `<input type="checkbox" id="field-main" name="main" value="1" ${ isChecked }>`;
+        } else if (mainFieldType === 'DATE') {
+            const dateValueHtml5 = mainValue ? this.formatDateForHtml5(mainValue, false) : currentDateHtml5;
+            const dateValueDisplay = mainValue ? this.formatDateForInput(mainValue, false) : currentDateDisplay;
+            mainFieldHtml = `<input type="date" class="form-control date-picker" id="field-main-picker" required data-target="field-main" value="${ this.escapeHtml(dateValueHtml5) }">`;
+            mainFieldHtml += `<input type="hidden" id="field-main" name="main" value="${ this.escapeHtml(dateValueDisplay) }">`;
+        } else if (mainFieldType === 'DATETIME') {
+            const dateTimeValueHtml5 = mainValue ? this.formatDateForHtml5(mainValue, true) : currentDateTimeHtml5;
+            const dateTimeValueDisplay = mainValue ? this.formatDateForInput(mainValue, true) : currentDateTimeDisplay;
+            mainFieldHtml = `<input type="datetime-local" class="form-control datetime-picker" id="field-main-picker" required data-target="field-main" value="${ this.escapeHtml(dateTimeValueHtml5) }">`;
+            mainFieldHtml += `<input type="hidden" id="field-main" name="main" value="${ this.escapeHtml(dateTimeValueDisplay) }">`;
+        } else if (mainFieldType === 'NUMBER') {
+            mainFieldHtml = `<input type="number" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required>`;
+        } else if (mainFieldType === 'SIGNED') {
+            mainFieldHtml = `<input type="number" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required step="0.01">`;
+        } else if (mainFieldType === 'MEMO') {
+            mainFieldHtml = `<textarea class="form-control memo-field" id="field-main" name="main" rows="4" required>${ this.escapeHtml(mainValue) }</textarea>`;
+        } else if (mainFieldType === 'GRANT') {
+            // GRANT field (dropdown with options from GET grants API - issue #581)
+            mainFieldHtml = `
+                <select class="form-control form-grant-select" id="field-main" name="main" required data-grant-type="grant">
+                    <option value="">Загрузка...</option>
+                </select>
+            `;
+            // Store current value (term) for later selection after options load (issue #583)
+            mainFieldHtml += `<input type="hidden" id="field-main-current-value" value="${ this.escapeHtml(mainTermValue) }">`;
+        } else if (mainFieldType === 'REPORT_COLUMN') {
+            // REPORT_COLUMN field (dropdown with options from GET rep_cols API - issue #581)
+            mainFieldHtml = `
+                <select class="form-control form-grant-select" id="field-main" name="main" required data-grant-type="rep_col">
+                    <option value="">Загрузка...</option>
+                </select>
+            `;
+            // Store current value (term) for later selection after options load (issue #583)
+            mainFieldHtml += `<input type="hidden" id="field-main-current-value" value="${ this.escapeHtml(mainTermValue) }">`;
+        } else {
+            // Default: text input (SHORT, CHARS, etc.)
+            mainFieldHtml = `<input type="text" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required>`;
+        }
+
+        html += `
+            <div class="form-group">
+                <label for="field-main">${typeName} <span class="required">*</span></label>
+                ${ mainFieldHtml }
+            </div>
+        `;
+
+        // Render requisite fields
+        regularFields.forEach(req => {
+            const attrs = this.parseAttrs(req.attrs);
+            const fieldName = attrs.alias || req.val;
+            const reqValue = recordReqs[req.id] ? recordReqs[req.id].value || '' : '';
+            const baseTypeId = recordReqs[req.id] ? recordReqs[req.id].base || req.type : req.type;
+            const baseFormat = this.normalizeFormat(baseTypeId);
+            const isRequired = attrs.required;
+
+            html += `<div class="form-group">`;
+            html += `<label for="field-${req.id}">${fieldName}${isRequired ? ' <span class="required">*</span>' : ''}</label>`;
+
+            // Reference field (searchable dropdown)
+            if (req.ref_id) {
+                const currentValue = reqValue || '';
+                html += `
+                    <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}">
+                        <div class="inline-editor-reference form-ref-editor-box">
+                            <div class="inline-editor-reference-header">
+                                <input type="text"
+                                       class="inline-editor-reference-search form-ref-search"
+                                       id="field-${req.id}-search"
+                                       placeholder="Поиск..."
+                                       autocomplete="off">
+                                <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
+                            </div>
+                            <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${req.id}-dropdown">
+                                <div class="inline-editor-reference-empty">Загрузка...</div>
+                            </div>
+                        </div>
+                        <input type="hidden"
+                               class="form-ref-value"
+                               id="field-${req.id}"
+                               name="t${req.id}"
+                               value="${this.escapeHtml(currentValue)}"
+                               data-ref-id="${req.id}">
+                    </div>
+                `;
+            }
+            // Boolean field
+            else if (baseFormat === 'BOOLEAN') {
+                const isChecked = reqValue ? 'checked' : '';
+                html += `<input type="checkbox" id="field-${req.id}" name="t${req.id}" value="1" ${isChecked}>`;
+            }
+            // Date field
+            else if (baseFormat === 'DATE') {
+                const dateValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, false) : '';
+                const dateValueDisplay = reqValue ? this.formatDateForInput(reqValue, false) : '';
+                html += `<input type="date" class="form-control date-picker" id="field-${req.id}-picker" value="${this.escapeHtml(dateValueHtml5)}" ${isRequired ? 'required' : ''} data-target="field-${req.id}">`;
+                html += `<input type="hidden" id="field-${req.id}" name="t${req.id}" value="${this.escapeHtml(dateValueDisplay)}">`;
+            }
+            // DateTime field
+            else if (baseFormat === 'DATETIME') {
+                const dateTimeValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, true) : '';
+                const dateTimeValueDisplay = reqValue ? this.formatDateForInput(reqValue, true) : '';
+                html += `<input type="datetime-local" class="form-control datetime-picker" id="field-${req.id}-picker" value="${this.escapeHtml(dateTimeValueHtml5)}" ${isRequired ? 'required' : ''} data-target="field-${req.id}">`;
+                html += `<input type="hidden" id="field-${req.id}" name="t${req.id}" value="${this.escapeHtml(dateTimeValueDisplay)}">`;
+            }
+            // MEMO field (multi-line text)
+            else if (baseFormat === 'MEMO') {
+                html += `<textarea class="form-control memo-field" id="field-${req.id}" name="t${req.id}" rows="4" ${isRequired ? 'required' : ''}>${this.escapeHtml(reqValue)}</textarea>`;
+            }
+            // FILE field
+            else if (baseFormat === 'FILE') {
+                html += `
+                    <div class="form-file-upload" data-req-id="${req.id}" data-original-value="">
+                        <input type="file" class="file-input" id="field-${req.id}-file" style="display: none;">
+                        <div class="file-dropzone">
+                            <span class="file-dropzone-text">Перетащите файл сюда или нажмите для выбора</span>
+                            <button type="button" class="file-select-btn">Выбрать файл</button>
+                        </div>
+                        <div class="file-preview" style="display: none;">
+                            <span class="file-name"></span>
+                            <button type="button" class="file-remove-btn" title="Удалить файл"><i class="pi pi-times"></i></button>
+                        </div>
+                        <input type="hidden" id="field-${req.id}" name="t${req.id}" value="" ${isRequired ? 'required' : ''} data-file-deleted="false">
+                    </div>
+                `;
+            }
+            // GRANT field (dropdown with options from GET grants API - issue #577)
+            else if (baseFormat === 'GRANT') {
+                html += `
+                    <select class="form-control form-grant-select" id="field-${req.id}" name="t${req.id}" ${isRequired ? 'required' : ''} data-grant-type="grant">
+                        <option value="">Загрузка...</option>
+                    </select>
+                `;
+                // Store current value for later selection after options load
+                html += `<input type="hidden" id="field-${req.id}-current-value" value="${this.escapeHtml(reqValue)}">`;
+            }
+            // REPORT_COLUMN field (dropdown with options from GET rep_cols API - issue #577)
+            else if (baseFormat === 'REPORT_COLUMN') {
+                html += `
+                    <select class="form-control form-grant-select" id="field-${req.id}" name="t${req.id}" ${isRequired ? 'required' : ''} data-grant-type="rep_col">
+                        <option value="">Загрузка...</option>
+                    </select>
+                `;
+                // Store current value for later selection after options load
+                html += `<input type="hidden" id="field-${req.id}-current-value" value="${this.escapeHtml(reqValue)}">`;
+            }
+            // Regular text field
+            else {
+                html += `<input type="text" class="form-control" id="field-${req.id}" name="t${req.id}" value="${this.escapeHtml(reqValue)}" ${isRequired ? 'required' : ''}>`;
+            }
+
+            html += `</div>`;
+        });
+
+        return html;
+    }
+
+    /**
+     * Fetch GRANT or REPORT_COLUMN options from cache or API (issue #607)
+     * @param {string} grantType - 'grant' or 'rep_col'
+     * @returns {Promise<Array>} - Array of options
+     */
+    async fetchGrantOrReportColumnOptions(grantType) {
+        // Check cache first (issue #607)
+        if (grantType === 'grant' && this.grantOptionsCache !== null) {
+            return this.grantOptionsCache;
+        }
+        if (grantType === 'rep_col' && this.reportColumnOptionsCache !== null) {
+            return this.reportColumnOptionsCache;
+        }
+
+        let apiUrl;
+
+        if (grantType === 'grant') {
+            apiUrl = `${ this.apiBase }/grants`;
+        } else if (grantType === 'rep_col') {
+            apiUrl = `${ this.apiBase }/rep_cols`;
+        } else {
+            return [];
+        }
+
+        const response = await fetch(apiUrl);
+        if (!response.ok) {
+            throw new Error(`HTTP ${ response.status }`);
+        }
+        const options = await response.json();
+
+        // Store in cache (issue #607)
+        if (grantType === 'grant') {
+            this.grantOptionsCache = options;
+        } else if (grantType === 'rep_col') {
+            this.reportColumnOptionsCache = options;
+        }
+
+        return options;
+    }
+
+    /**
+     * Load GRANT and REPORT_COLUMN dropdown options from API (issue #577)
+     * Uses cache to avoid re-fetching on each call (issue #607)
+     * GRANT fields use GET /grants endpoint
+     * REPORT_COLUMN fields use GET /rep_cols endpoint
+     */
+    async loadGrantAndReportColumnOptions(modal) {
+        const grantSelects = modal.querySelectorAll('.form-grant-select');
+
+        for (const select of grantSelects) {
+            const grantType = select.dataset.grantType;
+            const fieldId = select.id;
+            const currentValueInput = modal.querySelector(`#${ fieldId }-current-value`);
+            const currentValue = currentValueInput ? currentValueInput.value : '';
+
+            try {
+                // Use cached options or fetch from API (issue #607)
+                const options = await this.fetchGrantOrReportColumnOptions(grantType);
+
+                // Clear loading option and populate with fetched options
+                select.innerHTML = '<option value="">-- Выберите --</option>';
+
+                if (Array.isArray(options)) {
+                    options.forEach(opt => {
+                        // Options may be in format: { id: "...", val: "..." } or { id: "...", value: "..." }
+                        // Use nullish check to properly handle "0" as a valid ID (issue #583)
+                        const optId = (opt.id !== undefined && opt.id !== null) ? opt.id : ((opt.i !== undefined && opt.i !== null) ? opt.i : '');
+                        const optVal = opt.val || opt.value || opt.name || opt.v || '';
+                        const option = document.createElement('option');
+                        option.value = optId;
+                        option.textContent = optVal;
+                        if (String(optId) === String(currentValue)) {
+                            option.selected = true;
+                        }
+                        select.appendChild(option);
+                    });
+                }
+
+                // Remove the hidden current value input after loading
+                if (currentValueInput) {
+                    currentValueInput.remove();
+                }
+
+            } catch (error) {
+                console.error(`Error loading ${ grantType } options:`, error);
+                select.innerHTML = '<option value="">Ошибка загрузки</option>';
+            }
+        }
+    }
+
+    async loadReferenceOptions(reqs, modal, fieldValues) {
+        if (!reqs) return;
+
+        for (const req of reqs) {
+            if (!req.ref_id) continue;
+
+            const dropdown = modal.querySelector(`#field-${req.id}-dropdown`);
+            const hiddenInput = modal.querySelector(`#field-${req.id}`);
+            const searchInput = modal.querySelector(`#field-${req.id}-search`);
+
+            if (!dropdown || !hiddenInput) continue;
+
+            try {
+                const url = `${this.apiBase}/_ref_reqs/${req.id}?JSON&LIMIT=50`;
+                const response = await fetch(url);
+                const data = await response.json();
+
+                // Parse options - data is an object {id: text, ...}
+                let optionsHtml = '';
+                const entries = Object.entries(data);
+
+                if (entries.length === 0) {
+                    optionsHtml = '<div class="inline-editor-reference-empty">Нет данных</div>';
+                } else {
+                    entries.forEach(([id, text]) => {
+                        optionsHtml += `<div class="inline-editor-reference-option" data-value="${this.escapeHtml(id)}">${this.escapeHtml(text)}</div>`;
+                    });
+                }
+
+                dropdown.innerHTML = optionsHtml;
+
+                // Check if this field has a pre-filled value from fieldValues
+                const fieldKey = `t${req.id}`;
+                const prefilledValue = fieldValues[fieldKey];
+
+                if (prefilledValue !== undefined) {
+                    hiddenInput.value = prefilledValue;
+                    // Find and display the text for this value
+                    const text = data[prefilledValue];
+                    if (text && searchInput) {
+                        searchInput.value = text;
+                    }
+                }
+
+                // Attach click handlers for options
+                dropdown.querySelectorAll('.inline-editor-reference-option').forEach(option => {
+                    option.addEventListener('click', () => {
+                        const value = option.dataset.value;
+                        const text = option.textContent;
+                        hiddenInput.value = value;
+                        if (searchInput) {
+                            searchInput.value = text;
+                        }
+                        dropdown.style.display = 'none';
+                    });
+                });
+
+                // Attach search handler
+                if (searchInput) {
+                    searchInput.addEventListener('focus', () => {
+                        dropdown.style.display = 'block';
+                    });
+
+                    searchInput.addEventListener('input', () => {
+                        const query = searchInput.value.toLowerCase();
+                        dropdown.querySelectorAll('.inline-editor-reference-option').forEach(option => {
+                            const text = option.textContent.toLowerCase();
+                            option.style.display = text.includes(query) ? '' : 'none';
+                        });
+                    });
+                }
+
+                // Attach clear button handler
+                const clearBtn = modal.querySelector(`#field-${req.id}-search`)?.closest('.inline-editor-reference-header')?.querySelector('.form-ref-clear');
+                if (clearBtn) {
+                    clearBtn.addEventListener('click', () => {
+                        hiddenInput.value = '';
+                        if (searchInput) {
+                            searchInput.value = '';
+                        }
+                    });
+                }
+
+            } catch (error) {
+                console.error(`Error loading reference options for field ${req.id}:`, error);
+                dropdown.innerHTML = '<div class="inline-editor-reference-empty">Ошибка загрузки</div>';
+            }
+        }
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.form-reference-editor')) {
+                modal.querySelectorAll('.form-ref-dropdown').forEach(dropdown => {
+                    dropdown.style.display = 'none';
+                });
+            }
+        });
+    }
+
+    attachDatePickerHandlers(modal) {
+        // Handle date pickers
+        modal.querySelectorAll('.date-picker').forEach(picker => {
+            picker.addEventListener('change', () => {
+                const targetId = picker.dataset.target;
+                const hiddenInput = modal.querySelector(`#${targetId}`);
+                if (hiddenInput && picker.value) {
+                    // Convert YYYY-MM-DD to DD.MM.YYYY
+                    const [year, month, day] = picker.value.split('-');
+                    hiddenInput.value = `${day}.${month}.${year}`;
+                } else if (hiddenInput) {
+                    hiddenInput.value = '';
+                }
+            });
+        });
+
+        // Handle datetime pickers
+        modal.querySelectorAll('.datetime-picker').forEach(picker => {
+            picker.addEventListener('change', () => {
+                const targetId = picker.dataset.target;
+                const hiddenInput = modal.querySelector(`#${targetId}`);
+                if (hiddenInput && picker.value) {
+                    // Convert YYYY-MM-DDTHH:MM to DD.MM.YYYY HH:MM
+                    const [datePart, timePart] = picker.value.split('T');
+                    const [year, month, day] = datePart.split('-');
+                    hiddenInput.value = `${day}.${month}.${year} ${timePart}`;
+                } else if (hiddenInput) {
+                    hiddenInput.value = '';
+                }
+            });
+        });
+    }
+
+    attachFormFileUploadHandlers(modal) {
+        modal.querySelectorAll('.form-file-upload').forEach(container => {
+            const fileInput = container.querySelector('.file-input');
+            const dropzone = container.querySelector('.file-dropzone');
+            const preview = container.querySelector('.file-preview');
+            const fileName = container.querySelector('.file-name');
+            const removeBtn = container.querySelector('.file-remove-btn');
+            const selectBtn = container.querySelector('.file-select-btn');
+            const hiddenInput = container.querySelector('input[type="hidden"]');
+
+            if (selectBtn) {
+                selectBtn.addEventListener('click', () => fileInput.click());
+            }
+
+            if (dropzone) {
+                dropzone.addEventListener('click', () => fileInput.click());
+
+                dropzone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    dropzone.classList.add('dragover');
+                });
+
+                dropzone.addEventListener('dragleave', () => {
+                    dropzone.classList.remove('dragover');
+                });
+
+                dropzone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    dropzone.classList.remove('dragover');
+                    if (e.dataTransfer.files.length > 0) {
+                        fileInput.files = e.dataTransfer.files;
+                        fileInput.dispatchEvent(new Event('change'));
+                    }
+                });
+            }
+
+            if (fileInput) {
+                fileInput.addEventListener('change', () => {
+                    if (fileInput.files.length > 0) {
+                        const file = fileInput.files[0];
+                        container._fileToUpload = file;
+                        hiddenInput.dataset.hasNewFile = 'true';
+                        fileName.textContent = file.name;
+                        dropzone.style.display = 'none';
+                        preview.style.display = 'flex';
+                    }
+                });
+            }
+
+            if (removeBtn) {
+                removeBtn.addEventListener('click', () => {
+                    container._fileToUpload = null;
+                    hiddenInput.dataset.hasNewFile = 'false';
+                    hiddenInput.value = '';
+                    fileInput.value = '';
+                    fileName.textContent = '';
+                    dropzone.style.display = '';
+                    preview.style.display = 'none';
+                });
+            }
+        });
+    }
+
+    async saveRecord(modal, metadata) {
+        const form = modal.querySelector('#edit-form');
+
+        if (!form.checkValidity()) {
+            form.reportValidity();
+            return;
+        }
+
+        try {
+            // Check for file uploads
+            const fileUploads = modal.querySelectorAll('.form-file-upload');
+            let hasNewFiles = false;
+
+            for (const uploadContainer of fileUploads) {
+                if (uploadContainer._fileToUpload) {
+                    hasNewFiles = true;
+                    break;
+                }
+            }
+
+            // Prepare request body
+            let requestBody;
+            let headers = {};
+
+            const formData = new FormData(form);
+
+            if (hasNewFiles) {
+                requestBody = new FormData();
+
+                // Add XSRF token
+                if (typeof xsrf !== 'undefined') {
+                    requestBody.append('_xsrf', xsrf);
+                }
+
+                // Get main value
+                const mainValue = formData.get('main');
+                if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
+                    requestBody.append(`t${this.tableTypeId}`, mainValue);
+                }
+
+                // Add all form fields
+                for (const [key, value] of formData.entries()) {
+                    if (key === 'main') continue;
+
+                    // Check if this is a file field
+                    const fieldMatch = key.match(/^t(\d+)$/);
+                    if (fieldMatch) {
+                        const reqId = fieldMatch[1];
+                        const uploadContainer = modal.querySelector(`.form-file-upload[data-req-id="${reqId}"]`);
+
+                        if (uploadContainer && uploadContainer._fileToUpload) {
+                            requestBody.append(key, uploadContainer._fileToUpload);
+                            continue;
+                        }
+                    }
+
+                    if (value !== '' && value !== null && value !== undefined) {
+                        requestBody.append(key, value);
+                    }
+                }
+            } else {
+                const params = new URLSearchParams();
+
+                // Add XSRF token
+                if (typeof xsrf !== 'undefined') {
+                    params.append('_xsrf', xsrf);
+                }
+
+                // Get main value
+                const mainValue = formData.get('main');
+
+                // Add all form fields
+                for (const [key, value] of formData.entries()) {
+                    if (key === 'main') continue;
+                    if (value !== '' && value !== null && value !== undefined) {
+                        params.append(key, value);
+                    }
+                }
+
+                if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
+                    params.append(`t${this.tableTypeId}`, mainValue);
+                }
+
+                requestBody = params.toString();
+                headers['Content-Type'] = 'application/x-www-form-urlencoded';
+            }
+
+            // Create the record
+            const url = `${this.apiBase}/_m_new/${this.tableTypeId}?JSON&up=${this.parentId || 1}`;
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: headers,
+                body: requestBody
+            });
+
+            const text = await response.text();
+            let result;
+
+            try {
+                result = JSON.parse(text);
+            } catch (e) {
+                throw new Error(`Invalid response: ${text}`);
+            }
+
+            if (result.error) {
+                throw new Error(result.error);
+            }
+
+            // Success - close modal
+            this.showToast('Запись создана', 'success');
+
+            // Close modal
+            modal._overlayElement?.remove();
+            modal.remove();
+            window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+
+            // Reload any IntegramTable instances on the page
+            if (typeof reloadAllIntegramTables === 'function') {
+                reloadAllIntegramTables();
+            }
+
+        } catch (error) {
+            console.error('Error saving record:', error);
+            this.showToast(`Ошибка: ${error.message}`, 'error');
+        }
+    }
+}
+
+// Make openCreateRecordForm globally accessible
+if (typeof window !== 'undefined') {
+    window.openCreateRecordForm = openCreateRecordForm;
+    window.IntegramCreateFormHelper = IntegramCreateFormHelper;
 }
 
 // Auto-initialize tables from data attributes

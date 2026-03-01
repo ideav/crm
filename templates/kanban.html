@@ -292,10 +292,12 @@
     }
 
     .kanban-card-date {
+        position: absolute;
+        top: 6px;
+        right: 6px;
         font-size: 0.75rem;
         color: var(--text-secondary);
         text-align: right;
-        margin-top: 4px;
     }
 
     .kanban-card-tasks-button {
@@ -333,7 +335,13 @@
     .kanban-card-tasks-button.no-tasks {
         background-color: rgba(0, 0, 0, 0.12);
         color: rgba(0, 0, 0, 0.38);
-        cursor: default;
+        cursor: pointer;
+    }
+
+    .kanban-card-tasks-button.no-tasks:hover {
+        background-color: rgba(0, 0, 0, 0.18);
+        color: rgba(0, 0, 0, 0.5);
+        transform: translateY(-1px);
     }
 
     .kanban-card-deals-button {
@@ -372,7 +380,13 @@
     .kanban-card-deals-button.no-deals {
         background-color: rgba(0, 0, 0, 0.12);
         color: rgba(0, 0, 0, 0.38);
-        cursor: default;
+        cursor: pointer;
+    }
+
+    .kanban-card-deals-button.no-deals:hover {
+        background-color: rgba(0, 0, 0, 0.18);
+        color: rgba(0, 0, 0, 0.5);
+        transform: translateY(-1px);
     }
 
     .kanban-card-tasks-row {
@@ -1035,10 +1049,26 @@
 </div>
 
 <!-- Include IntegramTable component -->
-<link rel="stylesheet" href="/css/integram-table.css?1">
-<script src="/js/integram-table.js?2"></script>
+<link rel="stylesheet" href="/css/integram-table.css">
+<script src="/js/integram-table.js"></script>
 
 <script>
+// Overrides
+var integramTableOverrides = {
+  'ddls': {
+    638: 'report/5230?JSON_KV',
+    4874: 'report/3796?JSON_KV'
+  },
+  fieldHooks: [
+    {
+      watch: 443,                       // data-ref-id of the field to watch
+      target: 4874,                     // data-ref-id of the field whose options change
+      onEmpty: { FR_partners: '!%' },    // extra query params when watched field is empty
+      onFilled: { FR_partners: '%' }   // extra query params when watched field has a value
+    }
+  ]
+};
+
 // Kanban functionality
 var kanbanData = [];
 var statusesData = [];
@@ -1442,13 +1472,13 @@ function renderCard(task){
         html += '<div class="kanban-card-amount">' + task['Сумма'] + ' ₽</div>';
     }
 
-    // Add contact icons at bottom right (vertically stacked)
-    html += '<div class="kanban-card-contacts">';
-
-    // Date above contact icons (without "Дата:" label)
+    // Date in top-right corner of the card
     if(task['Дата']){
         html += '<div class="kanban-card-date">' + task['Дата'] + '</div>';
     }
+
+    // Add contact icons at bottom right (vertically stacked)
+    html += '<div class="kanban-card-contacts">';
 
     // Phone icon (on top)
     var hasPhone = task['Телефон'] && task['Телефон'].trim() !== '';
@@ -1475,11 +1505,12 @@ function renderCard(task){
     // Use fixed FR parameter
     var tasksUrl = '';
     if(task['ЛидID']){
-        tasksUrl = '/' + db + '/object/3596?FR_4547=@' + task['ЛидID'];
+        tasksUrl = '/' + db + '/table/3596?FR_4547=@' + task['ЛидID'];
     }
 
     html += '<div class="kanban-card-tasks-row">';
-    if(tasksCount > 0 && tasksUrl){
+    // Always render clickable link - leads to tasks page (shows all tasks including closed when count is 0)
+    if(tasksUrl){
         html += '<a href="' + tasksUrl + '" target="tasks" class="kanban-card-tasks-button ' + buttonClass + '" data-lead-id="' + task['ЛидID'] + '" onclick="event.stopPropagation();">';
         html += 'Задачи:&nbsp;<span class="tasks-count">' + tasksCount + '</span>';
         html += '</a>';
@@ -1498,7 +1529,8 @@ function renderCard(task){
         dealsUrl = '/' + db + '/smartq/6271?FR_КлиентID=' + task['ЛидID'];
     }
 
-    if(dealsCount > 0 && dealsUrl){
+    // Always render clickable link - leads to deals page (shows all deals including completed/cancelled when count is 0)
+    if(dealsUrl){
         html += '<a href="' + dealsUrl + '" target="deals" class="kanban-card-deals-button ' + dealsButtonClass + '" data-lead-id="' + task['ЛидID'] + '" onclick="event.stopPropagation();">';
         html += 'Сделки:&nbsp;<span class="deals-count">' + dealsCount + '</span>';
         html += '</a>';
@@ -2075,8 +2107,9 @@ function submitAddRecord(){
                 console.log('Record created:', response);
 
                 // Check for warning in response - show it and stay in edit mode
+                // Pass response.obj to show a link to the found record if available
                 if(response.warning && response.warning !== ''){
-                    alert('Предупреждение: ' + response.warning);
+                    showKanbanWarningModal(response.warning, response.obj || null);
                     // Don't close modal, stay in edit mode
                     return;
                 }
@@ -2101,6 +2134,62 @@ function submitAddRecord(){
         alert('Ошибка сети при создании записи');
     };
     xhr.send(postData);
+}
+
+// Show warning modal with optional link to found record
+function showKanbanWarningModal(message, objId){
+    var modalId = 'kanban-warning-modal-' + Date.now();
+
+    // Build link HTML if objId is provided
+    var linkHtml = '';
+    if(objId){
+        var editUrl = '/' + db + '/edit_obj/' + objId;
+        linkHtml = '<a href="' + editUrl + '" target="_blank" class="integram-modal-link" style="display: block; margin-top: 12px; color: #1976d2; text-decoration: none; font-weight: 500;">Открыть найденную запись ↗</a>';
+    }
+
+    var modalHtml = '' +
+        '<div class="integram-modal-overlay" id="' + modalId + '">' +
+            '<div class="integram-modal" style="max-width: 500px;">' +
+                '<div class="integram-modal-header">' +
+                    '<h5>Предупреждение</h5>' +
+                '</div>' +
+                '<div class="integram-modal-body">' +
+                    '<div class="alert alert-warning" style="margin: 0;">' +
+                        escapeHtmlForModal(message) +
+                    '</div>' +
+                    linkHtml +
+                '</div>' +
+                '<div class="integram-modal-footer" style="padding: 15px; text-align: right;">' +
+                    '<button type="button" class="btn btn-primary" data-close-warning-modal="true">OK</button>' +
+                '</div>' +
+            '</div>' +
+        '</div>';
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    var overlay = document.getElementById(modalId);
+    var closeBtn = overlay.querySelector('[data-close-warning-modal="true"]');
+
+    closeBtn.addEventListener('click', function(){
+        overlay.remove();
+    });
+
+    // Also close on click outside the modal
+    overlay.addEventListener('click', function(e){
+        if(e.target === overlay){
+            overlay.remove();
+        }
+    });
+}
+
+// Helper function to escape HTML for warning modal
+function escapeHtmlForModal(text){
+    if(text === null || text === undefined) return '';
+    return String(text).replace(/&/g, '&amp;')
+                       .replace(/</g, '&lt;')
+                       .replace(/>/g, '&gt;')
+                       .replace(/"/g, '&quot;')
+                       .replace(/'/g, '&#039;');
 }
 
 // Close modal when clicking outside
@@ -2355,7 +2444,7 @@ function updateTaskCount(leadId){
                 // Convert span to anchor with link
                 var card = taskButton.closest('.kanban-card');
                 var cardLeadId = card.data('lead-id');
-                var tasksUrl = '/' + db + '/object/3596?FR_4547=@' + cardLeadId;
+                var tasksUrl = '/' + db + '/table/3596?FR_4547=@' + cardLeadId;
 
                 var newButton = $('<a href="' + tasksUrl + '" target="tasks" class="kanban-card-tasks-button has-tasks" data-lead-id="' + leadId + '" onclick="event.stopPropagation();">Задачи: <span class="tasks-count">' + newCount + '</span></a>');
                 taskButton.replaceWith(newButton);

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Share Link Feature - Issue #510</title>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .test-result { margin: 10px 0; padding: 10px; border-radius: 4px; }
+        .pass { background-color: #d4edda; }
+        .fail { background-color: #f8d7da; }
+        h2 { margin-top: 30px; }
+        pre { background: #f5f5f5; padding: 10px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>Test Share Link Feature - Issue #510</h1>
+
+    <h2>Test 1: hasActiveFiltersOrGroups()</h2>
+    <div id="test1"></div>
+
+    <h2>Test 2: getConfigUrl()</h2>
+    <div id="test2"></div>
+
+    <h2>Test 3: loadConfigFromUrl()</h2>
+    <div id="test3"></div>
+
+    <h2>Test 4: URL encoding/decoding round-trip</h2>
+    <div id="test4"></div>
+
+    <script>
+        // Mock IntegramTable class for testing
+        class MockIntegramTable {
+            constructor() {
+                this.filters = {};
+                this.groupingEnabled = false;
+                this.groupingColumns = [];
+                this.sortColumn = null;
+                this.sortDirection = null;
+                this.filtersEnabled = false;
+            }
+
+            hasActiveFilters() {
+                return Object.values(this.filters).some(filter => {
+                    if (!filter) return false;
+                    if (filter.type === '%' || filter.type === '!%') return true;
+                    return filter.value && filter.value.trim() !== '';
+                });
+            }
+
+            hasActiveFiltersOrGroups() {
+                return this.hasActiveFilters() || (this.groupingEnabled && this.groupingColumns.length > 0);
+            }
+
+            getConfigUrl() {
+                const url = new URL(window.location.href);
+                url.searchParams.delete('_itc');
+
+                const config = {};
+
+                if (this.hasActiveFilters()) {
+                    config.f = {};
+                    Object.keys(this.filters).forEach(colId => {
+                        const filter = this.filters[colId];
+                        if (filter && (filter.value || filter.type === '%' || filter.type === '!%')) {
+                            config.f[colId] = {
+                                t: filter.type,
+                                v: filter.value || ''
+                            };
+                        }
+                    });
+                }
+
+                if (this.groupingEnabled && this.groupingColumns.length > 0) {
+                    config.g = this.groupingColumns;
+                }
+
+                if (this.sortColumn !== null && this.sortDirection !== null) {
+                    config.s = {
+                        c: this.sortColumn,
+                        d: this.sortDirection
+                    };
+                }
+
+                const configJson = JSON.stringify(config);
+                const configEncoded = btoa(encodeURIComponent(configJson));
+                url.searchParams.set('_itc', configEncoded);
+
+                return url.toString();
+            }
+
+            loadConfigFromUrl(urlString) {
+                const urlParams = new URLSearchParams(new URL(urlString).search);
+                const configEncoded = urlParams.get('_itc');
+
+                if (!configEncoded) return;
+
+                try {
+                    const configJson = decodeURIComponent(atob(configEncoded));
+                    const config = JSON.parse(configJson);
+
+                    if (config.f && typeof config.f === 'object') {
+                        this.filters = {};
+                        Object.keys(config.f).forEach(colId => {
+                            const filterConfig = config.f[colId];
+                            if (filterConfig) {
+                                this.filters[colId] = {
+                                    type: filterConfig.t || '^',
+                                    value: filterConfig.v || ''
+                                };
+                            }
+                        });
+                        if (Object.keys(this.filters).length > 0) {
+                            this.filtersEnabled = true;
+                        }
+                    }
+
+                    if (config.g && Array.isArray(config.g) && config.g.length > 0) {
+                        this.groupingEnabled = true;
+                        this.groupingColumns = config.g;
+                    }
+
+                    if (config.s && config.s.c) {
+                        this.sortColumn = config.s.c;
+                        this.sortDirection = config.s.d || 'asc';
+                    }
+                } catch (e) {
+                    console.error('Error loading table configuration from URL:', e);
+                }
+            }
+        }
+
+        function result(elementId, pass, message) {
+            const el = document.getElementById(elementId);
+            const div = document.createElement('div');
+            div.className = 'test-result ' + (pass ? 'pass' : 'fail');
+            div.textContent = (pass ? 'PASS: ' : 'FAIL: ') + message;
+            el.appendChild(div);
+        }
+
+        // Test 1: hasActiveFiltersOrGroups
+        (function() {
+            const table1 = new MockIntegramTable();
+            result('test1', !table1.hasActiveFiltersOrGroups(), 'No filters or groups - should return false');
+
+            const table2 = new MockIntegramTable();
+            table2.filters['col1'] = { type: '^', value: 'test' };
+            result('test1', table2.hasActiveFiltersOrGroups(), 'With filter - should return true');
+
+            const table3 = new MockIntegramTable();
+            table3.groupingEnabled = true;
+            table3.groupingColumns = ['col1'];
+            result('test1', table3.hasActiveFiltersOrGroups(), 'With grouping - should return true');
+
+            const table4 = new MockIntegramTable();
+            table4.filters['col1'] = { type: '%', value: '' };
+            result('test1', table4.hasActiveFiltersOrGroups(), 'With "not empty" filter - should return true');
+        })();
+
+        // Test 2: getConfigUrl
+        (function() {
+            const table = new MockIntegramTable();
+            table.filters['1'] = { type: '=', value: 'test value' };
+            table.groupingColumns = ['2', '3'];
+            table.groupingEnabled = true;
+            table.sortColumn = '4';
+            table.sortDirection = 'desc';
+
+            const url = table.getConfigUrl();
+            result('test2', url.includes('_itc='), 'URL should contain _itc parameter');
+
+            const pre = document.createElement('pre');
+            pre.textContent = 'Generated URL: ' + url;
+            document.getElementById('test2').appendChild(pre);
+        })();
+
+        // Test 3: loadConfigFromUrl
+        (function() {
+            const table1 = new MockIntegramTable();
+            table1.filters['1'] = { type: '~', value: 'search' };
+            table1.groupingColumns = ['2'];
+            table1.groupingEnabled = true;
+            table1.sortColumn = '3';
+            table1.sortDirection = 'asc';
+
+            const url = table1.getConfigUrl();
+
+            const table2 = new MockIntegramTable();
+            table2.loadConfigFromUrl(url);
+
+            result('test3', table2.filters['1']?.type === '~', 'Filter type restored correctly');
+            result('test3', table2.filters['1']?.value === 'search', 'Filter value restored correctly');
+            result('test3', table2.groupingEnabled === true, 'Grouping enabled restored');
+            result('test3', JSON.stringify(table2.groupingColumns) === '["2"]', 'Grouping columns restored');
+            result('test3', table2.sortColumn === '3', 'Sort column restored');
+            result('test3', table2.sortDirection === 'asc', 'Sort direction restored');
+        })();
+
+        // Test 4: Round-trip encoding/decoding
+        (function() {
+            const specialChars = 'Тест: спец символы & "quotes" <tags> 日本語';
+            const table1 = new MockIntegramTable();
+            table1.filters['col'] = { type: '=', value: specialChars };
+
+            const url = table1.getConfigUrl();
+
+            const table2 = new MockIntegramTable();
+            table2.loadConfigFromUrl(url);
+
+            const restored = table2.filters['col']?.value;
+            result('test4', restored === specialChars,
+                   'Special characters round-trip: "' + specialChars + '" -> "' + restored + '"');
+        })();
+    </script>
+</body>
+</html>

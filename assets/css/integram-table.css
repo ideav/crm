@@ -78,6 +78,18 @@
     letter-spacing: 0.15px;
 }
 
+/* Parent info links in title (issue #571) */
+.integram-title-link {
+    color: var(--md-primary);
+    text-decoration: none;
+    transition: var(--md-transition);
+}
+
+.integram-title-link:hover {
+    text-decoration: underline;
+    color: var(--md-primary-dark, #1565c0);
+}
+
 .integram-table-controls {
     display: flex;
     align-items: center;
@@ -113,14 +125,19 @@
     overflow: overlay;
 }
 
+.btn-outline-secondary:hover {
+    background-color: #eaeaea !important;
+    color: #6c757d !important;
+}
+
 .integram-table th {
-    background: var(--md-surface);
-    padding: 16px;
+    background-color: #f5f5f5;
+    padding: 10px;
     text-align: left;
     font-weight: 500;
     font-size: 12px;
-    letter-spacing: 0.4px;
-    text-transform: uppercase;
+    /* letter-spacing: 0.4px;
+    text-transform: uppercase; */
     color: var(--md-text-secondary);
     border-bottom: 1px solid var(--md-divider);
     border-left: none;
@@ -134,7 +151,7 @@
 
 .integram-table th:first-child {
     border-left: none;
-    padding-left: 6px;
+    padding-left: 10px;
 }
 
 .integram-table th:last-child {
@@ -227,18 +244,18 @@
 }
 
 .integram-table td {
-    padding: 16px;
+    padding: 10px;
     border-bottom: 1px solid var(--md-divider);
     border-left: none;
     border-right: 1px solid rgba(0, 0, 0, 0.06);
     color: var(--md-text-primary);
-    font-size: 14px;
+    font-size: 13px;
     letter-spacing: 0.25px;
 }
 
 .integram-table td:first-child {
     border-left: none;
-    padding-left: 6px;
+    padding-left: 10px;
 }
 
 .integram-table td:last-child {
@@ -558,6 +575,18 @@
     cursor: pointer;
 }
 
+/* Column settings modal buttons - prevent Bootstrap 5.3 from stretching buttons (issue #569) */
+.column-settings-modal .btn {
+    flex: 0 0 auto;
+    width: auto;
+}
+
+/* Add column modal buttons - prevent Bootstrap 5.3 from stretching buttons (issue #569) */
+.add-column-modal .btn {
+    flex: 0 0 auto;
+    width: auto;
+}
+
 .table-settings-item {
     padding: 12px 12px 12px 8px;
     border-bottom: 1px solid #f0f0f0;
@@ -726,6 +755,19 @@
     letter-spacing: 0.15px;
 }
 
+.edit-form-header-titles {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.edit-form-parent-subtitle {
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--md-text-secondary);
+    letter-spacing: 0.1px;
+}
+
 .edit-form-close {
     background: none;
     border: none;
@@ -746,6 +788,46 @@
 .edit-form-close:hover {
     color: var(--md-text-primary);
     background: var(--md-hover);
+}
+
+/* Edit form header title row with record ID and table link (issue #563) */
+.edit-form-header-title-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.edit-form-record-id {
+    font-size: 14px;
+    font-weight: 400;
+    color: #999;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.edit-form-record-id:hover {
+    color: #666;
+}
+
+.edit-form-table-link {
+    color: #999;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border-radius: 4px;
+    transition: color 0.2s ease, background-color 0.2s ease;
+    text-decoration: none;
+}
+
+.edit-form-table-link:hover {
+    color: #666;
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+.edit-form-table-link svg {
+    display: block;
 }
 
 .edit-form-body {
@@ -854,6 +936,11 @@
     cursor: pointer;
     transition: var(--md-transition);
     font-family: 'Roboto', sans-serif;
+    min-height: 40px;
+    line-height: 1.4;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .edit-form-footer .btn-primary {
@@ -1231,6 +1318,11 @@
     cursor: pointer;
     transition: var(--md-transition);
     font-family: 'Roboto', sans-serif;
+    min-height: 40px;
+    line-height: 1.4;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .form-field-settings-footer .btn-primary {
@@ -1370,12 +1462,41 @@
     padding: 0;
     display: flex;
     justify-content: flex-start;
+    align-items: center;
     gap: 8px;
 }
 
+/* Subordinate table add button - prevent Bootstrap 5.3 from stretching (issue #579) */
 .subordinate-add-btn {
+    flex: 0 0 auto;
+    width: auto;
     font-size: 13px;
     padding: 6px 16px;
+    height: 32px;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+
+/* Subordinate table link icon - positioned on the right side (issue #589) */
+.subordinate-table-link {
+    margin-left: auto;
+    color: #999;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border-radius: 4px;
+    transition: color 0.2s ease, background-color 0.2s ease;
+    text-decoration: none;
+}
+
+.subordinate-table-link:hover {
+    color: #666;
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+.subordinate-table-link svg {
+    display: block;
 }
 
 .subordinate-table-wrapper {
@@ -1507,6 +1628,7 @@
     align-items: center;
     flex: 1;
     max-width: 250px;
+    height: 32px;
 }
 
 .subordinate-search-input {
@@ -1519,6 +1641,8 @@
     color: var(--md-text-primary);
     background: var(--md-surface);
     transition: var(--md-transition);
+    height: 32px;
+    box-sizing: border-box;
 }
 
 .subordinate-search-input:focus {
@@ -1647,6 +1771,23 @@ td:has(.inline-editor) {
 /* Ensure proper sizing in compact mode */
 .integram-table.compact td:has(.inline-editor) {
     padding: 2px !important;
+}
+
+/* Inline select editor for GRANT and REPORT_COLUMN types (issue #601) */
+.inline-editor-select {
+    min-height: 32px;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M2 4l4 4 4-4z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 30px;
+}
+
+.inline-editor-select:focus {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%231976d2' d='M2 4l4 4 4-4z'/%3E%3C/svg%3E");
 }
 
 /* ========================================
@@ -2117,4 +2258,304 @@ tr.row-selected {
     text-align: center;
     font-size: 14px;
     color: var(--md-text-secondary);
+}
+
+/* ========================================
+   Warning Modal Styles (integram-modal-overlay)
+   ======================================== */
+
+.integram-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10000;
+}
+
+.integram-modal {
+    background: var(--md-surface, white);
+    border-radius: 4px;
+    box-shadow: var(--md-elevation-4, 0 14px 28px rgba(0, 0, 0, 0.25), 0 10px 10px rgba(0, 0, 0, 0.22));
+    max-width: 500px;
+    width: 90%;
+    font-family: 'Roboto', sans-serif;
+}
+
+.integram-modal-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--md-divider, #e5e5e5);
+}
+
+.integram-modal-header h5 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 500;
+    color: var(--md-text-primary, rgba(0, 0, 0, 0.87));
+    letter-spacing: 0.15px;
+}
+
+.integram-modal-body {
+    padding: 24px;
+}
+
+.integram-modal-footer {
+    padding: 16px 24px;
+    text-align: right;
+    border-top: 1px solid var(--md-divider, #e5e5e5);
+}
+
+/* Warning modal link to existing record */
+.integram-modal-link {
+    display: block;
+    margin-top: 12px;
+    color: var(--md-primary, #1976d2);
+    text-decoration: none;
+    font-weight: 500;
+    transition: var(--md-transition, all 0.3s cubic-bezier(0.4, 0, 0.2, 1));
+}
+
+.integram-modal-link:hover {
+    color: var(--md-primary-dark, #1565c0);
+    text-decoration: underline;
+}
+
+/* ========================================
+   Grouping Mode Styles (issue #502)
+   ======================================== */
+
+/* Grouping settings modal */
+.grouping-settings-modal {
+    max-width: 500px;
+}
+
+.grouping-columns-list {
+    max-height: 350px;
+    overflow-y: auto;
+}
+
+.grouping-column-item {
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.grouping-column-item:hover {
+    background-color: var(--md-hover, rgba(0, 0, 0, 0.04));
+}
+
+/* Order badge in grouping settings */
+.grouping-order-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    margin-right: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: white;
+    background-color: var(--md-primary, #1976d2);
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+/* Group header styles */
+.integram-table th.group-header {
+    background-color: rgba(25, 118, 210, 0.08);
+    border-bottom-color: var(--md-primary, #1976d2);
+}
+
+/* Grouping header badge (order indicator in table header) */
+.grouping-header-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    margin-right: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    color: white;
+    background-color: var(--md-primary, #1976d2);
+    border-radius: 50%;
+    vertical-align: middle;
+}
+
+/* Group cell styles (merged cells on the left)
+ * Issue #531: Group cells use BLUE borders to visually distinguish
+ * grouping columns from regular data columns (which have gray borders).
+ * This visual distinction helps users understand which columns are
+ * being used for data grouping at a glance.
+ */
+.group-cell {
+    background-color: rgba(25, 118, 210, 0.04);
+    font-weight: 500;
+    color: var(--md-text-primary, rgba(0, 0, 0, 0.87));
+    vertical-align: top;
+    border-right: 2px solid var(--md-primary, #1976d2);  /* Blue right border for grouping columns */
+    padding: 12px 16px;
+    position: relative;
+}
+
+/* First group cell has thicker left border
+ * This creates a visual "bracket" effect showing the grouping hierarchy
+ */
+.group-cell:first-child,
+.integram-table td.group-cell:first-of-type {
+    border-left: 3px solid var(--md-primary, #1976d2);  /* Blue left border for grouping columns */
+}
+
+/* Nested grouping levels get slightly different shading */
+.group-cell[data-group-level="1"] {
+    background-color: rgba(25, 118, 210, 0.06);
+}
+
+.group-cell[data-group-level="2"] {
+    background-color: rgba(25, 118, 210, 0.08);
+}
+
+.group-cell[data-group-level="3"] {
+    background-color: rgba(25, 118, 210, 0.10);
+}
+
+/* Ensure proper alignment for grouped rows */
+.integram-table tbody tr:has(.group-cell) {
+    border-top: 1px solid var(--md-divider, rgba(0, 0, 0, 0.12));
+}
+
+/* Sticky group cells for horizontal scrolling */
+.group-cell {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+}
+
+/* Second group cell offset for sticky positioning */
+.group-cell + .group-cell {
+    position: sticky;
+    z-index: 1;
+}
+
+/* Scroll counter in grouping mode */
+.scroll-counter.grouping-mode {
+    background-color: rgba(25, 118, 210, 0.08);
+    border-left: 3px solid var(--md-primary, #1976d2);
+}
+
+/* Compact mode adjustments for grouping */
+.integram-table.compact .group-cell {
+    padding: 6px 10px;
+}
+
+/* Hover state for grouped rows */
+.integram-table tbody tr:has(.group-cell):hover .group-cell {
+    background-color: rgba(25, 118, 210, 0.12);
+}
+
+/* Issue #543: Add button for grouped cells (create record with prefilled grouping attributes) */
+.group-cell {
+    position: relative;
+}
+
+.group-cell-content {
+    display: inline;
+}
+
+.group-cell-add-btn {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--md-primary, #1976d2);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    width: 20px;
+    height: 20px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    line-height: 1;
+    padding: 0;
+    box-shadow: var(--md-elevation-1, 0 1px 3px rgba(0,0,0,0.12));
+    transition: background-color 0.2s ease, box-shadow 0.2s ease;
+    z-index: 3;
+}
+
+.group-cell:hover .group-cell-add-btn {
+    display: flex;
+}
+
+.group-cell-add-btn:hover {
+    background: var(--md-primary-dark, #1565c0);
+    box-shadow: var(--md-elevation-2, 0 2px 6px rgba(0,0,0,0.16));
+}
+
+.group-cell-add-btn:active {
+    background: var(--md-primary-dark, #1565c0);
+    box-shadow: var(--md-elevation-1, 0 1px 3px rgba(0,0,0,0.12));
+    transform: translateY(-50%) scale(0.95);
+}
+
+/* Hidden filter badges container (issue #547)
+ * Displays filters for columns that are not visible in the table
+ */
+.hidden-filter-badges-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 12px;
+    background-color: rgba(255, 193, 7, 0.1);
+    border-bottom: 1px solid rgba(255, 193, 7, 0.3);
+}
+
+/* Individual hidden filter badge */
+.hidden-filter-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    background-color: rgba(255, 193, 7, 0.2);
+    border: 1px solid rgba(255, 193, 7, 0.5);
+    border-radius: 4px;
+    font-size: 13px;
+    color: rgba(0, 0, 0, 0.87);
+}
+
+.hidden-filter-badge-name {
+    font-weight: 500;
+    color: rgba(0, 0, 0, 0.7);
+}
+
+.hidden-filter-badge-value {
+    font-family: monospace;
+    font-size: 12px;
+    color: rgba(0, 0, 0, 0.87);
+    background-color: rgba(255, 255, 255, 0.5);
+    padding: 1px 4px;
+    border-radius: 2px;
+}
+
+.hidden-filter-badge-remove {
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: bold;
+    color: rgba(0, 0, 0, 0.5);
+    line-height: 1;
+    padding: 0 2px;
+    margin-left: 2px;
+    border-radius: 2px;
+    transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.hidden-filter-badge-remove:hover {
+    color: #d32f2f;
+    background-color: rgba(211, 47, 47, 0.1);
 }

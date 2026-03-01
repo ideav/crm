@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Issue #543 - Grouped Cell Add Button</title>
+    <link rel="stylesheet" href="../assets/css/integram-table.css">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #333;
+        }
+        .description {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .test-case {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .test-case h3 {
+            margin-top: 0;
+            color: #1976d2;
+        }
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 13px;
+        }
+        .note {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            padding: 10px 15px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        #table-container {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test Issue #543: Grouped Cell Add Button</h1>
+
+    <div class="description">
+        <h3>Issue Description</h3>
+        <p>When grouping mode is enabled and the data source is a table (object format),
+           hovering over a grouped cell should display a "+" button. Clicking this button
+           opens a create record form with prefilled attributes from the current cell
+           and all cells to the left.</p>
+
+        <h4>Expected Behavior:</h4>
+        <ul>
+            <li>The add button appears only when data source is table/object format</li>
+            <li>Hovering over a grouped cell shows the "+" button</li>
+            <li>Clicking the button opens a create form</li>
+            <li>The form should have prefilled values from grouping columns</li>
+        </ul>
+    </div>
+
+    <div class="test-case">
+        <h3>Test Case 1: Verify CSS Styles</h3>
+        <p>The grouped cell add button should have proper styling:</p>
+        <ul>
+            <li><code>.group-cell-add-btn</code> - Button element class</li>
+            <li><code>.group-cell:hover .group-cell-add-btn</code> - Display on hover</li>
+            <li>Button positioned absolutely at right side of cell</li>
+        </ul>
+    </div>
+
+    <div class="test-case">
+        <h3>Test Case 2: Verify JavaScript Methods</h3>
+        <p>New methods added to IntegramTable class:</p>
+        <pre>
+// Check if button should be shown (only for object/table format)
+shouldShowGroupedCellAddButton()
+
+// Open create form with prefilled grouping values
+openGroupedCellCreateForm(rowIndex, groupLevel)
+        </pre>
+    </div>
+
+    <div class="test-case">
+        <h3>Test Case 3: Verify renderGroupedRows</h3>
+        <p>The renderGroupedRows method should now include:</p>
+        <ul>
+            <li>Button element inside each group cell</li>
+            <li>Content wrapped in <code>.group-cell-content</code> span</li>
+            <li>Button with onclick handler calling <code>openGroupedCellCreateForm</code></li>
+        </ul>
+    </div>
+
+    <div class="test-case">
+        <h3>Test Case 4: Prefill Logic</h3>
+        <p>When clicking the add button on a grouped cell at level N:</p>
+        <ul>
+            <li>Collect values from grouping columns 0 to N (inclusive)</li>
+            <li>For reference fields, extract ID from "id:Value" format</li>
+            <li>Pass values as <code>{'t{fieldId}': value}</code> to create form</li>
+        </ul>
+    </div>
+
+    <div id="table-container">
+        <p><strong>Note:</strong> To fully test this feature, you need to:</p>
+        <ol>
+            <li>Open a page with an IntegramTable using object/table data source</li>
+            <li>Enable grouping mode (click "Группы" button)</li>
+            <li>Select one or more columns to group by</li>
+            <li>Hover over a grouped cell to see the "+" button</li>
+            <li>Click the button to open create form with prefilled values</li>
+        </ol>
+    </div>
+
+    <div class="note">
+        <strong>Implementation Summary:</strong>
+        <ul>
+            <li>Modified <code>renderGroupedRows()</code> in integram-table.js</li>
+            <li>Added <code>shouldShowGroupedCellAddButton()</code> method</li>
+            <li>Added <code>openGroupedCellCreateForm(rowIndex, groupLevel)</code> method</li>
+            <li>Added CSS styles for <code>.group-cell-add-btn</code> in integram-table.css</li>
+        </ul>
+    </div>
+
+    <script src="../assets/js/integram-table.js"></script>
+    <script>
+        // Test: Verify IntegramTable class has the new methods
+        console.log('=== Test Issue #543: Grouped Cell Add Button ===');
+
+        // Create a mock instance to verify methods exist
+        const mockOptions = {
+            instanceName: 'testTable',
+            container: document.getElementById('table-container'),
+            url: '/test'
+        };
+
+        // Check if the class has the new methods
+        if (typeof IntegramTable !== 'undefined') {
+            const proto = IntegramTable.prototype;
+
+            console.log('Checking IntegramTable methods:');
+            console.log('  shouldShowGroupedCellAddButton:', typeof proto.shouldShowGroupedCellAddButton === 'function' ? 'OK' : 'MISSING');
+            console.log('  openGroupedCellCreateForm:', typeof proto.openGroupedCellCreateForm === 'function' ? 'OK' : 'MISSING');
+            console.log('  renderGroupedRows:', typeof proto.renderGroupedRows === 'function' ? 'OK' : 'MISSING');
+
+            // Verify the method logic
+            if (typeof proto.shouldShowGroupedCellAddButton === 'function') {
+                console.log('\n  shouldShowGroupedCellAddButton implementation check:');
+                const fnString = proto.shouldShowGroupedCellAddButton.toString();
+                console.log('    - Checks rawObjectData:', fnString.includes('rawObjectData') ? 'OK' : 'MISSING');
+                console.log('    - Checks objectTableId:', fnString.includes('objectTableId') ? 'OK' : 'MISSING');
+                console.log('    - Checks dataSource:', fnString.includes('dataSource') ? 'OK' : 'MISSING');
+            }
+
+            if (typeof proto.openGroupedCellCreateForm === 'function') {
+                console.log('\n  openGroupedCellCreateForm implementation check:');
+                const fnString = proto.openGroupedCellCreateForm.toString();
+                console.log('    - Uses groupedData:', fnString.includes('groupedData') ? 'OK' : 'MISSING');
+                console.log('    - Uses groupingColumns:', fnString.includes('groupingColumns') ? 'OK' : 'MISSING');
+                console.log('    - Handles ref fields:', fnString.includes('ref_id') ? 'OK' : 'MISSING');
+                console.log('    - Calls openCreateRecordForm:', fnString.includes('openCreateRecordForm') ? 'OK' : 'MISSING');
+            }
+        } else {
+            console.error('IntegramTable class not found!');
+        }
+
+        console.log('\n=== Tests Complete ===');
+    </script>
+</body>
+</html>

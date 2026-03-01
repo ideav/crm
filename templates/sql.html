@@ -1,0 +1,1062 @@
+<style>
+label {
+    display: inline-block;
+    margin: .5rem 0 0 0;
+    float: left;
+}
+.list {
+    position: absolute;
+}
+.list-open {
+    z-index: 10000;
+    background-color: #fafafa;
+    border: 1px solid #eeeeee;
+}
+.rth {
+    vertical-align: bottom;
+}
+.saving {
+    border-color: green;
+    border-width: 2px;
+}
+.btns, .inline {
+    display: inline-block;
+}
+.icon8 {
+    padding: 3px;
+    margin: 3px;
+    cursor: pointer;
+}
+.ileft {
+    margin-left:-12px;
+}
+.iright {
+    margin-right:-12px;
+}
+.t-selected {
+    margin-top: 3px;
+}
+.textarea-container {
+    padding: 10px 15px 0;
+    display: flex;
+    flex-direction: row;
+    margin-bottom: 0;
+    position: relative;
+}
+.textarea-container + #ShowReport {
+    margin-top: 10px;
+}
+.textarea-container textarea {
+    padding: 5px 10px;
+    padding-right: 65px;
+    min-height: 75px;
+}
+.textarea-controls {
+    align-items: flex-end;
+    display: flex;
+    flex-direction: column;
+    margin-left: 15px;
+    row-gap: 5px;
+    position: absolute;
+    right: 30px;
+    top: 15px;
+}
+.textarea-controls button {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+}
+.btn-textarea-save {
+    background-color: #007bffbb;
+}
+.btn-textarea-save:hover {
+    background-color: #007bff;
+}
+.btn-textarea-cancel {
+    background-color: #6c757d88;
+}
+.btn-textarea-cancel:hover {
+    background-color: #6c757d;
+}
+td[id*="td101"],td[id*="td102"],td[id*="td105"],td[id*="td132"] {
+    position: relative;
+}
+.control-label {
+    display: none;
+    position: absolute;
+    right: 5px;
+    cursor: pointer;
+    background-color: white;
+    padding: 0 0 0 4px;
+}
+.control-label:last-of-type {
+    bottom: 6px;
+}
+.control-label:first-of-type {
+    top: 17px;
+}
+.active.control-label {
+    display: block;
+}
+center {
+    position: relative;
+}
+center .add-id-for-col {
+    display: none;
+    position: absolute;
+    right: 0px;
+    z-index: 0;
+    cursor: pointer;
+    background-color: white;
+    border: 1px solid #007bff;
+    font-size: 12px;
+    padding: 0 3px;
+    border-radius: 5px;
+    color: #007bff;
+}
+center:hover .add-id-for-col {
+    display: inline-block;
+}
+#ShowReport {
+    overflow-y: scroll;
+}
+.inner-modal{
+    margin-left: auto;
+    margin-right: auto;
+    margin-top: 20%;
+    border: 1px solid gray;
+    border-radius: 3px;
+    background-color: #fbfbfb;
+}
+.middle-modal{
+    display: table-cell;
+    vertical-align: middle;
+    
+}
+.outer-modal{
+    display: table;
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 100%;
+    z-index: 2;
+    background: rgba(255, 255, 255, .4);
+}
+.existing-froms{
+    font-size: larger;
+}
+.empty-val{
+    border: 2px solid red;
+}
+/* .edit-col-title-input {
+    z-index: 10;
+}
+.col-title-wrapper {
+    position: relative;
+} */
+</style>
+<div class="t9n">
+<div id="show" class="list" style="z-index: 1;">
+<a id="showanchor" onclick="if(json['list']){byId('queries').classList.remove('hidden');byId('show').classList.add('hidden')}else myApi('GET','object/22/?JSON','list')"><img class="icon8" title="<t9n>[RU]Список запросов[EN]Reports list</t9n>" src="https://img.icons8.com/ios/25/222222/list.png"></a>
+</div>
+<div id="queries" class="list list-open shadow p-3 hidden" onclick="event.stopPropagation?event.stopPropagation():(event.cancelBubble=true);">
+<p>
+    <t9n>[RU]Выберите запрос или добавьте новый[EN]Pick the report or add a new one</t9n>
+    <a id="closeList" onclick="byId('queries').classList.add('hidden');byId('show').classList.remove('hidden')">
+        &nbsp;&nbsp;&nbsp;&nbsp;<img class="icon8" title="<t9n>[RU]Скрыть список запросов[EN]Hide the reports list</t9n>" src="https://img.icons8.com/ios/25/222222/close-window.png">
+    </a>
+</p>
+<div>
+<form method="post" action="/{_global_.z}/_m_new/22?up=1" onsubmit="addbtn.disabled=true; return true;">
+    <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
+    <input type="hidden" name="next_act" value="{_global_.action}">
+    <table>
+    <tr>
+    	<td><input placeholder="<t9n>[RU]Поиск / Новый запрос[EN]Seek or add new</t9n>" type="text" name="t22" class="form-control form-control-sm" autocomplete="off" onkeyup="seekRep(this.value)"></td>
+    	<td><input type="submit" name="addbtn" class="btn btn-primary btn-sm" value="<t9n>[RU]Создать запрос[EN]Create a query</t9n>"></td>
+    </tr>
+    </table>
+</form>
+</div>
+<br/>
+<div id="list">
+    <p><a target="_rep{_global_.id}" href="/{_global_.z}/report/:id:">:val:</a> 
+     <a target="_rep{_global_.id}"  href="/{_global_.z}/smartq/:id:"><svg width="28" height="28" viewBox="0 0 28 28" class="ml-2" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M6 24H23M18 4L22 8L11 19H7V15L18 4Z" stroke="#666666" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg></a>
+     <a  href="/{_global_.z}/sql/:id:"><svg width="24" height="24" viewBox="0 0 24 24" class="ml-2" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M12 14.5714C13.4201 14.5714 14.5714 13.4201 14.5714 12C14.5714 10.5798 13.4201 9.42855 12 9.42855C10.5798 9.42855 9.42855 10.5798 9.42855 12C9.42855 13.4201 10.5798 14.5714 12 14.5714Z" stroke="#666666" stroke-linecap="round" stroke-linejoin="round"></path>
+    <path d="M18.3428 14.5714C18.2287 14.8299 18.1947 15.1167 18.2451 15.3948C18.2955 15.6728 18.4281 15.9294 18.6257 16.1314L18.6771 16.1828C18.8365 16.3421 18.963 16.5311 19.0492 16.7392C19.1355 16.9473 19.1799 17.1704 19.1799 17.3957C19.1799 17.621 19.1355 17.8441 19.0492 18.0522C18.963 18.2603 18.8365 18.4493 18.6771 18.6086C18.5179 18.7679 18.3288 18.8944 18.1207 18.9807C17.9126 19.0669 17.6896 19.1113 17.4643 19.1113C17.239 19.1113 17.0159 19.0669 16.8078 18.9807C16.5997 18.8944 16.4106 18.7679 16.2514 18.6086L16.2 18.5571C15.998 18.3595 15.7414 18.227 15.4633 18.1766C15.1853 18.1261 14.8985 18.1602 14.64 18.2743C14.3865 18.3829 14.1703 18.5633 14.018 18.7933C13.8657 19.0233 13.7839 19.2927 13.7828 19.5686V19.7143C13.7828 20.1689 13.6022 20.605 13.2807 20.9265C12.9592 21.2479 12.5232 21.4286 12.0686 21.4286C11.6139 21.4286 11.1779 21.2479 10.8564 20.9265C10.5349 20.605 10.3543 20.1689 10.3543 19.7143V19.6371C10.3476 19.3534 10.2558 19.0783 10.0907 18.8474C9.92561 18.6166 9.6949 18.4408 9.42855 18.3428C9.17003 18.2287 8.88325 18.1947 8.60519 18.2451C8.32714 18.2955 8.07056 18.4281 7.86855 18.6257L7.81713 18.6771C7.65791 18.8365 7.46885 18.963 7.26074 19.0492C7.05263 19.1355 6.82955 19.1799 6.60427 19.1799C6.37898 19.1799 6.15591 19.1355 5.9478 19.0492C5.73969 18.963 5.55062 18.8365 5.39141 18.6771C5.23202 18.5179 5.10558 18.3288 5.01931 18.1207C4.93304 17.9126 4.88863 17.6896 4.88863 17.4643C4.88863 17.239 4.93304 17.0159 5.01931 16.8078C5.10558 16.5997 5.23202 16.4106 5.39141 16.2514L5.44284 16.2C5.64044 15.998 5.773 15.7414 5.82341 15.4633C5.87383 15.1853 5.8398 14.8985 5.7257 14.64C5.61704 14.3865 5.43663 14.1703 5.20667 14.018C4.9767 13.8657 4.70723 13.7839 4.43141 13.7828H4.2857C3.83104 13.7828 3.395 13.6022 3.07351 13.2807C2.75202 12.9592 2.57141 12.5232 2.57141 12.0686C2.57141 11.6139 2.75202 11.1779 3.07351 10.8564C3.395 10.5349 3.83104 10.3543 4.2857 10.3543H4.36284C4.64655 10.3476 4.9217 10.2558 5.15252 10.0907C5.38335 9.92561 5.55917 9.6949 5.65713 9.42855C5.77122 9.17003 5.80526 8.88325 5.75484 8.60519C5.70443 8.32714 5.57187 8.07056 5.37427 7.86855L5.32284 7.81713C5.16345 7.65791 5.03701 7.46885 4.95074 7.26074C4.86447 7.05263 4.82006 6.82955 4.82006 6.60427C4.82006 6.37898 4.86447 6.15591 4.95074 5.9478C5.03701 5.73969 5.16345 5.55062 5.32284 5.39141C5.48205 5.23202 5.67112 5.10558 5.87923 5.01931C6.08734 4.93304 6.31041 4.88863 6.5357 4.88863C6.76098 4.88863 6.98405 4.93304 7.19217 5.01931C7.40028 5.10558 7.58934 5.23202 7.74855 5.39141L7.79998 5.44284C8.00199 5.64044 8.25857 5.773 8.53662 5.82341C8.81467 5.87383 9.10145 5.8398 9.35998 5.7257H9.42855C9.68207 5.61704 9.89828 5.43663 10.0506 5.20667C10.2029 4.9767 10.2846 4.70723 10.2857 4.43141V4.2857C10.2857 3.83104 10.4663 3.395 10.7878 3.07351C11.1093 2.75202 11.5453 2.57141 12 2.57141C12.4546 2.57141 12.8907 2.75202 13.2122 3.07351C13.5337 3.395 13.7143 3.83104 13.7143 4.2857V4.36284C13.7154 4.63866 13.7971 4.90813 13.9494 5.1381C14.1017 5.36806 14.3179 5.54847 14.5714 5.65713C14.8299 5.77122 15.1167 5.80526 15.3948 5.75484C15.6728 5.70443 15.9294 5.57187 16.1314 5.37427L16.1828 5.32284C16.3421 5.16345 16.5311 5.03701 16.7392 4.95074C16.9473 4.86447 17.1704 4.82006 17.3957 4.82006C17.621 4.82006 17.8441 4.86447 18.0522 4.95074C18.2603 5.03701 18.4493 5.16345 18.6086 5.32284C18.7679 5.48205 18.8944 5.67112 18.9807 5.87923C19.0669 6.08734 19.1113 6.31041 19.1113 6.5357C19.1113 6.76098 19.0669 6.98405 18.9807 7.19217C18.8944 7.40028 18.7679 7.58934 18.6086 7.74855L18.5571 7.79998C18.3595 8.00199 18.227 8.25857 18.1766 8.53662C18.1261 8.81467 18.1602 9.10145 18.2743 9.35998V9.42855C18.3829 9.68207 18.5633 9.89828 18.7933 10.0506C19.0233 10.2029 19.2927 10.2846 19.5686 10.2857H19.7143C20.1689 10.2857 20.605 10.4663 20.9265 10.7878C21.2479 11.1093 21.4286 11.5453 21.4286 12C21.4286 12.4546 21.2479 12.8907 20.9265 13.2122C20.605 13.5337 20.1689 13.7143 19.7143 13.7143H19.6371C19.3613 13.7154 19.0918 13.7971 18.8619 13.9494C18.6319 14.1017 18.4515 14.3179 18.3428 14.5714Z" stroke="#666666" stroke-linecap="round" stroke-linejoin="round"></path>
+    </svg></a>
+</p>
+</div>
+</div>
+</div>
+<div class="add-from outer-modal" style="display:none;">
+    <div class="middle-modal">
+        <div class="inner-modal w-75 pt-4 pb-3 shadow t9n">
+            <center>
+            <b><t9n>[RU]Присоединить таблицу по условию в существующей колонке[EN]Join a table by condition to existing column</t9n></b>
+            <div class="form-inline justify-content-center align-items-center mt-3">
+                <select class="form-control form-control-sm add-from-left"></select>
+                <input type="text" placeholder="<t9n>[RU]Псевдоним: 1 слово латиницей[EN]Alias: 1 short word</t9n>" class="add-from-alias form-control form-control-sm">
+                <select class="form-control form-control-sm add-from-left-field mr-2">
+                    <option value="id">ID</option>
+                    <option value="t">Type (table)</option>
+                    <option value="up">Parent (up)</option>
+                    <option value="val">Value</option>
+                </select>
+                <font size="+2">=</font>
+                <select class="form-control form-control-sm add-from-right ml-2"></select>
+                <select class="form-control form-control-sm add-from-right-field mr-2">
+                    <option value="id">ID</option>
+                    <option value="t" selected>Type (table)</option>
+                    <option value="up">Parent (up)</option>
+                    <option value="val">Value</option>
+                </select>
+                <button class="btn btn-sm btn-primary" onclick="newFrom(this)">Добавить</button>
+            </div>
+            <div class="existing-froms mt-3"></div>
+            <button class="btn btn-outline-secondary btn-sm mt-3" onclick="$('.add-from').hide(200)">Закрыть</button>
+            </center>
+        </div>
+    </div>
+</div>
+<div id="one" class="hidden mt-3" onclick="hideList()">
+    <center>
+        <h4 class="ml-5 t9n">
+            <a target=":id:" href="/{_global_.z}/report/{_global_.id}">:val:</a>&nbsp;
+			<a target="2122" href="/{_global_.z}/query/{_global_.id}" title="Кастомизируемая таблица">
+                <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+				<path d="M15 4L5 16H14L13 24L23 12H14L15 4Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round">
+				</svg></a>&nbsp;
+            <a target=":id:" href="/{_global_.z}/smartq/{_global_.id}" title="<t9n>[RU]Редактируемый отчет[EN]Editable report</t9n>">
+                <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M6 24H23M18 4L22 8L11 19H7V15L18 4Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg></a>&nbsp;
+            <a target=":id:" href="/{_global_.z}/edit_obj/{_global_.id}#t22" title="<t9n>[RU]Редактировать остальные свойства запроса[EN]Edit the rest of the query properties</t9n>">
+                <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" class="btn-svg">
+                <path d="M22 16.66V22C22 22.5304 21.7893 23.0391 21.4142 23.4142C21.0391 23.7893 20.5304 24 20 24H6C5.46957 24 4.96086 23.7893 4.58579 23.4142C4.21071 23.0391 4 22.5304 4 22V8C4 7.46957 4.21071 6.96086 4.58579 6.58579C4.96086 6.21071 5.46957 6 6 6H11.34M20 4L24 8L14 18H10V14L20 4Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg></a>&nbsp;
+            <a href="#" onclick="copyLink('report/{_global_.id}')" title="<t9n>[RU]Копировать путь для использования в шаблонах Интеграла[EN]Copy the path to use in templates within IdeaV</t9n>">
+                <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" class="btn-svg">
+                <path d="M11.9436 14.9336C12.373 15.5077 12.9209 15.9827 13.5501 16.3265C14.1793 16.6703 14.8751 16.8747 15.5902 16.9259C16.3054 16.9771 17.0231 16.8739 17.6949 16.6233C18.3667 16.3728 18.9767 15.9806 19.4836 15.4736L22.4836 12.4736C23.3944 11.5305 23.8983 10.2675 23.8869 8.95655C23.8755 7.64557 23.3497 6.39151 22.4227 5.46447C21.4956 4.53743 20.2415 4.01158 18.9306 4.00019C17.6196 3.9888 16.3566 4.49277 15.4136 5.40356L13.6936 7.11356M15.9436 12.9336C15.5141 12.3594 14.9662 11.8844 14.337 11.5406C13.7078 11.1969 13.0121 10.9924 12.2969 10.9412C11.5818 10.89 10.864 10.9932 10.1922 11.2438C9.52045 11.4944 8.91044 11.8865 8.40356 12.3936L5.40356 15.3936C4.49277 16.3366 3.9888 17.5996 4.00019 18.9106C4.01158 20.2216 4.53743 21.4756 5.46447 22.4027C6.39151 23.3297 7.64557 23.8555 8.95655 23.8669C10.2675 23.8783 11.5305 23.3744 12.4736 22.4636L14.1836 20.7536" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg></a>&nbsp;
+            <a href="#" onclick="copyLink('https://'+location.host+'/{_global_.z}/report/{_global_.id}')" title="<t9n>[RU]Копировать абсолютный путь для раздачи вовне[EN]Copy the full path to open from anywhere</t9n>">
+                <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" class="btn-svg">
+                <path d="M18 6H20C20.5304 6 21.0391 6.21071 21.4142 6.58579C21.7893 6.96086 22 7.46957 22 8V22C22 22.5304 21.7893 23.0391 21.4142 23.4142C21.0391 23.7893 20.5304 24 20 24H8C7.46957 24 6.96086 23.7893 6.58579 23.4142C6.21071 23.0391 6 22.5304 6 22V8C6 7.46957 6.21071 6.96086 6.58579 6.58579C6.96086 6.21071 7.46957 6 8 6H10M11 4H17C17.5523 4 18 4.44772 18 5V7C18 7.55228 17.5523 8 17 8H11C10.4477 8 10 7.55228 10 7V5C10 4.44772 10.4477 4 11 4Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg></a>&nbsp;
+            <span id="copied" style="display:none; color:gray; position:absolute" class="text-nowrap"><t9n>[RU]Скопировано[EN]Copied</t9n></span>
+        </h4>
+    </center>
+    <div class="container-fluid">
+        <div class="row">
+            <div class="col" style="height:12px"></div>
+        </div>
+        <div class="row">
+            <div class="col-6 col-md-2 col-lg-2 col-xl-2 mb-1">
+                <br /><nobr><label class="mt-0"><img id="interactWait" class="hidden" src="/i/ajax.gif"><input type="checkbox" id="interact" onchange="setInteract()" value="1">&nbsp;<t9n>[RU]Интерактивный[EN]Interactive</t9n></label></nobr>
+            </div>
+            <div class="col-6 col-md-2 col-lg-2 col-xl-1 mb-1 pr-1">
+                <br /><img id="limitWait" class="hidden" src="/i/ajax.gif"><input class="form-control form-control-sm" type="text" id="limit" onchange="setLimit(this.valur)" placeholder="LIMIT">
+            </div>
+            <div class="col-12 col-md-8 col-lg-8 col-xl-6 pl-1">
+                <br />
+                <button class="btn btn-outline-secondary btn-sm mb-1" id="102" onclick="showCtl(this)"><t9n>[RU]Фильтр[EN]Filter</t9n></button>
+                <button class="btn btn-outline-secondary btn-sm mb-1" id="84" onclick="showCtl(this)"><t9n>[RU]Формат[EN]Format</t9n></button>
+                <button class="btn btn-outline-secondary btn-sm mb-1" id="104" onclick="showCtl(this)"><t9n>[RU]Функция[EN]Function</t9n></button>
+                <button class="btn btn-outline-secondary btn-sm mb-1" id="109" onclick="showCtl(this)"><t9n>[RU]Сортировка[EN]Order</t9n></button>
+                <button class="btn btn-outline-secondary btn-sm mb-1" id="72" onclick="showCtl(this)"><t9n>[RU]Итоги[EN]Totals</t9n></button>
+                <button class="btn btn-outline-secondary btn-sm mb-1" id="101" onclick="showCtl(this)"><t9n>[RU]Формула[EN]Expression</t9n></button>
+                <button class="btn btn-outline-secondary btn-sm mb-1" id="105" onclick="showCtl(this)"><t9n>[RU]HAVING[EN]HAVING</t9n></button>
+                <button class="btn btn-outline-secondary btn-sm mb-1" id="132" onclick="showCtl(this)"><t9n>[RU]SET[EN]SET</t9n></button>
+                <button class="btn btn-outline-secondary btn-sm mb-1" id="58" onclick="showCtl(this)" style="display:none"><t9n>[RU]ALIAS[EN]ALIAS</t9n></button>
+            </div>
+            <div class="col-12 col-md-12 col-lg-12 col-xl-3 mb-1">
+                <t9n>[RU]Добавить колонку[EN]Add a column</t9n>, <a class="text-primary" onclick="addCol(0)"><t9n>[RU]вычисляемое[EN]calculatable</t9n></a>, <a class="text-primary" onclick="addFrom()">ALIAS</a><br>
+                <div class="input-group input-group-sm">
+                    <span class="t-selected table-column" style="display:none;"></span>
+            		<select id="table" class="form-control table-column" onchange="if(this.value.length)selectTable(this.value)">
+            			<option id=":id:" value=":id:">:val:</option>
+            		</select>
+            		<div class="input-group-append t9n">
+            		    <img id="addColWait" style="display:none;" src="/i/ajax.gif">
+            		    <a onclick="$('.table-column').toggle()" class="table-column" title="<t9n>[RU]Выбрать другую таблицу[EN]Choose another table</t9n>" style="display:none;">
+                            <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M12.5714 12.5714L19.4286 19.4285M19.4286 12.5714L12.5714 19.4285" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </a>
+                    </div>
+            		<select id="t28" class="form-control table-column" onchange="if(this.value.length)addCol(this.value)" style="display:none;">
+            		</select>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="warning" class="alert alert-warning hidden" role="alert"></div>
+    <div id="ShowReport"></div>
+</div>
+<div class="hidden t9n" id="controls">
+    <div id="template102">
+        <label class="control-label" for="t102_:id:">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M15.502 1.93991C15.5954 2.03363 15.6479 2.16057 15.6479 2.2929C15.6479 2.42524 15.5954 2.55218 15.502 2.6459L14.459 3.6899L12.459 1.68991L13.502 0.645905C13.5958 0.552169 13.7229 0.499512 13.8555 0.499512C13.9881 0.499512 14.1152 0.552169 14.209 0.645905L15.502 1.93891V1.93991ZM13.752 4.3959L11.752 2.3959L4.939 9.2099C4.88396 9.26493 4.84253 9.33204 4.818 9.4059L4.013 11.8199C3.9984 11.8639 3.99633 11.9111 4.00701 11.9562C4.0177 12.0014 4.04072 12.0426 4.07351 12.0754C4.10629 12.1082 4.14755 12.1312 4.19267 12.1419C4.23779 12.1526 4.28499 12.1505 4.329 12.1359L6.743 11.3309C6.81676 11.3067 6.88387 11.2656 6.939 11.2109L13.752 4.3959Z" fill="#212529"></path>
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M1 13.4999C1 13.8977 1.15804 14.2793 1.43934 14.5606C1.72064 14.8419 2.10218 14.9999 2.5 14.9999H13.5C13.8978 14.9999 14.2794 14.8419 14.5607 14.5606C14.842 14.2793 15 13.8977 15 13.4999V7.49991C15 7.3673 14.9473 7.24012 14.8536 7.14635C14.7598 7.05258 14.6326 6.99991 14.5 6.99991C14.3674 6.99991 14.2402 7.05258 14.1464 7.14635C14.0527 7.24012 14 7.3673 14 7.49991V13.4999C14 13.6325 13.9473 13.7597 13.8536 13.8535C13.7598 13.9472 13.6326 13.9999 13.5 13.9999H2.5C2.36739 13.9999 2.24021 13.9472 2.14645 13.8535C2.05268 13.7597 2 13.6325 2 13.4999V2.4999C2 2.3673 2.05268 2.24012 2.14645 2.14635C2.24021 2.05258 2.36739 1.9999 2.5 1.9999H9C9.13261 1.9999 9.25979 1.94723 9.35355 1.85346C9.44732 1.75969 9.5 1.63251 9.5 1.4999C9.5 1.3673 9.44732 1.24012 9.35355 1.14635C9.25979 1.05258 9.13261 0.999905 9 0.999905H2.5C2.10218 0.999905 1.72064 1.15794 1.43934 1.43924C1.15804 1.72055 1 2.10208 1 2.4999V13.4999Z" fill="#212529"></path>
+            </svg>
+        </label>
+        <input type="text" id="t102_:id:" value="" placeholder="<t9n>[RU]От[EN]Filter from</t9n>" class="form-control form-control-sm save-input">
+        <div id="dd102_:id:"></div>
+        <label class="control-label" for="t103_:id:">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M15.502 1.93991C15.5954 2.03363 15.6479 2.16057 15.6479 2.2929C15.6479 2.42524 15.5954 2.55218 15.502 2.6459L14.459 3.6899L12.459 1.68991L13.502 0.645905C13.5958 0.552169 13.7229 0.499512 13.8555 0.499512C13.9881 0.499512 14.1152 0.552169 14.209 0.645905L15.502 1.93891V1.93991ZM13.752 4.3959L11.752 2.3959L4.939 9.2099C4.88396 9.26493 4.84253 9.33204 4.818 9.4059L4.013 11.8199C3.9984 11.8639 3.99633 11.9111 4.00701 11.9562C4.0177 12.0014 4.04072 12.0426 4.07351 12.0754C4.10629 12.1082 4.14755 12.1312 4.19267 12.1419C4.23779 12.1526 4.28499 12.1505 4.329 12.1359L6.743 11.3309C6.81676 11.3067 6.88387 11.2656 6.939 11.2109L13.752 4.3959Z" fill="#212529"></path>
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M1 13.4999C1 13.8977 1.15804 14.2793 1.43934 14.5606C1.72064 14.8419 2.10218 14.9999 2.5 14.9999H13.5C13.8978 14.9999 14.2794 14.8419 14.5607 14.5606C14.842 14.2793 15 13.8977 15 13.4999V7.49991C15 7.3673 14.9473 7.24012 14.8536 7.14635C14.7598 7.05258 14.6326 6.99991 14.5 6.99991C14.3674 6.99991 14.2402 7.05258 14.1464 7.14635C14.0527 7.24012 14 7.3673 14 7.49991V13.4999C14 13.6325 13.9473 13.7597 13.8536 13.8535C13.7598 13.9472 13.6326 13.9999 13.5 13.9999H2.5C2.36739 13.9999 2.24021 13.9472 2.14645 13.8535C2.05268 13.7597 2 13.6325 2 13.4999V2.4999C2 2.3673 2.05268 2.24012 2.14645 2.14635C2.24021 2.05258 2.36739 1.9999 2.5 1.9999H9C9.13261 1.9999 9.25979 1.94723 9.35355 1.85346C9.44732 1.75969 9.5 1.63251 9.5 1.4999C9.5 1.3673 9.44732 1.24012 9.35355 1.14635C9.25979 1.05258 9.13261 0.999905 9 0.999905H2.5C2.10218 0.999905 1.72064 1.15794 1.43934 1.43924C1.15804 1.72055 1 2.10208 1 2.4999V13.4999Z" fill="#212529"></path>
+            </svg>
+        </label>
+		<input type="text" id="t103_:id:" value="" placeholder="<t9n>[RU]До[EN]Filter to</t9n>" class="form-control form-control-sm save-input">
+		<div id="dd103_:id:"></div>
+	</div>
+    <div id="template104"><!--Функция-->
+        <select name="t104" id="t104_:id:" class="form-control form-control-sm onchange">
+		    <option> </option>
+            <!-- Begin: &Functions -->
+		    <option value="{ID}" r="104">{VAL}</option>
+            <!-- End: &Functions -->
+		</select>
+	</div>
+	<div id="template84"><!--Формат-->
+	    <select name="t84" id="t84_:id:" class="form-control form-control-sm onchange">
+		    <option> </option>
+            <!-- Begin: &Formats -->
+		    <option value="{ID}" r="104">{VAL}</option>
+            <!-- End: &Formats -->
+		</select>
+    </div>
+    <div id="template72"><!--Итог-->
+	    <select name="t72" id="t72_:id:" class="form-control form-control-sm onchange">
+		    <option> </option>
+			<option value="68" r="72">AVG</option>
+			<option value="71" r="72">COUNT</option>
+			<option value="70" r="72">MAX</option>
+			<option value="69" r="72">MIN</option>
+			<option value="67" r="72">SUM</option>
+		</select>
+	</div>
+    <div id="template105"><!--Having-->
+        <label class="control-label" for="t105_:id:">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M15.502 1.93991C15.5954 2.03363 15.6479 2.16057 15.6479 2.2929C15.6479 2.42524 15.5954 2.55218 15.502 2.6459L14.459 3.6899L12.459 1.68991L13.502 0.645905C13.5958 0.552169 13.7229 0.499512 13.8555 0.499512C13.9881 0.499512 14.1152 0.552169 14.209 0.645905L15.502 1.93891V1.93991ZM13.752 4.3959L11.752 2.3959L4.939 9.2099C4.88396 9.26493 4.84253 9.33204 4.818 9.4059L4.013 11.8199C3.9984 11.8639 3.99633 11.9111 4.00701 11.9562C4.0177 12.0014 4.04072 12.0426 4.07351 12.0754C4.10629 12.1082 4.14755 12.1312 4.19267 12.1419C4.23779 12.1526 4.28499 12.1505 4.329 12.1359L6.743 11.3309C6.81676 11.3067 6.88387 11.2656 6.939 11.2109L13.752 4.3959Z" fill="#212529"></path>
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M1 13.4999C1 13.8977 1.15804 14.2793 1.43934 14.5606C1.72064 14.8419 2.10218 14.9999 2.5 14.9999H13.5C13.8978 14.9999 14.2794 14.8419 14.5607 14.5606C14.842 14.2793 15 13.8977 15 13.4999V7.49991C15 7.3673 14.9473 7.24012 14.8536 7.14635C14.7598 7.05258 14.6326 6.99991 14.5 6.99991C14.3674 6.99991 14.2402 7.05258 14.1464 7.14635C14.0527 7.24012 14 7.3673 14 7.49991V13.4999C14 13.6325 13.9473 13.7597 13.8536 13.8535C13.7598 13.9472 13.6326 13.9999 13.5 13.9999H2.5C2.36739 13.9999 2.24021 13.9472 2.14645 13.8535C2.05268 13.7597 2 13.6325 2 13.4999V2.4999C2 2.3673 2.05268 2.24012 2.14645 2.14635C2.24021 2.05258 2.36739 1.9999 2.5 1.9999H9C9.13261 1.9999 9.25979 1.94723 9.35355 1.85346C9.44732 1.75969 9.5 1.63251 9.5 1.4999C9.5 1.3673 9.44732 1.24012 9.35355 1.14635C9.25979 1.05258 9.13261 0.999905 9 0.999905H2.5C2.10218 0.999905 1.72064 1.15794 1.43934 1.43924C1.15804 1.72055 1 2.10208 1 2.4999V13.4999Z" fill="#212529"></path>
+            </svg>
+        </label>
+        <input type="text" id="t105_:id:" value="" placeholder="<t9n>[RU]От[EN]Having: from</t9n>" class="form-control form-control-sm save-input">
+        <label class="control-label" for="t106_:id:">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M15.502 1.93991C15.5954 2.03363 15.6479 2.16057 15.6479 2.2929C15.6479 2.42524 15.5954 2.55218 15.502 2.6459L14.459 3.6899L12.459 1.68991L13.502 0.645905C13.5958 0.552169 13.7229 0.499512 13.8555 0.499512C13.9881 0.499512 14.1152 0.552169 14.209 0.645905L15.502 1.93891V1.93991ZM13.752 4.3959L11.752 2.3959L4.939 9.2099C4.88396 9.26493 4.84253 9.33204 4.818 9.4059L4.013 11.8199C3.9984 11.8639 3.99633 11.9111 4.00701 11.9562C4.0177 12.0014 4.04072 12.0426 4.07351 12.0754C4.10629 12.1082 4.14755 12.1312 4.19267 12.1419C4.23779 12.1526 4.28499 12.1505 4.329 12.1359L6.743 11.3309C6.81676 11.3067 6.88387 11.2656 6.939 11.2109L13.752 4.3959Z" fill="#212529"></path>
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M1 13.4999C1 13.8977 1.15804 14.2793 1.43934 14.5606C1.72064 14.8419 2.10218 14.9999 2.5 14.9999H13.5C13.8978 14.9999 14.2794 14.8419 14.5607 14.5606C14.842 14.2793 15 13.8977 15 13.4999V7.49991C15 7.3673 14.9473 7.24012 14.8536 7.14635C14.7598 7.05258 14.6326 6.99991 14.5 6.99991C14.3674 6.99991 14.2402 7.05258 14.1464 7.14635C14.0527 7.24012 14 7.3673 14 7.49991V13.4999C14 13.6325 13.9473 13.7597 13.8536 13.8535C13.7598 13.9472 13.6326 13.9999 13.5 13.9999H2.5C2.36739 13.9999 2.24021 13.9472 2.14645 13.8535C2.05268 13.7597 2 13.6325 2 13.4999V2.4999C2 2.3673 2.05268 2.24012 2.14645 2.14635C2.24021 2.05258 2.36739 1.9999 2.5 1.9999H9C9.13261 1.9999 9.25979 1.94723 9.35355 1.85346C9.44732 1.75969 9.5 1.63251 9.5 1.4999C9.5 1.3673 9.44732 1.24012 9.35355 1.14635C9.25979 1.05258 9.13261 0.999905 9 0.999905H2.5C2.10218 0.999905 1.72064 1.15794 1.43934 1.43924C1.15804 1.72055 1 2.10208 1 2.4999V13.4999Z" fill="#212529"></path>
+            </svg>
+        </label>
+		<input type="text" id="t106_:id:" value="" placeholder="<t9n>[RU]до[EN]Having: to</t9n>" class="form-control form-control-sm save-input">
+	</div>
+    <div id="template109"><!--Order-->
+		
+	</div>
+    <div id="template101" style="position: relative;">
+        <label class="control-label" for="t101_:id:">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M15.502 1.93991C15.5954 2.03363 15.6479 2.16057 15.6479 2.2929C15.6479 2.42524 15.5954 2.55218 15.502 2.6459L14.459 3.6899L12.459 1.68991L13.502 0.645905C13.5958 0.552169 13.7229 0.499512 13.8555 0.499512C13.9881 0.499512 14.1152 0.552169 14.209 0.645905L15.502 1.93891V1.93991ZM13.752 4.3959L11.752 2.3959L4.939 9.2099C4.88396 9.26493 4.84253 9.33204 4.818 9.4059L4.013 11.8199C3.9984 11.8639 3.99633 11.9111 4.00701 11.9562C4.0177 12.0014 4.04072 12.0426 4.07351 12.0754C4.10629 12.1082 4.14755 12.1312 4.19267 12.1419C4.23779 12.1526 4.28499 12.1505 4.329 12.1359L6.743 11.3309C6.81676 11.3067 6.88387 11.2656 6.939 11.2109L13.752 4.3959Z" fill="#212529"></path>
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M1 13.4999C1 13.8977 1.15804 14.2793 1.43934 14.5606C1.72064 14.8419 2.10218 14.9999 2.5 14.9999H13.5C13.8978 14.9999 14.2794 14.8419 14.5607 14.5606C14.842 14.2793 15 13.8977 15 13.4999V7.49991C15 7.3673 14.9473 7.24012 14.8536 7.14635C14.7598 7.05258 14.6326 6.99991 14.5 6.99991C14.3674 6.99991 14.2402 7.05258 14.1464 7.14635C14.0527 7.24012 14 7.3673 14 7.49991V13.4999C14 13.6325 13.9473 13.7597 13.8536 13.8535C13.7598 13.9472 13.6326 13.9999 13.5 13.9999H2.5C2.36739 13.9999 2.24021 13.9472 2.14645 13.8535C2.05268 13.7597 2 13.6325 2 13.4999V2.4999C2 2.3673 2.05268 2.24012 2.14645 2.14635C2.24021 2.05258 2.36739 1.9999 2.5 1.9999H9C9.13261 1.9999 9.25979 1.94723 9.35355 1.85346C9.44732 1.75969 9.5 1.63251 9.5 1.4999C9.5 1.3673 9.44732 1.24012 9.35355 1.14635C9.25979 1.05258 9.13261 0.999905 9 0.999905H2.5C2.10218 0.999905 1.72064 1.15794 1.43934 1.43924C1.15804 1.72055 1 2.10208 1 2.4999V13.4999Z" fill="#212529"></path>
+            </svg>
+        </label>
+        <!--Expression-->
+		<input type="text" name="t101" id="t101_:id:" class="form-control form-control-sm save-input" value="">
+	</div>
+    <div id="date_dd"><!--Date DD-->
+    	<ul class="dropdown-menu">
+            <li class="p-2"><a onclick="curEl.value='[TODAY]';updateValue(curEl)">[TODAY] – <t9n>[RU]текущий день[EN]Current date</t9n></a></li>
+            <li class="p-2"><a onclick="curEl.value='[YESTERDAY]';updateValue(curEl)">[YESTERDAY] – <t9n>[RU]вчерашний день[EN]yesterday</t9n></a></li>
+            <li class="p-2"><a onclick="curEl.value='[TOMORROW]';updateValue(curEl)">[TOMORROW] – <t9n>[RU]завтрашний день.[EN]tomorrow date</t9n></a></li>
+            <li class="p-2"><a onclick="curEl.value='[MONTH_AGO]';updateValue(curEl)">[MONTH_AGO] – <t9n>[RU]день месяц назад[EN]a day a month ago</t9n></a></li>
+            <li class="p-2"><a onclick="curEl.value='';updateValue(curEl)"><img class="icon8 p-0" src="https://img.icons8.com/ios/20/dd0000/delete-sign.png"/> <t9n>[RU]Очистить[EN]Clean</t9n></a></li>
+        </ul>
+	</div>
+    <div id="template58"><!--Alias-->
+		<select name="t58" id="t58_:id:" class="form-control form-control-sm onchange t-58"></select>
+	</div>
+    <div id="template132"><!--Set-->
+        <label class="control-label" for="t132_:id:">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M15.502 1.93991C15.5954 2.03363 15.6479 2.16057 15.6479 2.2929C15.6479 2.42524 15.5954 2.55218 15.502 2.6459L14.459 3.6899L12.459 1.68991L13.502 0.645905C13.5958 0.552169 13.7229 0.499512 13.8555 0.499512C13.9881 0.499512 14.1152 0.552169 14.209 0.645905L15.502 1.93891V1.93991ZM13.752 4.3959L11.752 2.3959L4.939 9.2099C4.88396 9.26493 4.84253 9.33204 4.818 9.4059L4.013 11.8199C3.9984 11.8639 3.99633 11.9111 4.00701 11.9562C4.0177 12.0014 4.04072 12.0426 4.07351 12.0754C4.10629 12.1082 4.14755 12.1312 4.19267 12.1419C4.23779 12.1526 4.28499 12.1505 4.329 12.1359L6.743 11.3309C6.81676 11.3067 6.88387 11.2656 6.939 11.2109L13.752 4.3959Z" fill="#212529"></path>
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M1 13.4999C1 13.8977 1.15804 14.2793 1.43934 14.5606C1.72064 14.8419 2.10218 14.9999 2.5 14.9999H13.5C13.8978 14.9999 14.2794 14.8419 14.5607 14.5606C14.842 14.2793 15 13.8977 15 13.4999V7.49991C15 7.3673 14.9473 7.24012 14.8536 7.14635C14.7598 7.05258 14.6326 6.99991 14.5 6.99991C14.3674 6.99991 14.2402 7.05258 14.1464 7.14635C14.0527 7.24012 14 7.3673 14 7.49991V13.4999C14 13.6325 13.9473 13.7597 13.8536 13.8535C13.7598 13.9472 13.6326 13.9999 13.5 13.9999H2.5C2.36739 13.9999 2.24021 13.9472 2.14645 13.8535C2.05268 13.7597 2 13.6325 2 13.4999V2.4999C2 2.3673 2.05268 2.24012 2.14645 2.14635C2.24021 2.05258 2.36739 1.9999 2.5 1.9999H9C9.13261 1.9999 9.25979 1.94723 9.35355 1.85346C9.44732 1.75969 9.5 1.63251 9.5 1.4999C9.5 1.3673 9.44732 1.24012 9.35355 1.14635C9.25979 1.05258 9.13261 0.999905 9 0.999905H2.5C2.10218 0.999905 1.72064 1.15794 1.43934 1.43924C1.15804 1.72055 1 2.10208 1 2.4999V13.4999Z" fill="#212529"></path>
+            </svg>
+        </label>
+		<input type="text" name="t132" id="t132_:id:" class="form-control form-control-sm save-input" value="">
+	</div>
+</div>
+<script>
+var timer,lastK,froms,repList=byId('list').innerHTML;
+function getFrom(json){
+    var i,alias,right,f='',h='<option value=""> </option>';
+    for(i in json.object){
+        fi=json.object[i].id;
+        alias=json.reqs[fi]?json.reqs[fi][265]:''
+        right=json.reqs[fi]?json.reqs[fi][266]:''
+        h+='<option value="'+alias+'">'+alias+' / '+json.object[i].val+'</option>';
+        f+='<span id="'+fi+'" class="badge badge-pill badge-outline-secondary border shadow-sm p-2 m-2">'
+                +json.object[i].val+' / '+alias+' / '+right
+            +' <a class="text-primary ml-2" onclick="dropFrom('+fi+')">X</a></span>';
+        $('#58').show();
+    }
+    $('.t-58').html(h);
+    $('.existing-froms').html(f);
+    getCols();
+}
+function fromDone(json){
+    document.location.reload();
+}
+function newFrom(el){
+    $('.empty-val').removeClass('empty-val');
+    $('.add-from-alias,.add-from-left,.add-from-right').each(function(){
+        if(this.value.length===0)
+            $(this).addClass('empty-val');
+    });
+    if($('.empty-val').length>0)
+        return;
+    $(el).prop('disabled',true);
+    var fd = new FormData();
+    fd.append('t265',$('.add-from-alias').val());
+    fd.append('t266','a'+$('.add-from-alias').val()+'.'+$('.add-from-left-field').val()+'=r'+$('.add-from-right').val()+'.'+$('.add-from-right-field').val());
+    newApi('POST','_m_new/44?JSON&up={_global_.id}&t44='+$('.add-from-left').val(),'fromDone',fd);
+}
+function dropFromDone(json){
+    $('#'+json.id).remove();
+    fromDone();
+}
+function dropFrom(i){
+    newApi('POST','_m_del/'+i+'?JSON','dropFromDone');
+}
+function getCols(){
+    myApi('GET','object/28/?F_U={_global_.id}&JSON&LIMIT=1000','select');
+}
+function getFromList(json){
+    froms={};
+    for(var i in json.rep_col_list)
+        if(json.rep_col_list[i].id===json.rep_col_list[i].table)
+            froms[json.rep_col_list[i].id]=json.rep_col_list[i].name;
+    fillInFrom();
+}
+function fillInFrom(){
+    var i,h='<option value="">--- '+t9n('[RU]таблица[EN]table')+' ---</option>',l='<option value="">--- '+t9n('[RU]колонка[EN]column')+' ---</option>';
+    for(i in froms)
+        h+='<option value="'+i+'">'+froms[i]+'</option>';
+    $('.add-from-left').html(h);
+    $('.col-title-wrapper').each(function(){
+        l+='<option value="'+$(this).attr('ref')+'">'+$(this).find('a').html()+'</option>';
+    });
+    $('.add-from-right').html(l);
+}
+function addFrom(){
+    if(!froms)
+        newApi('GET','object/44/?F_U={_global_.id}&JSON&LIMIT=1000','getFromList');
+    else
+        fillInFrom();
+    $('.add-from').show(200);
+}
+function selectTable(v){
+    var i,h=colListTemplate.replace(/:id:/g,'')
+                            .replace(':val:',t9n('[RU]выберите колонку[EN]Select the column'));
+    for(i in json.select.rep_col_list)
+        if(json.select.rep_col_list[i].table===v)
+            h+=colListTemplate.replace(/:id:/g,json.select.rep_col_list[i].id)
+                            .replace(':val:',json.select.rep_col_list[i].name);
+    $('#t28').html(h);
+    if($('#t28').find('option[value]').length===2)
+        addCol($('#t28').find('option[value]')[1].id);
+    $('.t-selected').html(getTableName(v));
+    $('.table-column').toggle();
+    $('#t28').focus();
+}
+function getTableName(v){
+    for(i in json.select.rep_col_list)
+        if(json.select.rep_col_list[i].table===v)
+            return json.select.rep_col_list[i].name;
+}
+function copyLink(i){
+    var $temp = $("<input>");
+    $("body").append($temp);
+    $temp.val(i).select();
+    document.execCommand("copy");
+    $temp.remove();
+    $('#copied').show().delay(2500).slideUp(400);
+}
+function seekRep(v){
+    if(lastK==v) return;
+    lastK=v;
+    window.clearTimeout(timer);
+    if(v.length>0){
+        if(v.substring(0,1)!='@'&&v.substring(0,1)!='!')
+            v='%25'+v+'%25';
+        timer=setTimeout(function(){myApi('GET','object/22/?JSON&F_22='+v,'list')},330);
+    }
+}
+function hideList(){
+    if(!byId('queries').classList.contains('hidden'))
+        byId('closeList').click();
+}
+function showCtl(el){ // Mark buttons pressed in case they were pressed before the last action
+    i='r'+el.id;
+    if(byId(i).classList.contains('hidden')){
+        byId(i).classList.remove('hidden');
+        el.classList.add('active')
+    }
+    else{
+        byId(i).classList.add('hidden');
+        el.classList.remove('active')
+    }
+}
+function setInteract(){ // Set Interactive mark and save it's value
+    byId('interactWait').classList.remove('hidden');
+    byId('interact').classList.add('hidden');
+    myApi('POST','_m_set/{_global_.id}?JSON&t95='+(interact?'':1),'interact');
+}
+function setLimit(){ // Set Interactive mark and save it's value
+    byId('limitWait').classList.remove('hidden');
+    byId('limit').classList.add('hidden');
+    myApi('POST','_m_set/{_global_.id}?JSON&t134='+($('#limit').val()),'interact');
+}
+function addCol(val, isId){ // Add a column to the report
+    $('.table-column,#addColWait').toggle();
+    // Prevent creating duplicate names, use Name1, Name2, ...
+    var j=1,seek=true,a=alias[val];
+    if (isId) {
+        a+='ID';
+        while(seek){
+            seek=false;
+            for(i in colNames)
+            if(colNames[i]===a){
+                a = a.slice(0, a.length - 2) + 1 + a.slice(-2);
+                seek=true;
+                break;
+            }
+        }
+    } else {
+        while(seek){
+            seek=false;
+            for(i in colNames)
+            if(colNames[i]===a){
+                a+=(j++);
+                seek=true;
+                break;
+            }
+        }
+    }
+    myApi('POST','_m_new/28?JSON&up={_global_.id}&t28='+val+'&t100='+a,'addCol', isId ? 'isIdCol' : '');
+}
+function addIdCol(el) {
+    const colRef = $(el).closest('.col-title-wrapper').attr('ref');
+    addCol(colRef, true);
+}
+function getReq(id,r){
+    if(json['select'].reqs)
+        if(json['select'].reqs[id]!==undefined)
+            if(json['select'].reqs[id][r]!==undefined)
+                return json['select'].reqs[id][r].replace(/"/gm,'&quot;');
+    return '';
+}
+function align(i){
+    switch(i){
+		case 'PWD':
+		case 'DATE':
+		case 'BOOLEAN':
+			return 'CENTER';
+		case 'NUMBER':
+		case 'SIGNED':
+			return 'RIGHT';
+	}
+	return 'LEFT';
+}
+// Функция для отправки асинхронного запроса по https api с обработкой его результата
+function myApi(m,u,b,vars,index){ // Параметры: метод, адрес, действие - ветка switch, параметры
+    vars=vars||''; // По умолчанию список параметров пуст
+    var h='',i,j,er='',obj=new XMLHttpRequest(); // Объявляем переменную под JSON и API по HTTPS
+    json[u]=[];
+    obj.open(m,'/'+db+'/'+u,true); // Открываем асинхронное соединение заданным методом по нужному адресу
+    if(m=='POST'){ // Если это POST запрос, то передаем заданные параметры
+        obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+        vars='_xsrf='+xsrf+'&'+vars; // добавляем токен xsrf, необходимый для POST-запроса
+        obj.send(vars); // отправляем параметры
+    }
+    else
+        obj.send(); // отправили запрос и теперь будем ждать ответ, а пока - выходим
+    obj.onload=function(e){ // Когда запрос вернет результат - сработает эта функция
+        try{ // в this.responseText лежит ответ от сервера
+            json[b]=JSON.parse(this.responseText); // Пытаемся разобрать ответ как JSON
+        }
+        catch(e){ // Если произошла ошибка при разборе JSON
+            console.log(e); // то выводим детали этой ошибки в консоль браузера
+            console.log(er=this.responseText);
+        }
+        obj.abort(); // Закрываем соединение
+        switch(b){ // Отрабатываем заданную команду - переходим в соответствующую ветку case
+            case 'addCol':
+                $('#addColWait').hide();
+                if (vars.split('&').includes('isIdCol')) {
+                    // get abn_ID field id for a new ID column
+                    lastCreatedIdColumn = json[b].id;
+                }
+            case 'd':
+                go();
+                break;
+            case 'setOrder': // Wait until all orders are updated
+                ordersCount--;
+                if(ordersCount===0)
+                    go();
+                break;
+            case 'ctls': // Controls were updated - Filter, Function, Totals, etc.
+                myApi('GET','report/{_global_.id}?LIMIT=25&JSON','ShowReport');
+            case 'updateCol': // Update a column name - alias
+                if(byId(index))
+                    byId(index).classList.remove('saving');
+                break;
+            case 'interact':
+                $('#interactWait,#limitWait').addClass('hidden');
+                $('#interact,#limit').removeClass('hidden');
+                go();
+                break;
+            case 'list': 
+                if(json[b].object){
+                    for(i in json[b].object)
+                        h+=repList.replace(/:id:/g,json[b].object[i].id).replace(':val:',json[b].object[i].val);
+                    byId('list').innerHTML=h;
+                }
+                else
+                    byId('list').innerHTML=t9n('[RU]Не найдено[EN]Found nothing');
+                byId('queries').classList.remove('hidden');
+                byId('show').classList.add('hidden');
+                break;
+            case 'one': // Get the info on the requested report
+                if(json[b]['obj']){
+                    byId('one').innerHTML=byId('one').innerHTML.replace(/:id:/g,json[b]['obj'].id)
+                                                                .replace(':val:',json[b]['obj'].val);
+                    byId('one').classList.remove('hidden');
+                    byId('interact').checked=interact=(json[b]['reqs'][95]['value']!="");
+                    $('#limit').val(json[b]['reqs'][134]['value']);
+                    if(json[b]['reqs'][261]['arr']) // Fetch manual joins if any
+                        newApi('GET','object/44/?F_U={_global_.id}&JSON&LIMIT=1000','getFrom');
+                    else
+                        getCols();
+                }
+                break;
+            case 'select': // Get the info on the requested report's columns
+                if(json[b]['type']){
+                    var hcolor,htitle,id,ref,dir,order,l='',hide,c=[],control;
+                    for(k in ctl)
+                        c[k]='';
+                    j=0;
+                    for(i in json[b].object){
+                        id=json[b].object[i].id;
+                        ref=json[b].object[i].ref;
+                        var refs = json[b].object?.map(val => val.ref);
+                        // Check if we should add ID button to the header
+                        let shouldDrawIdButton = false;
+                        const colName = json[b].reqs[id]?json[b].reqs[id][100]:undefined;
+                        const colBase = json[b].rep_col_list.find?json[b].rep_col_list.find(val => val.id === ref):undefined;
+                        if(colName)
+                            if (colBase?.type === colBase?.table && ref !== "0" && colName && colName.slice(-2) !== "ID" && refs.filter(val => val === ref).length < 2)
+                                shouldDrawIdButton = true;
+                        // The report table header
+                        h+='<td class="rth pt-2 pl-2 pr-2"><center><div class="col-title-wrapper" ref="'+ref+'" id="'+id+'">'+drawCol(id, shouldDrawIdButton)+'</div>';
+                        // Hidden/non-hidden fields
+                        if(getReq(id,107)===''){
+                            hcolor='aaaaaa';
+                            htitle=t9n('[RU]Кликните, чтобы скрыть колонку в отчете[EN]Click to hide this column in the report');
+                            l+='<td align=":align'+j+':">:'+j+':</td>'; // a non-hidden report line
+                            j++;
+                            t107=1;
+                        }
+                        else{
+                            hcolor='222222';
+                            htitle=t9n('[RU]Скрытое поле[EN]Hidden column. Click to unhide');
+                            l+='<td> </td>' // a hidden report line
+                            t107='';
+                        }
+                        // Buttons under the column name
+                        h+='<nobr><img class="icon8 ileft" onclick="this.src=\'/i/ajax.gif\';d(\'up\','+id+')" src="https://img.icons8.com/ios/25/aaaaaa/chevron-left.png" title="'
+                                +t9n('[RU]Переместить колонку левее[EN]Move the column left')+'">'
+                            +'<img class="icon8" onclick="this.src=\'/i/ajax.gif\';d(\'set\','+id+',\'t107='+t107+'\')" src="https://img.icons8.com/ios/25/'+hcolor+'/hide.png" title="'+htitle+'">'
+                            +'<img class="icon8 iright" onclick="d(\'del\','+id+');colNames['+id+']=undefined" src="https://img.icons8.com/ios/25/aaaaaa/delete.png" title="'
+                                +t9n('[RU]Удалить колонку[EN]Delete the column')+'"><nobr></center></td>';
+                        // Column control lines: Filter, Function, Totals, etc.
+                        for(k in ctl){
+                            c[k]+='<td style="border: none;" class="p-0" id="td'+ctl[k]+'_'+id+'">';
+                            control=(i==0?byId(ctl[k]).innerHTML:'')+'<br />';
+                            control+=byId('template'+ctl[k]).innerHTML.replace(/:t:/g,ctl[k]).replace(/:id:/g,id);
+                            if(getReq(id,'ref_'+ctl[k])!=='') // Reference - select input
+                                control=control.replace('value="'+getReq(id,'ref_'+ctl[k]).split(':')[1]+'"','value="'+getReq(id,'ref_'+ctl[k]).split(':')[1]+'" selected');
+                            if(getReq(id,58)!=='') // Alias - select input
+                                control=control.replace('value="'+getReq(id,58)+'"','value="'+getReq(id,58)+'" selected');
+                            else if(ctl[k]==102){ // Range input for Filter
+                                control=control.replace('id="t102_'+id+'" value=""','id="t102_'+id+'" value="'+getReq(id,102)+'"')
+                                                .replace('id="t103_'+id+'" value=""','id="t103_'+id+'" value="'+getReq(id,103)+'"');
+                            }
+                            else if(ctl[k]==105){ // Range input for HAVING
+                                control=control.replace('id="t105_'+id+'" value=""','id="t105_'+id+'" value="'+getReq(id,105)+'"')
+                                                .replace('id="t106_'+id+'" value=""','id="t106_'+id+'" value="'+getReq(id,106)+'"');
+                            }
+                            else if(ctl[k]==109){ // Order
+                                dir=getReq(id,ctl[k]);
+                                order=Math.abs(dir);
+                                if(dir=='')
+                                    control+='<img onclick="this.src=\'/i/ajax.gif\';setOrder('+id+',0,1)" title="'+t9n('[RU]Включить сортировку[EN]Set the order by this column')
+                                            +'" class="icon8" src="https://img.icons8.com/ios/25/aaaaaa/generic-sorting-2.png"/>';
+                                else{
+                                    if(order==1)
+                                        control+='<img title="'+t9n('[RU]В первую очередь сортировка по этой колонке[EN]First, the report is ordered by this column')
+                                                +'" class="icon8" src="https://img.icons8.com/ios/25/222222/'+order+'.png"/>';
+                                    else
+                                        control+='<img onclick="this.src=\'/i/ajax.gif\';setOrder('+id+','+dir+','+(order-1)+')" title="'+t9n('[RU]Очередность сортировки. Кликните, чтобы повысить.[EN]Ordering sequence. Click to rise.')
+                                                +'" class="icon8" src="https://img.icons8.com/ios/25/222222/'+order+'.png"/>';
+                                    if(dir>0)
+                                        control+='<img title="'+t9n('[RU]Сортировка по возрастанию. Кликните, чтобы обратить[EN]Ascending order. Click to revert')
+                                                +'" onclick="this.src=\'/i/ajax.gif\';d(\'set\','+id+',\'t109='+(-dir)+'\')" class="icon8" src="https://img.icons8.com/ios/25/222222/generic-sorting-2.png"/>';
+                                    else
+                                        control+='<img title="'+t9n('[RU]Сортировка по убыванию. Кликните, чтобы обратить[EN]Descending order. Click to revert')
+                                                +'" onclick="this.src=\'/i/ajax.gif\';d(\'set\','+id+',\'t109='+(-dir)+'\')" class="icon8" src="https://img.icons8.com/ios/25/222222/generic-sorting.png"/>';
+                                    control+='<img title="'+t9n('[RU]Удалить сортировку[EN]Remove the ordering')
+                                            +'" onclick="this.src=\'/i/ajax.gif\';setOrder('+id+',0,\'\')" class="icon8" src="https://img.icons8.com/ios/25/222222/delete-sign.png"/>';
+                                }
+                            }
+                            else
+                                control=control.replace('value=""','value="'+getReq(id,ctl[k]).replace(/"/g,'\"')+'" title="'+getReq(id,ctl[k]).replace(/"/g,'\"')+'"');
+                            c[k]+=control+'</td>';
+                        }
+                    }
+                    // Construct the control lines
+                    for(k in ctl)
+                        c[k]='<tr style="border: 1px" id="r'+ctl[k]+'" class="'+(byId(ctl[k]).classList.contains('active')?'':'hidden')+'">'+c[k]+'</tr>';
+                    // The template for the data line
+                    rbody='<tr>'+l+'</tr>';
+                    // Table: Header (h) + Control lines (c) + Data (rbody as a template)
+                    byId('ShowReport').innerHTML='<table class="table table-bordered table-sm"><thead><tr>'+h+c.join('')+'</thead><tbody id="rbody" style="display:none;">'+rbody+'</body></table>';
+                    // A list of columns available to add to the report
+                    h=colListTemplate.replace(/:id:/g,'')
+                                    .replace(':val:',t9n('[RU]выберите таблицу[EN]Select table'));
+                    var suffix;
+                    for(i in json[b].rep_col_list){
+                        if(json[b].rep_col_list[i].table===json[b].rep_col_list[i].id){
+                            if(json[b].rep_col_list[parseInt(i)+1]&&json[b].rep_col_list[parseInt(i)+1].table===json[b].rep_col_list[i].id)
+                                suffix='...';
+                            else
+                                suffix='';
+                            h+=colListTemplate.replace(/:id:/g,json[b].rep_col_list[i].id)
+                                            .replace(':val:',json[b].rep_col_list[i].name+suffix);
+                        }
+                        alias[json[b].rep_col_list[i].id]=json[b].rep_col_list[i].name.split(' -> ').pop();
+                    }
+                    $('#table').html(h);
+                    // Request the report data
+                    myApi('GET','report/{_global_.id}?LIMIT=25&JSON','ShowReport');
+                    // Listeners to auto-save the changed control line values
+                    $('.save-input').focusout(function(){ // Text input fields
+                        updateValue(this);
+                    });
+                    $('.save-input').focusin(function(){ // Text input fields - get current element for Date DDs
+                        curEl=this;
+                    });
+                    $('.onchange').change(function(){ // Dropdown lists
+                        updateValue(this);
+                    });
+                    $('.save-input').keyup(function(){ // Text input fields on Enter pressed
+                        if(event.keyCode==13)
+                            updateValue(this);
+                    });
+                    colorBtns();
+                    addTextareaListeners();
+                    if (lastCreatedIdColumn > 0) {
+                        $('#t104_' + lastCreatedIdColumn).val(85).change();
+                        lastCreatedIdColumn = 0;
+                    }
+                }
+                break;
+            case 'ShowReport': // Construct the report table
+                if(er!=''){ // There were errors during report retrieval
+                    byId('warning').innerHTML=er.replace(/<A.+<\/a>/i,''); // Clean up the links if any
+                    byId('warning').classList.remove('hidden');
+                }
+                else if(json[b]["data"]){
+                    byId('warning').classList.add('hidden');
+                    for(i in json[b]["data"][0]){ // Data lines
+                        el=rbody;
+                        for(j in json[b]["data"])
+                            el=el.replace('>:'+j+':<','>'+json[b]["data"][j][i]+'<')
+                                .replace(':align'+j+':',align(json[b]["columns"][j].format));
+                        h+=el;
+                    }
+                    if(json[b]["columns"][0]["totals"]!==undefined){ // Fill in Total lines, if any
+                        el=rbody;
+                        for(j in json[b]["data"])
+                            el=el.replace(':'+j+':','<b>'+json[b]["columns"][j]["totals"]+'</b>')
+                                .replace(':align'+j+':',align(json[b]["columns"][j].format));
+                        h+=el;
+                    }
+                    byId('rbody').innerHTML=h;
+                    var id;
+                    for(i in json[b]["columns"]) // Update DATE fields with keyword dropdowns
+                        if(json[b]["columns"][i].format=='DATE')
+                            if(dateDDFilledIn[json[b]["columns"][i].id]==undefined){
+                                id=json[b]["columns"][i].id;
+                    		    $('#t102_'+id).attr("data-toggle", "dropdown");
+                    		    $('#t102_'+id).attr("autocomplete", "off");
+                    		    $('#t103_'+id).attr("data-toggle", "dropdown");
+                    		    $('#t103_'+id).attr("autocomplete", "off");
+                    		    byId('dd102_'+id).innerHTML+=byId('date_dd').innerHTML.replace(/:t:/g,'102').replace(/:id:/g,id);
+                                dateDDFilledIn[id]=true;
+                            }
+                }
+                else{
+                    byId('warning').innerHTML=t9n('[RU]Пустой отчет[EN]Empty report');
+                    byId('warning').classList.remove('hidden');
+                }
+                $('#rbody').show();
+                break;
+
+        }
+    }
+}
+var ordersCount;
+function setOrder(id,dir,order){ // Set the order control
+    ordersCount=0;
+    for(i in json['select'].reqs)
+        if(json['select'].reqs[i][109]!==undefined)
+            if(order===''){ // Move others up in case we delete an order value
+                if(Math.abs(json['select'].reqs[i][109])>json['select'].reqs[id][109])
+                    myApi('POST','_m_set/'+i+'?JSON&a1&t109='+(parseInt(json['select'].reqs[i][109])-Math.sign(json['select'].reqs[i][109])),'setOrder','',ordersCount++);
+            }
+            else if((Math.abs(json['select'].reqs[i][109])<=order)||(dir===0)) // Move others down in case we add a new ordering
+                myApi('POST','_m_set/'+i+'?JSON&a2&t109='+(Math.sign(json['select'].reqs[i][109])+parseInt(json['select'].reqs[i][109])),'setOrder','',ordersCount++);
+    myApi('POST','_m_set/'+id+'?JSON&a3&t109='+order,'setOrder','',ordersCount++); // Save the initially changed order value
+}
+function colorBtns(){ // Color the buttons blue in case there are filled in control under them
+    for(var i in ctl)
+        byId(ctl[i]).classList.add('btn-outline-secondary');
+    if(json['select'].reqs==undefined)
+        return;
+    for(i in json['select'].reqs)
+        for(var j in json['select'].reqs[i])
+            if(byId(k=j.replace('ref_',''))&&(json['select'].reqs[i][j]!=''))
+                if(byId(k).classList.contains('btn-outline-secondary')){
+                    byId(k).classList.remove('btn-outline-secondary');
+                    byId(k).classList.add('btn-outline-primary');
+                    $('#'+k).show();
+                }
+}
+function updateValue(i){ // Save the updated control value
+    var obj=i.id.split('_')[1],req=i.id.split('_')[0].substr(1);
+    if(getReq(obj,req)==i.value)
+        return;
+    if($(i).attr('name')==='t101')
+        if(['id','t','ord','up','val'].indexOf(i.value)!==-1)
+            $(i).val(i.value.toUpperCase());
+    setReq(obj,req,i.value);
+    i.className+=' saving';
+    myApi('POST','_m_set/'+obj+'?JSON&t'+req+'='+encodeURIComponent(i.value),'ctls','',i.id);
+}
+function setReq(id,t,v){ // Save the changed value in the local array
+    if(json['select'].reqs==undefined)
+        json['select'].reqs=[];
+    if(json['select'].reqs[id]==undefined)
+        json['select'].reqs[id]=[];
+    json['select'].reqs[id][t]=v;
+}
+function d(d,i,v){ // Do the DML command and re-draw the report
+    v=v||'';
+    myApi('POST','_m_'+d+'/'+i+'?JSON&'+v,'d');
+}
+function drawCol(id, drawIdButton){
+    if (drawIdButton) {
+        return '<a title="'+colOrigName(id)+'" onclick="activate('+id+')">'+colAlias(id)+'</a><span onclick="addIdCol(this)" title="'+t9n('[RU]Кликните, чтобы добавить колонку-идентификатор для данной колонки[EN]Click to add column for the current column')+'" class="add-id-for-col">ID</span>';
+    } else {   
+        return '<a title="'+colOrigName(id)+'" onclick="activate('+id+')">'+colAlias(id)+'</a>';
+    }
+}
+function colAlias(id){ // In case the alias is not set, use the original object name, referenced by the column
+    colNames[id]=getReq(id,100);
+    if(colNames[id]==='')
+        for(i in json['select'].object)
+            if(json['select'].object[i].id==id)
+                colNames[id]=json['select'].object[i].val;
+    return colNames[id];
+}
+function colOrigName(id){ // The Object referenced by this column
+    for(i in json['select'].object)
+        if(json['select'].object[i].id==id)
+            return json['select'].object[i].val;
+}
+function deActivate(id){ // Deactivate the column name edit field upon a focus change
+    if(byId(id))
+        byId(id).innerHTML=drawCol(id);
+    active=undefined;
+}
+function activate(id){ // Activate the column name edit field upon click
+    if(active==id)
+        return;
+    deActivate(active);
+    active=id;
+    // COnstruct the input field to edit the column name
+    byId(id).innerHTML='<input type="text" id="c'+id+'" class="edit-col-title-input form-control form-control-sm" onkeyup="if(event.keyCode==13)updateCol(this)" onfocusout="updateCol(this);deActivate('+id+')" value="'+colAlias(id)+'">';
+    byId('c'+id).focus();
+}
+function updateCol(i){ // Save the updated column name - alias
+    var id=i.id.substr(1);
+    if(colNames[id]==i.value)
+        return;
+    i.className+=' saving';
+    setReq(id,100,i.value);
+    colNames[id]=i.value;
+    myApi('POST','_m_set/'+id+'?JSON&t100='+encodeURIComponent(i.value),'updateCol','',i.id);
+}
+function go(){ // Re-draw the header and the report
+    byId('warning').classList.add('hidden');
+    $('#rbody').hide();
+    myApi('GET','edit_obj/{_global_.id}?JSON','one');
+}
+function addTextareaListeners() {
+    const COLORS = ['78AAD2','78AAFF','78D2AA','78D2FF','78FFAA','78FFD2','AA78D2','AA78FF','AAD278','AAD2FF','AAFF78','AAFFD2','D278AA','D278FF','D2AA78','D2AAFF','D2FF78','D2FFAA','FF78AA','FF78D2','FFAA78','FFAAD2','FFD278','FFD2AA'];
+    let lastClickedElement = null;
+
+    $('[id*="t102"],[id*="t103"],[id*="t101"],[id*="t105"],[id*="t106"],[id*="t132"]').click(function(e) {
+        const textareaSelector = 'textarea[id=' + $(this).attr('id') + '_text]';
+        if ($(textareaSelector).length > 0) {
+            $(textareaSelector).focus();
+            return;
+        };
+        $(this).prev().addClass('active');
+    });
+    // $('[id*="t102"],[id*="t103"],[id*="t101"],[id*="t105"],[id*="t106"],[id*="t132"]').mouseleave(function(e) {
+    //     $(this).prev().removeClass('active');
+    // });
+
+    $('[id*="t102"],[id*="t103"],[id*="t101"],[id*="t105"],[id*="t106"],[id*="t132"]').siblings('label').click(function(e) {
+        const label = $(e.currentTarget);
+        const inputSelector = $($(this).next('input'));
+        $(inputSelector).addClass('active-input');
+        if ($('textarea[id=' + inputSelector.attr('id') + '_text]').length > 0) return;
+        
+        // setting color style
+        const random_color = COLORS[Math.floor(Math.random() * COLORS.length)] + '66';
+        inputSelector[0].style.backgroundColor = "#" + random_color;
+
+        const textareaBg = '#' + random_color;
+        const newTextareaHtml = `
+            <div class="textarea-container">
+                <textarea rows="3" style="${'width:100%;background-color:' + textareaBg};" name="textarea_formula" id="${inputSelector.attr('id')}_text"></textarea>
+                <div class="textarea-controls">
+                    <button id="${inputSelector.attr('id')}_save" class="btn btn-textarea-save">
+                        <svg width="18" height="18" viewBox="0 0 18 18" fill="#fff" xmlns="http://www.w3.org/2000/svg">
+                            <path fill-rule="evenodd" clip-rule="evenodd" d="M4 0H13L18 5V14C18 16.2091 16.2091 18 14 18H4C1.79086 18 0 16.2091 0 14V4C0 1.79086 1.79086 0 4 0ZM15.7878 15.7878C16.2616 15.3141 16.5254 14.67 16.52 14L16.55 5.64L12.39 1.48H4C3.33002 1.47462 2.68592 1.73839 2.21215 2.21215C1.73839 2.68592 1.47462 3.33002 1.48 4V14C1.47462 14.67 1.73839 15.3141 2.21215 15.7878C2.68592 16.2616 3.33002 16.5254 4 16.52H14C14.67 16.5254 15.3141 16.2616 15.7878 15.7878Z" fill="#fff"/>
+                            <path d="M10.53 3.59H3.1C2.68579 3.59 2.35 3.92579 2.35 4.34C2.35 4.75421 2.68579 5.09 3.1 5.09H10.53C10.9442 5.09 11.28 4.75421 11.28 4.34C11.28 3.92579 10.9442 3.59 10.53 3.59Z" fill="#fff"/>
+                            <path fill-rule="evenodd" clip-rule="evenodd" d="M3.25407 10.9502C3.58632 10.1534 4.36669 9.63593 5.23 9.63998C6.40084 9.63998 7.35 10.5891 7.35 11.76C7.35404 12.6233 6.83657 13.4037 6.03975 13.7359C5.24292 14.0681 4.32435 13.8866 3.71389 13.2761C3.10343 12.6656 2.92183 11.7471 3.25407 10.9502ZM4.64087 12.0081C4.74155 12.2431 4.97432 12.394 5.23 12.39C5.57403 12.3845 5.85004 12.104 5.85 11.76C5.84997 11.5043 5.69537 11.2739 5.45872 11.177C5.22208 11.0801 4.95034 11.1359 4.77097 11.3182C4.59161 11.5004 4.5402 11.773 4.64087 12.0081Z" fill="#fff"/>
+                        </svg>    
+                    </button>
+                    <button id="${inputSelector.attr('id')}_cancel" class="btn btn-textarea-cancel">
+                        <svg width="18" height="18" viewBox="0 0 20 20" fill="#fff" xmlns="http://www.w3.org/2000/svg">
+                            <path fill-rule="evenodd" clip-rule="evenodd" d="M4 0H16C18.2091 0 20 1.79086 20 4V16C20 18.2091 18.2091 20 16 20H4C1.79086 20 0 18.2091 0 16V4C0 1.79086 1.79086 0 4 0ZM17.7678 17.7678C18.2366 17.2989 18.5 16.663 18.5 16V4C18.5 3.33696 18.2366 2.70107 17.7678 2.23223C17.2989 1.76339 16.663 1.5 16 1.5H4C2.61929 1.5 1.5 2.61929 1.5 4V16C1.5 16.663 1.76339 17.2989 2.23223 17.7678C2.70107 18.2366 3.33696 18.5 4 18.5H16C16.663 18.5 17.2989 18.2366 17.7678 17.7678Z" fill="#fff"/>
+                            <path d="M13.69 6.73C13.3972 6.43755 12.9228 6.43755 12.63 6.73L10.21 9.15L7.79 6.73C7.49449 6.45464 7.03399 6.46277 6.74838 6.74838C6.46277 7.03399 6.45464 7.49449 6.73 7.79L9.15 10.21L6.73 12.63C6.43755 12.9228 6.43755 13.3972 6.73 13.69C7.02282 13.9825 7.49718 13.9825 7.79 13.69L10.21 11.27L12.63 13.69C12.7705 13.8307 12.9612 13.9098 13.16 13.91C13.358 13.9057 13.5472 13.8272 13.69 13.69C13.9825 13.3972 13.9825 12.9228 13.69 12.63L11.27 10.21L13.69 7.79C13.9825 7.49718 13.9825 7.02282 13.69 6.73Z" fill="#fff"/>
+                        </svg>    
+                    </button>
+                </div>
+            </div>
+        `;
+        // Insert new textarea, order RTL,TTB
+        // Getting the number of active inputs before the current input to find out a position 
+        let index = $(inputSelector).prevAll().find('.active-input').length +
+                    $(inputSelector).parent().prevAll().find('.active-input').length +
+                    $(inputSelector).parent().parent().prevAll().find('.active-input').length;
+
+        if (!$('.textarea-container').length) {
+            inputSelector.closest('#ShowReport').before(newTextareaHtml);
+        } else {
+            if (index > 0) {
+                $($('.textarea-container')[index - 1]).after(newTextareaHtml);
+            } else {
+                $($('.textarea-container')[index]).before(newTextareaHtml);
+            }
+        }
+        
+        const newTextarea = $('[id="' + inputSelector.attr('id') + '_text"]');
+        newTextarea.keydown(function(event){ // Text input fields on Enter pressed
+            if(event.key === 'Enter' && !event.shiftKey)
+                saveTextareaValue(newTextarea, inputSelector);
+            if(event.key === 'Escape')
+                removeTextarea(newTextarea);
+        });
+        newTextarea.focus();
+        newTextarea.val($(inputSelector).val());
+        // Later
+        // newTextarea.blur(function(e) {
+        //     const newTarget = e.relatedTarget;
+        //     if (lastClickedElement && lastClickedElement.tagName === 'TD' && $(lastClickedElement).parent().parent().is('tbody')) {
+        //         insertValueToTextarea(newTextarea, lastClickedElement.textContent);
+        //         $(this).focus();
+        //     } else if ($(newTarget).not('textarea').is('[id*="t102"],[id*="t103"],[id*="t101"],[id*="t105"],[id*="t106"],[id*="t132"],tbody tr td')) {
+        //         insertValueToTextarea(newTextarea, $(newTarget).val());
+        //         $(this).focus();
+        //     }
+        // });
+        
+        const saveButtonSelector = $(newTextarea).next().find('.btn-textarea-save');
+        $(saveButtonSelector).click(function(e) {
+            saveTextareaValue(newTextarea, inputSelector);
+        })
+        const cancelButtonSelector = $(newTextarea).next().find('.btn-textarea-cancel');
+        $(cancelButtonSelector).click(function(e) {
+            removeTextarea(newTextarea);
+        })
+    });
+    // Getting last clicked element (to be able to detect <td>'s on textarea blur)
+    $(document).mousedown(function(e) {
+        lastClickedElement = e.target;
+    });
+    // Remove edit buttons from inputs
+    $(document).mouseup(function(e) {
+        if (!$(e.target).hasClass('active')) {
+            $('label.active').removeClass('active');
+        }
+    });
+}
+function saveTextareaValue(newTextarea, inputSelector) {
+    const inputId = $(newTextarea).attr('id').slice(0, -5);
+    $(inputSelector).val($(newTextarea).val());
+    $(inputSelector).focusout();
+    removeTextarea(newTextarea);
+}
+function removeTextarea(textareaSelector) {
+    const inputId = $(textareaSelector).attr('id').slice(0, -5);
+    // Remove textarea
+    $(textareaSelector).parent().remove();
+    // Get back to normal
+    $('[id="' + inputId + '"]').removeClass('active-input');
+    $('[id="' + inputId + '"]').css('background-color', 'white');
+    // $('[id="' + inputId + '"]').css('box-shadow', 'none');
+}
+function insertValueToTextarea(newTextarea, value) {
+    const textareaSelector = $(newTextarea)[0];
+    if (textareaSelector.selectionStart || textareaSelector.selectionStart == '0') {
+        var startPos = textareaSelector.selectionStart;
+        var endPos = textareaSelector.selectionEnd;
+        textareaSelector.value = textareaSelector.value.substring(0, startPos)
+            + value
+            + textareaSelector.value.substring(endPos, textareaSelector.value.length);
+        textareaSelector.selectionStart = startPos + value.length; 
+        textareaSelector.selectionEnd = startPos + value.length;
+    } else {
+        textareaSelector.value += value;
+    }
+}
+document.title=t9n('[RU]Конструктор запросов[EN]Query builder');
+var rbody,active=-1,alias=[],colNames={},rep=[],json=[],colListTemplate=$('#table').html(),dateDDFilledIn=[],curEl,ctl=['102','84','104','109','72','101','105','132','58'],lastCreatedIdColumn=0;
+if('{_global_.id}'=='')
+    byId('showanchor').click();
+else // In case a report is requested - draw it
+    go();
+</script>
