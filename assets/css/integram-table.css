@@ -103,7 +103,7 @@
     transition: var(--md-transition);
     font-weight: 500;
     font-size: 14px;
-    color: var(--md-primary);
+    color: #6c757d;
     background: transparent;
     border: none;
 }
