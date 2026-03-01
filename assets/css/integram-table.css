@@ -125,14 +125,18 @@
     overflow: overlay;
 }
 
+.btn-outline-secondary:hover {
+    background-color: #eaeaea !important;
+}
+
 .integram-table th {
     background: var(--md-surface);
     padding: 16px;
     text-align: left;
     font-weight: 500;
     font-size: 12px;
-    letter-spacing: 0.4px;
-    text-transform: uppercase;
+    /* letter-spacing: 0.4px;
+    text-transform: uppercase; */
     color: var(--md-text-secondary);
     border-bottom: 1px solid var(--md-divider);
     border-left: none;
