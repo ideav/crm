@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{_global_.action} - {_global_.z}</title>
+    <link rel="stylesheet" href="/css/styles.css">
+    <link rel="stylesheet" href="https://unpkg.com/primeicons/primeicons.css">
+    <link rel="stylesheet" href="/css/main-app.css">
+    <script>
+        var db = '{_global_.z}',
+            xsrf = '{_global_.xsrf}',
+            id = '{_global_.id}',
+            token = '{_global_.token}',
+            uid = '{_global_.user_id}',
+            user = '{_global_.user}',
+            role = '{_global_.role}',
+            action = '{_global_.action}';
+    </script>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+        <div class="navbar-left">
+            <a href="/{_global_.z}/" class="navbar-brand">
+                <img src="/images/logo.png" alt="Logo" class="logo">
+                <span class="brand-name">{_global_.z}</span>
+            </a>
+        </div>
+        <div class="navbar-right">
+            <div class="user-menu-wrapper">
+                <button id="user-menu-toggle" class="account-info" type="button" title="User menu">
+                    <div id="account-avatar" class="account-avatar">{_global_.user}</div>
+                    <span id="account-email" class="account-email">{_global_.user}</span>
+                    <span class="user-menu-arrow">&#9660;</span>
+                </button>
+                <div id="user-menu-dropdown" class="user-menu-dropdown" style="display: none;">
+                    <!-- Begin: showCabinet --><!--{_global_.z}-->
+                    <a href="/my" class="user-menu-item">
+                        <span class="user-menu-icon">&#128100;</span>
+                        <span>Личный кабинет</span>
+                    </a>
+                    <div class="user-menu-divider"></div>
+                    <!-- End: showCabinet -->
+                    <button id="theme-toggle" class="user-menu-item" type="button">
+                        <span class="user-menu-icon" id="theme-icon">&#127769;</span>
+                        <span>Тема</span>
+                        <span class="user-menu-value" id="theme-value">Темная</span>
+                    </button>
+                    <div class="user-menu-divider"></div>
+                    <button id="logout-btn" class="user-menu-item user-menu-item-danger" type="button">
+                        <span class="user-menu-icon">&#128682;</span>
+                        <span>Выйти</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Application Layout -->
+    <div class="app-layout">
+        <!-- Left Sidebar Menu -->
+        <aside class="app-sidebar" id="app-sidebar">
+            <button id="sidebar-toggle" class="sidebar-toggle" type="button" title="Toggle menu" aria-label="Toggle sidebar">&#9776;</button>
+            <nav class="app-menu" id="app-menu">
+                <!-- Begin: MyRoleMenu -->
+                <a href="/{_global_.z}/{HREF}" class="app-menu-item" data-href="{HREF}">
+                    <span class="menu-icon">&#128196;</span>
+                    <span class="menu-text">{Name}</span>
+                </a>
+                <!-- End: MyRoleMenu -->
+            </nav>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="app-content">
+            <!-- File: a -->
+        </main>
+    </div>
+
+    <script src="/js/app.js"></script>
+    <script src="/js/main-app.js"></script>
+</body>
+</html>
