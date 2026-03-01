@@ -131,11 +131,11 @@
 }
 
 .integram-table th {
-    background: var(--md-surface);
-    padding: 16px;
+    background-color: #f5f5f5;
+    padding: 10px;
     text-align: left;
     font-weight: 500;
-    font-size: 14px;
+    font-size: 12px;
     /* letter-spacing: 0.4px;
     text-transform: uppercase; */
     color: var(--md-text-secondary);
@@ -151,7 +151,7 @@
 
 .integram-table th:first-child {
     border-left: none;
-    padding-left: 12px;
+    padding-left: 10px;
 }
 
 .integram-table th:last-child {
@@ -244,18 +244,18 @@
 }
 
 .integram-table td {
-    padding: 16px;
+    padding: 10px;
     border-bottom: 1px solid var(--md-divider);
     border-left: none;
     border-right: 1px solid rgba(0, 0, 0, 0.06);
     color: var(--md-text-primary);
-    font-size: 14px;
+    font-size: 13px;
     letter-spacing: 0.25px;
 }
 
 .integram-table td:first-child {
     border-left: none;
-    padding-left: 12px;
+    padding-left: 10px;
 }
 
 .integram-table td:last-child {
