@@ -1063,7 +1063,7 @@ class IntegramTable {
                             ` : '' }
                             ${ this.groupingEnabled ? `
                             <button class="btn btn-sm btn-outline-secondary me-1" onclick="window.${ instanceName }.clearGrouping()" title="Очистить группировку">
-                                <i class="pi pi-filter-slash" style="vertical-align: middle;"></i>
+                                <i class="pi pi-undo" style="vertical-align: middle;"></i>
                             </button>
                             ` : '' }
                             <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.openGroupingSettings()">
