@@ -1326,6 +1326,9 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    /* Prevent Bootstrap 5.3 from stretching buttons (issue #612) */
+    flex: 0 0 auto;
+    width: auto;
 }
 
 .form-field-settings-footer .btn-primary {
