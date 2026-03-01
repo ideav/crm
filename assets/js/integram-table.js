@@ -138,6 +138,8 @@ class IntegramTable {
             this.filterTypes['MEMO'] = this.filterTypes['CHARS'];
             this.filterTypes['DATETIME'] = this.filterTypes['DATE'];
             this.filterTypes['SIGNED'] = this.filterTypes['NUMBER'];
+            this.filterTypes['GRANT'] = this.filterTypes['NUMBER'];
+            this.filterTypes['REPORT_COLUMN'] = this.filterTypes['NUMBER'];
 
             this.init();
         }
@@ -165,8 +167,8 @@ class IntegramTable {
                 '2': 'HTML',       // HTML
                 '7': 'BUTTON',     // Button
                 '6': 'PWD',        // Password
-                '5': 'NUMBER',     // Grant (treat as number for filters)
-                '16': 'NUMBER',    // Report column (treat as number for filters)
+                '5': 'GRANT',      // Grant (dropdown select)
+                '16': 'REPORT_COLUMN', // Report column (dropdown select)
                 '17': 'CHARS'      // Path (treat as string for filters)
             };
 
