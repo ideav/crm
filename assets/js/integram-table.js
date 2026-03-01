@@ -3102,7 +3102,9 @@ class IntegramTable {
             }
 
             const apiBase = this.getApiBase();
-            const url = `${apiBase}/_m_new/${typeId}?JSON&up=1`; // ${parentRecordId || 1}
+            // Issue #616: Use F_U from URL as parent (up) when F_U > 1
+            const parentIdForNew = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
+            const url = `${apiBase}/_m_new/${typeId}?JSON&up=${parentIdForNew}`;
 
             try {
                 const response = await fetch(url, {
@@ -5699,7 +5701,9 @@ class IntegramTable {
                 // Pre-fill reference fields from URL @id filters (issue #553)
                 // When URL has FR_{colId}=@{id}, auto-select that id in the create form
                 const prefillReqs = this.buildRefIdPrefillFromUrlFilters(metadata);
-                const createRecordData = prefillReqs ? { obj: { val: '', parent: 1 }, reqs: prefillReqs } : null;
+                // Issue #616: Use F_U from URL as parent when F_U > 1
+                const parentForCreate = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
+                const createRecordData = prefillReqs ? { obj: { val: '', parent: parentForCreate }, reqs: prefillReqs } : null;
 
                 // Render create form with pre-filled values from URL filters
                 this.renderEditFormModal(metadata, createRecordData, true, typeId, columnId);
@@ -6225,7 +6229,9 @@ class IntegramTable {
             const title = isCreate ? `Создание: ${ typeName }` : `Редактирование: ${ firstColumnValue || typeName }`;
             const instanceName = this.options.instanceName;
             const recordId = recordData && recordData.obj ? recordData.obj.id : null;
-            const parentId = recordData && recordData.obj ? recordData.obj.parent : 1;
+            // Issue #616: For create mode, use F_U from URL as parent when F_U > 1
+            const defaultParentId = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
+            const parentId = recordData && recordData.obj && recordData.obj.parent ? recordData.obj.parent : defaultParentId;
 
             // Build record ID and table link HTML for edit mode (issue #563)
             let recordIdHtml = '';
@@ -8325,7 +8331,9 @@ class IntegramTable {
             }
 
             const apiBase = this.getApiBase();
-            const url = `${apiBase}/_m_new/${typeId}?JSON&up=1`;
+            // Issue #616: Use F_U from URL as parent (up) when F_U > 1
+            const parentIdForNew = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
+            const url = `${apiBase}/_m_new/${typeId}?JSON&up=${parentIdForNew}`;
 
             try {
                 const response = await fetch(url, {
