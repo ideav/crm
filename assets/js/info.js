@@ -30,7 +30,7 @@
 
                 html += `
                     <a href="${url}" class="quick-link-badge${isPriority ? ' priority' : ''}" target="${queryId}">
-                        ${isPriority ? '<span class="icon">⚡</span>' : ''}
+                        ${isPriority ? '<span class="icon"><i class="pi pi-bolt"></i></span>' : ''}
                         ${label}
                     </a>
                 `;

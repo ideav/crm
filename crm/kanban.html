@@ -1382,17 +1382,17 @@ function renderCard(task){
     // Phone icon (on top)
     var hasPhone = task['Телефон'] && task['Телефон'].trim() !== '';
     if(hasPhone){
-        html += '<span class="kanban-card-contact-icon active" title="' + task['Телефон'] + '" onclick="copyContact(\'' + task['Телефон'] + '\', \'phone\', event)">📞</span>';
+        html += '<span class="kanban-card-contact-icon active" title="' + task['Телефон'] + '" onclick="copyContact(\'' + task['Телефон'] + '\', \'phone\', event)"><i class="pi pi-phone"></i></span>';
     } else {
-        html += '<span class="kanban-card-contact-icon inactive" title="Телефон недоступен">📞</span>';
+        html += '<span class="kanban-card-contact-icon inactive" title="Телефон недоступен"><i class="pi pi-phone"></i></span>';
     }
 
     // Email icon (below)
     var hasEmail = task['Email'] && task['Email'].trim() !== '';
     if(hasEmail){
-        html += '<span class="kanban-card-contact-icon active" title="' + task['Email'] + '" onclick="copyContact(\'' + task['Email'] + '\', \'email\', event)">📧</span>';
+        html += '<span class="kanban-card-contact-icon active" title="' + task['Email'] + '" onclick="copyContact(\'' + task['Email'] + '\', \'email\', event)"><i class="pi pi-envelope"></i></span>';
     } else {
-        html += '<span class="kanban-card-contact-icon inactive" title="Email недоступен">📧</span>';
+        html += '<span class="kanban-card-contact-icon inactive" title="Email недоступен"><i class="pi pi-envelope"></i></span>';
     }
 
     html += '</div>';
@@ -1639,19 +1639,20 @@ function copyContact(value, type, event){
     $temp.remove();
 
     // Show visual feedback
-    var icon = event.target;
-    var originalText = icon.textContent;
+    var icon = event.target.closest('.kanban-card-contact-icon');
+    if (!icon) return;
+    var originalHTML = icon.innerHTML;
     var originalTitle = icon.title;
 
     // Change icon to checkmark temporarily
-    icon.textContent = '✓';
+    icon.innerHTML = '<i class="pi pi-check"></i>';
     icon.title = 'Скопировано в буфер';
     icon.style.backgroundColor = 'rgba(34, 197, 94, 0.25)'; // Green background
     icon.style.color = 'rgba(34, 197, 94, 0.9)'; // Green text
 
     // Restore original icon after 1.5 seconds
     setTimeout(function(){
-        icon.textContent = originalText;
+        icon.innerHTML = originalHTML;
         icon.title = originalTitle;
         icon.style.backgroundColor = '';
         icon.style.color = '';

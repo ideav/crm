@@ -561,19 +561,19 @@
         </div>
 
         <div class="calendar-control-group">
-            <button class="calendar-button" onclick="refreshCalendar()">🔄 Обновить</button>
+            <button class="calendar-button" onclick="refreshCalendar()"><i class="pi pi-refresh"></i> Обновить</button>
         </div>
 
         <!-- Issue #427: Create Task Button -->
         <div class="calendar-control-group">
-            <button class="calendar-button" onclick="createNewTask()" style="background-color: var(--primary-color); color: white;">+ Задача</button>
+            <button class="calendar-button" onclick="createNewTask()" style="background-color: var(--primary-color); color: white;"><i class="pi pi-plus"></i> Задача</button>
         </div>
 
         <!-- Issue #428: Overdue Tasks - Compact Inline Display -->
         <div id="overdue-section" class="overdue-section collapsed" style="display: none;" onclick="toggleOverdueSection(event)">
             <h3>
-                <span>⚠️ Просрочено <span id="overdue-count">0</span></span>
-                <span class="overdue-toggle-icon">▼</span>
+                <span><i class="pi pi-exclamation-triangle"></i> Просрочено <span id="overdue-count">0</span></span>
+                <span class="overdue-toggle-icon"><i class="pi pi-chevron-down"></i></span>
             </h3>
             <div id="overdue-list"></div>
         </div>
@@ -605,11 +605,11 @@ let searchQuery = ''; // Issue #439: Search query state
 
 // Task type icons mapping
 const taskTypeIcons = {
-    'Звонок': '📞',
-    'Доработка CRM': '📄',
-    'Встреча': '⚙️',
-    'Email': '📤',
-    'Другое': '📝'
+    'Звонок': '<i class="pi pi-phone"></i>',
+    'Доработка CRM': '<i class="pi pi-file"></i>',
+    'Встреча': '<i class="pi pi-users"></i>',
+    'Email': '<i class="pi pi-envelope"></i>',
+    'Другое': '<i class="pi pi-pencil"></i>'
 };
 
 // Toggle overdue section collapsed/expanded (Issue #423)
@@ -676,6 +676,9 @@ function initializeCalendar() {
         eventDrop: handleEventDrop,
         eventClick: handleEventClick,
         eventDidMount: handleEventDidMount,
+        eventContent: function(arg) {
+            return { html: arg.event.title };
+        },
         datesSet: handleDatesSet,
         buttonText: {
             today: 'Сегодня',
@@ -702,7 +705,7 @@ function addSearchToToolbar() {
     searchContainer.className = 'fc-search-container';
     searchContainer.innerHTML = `
         <button class="fc-search-icon" id="search-icon" onclick="showSearchInput()" title="Поиск задач">
-            🔍
+            <i class="pi pi-search"></i>
         </button>
         <div class="fc-search-input-wrapper" id="search-input-wrapper">
             <input
@@ -713,7 +716,7 @@ function addSearchToToolbar() {
                 oninput="performSearch()"
             />
             <button class="fc-search-close" onclick="hideSearchInput()" title="Закрыть">
-                ✕
+                <i class="pi pi-times"></i>
             </button>
         </div>
     `;
