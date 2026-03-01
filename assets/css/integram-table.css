@@ -629,7 +629,7 @@
     padding: 9px 16px;
     cursor: pointer;
     display: flex;
-    justify-content: space-between;
+    /* justify-content: space-between; */
     align-items: center;
     transition: background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
     font-size: 14px;
