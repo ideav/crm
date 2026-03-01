@@ -6793,6 +6793,11 @@ class IntegramTable {
                 html += `</tbody></table></div>`;
             }
 
+            // Save search input focus state before re-rendering (issue #593)
+            const oldSearchInput = container.querySelector('.subordinate-search-input');
+            const wasSearchFocused = oldSearchInput && document.activeElement === oldSearchInput;
+            const cursorPosition = wasSearchFocused ? oldSearchInput.selectionStart : 0;
+
             container.innerHTML = html;
 
             // Attach click handlers for editing rows
@@ -6860,6 +6865,16 @@ class IntegramTable {
                         ''
                     );
                 });
+            }
+
+            // Restore search input focus after re-rendering (issue #593)
+            if (wasSearchFocused && searchInput) {
+                searchInput.focus();
+                // Restore cursor position
+                if (typeof searchInput.setSelectionRange === 'function') {
+                    const newPos = Math.min(cursorPosition, searchInput.value.length);
+                    searchInput.setSelectionRange(newPos, newPos);
+                }
             }
         }
 
@@ -7152,6 +7167,20 @@ class IntegramTable {
                 mainFieldHtml = `<input type="number" class="form-control" id="sub-field-main" name="main" value="" required ${ mainFieldType === 'SIGNED' ? 'step="0.01"' : '' }>`;
             } else if (mainFieldType === 'MEMO') {
                 mainFieldHtml = `<textarea class="form-control memo-field" id="sub-field-main" name="main" rows="4" required></textarea>`;
+            } else if (mainFieldType === 'GRANT') {
+                // GRANT field (dropdown with options from GET grants API - issue #593)
+                mainFieldHtml = `
+                    <select class="form-control form-grant-select" id="sub-field-main" name="main" required data-grant-type="grant">
+                        <option value="">Загрузка...</option>
+                    </select>
+                `;
+            } else if (mainFieldType === 'REPORT_COLUMN') {
+                // REPORT_COLUMN field (dropdown with options from GET rep_cols API - issue #593)
+                mainFieldHtml = `
+                    <select class="form-control form-grant-select" id="sub-field-main" name="main" required data-grant-type="rep_col">
+                        <option value="">Загрузка...</option>
+                    </select>
+                `;
             } else {
                 // Default: text input (SHORT, CHARS, etc.)
                 mainFieldHtml = `<input type="text" class="form-control" id="sub-field-main" name="main" value="" required>`;
@@ -7227,6 +7256,22 @@ class IntegramTable {
                 }
                 else if (baseFormat === 'MEMO') {
                     formHtml += `<textarea class="form-control memo-field" id="sub-field-${ req.id }" name="t${ req.id }" rows="4" ${ isRequired ? 'required' : '' }></textarea>`;
+                }
+                // GRANT field (dropdown with options from GET grants API - issue #593)
+                else if (baseFormat === 'GRANT') {
+                    formHtml += `
+                        <select class="form-control form-grant-select" id="sub-field-${ req.id }" name="t${ req.id }" ${ isRequired ? 'required' : '' } data-grant-type="grant">
+                            <option value="">Загрузка...</option>
+                        </select>
+                    `;
+                }
+                // REPORT_COLUMN field (dropdown with options from GET rep_cols API - issue #593)
+                else if (baseFormat === 'REPORT_COLUMN') {
+                    formHtml += `
+                        <select class="form-control form-grant-select" id="sub-field-${ req.id }" name="t${ req.id }" ${ isRequired ? 'required' : '' } data-grant-type="rep_col">
+                            <option value="">Загрузка...</option>
+                        </select>
+                    `;
                 }
                 else {
                     formHtml += `<input type="text" class="form-control" id="sub-field-${ req.id }" name="t${ req.id }" value="" ${ isRequired ? 'required' : '' }>`;
