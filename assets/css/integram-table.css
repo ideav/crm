@@ -2177,7 +2177,7 @@ td:has(.inline-editor-file) {
 /* Checkbox selection mode */
 .integram-table-checkbox-toggle {
     cursor: pointer;
-    padding: 4px 8px;
+    padding: 11px 8px 13px;
     border-radius: 4px;
     font-size: 16px;
     user-select: none;
