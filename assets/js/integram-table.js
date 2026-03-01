@@ -1079,7 +1079,7 @@ class IntegramTable {
                             </button>
                             <div class="integram-table-export-container">
                                 <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.toggleExportMenu(event)" title="Экспорт таблицы">
-                                    <i class="pi pi-download"></i> Экспорт
+                                    Экспорт
                                 </button>
                                 <div class="integram-export-menu" id="${ instanceName }-export-menu" style="display: none;">
                                     <div class="export-menu-item" onclick="window.${ instanceName }.exportTable('xlsx')">
