@@ -367,6 +367,19 @@ class IntegramTable {
                     this.visibleColumns = validVisible;
                 }
 
+                // Issue #614: Add newly created columns to visibleColumns and columnOrder
+                // New columns (present in metadata but not in saved state) should appear visible by default
+                const savedColumnIdsSet = new Set(this.columnOrder);
+                const newColumnIds = this.columns
+                    .filter(c => !savedColumnIdsSet.has(c.id) && !this.idColumns.has(c.id))
+                    .map(c => c.id);
+                if (newColumnIds.length > 0) {
+                    // Add new columns to the end of columnOrder
+                    this.columnOrder = [...this.columnOrder.filter(id => currentColumnIds.has(id)), ...newColumnIds];
+                    // Make new columns visible
+                    this.visibleColumns = [...this.visibleColumns, ...newColumnIds.filter(id => !this.visibleColumns.includes(id))];
+                }
+
                 // Parse URL filter parameters on initial load (issue #547)
                 // This must be done after columns are loaded so we can match column IDs
                 if (!append && Object.keys(this.urlFilters).length === 0) {
