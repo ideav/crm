@@ -2326,6 +2326,22 @@ class IntegramTable {
                         </div>
                     `;
                     break;
+                case 'GRANT':
+                    // GRANT field - dropdown with options from GET /grants API (issue #601)
+                    editorHtml = `
+                        <select class="inline-editor inline-editor-select inline-editor-grant" data-grant-type="grant">
+                            <option value="">Загрузка...</option>
+                        </select>
+                    `;
+                    break;
+                case 'REPORT_COLUMN':
+                    // REPORT_COLUMN field - dropdown with options from GET /rep_cols API (issue #601)
+                    editorHtml = `
+                        <select class="inline-editor inline-editor-select inline-editor-grant" data-grant-type="rep_col">
+                            <option value="">Загрузка...</option>
+                        </select>
+                    `;
+                    break;
                 default:
                     // SHORT, CHARS, etc. - text input
                     editorHtml = `<input type="text" class="inline-editor inline-editor-text" value="${ escapedValue }">`;
@@ -2339,8 +2355,13 @@ class IntegramTable {
                 this.attachFileUploadHandlers(editor, currentValue);
             }
 
+            // Special handling for GRANT and REPORT_COLUMN types (issue #601)
+            if (format === 'GRANT' || format === 'REPORT_COLUMN') {
+                this.loadInlineGrantOptions(editor, currentValue, format);
+            }
+
             // Focus the editor
-            if (format !== 'FILE') {
+            if (format !== 'FILE' && format !== 'GRANT' && format !== 'REPORT_COLUMN') {
                 editor.focus();
                 if (editor.select) {
                     editor.select();
@@ -2359,6 +2380,12 @@ class IntegramTable {
                 } else if (format === 'FILE') {
                     // For FILE type, the value is stored in data attribute by file upload handler
                     newValue = editor.dataset.fileValue || '';
+                } else if (format === 'GRANT' || format === 'REPORT_COLUMN') {
+                    // For GRANT/REPORT_COLUMN: save the ID to API, display the text in cell (issue #601)
+                    newValue = editor.value;
+                    // Store display text for updateCellDisplay
+                    const selectedOption = editor.options[editor.selectedIndex];
+                    this.currentEditingCell.displayText = selectedOption ? selectedOption.textContent : '';
                 } else {
                     newValue = editor.value;
                 }
@@ -2377,6 +2404,7 @@ class IntegramTable {
 
             // Enter to save (except for textarea and file upload)
             // Tab/Shift+Tab to navigate between cells, Up/Down arrows to navigate vertically (issue #518)
+            // For select elements (GRANT/REPORT_COLUMN), allow ArrowUp/ArrowDown for option navigation (issue #601)
             if (format !== 'MEMO' && format !== 'FILE') {
                 editor.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter') {
@@ -2390,12 +2418,14 @@ class IntegramTable {
                         e.preventDefault();
                         const direction = e.shiftKey ? 'prev' : 'next';
                         this.saveAndNavigate(direction, saveEdit, cancelEdit);
-                    } else if (e.key === 'ArrowUp') {
+                    } else if (e.key === 'ArrowUp' && format !== 'GRANT' && format !== 'REPORT_COLUMN') {
                         // Arrow Up: navigate to cell above (issue #518)
+                        // Skip for GRANT/REPORT_COLUMN selects - let them use arrows for option navigation (issue #601)
                         e.preventDefault();
                         this.saveAndNavigate('up', saveEdit, cancelEdit);
-                    } else if (e.key === 'ArrowDown') {
+                    } else if (e.key === 'ArrowDown' && format !== 'GRANT' && format !== 'REPORT_COLUMN') {
                         // Arrow Down: navigate to cell below (issue #518)
+                        // Skip for GRANT/REPORT_COLUMN selects - let them use arrows for option navigation (issue #601)
                         e.preventDefault();
                         this.saveAndNavigate('down', saveEdit, cancelEdit);
                     }
@@ -3188,7 +3218,11 @@ class IntegramTable {
                 }
 
                 // Update the cell display with the new value
-                this.updateCellDisplay(cell, newValue, this.currentEditingCell.format);
+                // For GRANT/REPORT_COLUMN, use the display text instead of the ID (issue #601)
+                const displayValue = (this.currentEditingCell.format === 'GRANT' || this.currentEditingCell.format === 'REPORT_COLUMN')
+                    ? (this.currentEditingCell.displayText || newValue)
+                    : newValue;
+                this.updateCellDisplay(cell, displayValue, this.currentEditingCell.format);
 
                 this.showToast('Изменения сохранены', 'success');
 
@@ -3257,6 +3291,20 @@ class IntegramTable {
                                                         .replace(/"/g, '&quot;')
                                                         .replace(/'/g, '&#039;');
                     fullValueForEditing = escapedValue;
+                    break;
+                case 'GRANT':
+                case 'REPORT_COLUMN':
+                    // For GRANT/REPORT_COLUMN: newValue is the display text (issue #601)
+                    // Store the selected ID in data-full-value for next edit (from currentEditingCell)
+                    escapedValue = String(newValue).replace(/&/g, '&amp;')
+                                                    .replace(/</g, '&lt;')
+                                                    .replace(/>/g, '&gt;')
+                                                    .replace(/"/g, '&quot;')
+                                                    .replace(/'/g, '&#039;');
+                    // Use the saved ID from currentEditingCell for future editing
+                    // The saveInlineEdit method stores displayText, and the actual newValue (ID) is what was sent to API
+                    // We need to get the ID that was saved - it's available via data-col-value or will be set separately
+                    fullValueForEditing = escapedValue; // This will be overridden later if we have the ID
                     break;
                 default:
                     // Escape HTML and store for editing
@@ -7918,6 +7966,69 @@ class IntegramTable {
                     console.error(`Error loading ${ grantType } options:`, error);
                     select.innerHTML = '<option value="">Ошибка загрузки</option>';
                 }
+            }
+        }
+
+        /**
+         * Load GRANT or REPORT_COLUMN dropdown options for inline editor (issue #601)
+         * @param {HTMLSelectElement} selectElement - The select element to populate
+         * @param {string} currentValue - The current cell value (display text or ID)
+         * @param {string} format - 'GRANT' or 'REPORT_COLUMN'
+         */
+        async loadInlineGrantOptions(selectElement, currentValue, format) {
+            try {
+                const apiBase = this.getApiBase();
+                let apiUrl;
+
+                if (format === 'GRANT') {
+                    apiUrl = `${ apiBase }/grants`;
+                } else if (format === 'REPORT_COLUMN') {
+                    apiUrl = `${ apiBase }/rep_cols`;
+                } else {
+                    return;
+                }
+
+                const response = await fetch(apiUrl);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${ response.status }`);
+                }
+                const options = await response.json();
+
+                // Clear loading option and populate with fetched options
+                selectElement.innerHTML = '<option value="">-- Выберите --</option>';
+
+                let selectedId = null;
+
+                if (Array.isArray(options)) {
+                    options.forEach(opt => {
+                        // Options may be in format: { id: "...", val: "..." } or { id: "...", value: "..." }
+                        // Use nullish check to properly handle "0" as a valid ID
+                        const optId = (opt.id !== undefined && opt.id !== null) ? opt.id : ((opt.i !== undefined && opt.i !== null) ? opt.i : '');
+                        const optVal = opt.val || opt.value || opt.name || opt.v || '';
+                        const option = document.createElement('option');
+                        option.value = optId;
+                        option.textContent = optVal;
+                        // Pre-select if currentValue matches either ID or display text (issue #601)
+                        // Cell may contain display text (from initial load) or ID (from data attribute)
+                        if (String(optId) === String(currentValue) || String(optVal) === String(currentValue)) {
+                            option.selected = true;
+                            selectedId = optId;
+                        }
+                        selectElement.appendChild(option);
+                    });
+                }
+
+                // Store the original ID for comparison when saving (in case currentValue was display text)
+                if (selectedId !== null) {
+                    this.currentEditingCell.originalValue = String(selectedId);
+                }
+
+                // Focus the select after loading options
+                selectElement.focus();
+
+            } catch (error) {
+                console.error(`Error loading inline ${ format } options:`, error);
+                selectElement.innerHTML = '<option value="">Ошибка загрузки</option>';
             }
         }
 

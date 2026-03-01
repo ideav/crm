@@ -1768,6 +1768,23 @@ td:has(.inline-editor) {
     padding: 2px !important;
 }
 
+/* Inline select editor for GRANT and REPORT_COLUMN types (issue #601) */
+.inline-editor-select {
+    min-height: 32px;
+    cursor: pointer;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M2 4l4 4 4-4z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 30px;
+}
+
+.inline-editor-select:focus {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%231976d2' d='M2 4l4 4 4-4z'/%3E%3C/svg%3E");
+}
+
 /* ========================================
    Inline Reference Editor Styles (ref:1)
    ======================================== */
