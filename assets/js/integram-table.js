@@ -1101,11 +1101,11 @@ class IntegramTable {
                                 Удалить (${ this.selectedRows.size })
                             </button>
                             ` : '' }
-                            <div class="integram-table-settings" onclick="window.${ instanceName }.openTableSettings()" title="Настройка">
+                            <div class="integram-table-settings" onclick="window.${ instanceName }.openTableSettings()" title="Настройка таблицы">
                                 <i class="pi pi-cog"></i>
                             </div>
-                            <div class="integram-table-settings" onclick="window.${ instanceName }.openColumnSettings()">
-                                <i class="pi pi-th-large"></i> Колонки
+                            <div class="integram-table-settings" onclick="window.${ instanceName }.openColumnSettings()" title="Настройка колонок">
+                                <i class="pi pi-th-large"></i>
                             </div>
                         </div>
                     </div>
