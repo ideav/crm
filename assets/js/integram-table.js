@@ -3212,6 +3212,12 @@ class IntegramTable {
                     throw new Error(result.error);
                 }
 
+                // Check for warnings (plural) - show modal but continue with save (issue #610)
+                // These are informational warnings that don't block the save
+                if (result.warnings) {
+                    this.showWarningsModal(result.warnings);
+                }
+
                 // Update the cell display with the new value
                 // For GRANT/REPORT_COLUMN, use the display text instead of the ID (issue #601)
                 const displayValue = (this.currentEditingCell.format === 'GRANT' || this.currentEditingCell.format === 'REPORT_COLUMN')
@@ -8870,6 +8876,12 @@ class IntegramTable {
                     return;
                 }
 
+                // Check for warnings (plural) - show modal but continue with save (issue #610)
+                // These are informational warnings that don't block the save
+                if (result.warnings) {
+                    this.showWarningsModal(result.warnings);
+                }
+
                 // Close modal
                 modal.remove();
                 if (modal._overlayElement) {
@@ -9521,6 +9533,84 @@ class IntegramTable {
                 }
             };
             document.addEventListener('keydown', handleEscape);
+        }
+
+        /**
+         * Show warnings modal for informational warnings after save (issue #610)
+         * Unlike showWarningModal, this doesn't block the save operation
+         * @param {string} message - The warning message (may contain basic HTML like <br>)
+         */
+        showWarningsModal(message) {
+            const modalId = `warnings-modal-${ Date.now() }`;
+
+            // Sanitize HTML - allow only safe tags like <br>, strip others
+            const sanitizedMessage = this.sanitizeWarningHtml(message);
+
+            const modalHtml = `
+                <div class="integram-modal-overlay" id="${ modalId }">
+                    <div class="integram-modal" style="max-width: 500px;">
+                        <div class="integram-modal-header">
+                            <h5>Предупреждение</h5>
+                        </div>
+                        <div class="integram-modal-body">
+                            <div class="alert alert-warning" style="margin: 0;">
+                                ${ sanitizedMessage }
+                            </div>
+                        </div>
+                        <div class="integram-modal-footer" style="padding: 15px; text-align: right;">
+                            <button type="button" class="btn btn-primary" data-close-warnings-modal="true">OK</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+            const overlay = document.getElementById(modalId);
+            const closeBtn = overlay.querySelector('[data-close-warnings-modal="true"]');
+
+            closeBtn.addEventListener('click', () => {
+                overlay.remove();
+            });
+
+            // Also close on click outside the modal
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) {
+                    overlay.remove();
+                }
+            });
+
+            // Close on Escape key
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    overlay.remove();
+                    document.removeEventListener('keydown', handleEscape);
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
+        }
+
+        /**
+         * Sanitize HTML for warning messages - allows basic formatting tags (issue #610)
+         * @param {string} html - The HTML string to sanitize
+         * @returns {string} - Sanitized HTML string
+         */
+        sanitizeWarningHtml(html) {
+            if (html === null || html === undefined) return '';
+
+            // Convert to string
+            let str = String(html);
+
+            // First, escape all HTML
+            str = str.replace(/&/g, '&amp;')
+                     .replace(/</g, '&lt;')
+                     .replace(/>/g, '&gt;')
+                     .replace(/"/g, '&quot;')
+                     .replace(/'/g, '&#039;');
+
+            // Then, selectively un-escape safe tags: <br>, <br/>, <br />
+            str = str.replace(/&lt;br\s*\/?&gt;/gi, '<br>');
+
+            return str;
         }
 
         /**
