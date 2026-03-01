@@ -1058,52 +1058,43 @@ class IntegramTable {
                         <div class="integram-table-controls">
                             ${ this.hasActiveFiltersOrGroups() ? `
                             <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.copyConfigUrl()" title="Скопировать ссылку с текущими фильтрами и группами">
-                                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle;">
-                                    <path d="M10 2H6C5.44772 2 5 2.44772 5 3V4H4C3.44772 4 3 4.44772 3 5V13C3 13.5523 3.44772 14 4 14H10C10.5523 14 11 13.5523 11 13V12H12C12.5523 12 13 11.5523 13 11V5L10 2Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-                                    <path d="M5 4V3C5 2.44772 5.44772 2 6 2H9.5L13 5.5V11C13 11.5523 12.5523 12 12 12H11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-                                </svg>
+                                <i class="pi pi-copy" style="vertical-align: middle;"></i>
                             </button>
                             ` : '' }
                             ${ this.groupingEnabled ? `
                             <button class="btn btn-sm btn-outline-secondary me-1" onclick="window.${ instanceName }.clearGrouping()" title="Очистить группировку">
-                                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle;">
-                                    <circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/>
-                                    <path d="M5 5L11 11M11 5L5 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                                </svg>
+                                <i class="pi pi-filter-slash" style="vertical-align: middle;"></i>
                             </button>
                             ` : '' }
                             <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.openGroupingSettings()">
-                                ${ this.groupingEnabled ? '✓' : '' } Группы
+                                ${ this.groupingEnabled ? '<i class="pi pi-check"></i>' : '' } Группы
                             </button>
                             ${ this.hasActiveFilters() ? `
                             <button class="btn btn-sm btn-outline-secondary me-1" onclick="window.${ instanceName }.clearAllFilters()" title="Очистить фильтры">
-                                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle;">
-                                    <circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5" fill="none"/>
-                                    <path d="M5 5L11 11M11 5L5 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-                                </svg>
+                                <i class="pi pi-filter-slash" style="vertical-align: middle;"></i>
                             </button>
                             ` : '' }
                             <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.toggleFilters()">
-                                ${ this.filtersEnabled ? '✓' : '' } Фильтры
+                                ${ this.filtersEnabled ? '<i class="pi pi-check"></i>' : '' } Фильтры
                             </button>
                             <div class="integram-table-export-container">
                                 <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.toggleExportMenu(event)" title="Экспорт таблицы">
-                                    📥 Экспорт
+                                    <i class="pi pi-download"></i> Экспорт
                                 </button>
                                 <div class="integram-export-menu" id="${ instanceName }-export-menu" style="display: none;">
                                     <div class="export-menu-item" onclick="window.${ instanceName }.exportTable('xlsx')">
-                                        <span class="export-icon">📊</span> XLSX (Excel)
+                                        <span class="export-icon"><i class="pi pi-file-excel"></i></span> XLSX (Excel)
                                     </div>
                                     <div class="export-menu-item" onclick="window.${ instanceName }.exportTable('xls')">
-                                        <span class="export-icon">📗</span> XLS (Excel 97-2003)
+                                        <span class="export-icon"><i class="pi pi-file-excel"></i></span> XLS (Excel 97-2003)
                                     </div>
                                     <div class="export-menu-item" onclick="window.${ instanceName }.exportTable('csv')">
-                                        <span class="export-icon">📄</span> CSV
+                                        <span class="export-icon"><i class="pi pi-file"></i></span> CSV
                                     </div>
                                 </div>
                             </div>
                             <div class="integram-table-checkbox-toggle${ this.checkboxMode ? ' active' : '' }" onclick="window.${ instanceName }.toggleCheckboxMode()" title="Выбор строк в таблице">
-                                ☑
+                                <i class="pi pi-check-square"></i>
                             </div>
                             ${ this.checkboxMode && this.selectedRows.size > 0 ? `
                             <button class="btn btn-sm btn-danger integram-bulk-delete-btn" id="${ instanceName }-bulk-delete-btn" onclick="window.${ instanceName }.showBulkDeleteConfirm(event)">
@@ -1111,10 +1102,10 @@ class IntegramTable {
                             </button>
                             ` : '' }
                             <div class="integram-table-settings" onclick="window.${ instanceName }.openTableSettings()" title="Настройка">
-                                ⚙️
+                                <i class="pi pi-cog"></i>
                             </div>
                             <div class="integram-table-settings" onclick="window.${ instanceName }.openColumnSettings()">
-                                <span font="size:+1" style="font-size: 146%;">▥</span> Колонки
+                                <i class="pi pi-th-large"></i> Колонки
                             </div>
                         </div>
                     </div>
@@ -1130,12 +1121,12 @@ class IntegramTable {
                                         const width = this.columnWidths[col.id];
                                         const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
                                         const addButtonHtml = this.shouldShowAddButton(col) ?
-                                            `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись">+</button>` : '';
+                                            `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
 
                                         // Add sort indicator if this column is sorted
                                         let sortIndicator = '';
                                         if (this.sortColumn === col.id) {
-                                            sortIndicator = this.sortDirection === 'asc' ? '▲ ' : '▼ ';
+                                            sortIndicator = this.sortDirection === 'asc' ? '<i class="pi pi-sort-amount-up-alt" style="font-size:0.75em;"></i> ' : '<i class="pi pi-sort-amount-down" style="font-size:0.75em;"></i> ';
                                         }
 
                                         return `
@@ -1384,9 +1375,9 @@ class IntegramTable {
                     recordId = this.rawObjectData[rowIndex].i;
                 }
                 if (recordId) {
-                    displayValue = `<a href="#" class="subordinate-table-link" onclick="window.${ instanceName }.openSubordinateTableFromCell(event, ${ column.arr_id }, ${ recordId }); return false;" title="Открыть подчиненную таблицу"><span class="table-icon">📋</span><span class="subordinate-count">(${ count })</span></a>`;
+                    displayValue = `<a href="#" class="subordinate-table-link" onclick="window.${ instanceName }.openSubordinateTableFromCell(event, ${ column.arr_id }, ${ recordId }); return false;" title="Открыть подчиненную таблицу"><span class="table-icon"><i class="pi pi-table"></i></span><span class="subordinate-count">(${ count })</span></a>`;
                 } else {
-                    displayValue = `<span class="table-icon">📋</span><span class="subordinate-count">(${ count })</span>`;
+                    displayValue = `<span class="table-icon"><i class="pi pi-table"></i></span><span class="subordinate-count">(${ count })</span>`;
                 }
                 return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }" data-arr-id="${ column.arr_id }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
             }
@@ -1462,7 +1453,7 @@ class IntegramTable {
             // BOOLEAN cells use HTML icons, so skip HTML escaping for them
             if (format === 'BOOLEAN') {
                 const boolValue = value !== null && value !== undefined && value !== '' && value !== 0 && value !== '0' && value !== false;
-                escapedValue = boolValue ? '<span class="boolean-check">✓</span>' : '<span class="boolean-uncheck">✗</span>';
+                escapedValue = boolValue ? '<span class="boolean-check"><i class="pi pi-check"></i></span>' : '<span class="boolean-uncheck"><i class="pi pi-times"></i></span>';
                 // Store the original value for editing (1 or 0, or the actual value)
                 fullValueForEditing = boolValue ? '1' : '0';
             } else {
@@ -1601,7 +1592,7 @@ class IntegramTable {
                 }
 
                 if (shouldShowEditIcon) {
-                    const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();" title="Редактировать"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M0 11.0833V14H2.91667L11.5442 5.3725L8.6275 2.45583L0 11.0833ZM13.8083 3.10833L10.8917 0.191667C10.6583 -0.0416667 10.2917 -0.0416667 10.0583 0.191667L7.90833 2.34167L10.825 5.25833L12.975 3.10833C13.2083 2.875 13.2083 2.50833 12.975 2.275L13.8083 3.10833Z" fill="currentColor"/></svg></span>`;
+                    const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 14px;"></i></span>`;
                     escapedValue = `<div class="cell-content-wrapper">${ escapedValue }${ editIcon }</div>`;
                 }
             }
@@ -1731,7 +1722,7 @@ class IntegramTable {
                         const groupLevel = this.groupingColumns.indexOf(groupCell.colId);
                         const showAddButton = this.shouldShowGroupedCellAddButton();
                         const addButtonHtml = showAddButton
-                            ? `<button class="group-cell-add-btn" onclick="window.${ instanceName }.openGroupedCellCreateForm(${ rowIndex }, ${ groupLevel })" title="Создать запись">+</button>`
+                            ? `<button class="group-cell-add-btn" onclick="window.${ instanceName }.openGroupedCellCreateForm(${ rowIndex }, ${ groupLevel })" title="Создать запись"><i class="pi pi-plus"></i></button>`
                             : '';
 
                         // Render the group cell with special styling
@@ -1779,12 +1770,12 @@ class IntegramTable {
                 const width = this.columnWidths[col.id];
                 const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
                 const addButtonHtml = this.shouldShowAddButton(col) ?
-                    `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись">+</button>` : '';
+                    `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
 
                 // Add sort indicator if this column is sorted
                 let sortIndicator = '';
                 if (this.sortColumn === col.id) {
-                    sortIndicator = this.sortDirection === 'asc' ? '▲ ' : '▼ ';
+                    sortIndicator = this.sortDirection === 'asc' ? '<i class="pi pi-sort-amount-up-alt" style="font-size:0.75em;"></i> ' : '<i class="pi pi-sort-amount-down" style="font-size:0.75em;"></i> ';
                 }
 
                 // Add grouping indicator
@@ -2325,7 +2316,7 @@ class IntegramTable {
                             </div>
                             <div class="file-preview" style="display: none;">
                                 <span class="file-name"></span>
-                                <button type="button" class="file-remove-btn" title="Удалить файл">×</button>
+                                <button type="button" class="file-remove-btn" title="Удалить файл"><i class="pi pi-times"></i></button>
                             </div>
                         </div>
                     `;
@@ -2522,9 +2513,9 @@ class IntegramTable {
                 // The "+" button will be shown only when search input has non-zero length
                 // The "×" button will be hidden when search input has text (and add button is shown)
                 const showAddButton = hasGranted && origType !== null;
-                let buttonHtml = `<button class="inline-editor-reference-clear" title="Очистить значение" aria-label="Очистить значение">×</button>`;
+                let buttonHtml = `<button class="inline-editor-reference-clear" title="Очистить значение" aria-label="Очистить значение"><i class="pi pi-times"></i></button>`;
                 if (showAddButton) {
-                    buttonHtml += `<button class="inline-editor-reference-add" style="display: none;" title="Создать запись" aria-label="Создать запись">+</button>`;
+                    buttonHtml += `<button class="inline-editor-reference-add" style="display: none;" title="Создать запись" aria-label="Создать запись"><i class="pi pi-plus"></i></button>`;
                 }
 
                 // Create dropdown with search
@@ -2975,8 +2966,8 @@ class IntegramTable {
                                            id="field-ref-${req.id}-search"
                                            placeholder="Поиск..."
                                            autocomplete="off">
-                                    <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button">×</button>
-                                    <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button">+</button>
+                                    <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
+                                    <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                                 </div>
                                 <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-ref-${req.id}-dropdown">
                                     <div class="inline-editor-reference-empty">Загрузка...</div>
@@ -3001,7 +2992,7 @@ class IntegramTable {
             let formHtml = `
                 <div class="edit-form-header">
                     <h5>${title}</h5>
-                    <button class="edit-form-close" data-close-modal-ref="true">×</button>
+                    <button class="edit-form-close" data-close-modal-ref="true"><i class="pi pi-times"></i></button>
                 </div>
                 <div class="edit-form-body">
                     <form id="edit-form-ref-create" class="edit-form">
@@ -3263,7 +3254,7 @@ class IntegramTable {
                     // Display as checkbox icon: any non-empty value = YES, empty = NO
                     const boolValue = newValue !== null && newValue !== undefined && newValue !== '' && newValue !== '0' && newValue !== false;
                     // For BOOLEAN, use HTML icon directly (no escaping) and store '1' or '0' for editing
-                    escapedValue = boolValue ? '<span class="boolean-check">✓</span>' : '<span class="boolean-uncheck">✗</span>';
+                    escapedValue = boolValue ? '<span class="boolean-check"><i class="pi pi-check"></i></span>' : '<span class="boolean-uncheck"><i class="pi pi-times"></i></span>';
                     fullValueForEditing = boolValue ? '1' : '0';
                     break;
                 case 'DATE':
@@ -5457,7 +5448,7 @@ class IntegramTable {
                     <span class="hidden-filter-badge" data-col-id="${hf.colId}">
                         <span class="hidden-filter-badge-name">${hf.colName}</span>
                         <span class="hidden-filter-badge-value">${displayValue}</span>
-                        <span class="hidden-filter-badge-remove" onclick="window.${instanceName}.removeUrlFilter('${hf.colId}')" title="Удалить фильтр">×</span>
+                        <span class="hidden-filter-badge-remove" onclick="window.${instanceName}.removeUrlFilter('${hf.colId}')" title="Удалить фильтр"><i class="pi pi-times"></i></span>
                     </span>
                 `;
             }).join('');
@@ -6229,11 +6220,7 @@ class IntegramTable {
                 recordIdHtml = `
                     <span class="edit-form-record-id" onclick="window.${instanceName}.copyRecordIdToClipboard('${recordId}')" title="Скопировать ID">#${recordId}</span>
                     <a href="${tableUrl}" class="edit-form-table-link" title="Открыть в таблице" target="_blank">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <rect x="2" y="2" width="12" height="12" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
-                            <line x1="2" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5"/>
-                            <line x1="6" y1="6" x2="6" y2="14" stroke="currentColor" stroke-width="1.5"/>
-                        </svg>
+                        <i class="pi pi-table"></i>
                     </a>
                 `;
             }
@@ -6279,7 +6266,7 @@ class IntegramTable {
                         <h5>${ title }</h5>
                         ${ recordIdHtml }
                     </div>
-                    <button class="edit-form-close" data-close-modal="true">×</button>
+                    <button class="edit-form-close" data-close-modal="true"><i class="pi pi-times"></i></button>
                 </div>
                 ${ tabsHtml }
                 <div class="edit-form-body">
@@ -6305,7 +6292,7 @@ class IntegramTable {
                 </div>
                 <div class="edit-form-footer">
                     <button type="button" class="btn btn-icon form-settings-btn" id="form-settings-btn" title="Настройка видимости полей">
-                        ⚙️
+                        <i class="pi pi-cog"></i>
                     </button>
                     <div class="edit-form-footer-buttons">
                         ${ !isCreate ? '<button type="button" class="btn btn-danger" id="delete-record-btn" style="display:none;">Удалить</button>' : '' }
@@ -6528,8 +6515,8 @@ class IntegramTable {
                                            id="field-${ req.id }-search"
                                            placeholder="Поиск..."
                                            autocomplete="off">
-                                    <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button">×</button>
-                                    <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button">+</button>
+                                    <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
+                                    <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                                 </div>
                                 <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${ req.id }-dropdown">
                                     <div class="inline-editor-reference-empty">Загрузка...</div>
@@ -6604,7 +6591,7 @@ class IntegramTable {
                             </div>
                             <div class="file-preview" style="${ hasFile ? 'display: flex;' : 'display: none;' }">
                                 ${ fileHref ? `<a href="${ this.escapeHtml(fileHref) }" target="_blank" class="file-name file-link">${ this.escapeHtml(fileName) }</a>` : `<span class="file-name">${ this.escapeHtml(fileName) }</span>` }
-                                <button type="button" class="file-remove-btn" title="Удалить файл">×</button>
+                                <button type="button" class="file-remove-btn" title="Удалить файл"><i class="pi pi-times"></i></button>
                             </div>
                             <input type="hidden" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(reqValue) }" ${ isRequired ? 'required' : '' } data-file-deleted="false">
                         </div>
@@ -6752,7 +6739,7 @@ class IntegramTable {
                 modal.innerHTML = `
                     <div class="edit-form-header">
                         <h5>${ typeName }</h5>
-                        <button class="edit-form-close subordinate-modal-close">×</button>
+                        <button class="edit-form-close subordinate-modal-close"><i class="pi pi-times"></i></button>
                     </div>
                     <div class="edit-form-body">
                         <div class="subordinate-table-container">
@@ -6861,14 +6848,10 @@ class IntegramTable {
                     </button>
                     <div class="subordinate-search-wrapper">
                         <input type="text" class="subordinate-search-input" placeholder="Поиск..." value="${ this.escapeHtml(searchTerm) }">
-                        <button type="button" class="subordinate-search-clear" title="Очистить поиск"${ searchTerm ? '' : ' style="display: none;"' }>×</button>
+                        <button type="button" class="subordinate-search-clear" title="Очистить поиск"${ searchTerm ? '' : ' style="display: none;"' }><i class="pi pi-times"></i></button>
                     </div>
                     <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <rect x="2" y="2" width="12" height="12" rx="1" stroke="currentColor" stroke-width="1.5" fill="none"/>
-                            <line x1="2" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5"/>
-                            <line x1="6" y1="6" x2="6" y2="14" stroke="currentColor" stroke-width="1.5"/>
-                        </svg>
+                        <i class="pi pi-table"></i>
                     </a>
                 </div>
             `;
@@ -6883,7 +6866,7 @@ class IntegramTable {
                 columns.forEach((col, colIdx) => {
                     // Find sort state for this column
                     const sortInfo = sortState.find(s => s.colIndex === colIdx);
-                    const sortIndicator = sortInfo ? (sortInfo.direction === 'asc' ? ' ▲' : ' ▼') : '';
+                    const sortIndicator = sortInfo ? (sortInfo.direction === 'asc' ? ' <i class="pi pi-sort-amount-up-alt" style="font-size:0.75em;"></i>' : ' <i class="pi pi-sort-amount-down" style="font-size:0.75em;"></i>') : '';
                     const sortPriority = sortInfo ? sortState.indexOf(sortInfo) + 1 : '';
                     const priorityBadge = sortState.length > 1 && sortPriority ? `<span class="subordinate-sort-priority">${ sortPriority }</span>` : '';
 
@@ -7189,7 +7172,7 @@ class IntegramTable {
                     case 'BOOLEAN':
                         // Display as checkbox icon: any non-empty value = YES, empty = NO
                         const boolVal = value !== null && value !== undefined && value !== '' && value !== 0 && value !== '0' && value !== false;
-                        return boolVal ? '<span class="boolean-check">✓</span>' : '<span class="boolean-uncheck">✗</span>';
+                        return boolVal ? '<span class="boolean-check"><i class="pi pi-check"></i></span>' : '<span class="boolean-uncheck"><i class="pi pi-times"></i></span>';
                     case 'DATE':
                         if (value) {
                             const dateObj = this.parseDDMMYYYY(value);
@@ -7326,7 +7309,7 @@ class IntegramTable {
             let formHtml = `
                 <div class="edit-form-header">
                     <h5>${ title }</h5>
-                    <button class="edit-form-close subordinate-close-btn">×</button>
+                    <button class="edit-form-close subordinate-close-btn"><i class="pi pi-times"></i></button>
                 </div>
                 <div class="edit-form-body">
                     <form id="subordinate-edit-form" class="edit-form">
@@ -7356,8 +7339,8 @@ class IntegramTable {
                                            id="sub-field-${ req.id }-search"
                                            placeholder="Поиск..."
                                            autocomplete="off">
-                                    <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button">×</button>
-                                    <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button">+</button>
+                                    <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
+                                    <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                                 </div>
                                 <div class="inline-editor-reference-dropdown form-ref-dropdown" id="sub-field-${ req.id }-dropdown">
                                     <div class="inline-editor-reference-empty">Загрузка...</div>
@@ -8206,8 +8189,8 @@ class IntegramTable {
                                            id="field-form-ref-${req.id}-search"
                                            placeholder="Поиск..."
                                            autocomplete="off">
-                                    <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button">×</button>
-                                    <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button">+</button>
+                                    <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
+                                    <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                                 </div>
                                 <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-form-ref-${req.id}-dropdown">
                                     <div class="inline-editor-reference-empty">Загрузка...</div>
@@ -8232,7 +8215,7 @@ class IntegramTable {
             let formHtml = `
                 <div class="edit-form-header">
                     <h5>${title}</h5>
-                    <button class="edit-form-close" data-close-form-ref-modal="true">×</button>
+                    <button class="edit-form-close" data-close-form-ref-modal="true"><i class="pi pi-times"></i></button>
                 </div>
                 <div class="edit-form-body">
                     <form id="edit-form-form-ref-create" class="edit-form">
@@ -10540,7 +10523,7 @@ class IntegramCreateFormHelper {
                     <h5>${title}</h5>
                     ${parentSubtitleHtml}
                 </div>
-                <button class="edit-form-close" data-close-modal="true">×</button>
+                <button class="edit-form-close" data-close-modal="true"><i class="pi pi-times"></i></button>
             </div>
             <div class="edit-form-body">
                 <div class="edit-form-tab-content active" data-tab-content="attributes">
@@ -10702,7 +10685,7 @@ class IntegramCreateFormHelper {
                                        id="field-${req.id}-search"
                                        placeholder="Поиск..."
                                        autocomplete="off">
-                                <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button">×</button>
+                                <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
                             </div>
                             <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${req.id}-dropdown">
                                 <div class="inline-editor-reference-empty">Загрузка...</div>
@@ -10751,7 +10734,7 @@ class IntegramCreateFormHelper {
                         </div>
                         <div class="file-preview" style="display: none;">
                             <span class="file-name"></span>
-                            <button type="button" class="file-remove-btn" title="Удалить файл">×</button>
+                            <button type="button" class="file-remove-btn" title="Удалить файл"><i class="pi pi-times"></i></button>
                         </div>
                         <input type="hidden" id="field-${req.id}" name="t${req.id}" value="" ${isRequired ? 'required' : ''} data-file-deleted="false">
                     </div>

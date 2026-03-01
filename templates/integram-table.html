@@ -441,18 +441,15 @@ class IntegramTable {
                     <div>
                         ${this.hasActiveFilters() ? `
                         <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.tableInstance.clearAllFilters()" title="Очистить фильтры">
-                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle;">
-                                <polygon fill="var(--ci-primary-color, currentColor)" points="2,1 6,1 10,6 10,12 6,10 6,6"/>
-                                <polygon fill="var(--ci-primary-color, currentColor)" points="10,10 11,9 13,11 15,9 16,10 14,12 16,14 15,15 13,13 11,15 10,14 12,12"/>
-                            </svg>
+                            <i class="pi pi-filter-slash" style="vertical-align: middle;"></i>
                         </button>
                         ` : ''}
                         <button class="btn btn-sm btn-outline-secondary" onclick="window.tableInstance.toggleFilters()">
-                            ${this.filtersEnabled ? '✓' : ''} Фильтры
+                            ${this.filtersEnabled ? '<i class="pi pi-check"></i>' : ''} Фильтры
                         </button>
                     </div>
                     <div class="integram-table-settings" onclick="window.tableInstance.openColumnSettings()">
-                        ⚙️ Настройки колонок
+                        <i class="pi pi-cog"></i> Настройки колонок
                     </div>
                 </div>
                 <table class="integram-table">

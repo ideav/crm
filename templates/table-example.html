@@ -544,15 +544,15 @@ class IntegramTable {
                     <div>
                         ${this.hasActiveFilters() ? `
                         <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.demoTable.clearAllFilters()" title="Очистить фильтры">
-                            ✕
+                            <i class="pi pi-filter-slash"></i>
                         </button>
                         ` : ''}
                         <button class="btn btn-sm btn-outline-secondary" onclick="window.demoTable.toggleFilters()">
-                            ${this.filtersEnabled ? '✓' : ''} Фильтры
+                            ${this.filtersEnabled ? '<i class="pi pi-check"></i>' : ''} Фильтры
                         </button>
                     </div>
                     <div class="integram-table-settings" onclick="window.demoTable.openColumnSettings()">
-                        ⚙️ Настройки колонок
+                        <i class="pi pi-cog"></i> Настройки колонок
                     </div>
                 </div>
                 <table class="integram-table">
