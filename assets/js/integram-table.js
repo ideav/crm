@@ -9067,8 +9067,8 @@ class IntegramTable {
                                 <p style="margin: 0;">Вы уверены, что хотите удалить эту запись?</p>
                             </div>
                             <div class="integram-modal-footer">
-                                <button type="button" class="btn btn-secondary delete-confirm-cancel-btn" style="margin-right: 8px;">Отмена</button>
-                                <button type="button" class="btn btn-danger delete-confirm-ok-btn">Удалить</button>
+                                <button type="button" class="btn btn-danger delete-confirm-ok-btn" style="margin-right: 8px;">Удалить</button>
+                                <button type="button" class="btn btn-secondary delete-confirm-cancel-btn">Отмена</button>
                             </div>
                         </div>
                     </div>
