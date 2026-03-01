@@ -125,11 +125,11 @@
     overflow: overlay;
 }
 .btn-outline-secondary {
-    border-color: none !important;
+    border-color: #fff !important;
 }
 
 .btn-outline-secondary:hover {
-    background-color: #eaeaea !important;
+    background-color: #f3f3f3 !important;
     color: #6c757d !important;
 }
 
