@@ -156,6 +156,10 @@ center:hover .add-id-for-col {
     position: relative;
 } */
 </style>
+<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z" crossorigin="anonymous">
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
+<script src="/js/js.js"></script>
 <div class="t9n">
 <div id="show" class="list" style="z-index: 1;">
 <a id="showanchor" onclick="if(json['list']){byId('queries').classList.remove('hidden');byId('show').classList.add('hidden')}else myApi('GET','object/22/?JSON','list')"><img class="icon8" title="<t9n>[RU]Список запросов[EN]Reports list</t9n>" src="https://img.icons8.com/ios/25/222222/list.png"></a>
@@ -1055,8 +1059,11 @@ function insertValueToTextarea(newTextarea, value) {
 }
 document.title=t9n('[RU]Конструктор запросов[EN]Query builder');
 var rbody,active=-1,alias=[],colNames={},rep=[],json=[],colListTemplate=$('#table').html(),dateDDFilledIn=[],curEl,ctl=['102','84','104','109','72','101','105','132','58'],lastCreatedIdColumn=0;
+localize();
 if('{_global_.id}'=='')
     byId('showanchor').click();
 else // In case a report is requested - draw it
     go();
 </script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js" integrity="sha384-B4gt1jrGC7Jh4AgTPSdUtOBvfO8shuf57BaghqFfPlYxofvL8/KUEfYiJOMMV+rV" crossorigin="anonymous"></script>
+<script src="/js/main.js"></script>
