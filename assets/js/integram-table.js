@@ -6642,8 +6642,11 @@ class IntegramTable {
             container.innerHTML = '<div class="subordinate-table-loading">Загрузка...</div>';
 
             try {
-                // Fetch metadata for subordinate table
-                const metadata = await this.fetchMetadata(arrId);
+                // Fetch metadata for subordinate table (use cache to avoid redundant requests)
+                if (!this.metadataCache[arrId]) {
+                    this.metadataCache[arrId] = await this.fetchMetadata(arrId);
+                }
+                const metadata = this.metadataCache[arrId];
 
                 // Fetch data for subordinate table
                 const apiBase = this.getApiBase();
@@ -6671,8 +6674,11 @@ class IntegramTable {
             event.stopPropagation();
 
             try {
-                // Fetch metadata for subordinate table
-                const metadata = await this.fetchMetadata(arrId);
+                // Fetch metadata for subordinate table (use cache to avoid redundant requests)
+                if (!this.metadataCache[arrId]) {
+                    this.metadataCache[arrId] = await this.fetchMetadata(arrId);
+                }
+                const metadata = this.metadataCache[arrId];
 
                 // Create modal for subordinate table
                 const modalDepth = (window._integramModalDepth || 0) + 1;
@@ -8774,7 +8780,8 @@ class IntegramTable {
                 }
 
                 // Check if we edited a record from a cell-opened subordinate table
-                if (!refreshedSubordinateTable && this.cellSubordinateContext && this.cellSubordinateContext.arrId === typeId) {
+                // Use == for type coercion since typeId from dataset is a string, while arrId may be a number
+                if (!refreshedSubordinateTable && this.cellSubordinateContext && this.cellSubordinateContext.arrId == typeId) {
                     await this.loadSubordinateTable(this.cellSubordinateContext.container, this.cellSubordinateContext.arrId, this.cellSubordinateContext.parentRecordId);
                     refreshedSubordinateTable = true;
                 }
