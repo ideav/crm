@@ -3014,6 +3014,20 @@ class IntegramTable {
             });
 
             overlay.addEventListener('click', closeModal);
+
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    // Only close if this modal is the topmost one
+                    const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
+                    const maxDepth = window._integramModalDepth || 0;
+                    if (currentDepth === maxDepth) {
+                        closeModal();
+                        document.removeEventListener('keydown', handleEscape);
+                    }
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
         }
 
         async saveRecordForReference(modal, typeId, parentRecordId) {
@@ -3769,6 +3783,15 @@ class IntegramTable {
             });
 
             overlay.addEventListener('click', () => this.closeColumnSettings());
+
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    this.closeColumnSettings();
+                    document.removeEventListener('keydown', handleEscape);
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
         }
 
         closeColumnSettings() {
@@ -4400,6 +4423,15 @@ class IntegramTable {
             });
 
             overlay.addEventListener('click', () => this.closeTableSettings());
+
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    this.closeTableSettings();
+                    document.removeEventListener('keydown', handleEscape);
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
         }
 
         closeTableSettings() {
@@ -4461,6 +4493,16 @@ class IntegramTable {
                 modal.remove();
                 overlay.remove();
             });
+
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    modal.remove();
+                    overlay.remove();
+                    document.removeEventListener('keydown', handleEscape);
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
         }
 
         toggleFilters() {
@@ -4581,6 +4623,15 @@ class IntegramTable {
 
             modal.querySelector('#close-grouping-btn').addEventListener('click', closeModal);
             overlay.addEventListener('click', closeModal);
+
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    closeModal();
+                    document.removeEventListener('keydown', handleEscape);
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
         }
 
         /**
@@ -6294,6 +6345,20 @@ class IntegramTable {
             });
 
             overlay.addEventListener('click', closeModal);
+
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    // Only close if this modal is the topmost one
+                    const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
+                    const maxDepth = window._integramModalDepth || 0;
+                    if (currentDepth === maxDepth) {
+                        closeModal();
+                        document.removeEventListener('keydown', handleEscape);
+                    }
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
         }
 
         renderAttributesForm(metadata, recordData, regularFields, recordReqs, isCreate = false, typeId = null) {
@@ -6662,6 +6727,20 @@ class IntegramTable {
 
                 modal.querySelector('.subordinate-modal-close').addEventListener('click', closeModal);
                 overlay.addEventListener('click', closeModal);
+
+                // Close on Escape key (issue #595)
+                const handleEscape = (e) => {
+                    if (e.key === 'Escape') {
+                        // Only close if this modal is the topmost one
+                        const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
+                        const maxDepth = window._integramModalDepth || 0;
+                        if (currentDepth === maxDepth) {
+                            closeModal();
+                            document.removeEventListener('keydown', handleEscape);
+                        }
+                    }
+                };
+                document.addEventListener('keydown', handleEscape);
 
             } catch (error) {
                 console.error('Error opening subordinate table:', error);
@@ -7317,6 +7396,20 @@ class IntegramTable {
             modal.querySelector('.subordinate-close-btn').addEventListener('click', closeModal);
             modal.querySelector('.subordinate-cancel-btn').addEventListener('click', closeModal);
             overlay.addEventListener('click', closeModal);
+
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    // Only close if this modal is the topmost one
+                    const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
+                    const maxDepth = window._integramModalDepth || 0;
+                    if (currentDepth === maxDepth) {
+                        closeModal();
+                        document.removeEventListener('keydown', handleEscape);
+                    }
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
 
             // Save handler
             modal.querySelector('#subordinate-save-btn').addEventListener('click', async () => {
@@ -8032,6 +8125,20 @@ class IntegramTable {
             });
 
             overlay.addEventListener('click', closeModal);
+
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    // Only close if this modal is the topmost one
+                    const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
+                    const maxDepth = window._integramModalDepth || 0;
+                    if (currentDepth === maxDepth) {
+                        closeModal();
+                        document.removeEventListener('keydown', handleEscape);
+                    }
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
         }
 
         async saveRecordForFormReference(modal, overlay, typeId, parentRecordId, hiddenInput, searchInput, wrapper, dropdown) {
@@ -8245,6 +8352,15 @@ class IntegramTable {
             closeBtn.addEventListener('click', closeModal);
             cancelBtn.addEventListener('click', closeModal);
             overlay.addEventListener('click', closeModal);
+
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    closeModal();
+                    document.removeEventListener('keydown', handleEscape);
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
 
             saveBtn.addEventListener('click', () => {
                 // Save visibility
@@ -9177,6 +9293,15 @@ class IntegramTable {
                     overlay.remove();
                 }
             });
+
+            // Close on Escape key (issue #595)
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    overlay.remove();
+                    document.removeEventListener('keydown', handleEscape);
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
         }
 
         /**
@@ -10229,6 +10354,20 @@ class IntegramCreateFormHelper {
         });
 
         overlay.addEventListener('click', closeModal);
+
+        // Close on Escape key (issue #595)
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                // Only close if this modal is the topmost one
+                const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
+                const maxDepth = window._integramModalDepth || 0;
+                if (currentDepth === maxDepth) {
+                    closeModal();
+                    document.removeEventListener('keydown', handleEscape);
+                }
+            }
+        };
+        document.addEventListener('keydown', handleEscape);
     }
 
     renderAttributesForm(metadata, recordData, regularFields, recordReqs, fieldValues) {
