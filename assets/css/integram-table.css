@@ -124,6 +124,9 @@
     /* border-radius: 4px; */
     overflow: overlay;
 }
+.btn-outline-secondary {
+    border-color: none !important;
+}
 
 .btn-outline-secondary:hover {
     background-color: #eaeaea !important;
