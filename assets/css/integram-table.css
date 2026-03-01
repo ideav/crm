@@ -127,6 +127,7 @@
 
 .btn-outline-secondary:hover {
     background-color: #eaeaea !important;
+    color: #6c757d !important;
 }
 
 .integram-table th {
@@ -150,7 +151,7 @@
 
 .integram-table th:first-child {
     border-left: none;
-    padding-left: 6px;
+    padding-left: 12px;
 }
 
 .integram-table th:last-child {
@@ -254,7 +255,7 @@
 
 .integram-table td:first-child {
     border-left: none;
-    padding-left: 6px;
+    padding-left: 12px;
 }
 
 .integram-table td:last-child {
