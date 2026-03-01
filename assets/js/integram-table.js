@@ -59,6 +59,8 @@ class IntegramTable {
             this.idColumns = new Set();  // Set of hidden ID column IDs
             this.columnWidths = {};  // Map of column IDs to their widths in pixels
             this.metadataCache = {};  // Cache for metadata by type ID
+            this.grantOptionsCache = null;  // Cache for GRANT dropdown options (issue #607)
+            this.reportColumnOptionsCache = null;  // Cache for REPORT_COLUMN dropdown options (issue #607)
             this.editableColumns = new Map();  // Map of column IDs to their corresponding ID column IDs
             this.checkboxMode = false;  // Whether checkbox selection column is visible
             this.selectedRows = new Set();  // Set of selected row indices
@@ -7908,7 +7910,49 @@ class IntegramTable {
         }
 
         /**
+         * Fetch GRANT or REPORT_COLUMN options from cache or API (issue #607)
+         * @param {string} grantType - 'grant' or 'rep_col'
+         * @returns {Promise<Array>} - Array of options
+         */
+        async fetchGrantOrReportColumnOptions(grantType) {
+            // Check cache first (issue #607)
+            if (grantType === 'grant' && this.grantOptionsCache !== null) {
+                return this.grantOptionsCache;
+            }
+            if (grantType === 'rep_col' && this.reportColumnOptionsCache !== null) {
+                return this.reportColumnOptionsCache;
+            }
+
+            const apiBase = this.getApiBase();
+            let apiUrl;
+
+            if (grantType === 'grant') {
+                apiUrl = `${ apiBase }/grants`;
+            } else if (grantType === 'rep_col') {
+                apiUrl = `${ apiBase }/rep_cols`;
+            } else {
+                return [];
+            }
+
+            const response = await fetch(apiUrl);
+            if (!response.ok) {
+                throw new Error(`HTTP ${ response.status }`);
+            }
+            const options = await response.json();
+
+            // Store in cache (issue #607)
+            if (grantType === 'grant') {
+                this.grantOptionsCache = options;
+            } else if (grantType === 'rep_col') {
+                this.reportColumnOptionsCache = options;
+            }
+
+            return options;
+        }
+
+        /**
          * Load GRANT and REPORT_COLUMN dropdown options from API (issue #577)
+         * Uses cache to avoid re-fetching on each call (issue #607)
          * GRANT fields use GET /grants endpoint
          * REPORT_COLUMN fields use GET /rep_cols endpoint
          */
@@ -7923,22 +7967,8 @@ class IntegramTable {
                 const currentValue = currentValueInput ? currentValueInput.value : '';
 
                 try {
-                    const apiBase = this.getApiBase();
-                    let apiUrl;
-
-                    if (grantType === 'grant') {
-                        apiUrl = `${ apiBase }/grants`;
-                    } else if (grantType === 'rep_col') {
-                        apiUrl = `${ apiBase }/rep_cols`;
-                    } else {
-                        continue;
-                    }
-
-                    const response = await fetch(apiUrl);
-                    if (!response.ok) {
-                        throw new Error(`HTTP ${ response.status }`);
-                    }
-                    const options = await response.json();
+                    // Use cached options or fetch from API (issue #607)
+                    const options = await this.fetchGrantOrReportColumnOptions(grantType);
 
                     // Clear loading option and populate with fetched options
                     select.innerHTML = '<option value="">-- Выберите --</option>';
@@ -7977,24 +8007,23 @@ class IntegramTable {
          * @param {string} currentValue - The current cell value (display text or ID)
          * @param {string} format - 'GRANT' or 'REPORT_COLUMN'
          */
+        /**
+         * Load GRANT or REPORT_COLUMN dropdown options for inline editor (issue #601)
+         * Uses cache to avoid re-fetching on each call (issue #607)
+         * @param {HTMLSelectElement} selectElement - The select element to populate
+         * @param {string} currentValue - The current cell value (display text or ID)
+         * @param {string} format - 'GRANT' or 'REPORT_COLUMN'
+         */
         async loadInlineGrantOptions(selectElement, currentValue, format) {
             try {
-                const apiBase = this.getApiBase();
-                let apiUrl;
-
-                if (format === 'GRANT') {
-                    apiUrl = `${ apiBase }/grants`;
-                } else if (format === 'REPORT_COLUMN') {
-                    apiUrl = `${ apiBase }/rep_cols`;
-                } else {
+                // Map format to grantType for the cache method (issue #607)
+                const grantType = format === 'GRANT' ? 'grant' : (format === 'REPORT_COLUMN' ? 'rep_col' : null);
+                if (!grantType) {
                     return;
                 }
 
-                const response = await fetch(apiUrl);
-                if (!response.ok) {
-                    throw new Error(`HTTP ${ response.status }`);
-                }
-                const options = await response.json();
+                // Use cached options or fetch from API (issue #607)
+                const options = await this.fetchGrantOrReportColumnOptions(grantType);
 
                 // Clear loading option and populate with fetched options
                 selectElement.innerHTML = '<option value="">-- Выберите --</option>';
@@ -10337,6 +10366,8 @@ class IntegramCreateFormHelper {
         this.tableTypeId = tableTypeId;
         this.parentId = parentId;
         this.metadataCache = {};
+        this.grantOptionsCache = null;  // Cache for GRANT dropdown options (issue #607)
+        this.reportColumnOptionsCache = null;  // Cache for REPORT_COLUMN dropdown options (issue #607)
     }
 
     escapeHtml(text) {
@@ -10758,7 +10789,48 @@ class IntegramCreateFormHelper {
     }
 
     /**
+     * Fetch GRANT or REPORT_COLUMN options from cache or API (issue #607)
+     * @param {string} grantType - 'grant' or 'rep_col'
+     * @returns {Promise<Array>} - Array of options
+     */
+    async fetchGrantOrReportColumnOptions(grantType) {
+        // Check cache first (issue #607)
+        if (grantType === 'grant' && this.grantOptionsCache !== null) {
+            return this.grantOptionsCache;
+        }
+        if (grantType === 'rep_col' && this.reportColumnOptionsCache !== null) {
+            return this.reportColumnOptionsCache;
+        }
+
+        let apiUrl;
+
+        if (grantType === 'grant') {
+            apiUrl = `${ this.apiBase }/grants`;
+        } else if (grantType === 'rep_col') {
+            apiUrl = `${ this.apiBase }/rep_cols`;
+        } else {
+            return [];
+        }
+
+        const response = await fetch(apiUrl);
+        if (!response.ok) {
+            throw new Error(`HTTP ${ response.status }`);
+        }
+        const options = await response.json();
+
+        // Store in cache (issue #607)
+        if (grantType === 'grant') {
+            this.grantOptionsCache = options;
+        } else if (grantType === 'rep_col') {
+            this.reportColumnOptionsCache = options;
+        }
+
+        return options;
+    }
+
+    /**
      * Load GRANT and REPORT_COLUMN dropdown options from API (issue #577)
+     * Uses cache to avoid re-fetching on each call (issue #607)
      * GRANT fields use GET /grants endpoint
      * REPORT_COLUMN fields use GET /rep_cols endpoint
      */
@@ -10772,21 +10844,8 @@ class IntegramCreateFormHelper {
             const currentValue = currentValueInput ? currentValueInput.value : '';
 
             try {
-                let apiUrl;
-
-                if (grantType === 'grant') {
-                    apiUrl = `${ this.apiBase }/grants`;
-                } else if (grantType === 'rep_col') {
-                    apiUrl = `${ this.apiBase }/rep_cols`;
-                } else {
-                    continue;
-                }
-
-                const response = await fetch(apiUrl);
-                if (!response.ok) {
-                    throw new Error(`HTTP ${ response.status }`);
-                }
-                const options = await response.json();
+                // Use cached options or fetch from API (issue #607)
+                const options = await this.fetchGrantOrReportColumnOptions(grantType);
 
                 // Clear loading option and populate with fetched options
                 select.innerHTML = '<option value="">-- Выберите --</option>';
