@@ -102,7 +102,7 @@
     border-radius: 4px;
     transition: var(--md-transition);
     font-weight: 500;
-    font-size: 14px;
+    font-size: 16px;
     color: #6c757d;
     background: transparent;
     border: none;
@@ -2179,11 +2179,12 @@ td:has(.inline-editor-file) {
     cursor: pointer;
     padding: 4px 8px;
     border-radius: 4px;
-    font-size: 18px;
+    font-size: 16px;
     user-select: none;
     display: inline-flex;
     align-items: center;
     transition: background-color 0.2s;
+    color: #6c757d;
 }
 
 .integram-table-checkbox-toggle:hover {
