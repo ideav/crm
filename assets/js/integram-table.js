@@ -8931,7 +8931,9 @@ class IntegramTable {
         }
 
         async deleteRecord(modal, recordId, typeId) {
-            if (!confirm('Вы уверены, что хотите удалить эту запись?')) {
+            // Show custom confirmation modal instead of native confirm()
+            const confirmed = await this.showDeleteConfirmModal();
+            if (!confirmed) {
                 return;
             }
 
@@ -8962,16 +8964,96 @@ class IntegramTable {
 
                 this.showToast('Запись удалена', 'success');
 
-                // Reload table data
-                this.data = [];
-                this.loadedRecords = 0;
-                this.hasMore = true;
-                this.totalRows = null;
-                await this.loadData(false);
+                // Check if we deleted a record from a subordinate table and refresh it
+                let refreshedSubordinateTable = false;
+                if (this.currentEditModal && this.currentEditModal.subordinateTables) {
+                    // Find which subordinate table this record belongs to (by matching typeId with arr_id)
+                    const subordinateTable = this.currentEditModal.subordinateTables.find(st => st.arr_id === typeId);
+
+                    if (subordinateTable) {
+                        // Reload the specific subordinate table
+                        const tabContent = this.currentEditModal.modal.querySelector(`[data-tab-content="sub-${ subordinateTable.id }"]`);
+                        if (tabContent) {
+                            tabContent.dataset.loaded = '';
+                            await this.loadSubordinateTable(tabContent, subordinateTable.arr_id, this.currentEditModal.recordId);
+                            tabContent.dataset.loaded = 'true';
+                            refreshedSubordinateTable = true;
+                        }
+                    }
+                }
+
+                // Check if we deleted a record from a cell-opened subordinate table
+                // Use == for type coercion since typeId from dataset is a string, while arrId may be a number
+                if (!refreshedSubordinateTable && this.cellSubordinateContext && this.cellSubordinateContext.arrId == typeId) {
+                    await this.loadSubordinateTable(this.cellSubordinateContext.container, this.cellSubordinateContext.arrId, this.cellSubordinateContext.parentRecordId);
+                    refreshedSubordinateTable = true;
+                }
+
+                // If we didn't refresh a subordinate table, reload main table data
+                if (!refreshedSubordinateTable) {
+                    this.data = [];
+                    this.loadedRecords = 0;
+                    this.hasMore = true;
+                    this.totalRows = null;
+                    await this.loadData(false);
+                }
             } catch (error) {
                 console.error('Error deleting record:', error);
                 this.showToast(`Ошибка удаления: ${ error.message }`, 'error');
             }
+        }
+
+        /**
+         * Show a custom modal confirmation dialog for delete action
+         * @returns {Promise<boolean>} - true if user confirmed, false otherwise
+         */
+        showDeleteConfirmModal() {
+            return new Promise((resolve) => {
+                const modalId = `delete-confirm-${ Date.now() }`;
+                const modalHtml = `
+                    <div class="integram-modal-overlay" id="${ modalId }">
+                        <div class="integram-modal" style="max-width: 400px;">
+                            <div class="integram-modal-header">
+                                <h5>Подтверждение удаления</h5>
+                            </div>
+                            <div class="integram-modal-body">
+                                <p style="margin: 0;">Вы уверены, что хотите удалить эту запись?</p>
+                            </div>
+                            <div class="integram-modal-footer">
+                                <button type="button" class="btn btn-secondary delete-confirm-cancel-btn" style="margin-right: 8px;">Отмена</button>
+                                <button type="button" class="btn btn-danger delete-confirm-ok-btn">Удалить</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+                const confirmModal = document.getElementById(modalId);
+
+                const cleanup = (result) => {
+                    confirmModal.remove();
+                    resolve(result);
+                };
+
+                confirmModal.querySelector('.delete-confirm-ok-btn').addEventListener('click', () => cleanup(true));
+                confirmModal.querySelector('.delete-confirm-cancel-btn').addEventListener('click', () => cleanup(false));
+
+                // Close on overlay click (outside modal content)
+                confirmModal.addEventListener('click', (e) => {
+                    if (e.target === confirmModal) {
+                        cleanup(false);
+                    }
+                });
+
+                // Close on Escape key
+                const handleEscape = (e) => {
+                    if (e.key === 'Escape') {
+                        document.removeEventListener('keydown', handleEscape);
+                        cleanup(false);
+                    }
+                };
+                document.addEventListener('keydown', handleEscape);
+            });
         }
 
         saveFormShowDelete(typeId, show) {
