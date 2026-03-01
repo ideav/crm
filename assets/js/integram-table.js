@@ -7427,16 +7427,21 @@ class IntegramTable {
                     params.append('_xsrf', xsrf);
                 }
 
+                // Get main value before iterating form fields
+                const mainValue = formData.get('main');
+
                 // Skip empty parameters when creating so server can fill defaults
+                // Skip 'main' since it's handled separately as t{arrId}
                 for (const [key, value] of formData.entries()) {
+                    if (key === 'main') continue;
                     if (value !== '' && value !== null && value !== undefined) {
                         params.append(key, value);
                     }
                 }
 
-                const mainValue = formData.get('main');
+                // Add main value as t{arrId} parameter (issue #597)
                 if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
-                    params.append('t0', mainValue);
+                    params.append(`t${ arrId }`, mainValue);
                 }
 
                 const apiBase = this.getApiBase();
