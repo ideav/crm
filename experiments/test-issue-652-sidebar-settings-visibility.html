@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Issue #652 - Sidebar Settings Icon Visibility</title>
+    <link rel="stylesheet" href="../assets/css/styles.css">
+    <link rel="stylesheet" href="https://unpkg.com/primeicons/primeicons.css">
+    <link rel="stylesheet" href="../assets/css/main-app.css">
+    <style>
+        /* Additional test styles to simulate production environment */
+        .test-info {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: #333;
+            color: #fff;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 1000;
+        }
+        .test-info code {
+            background: #555;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-info">
+        Issue #652 Test: Settings icon (cog) at bottom should always be visible, not go off screen
+    </div>
+
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+        <div class="navbar-left">
+            <a href="#" class="navbar-brand">
+                <span class="brand-name">Test DB</span>
+            </a>
+        </div>
+        <div class="navbar-right">
+            <div class="user-menu-wrapper">
+                <button id="user-menu-toggle" class="account-info" type="button" title="User menu">
+                    <div id="account-avatar" class="account-avatar">T</div>
+                    <span id="account-email" class="account-email">test@example.com</span>
+                    <i class="user-menu-arrow pi pi-chevron-down"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Application Layout -->
+    <div class="app-layout">
+        <!-- Left Sidebar Menu -->
+        <aside class="app-sidebar" id="app-sidebar">
+            <button id="sidebar-toggle" class="sidebar-toggle" type="button" title="Toggle sidebar" aria-label="Toggle sidebar">
+                <i class="pi pi-bars"></i>
+            </button>
+            <nav class="app-menu" id="app-menu">
+                <!-- Many menu items to test scrolling -->
+                <a href="#" class="app-menu-item"><i class="menu-icon pi pi-users"></i><span class="menu-text">Users</span></a>
+                <a href="#" class="app-menu-item"><i class="menu-icon pi pi-th-large"></i><span class="menu-text">Forms</span></a>
+                <a href="#" class="app-menu-item"><i class="menu-icon pi pi-search"></i><span class="menu-text">Requests</span></a>
+                <a href="#" class="app-menu-item"><i class="menu-icon pi pi-upload"></i><span class="menu-text">Upload</span></a>
+                <a href="#" class="app-menu-item active"><i class="menu-icon pi pi-table"></i><span class="menu-text">Tables</span></a>
+                <a href="#" class="app-menu-item"><i class="menu-icon pi pi-file"></i><span class="menu-text">Files</span></a>
+                <a href="#" class="app-menu-item"><i class="menu-icon pi pi-plus"></i><span class="menu-text">New</span></a>
+                <a href="#" class="app-menu-item"><i class="menu-icon pi pi-calendar"></i><span class="menu-text">Calendar</span></a>
+                <a href="#" class="app-menu-item"><i class="menu-icon pi pi-chart-bar"></i><span class="menu-text">Reports</span></a>
+                <a href="#" class="app-menu-item"><i class="menu-icon pi pi-inbox"></i><span class="menu-text">Messages</span></a>
+                <a href="#" class="app-menu-item"><i class="menu-icon pi pi-bell"></i><span class="menu-text">Notifications</span></a>
+                <a href="#" class="app-menu-item"><i class="menu-icon pi pi-bookmark"></i><span class="menu-text">Bookmarks</span></a>
+                <a href="#" class="app-menu-item"><i class="menu-icon pi pi-star"></i><span class="menu-text">Favorites</span></a>
+                <a href="#" class="app-menu-item"><i class="menu-icon pi pi-history"></i><span class="menu-text">History</span></a>
+                <a href="#" class="app-menu-item"><i class="menu-icon pi pi-lock"></i><span class="menu-text">Security</span></a>
+            </nav>
+            <button id="sidebar-settings" class="sidebar-settings" type="button" title="Edit menu" aria-label="Edit menu">
+                <i class="pi pi-cog"></i>
+            </button>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="app-content">
+            <h1>Test Issue #652 - Sidebar Settings Icon</h1>
+            <p>The settings icon (cog wheel) at the bottom left of the sidebar should always be visible within the viewport.</p>
+            <h2>Expected behavior:</h2>
+            <ul>
+                <li>The settings icon stays at the bottom of the sidebar</li>
+                <li>The menu items scroll within the sidebar when there are many items</li>
+                <li>The settings icon never goes off screen</li>
+            </ul>
+            <h2>Test steps:</h2>
+            <ol>
+                <li>Look at the left sidebar - you should see the cog icon at the bottom</li>
+                <li>If there are many menu items, they should scroll within the sidebar</li>
+                <li>The sidebar itself should not extend beyond the viewport</li>
+            </ol>
+        </main>
+    </div>
+
+    <script>
+        // Test script to verify sidebar dimensions
+        window.addEventListener('load', function() {
+            const sidebar = document.getElementById('app-sidebar');
+            const settingsBtn = document.getElementById('sidebar-settings');
+            const viewportHeight = window.innerHeight;
+
+            const sidebarRect = sidebar.getBoundingClientRect();
+            const settingsRect = settingsBtn.getBoundingClientRect();
+
+            console.log('Viewport height:', viewportHeight);
+            console.log('Sidebar height:', sidebarRect.height);
+            console.log('Sidebar bottom:', sidebarRect.bottom);
+            console.log('Settings button bottom:', settingsRect.bottom);
+            console.log('Settings button visible:', settingsRect.bottom <= viewportHeight ? 'YES' : 'NO');
+
+            if (settingsRect.bottom > viewportHeight) {
+                console.error('FAIL: Settings icon is off screen!');
+            } else {
+                console.log('PASS: Settings icon is visible within viewport.');
+            }
+        });
+    </script>
+</body>
+</html>

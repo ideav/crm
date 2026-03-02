@@ -136,7 +136,9 @@
     flex-shrink: 0;
     transition: width 0.25s ease, background-color 0.3s ease;
     overflow: hidden;
-    position: relative;
+    position: sticky;
+    top: 0;
+    height: calc(100vh - 70px);
     display: flex;
     flex-direction: column;
 }
@@ -344,6 +346,8 @@
         border-right: none;
         border-bottom: 1px solid var(--border-color);
         padding: 0.75rem 0;
+        position: relative;
+        height: auto;
     }
 
     .app-menu {
