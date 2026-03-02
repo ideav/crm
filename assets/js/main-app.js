@@ -721,7 +721,8 @@ class MainAppController {
                     confirmMsg = `Удалить пункт "${itemName}" и все его подпункты?`;
                 }
 
-                if (confirm(confirmMsg)) {
+                const confirmed = await this.showDeleteConfirmModal(confirmMsg);
+                if (confirmed) {
                     await this.deleteMenuItem(config.menuId);
                     overlay.remove();
                 }
@@ -901,11 +902,11 @@ class MainAppController {
                 }
             } else {
                 console.error('Failed to delete menu item:', response.status);
-                alert('Ошибка удаления пункта меню: ' + response.status);
+                this.showErrorModal('Ошибка удаления пункта меню: ' + response.status);
             }
         } catch (err) {
             console.error('Error deleting menu item:', err);
-            alert('Ошибка удаления пункта меню: ' + err.message);
+            this.showErrorModal('Ошибка удаления пункта меню: ' + err.message);
         }
     }
 
@@ -941,6 +942,89 @@ class MainAppController {
                 }
             }
         }
+    }
+
+    showDeleteConfirmModal(message) {
+        return new Promise((resolve) => {
+            const modalId = `menu-delete-confirm-${ Date.now() }`;
+            const modalHtml = `
+                <div class="menu-modal-overlay" id="${ modalId }" style="z-index: 10001;">
+                    <div class="menu-modal" style="max-width: 400px; padding: 24px;">
+                        <h3 style="margin: 0 0 16px 0;">Подтверждение удаления</h3>
+                        <p style="margin: 0 0 24px 0;">${ message }</p>
+                        <div class="menu-modal-actions">
+                            <button type="button" class="menu-modal-btn delete menu-delete-confirm-ok">Удалить</button>
+                            <button type="button" class="menu-modal-btn cancel menu-delete-confirm-cancel">Отмена</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+            const confirmModal = document.getElementById(modalId);
+
+            const cleanup = (result) => {
+                confirmModal.remove();
+                resolve(result);
+            };
+
+            confirmModal.querySelector('.menu-delete-confirm-ok').addEventListener('click', () => cleanup(true));
+            confirmModal.querySelector('.menu-delete-confirm-cancel').addEventListener('click', () => cleanup(false));
+
+            // Close on overlay click (outside modal content)
+            confirmModal.addEventListener('click', (e) => {
+                if (e.target === confirmModal) {
+                    cleanup(false);
+                }
+            });
+
+            // Close on Escape key
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    document.removeEventListener('keydown', handleEscape);
+                    cleanup(false);
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
+        });
+    }
+
+    showErrorModal(message) {
+        const modalId = `menu-error-${ Date.now() }`;
+        const modalHtml = `
+            <div class="menu-modal-overlay" id="${ modalId }" style="z-index: 10001;">
+                <div class="menu-modal" style="max-width: 400px; padding: 24px;">
+                    <h3 style="margin: 0 0 16px 0; color: #dc3545;">Ошибка</h3>
+                    <p style="margin: 0 0 24px 0;">${ message }</p>
+                    <div class="menu-modal-actions">
+                        <button type="button" class="menu-modal-btn cancel menu-error-close">Закрыть</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+        const errorModal = document.getElementById(modalId);
+
+        const cleanup = () => errorModal.remove();
+
+        errorModal.querySelector('.menu-error-close').addEventListener('click', cleanup);
+
+        // Close on overlay click
+        errorModal.addEventListener('click', (e) => {
+            if (e.target === errorModal) {
+                cleanup();
+            }
+        });
+
+        // Close on Escape key
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                document.removeEventListener('keydown', handleEscape);
+                cleanup();
+            }
+        };
+        document.addEventListener('keydown', handleEscape);
     }
 
     enableInlineRename(menuItem) {
