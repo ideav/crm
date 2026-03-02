@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Menu Expansion Test - Edit Mode</title>
+    <link rel="stylesheet" href="https://unpkg.com/primeicons@7.0.0/primeicons.css">
+    <style>
+        :root {
+            --text-primary: #1f2937;
+            --text-secondary: #6b7280;
+            --bg-primary: #f9fafb;
+            --bg-secondary: #f3f4f6;
+            --border-color: #e5e7eb;
+            --card-bg: #ffffff;
+            --button-primary: #3b82f6;
+            --button-primary-hover: #2563eb;
+            --nav-shadow: rgba(0, 0, 0, 0.05);
+            --input-bg: #ffffff;
+        }
+
+        [data-theme="dark"] {
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
+            --bg-primary: #111827;
+            --bg-secondary: #1f2937;
+            --border-color: #374151;
+            --card-bg: #1f2937;
+            --button-primary: #3b82f6;
+            --button-primary-hover: #60a5fa;
+            --nav-shadow: rgba(0, 0, 0, 0.3);
+            --input-bg: #374151;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            padding: 20px;
+        }
+
+        h1 {
+            margin-bottom: 10px;
+        }
+
+        .status {
+            margin-bottom: 20px;
+            padding: 10px;
+            border-radius: 8px;
+            background-color: var(--bg-secondary);
+        }
+
+        .status.edit-active {
+            background-color: rgba(59, 130, 246, 0.1);
+            border: 1px solid var(--button-primary);
+        }
+    </style>
+    <link rel="stylesheet" href="../assets/css/main-app.css">
+</head>
+<body>
+    <h1>Test: Menu Expansion in Edit Mode</h1>
+    <div class="status" id="status">Edit Mode: <strong id="edit-mode-status">OFF</strong></div>
+
+    <p style="margin-bottom: 20px;">
+        <strong>Test Instructions:</strong><br>
+        1. Click the settings gear icon to enable edit mode<br>
+        2. Try clicking on "Настройки" (has sub-items) to expand it<br>
+        3. The submenu should now expand even in edit mode (fix for issue #640)
+    </p>
+
+    <div id="app-sidebar" class="app-sidebar">
+        <button id="sidebar-settings" class="sidebar-settings" title="Настройки меню">
+            <i class="pi pi-cog"></i>
+        </button>
+        <div id="app-menu" class="app-menu"></div>
+    </div>
+
+    <script>
+        // Mock data
+        const db = 'testdb';
+        const action = '';
+        window.xsrf = 'test-xsrf';
+        window.roleId = '1';
+
+        // Sample menu data with nested items
+        const menuData = [
+            { menu_id: '1', menu_up: '', name: 'Главная', href: 'home', icon: '<i class="pi pi-home"></i>' },
+            { menu_id: '2', menu_up: '', name: 'Настройки', href: '', icon: '<i class="pi pi-cog"></i>' },
+            { menu_id: '3', menu_up: '2', name: 'Профиль', href: 'settings/profile', icon: '<i class="pi pi-user"></i>' },
+            { menu_id: '4', menu_up: '2', name: 'Безопасность', href: 'settings/security', icon: '<i class="pi pi-shield"></i>' },
+            { menu_id: '5', menu_up: '2', name: 'Уведомления', href: 'settings/notifications', icon: '<i class="pi pi-bell"></i>' },
+            { menu_id: '6', menu_up: '', name: 'Отчеты', href: '', icon: '<i class="pi pi-chart-bar"></i>' },
+            { menu_id: '7', menu_up: '6', name: 'Продажи', href: 'reports/sales', icon: '<i class="pi pi-shopping-cart"></i>' },
+            { menu_id: '8', menu_up: '6', name: 'Аналитика', href: 'reports/analytics', icon: '<i class="pi pi-chart-line"></i>' },
+        ];
+    </script>
+    <script src="../assets/js/main-app.js"></script>
+    <script>
+        // Update status indicator when edit mode changes
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.attributeName === 'class') {
+                    const sidebar = document.getElementById('app-sidebar');
+                    const statusEl = document.getElementById('status');
+                    const statusText = document.getElementById('edit-mode-status');
+                    if (sidebar.classList.contains('edit-mode')) {
+                        statusEl.classList.add('edit-active');
+                        statusText.textContent = 'ON';
+                    } else {
+                        statusEl.classList.remove('edit-active');
+                        statusText.textContent = 'OFF';
+                    }
+                }
+            });
+        });
+
+        observer.observe(document.getElementById('app-sidebar'), { attributes: true });
+    </script>
+</body>
+</html>

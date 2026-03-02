@@ -287,7 +287,8 @@ class MainAppController {
             menuItem.appendChild(arrowSpan);
 
             menuItem.addEventListener('click', (e) => {
-                if (this.editMode) return; // Don't toggle in edit mode
+                // Allow expanding/collapsing in edit mode too
+                // Edit button clicks are stopped via e.stopPropagation() so they don't trigger this
                 if (!href || hasChildren) {
                     e.preventDefault();
                     const submenu = menuItem.nextElementSibling;
