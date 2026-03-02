@@ -63,12 +63,7 @@
         <aside class="app-sidebar" id="app-sidebar">
             <button id="sidebar-toggle" class="sidebar-toggle" type="button" title="Toggle menu" aria-label="Toggle sidebar">&#9776;</button>
             <nav class="app-menu" id="app-menu">
-                <!-- Begin: MyRoleMenu -->
-                <a href="/{_global_.z}/{HREF}" class="app-menu-item" data-href="{HREF}">
-                    <span class="menu-icon">&#128196;</span>
-                    <span class="menu-text">{Name}</span>
-                </a>
-                <!-- End: MyRoleMenu -->
+                <!-- Menu will be built from menuData by JavaScript -->
             </nav>
         </aside>
 
@@ -78,6 +73,13 @@
         </main>
     </div>
 
+    <script>
+        var menuData = [
+        <!-- Begin: MyRoleMenu -->
+        {menu_id:'{menu_id}',menu_up:'{menu_up}',name:'{name}',href:'{href}',icon:'{icon}'},
+        <!-- End: MyRoleMenu -->
+        ];
+    </script>
     <script src="/js/app.js"></script>
     <script src="/js/main-app.js"></script>
 </body>
