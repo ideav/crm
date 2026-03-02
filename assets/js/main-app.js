@@ -266,6 +266,19 @@ class MainAppController {
         const actionsSpan = document.createElement('span');
         actionsSpan.className = 'menu-item-actions';
 
+        // Add child item button (plus icon, left of edit)
+        const addChildBtn = document.createElement('button');
+        addChildBtn.className = 'menu-action-btn add';
+        addChildBtn.type = 'button';
+        addChildBtn.title = 'Добавить пункт';
+        addChildBtn.innerHTML = '<i class="pi pi-plus"></i>';
+        addChildBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.showAddItemModal(item.menu_id, level + 1);
+        });
+        actionsSpan.appendChild(addChildBtn);
+
         const editBtn = document.createElement('button');
         editBtn.className = 'menu-action-btn edit';
         editBtn.type = 'button';
@@ -286,18 +299,29 @@ class MainAppController {
             arrowSpan.className = 'menu-arrow pi pi-chevron-down';
             menuItem.appendChild(arrowSpan);
 
-            menuItem.addEventListener('click', (e) => {
-                // Allow expanding/collapsing in edit mode too
-                // Edit button clicks are stopped via e.stopPropagation() so they don't trigger this
-                if (!href || hasChildren) {
+            // Click on the arrow expands/collapses the submenu
+            arrowSpan.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const submenu = menuItem.nextElementSibling;
+                if (submenu && submenu.classList.contains('app-submenu')) {
+                    const isExpanded = submenu.classList.toggle('expanded');
+                    menuItem.classList.toggle('expanded', isExpanded);
+                }
+            });
+
+            // If item has no href, clicking on the item also expands/collapses
+            // If item has href, let it navigate (link behavior)
+            if (!href) {
+                menuItem.addEventListener('click', (e) => {
                     e.preventDefault();
                     const submenu = menuItem.nextElementSibling;
                     if (submenu && submenu.classList.contains('app-submenu')) {
                         const isExpanded = submenu.classList.toggle('expanded');
                         menuItem.classList.toggle('expanded', isExpanded);
                     }
-                }
-            });
+                });
+            }
         }
 
         // Setup drag and drop handlers (will be active only in edit mode)
