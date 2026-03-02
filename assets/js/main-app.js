@@ -656,7 +656,7 @@ class MainAppController {
             }
 
             if (config.mode === 'add') {
-                await this.createMenuItem(name, href, finalIcon, config.parentId);
+                await this.createMenuItemAPI(name, href, finalIcon, config.parentId);
             } else {
                 await this.updateMenuItem(config.menuId, name, href, finalIcon);
             }
@@ -707,7 +707,7 @@ class MainAppController {
                   .replace(/'/g, '&#39;');
     }
 
-    async createMenuItem(name, href, icon, parentId) {
+    async createMenuItemAPI(name, href, icon, parentId) {
         // Create menu item via API
         // POST: _m_new/151?JSON&up={parentId or roleId}
         // Parameters: t151 (name), t153 (href), t391 (icon)
