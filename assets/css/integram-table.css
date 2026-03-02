@@ -125,7 +125,7 @@
     overflow: overlay;
 }
 .btn-outline-secondary {
-    border-color: #fff !important;
+    border: none !important;
 }
 
 .btn-outline-secondary:hover {
