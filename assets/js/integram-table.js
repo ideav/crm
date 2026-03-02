@@ -1080,7 +1080,7 @@ class IntegramTable {
                                 <i class="pi pi-undo" style="vertical-align: middle;"></i>
                             </button>
                             ` : '' }
-                            <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.openGroupingSettings()">
+                            <button class="btn btn-sm btn-link text-dark me-2" onclick="window.${ instanceName }.openGroupingSettings()">
                                 ${ this.groupingEnabled ? '<i class="pi pi-check"></i>' : '' } Группы
                             </button>
                             ${ this.hasActiveFilters() ? `
@@ -1088,11 +1088,11 @@ class IntegramTable {
                                 <i class="pi pi-filter-slash" style="vertical-align: middle;"></i>
                             </button>
                             ` : '' }
-                            <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.toggleFilters()">
+                            <button class="btn btn-sm btn-link text-dark me-2" onclick="window.${ instanceName }.toggleFilters()">
                                 ${ this.filtersEnabled ? '<i class="pi pi-check"></i>' : '' } Фильтры
                             </button>
                             <div class="integram-table-export-container">
-                                <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.toggleExportMenu(event)" title="Экспорт таблицы">
+                                <button class="btn btn-sm btn-link text-dark me-2" onclick="window.${ instanceName }.toggleExportMenu(event)" title="Экспорт таблицы">
                                     Экспорт
                                 </button>
                                 <div class="integram-export-menu" id="${ instanceName }-export-menu" style="display: none;">
