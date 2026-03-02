@@ -753,6 +753,17 @@
     background-color: var(--button-primary-hover);
 }
 
+.menu-modal-btn.delete {
+    background-color: #dc3545;
+    border: none;
+    color: white;
+    margin-right: auto;
+}
+
+.menu-modal-btn.delete:hover {
+    background-color: #bb2d3b;
+}
+
 /* Drop indicator for drag and drop */
 .drop-indicator {
     height: 2px;

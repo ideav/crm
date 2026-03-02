@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Test Menu CRUD API</title>
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; padding: 2rem; }
+        .section { margin-bottom: 2rem; padding: 1rem; border: 1px solid #ccc; border-radius: 8px; }
+        h2 { margin-top: 0; }
+        pre { background: #f5f5f5; padding: 1rem; border-radius: 4px; overflow-x: auto; }
+        code { font-family: 'Monaco', 'Menlo', monospace; }
+        .params { margin: 0.5rem 0; }
+        .params dt { font-weight: bold; color: #333; }
+        .params dd { margin-left: 1.5rem; margin-bottom: 0.5rem; color: #666; }
+    </style>
+</head>
+<body>
+    <h1>Menu CRUD API Testing</h1>
+    <p>This page documents the API endpoints for creating and deleting menu items as described in issue #632.</p>
+
+    <div class="section">
+        <h2>Create Menu Item</h2>
+        <pre><code>POST: /_m_new/151?JSON&up={parentId|roleId}</code></pre>
+
+        <h3>Parameters (form-urlencoded):</h3>
+        <dl class="params">
+            <dt>_xsrf</dt>
+            <dd>XSRF token from window.xsrf</dd>
+            <dt>t151</dt>
+            <dd>Menu item name (string)</dd>
+            <dt>t153</dt>
+            <dd>Menu item URL/href (string)</dd>
+            <dt>t391</dt>
+            <dd>Menu item icon (string - can be PrimeVue icon HTML or emoji)</dd>
+        </dl>
+
+        <h3>Response:</h3>
+        <pre><code>{
+    "obj": 123  // ID of the newly created menu item
+}</code></pre>
+
+        <h3>JavaScript Implementation:</h3>
+        <pre><code>async function createMenuItem(name, href, icon, parentId) {
+    const upParam = parentId || window.roleId;
+    const url = '/_m_new/151?JSON&up=' + encodeURIComponent(upParam);
+
+    const params = new URLSearchParams();
+    params.append('_xsrf', window.xsrf || '');
+    params.append('t151', name);
+    params.append('t153', href);
+    params.append('t391', icon);
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString()
+    });
+
+    if (response.ok) {
+        const data = await response.json();
+        return data.obj; // Returns new menu item ID
+    }
+    throw new Error('Failed to create menu item');
+}</code></pre>
+    </div>
+
+    <div class="section">
+        <h2>Delete Menu Item</h2>
+        <pre><code>POST: /_m_del/{menuItemId}?JSON</code></pre>
+
+        <h3>Parameters (form-urlencoded):</h3>
+        <dl class="params">
+            <dt>_xsrf</dt>
+            <dd>XSRF token from window.xsrf</dd>
+        </dl>
+
+        <h3>Notes:</h3>
+        <ul>
+            <li>Backend automatically renumbers remaining items after deletion</li>
+            <li>All subordinate (child) menu items are also deleted automatically</li>
+        </ul>
+
+        <h3>JavaScript Implementation:</h3>
+        <pre><code>async function deleteMenuItem(menuId) {
+    const url = '/_m_del/' + encodeURIComponent(menuId) + '?JSON';
+
+    const params = new URLSearchParams();
+    params.append('_xsrf', window.xsrf || '');
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString()
+    });
+
+    if (!response.ok) {
+        throw new Error('Failed to delete menu item');
+    }
+}</code></pre>
+    </div>
+
+    <div class="section">
+        <h2>UI Integration</h2>
+        <p>The menu edit mode is activated by clicking the settings button (gear icon) at the bottom of the sidebar.</p>
+
+        <h3>In Edit Mode:</h3>
+        <ul>
+            <li><strong>"Add item" buttons</strong> appear at the end of each menu level (including submenus)</li>
+            <li><strong>Pencil (edit) button</strong> appears on each menu item - opens settings modal</li>
+            <li><strong>Settings modal</strong> allows editing name, URL, and icon</li>
+            <li><strong>Delete button</strong> appears in the settings modal (only when editing existing items)</li>
+            <li>Confirmation dialog shows when deleting, warning about child items if applicable</li>
+        </ul>
+    </div>
+</body>
+</html>
+</code></pre>
