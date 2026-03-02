@@ -429,13 +429,56 @@ class MainAppController {
             });
 
             if (response.ok) {
-                // Update local menuData and rebuild menu
-                this.rebuildMenuFromDOM();
+                // Update local menuData order to reflect the new position
+                this.reorderMenuDataLocally(draggedId, targetId, targetParentId, insertBefore);
+                // Rebuild menu from updated menuData
+                this.buildMenu();
+                this.highlightActiveMenuItem();
+                // Restore edit mode if active
+                if (this.editMode) {
+                    const sidebar = document.getElementById('app-sidebar');
+                    sidebar.classList.add('edit-mode');
+                    document.querySelectorAll('.app-menu-item').forEach(item => {
+                        item.setAttribute('draggable', 'true');
+                    });
+                }
             } else {
                 console.error('Failed to reorder menu item:', response.status);
             }
         } catch (err) {
             console.error('Error reordering menu item:', err);
+        }
+    }
+
+    /**
+     * Reorders menuData array locally to match the new position after a successful API reorder.
+     * This ensures the visual order matches the database order.
+     */
+    reorderMenuDataLocally(draggedId, targetId, targetParentId, insertBefore) {
+        if (typeof menuData === 'undefined' || !Array.isArray(menuData)) return;
+
+        // Find and remove the dragged item from menuData
+        const draggedIndex = menuData.findIndex(item => item.menu_id === draggedId);
+        if (draggedIndex === -1) return;
+
+        const [draggedItem] = menuData.splice(draggedIndex, 1);
+
+        // Find the target item's index in menuData
+        let targetIndex = menuData.findIndex(item => item.menu_id === targetId);
+        if (targetIndex === -1) {
+            // Target not found, append to the end
+            menuData.push(draggedItem);
+            return;
+        }
+
+        // Calculate insertion point: before or after the target
+        // When insertBefore is true, insert at targetIndex; otherwise insert after targetIndex
+        const insertIndex = insertBefore ? targetIndex : targetIndex + 1;
+        menuData.splice(insertIndex, 0, draggedItem);
+
+        // Also update this.menuItems to keep in sync
+        if (this.menuItems[draggedId]) {
+            this.menuItems[draggedId] = draggedItem;
         }
     }
 
