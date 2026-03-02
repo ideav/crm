@@ -561,6 +561,7 @@ class MainAppController {
                 </div>
             </div>
             <div class="menu-modal-actions">
+                ${config.mode === 'edit' ? '<button type="button" class="menu-modal-btn delete">Удалить</button>' : ''}
                 <button type="button" class="menu-modal-btn cancel">Отмена</button>
                 <button type="button" class="menu-modal-btn save">Сохранить</button>
             </div>
@@ -663,10 +664,38 @@ class MainAppController {
             overlay.remove();
         });
 
+        // Delete button (only in edit mode)
+        const deleteBtn = modal.querySelector('.delete');
+        if (deleteBtn && config.mode === 'edit') {
+            deleteBtn.addEventListener('click', async () => {
+                const itemName = config.name || 'этот пункт';
+                const hasChildren = this.hasChildMenuItems(config.menuId);
+                let confirmMsg = `Удалить пункт "${itemName}"?`;
+                if (hasChildren) {
+                    confirmMsg = `Удалить пункт "${itemName}" и все его подпункты?`;
+                }
+
+                if (confirm(confirmMsg)) {
+                    await this.deleteMenuItem(config.menuId);
+                    overlay.remove();
+                }
+            });
+        }
+
         // Focus name input
         setTimeout(() => {
             modal.querySelector('#modal-name').focus();
         }, 100);
+    }
+
+    hasChildMenuItems(menuId) {
+        // Check if menu item has children
+        for (const id in this.menuItems) {
+            if (this.menuItems[id].menu_up === menuId) {
+                return true;
+            }
+        }
+        return false;
     }
 
     escapeHtml(str) {
@@ -679,14 +708,71 @@ class MainAppController {
     }
 
     async createMenuItem(name, href, icon, parentId) {
-        // For creating new menu items, we'd need an API endpoint
-        // This is a placeholder - the actual implementation depends on available API
-        console.log('Creating menu item:', { name, href, icon, parentId });
+        // Create menu item via API
+        // POST: _m_new/151?JSON&up={parentId or roleId}
+        // Parameters: t151 (name), t153 (href), t391 (icon)
+        // Response: JSON with key 'obj' containing the new menu item ID
 
-        // Typically this would be something like:
-        // POST /_m_new/menu_table_id?JSON
-        // For now, show a message that this requires backend support
-        alert('Создание новых пунктов меню требует поддержки на сервере. Пожалуйста, добавьте пункт через административную панель.');
+        const upParam = parentId || (typeof window.roleId !== 'undefined' ? window.roleId : '');
+        const url = '/_m_new/151?JSON&up=' + encodeURIComponent(upParam);
+
+        const params = new URLSearchParams();
+        params.append('_xsrf', window.xsrf || '');
+        params.append('t151', name);
+        params.append('t153', href);
+        params.append('t391', icon);
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: params.toString()
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                if (data && data.obj) {
+                    // Successfully created - add to local data and rebuild menu
+                    const newItem = {
+                        menu_id: String(data.obj),
+                        menu_up: parentId || '',
+                        name: name,
+                        href: href,
+                        icon: icon
+                    };
+                    this.menuItems[newItem.menu_id] = newItem;
+
+                    // Add to global menuData if it exists
+                    if (typeof menuData !== 'undefined' && Array.isArray(menuData)) {
+                        menuData.push(newItem);
+                    }
+
+                    // Rebuild menu to show new item
+                    this.buildMenu();
+                    this.highlightActiveMenuItem();
+
+                    // Restore edit mode if active
+                    if (this.editMode) {
+                        const sidebar = document.getElementById('app-sidebar');
+                        sidebar.classList.add('edit-mode');
+                        document.querySelectorAll('.app-menu-item').forEach(item => {
+                            item.setAttribute('draggable', 'true');
+                        });
+                    }
+                } else {
+                    console.error('Failed to create menu item: no obj in response', data);
+                    alert('Ошибка создания пункта меню: сервер не вернул ID');
+                }
+            } else {
+                console.error('Failed to create menu item:', response.status);
+                alert('Ошибка создания пункта меню: ' + response.status);
+            }
+        } catch (err) {
+            console.error('Error creating menu item:', err);
+            alert('Ошибка создания пункта меню: ' + err.message);
+        }
     }
 
     async updateMenuItem(menuId, name, href, icon) {
@@ -727,6 +813,86 @@ class MainAppController {
         // Note: Actual save to backend would require appropriate API endpoint
         // For name/href changes, this might use a record update endpoint
         console.log('Updated menu item locally:', { menuId, name, href, icon });
+    }
+
+    async deleteMenuItem(menuId) {
+        // Delete menu item via API
+        // POST: _m_del/{id}?JSON
+        // Note: Backend automatically deletes all subordinate menu items and renumbers
+
+        const url = '/_m_del/' + encodeURIComponent(menuId) + '?JSON';
+
+        const params = new URLSearchParams();
+        params.append('_xsrf', window.xsrf || '');
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: params.toString()
+            });
+
+            if (response.ok) {
+                // Successfully deleted - remove from local data
+                // Also remove all children (subordinate items)
+                this.removeMenuItemAndChildren(menuId);
+
+                // Rebuild menu to reflect changes
+                this.buildMenu();
+                this.highlightActiveMenuItem();
+
+                // Restore edit mode if active
+                if (this.editMode) {
+                    const sidebar = document.getElementById('app-sidebar');
+                    sidebar.classList.add('edit-mode');
+                    document.querySelectorAll('.app-menu-item').forEach(item => {
+                        item.setAttribute('draggable', 'true');
+                    });
+                }
+            } else {
+                console.error('Failed to delete menu item:', response.status);
+                alert('Ошибка удаления пункта меню: ' + response.status);
+            }
+        } catch (err) {
+            console.error('Error deleting menu item:', err);
+            alert('Ошибка удаления пункта меню: ' + err.message);
+        }
+    }
+
+    removeMenuItemAndChildren(menuId) {
+        // Find all children of this menu item
+        const childrenToRemove = [];
+        const findChildren = (parentId) => {
+            for (const id in this.menuItems) {
+                if (this.menuItems[id].menu_up === parentId) {
+                    childrenToRemove.push(id);
+                    findChildren(id);
+                }
+            }
+        };
+        findChildren(menuId);
+
+        // Remove children from local data
+        childrenToRemove.forEach(id => {
+            delete this.menuItems[id];
+            delete this.menuElements[id];
+        });
+
+        // Remove the item itself
+        delete this.menuItems[menuId];
+        delete this.menuElements[menuId];
+
+        // Update global menuData
+        if (typeof menuData !== 'undefined' && Array.isArray(menuData)) {
+            const idsToRemove = new Set([menuId, ...childrenToRemove]);
+            for (let i = menuData.length - 1; i >= 0; i--) {
+                if (idsToRemove.has(menuData[i].menu_id)) {
+                    menuData.splice(i, 1);
+                }
+            }
+        }
     }
 
     enableInlineRename(menuItem) {
