@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Icon Decoding</title>
+    <link rel="stylesheet" href="https://unpkg.com/primeicons/primeicons.css">
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        .test-case { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        .test-case h3 { margin-top: 0; }
+        .icon-display { font-size: 24px; margin: 10px 0; }
+        .status { padding: 5px 10px; border-radius: 3px; display: inline-block; }
+        .pass { background: #d4edda; color: #155724; }
+        .fail { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <h1>Test: Icon Decoding for Menu</h1>
+    <p>This test verifies that HTML entities escaped by server-side templates are properly decoded before rendering.</p>
+
+    <div id="test-results"></div>
+
+    <script>
+        // decodeHtmlEntities function (copy from main-app.js)
+        function decodeHtmlEntities(str) {
+            if (!str) return str;
+            const textarea = document.createElement('textarea');
+            textarea.innerHTML = str;
+            return textarea.value;
+        }
+
+        // Test cases - simulate what the server might send
+        const testCases = [
+            {
+                name: 'Escaped HTML numeric entity',
+                input: '&amp;#128196;',  // Server escaped &#128196;
+                expected: '📄',
+                description: 'Document emoji (U+1F4C4)'
+            },
+            {
+                name: 'Direct HTML numeric entity',
+                input: '&#128196;',
+                expected: '📄',
+                description: 'Document emoji (U+1F4C4)'
+            },
+            {
+                name: 'Escaped PrimeIcons HTML',
+                input: '&lt;i class=&quot;pi pi-bars&quot;&gt;&lt;/i&gt;',
+                expected: '<i class="pi pi-bars"></i>',
+                description: 'Hamburger menu icon'
+            },
+            {
+                name: 'Direct PrimeIcons HTML',
+                input: '<i class="pi pi-file"></i>',
+                expected: '<i class="pi pi-file"></i>',
+                description: 'File icon'
+            },
+            {
+                name: 'Escaped emoji entity with ampersand',
+                input: '&amp;#128100;',  // User icon
+                expected: '👤',
+                description: 'Bust silhouette (U+1F464)'
+            },
+            {
+                name: 'Empty string',
+                input: '',
+                expected: '',
+                description: 'Should return empty'
+            },
+            {
+                name: 'Direct emoji character',
+                input: '📋',
+                expected: '📋',
+                description: 'Clipboard emoji (should pass through unchanged)'
+            },
+            {
+                name: 'Complex escaped HTML',
+                input: '&lt;i data-v-1081a83b=&quot;&quot; class=&quot;pi pi-bars drag-handle&quot;&gt;&lt;/i&gt;',
+                expected: '<i data-v-1081a83b="" class="pi pi-bars drag-handle"></i>',
+                description: 'Vue.js style icon HTML'
+            }
+        ];
+
+        const resultsDiv = document.getElementById('test-results');
+        let passCount = 0;
+        let failCount = 0;
+
+        testCases.forEach((tc, idx) => {
+            const result = decodeHtmlEntities(tc.input);
+            const passed = result === tc.expected;
+
+            if (passed) passCount++;
+            else failCount++;
+
+            const caseDiv = document.createElement('div');
+            caseDiv.className = 'test-case';
+            caseDiv.innerHTML = `
+                <h3>Test ${idx + 1}: ${tc.name}</h3>
+                <p><strong>Description:</strong> ${tc.description}</p>
+                <p><strong>Input:</strong> <code>${tc.input.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></p>
+                <p><strong>Expected:</strong> <code>${tc.expected.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></p>
+                <p><strong>Got:</strong> <code>${result.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></p>
+                <p><strong>Rendered:</strong> <span class="icon-display">${result}</span></p>
+                <span class="status ${passed ? 'pass' : 'fail'}">${passed ? 'PASS' : 'FAIL'}</span>
+            `;
+            resultsDiv.appendChild(caseDiv);
+        });
+
+        // Summary
+        const summaryDiv = document.createElement('div');
+        summaryDiv.innerHTML = `
+            <h2>Summary</h2>
+            <p><strong>Total:</strong> ${testCases.length} tests</p>
+            <p><strong>Passed:</strong> ${passCount}</p>
+            <p><strong>Failed:</strong> ${failCount}</p>
+        `;
+        resultsDiv.insertBefore(summaryDiv, resultsDiv.firstChild);
+    </script>
+</body>
+</html>
