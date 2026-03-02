@@ -197,15 +197,17 @@ class MainAppController {
                 }
             });
 
-            // Add "Add item" button at the end (visible in edit mode)
-            const addBtn = document.createElement('button');
-            addBtn.className = 'menu-item-add';
-            addBtn.type = 'button';
-            addBtn.innerHTML = '<i class="pi pi-plus"></i><span>Добавить пункт</span>';
-            addBtn.setAttribute('data-parent-id', parentId || '');
-            addBtn.setAttribute('data-level', level);
-            addBtn.addEventListener('click', () => this.showAddItemModal(parentId, level));
-            fragment.appendChild(addBtn);
+            // Add "Add item" button only at the top level (bottom of menu, not inside submenus)
+            if (level === 0) {
+                const addBtn = document.createElement('button');
+                addBtn.className = 'menu-item-add';
+                addBtn.type = 'button';
+                addBtn.innerHTML = '<i class="pi pi-plus"></i><span>Добавить пункт</span>';
+                addBtn.setAttribute('data-parent-id', parentId || '');
+                addBtn.setAttribute('data-level', level);
+                addBtn.addEventListener('click', () => this.showAddItemModal(parentId, level));
+                fragment.appendChild(addBtn);
+            }
 
             return fragment;
         };
