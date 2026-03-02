@@ -417,8 +417,9 @@ class MainAppController {
         const targetIndex = siblings.findIndex(el => el.getAttribute('data-menu-id') === targetId);
         const newOrder = insertBefore ? targetIndex + 1 : targetIndex + 2; // API uses 1-based indexing
 
+        const dbName = typeof db !== 'undefined' ? db : '';
         try {
-            const response = await fetch('/_m_ord/' + draggedId + '?JSON', {
+            const response = await fetch('/' + dbName + '/_m_ord/' + draggedId + '?JSON', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded'
@@ -438,8 +439,9 @@ class MainAppController {
     }
 
     async handleReparent(draggedId, newParentId, targetSiblingId = null, insertBefore = false) {
+        const dbName = typeof db !== 'undefined' ? db : '';
         try {
-            const url = '/_m_move/' + draggedId + '?JSON' + (newParentId ? '&up=' + newParentId : '&up=');
+            const url = '/' + dbName + '/_m_move/' + draggedId + '?JSON' + (newParentId ? '&up=' + newParentId : '&up=');
             const response = await fetch(url, {
                 method: 'POST',
                 headers: {
@@ -709,12 +711,13 @@ class MainAppController {
 
     async createMenuItemAPI(name, href, icon, parentId) {
         // Create menu item via API
-        // POST: _m_new/151?JSON&up={parentId or roleId}
+        // POST: /{db}/_m_new/151?JSON&up={parentId or roleId}
         // Parameters: t151 (name), t153 (href), t391 (icon)
         // Response: JSON with key 'obj' containing the new menu item ID
 
+        const dbName = typeof db !== 'undefined' ? db : '';
         const upParam = parentId || (typeof window.roleId !== 'undefined' ? window.roleId : '');
-        const url = '/_m_new/151?JSON&up=' + encodeURIComponent(upParam);
+        const url = '/' + dbName + '/_m_new/151?JSON&up=' + encodeURIComponent(upParam);
 
         const params = new URLSearchParams();
         params.append('_xsrf', window.xsrf || '');
@@ -817,10 +820,11 @@ class MainAppController {
 
     async deleteMenuItem(menuId) {
         // Delete menu item via API
-        // POST: _m_del/{id}?JSON
+        // POST: /{db}/_m_del/{id}?JSON
         // Note: Backend automatically deletes all subordinate menu items and renumbers
 
-        const url = '/_m_del/' + encodeURIComponent(menuId) + '?JSON';
+        const dbName = typeof db !== 'undefined' ? db : '';
+        const url = '/' + dbName + '/_m_del/' + encodeURIComponent(menuId) + '?JSON';
 
         const params = new URLSearchParams();
         params.append('_xsrf', window.xsrf || '');
