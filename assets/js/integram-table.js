@@ -1191,6 +1191,7 @@ class IntegramTable {
             this.attachScrollListener();
             this.attachStickyScrollbar();
             this.attachColumnResizeHandlers();
+            this.attachScrollCounterPositioning();
 
             // Restore focus state after re-rendering
             if (focusState) {
@@ -3671,6 +3672,59 @@ class IntegramTable {
             // Initial setup
             updateStickyWidth();
             checkStickyVisibility();
+        }
+
+        /**
+         * Position scroll counter relative to the table wrapper (issue #656)
+         * This ensures the counter stays within the table area and doesn't overlap with sidebar menu.
+         */
+        attachScrollCounterPositioning() {
+            const tableWrapper = this.container.querySelector('.integram-table-wrapper');
+            const scrollCounter = this.container.querySelector('.scroll-counter');
+
+            if (!tableWrapper || !scrollCounter) return;
+
+            const updateScrollCounterPosition = () => {
+                const rect = tableWrapper.getBoundingClientRect();
+                // Position counter 20px from the left edge of the table wrapper
+                scrollCounter.style.left = (rect.left + 20) + 'px';
+            };
+
+            // Remove existing listeners if any
+            if (this.scrollCounterResizeListener) {
+                window.removeEventListener('resize', this.scrollCounterResizeListener);
+            }
+            if (this.scrollCounterScrollListener) {
+                window.removeEventListener('scroll', this.scrollCounterScrollListener, true);
+            }
+            if (this.scrollCounterResizeObserver) {
+                this.scrollCounterResizeObserver.disconnect();
+            }
+
+            // Store the listener reference for cleanup
+            this.scrollCounterResizeListener = updateScrollCounterPosition;
+            this.scrollCounterScrollListener = updateScrollCounterPosition;
+
+            // Attach resize listener
+            window.addEventListener('resize', this.scrollCounterResizeListener);
+
+            // Attach scroll listener (capture phase to catch all scroll events including sidebar resize)
+            window.addEventListener('scroll', this.scrollCounterScrollListener, true);
+
+            // Use ResizeObserver to detect sidebar resize and other layout changes
+            if (typeof ResizeObserver !== 'undefined') {
+                this.scrollCounterResizeObserver = new ResizeObserver(updateScrollCounterPosition);
+                // Observe the parent container that includes the sidebar
+                const appContent = document.querySelector('.app-content');
+                if (appContent) {
+                    this.scrollCounterResizeObserver.observe(appContent);
+                }
+                // Also observe the table wrapper itself
+                this.scrollCounterResizeObserver.observe(tableWrapper);
+            }
+
+            // Initial position update
+            updateScrollCounterPosition();
         }
 
         attachColumnResizeHandlers() {

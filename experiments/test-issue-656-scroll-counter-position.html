@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Issue #656 - Scroll Counter Position</title>
+    <link rel="stylesheet" href="../assets/css/styles.css">
+    <link rel="stylesheet" href="https://unpkg.com/primeicons/primeicons.css">
+    <link rel="stylesheet" href="../assets/css/main-app.css">
+    <link rel="stylesheet" href="../assets/css/integram-table.css">
+    <style>
+        /* Additional test styles */
+        .test-info {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: #333;
+            color: #fff;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 2000;
+            max-width: 350px;
+        }
+        .test-info code {
+            background: #555;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        .test-result {
+            margin-top: 10px;
+            padding: 8px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .test-result.pass {
+            background: #4caf50;
+        }
+        .test-result.fail {
+            background: #f44336;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-info">
+        <strong>Issue #656 Test</strong><br>
+        Scroll counter "N из M" should stay within the table DIV and not overlap the sidebar menu.
+        <div id="test-result" class="test-result"></div>
+    </div>
+
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+        <div class="navbar-left">
+            <a href="#" class="navbar-brand">
+                <span class="brand-name">Test DB</span>
+            </a>
+        </div>
+        <div class="navbar-right">
+            <div class="user-menu-wrapper">
+                <button id="user-menu-toggle" class="account-info" type="button" title="User menu">
+                    <div id="account-avatar" class="account-avatar">T</div>
+                    <span id="account-email" class="account-email">test@example.com</span>
+                    <i class="user-menu-arrow pi pi-chevron-down"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Application Layout -->
+    <div class="app-layout">
+        <!-- Left Sidebar Menu -->
+        <aside class="app-sidebar" id="app-sidebar">
+            <button id="sidebar-toggle" class="sidebar-toggle" type="button" title="Toggle sidebar" aria-label="Toggle sidebar">
+                <i class="pi pi-bars"></i>
+            </button>
+            <nav class="app-menu" id="app-menu">
+                <a href="#" class="app-menu-item"><i class="menu-icon pi pi-users"></i><span class="menu-text">Users</span></a>
+                <a href="#" class="app-menu-item"><i class="menu-icon pi pi-th-large"></i><span class="menu-text">Forms</span></a>
+                <a href="#" class="app-menu-item"><i class="menu-icon pi pi-search"></i><span class="menu-text">Requests</span></a>
+                <a href="#" class="app-menu-item"><i class="menu-icon pi pi-upload"></i><span class="menu-text">Upload</span></a>
+                <a href="#" class="app-menu-item active"><i class="menu-icon pi pi-table"></i><span class="menu-text">Tables</span></a>
+                <a href="#" class="app-menu-item"><i class="menu-icon pi pi-file"></i><span class="menu-text">Files</span></a>
+            </nav>
+            <button id="sidebar-settings" class="sidebar-settings" type="button" title="Edit menu" aria-label="Edit menu">
+                <i class="pi pi-cog"></i>
+            </button>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="app-content" id="app-content">
+            <h1>Test Issue #656 - Scroll Counter Position</h1>
+
+            <div id="table-container"></div>
+        </main>
+    </div>
+
+    <script src="../assets/js/integram-table.js"></script>
+    <script>
+        // Create a mock table instance to test scroll counter positioning
+        const mockData = [
+            ['1', 'John Doe', 'john@example.com', '2026-01-01'],
+            ['2', 'Jane Smith', 'jane@example.com', '2026-01-02'],
+            ['3', 'Bob Wilson', 'bob@example.com', '2026-01-03'],
+            ['4', 'Alice Brown', 'alice@example.com', '2026-01-04'],
+            ['5', 'Charlie Davis', 'charlie@example.com', '2026-01-05'],
+        ];
+
+        const mockColumns = [
+            { id: 'id', name: 'ID', format: 'NUMBER' },
+            { id: 'name', name: 'Name', format: 'CHARS' },
+            { id: 'email', name: 'Email', format: 'CHARS' },
+            { id: 'date', name: 'Created', format: 'DATE' }
+        ];
+
+        // Mock IntegramTable for testing
+        class MockIntegramTable {
+            constructor(containerId) {
+                this.container = document.getElementById(containerId);
+                this.loadedRecords = 5;
+                this.totalRows = 100;
+                this.options = { instanceName: 'mockTable' };
+                window.mockTable = this;
+                this.render();
+            }
+
+            render() {
+                const html = `
+                    <div class="integram-table-wrapper">
+                        <div class="integram-table-header">
+                            <div class="integram-table-title">Test Table</div>
+                            <div class="integram-table-controls">
+                                <button class="btn btn-sm btn-outline-secondary">Фильтры</button>
+                            </div>
+                        </div>
+                        <div class="integram-table-container">
+                            <table class="integram-table">
+                                <thead>
+                                    <tr>
+                                        ${mockColumns.map(col => `<th>${col.name}</th>`).join('')}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${mockData.map(row => `
+                                        <tr>
+                                            ${row.map(cell => `<td>${cell}</td>`).join('')}
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="scroll-counter">
+                            Показано ${this.loadedRecords} из ${this.totalRows}
+                        </div>
+                    </div>
+                `;
+
+                this.container.innerHTML = html;
+                this.attachScrollCounterPositioning();
+            }
+
+            attachScrollCounterPositioning() {
+                const tableWrapper = this.container.querySelector('.integram-table-wrapper');
+                const scrollCounter = this.container.querySelector('.scroll-counter');
+
+                if (!tableWrapper || !scrollCounter) return;
+
+                const updateScrollCounterPosition = () => {
+                    const rect = tableWrapper.getBoundingClientRect();
+                    // Position counter 20px from the left edge of the table wrapper
+                    scrollCounter.style.left = (rect.left + 20) + 'px';
+                };
+
+                // Remove existing listeners if any
+                if (this.scrollCounterResizeListener) {
+                    window.removeEventListener('resize', this.scrollCounterResizeListener);
+                }
+                if (this.scrollCounterScrollListener) {
+                    window.removeEventListener('scroll', this.scrollCounterScrollListener, true);
+                }
+                if (this.scrollCounterResizeObserver) {
+                    this.scrollCounterResizeObserver.disconnect();
+                }
+
+                // Store the listener reference for cleanup
+                this.scrollCounterResizeListener = updateScrollCounterPosition;
+                this.scrollCounterScrollListener = updateScrollCounterPosition;
+
+                // Attach resize listener
+                window.addEventListener('resize', this.scrollCounterResizeListener);
+
+                // Attach scroll listener (capture phase to catch all scroll events including sidebar resize)
+                window.addEventListener('scroll', this.scrollCounterScrollListener, true);
+
+                // Use ResizeObserver to detect sidebar resize and other layout changes
+                if (typeof ResizeObserver !== 'undefined') {
+                    this.scrollCounterResizeObserver = new ResizeObserver(updateScrollCounterPosition);
+                    // Observe the parent container that includes the sidebar
+                    const appContent = document.querySelector('.app-content');
+                    if (appContent) {
+                        this.scrollCounterResizeObserver.observe(appContent);
+                    }
+                    // Also observe the table wrapper itself
+                    this.scrollCounterResizeObserver.observe(tableWrapper);
+                }
+
+                // Initial position update
+                updateScrollCounterPosition();
+            }
+        }
+
+        // Initialize the mock table
+        const table = new MockIntegramTable('table-container');
+
+        // Test verification
+        function runTest() {
+            const sidebar = document.getElementById('app-sidebar');
+            const scrollCounter = document.querySelector('.scroll-counter');
+            const resultDiv = document.getElementById('test-result');
+
+            if (!sidebar || !scrollCounter) {
+                resultDiv.textContent = 'ERROR: Elements not found';
+                resultDiv.className = 'test-result fail';
+                return;
+            }
+
+            const sidebarRect = sidebar.getBoundingClientRect();
+            const counterRect = scrollCounter.getBoundingClientRect();
+
+            console.log('Sidebar right edge:', sidebarRect.right);
+            console.log('Counter left edge:', counterRect.left);
+
+            // The counter's left edge should be to the right of the sidebar's right edge
+            if (counterRect.left >= sidebarRect.right) {
+                resultDiv.textContent = 'PASS: Counter is within content area';
+                resultDiv.className = 'test-result pass';
+                console.log('PASS: Scroll counter is properly positioned within the content area.');
+            } else {
+                resultDiv.textContent = 'FAIL: Counter overlaps sidebar!';
+                resultDiv.className = 'test-result fail';
+                console.error('FAIL: Scroll counter overlaps with sidebar!');
+                console.log('Expected: counter left >= ' + sidebarRect.right);
+                console.log('Actual: counter left = ' + counterRect.left);
+            }
+        }
+
+        // Run test after a short delay to ensure DOM is ready
+        setTimeout(runTest, 100);
+
+        // Re-run test on resize
+        window.addEventListener('resize', function() {
+            setTimeout(runTest, 100);
+        });
+    </script>
+</body>
+</html>
