@@ -19,15 +19,15 @@ class TablesController {
         // Tables data from API
         this.tables = [];
 
-        // Type icons mapping
+        // Type icons mapping (PrimeVue icons)
         this.typeIcons = {
-            3: '&#128196;', // CHARS - document
-            4: '&#128290;', // NUMBER - 1234
-            5: '&#128197;', // DATE - calendar
-            6: '&#128336;', // DATETIME - clock
-            7: '&#9745;',   // BOOLEAN - checkbox
-            8: '&#9881;',   // FUNCTION - gear
-            9: '&#128221;'  // MEMO - memo
+            3: 'pi pi-file',         // CHARS - document
+            4: 'pi pi-hashtag',      // NUMBER - 1234
+            5: 'pi pi-calendar',     // DATE - calendar
+            6: 'pi pi-clock',        // DATETIME - clock
+            7: 'pi pi-check-square', // BOOLEAN - checkbox
+            8: 'pi pi-cog',          // FUNCTION - gear
+            9: 'pi pi-file-edit'     // MEMO - memo
         };
 
         // Drag and drop state
@@ -161,13 +161,11 @@ class TablesController {
         const header = document.createElement('div');
         header.className = 'folder-header';
 
-        const toggle = document.createElement('span');
-        toggle.className = 'folder-toggle';
-        toggle.innerHTML = '&#9660;'; // Down arrow
+        const toggle = document.createElement('i');
+        toggle.className = 'folder-toggle pi pi-chevron-down';
 
-        const icon = document.createElement('span');
-        icon.className = 'folder-icon';
-        icon.innerHTML = folderData.open ? '&#128194;' : '&#128193;'; // Open/closed folder
+        const icon = document.createElement('i');
+        icon.className = 'folder-icon pi ' + (folderData.open ? 'pi-folder-open' : 'pi-folder');
 
         const name = document.createElement('span');
         name.className = 'folder-name';
@@ -189,7 +187,7 @@ class TablesController {
 
             const renameBtn = document.createElement('button');
             renameBtn.className = 'folder-action-btn';
-            renameBtn.innerHTML = '&#9998;'; // Pencil
+            renameBtn.innerHTML = '<i class="pi pi-pencil"></i>';
             renameBtn.title = 'Переименовать';
             renameBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -198,7 +196,7 @@ class TablesController {
 
             const deleteBtn = document.createElement('button');
             deleteBtn.className = 'folder-action-btn delete';
-            deleteBtn.innerHTML = '&#128465;'; // Trash
+            deleteBtn.innerHTML = '<i class="pi pi-trash"></i>';
             deleteBtn.title = 'Удалить';
             deleteBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -214,7 +212,7 @@ class TablesController {
         header.addEventListener('click', () => {
             folderEl.classList.toggle('collapsed');
             const isOpen = !folderEl.classList.contains('collapsed');
-            icon.innerHTML = isOpen ? '&#128194;' : '&#128193;';
+            icon.className = 'folder-icon pi ' + (isOpen ? 'pi-folder-open' : 'pi-folder');
 
             if (!isVirtual) {
                 this.config[folderName].open = isOpen;
@@ -260,9 +258,8 @@ class TablesController {
         card.dataset.tableName = table.name.toLowerCase();
         card.draggable = true;
 
-        const icon = document.createElement('span');
-        icon.className = 'table-card-icon type-' + (table.type || 3);
-        icon.innerHTML = this.typeIcons[table.type] || this.typeIcons[3];
+        const icon = document.createElement('i');
+        icon.className = 'table-card-icon type-' + (table.type || 3) + ' ' + (this.typeIcons[table.type] || this.typeIcons[3]);
 
         const name = document.createElement('span');
         name.className = 'table-card-name';

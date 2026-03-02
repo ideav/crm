@@ -32,24 +32,24 @@
                 <button id="user-menu-toggle" class="account-info" type="button" title="User menu">
                     <div id="account-avatar" class="account-avatar">{_global_.user}</div>
                     <span id="account-email" class="account-email">{_global_.user}</span>
-                    <span class="user-menu-arrow">&#9660;</span>
+                    <i class="user-menu-arrow pi pi-chevron-down"></i>
                 </button>
                 <div id="user-menu-dropdown" class="user-menu-dropdown" style="display: none;">
                     <!-- Begin: showCabinet --><!--{_global_.z}-->
                     <a href="/my" class="user-menu-item">
-                        <span class="user-menu-icon">&#128100;</span>
+                        <i class="user-menu-icon pi pi-user"></i>
                         <span>Личный кабинет</span>
                     </a>
                     <div class="user-menu-divider"></div>
                     <!-- End: showCabinet -->
                     <button id="theme-toggle" class="user-menu-item" type="button">
-                        <span class="user-menu-icon" id="theme-icon">&#127769;</span>
+                        <i class="user-menu-icon pi pi-moon" id="theme-icon"></i>
                         <span>Тема</span>
                         <span class="user-menu-value" id="theme-value">Темная</span>
                     </button>
                     <div class="user-menu-divider"></div>
                     <button id="logout-btn" class="user-menu-item user-menu-item-danger" type="button">
-                        <span class="user-menu-icon">&#128682;</span>
+                        <i class="user-menu-icon pi pi-sign-out"></i>
                         <span>Выйти</span>
                     </button>
                 </div>
@@ -61,7 +61,7 @@
     <div class="app-layout">
         <!-- Left Sidebar Menu -->
         <aside class="app-sidebar" id="app-sidebar">
-            <button id="sidebar-toggle" class="sidebar-toggle" type="button" title="Toggle menu" aria-label="Toggle sidebar">&#9776;</button>
+            <button id="sidebar-toggle" class="sidebar-toggle" type="button" title="Toggle menu" aria-label="Toggle sidebar"><i class="pi pi-bars"></i></button>
             <nav class="app-menu" id="app-menu">
                 <!-- Menu will be built from menuData by JavaScript -->
             </nav>
