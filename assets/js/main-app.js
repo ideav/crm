@@ -1085,10 +1085,38 @@ class MainAppController {
 
             if (currentAction && lastPart === currentAction) {
                 item.classList.add('active');
+                this.expandParentMenus(item);
             } else if (currentPath.includes(dataHref)) {
                 item.classList.add('active');
+                this.expandParentMenus(item);
             }
         });
+    }
+
+    /**
+     * Expands all parent menus of the given menu item.
+     * This ensures that active menu items inside collapsed submenus are visible.
+     * @param {HTMLElement} menuItem - The active menu item
+     */
+    expandParentMenus(menuItem) {
+        let parentId = menuItem.getAttribute('data-menu-up');
+
+        while (parentId) {
+            // Find the parent menu item
+            const parentMenuItem = document.querySelector(`.app-menu-item[data-menu-id="${parentId}"]`);
+            if (!parentMenuItem) break;
+
+            // Find the submenu that contains the current item
+            const submenu = parentMenuItem.nextElementSibling;
+            if (submenu && submenu.classList.contains('app-submenu')) {
+                // Expand the submenu and mark parent as expanded
+                submenu.classList.add('expanded');
+                parentMenuItem.classList.add('expanded');
+            }
+
+            // Move up to the next parent
+            parentId = parentMenuItem.getAttribute('data-menu-up');
+        }
     }
 
     initUserAvatar() {
