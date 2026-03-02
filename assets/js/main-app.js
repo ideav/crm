@@ -205,9 +205,8 @@ class MainAppController {
 
         // Expand/collapse arrow for parent items
         if (hasChildren) {
-            const arrowSpan = document.createElement('span');
-            arrowSpan.className = 'menu-arrow';
-            arrowSpan.innerHTML = '&#9660;'; // down arrow
+            const arrowSpan = document.createElement('i');
+            arrowSpan.className = 'menu-arrow pi pi-chevron-down';
             menuItem.appendChild(arrowSpan);
 
             menuItem.addEventListener('click', (e) => {
@@ -280,7 +279,7 @@ class MainAppController {
         const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
 
         if (themeIcon) {
-            themeIcon.innerHTML = isDark ? '&#9728;' : '&#127769;'; // Sun or Moon
+            themeIcon.className = 'user-menu-icon pi ' + (isDark ? 'pi-sun' : 'pi-moon');
         }
         if (themeValue) {
             themeValue.textContent = isDark ? 'Светлая' : 'Темная';
