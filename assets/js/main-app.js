@@ -8,6 +8,19 @@ class MainAppController {
         this.theme = window._app ? window._app.theme : null;
     }
 
+    /**
+     * Decodes HTML entities that may have been escaped by server-side template.
+     * Handles: &lt; &gt; &amp; &quot; &#xxxxx; (numeric entities)
+     * @param {string} str - String with possibly escaped HTML entities
+     * @returns {string} - Decoded string
+     */
+    decodeHtmlEntities(str) {
+        if (!str) return str;
+        const textarea = document.createElement('textarea');
+        textarea.innerHTML = str;
+        return textarea.value;
+    }
+
     init() {
         this.setupSidebarToggle();
         this.setupSidebarResize();
@@ -167,15 +180,16 @@ class MainAppController {
             menuItem.setAttribute('data-href', href);
         }
 
-        // Icon
+        // Icon - decode HTML entities that may have been escaped by server template
         const iconSpan = document.createElement('span');
         iconSpan.className = 'menu-icon';
-        const icon = item.icon || '';
-        if (icon.indexOf('<') !== -1) {
+        const rawIcon = item.icon || '';
+        const icon = this.decodeHtmlEntities(rawIcon);
+        if (icon && icon.indexOf('<') !== -1) {
             // HTML icon (e.g., <i class="pi pi-bars"></i>)
             iconSpan.innerHTML = icon;
-        } else if (icon && icon !== '&#128196;') {
-            // Emoji or HTML entity
+        } else if (icon && icon.trim() !== '') {
+            // Emoji or HTML entity (decoded)
             iconSpan.innerHTML = icon;
         } else {
             // Default: PrimeIcons pi-file
