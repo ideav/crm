@@ -126,11 +126,26 @@
 }
 .btn-outline-secondary {
     border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+.integram-table-controls .btn-outline-secondary {
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
 }
 
 .btn-outline-secondary:hover {
     background-color: #f3f3f3 !important;
     color: #6c757d !important;
+}
+
+.btn-outline-secondary:focus,
+.btn-outline-secondary:active {
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
 }
 
 .integram-table th {
