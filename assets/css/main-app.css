@@ -1,0 +1,291 @@
+/* Main Application Layout Styles */
+
+/* Navbar brand link */
+.navbar-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    text-decoration: none;
+    color: var(--text-primary);
+}
+
+.navbar-brand:hover {
+    opacity: 0.85;
+}
+
+.brand-name {
+    font-weight: 600;
+    font-size: 1.1rem;
+}
+
+/* User Menu Dropdown */
+.user-menu-wrapper {
+    position: relative;
+}
+
+.user-menu-wrapper .account-info {
+    cursor: pointer;
+    border: none;
+    font: inherit;
+}
+
+.user-menu-wrapper .account-info:hover {
+    background-color: var(--border-color);
+}
+
+.user-menu-arrow {
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+    margin-left: 0.25rem;
+    transition: transform 0.2s ease;
+}
+
+.user-menu-wrapper.open .user-menu-arrow {
+    transform: rotate(180deg);
+}
+
+.user-menu-dropdown {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px var(--nav-shadow);
+    min-width: 220px;
+    z-index: 200;
+    overflow: hidden;
+    animation: userMenuSlideIn 0.15s ease-out;
+}
+
+@keyframes userMenuSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.user-menu-item {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 0.875rem 1rem;
+    background: none;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    font-family: inherit;
+    transition: background-color 0.2s ease;
+    gap: 0.75rem;
+    text-decoration: none;
+}
+
+.user-menu-item:hover {
+    background-color: var(--bg-secondary);
+}
+
+.user-menu-icon {
+    font-size: 1.1rem;
+    width: 1.5rem;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.user-menu-value {
+    margin-left: auto;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.user-menu-divider {
+    height: 1px;
+    background-color: var(--border-color);
+    margin: 0.25rem 0;
+}
+
+.user-menu-item-danger {
+    color: #dc3545;
+}
+
+.user-menu-item-danger:hover {
+    background-color: rgba(220, 53, 69, 0.1);
+}
+
+[data-theme="dark"] .user-menu-item-danger:hover {
+    background-color: rgba(220, 53, 69, 0.2);
+}
+
+/* Application Layout */
+.app-layout {
+    display: flex;
+    min-height: calc(100vh - 70px);
+}
+
+/* Sidebar */
+.app-sidebar {
+    width: 240px;
+    background-color: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    padding: 1rem 0;
+    flex-shrink: 0;
+    transition: width 0.25s ease, background-color 0.3s ease;
+    overflow: hidden;
+    position: relative;
+}
+
+/* Sidebar toggle button */
+.sidebar-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    margin: 0 0.75rem 0.75rem auto;
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 1rem;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.sidebar-toggle:hover {
+    background-color: var(--card-bg);
+    color: var(--text-primary);
+}
+
+/* Collapsed sidebar */
+.app-sidebar.collapsed {
+    width: 56px;
+}
+
+.app-sidebar.collapsed .sidebar-toggle {
+    margin: 0 auto 0.75rem auto;
+}
+
+.app-sidebar.collapsed .menu-text {
+    display: none;
+}
+
+.app-sidebar.collapsed .app-menu-item {
+    justify-content: center;
+    padding: 0.75rem 0;
+}
+
+/* App Menu */
+.app-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0 0.75rem;
+}
+
+.app-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    background: none;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    text-align: left;
+    transition: all 0.2s ease;
+    width: 100%;
+    text-decoration: none;
+}
+
+.app-menu-item:hover {
+    background-color: var(--card-bg);
+}
+
+.app-menu-item.active {
+    background-color: var(--button-primary);
+    color: white;
+}
+
+.menu-icon {
+    font-size: 1.15rem;
+    width: 1.5rem;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.menu-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Main Content */
+.app-content {
+    flex: 1;
+    padding: 1.5rem 2rem;
+    background-color: var(--bg-primary);
+    overflow-y: auto;
+    min-height: calc(100vh - 70px);
+}
+
+/* Responsive Design */
+@media (max-width: 900px) {
+    .app-layout {
+        flex-direction: column;
+    }
+
+    .app-sidebar {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid var(--border-color);
+        padding: 0.75rem 0;
+    }
+
+    .app-menu {
+        flex-direction: row;
+        overflow-x: auto;
+        gap: 0.5rem;
+        padding: 0 1rem;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+
+    .app-menu::-webkit-scrollbar {
+        display: none;
+    }
+
+    .app-menu-item {
+        flex-shrink: 0;
+        padding: 0.625rem 0.875rem;
+        white-space: nowrap;
+    }
+
+    .menu-icon {
+        display: none;
+    }
+
+    .sidebar-toggle {
+        display: none;
+    }
+
+    .app-content {
+        padding: 1rem;
+    }
+}
+
+@media (max-width: 600px) {
+    .brand-name {
+        display: none;
+    }
+
+    .app-content {
+        padding: 0.75rem;
+    }
+}
