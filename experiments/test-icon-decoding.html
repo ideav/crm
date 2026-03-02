@@ -30,19 +30,21 @@
             return textarea.value;
         }
 
-        // Test cases - simulate what the server might send
+        // Test cases - simulate what JavaScript receives after HTML parsing
+        // When server outputs &amp;#128196; in HTML, the browser decodes &amp; to &
+        // So JavaScript receives &#128196; which our function decodes to the emoji
         const testCases = [
             {
-                name: 'Escaped HTML numeric entity',
-                input: '&amp;#128196;',  // Server escaped &#128196;
+                name: 'HTML numeric entity (what JS receives after HTML parsing)',
+                input: '&#128196;',  // JS receives this after browser decodes &amp; to &
                 expected: '📄',
                 description: 'Document emoji (U+1F4C4)'
             },
             {
-                name: 'Direct HTML numeric entity',
-                input: '&#128196;',
-                expected: '📄',
-                description: 'Document emoji (U+1F4C4)'
+                name: 'User icon numeric entity',
+                input: '&#128100;',  // User icon
+                expected: '👤',
+                description: 'Bust silhouette (U+1F464)'
             },
             {
                 name: 'Escaped PrimeIcons HTML',
@@ -54,13 +56,7 @@
                 name: 'Direct PrimeIcons HTML',
                 input: '<i class="pi pi-file"></i>',
                 expected: '<i class="pi pi-file"></i>',
-                description: 'File icon'
-            },
-            {
-                name: 'Escaped emoji entity with ampersand',
-                input: '&amp;#128100;',  // User icon
-                expected: '👤',
-                description: 'Bust silhouette (U+1F464)'
+                description: 'File icon (should pass through unchanged)'
             },
             {
                 name: 'Empty string',
@@ -75,10 +71,16 @@
                 description: 'Clipboard emoji (should pass through unchanged)'
             },
             {
-                name: 'Complex escaped HTML',
+                name: 'Complex escaped HTML with Vue.js attributes',
                 input: '&lt;i data-v-1081a83b=&quot;&quot; class=&quot;pi pi-bars drag-handle&quot;&gt;&lt;/i&gt;',
                 expected: '<i data-v-1081a83b="" class="pi pi-bars drag-handle"></i>',
                 description: 'Vue.js style icon HTML'
+            },
+            {
+                name: 'Exit icon numeric entity',
+                input: '&#128682;',
+                expected: '🚪',
+                description: 'Door emoji (U+1F6AA)'
             }
         ];
 
