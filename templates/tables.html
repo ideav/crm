@@ -1,0 +1,95 @@
+    <!-- Tables Workplace Content -->
+    <div class="tables-workplace">
+        <div class="tables-header">
+            <h1>Таблицы</h1>
+            <div class="tables-actions">
+                <div class="search-box">
+                    <input type="text" id="tables-search" placeholder="Поиск таблиц..." class="search-input">
+                    <span class="search-icon">&#128269;</span>
+                </div>
+                <button type="button" id="add-table-btn" class="btn-primary btn-small">
+                    <span>+</span> Новая таблица
+                </button>
+            </div>
+        </div>
+
+        <div class="tables-container" id="tables-container">
+            <!-- Folders with tables will be rendered here by JavaScript -->
+            <div class="loading-state" id="tables-loading">
+                <div class="loading-spinner"></div>
+                <p>Загрузка таблиц...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Table Modal -->
+    <div id="new-table-modal" class="modal" style="display: none;">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Новая таблица</h2>
+                <button type="button" class="modal-close" id="close-new-table-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="new-table-form">
+                    <div class="form-group">
+                        <label for="new-table-name">Название таблицы</label>
+                        <input type="text" id="new-table-name" name="name" required placeholder="Введите название">
+                    </div>
+                    <div class="form-group">
+                        <label for="new-table-type">Тип</label>
+                        <div class="custom-select-wrapper">
+                            <select id="new-table-type" name="type" required class="custom-select">
+                                <option value="3" data-icon="&#128196;">Текст</option>
+                                <option value="4" data-icon="&#128290;">Число</option>
+                                <option value="5" data-icon="&#128197;">Дата</option>
+                                <option value="6" data-icon="&#128336;">Дата и время</option>
+                                <option value="7" data-icon="&#9745;">Логический</option>
+                                <option value="8" data-icon="&#9881;">Функция</option>
+                                <option value="9" data-icon="&#128221;">Текстовый блок</option>
+                            </select>
+                            <span class="custom-select-arrow">&#9660;</span>
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn-secondary" id="cancel-new-table">Отмена</button>
+                        <button type="submit" class="btn-primary">Создать</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Folder Modal -->
+    <div id="new-folder-modal" class="modal" style="display: none;">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Новая папка</h2>
+                <button type="button" class="modal-close" id="close-new-folder-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="new-folder-form">
+                    <div class="form-group">
+                        <label for="new-folder-name">Название папки</label>
+                        <input type="text" id="new-folder-name" name="name" required placeholder="Введите название">
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn-secondary" id="cancel-new-folder">Отмена</button>
+                        <button type="submit" class="btn-primary">Создать</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings object to be populated by templater -->
+    <script>
+        var myTablesSet = {};
+        <!-- Begin: &Settings -->
+        myTablesSet['{ID}'] = {'{TYPE}': '{SETTINGS}'.replace(/&quot;/g, '"')};
+        <!-- End: &Settings -->
+    </script>
+
+    <link rel="stylesheet" href="/css/tables.css">
+    <script src="/js/tables.js"></script>
