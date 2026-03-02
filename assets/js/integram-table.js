@@ -95,6 +95,7 @@ class IntegramTable {
             // Table settings
             this.settings = {
                 compact: false,  // false = spacious (default), true = compact
+                compactForAll: true,  // true = apply compact setting to all tables without explicit setting (default)
                 pageSize: this.options.pageSize,  // Current page size
                 truncateLongValues: true  // true = truncate to 127 chars (default)
             };
@@ -4382,6 +4383,10 @@ class IntegramTable {
                                 <input type="radio" name="padding-mode" value="compact" ${ this.settings.compact ? 'checked' : '' }>
                                 Компактно
                             </label>
+                            <label style="margin-left: 15px;" title="Настройка действует на все таблицы, для которых компактность не указана">
+                                <input type="checkbox" id="compact-for-all" ${ this.settings.compactForAll ? 'checked' : '' }>
+                                Для всех
+                            </label>
                         </div>
                     </div>
 
@@ -4439,6 +4444,13 @@ class IntegramTable {
                     this.saveSettings();
                     this.render();
                 });
+            });
+
+            // Handle "For All" checkbox change
+            const compactForAllCheckbox = modal.querySelector('#compact-for-all');
+            compactForAllCheckbox.addEventListener('change', (e) => {
+                this.settings.compactForAll = e.target.checked;
+                this.saveSettings();
             });
 
             // Handle page size change
@@ -4512,6 +4524,7 @@ class IntegramTable {
             // Reset to defaults
             this.settings = {
                 compact: false,
+                compactForAll: true,
                 pageSize: 20,
                 truncateLongValues: true
             };
@@ -5599,10 +5612,17 @@ class IntegramTable {
         saveSettings() {
             const settings = {
                 compact: this.settings.compact,
+                compactForAll: this.settings.compactForAll,
                 pageSize: this.settings.pageSize,
                 truncateLongValues: this.settings.truncateLongValues
             };
             document.cookie = `${ this.options.cookiePrefix }-settings=${ JSON.stringify(settings) }; path=/; max-age=31536000`;
+
+            // Save global compact setting if "For All" is checked
+            if (this.settings.compactForAll) {
+                const globalSettings = { compact: this.settings.compact };
+                document.cookie = `integram-table-global-settings=${ JSON.stringify(globalSettings) }; path=/; max-age=31536000`;
+            }
         }
 
         loadSettings() {
@@ -5613,6 +5633,7 @@ class IntegramTable {
                 try {
                     const settings = JSON.parse(settingsCookie.split('=')[1]);
                     this.settings.compact = settings.compact !== undefined ? settings.compact : false;
+                    this.settings.compactForAll = settings.compactForAll !== undefined ? settings.compactForAll : true;
                     this.settings.pageSize = settings.pageSize || 20;
                     this.settings.truncateLongValues = settings.truncateLongValues !== undefined ? settings.truncateLongValues : true;
 
@@ -5620,6 +5641,19 @@ class IntegramTable {
                     this.options.pageSize = this.settings.pageSize;
                 } catch (e) {
                     console.error('Error loading settings:', e);
+                }
+            } else {
+                // No table-specific settings found, try to load global compact setting
+                const globalSettingsCookie = cookies.find(c => c.trim().startsWith('integram-table-global-settings='));
+                if (globalSettingsCookie) {
+                    try {
+                        const globalSettings = JSON.parse(globalSettingsCookie.split('=')[1]);
+                        if (globalSettings.compact !== undefined) {
+                            this.settings.compact = globalSettings.compact;
+                        }
+                    } catch (e) {
+                        console.error('Error loading global settings:', e);
+                    }
                 }
             }
         }
