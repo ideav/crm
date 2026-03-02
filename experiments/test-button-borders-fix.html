@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Issue #646 - Button Borders Fix</title>
+    <!-- Load Bootstrap first (like in production) -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Then load our custom CSS -->
+    <link rel="stylesheet" href="../assets/css/integram-table.css">
+    <style>
+        body {
+            padding: 40px;
+            font-family: 'Roboto', sans-serif;
+        }
+        .test-container {
+            margin-bottom: 40px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        h2 {
+            margin-bottom: 20px;
+            font-size: 18px;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .status.pass {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status.fail {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test Issue #646 - Button Borders Fix</h1>
+    <p>This test verifies that the "Группы", "Фильтры", "Экспорт" buttons do NOT have visible borders.</p>
+
+    <div class="test-container">
+        <h2>Test 1: Simulated Table Header with Controls (like production)</h2>
+        <div class="integram-table-wrapper">
+            <div class="integram-table-header">
+                <div class="integram-table-title">Test Table</div>
+                <div class="integram-table-controls">
+                    <button class="btn btn-sm btn-outline-secondary me-2">Группы</button>
+                    <button class="btn btn-sm btn-outline-secondary me-2">Фильтры</button>
+                    <button class="btn btn-sm btn-outline-secondary me-2">Экспорт</button>
+                    <button class="integram-table-settings" title="Settings">
+                        <i style="font-size: 19px;">&#9881;</i>
+                    </button>
+                    <button class="integram-table-settings" title="Grid View">
+                        <i style="font-size: 16px;">&#9638;</i>
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div class="status" id="status1">Testing...</div>
+    </div>
+
+    <div class="test-container">
+        <h2>Test 2: Standalone btn-outline-secondary buttons</h2>
+        <div>
+            <button class="btn btn-sm btn-outline-secondary me-2">Button 1</button>
+            <button class="btn btn-sm btn-outline-secondary me-2">Button 2</button>
+            <button class="btn btn-sm btn-outline-secondary me-2">Button 3</button>
+        </div>
+        <div class="status" id="status2">Testing...</div>
+    </div>
+
+    <div class="test-container">
+        <h2>Test 3: Focus and Active states</h2>
+        <p>Click each button to test focus/active states:</p>
+        <div>
+            <button class="btn btn-sm btn-outline-secondary me-2" id="focusBtn1">Click Me 1</button>
+            <button class="btn btn-sm btn-outline-secondary me-2" id="focusBtn2">Click Me 2</button>
+        </div>
+        <div class="status" id="status3">Click a button to test focus state...</div>
+    </div>
+
+    <div class="test-container">
+        <h2>Expected Result (from Issue #628)</h2>
+        <p>The buttons should appear as plain text links without visible borders around them.</p>
+        <img src="https://github.com/user-attachments/assets/2a84cf76-d585-405e-bbbe-2e7e711ecb8b" alt="Expected Result" style="max-width: 100%; border: 1px solid #ccc;" />
+    </div>
+
+    <script>
+        function testButtonBorders() {
+            // Test 1: Check buttons in integram-table-controls
+            const controlButtons = document.querySelectorAll('.integram-table-controls .btn-outline-secondary');
+            let test1Pass = true;
+            controlButtons.forEach(btn => {
+                const style = window.getComputedStyle(btn);
+                const border = style.border;
+                const borderWidth = style.borderWidth;
+                const outline = style.outline;
+                const boxShadow = style.boxShadow;
+
+                console.log('Control Button computed styles:', {
+                    border,
+                    borderWidth,
+                    outline,
+                    boxShadow
+                });
+
+                // Check if border is effectively "none"
+                if (borderWidth !== '0px' && border.indexOf('none') === -1 && border.indexOf('0px') === -1) {
+                    test1Pass = false;
+                }
+            });
+            document.getElementById('status1').textContent = test1Pass ? 'PASS: No borders detected' : 'FAIL: Borders detected';
+            document.getElementById('status1').className = 'status ' + (test1Pass ? 'pass' : 'fail');
+
+            // Test 2: Check standalone buttons
+            const standaloneButtons = document.querySelectorAll('.test-container:nth-child(2) .btn-outline-secondary');
+            let test2Pass = true;
+            standaloneButtons.forEach(btn => {
+                const style = window.getComputedStyle(btn);
+                const borderWidth = style.borderWidth;
+
+                if (borderWidth !== '0px') {
+                    test2Pass = false;
+                }
+            });
+            document.getElementById('status2').textContent = test2Pass ? 'PASS: No borders detected' : 'FAIL: Borders detected';
+            document.getElementById('status2').className = 'status ' + (test2Pass ? 'pass' : 'fail');
+        }
+
+        // Run tests after CSS is loaded
+        window.onload = testButtonBorders;
+
+        // Test 3: Focus state
+        document.getElementById('focusBtn1').addEventListener('focus', function() {
+            const style = window.getComputedStyle(this);
+            const border = style.border;
+            const outline = style.outline;
+            const boxShadow = style.boxShadow;
+
+            console.log('Focus state styles:', { border, outline, boxShadow });
+
+            const hasVisibleFocusOutline = outline !== 'none' && outline.indexOf('0px') === -1;
+            const hasVisibleBoxShadow = boxShadow !== 'none';
+
+            if (hasVisibleFocusOutline || hasVisibleBoxShadow) {
+                document.getElementById('status3').textContent = 'WARNING: Focus state shows outline/shadow - ' + JSON.stringify({ outline, boxShadow });
+                document.getElementById('status3').className = 'status fail';
+            } else {
+                document.getElementById('status3').textContent = 'PASS: No visible focus outline/shadow';
+                document.getElementById('status3').className = 'status pass';
+            }
+        });
+    </script>
+</body>
+</html>
