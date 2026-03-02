@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Begin: noAdmin1 --><!--{Role}-->
+    <title data-i18n="cabinet.title">Личный кабинет</title>
+    <link rel="stylesheet" href="/css/styles.css">
+    <link rel="stylesheet" href="/css/cabinet.css">
+<!-- End: noAdmin1 -->
+<!-- Begin: isAdmin1 --><!--{Role}-->
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z" crossorigin="anonymous">
+    <link rel="stylesheet" href="/css/css.css" />
+    <title>Integral</title>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
+
+    <script>
+        var db='{_global_.z}',xsrf='{_global_.xsrf}',id='{_global_.id}',token='{_global_.token}',uid='{_global_.user_id}',action='{_global_.action}',menu=[];
+    </script>
+    <script src="/js/js.js"></script>
+    <script>
+        <!-- Begin:MyRoleMenu -->menu.push({href:'{HREF}',name:'{Name}'.indexOf('[EN]')===-1?'{Name}':t9n('{Name}')});
+        <!-- End:MyRoleMenu -->
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
+<!-- End: isAdmin1 -->
+</head>
+<body>
+<!-- Begin: noAdmin --><!--{Role}-->
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+        <div class="navbar-left">
+            <a href="index.html">
+                <img src="/images/logo.png" alt="Логотип" class="logo">
+            </a>
+        </div>
+        <div class="navbar-right">
+            <div class="user-menu-wrapper">
+                <button id="user-menu-toggle" class="account-info" type="button" title="Меню пользователя">
+                    <div id="account-avatar" class="account-avatar">U</div>
+                    <span id="account-email" class="account-email">user@example.com</span>
+                    <span class="user-menu-arrow">▼</span>
+                </button>
+                <div id="user-menu-dropdown" class="user-menu-dropdown" style="display: none;">
+                    <button id="lang-toggle" class="user-menu-item" type="button">
+                        <span class="user-menu-icon">🌐</span>
+                        <span data-i18n="cabinet.userMenu.language">Язык</span>
+                        <span class="user-menu-value" id="lang-value">RU</span>
+                    </button>
+                    <button id="theme-toggle" class="user-menu-item" type="button">
+                        <span class="user-menu-icon" id="theme-icon">🌙</span>
+                        <span data-i18n="cabinet.userMenu.theme">Тема</span>
+                        <span class="user-menu-value" id="theme-value" data-i18n="nav.dark">Темная</span>
+                    </button>
+                    <div class="user-menu-divider"></div>
+                    <button id="logout-btn" class="user-menu-item user-menu-item-danger" type="button">
+                        <span class="user-menu-icon">🚪</span>
+                        <span data-i18n="cabinet.logout">Выйти</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Cabinet Layout -->
+    <div class="cabinet-layout">
+        <!-- Left Sidebar Menu -->
+        <aside class="cabinet-sidebar" id="cabinet-sidebar">
+            <button id="sidebar-toggle" class="sidebar-toggle" type="button" title="Свернуть меню" aria-label="Toggle sidebar">&#9776;</button>
+            <nav class="cabinet-menu">
+                <button class="cabinet-menu-item active" data-section="profile">
+                    <span class="menu-icon">👤</span>
+                    <span data-i18n="cabinet.menu.profile">Профиль</span>
+                </button>
+                <button class="cabinet-menu-item" data-section="balance">
+                    <span class="menu-icon">💰</span>
+                    <span data-i18n="cabinet.menu.balance">Баланс</span>
+                </button>
+                <button class="cabinet-menu-item" data-section="databases">
+                    <span class="menu-icon">🗄️</span>
+                    <span data-i18n="cabinet.menu.databases">Базы данных</span>
+                </button>
+                <button class="cabinet-menu-item" data-section="access">
+                    <span class="menu-icon">🔑</span>
+                    <span data-i18n="cabinet.menu.access">Доступы</span>
+                </button>
+                <button class="cabinet-menu-item" data-section="bonuses">
+                    <span class="menu-icon">🎁</span>
+                    <span data-i18n="cabinet.menu.bonuses">Бонусы</span>
+                </button>
+                <button class="cabinet-menu-item" data-section="referrals">
+                    <span class="menu-icon">👥</span>
+                    <span data-i18n="cabinet.menu.referrals">Партнерская программа</span>
+                </button>
+            </nav>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="cabinet-content">
+            <!-- Loading State -->
+            <div id="loading-state" class="loading-state">
+                <div class="loading-spinner"></div>
+                <p data-i18n="cabinet.loading">Загрузка данных...</p>
+            </div>
+
+            <!-- Profile Section -->
+            <section id="section-profile" class="cabinet-section" style="display: none;">
+                <h1 data-i18n="cabinet.profile.title">Профиль</h1>
+
+                <div class="profile-form">
+                    <div class="form-group">
+                        <label for="profile-name" data-i18n="cabinet.profile.name">Имя</label>
+                        <input type="text" id="profile-name" name="name" placeholder="Введите ваше имя">
+                    </div>
+                    <div class="form-group">
+                        <label for="profile-phone" data-i18n="cabinet.profile.phone">Телефон</label>
+                        <input type="tel" id="profile-phone" name="phone" placeholder="+7 (xxx) xxx-xx-xx">
+                    </div>
+                    <div class="form-group">
+                        <label for="profile-email" data-i18n="cabinet.profile.email">Email</label>
+                        <input type="email" id="profile-email" name="email" readonly disabled>
+                        <span class="field-hint" data-i18n="cabinet.profile.emailHint">Email нельзя изменить</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="profile-about" data-i18n="cabinet.profile.about">Обо мне</label>
+                        <textarea id="profile-about" name="notes" rows="4" placeholder="Расскажите о себе"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label data-i18n="cabinet.profile.photo">Фото</label>
+                        <div class="photo-upload">
+                            <div id="profile-photo-preview" class="photo-preview">
+                                <span class="photo-placeholder">📷</span>
+                            </div>
+                            <input type="file" id="profile-photo" name="photo" accept="image/*" style="display: none;">
+                            <button type="button" id="upload-photo-btn" class="btn-secondary" data-i18n="cabinet.profile.uploadPhoto">Загрузить фото</button>
+                        </div>
+                    </div>
+                    <button type="button" id="save-profile-btn" class="btn-primary" data-i18n="cabinet.profile.save">Сохранить изменения</button>
+                </div>
+
+                <!-- Tariff Info -->
+                <div class="tariff-section">
+                    <h2 data-i18n="cabinet.profile.tariffTitle">Информация о тарифе</h2>
+                    <div class="tariff-info">
+                        <p class="tariff-current">
+                            <span data-i18n="cabinet.profile.yourTariff">Ваш тариф</span> —
+                            <strong id="current-plan">Free</strong>
+                        </p>
+                        <p class="tariff-next-charge">
+                            <span data-i18n="cabinet.profile.nextCharge">Следующее списание</span>
+                            <strong id="next-charge-date">26 марта 2026</strong>
+                        </p>
+                        <p class="tariff-description" data-i18n="cabinet.profile.chargeDescription">
+                            Списание по тарифному плану производится один раз в месяц, при этом сбрасываются счетчики ресурсов всех ваших баз. Если расход ресурсов не укладывается в лимит плана, то для продолжения работы вам необходимо повысить план. Подробнее о планах.
+                        </p>
+                        <div class="usage-info">
+                            <p>
+                                <span data-i18n="cabinet.profile.usageNow">Сейчас вы использовали</span>
+                                <strong id="usage-units">0.00</strong>
+                                <span data-i18n="cabinet.profile.resourceUnits">ед. ресурсов или</span>
+                                <strong id="usage-percent">0.00%</strong>
+                                <span data-i18n="cabinet.profile.fromLimit">от лимита бесплатного тарифного плана в</span>
+                                <strong id="usage-limit">20000</strong>
+                                <span data-i18n="cabinet.profile.units">ед.</span>
+                            </p>
+                            <div class="usage-bar">
+                                <div id="usage-bar-fill" class="usage-bar-fill" style="width: 0%;"></div>
+                            </div>
+                        </div>
+                        <div class="plan-change">
+                            <p data-i18n="cabinet.profile.changePlanText">Для смены плана требуется иметь достаточное количество средств на счете. Пополнить счет вы можете здесь, выбрав нужный план:</p>
+                            <select id="plan-select" class="plan-select">
+                                <option value="free">Free</option>
+                                <option value="startup">Startup</option>
+                                <option value="scalable">Scalable</option>
+                            </select>
+                            <button type="button" id="change-plan-btn" class="btn-secondary" data-i18n="cabinet.profile.changePlan">Сменить план</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Balance Section -->
+            <section id="section-balance" class="cabinet-section" style="display: none;">
+                <h1 data-i18n="cabinet.balance.title">Баланс</h1>
+
+                <div class="balance-info">
+                    <p data-i18n="cabinet.balance.description">
+                        Средства вашего счета расходуются на оплату тарифного плана. Вы можете пополнить счет банковской картой или переводом, а также конвертировать бонусы и партнерские отчисления.
+                    </p>
+
+                    <div class="balance-current">
+                        <span data-i18n="cabinet.balance.current">Текущий баланс:</span>
+                        <strong id="balance-amount">0</strong>
+                        <span data-i18n="cabinet.balance.currency">руб.</span>
+                    </div>
+
+                    <div class="usage-today">
+                        <p>
+                            <span data-i18n="cabinet.balance.usageToday">На сегодня вы использовали около</span>
+                            <strong id="balance-usage-units">0.00</strong>
+                            <span data-i18n="cabinet.balance.resourceUnits">ед. ресурсов или</span>
+                            <strong id="balance-usage-percent">0.00%</strong>
+                            <span data-i18n="cabinet.balance.fromLimit">от лимита бесплатного тарифного плана в</span>
+                            <strong id="balance-usage-limit">20000</strong>
+                            <span data-i18n="cabinet.balance.units">ед.</span>
+                        </p>
+                    </div>
+
+                    <p class="history-link" data-i18n="cabinet.balance.historyNote">
+                        Вся история операций хранится здесь.
+                    </p>
+                </div>
+
+                <div class="balance-history">
+                    <h2 data-i18n="cabinet.balance.historyTitle">История операций</h2>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th data-i18n="cabinet.balance.date">Дата</th>
+                                <th data-i18n="cabinet.balance.amount">Сумма</th>
+                                <th data-i18n="cabinet.balance.note">Примечание</th>
+                            </tr>
+                        </thead>
+                        <tbody id="balance-history-body">
+                            <tr>
+                                <td colspan="3" class="empty-message" data-i18n="cabinet.balance.noHistory">Нет операций</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="balance-actions">
+                    <button type="button" id="add-funds-btn" class="btn-primary" data-i18n="cabinet.balance.addFunds">Пополнить счет</button>
+                </div>
+            </section>
+
+            <!-- Databases Section -->
+            <section id="section-databases" class="cabinet-section" style="display: none;">
+                <h1 data-i18n="cabinet.databases.title">Базы данных</h1>
+
+                <p class="section-description" data-i18n="cabinet.databases.description">Список моих баз данных</p>
+
+                <div class="databases-list" id="databases-list">
+                    <!-- Databases will be rendered here -->
+                </div>
+            </section>
+
+            <!-- Access Section -->
+            <section id="section-access" class="cabinet-section" style="display: none;">
+                <h1 data-i18n="cabinet.access.title">Доступы</h1>
+
+                <p class="section-description" data-i18n="cabinet.access.description">Список Баз данных с назначенными на них пользователями</p>
+
+                <div class="access-list" id="access-list">
+                    <!-- Access items will be rendered here -->
+                    <p class="empty-message" data-i18n="cabinet.access.noData">Нет данных о доступах</p>
+                </div>
+            </section>
+
+            <!-- Bonuses Section -->
+            <section id="section-bonuses" class="cabinet-section" style="display: none;">
+                <h1 data-i18n="cabinet.bonuses.title">Бонусы</h1>
+
+                <div class="bonuses-info">
+                    <p data-i18n="cabinet.bonuses.description">
+                        Вы получаете бонусы при регистрации и при совершении некоторых действий: прохождение уроков, активность в социальных сетях и участие в промо-акциях Интеграла. Актуальные предложения будут приходить вам на почту.
+                    </p>
+
+                    <div class="bonuses-current">
+                        <span data-i18n="cabinet.bonuses.current">Текущие бонусы:</span>
+                        <strong id="bonuses-amount">0</strong>
+                    </div>
+
+                    <p data-i18n="cabinet.bonuses.convertDescription">
+                        Бонусы можно конвертировать в валюту вашего депозита и пополнять таким образом баланс вашего счета: 1 бонус = 1 рубль.
+                    </p>
+
+                    <p data-i18n="cabinet.bonuses.historyNote">
+                        Ваша история операций с бонусами хранится в разделе Баланс.
+                    </p>
+                </div>
+
+                <div class="bonuses-actions">
+                    <button type="button" id="convert-bonuses-btn" class="btn-primary" data-i18n="cabinet.bonuses.convert">Конвертировать бонусы</button>
+                </div>
+            </section>
+
+            <!-- Referrals Section -->
+            <section id="section-referrals" class="cabinet-section" style="display: none;">
+                <h1 data-i18n="cabinet.referrals.title">Партнерская программа</h1>
+
+                <!-- About subsection -->
+                <div class="referrals-subsection">
+                    <h2 data-i18n="cabinet.referrals.aboutTitle">О программе</h2>
+                    <p data-i18n="cabinet.referrals.aboutDescription">
+                        Вы получаете вознаграждение 15% за каждую оплату услуги Ideav, которую сделал клиент, привлеченный по вашей реферальной ссылке или промокоду. Программа распространяется также на оплату продления услуг.
+                    </p>
+                    <p data-i18n="cabinet.referrals.withdrawDescription">
+                        Это вознаграждение можно вывести на вашу банковскую карту или переводом на счет в РФ. Вывод доступен через один месяц после оплаты клиента.
+                    </p>
+                    <p data-i18n="cabinet.referrals.convertDescription">
+                        Вы также можете сконвертировать ваше партнерское вознаграждение на ваш баланс для оплаты услуг Ideav.
+                    </p>
+
+                    <div class="referral-links">
+                        <h3 data-i18n="cabinet.referrals.yourLinks">Ваши партнерские ссылки:</h3>
+                        <div class="referral-link-item">
+                            <span data-i18n="cabinet.referrals.registration">Регистрация:</span>
+                            <a id="referral-link-register" href="#" target="_blank">https://ideav.ru?aff=...</a>
+                            <button type="button" class="copy-btn" data-copy="referral-link-register" title="Копировать">📋</button>
+                        </div>
+                        <div class="referral-link-item">
+                            <span data-i18n="cabinet.referrals.site">Сайт Интеграма:</span>
+                            <a id="referral-link-site" href="#" target="_blank">https://ideav.ru/ru?aff=...</a>
+                            <button type="button" class="copy-btn" data-copy="referral-link-site" title="Копировать">📋</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Rules subsection -->
+                <div class="referrals-subsection">
+                    <h2 data-i18n="cabinet.referrals.rulesTitle">Правила</h2>
+                    <div class="rules-list">
+                        <ul>
+                            <li data-i18n="cabinet.referrals.rule1">Вознаграждение выплачивается через СБП (Система быстрых платежей) или банковским переводом через месяц после каждого платежа приведенного клиента. Комиссия платежной системы оплачивается из вознаграждения партнера.</li>
+                            <li data-i18n="cabinet.referrals.rule2">Не пытайтесь получить скидку, покупая услуги для себя. Мы следим за этим.</li>
+                            <li data-i18n="cabinet.referrals.rule3">Минимальная сумма вывода: 360 рублей.</li>
+                            <li data-i18n="cabinet.referrals.rule4">Запрещено привлечение клиентов с помощью почтовых рассылок.</li>
+                            <li data-i18n="cabinet.referrals.rule5">Запрещено привлечение клиентов с контекстной рекламы с использованием бренда Интеграл.</li>
+                            <li data-i18n="cabinet.referrals.rule6">Запрещена установка партнерской cookie пользователю без его прямого перехода по реферальной ссылке.</li>
+                        </ul>
+                        <p>
+                            <a href="https://ideav.ru/download/AffiliateAgreement.pdf" target="_blank" data-i18n="cabinet.referrals.agreement">Партнерский договор</a>
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Statistics subsection -->
+                <div class="referrals-subsection">
+                    <h2 data-i18n="cabinet.referrals.statsTitle">Статистика</h2>
+                    <p class="stats-description" data-i18n="cabinet.referrals.statsDescription">
+                        Здесь будет статистика привлечений клиентов, оплат и вашего вознаграждения.
+                    </p>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th data-i18n="cabinet.referrals.clients">Клиенты</th>
+                                <th data-i18n="cabinet.referrals.payments">Платежи</th>
+                                <th data-i18n="cabinet.referrals.matured">Созрело*</th>
+                                <th data-i18n="cabinet.referrals.commission">Комиссия</th>
+                                <th data-i18n="cabinet.referrals.paid">Выплачено</th>
+                                <th data-i18n="cabinet.referrals.toPay">К выплате</th>
+                            </tr>
+                        </thead>
+                        <tbody id="referrals-stats-body">
+                            <tr>
+                                <td id="stats-clients">0</td>
+                                <td id="stats-payments">-</td>
+                                <td id="stats-matured">-</td>
+                                <td id="stats-commission">-</td>
+                                <td id="stats-paid">-</td>
+                                <td id="stats-to-pay">-</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <p class="stats-note" data-i18n="cabinet.referrals.maturedNote">* Прошло не менее месяца с момента совершения платежа</p>
+                </div>
+
+                <div class="referrals-actions">
+                    <button type="button" id="withdraw-referrals-btn" class="btn-primary" data-i18n="cabinet.referrals.withdraw">Вывести средства</button>
+                </div>
+            </section>
+        </main>
+    </div>
+    <script>
+        if('{_global_.role}'==='admin')
+            document.querySelectorAll('.adm').forEach(el => {
+                el.style.display = el.style.display === 'none' ? '' : 'none';
+            });
+    </script>
+    <script src="/js/app.js"></script>
+    <script src="/js/cabinet.js"></script>
+<!-- End: noAdmin -->
+<!-- Begin: isAdmin --><!--{Role}-->
+    <nav id="nav" class="navbar navbar-expand-562 fixed-top dark navbar-fixed-top">
+        <a id="brand" class="navbar-brand" href="/{_global_.z}/">
+            <img src="/i/lamp.png" width="30" loading="lazy"/>
+        </a>
+        <button onclick="burgerClick(this)" class="navbar-toggler" type="button"  data-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 16 16" class="icon" style="shape-rendering: geometricprecision; margin-top: 0px;">
+                    <path fill-rule="evenodd" class="" fill="currentColor" d="M2,12 C2,11.4477153 2.45576096,11 3.00247329,11 L12.9975267,11 C13.5511774,11 14,11.4438648 14,12 C14,12.5522847 13.544239,13 12.9975267,13 L3.00247329,13 C2.44882258,13 2,12.5561352 2,12 Z M2,8 C2,7.44771525 2.45576096,7 3.00247329,7 L12.9975267,7 C13.5511774,7 14,7.44386482 14,8 C14,8.55228475 13.544239,9 12.9975267,9 L3.00247329,9 C2.44882258,9 2,8.55613518 2,8 Z M2,4 C2,3.44771525 2.45576096,3 3.00247329,3 L12.9975267,3 C13.5511774,3 14,3.44386482 14,4 C14,4.55228475 13.544239,5 12.9975267,5 L3.00247329,5 C2.44882258,5 2,4.55613518 2,4 Z"></path>
+                </svg>
+            </span> 
+        </button>
+    
+        <div class="collapse navbar-collapse" id="navbarSupportedContent">
+            <ul id="navbar-list" class="navbar-nav">
+                <div id="navlist" class="hidden">
+                    <li class="nav-item"><a class="nav-link" id="list:id:" href="/{_global_.z}/:href:">:name:</a></li>
+                </div>
+                <div id="extralist" class="hidden">
+                    <li id="dropdown-link" class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                          Еще
+                        </a>
+                        <div class="dropdown-menu" id="dropdown-list" aria-labelledby="navbarDropdown">
+                            <a class="dropdown-item" href="/{_global_.z}/:href:">:name:</a>
+                        </div>
+                    </li>
+                </div>
+            </ul>
+        </div>
+        <div class="right-block" id="right_block">
+            <div class="nav-item dropdown">
+                <a class="user-link dropdown-toggle user-margin" href="#" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                    <img src="https://img.icons8.com/material-sharp/30/ffffff/user.png"/>
+                </a>
+                <div class="dropdown-menu dropdown-menu-right" aria-labelledby="navbarDropdown">
+                    <a class="dropdown-item" target="_help" href="https://help.ideav.online"><t9n>[RU]Помощь[EN]Help</t9n></a>
+                    <a class="dropdown-item" onclick="toggleLocale()">EN/RU</a>
+                    <a class="dropdown-item" onclick="changePwd()"><t9n>[RU]Сменить пароль[EN]Change password</t9n></a>
+                    <a class="dropdown-item" onclick="exitLogin()"><t9n>[RU]Выход[EN]Exit</t9n></a>
+                </div>
+            </div>
+        </div>
+    </nav>
+    <div class="content">
+    <!-- File: a -->
+    </div>
+    <div class="footer">
+    <!--Elapsed-->
+    </div>
+    <FORM method="POST" id="post" action="/{_global_.z}/"><input type="hidden" name="_xsrf" value="{_global_.xsrf}"></FORM>
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js" integrity="sha384-9/reFTGAW83EW2RDu2S0VKaIzap3H66lZH81PoYlFhbGU+6BZp6G7niu735Sk7lN" crossorigin="anonymous"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js" integrity="sha384-B4gt1jrGC7Jh4AgTPSdUtOBvfO8shuf57BaghqFfPlYxofvL8/KUEfYiJOMMV+rV" crossorigin="anonymous"></script>
+    <script src="/js/main.js"></script>
+    <script>
+    localize();
+    function exitLogin(){
+        document.cookie='{_global_.z}=;Path=/';
+        document.location.href='/'; 
+    }
+    function toggleLocale(){
+        document.cookie='{_global_.z}_locale='+(locale==='[EN]'?'RU':'EN')+';Path=/';
+        location.reload();
+    }
+    </script>
+<!-- End: isAdmin -->
+
+</body>
+</html>
