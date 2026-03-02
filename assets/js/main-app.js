@@ -10,8 +10,10 @@ class MainAppController {
 
     init() {
         this.setupSidebarToggle();
+        this.setupSidebarResize();
         this.setupUserMenuDropdown();
         this.setupLogout();
+        this.buildMenu();
         this.highlightActiveMenuItem();
         this.initUserAvatar();
     }
@@ -31,6 +33,182 @@ class MainAppController {
             const isCollapsed = sidebar.classList.toggle('collapsed');
             localStorage.setItem(storageKey, isCollapsed ? 'true' : 'false');
         });
+    }
+
+    setupSidebarResize() {
+        const sidebar = document.getElementById('app-sidebar');
+        if (!sidebar) return;
+
+        // Create resize handle
+        const resizeHandle = document.createElement('div');
+        resizeHandle.className = 'sidebar-resize-handle';
+        sidebar.appendChild(resizeHandle);
+
+        // Restore width from cookie
+        const cookieName = 'sidebarWidth_' + (typeof db !== 'undefined' ? db : 'default');
+        const savedWidth = this.getCookie(cookieName);
+        if (savedWidth && !sidebar.classList.contains('collapsed')) {
+            sidebar.style.width = savedWidth + 'px';
+        }
+
+        let isResizing = false;
+        let startX = 0;
+        let startWidth = 0;
+
+        resizeHandle.addEventListener('mousedown', (e) => {
+            if (sidebar.classList.contains('collapsed')) return;
+            isResizing = true;
+            startX = e.clientX;
+            startWidth = sidebar.offsetWidth;
+            document.body.style.cursor = 'ew-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+            const width = startWidth + (e.clientX - startX);
+            if (width >= 150 && width <= 400) {
+                sidebar.style.width = width + 'px';
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (!isResizing) return;
+            isResizing = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            // Save width to cookie (expires in 365 days)
+            const width = sidebar.offsetWidth;
+            this.setCookie(cookieName, width, 365);
+        });
+    }
+
+    getCookie(name) {
+        const match = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+        return match ? decodeURIComponent(match[1]) : null;
+    }
+
+    setCookie(name, value, days) {
+        const expires = new Date(Date.now() + days * 864e5).toUTCString();
+        document.cookie = name + '=' + encodeURIComponent(value) + '; expires=' + expires + '; path=/';
+    }
+
+    buildMenu() {
+        const menuContainer = document.getElementById('app-menu');
+        if (!menuContainer || typeof menuData === 'undefined' || !Array.isArray(menuData)) return;
+
+        // Build map of menu items by menu_id
+        const itemMap = {};
+        menuData.forEach(item => {
+            if (item.menu_id) {
+                itemMap[item.menu_id] = item;
+            }
+        });
+
+        // Identify top-level items (menu_up is empty or doesn't exist in itemMap)
+        const topLevel = [];
+        const children = {};
+
+        menuData.forEach(item => {
+            const parentId = item.menu_up;
+            if (!parentId || !itemMap[parentId]) {
+                // Top-level item
+                topLevel.push(item);
+            } else {
+                // Child item
+                if (!children[parentId]) {
+                    children[parentId] = [];
+                }
+                children[parentId].push(item);
+            }
+        });
+
+        // Render menu items recursively
+        const renderItems = (items, level) => {
+            const fragment = document.createDocumentFragment();
+            items.forEach(item => {
+                const hasChildren = children[item.menu_id] && children[item.menu_id].length > 0;
+                const menuItem = this.createMenuItem(item, level, hasChildren);
+                fragment.appendChild(menuItem);
+
+                if (hasChildren) {
+                    const submenu = document.createElement('div');
+                    submenu.className = 'app-submenu';
+                    submenu.setAttribute('data-parent', item.menu_id);
+                    submenu.appendChild(renderItems(children[item.menu_id], level + 1));
+                    fragment.appendChild(submenu);
+                }
+            });
+            return fragment;
+        };
+
+        menuContainer.appendChild(renderItems(topLevel, 0));
+    }
+
+    createMenuItem(item, level, hasChildren) {
+        const dbName = typeof db !== 'undefined' ? db : '';
+        const href = item.href || '';
+
+        const menuItem = document.createElement(hasChildren && !href ? 'button' : 'a');
+        menuItem.className = 'app-menu-item';
+        if (level > 0) {
+            menuItem.classList.add('app-menu-item-nested');
+            menuItem.style.paddingLeft = (1 + level * 1) + 'rem';
+        }
+        if (hasChildren) {
+            menuItem.classList.add('app-menu-item-parent');
+        }
+
+        if (hasChildren && !href) {
+            menuItem.type = 'button';
+        } else {
+            menuItem.href = '/' + dbName + '/' + href;
+            menuItem.setAttribute('data-href', href);
+        }
+
+        // Icon
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'menu-icon';
+        const icon = item.icon || '';
+        if (icon.indexOf('<') !== -1) {
+            // HTML icon (e.g., <i class="pi pi-bars"></i>)
+            iconSpan.innerHTML = icon;
+        } else if (icon && icon !== '&#128196;') {
+            // Emoji or HTML entity
+            iconSpan.innerHTML = icon;
+        } else {
+            // Default: PrimeIcons pi-file
+            iconSpan.innerHTML = '<i class="pi pi-file"></i>';
+        }
+        menuItem.appendChild(iconSpan);
+
+        // Text
+        const textSpan = document.createElement('span');
+        textSpan.className = 'menu-text';
+        textSpan.textContent = item.name || '';
+        menuItem.appendChild(textSpan);
+
+        // Expand/collapse arrow for parent items
+        if (hasChildren) {
+            const arrowSpan = document.createElement('span');
+            arrowSpan.className = 'menu-arrow';
+            arrowSpan.innerHTML = '&#9660;'; // down arrow
+            menuItem.appendChild(arrowSpan);
+
+            menuItem.addEventListener('click', (e) => {
+                if (!href || hasChildren) {
+                    e.preventDefault();
+                    const submenu = menuItem.nextElementSibling;
+                    if (submenu && submenu.classList.contains('app-submenu')) {
+                        const isExpanded = submenu.classList.toggle('expanded');
+                        menuItem.classList.toggle('expanded', isExpanded);
+                    }
+                }
+            });
+        }
+
+        return menuItem;
     }
 
     setupUserMenuDropdown() {

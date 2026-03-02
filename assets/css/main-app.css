@@ -179,6 +179,18 @@
     padding: 0.75rem 0;
 }
 
+.app-sidebar.collapsed .app-menu-item-nested {
+    padding-left: 0 !important;
+}
+
+.app-sidebar.collapsed .menu-arrow {
+    display: none;
+}
+
+.app-sidebar.collapsed .app-submenu {
+    display: none !important;
+}
+
 /* App Menu */
 .app-menu {
     display: flex;
@@ -224,6 +236,69 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    flex: 1;
+}
+
+/* Parent menu items with children */
+.app-menu-item-parent {
+    position: relative;
+}
+
+.menu-arrow {
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+    margin-left: auto;
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+}
+
+.app-menu-item-parent.expanded .menu-arrow {
+    transform: rotate(180deg);
+}
+
+/* Submenu styles */
+.app-submenu {
+    display: none;
+    flex-direction: column;
+    gap: 0.125rem;
+}
+
+.app-submenu.expanded {
+    display: flex;
+}
+
+.app-menu-item-nested {
+    font-size: 0.85rem;
+}
+
+/* Sidebar resize handle */
+.sidebar-resize-handle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 4px;
+    height: 100%;
+    cursor: ew-resize;
+    background: transparent;
+    transition: background-color 0.2s ease;
+    z-index: 10;
+}
+
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle:active {
+    background-color: var(--button-primary);
+}
+
+/* Hide resize handle when sidebar is collapsed */
+.app-sidebar.collapsed .sidebar-resize-handle {
+    display: none;
+}
+
+/* Hide resize handle on mobile */
+@media (max-width: 900px) {
+    .sidebar-resize-handle {
+        display: none;
+    }
 }
 
 /* Main Content */
