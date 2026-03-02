@@ -232,6 +232,7 @@
 
 .app-menu-item:hover {
     background-color: rgba(0, 0, 0, 0.04);
+    text-decoration: none;
 }
 
 [data-theme="dark"] .app-menu-item:hover {

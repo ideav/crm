@@ -1024,17 +1024,21 @@ class MainAppController {
 
         const menuItems = document.querySelectorAll('.app-menu-item');
         menuItems.forEach(item => {
-            const href = item.getAttribute('data-href') || item.getAttribute('href');
-            if (href) {
-                // Check if this menu item matches current action or path
-                const hrefParts = href.split('/').filter(p => p);
-                const lastPart = hrefParts[hrefParts.length - 1];
+            // Use data-href attribute which contains the actual href value (without db prefix)
+            // Skip menu items with empty href - they should not be highlighted as active
+            const dataHref = item.getAttribute('data-href');
+            if (!dataHref || dataHref.trim() === '') {
+                return; // Skip items with empty href
+            }
 
-                if (currentAction && lastPart === currentAction) {
-                    item.classList.add('active');
-                } else if (currentPath.includes(href)) {
-                    item.classList.add('active');
-                }
+            // Check if this menu item matches current action or path
+            const hrefParts = dataHref.split('/').filter(p => p);
+            const lastPart = hrefParts[hrefParts.length - 1];
+
+            if (currentAction && lastPart === currentAction) {
+                item.classList.add('active');
+            } else if (currentPath.includes(dataHref)) {
+                item.classList.add('active');
             }
         });
     }
