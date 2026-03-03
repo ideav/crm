@@ -2649,3 +2649,88 @@ tr.row-selected {
     color: #d32f2f;
     background-color: rgba(211, 47, 47, 0.1);
 }
+
+/* ========================================
+   Mobile Responsive Styles (issue #695)
+   Edit form modal doesn't fit on mobile devices
+   ======================================== */
+
+@media (max-width: 640px) {
+    /* Edit form modal - remove min-width and use full width on mobile */
+    .edit-form-modal {
+        min-width: auto;
+        width: calc(100% - 16px);
+        max-width: none;
+        left: 8px;
+        right: 8px;
+        transform: translateY(-50%);
+        max-height: 90vh;
+    }
+
+    /* Expanded modal on mobile - use full width */
+    .edit-form-modal.expanded {
+        max-width: none;
+        width: calc(100% - 16px);
+    }
+
+    /* Edit form header - smaller padding on mobile */
+    .edit-form-header {
+        padding: 16px;
+    }
+
+    /* Edit form header title - smaller font on mobile */
+    .edit-form-header h5 {
+        font-size: 18px;
+    }
+
+    /* Edit form header title row - wrap on mobile */
+    .edit-form-header-title-row {
+        gap: 8px;
+    }
+
+    /* Edit form body - smaller padding on mobile */
+    .edit-form-body {
+        padding: 8px;
+    }
+
+    /* Edit form footer - adjust layout for mobile */
+    .edit-form-footer {
+        padding: 12px 16px;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    /* Edit form footer buttons - smaller padding on mobile */
+    .edit-form-footer .btn {
+        padding: 8px 16px;
+        font-size: 13px;
+        min-height: 36px;
+    }
+
+    /* Form field settings modal - full width on mobile */
+    .form-field-settings-modal {
+        width: calc(100% - 16px);
+        max-width: none;
+        left: 8px;
+        right: 8px;
+        transform: translateY(-50%);
+    }
+
+    /* Subordinate form modal - full width on mobile */
+    .subordinate-form-modal {
+        max-width: none;
+        width: calc(100% - 16px);
+    }
+
+    /* Column settings modal - full width on mobile */
+    .column-settings-modal {
+        width: calc(100% - 16px);
+        max-width: none;
+    }
+
+    /* Grouping settings modal - full width on mobile */
+    .grouping-settings-modal {
+        max-width: none;
+        width: calc(100% - 16px);
+    }
+}
