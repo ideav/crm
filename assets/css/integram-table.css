@@ -171,19 +171,19 @@
 
 /* Standalone text-dark style (issue #660) - works without Bootstrap */
 .text-dark {
-    color: var(--md-text-primary) !important;
+    color: var(--md-text-primary);
 }
 
 /* Combined btn-link text-dark for table controls (issue #660) */
 .integram-table-controls .btn-link.text-dark {
-    color: var(--md-text-primary);
+    color: #6c757d;
     background-color: transparent;
     border: none;
     padding: 8px 8px;
     border-radius: 4px;
     transition: var(--md-transition);
     font-weight: 500;
-    font-size: 16px;
+    font-size: 14px;
     cursor: pointer;
 }
 
