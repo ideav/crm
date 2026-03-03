@@ -131,4 +131,4 @@ OR (if cell is not editable):
 5. Verify that `recordId` is correctly determined from `rawObjectData[i].i`
 
 ## Files Modified
-- `assets/js/integram-table.js` - Added object format handling and debug tracing
+- `js/integram-table.js` - Added object format handling and debug tracing

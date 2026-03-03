@@ -42,8 +42,8 @@
 
 ## Файлы компонента
 
-- `assets/js/integram-table.js` - standalone JS модуль (класс IntegramTable)
-- `assets/css/integram-table.css` - стили компонента в Material Design
+- `js/integram-table.js` - standalone JS модуль (класс IntegramTable)
+- `css/integram-table.css` - стили компонента в Material Design
 - `templates/integram-table.html` - legacy HTML версия (deprecated)
 - `templates/table-example.html` - пример использования с демо-данными и документацией
 
@@ -70,7 +70,7 @@
 <html>
 <head>
     <link rel="stylesheet" href="/css/bootstrap.min.css">
-    <link rel="stylesheet" href="/assets/css/integram-table.css">
+    <link rel="stylesheet" href="/css/integram-table.css">
 </head>
 <body>
     <div id="my-table"
@@ -81,7 +81,7 @@
          data-title="Мои задачи"
          data-instance-name="myTable"></div>
 
-    <script src="/assets/js/integram-table.js"></script>
+    <script src="/js/integram-table.js"></script>
     <!-- Таблица инициализируется автоматически! -->
 </body>
 </html>
@@ -102,12 +102,12 @@
 <html>
 <head>
     <link rel="stylesheet" href="/css/bootstrap.min.css">
-    <link rel="stylesheet" href="/assets/css/integram-table.css">
+    <link rel="stylesheet" href="/css/integram-table.css">
 </head>
 <body>
     <div id="my-table"></div>
 
-    <script src="/assets/js/integram-table.js"></script>
+    <script src="/js/integram-table.js"></script>
     <script>
         const myTable = new IntegramTable('my-table', {
             apiUrl: '/api/tasks',
@@ -1348,7 +1348,7 @@ window.integramTableOverrides = {
         }
     };
 </script>
-<script src="/assets/js/integram-table.js"></script>
+<script src="/js/integram-table.js"></script>
 ```
 
 ## Лицензия
