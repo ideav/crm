@@ -8981,7 +8981,7 @@ class IntegramTable {
                 // Check for warning - show modal and stay in edit mode
                 // Pass result.obj to show a link to the existing/found record if available
                 if (result.warning) {
-                    this.showWarningModal(result.warning, result.obj || null);
+                    this.showWarningModal(result.warning, result.id || null);
                     return;
                 }
 
