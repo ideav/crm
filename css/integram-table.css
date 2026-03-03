@@ -30,7 +30,7 @@
 /* Table component styles */
 .integram-table-wrapper {
     position: relative;
-    margin: 20px 0;
+    /* margin: 20px 0; */
     font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
