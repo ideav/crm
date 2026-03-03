@@ -275,6 +275,7 @@
     margin-left: auto;
     transition: transform 0.2s ease;
     flex-shrink: 0;
+    padding: 6px;
 }
 
 .app-menu-item-parent.expanded .menu-arrow {
