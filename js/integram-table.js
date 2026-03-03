@@ -178,6 +178,18 @@ class IntegramTable {
             return typeMap[id] || 'SHORT'; // Default to SHORT if not found
         }
 
+        /**
+         * Check if a type ID is a base (primitive) type (issue #708)
+         * Base types (2-17) don't have metadata and cannot be used for edit forms
+         * @param {string|number} typeId - Type ID to check
+         * @returns {boolean} True if typeId is a base type
+         */
+        isBaseType(typeId) {
+            const id = parseInt(typeId, 10);
+            // Base types are IDs 2-17 (primitives like string, number, date, etc.)
+            return !isNaN(id) && id >= 2 && id <= 17;
+        }
+
         init() {
             this.loadColumnState();
             this.loadSettings();
@@ -1627,6 +1639,16 @@ class IntegramTable {
                     if (window.INTEGRAM_DEBUG) {
                         console.log(`  - Using determineParentRecordId: recordId=${recordId}, typeId=${typeId}`);
                     }
+                }
+
+                // Issue #708: If typeId is a base type (2-17), fall back to objectTableId or tableTypeId
+                // Base types are primitives (string, number, date, etc.) that don't have editable metadata
+                if (typeId && this.isBaseType(typeId)) {
+                    const fallbackTypeId = this.objectTableId || this.options.tableTypeId || '';
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log(`  - typeId ${typeId} is a base type, falling back to ${fallbackTypeId}`);
+                    }
+                    typeId = fallbackTypeId;
                 }
 
                 const instanceName = this.options.instanceName;
@@ -5796,6 +5818,14 @@ class IntegramTable {
         async openEditForm(recordId, typeId, rowIndex) {
             if (!typeId) {
                 this.showToast('Ошибка: не указан тип записи', 'error');
+                return;
+            }
+
+            // Issue #708: Validate that typeId is not a base type (2-17)
+            // Base types are primitives that don't have editable metadata
+            if (this.isBaseType(typeId)) {
+                console.error(`openEditForm: typeId ${typeId} is a base type (primitive) and cannot be edited directly`);
+                this.showToast('Ошибка: невозможно редактировать базовый тип', 'error');
                 return;
             }
 
