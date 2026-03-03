@@ -77,11 +77,25 @@ class MainAppController {
         const storageKey = 'appSidebarCollapsed_' + (typeof db !== 'undefined' ? db : 'default');
         if (localStorage.getItem(storageKey) === 'true') {
             sidebar.classList.add('collapsed');
+            // Clear inline width so CSS collapsed width (56px) takes effect
+            sidebar.style.width = '';
         }
 
         toggleBtn.addEventListener('click', () => {
             const isCollapsed = sidebar.classList.toggle('collapsed');
             localStorage.setItem(storageKey, isCollapsed ? 'true' : 'false');
+
+            if (isCollapsed) {
+                // Clear inline width so CSS collapsed width (56px) takes effect
+                sidebar.style.width = '';
+            } else {
+                // Restore saved width when expanding
+                const cookieName = 'sidebarWidth_' + (typeof db !== 'undefined' ? db : 'default');
+                const savedWidth = this.getCookie(cookieName);
+                if (savedWidth) {
+                    sidebar.style.width = savedWidth + 'px';
+                }
+            }
         });
     }
 
