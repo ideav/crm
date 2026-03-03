@@ -56,7 +56,7 @@ const showDeleteConfirmModal = function() {
                     </div>
                     <div class="integram-modal-footer">
                         <button type="button" class="btn btn-danger delete-confirm-ok-btn" style="margin-right: 8px;">Удалить</button>
-                        <button type="button" class="btn btn-secondary delete-confirm-cancel-btn">Отмена</button>
+                        <button type="button" class="btn btn-secondary delete-confirm-cancel-btn">Отменить</button>
                     </div>
                 </div>
             </div>
@@ -139,7 +139,7 @@ if (modalHtml.includes('delete-confirm-ok-btn') && modalHtml.includes('delete-co
     console.error('✗ Missing modal buttons');
 }
 
-if (modalHtml.includes('Удалить') && modalHtml.includes('Отмена')) {
+if (modalHtml.includes('Удалить') && modalHtml.includes('Отменить')) {
     console.log('✓ Buttons have correct Russian labels');
 } else {
     console.error('✗ Missing button labels');
