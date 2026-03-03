@@ -253,7 +253,7 @@ class TablesController {
     createTableCard(table) {
         const card = document.createElement('a');
         card.className = 'table-card';
-        card.href = '/' + db + '/object/' + table.id;
+        card.href = '/' + db + '/table/' + table.id;
         card.dataset.tableId = table.id;
         card.dataset.tableName = table.name.toLowerCase();
         card.draggable = true;
