@@ -504,12 +504,72 @@ class TablesController {
         }, 3000);
     }
 
-    deleteFolder(folderName) {
-        if (confirm('Удалить папку "' + folderName + '"? Таблицы будут перемещены в "Без папки".')) {
+    async deleteFolder(folderName) {
+        const confirmed = await this.showDeleteConfirmModal(
+            'Удалить папку "' + folderName + '"? Таблицы будут перемещены в "Без папки".'
+        );
+        if (confirmed) {
             delete this.config[folderName];
             this.saveConfig();
             this.render();
         }
+    }
+
+    /**
+     * Show a custom modal confirmation dialog for delete action
+     * @param {string} message - The confirmation message to display
+     * @returns {Promise<boolean>} - true if user confirmed, false otherwise
+     */
+    showDeleteConfirmModal(message) {
+        return new Promise((resolve) => {
+            const modalId = `tables-delete-confirm-${ Date.now() }`;
+            const modalHtml = `
+                <div class="modal" id="${ modalId }">
+                    <div class="modal-backdrop"></div>
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h2>Подтверждение удаления</h2>
+                            <button type="button" class="modal-close tables-delete-confirm-cancel"><i class="pi pi-times"></i></button>
+                        </div>
+                        <div class="modal-body">
+                            <p style="margin: 0 0 1.5rem 0;">${ message }</p>
+                            <div class="form-actions">
+                                <button type="button" class="btn-danger tables-delete-confirm-ok">Удалить</button>
+                                <button type="button" class="btn-secondary tables-delete-confirm-cancel">Отменить</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+            const confirmModal = document.getElementById(modalId);
+
+            const cleanup = (result) => {
+                document.removeEventListener('keydown', handleEscape);
+                confirmModal.remove();
+                resolve(result);
+            };
+
+            // OK button
+            confirmModal.querySelector('.tables-delete-confirm-ok').addEventListener('click', () => cleanup(true));
+
+            // Cancel buttons (both X and Cancel button)
+            confirmModal.querySelectorAll('.tables-delete-confirm-cancel').forEach(btn => {
+                btn.addEventListener('click', () => cleanup(false));
+            });
+
+            // Close on backdrop click
+            confirmModal.querySelector('.modal-backdrop').addEventListener('click', () => cleanup(false));
+
+            // Close on Escape key
+            const handleEscape = (e) => {
+                if (e.key === 'Escape') {
+                    cleanup(false);
+                }
+            };
+            document.addEventListener('keydown', handleEscape);
+        });
     }
 
     addFolder(name) {
@@ -517,7 +577,7 @@ class TablesController {
 
         name = name.trim();
         if (this.config[name]) {
-            alert('Папка с таким названием уже существует');
+            this.showErrorModal('Папка с таким названием уже существует');
             return;
         }
 
@@ -528,6 +588,55 @@ class TablesController {
 
         this.saveConfig();
         this.render();
+    }
+
+    /**
+     * Show an error modal dialog
+     * @param {string} message - The error message to display
+     */
+    showErrorModal(message) {
+        const modalId = `tables-error-${ Date.now() }`;
+        const modalHtml = `
+            <div class="modal" id="${ modalId }">
+                <div class="modal-backdrop"></div>
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2 style="color: #dc3545;">Ошибка</h2>
+                        <button type="button" class="modal-close tables-error-close"><i class="pi pi-times"></i></button>
+                    </div>
+                    <div class="modal-body">
+                        <p style="margin: 0 0 1.5rem 0;">${ message }</p>
+                        <div class="form-actions">
+                            <button type="button" class="btn-secondary tables-error-close">Закрыть</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+        const errorModal = document.getElementById(modalId);
+
+        const cleanup = () => {
+            document.removeEventListener('keydown', handleEscape);
+            errorModal.remove();
+        };
+
+        // Close buttons
+        errorModal.querySelectorAll('.tables-error-close').forEach(btn => {
+            btn.addEventListener('click', cleanup);
+        });
+
+        // Close on backdrop click
+        errorModal.querySelector('.modal-backdrop').addEventListener('click', cleanup);
+
+        // Close on Escape key
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                cleanup();
+            }
+        };
+        document.addEventListener('keydown', handleEscape);
     }
 
     async saveConfig() {
@@ -722,7 +831,7 @@ class TablesController {
         const unique = uniqueCheckbox && uniqueCheckbox.checked;
 
         if (!name) {
-            alert('Введите название таблицы');
+            this.showErrorModal('Введите название таблицы');
             return;
         }
 
@@ -770,7 +879,7 @@ class TablesController {
 
         } catch (err) {
             console.error('[tables] Error creating table:', err);
-            alert('Ошибка при создании таблицы: ' + err.message);
+            this.showErrorModal('Ошибка при создании таблицы: ' + err.message);
         }
     }
 }
