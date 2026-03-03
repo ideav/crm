@@ -1478,7 +1478,10 @@ class IntegramTable {
                                                           .replace(/"/g, '&quot;')
                                                           .replace(/'/g, '&#039;');
                 // Store full value for editing before truncation
-                fullValueForEditing = escapedValue;
+                // Fix for issue #684: Store RAW value, not escaped value
+                // Browser's setAttribute() handles encoding automatically, and dataset.fullValue decodes it
+                // Storing escaped value causes double-encoding when read back
+                fullValueForEditing = String(displayValue);
             }
 
             // Truncate long values if setting is enabled
@@ -3287,13 +3290,14 @@ class IntegramTable {
                             displayValue = this.formatDateDisplay(dateObj);
                         }
                     }
-                    // Escape HTML and store for editing
+                    // Escape HTML for display
                     escapedValue = String(displayValue).replace(/&/g, '&amp;')
                                                         .replace(/</g, '&lt;')
                                                         .replace(/>/g, '&gt;')
                                                         .replace(/"/g, '&quot;')
                                                         .replace(/'/g, '&#039;');
-                    fullValueForEditing = escapedValue;
+                    // Fix for issue #684: Store RAW value for editing, not escaped
+                    fullValueForEditing = String(displayValue);
                     break;
                 case 'DATETIME':
                     if (newValue) {
@@ -3302,13 +3306,14 @@ class IntegramTable {
                             displayValue = this.formatDateTimeDisplay(datetimeObj);
                         }
                     }
-                    // Escape HTML and store for editing
+                    // Escape HTML for display
                     escapedValue = String(displayValue).replace(/&/g, '&amp;')
                                                         .replace(/</g, '&lt;')
                                                         .replace(/>/g, '&gt;')
                                                         .replace(/"/g, '&quot;')
                                                         .replace(/'/g, '&#039;');
-                    fullValueForEditing = escapedValue;
+                    // Fix for issue #684: Store RAW value for editing, not escaped
+                    fullValueForEditing = String(displayValue);
                     break;
                 case 'GRANT':
                 case 'REPORT_COLUMN':
@@ -3322,16 +3327,18 @@ class IntegramTable {
                     // Use the saved ID from currentEditingCell for future editing
                     // The saveInlineEdit method stores displayText, and the actual newValue (ID) is what was sent to API
                     // We need to get the ID that was saved - it's available via data-col-value or will be set separately
-                    fullValueForEditing = escapedValue; // This will be overridden later if we have the ID
+                    // Fix for issue #684: Store RAW value for editing, not escaped
+                    fullValueForEditing = String(newValue); // This will be overridden later if we have the ID
                     break;
                 default:
-                    // Escape HTML and store for editing
+                    // Escape HTML for display
                     escapedValue = String(displayValue).replace(/&/g, '&amp;')
                                                         .replace(/</g, '&lt;')
                                                         .replace(/>/g, '&gt;')
                                                         .replace(/"/g, '&quot;')
                                                         .replace(/'/g, '&#039;');
-                    fullValueForEditing = escapedValue;
+                    // Fix for issue #684: Store RAW value for editing, not escaped
+                    fullValueForEditing = String(displayValue);
                     break;
             }
 

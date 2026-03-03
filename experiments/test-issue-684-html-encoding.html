@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Issue #684 - HTML Double Encoding Fix</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        .pass { background-color: #d4edda; border-color: #c3e6cb; }
+        .fail { background-color: #f8d7da; border-color: #f5c6cb; }
+        code { background: #f4f4f4; padding: 2px 5px; }
+        pre { background: #f4f4f4; padding: 10px; overflow-x: auto; }
+        button { margin: 5px; padding: 8px 15px; }
+    </style>
+</head>
+<body>
+    <h1>Test Issue #684 - HTML Double Encoding Fix</h1>
+    <p>This test verifies that HTML content stored in data-full-value attribute is correctly handled without double-encoding.</p>
+
+    <div class="test-section" id="test1">
+        <h3>Test 1: setAttribute() with raw HTML value</h3>
+        <p>When we use setAttribute() with raw HTML, the browser handles encoding automatically.</p>
+        <div id="cell1" class="editable-cell"></div>
+        <button onclick="runTest1()">Run Test</button>
+        <pre id="result1"></pre>
+    </div>
+
+    <div class="test-section" id="test2">
+        <h3>Test 2: setAttribute() with pre-escaped HTML value (OLD BUG)</h3>
+        <p>If we pre-escape the value before setAttribute(), we get double-encoding.</p>
+        <div id="cell2" class="editable-cell"></div>
+        <button onclick="runTest2()">Run Test</button>
+        <pre id="result2"></pre>
+    </div>
+
+    <div class="test-section" id="test3">
+        <h3>Test 3: Direct HTML attribute assignment (template literals)</h3>
+        <p>When building HTML as string, we need to escape only for the attribute context.</p>
+        <div id="cell3-container"></div>
+        <button onclick="runTest3()">Run Test</button>
+        <pre id="result3"></pre>
+    </div>
+
+    <div class="test-section" id="test4">
+        <h3>Test 4: Full cycle - save and read back (FIX VERIFICATION)</h3>
+        <p>This simulates the actual flow: set attribute, read back via dataset, verify raw HTML is preserved.</p>
+        <div id="cell4" class="editable-cell"></div>
+        <button onclick="runTest4()">Run Test</button>
+        <pre id="result4"></pre>
+    </div>
+
+    <script>
+        const testHtmlValue = '<i class="pi pi-cloud-upload"></i> ';
+
+        function escapeHtml(text) {
+            if (text === null || text === undefined) return '';
+            return String(text).replace(/&/g, '&amp;')
+                              .replace(/</g, '&lt;')
+                              .replace(/>/g, '&gt;')
+                              .replace(/"/g, '&quot;')
+                              .replace(/'/g, '&#039;');
+        }
+
+        function runTest1() {
+            const cell = document.getElementById('cell1');
+            // FIX: Use raw value - browser handles encoding
+            cell.setAttribute('data-full-value', testHtmlValue);
+
+            const result = document.getElementById('result1');
+            const section = document.getElementById('test1');
+
+            const readBack = cell.dataset.fullValue;
+            const rawAttr = cell.getAttribute('data-full-value');
+
+            result.textContent = `Original value: ${testHtmlValue}
+Read back via dataset.fullValue: ${readBack}
+Read back via getAttribute(): ${rawAttr}
+Are they equal? ${readBack === testHtmlValue ? 'YES' : 'NO'}`;
+
+            section.classList.toggle('pass', readBack === testHtmlValue);
+            section.classList.toggle('fail', readBack !== testHtmlValue);
+        }
+
+        function runTest2() {
+            const cell = document.getElementById('cell2');
+            // BUG: Pre-escaping causes double-encoding
+            const escapedValue = escapeHtml(testHtmlValue);
+            cell.setAttribute('data-full-value', escapedValue);
+
+            const result = document.getElementById('result2');
+            const section = document.getElementById('test2');
+
+            const readBack = cell.dataset.fullValue;
+            const rawAttr = cell.getAttribute('data-full-value');
+
+            const isDoubleEncoded = readBack !== testHtmlValue && readBack === escapedValue;
+
+            result.textContent = `Original value: ${testHtmlValue}
+Escaped value (what was stored): ${escapedValue}
+Read back via dataset.fullValue: ${readBack}
+Read back via getAttribute(): ${rawAttr}
+Is this double-encoded (BAD)? ${isDoubleEncoded ? 'YES - BUG!' : 'NO'}`;
+
+            // This test PASSES if we detect the double-encoding bug (showing that pre-escaping is wrong)
+            section.classList.toggle('pass', isDoubleEncoded);
+            section.classList.toggle('fail', !isDoubleEncoded);
+        }
+
+        function runTest3() {
+            const container = document.getElementById('cell3-container');
+
+            // When building HTML as string, we need to escape for attribute context
+            // But the browser parses it and decodes it when accessed
+            const fullValueAttr = testHtmlValue.replace(/"/g, '&quot;');
+            container.innerHTML = `<div id="cell3" data-full-value="${fullValueAttr}"></div>`;
+
+            const cell = document.getElementById('cell3');
+            const result = document.getElementById('result3');
+            const section = document.getElementById('test3');
+
+            const readBack = cell.dataset.fullValue;
+
+            result.textContent = `Original value: ${testHtmlValue}
+HTML attribute value in template: ${fullValueAttr}
+Read back via dataset.fullValue: ${readBack}
+Are they equal (after browser parsing)? ${readBack === testHtmlValue ? 'YES' : 'NO'}`;
+
+            section.classList.toggle('pass', readBack === testHtmlValue);
+            section.classList.toggle('fail', readBack !== testHtmlValue);
+        }
+
+        function runTest4() {
+            const cell = document.getElementById('cell4');
+            const result = document.getElementById('result4');
+            const section = document.getElementById('test4');
+
+            // Simulate the FIXED flow from integram-table.js
+            const displayValue = testHtmlValue;
+            const escapedForDisplay = escapeHtml(displayValue);
+            // FIX: fullValueForEditing should be the RAW value
+            const fullValueForEditing = String(displayValue);
+
+            // Display escaped HTML (safe for innerHTML)
+            cell.innerHTML = escapedForDisplay;
+            // Store RAW value for editing
+            cell.setAttribute('data-full-value', fullValueForEditing);
+
+            // Read back for editing
+            const valueForEditing = cell.dataset.fullValue;
+
+            const success = valueForEditing === testHtmlValue;
+
+            result.textContent = `Original value: ${testHtmlValue}
+Displayed as (escaped): ${escapedForDisplay}
+Stored for editing (RAW): ${fullValueForEditing}
+Read back for editing: ${valueForEditing}
+FIX WORKS? ${success ? 'YES! Value preserved correctly!' : 'NO - Still broken'}`;
+
+            section.classList.toggle('pass', success);
+            section.classList.toggle('fail', !success);
+        }
+
+        // Run all tests on load
+        window.onload = function() {
+            runTest1();
+            runTest2();
+            runTest3();
+            runTest4();
+        };
+    </script>
+</body>
+</html>
