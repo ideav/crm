@@ -606,14 +606,19 @@ class IntegramTable {
                 if (metadata.reqs && Array.isArray(metadata.reqs)) {
                     metadata.reqs.forEach((req, idx) => {
                         const attrs = this.parseAttrs(req.attrs);
+                        const isReference = req.hasOwnProperty('ref_id');
                         columns.push({
                             id: String(idx + 1),
                             type: req.type || 'SHORT',
                             format: this.mapTypeIdToFormat(req.type || 'SHORT'),
                             name: attrs.alias || req.val,
                             granted: 1,  // In object format, allow editing all cells
-                            ref: req.arr_id || 0,
-                            paramId: req.id // For cell editing: use t{req.id} for requisite columns
+                            ref: isReference ? req.orig : 0,
+                            ref_id: req.ref_id || null,
+                            orig: req.orig || null,
+                            attrs: req.attrs || '',
+                            paramId: req.id, // For cell editing: use t{req.id} for requisite columns
+                            arr_id: req.arr_id || null // For table requisites (subordinate tables) (issue #710)
                         });
                     });
                 }
