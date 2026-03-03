@@ -58,6 +58,7 @@ class MainAppController {
 
     init() {
         this.setupSidebarToggle();
+        this.setupMobileSidebarToggle();
         this.setupSidebarResize();
         this.setupUserMenuDropdown();
         this.setupLogout();
@@ -66,6 +67,58 @@ class MainAppController {
         this.initUserAvatar();
         this.setupEditMode();
         this.setupMenuSearch();
+    }
+
+    isMobile() {
+        return window.innerWidth <= 900;
+    }
+
+    openMobileSidebar() {
+        const sidebar = document.getElementById('app-sidebar');
+        const backdrop = document.getElementById('sidebar-backdrop');
+        if (sidebar) sidebar.classList.add('mobile-open');
+        if (backdrop) backdrop.classList.add('visible');
+        document.body.style.overflow = 'hidden';
+    }
+
+    closeMobileSidebar() {
+        const sidebar = document.getElementById('app-sidebar');
+        const backdrop = document.getElementById('sidebar-backdrop');
+        if (sidebar) sidebar.classList.remove('mobile-open');
+        if (backdrop) backdrop.classList.remove('visible');
+        document.body.style.overflow = '';
+    }
+
+    setupMobileSidebarToggle() {
+        const mobileToggleBtn = document.getElementById('mobile-sidebar-toggle');
+        const backdrop = document.getElementById('sidebar-backdrop');
+
+        if (mobileToggleBtn) {
+            mobileToggleBtn.addEventListener('click', () => {
+                if (this.isMobile()) {
+                    const sidebar = document.getElementById('app-sidebar');
+                    if (sidebar && sidebar.classList.contains('mobile-open')) {
+                        this.closeMobileSidebar();
+                    } else {
+                        this.openMobileSidebar();
+                    }
+                }
+            });
+        }
+
+        // Close on backdrop click
+        if (backdrop) {
+            backdrop.addEventListener('click', () => {
+                this.closeMobileSidebar();
+            });
+        }
+
+        // Close sidebar on window resize to desktop
+        window.addEventListener('resize', () => {
+            if (!this.isMobile()) {
+                this.closeMobileSidebar();
+            }
+        });
     }
 
     setupSidebarToggle() {
@@ -344,6 +397,15 @@ class MainAppController {
                     }
                 });
             }
+        }
+
+        // On mobile: close the sidebar when navigating to a page (item has href)
+        if (href) {
+            menuItem.addEventListener('click', () => {
+                if (this.isMobile()) {
+                    this.closeMobileSidebar();
+                }
+            });
         }
 
         // Setup drag and drop handlers (will be active only in edit mode)
