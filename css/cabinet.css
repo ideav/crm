@@ -687,26 +687,7 @@
     margin-top: 0.5rem;
 }
 
-/* Button Styles */
-.btn-secondary {
-    padding: 0.625rem 1.25rem;
-    background-color: var(--bg-secondary);
-    color: var(--text-primary);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    font-size: 0.9rem;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.btn-secondary:hover {
-    background-color: var(--border-color);
-}
-
-.btn-small {
-    padding: 0.5rem 0.875rem;
-    font-size: 0.85rem;
-}
+/* Button styles are in /css/styles.css */
 
 /* Access List */
 .access-list {
