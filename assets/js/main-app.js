@@ -634,8 +634,8 @@ class MainAppController {
             </div>
             <div class="menu-modal-actions">
                 ${config.mode === 'edit' ? '<button type="button" class="menu-modal-btn delete">Удалить</button>' : ''}
-                <button type="button" class="menu-modal-btn cancel">Отмена</button>
                 <button type="button" class="menu-modal-btn save">Сохранить</button>
+                <button type="button" class="menu-modal-btn cancel">Отменить</button>
             </div>
         `;
 
@@ -980,7 +980,7 @@ class MainAppController {
                         <p style="margin: 0 0 24px 0;">${ message }</p>
                         <div class="menu-modal-actions">
                             <button type="button" class="menu-modal-btn delete menu-delete-confirm-ok">Удалить</button>
-                            <button type="button" class="menu-modal-btn cancel menu-delete-confirm-cancel">Отмена</button>
+                            <button type="button" class="menu-modal-btn cancel menu-delete-confirm-cancel">Отменить</button>
                         </div>
                     </div>
                 </div>

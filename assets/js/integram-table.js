@@ -3017,7 +3017,7 @@ class IntegramTable {
                 <div class="edit-form-footer">
                     <div class="edit-form-footer-buttons">
                         <button type="button" class="btn btn-primary" id="save-record-ref-btn">Сохранить</button>
-                        <button type="button" class="btn btn-secondary" data-close-modal-ref="true">Отмена</button>
+                        <button type="button" class="btn btn-secondary" data-close-modal-ref="true">Отменить</button>
                     </div>
                 </div>
             `;
@@ -3975,7 +3975,7 @@ class IntegramTable {
                 <div id="add-column-error-${instanceName}" style="color: #dc3545; margin-bottom: 16px; display: none; font-size: 14px;"></div>
                 <div style="display: flex; justify-content: flex-end; gap: 10px;">
                     <button class="btn btn-primary" id="create-column-btn-${instanceName}">Создать</button>
-                    <button class="btn btn-secondary" id="cancel-add-column-btn-${instanceName}">Отмена</button>
+                    <button class="btn btn-secondary" id="cancel-add-column-btn-${instanceName}">Отменить</button>
                 </div>
             `;
 
@@ -6410,7 +6410,7 @@ class IntegramTable {
                     <div class="edit-form-footer-buttons">
                         ${ !isCreate ? '<button type="button" class="btn btn-danger" id="delete-record-btn" style="display:none;">Удалить</button>' : '' }
                         <button type="button" class="btn btn-primary" id="save-record-btn">Сохранить</button>
-                        <button type="button" class="btn btn-secondary" data-close-modal="true">Отмена</button>
+                        <button type="button" class="btn btn-secondary" data-close-modal="true">Отменить</button>
                     </div>
                 </div>
             `;
@@ -7519,7 +7519,7 @@ class IntegramTable {
                 <div class="edit-form-footer">
                     <div class="edit-form-footer-buttons">
                         <button type="button" class="btn btn-primary" id="subordinate-save-btn">Создать</button>
-                        <button type="button" class="btn btn-secondary subordinate-cancel-btn">Отмена</button>
+                        <button type="button" class="btn btn-secondary subordinate-cancel-btn">Отменить</button>
                     </div>
                 </div>
             `;
@@ -8338,7 +8338,7 @@ class IntegramTable {
                 <div class="edit-form-footer">
                     <div class="edit-form-footer-buttons">
                         <button type="button" class="btn btn-primary" id="save-form-ref-btn">Сохранить</button>
-                        <button type="button" class="btn btn-secondary" data-close-form-ref-modal="true">Отмена</button>
+                        <button type="button" class="btn btn-secondary" data-close-form-ref-modal="true">Отменить</button>
                     </div>
                 </div>
             `;
@@ -8549,7 +8549,7 @@ class IntegramTable {
                 </div>
                 <div class="form-field-settings-footer">
                     <button type="button" class="btn btn-primary form-field-settings-save">Сохранить</button>
-                    <button type="button" class="btn btn-secondary form-field-settings-cancel">Отмена</button>
+                    <button type="button" class="btn btn-secondary form-field-settings-cancel">Отменить</button>
                 </div>
             `;
 
@@ -9156,7 +9156,7 @@ class IntegramTable {
                             </div>
                             <div class="integram-modal-footer">
                                 <button type="button" class="btn btn-danger delete-confirm-ok-btn" style="margin-right: 8px;">Удалить</button>
-                                <button type="button" class="btn btn-secondary delete-confirm-cancel-btn">Отмена</button>
+                                <button type="button" class="btn btn-secondary delete-confirm-cancel-btn">Отменить</button>
                             </div>
                         </div>
                     </div>
@@ -9763,7 +9763,7 @@ class IntegramTable {
                 <div class="bulk-delete-confirm">
                     <span>Удалить ${ count } записей?</span>
                     <button class="btn btn-sm btn-danger bulk-delete-confirm-btn">Подтвердить удаление</button>
-                    <button class="btn btn-sm btn-outline-secondary bulk-delete-cancel-btn">Отмена</button>
+                    <button class="btn btn-sm btn-outline-secondary bulk-delete-cancel-btn">Отменить</button>
                 </div>
             `;
 
@@ -10734,7 +10734,7 @@ class IntegramCreateFormHelper {
             <div class="edit-form-footer">
                 <div class="edit-form-footer-buttons">
                     <button type="button" class="btn btn-primary" id="save-record-btn">Сохранить</button>
-                    <button type="button" class="btn btn-secondary" data-close-modal="true">Отмена</button>
+                    <button type="button" class="btn btn-secondary" data-close-modal="true">Отменить</button>
                 </div>
             </div>
         `;
