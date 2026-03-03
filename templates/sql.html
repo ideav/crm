@@ -26,12 +26,67 @@ label {
     padding: 3px;
     margin: 3px;
     cursor: pointer;
+    font-size: 18px;
+    color: #666;
+    transition: color 0.2s ease, transform 0.2s ease;
+    vertical-align: middle;
+}
+.icon8:hover {
+    color: #333;
+    transform: scale(1.1);
+}
+.icon8.text-muted {
+    color: #aaa;
+}
+.icon8.text-muted:hover {
+    color: #666;
+}
+.icon8.text-danger {
+    color: #dc3545;
+}
+.icon8.text-danger:hover {
+    color: #c82333;
 }
 .ileft {
-    margin-left:-12px;
+    margin-left: -8px;
 }
 .iright {
-    margin-right:-12px;
+    margin-right: -8px;
+}
+.order-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #fff;
+    background-color: #007bff;
+    border-radius: 50%;
+    margin: 2px;
+    vertical-align: middle;
+}
+.order-badge-clickable {
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.2s ease;
+}
+.order-badge-clickable:hover {
+    background-color: #0056b3;
+    transform: scale(1.1);
+}
+.loading-spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #007bff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }
 .t-selected {
     margin-top: 3px;
@@ -157,18 +212,19 @@ center:hover .add-id-for-col {
 } */
 </style>
 <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z" crossorigin="anonymous">
+<link rel="stylesheet" href="https://unpkg.com/primeicons/primeicons.css">
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
 <script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
 <script src="/js/js.js"></script>
 <div class="t9n">
 <div id="show" class="list" style="z-index: 1;">
-<a id="showanchor" onclick="if(json['list']){byId('queries').classList.remove('hidden');byId('show').classList.add('hidden')}else myApi('GET','object/22/?JSON','list')"><img class="icon8" title="<t9n>[RU]Список запросов[EN]Reports list</t9n>" src="https://img.icons8.com/ios/25/222222/list.png"></a>
+<a id="showanchor" onclick="if(json['list']){byId('queries').classList.remove('hidden');byId('show').classList.add('hidden')}else myApi('GET','object/22/?JSON','list')"><i class="pi pi-list icon8" title="<t9n>[RU]Список запросов[EN]Reports list</t9n>"></i></a>
 </div>
 <div id="queries" class="list list-open shadow p-3 hidden" onclick="event.stopPropagation?event.stopPropagation():(event.cancelBubble=true);">
 <p>
     <t9n>[RU]Выберите запрос или добавьте новый[EN]Pick the report or add a new one</t9n>
     <a id="closeList" onclick="byId('queries').classList.add('hidden');byId('show').classList.remove('hidden')">
-        &nbsp;&nbsp;&nbsp;&nbsp;<img class="icon8" title="<t9n>[RU]Скрыть список запросов[EN]Hide the reports list</t9n>" src="https://img.icons8.com/ios/25/222222/close-window.png">
+        &nbsp;&nbsp;&nbsp;&nbsp;<i class="pi pi-times icon8" title="<t9n>[RU]Скрыть список запросов[EN]Hide the reports list</t9n>"></i>
     </a>
 </p>
 <div>
@@ -381,7 +437,7 @@ center:hover .add-id-for-col {
             <li class="p-2"><a onclick="curEl.value='[YESTERDAY]';updateValue(curEl)">[YESTERDAY] – <t9n>[RU]вчерашний день[EN]yesterday</t9n></a></li>
             <li class="p-2"><a onclick="curEl.value='[TOMORROW]';updateValue(curEl)">[TOMORROW] – <t9n>[RU]завтрашний день.[EN]tomorrow date</t9n></a></li>
             <li class="p-2"><a onclick="curEl.value='[MONTH_AGO]';updateValue(curEl)">[MONTH_AGO] – <t9n>[RU]день месяц назад[EN]a day a month ago</t9n></a></li>
-            <li class="p-2"><a onclick="curEl.value='';updateValue(curEl)"><img class="icon8 p-0" src="https://img.icons8.com/ios/20/dd0000/delete-sign.png"/> <t9n>[RU]Очистить[EN]Clean</t9n></a></li>
+            <li class="p-2"><a onclick="curEl.value='';updateValue(curEl)"><i class="pi pi-times-circle icon8 p-0" style="color: #dd0000;"></i> <t9n>[RU]Очистить[EN]Clean</t9n></a></li>
         </ul>
 	</div>
     <div id="template58"><!--Alias-->
@@ -685,11 +741,11 @@ function myApi(m,u,b,vars,index){ // Параметры: метод, адрес,
                             t107='';
                         }
                         // Buttons under the column name
-                        h+='<nobr><img class="icon8 ileft" onclick="this.src=\'/i/ajax.gif\';d(\'up\','+id+')" src="https://img.icons8.com/ios/25/aaaaaa/chevron-left.png" title="'
-                                +t9n('[RU]Переместить колонку левее[EN]Move the column left')+'">'
-                            +'<img class="icon8" onclick="this.src=\'/i/ajax.gif\';d(\'set\','+id+',\'t107='+t107+'\')" src="https://img.icons8.com/ios/25/'+hcolor+'/hide.png" title="'+htitle+'">'
-                            +'<img class="icon8 iright" onclick="d(\'del\','+id+');colNames['+id+']=undefined" src="https://img.icons8.com/ios/25/aaaaaa/delete.png" title="'
-                                +t9n('[RU]Удалить колонку[EN]Delete the column')+'"><nobr></center></td>';
+                        h+='<nobr><i class="pi pi-chevron-left icon8 ileft" onclick="showLoading(this);d(\'up\','+id+')" title="'
+                                +t9n('[RU]Переместить колонку левее[EN]Move the column left')+'"></i>'
+                            +'<i class="pi '+(t107?'pi-eye-slash':'pi-eye')+' icon8" style="color:#'+hcolor+'" onclick="showLoading(this);d(\'set\','+id+',\'t107='+t107+'\')" title="'+htitle+'"></i>'
+                            +'<i class="pi pi-trash icon8 iright" onclick="d(\'del\','+id+');colNames['+id+']=undefined" title="'
+                                +t9n('[RU]Удалить колонку[EN]Delete the column')+'"></i><nobr></center></td>';
                         // Column control lines: Filter, Function, Totals, etc.
                         for(k in ctl){
                             c[k]+='<td style="border: none;" class="p-0" id="td'+ctl[k]+'_'+id+'">';
@@ -711,23 +767,23 @@ function myApi(m,u,b,vars,index){ // Параметры: метод, адрес,
                                 dir=getReq(id,ctl[k]);
                                 order=Math.abs(dir);
                                 if(dir=='')
-                                    control+='<img onclick="this.src=\'/i/ajax.gif\';setOrder('+id+',0,1)" title="'+t9n('[RU]Включить сортировку[EN]Set the order by this column')
-                                            +'" class="icon8" src="https://img.icons8.com/ios/25/aaaaaa/generic-sorting-2.png"/>';
+                                    control+='<i onclick="showLoading(this);setOrder('+id+',0,1)" title="'+t9n('[RU]Включить сортировку[EN]Set the order by this column')
+                                            +'" class="pi pi-sort-alt icon8 text-muted"></i>';
                                 else{
                                     if(order==1)
-                                        control+='<img title="'+t9n('[RU]В первую очередь сортировка по этой колонке[EN]First, the report is ordered by this column')
-                                                +'" class="icon8" src="https://img.icons8.com/ios/25/222222/'+order+'.png"/>';
+                                        control+='<span class="order-badge" title="'+t9n('[RU]В первую очередь сортировка по этой колонке[EN]First, the report is ordered by this column')
+                                                +'">'+order+'</span>';
                                     else
-                                        control+='<img onclick="this.src=\'/i/ajax.gif\';setOrder('+id+','+dir+','+(order-1)+')" title="'+t9n('[RU]Очередность сортировки. Кликните, чтобы повысить.[EN]Ordering sequence. Click to rise.')
-                                                +'" class="icon8" src="https://img.icons8.com/ios/25/222222/'+order+'.png"/>';
+                                        control+='<span class="order-badge order-badge-clickable" onclick="showLoading(this);setOrder('+id+','+dir+','+(order-1)+')" title="'+t9n('[RU]Очередность сортировки. Кликните, чтобы повысить.[EN]Ordering sequence. Click to rise.')
+                                                +'">'+order+'</span>';
                                     if(dir>0)
-                                        control+='<img title="'+t9n('[RU]Сортировка по возрастанию. Кликните, чтобы обратить[EN]Ascending order. Click to revert')
-                                                +'" onclick="this.src=\'/i/ajax.gif\';d(\'set\','+id+',\'t109='+(-dir)+'\')" class="icon8" src="https://img.icons8.com/ios/25/222222/generic-sorting-2.png"/>';
+                                        control+='<i title="'+t9n('[RU]Сортировка по возрастанию. Кликните, чтобы обратить[EN]Ascending order. Click to revert')
+                                                +'" onclick="showLoading(this);d(\'set\','+id+',\'t109='+(-dir)+'\')" class="pi pi-sort-amount-up icon8"></i>';
                                     else
-                                        control+='<img title="'+t9n('[RU]Сортировка по убыванию. Кликните, чтобы обратить[EN]Descending order. Click to revert')
-                                                +'" onclick="this.src=\'/i/ajax.gif\';d(\'set\','+id+',\'t109='+(-dir)+'\')" class="icon8" src="https://img.icons8.com/ios/25/222222/generic-sorting.png"/>';
-                                    control+='<img title="'+t9n('[RU]Удалить сортировку[EN]Remove the ordering')
-                                            +'" onclick="this.src=\'/i/ajax.gif\';setOrder('+id+',0,\'\')" class="icon8" src="https://img.icons8.com/ios/25/222222/delete-sign.png"/>';
+                                        control+='<i title="'+t9n('[RU]Сортировка по убыванию. Кликните, чтобы обратить[EN]Descending order. Click to revert')
+                                                +'" onclick="showLoading(this);d(\'set\','+id+',\'t109='+(-dir)+'\')" class="pi pi-sort-amount-down icon8"></i>';
+                                    control+='<i title="'+t9n('[RU]Удалить сортировку[EN]Remove the ordering')
+                                            +'" onclick="showLoading(this);setOrder('+id+',0,\'\')" class="pi pi-times-circle icon8 text-danger"></i>';
                                 }
                             }
                             else
@@ -875,6 +931,13 @@ function setReq(id,t,v){ // Save the changed value in the local array
 function d(d,i,v){ // Do the DML command and re-draw the report
     v=v||'';
     myApi('POST','_m_'+d+'/'+i+'?JSON&'+v,'d');
+}
+function showLoading(el){ // Show loading spinner on icon click
+    if(el.tagName==='I'){
+        el.className='loading-spinner';
+    } else if(el.tagName==='SPAN'){
+        el.innerHTML='<span class="loading-spinner"></span>';
+    }
 }
 function drawCol(id, drawIdButton){
     if (drawIdButton) {
