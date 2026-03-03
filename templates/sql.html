@@ -1009,13 +1009,14 @@ function addTextareaListeners() {
         $(inputSelector).addClass('active-input');
         if ($('textarea[id=' + inputSelector.attr('id') + '_text]').length > 0) return;
 
-        // Getting the number of active inputs before the current input to find out a position
+        // Getting the number of active inputs before the current input to find out a position for DOM insertion
         let index = $(inputSelector).prevAll().find('.active-input').length +
                     $(inputSelector).parent().prevAll().find('.active-input').length +
                     $(inputSelector).parent().parent().prevAll().find('.active-input').length;
 
-        // setting color style based on position (index) rather than random
-        const positionColor = COLORS[index % COLORS.length] + '66';
+        // Color is based on the count of existing textarea-containers to ensure unique colors
+        const colorIndex = $('.textarea-container').length;
+        const positionColor = COLORS[colorIndex % COLORS.length] + '66';
         inputSelector[0].style.backgroundColor = "#" + positionColor;
 
         const textareaBg = '#' + positionColor;
