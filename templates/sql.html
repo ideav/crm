@@ -1008,12 +1008,17 @@ function addTextareaListeners() {
         const inputSelector = $($(this).next('input'));
         $(inputSelector).addClass('active-input');
         if ($('textarea[id=' + inputSelector.attr('id') + '_text]').length > 0) return;
-        
-        // setting color style
-        const random_color = COLORS[Math.floor(Math.random() * COLORS.length)] + '66';
-        inputSelector[0].style.backgroundColor = "#" + random_color;
 
-        const textareaBg = '#' + random_color;
+        // Getting the number of active inputs before the current input to find out a position
+        let index = $(inputSelector).prevAll().find('.active-input').length +
+                    $(inputSelector).parent().prevAll().find('.active-input').length +
+                    $(inputSelector).parent().parent().prevAll().find('.active-input').length;
+
+        // setting color style based on position (index) rather than random
+        const positionColor = COLORS[index % COLORS.length] + '66';
+        inputSelector[0].style.backgroundColor = "#" + positionColor;
+
+        const textareaBg = '#' + positionColor;
         const newTextareaHtml = `
             <div class="textarea-container">
                 <textarea rows="3" style="${'width:100%;background-color:' + textareaBg};" name="textarea_formula" id="${inputSelector.attr('id')}_text"></textarea>
@@ -1034,12 +1039,7 @@ function addTextareaListeners() {
                 </div>
             </div>
         `;
-        // Insert new textarea, order RTL,TTB
-        // Getting the number of active inputs before the current input to find out a position 
-        let index = $(inputSelector).prevAll().find('.active-input').length +
-                    $(inputSelector).parent().prevAll().find('.active-input').length +
-                    $(inputSelector).parent().parent().prevAll().find('.active-input').length;
-
+        // Insert new textarea, order RTL,TTB (index was already calculated above for color assignment)
         if (!$('.textarea-container').length) {
             inputSelector.closest('#ShowReport').before(newTextareaHtml);
         } else {
