@@ -713,11 +713,13 @@ class TablesController {
     async createNewTable() {
         const nameInput = document.getElementById('new-table-name');
         const typeSelect = document.getElementById('new-table-type');
+        const uniqueCheckbox = document.getElementById('new-table-unique');
 
         if (!nameInput || !typeSelect) return;
 
         const name = nameInput.value.trim();
         const type = typeSelect.value;
+        const unique = uniqueCheckbox && uniqueCheckbox.checked;
 
         if (!name) {
             alert('Введите название таблицы');
@@ -731,6 +733,9 @@ class TablesController {
             vars.append('_xsrf', xsrf);
             vars.append('t', type);    // Base type ID
             vars.append('val', name);  // Table name
+            if (unique) {
+                vars.append('unique', '1');  // Unique values flag
+            }
 
             const response = await fetch('/' + db + '/_d_new?JSON=1', {
                 method: 'POST',

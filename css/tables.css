@@ -543,6 +543,27 @@
     color: var(--button-primary);
 }
 
+/* Checkbox form group */
+.form-group-checkbox {
+    margin-bottom: 1rem;
+}
+
+.form-group-checkbox .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-weight: normal;
+    margin-bottom: 0;
+}
+
+.form-group-checkbox input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: var(--button-primary);
+}
+
 /* Search highlight */
 .table-card.search-match {
     box-shadow: 0 0 0 2px var(--button-primary);
