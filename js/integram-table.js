@@ -255,6 +255,13 @@ class IntegramTable {
                 return '';
             }
 
+            const instanceName = this.options.instanceName;
+
+            // Show create record button next to title when data source is a table (issue #693)
+            const createBtnHtml = this.options.dataSource === 'table'
+                ? `<button class="column-add-btn title-create-btn" onclick="window.${ instanceName }.openTitleCreateForm()" title="Создать запись"><i class="pi pi-plus"></i></button>`
+                : '';
+
             // Extract database name from URL path for building links
             const pathParts = window.location.pathname.split('/');
             const dbName = pathParts.length >= 2 ? pathParts[1] : '';
@@ -271,11 +278,43 @@ class IntegramTable {
                 const parentTypeLink = `/${ dbName }/table/${ parentTypeId }`;
                 // Parent record link is now a clickable span that opens modal edit form (issue #575)
 
-                return `<div class="integram-table-title"><a href="${ parentTypeLink }" class="integram-title-link">${ parentTypeName }</a> <span class="integram-title-link integram-parent-record-link" data-parent-record-id="${ parentRecordId }" data-parent-type-id="${ parentTypeId }" style="cursor: pointer;">${ parentVal }</span>${ currentTitle ? ': ' + currentTitle : '' }</div>`;
+                return `<div class="integram-table-title-area"><div class="integram-table-title"><a href="${ parentTypeLink }" class="integram-title-link">${ parentTypeName }</a> <span class="integram-title-link integram-parent-record-link" data-parent-record-id="${ parentRecordId }" data-parent-type-id="${ parentTypeId }" style="cursor: pointer;">${ parentVal }</span>${ currentTitle ? ': ' + currentTitle : '' }</div>${ createBtnHtml }</div>`;
             }
 
             // No parent info, just show the title
-            return `<div class="integram-table-title">${ this.escapeHtml(this.options.title) }</div>`;
+            return `<div class="integram-table-title-area"><div class="integram-table-title">${ this.escapeHtml(this.options.title) }</div>${ createBtnHtml }</div>`;
+        }
+
+        /**
+         * Open create record form from the title area (issue #693)
+         * Used when dataSource='table' to create a new record in the main table type
+         */
+        async openTitleCreateForm() {
+            try {
+                const typeId = this.options.tableTypeId || this.objectTableId;
+                if (!typeId) {
+                    this.showToast('Ошибка: не найден тип таблицы', 'error');
+                    return;
+                }
+
+                if (!this.metadataCache[typeId]) {
+                    this.metadataCache[typeId] = await this.fetchMetadata(typeId);
+                }
+
+                const metadata = this.metadataCache[typeId];
+
+                // Pre-fill reference fields from URL @id filters (issue #553)
+                const prefillReqs = this.buildRefIdPrefillFromUrlFilters(metadata);
+                // Issue #616: Use F_U from URL as parent when F_U > 1
+                const parentForCreate = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
+                const createRecordData = prefillReqs ? { obj: { val: '', parent: parentForCreate }, reqs: prefillReqs } : null;
+
+                this.renderEditFormModal(metadata, createRecordData, true, typeId, null);
+
+            } catch (error) {
+                console.error('Error opening create form from title:', error);
+                this.showToast(`Ошибка: ${ error.message }`, 'error');
+            }
         }
 
         async loadData(append = false) {

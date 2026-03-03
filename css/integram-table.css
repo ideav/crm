@@ -71,11 +71,30 @@
     padding: 0 4px;
 }
 
+/* Title area wrapper with create button (issue #693) */
+.integram-table-title-area {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .integram-table-title {
     font-size: 20px;
     font-weight: 500;
     color: var(--md-text-primary);
     letter-spacing: 0.15px;
+}
+
+/* Create button displayed inline next to table title (issue #693) */
+.title-create-btn {
+    position: static !important;
+    transform: none !important;
+    display: flex !important;
+    flex-shrink: 0;
+}
+
+.title-create-btn:active {
+    transform: scale(0.95) !important;
 }
 
 /* Parent info links in title (issue #571) */
