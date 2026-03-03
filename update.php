@@ -12,6 +12,9 @@
  * - Only copies files that are newer than the local version
  * - Preserves original filenames
  * - Updates modification time on copy
+ * - GitHub token support for higher API rate limits
+ * - cURL fallback when allow_url_fopen is disabled
+ * - Detailed error reporting for API failures
  */
 
 // Error reporting for debugging (can be disabled in production)
@@ -19,11 +22,108 @@ error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
 /**
+ * Make an HTTP GET request using cURL or file_get_contents
+ *
+ * Uses cURL if available (preferred, works even when allow_url_fopen is disabled).
+ * Falls back to file_get_contents if cURL is not available.
+ *
+ * @param string $url URL to fetch
+ * @param array $headers HTTP headers to send
+ * @param int $timeout Request timeout in seconds
+ * @return array ['body' => string|false, 'http_code' => int|null, 'error' => string|null]
+ */
+function httpGet($url, $headers = [], $timeout = 30) {
+    if (function_exists('curl_init')) {
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        curl_setopt($ch, CURLOPT_USERAGENT, 'PHP-GitHub-Sync-Script');
+
+        $body = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($body === false) {
+            return ['body' => false, 'http_code' => null, 'error' => "cURL error: {$error}"];
+        }
+        return ['body' => $body, 'http_code' => $httpCode, 'error' => null];
+    }
+
+    // Fallback to file_get_contents
+    if (!ini_get('allow_url_fopen')) {
+        return [
+            'body' => false,
+            'http_code' => null,
+            'error' => 'Neither cURL extension nor allow_url_fopen is available. Please enable one of them in PHP configuration.'
+        ];
+    }
+
+    $contextHeaders = [];
+    foreach ($headers as $header) {
+        $contextHeaders[] = $header;
+    }
+
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'GET',
+            'header' => $contextHeaders,
+            'timeout' => $timeout,
+            'ignore_errors' => true
+        ]
+    ]);
+
+    $body = @file_get_contents($url, false, $context);
+    $httpCode = null;
+
+    if (isset($http_response_header)) {
+        foreach ($http_response_header as $headerLine) {
+            if (preg_match('#^HTTP/\S+\s+(\d+)#', $headerLine, $m)) {
+                $httpCode = (int) $m[1];
+            }
+        }
+    }
+
+    if ($body === false) {
+        $error = error_get_last();
+        return [
+            'body' => false,
+            'http_code' => null,
+            'error' => isset($error['message']) ? $error['message'] : 'file_get_contents failed'
+        ];
+    }
+
+    return ['body' => $body, 'http_code' => $httpCode, 'error' => null];
+}
+
+/**
+ * Build GitHub API request headers
+ *
+ * @param string $token Optional GitHub personal access token
+ * @return array HTTP headers
+ */
+function buildGitHubHeaders($token = '') {
+    $headers = [
+        'User-Agent: PHP-GitHub-Sync-Script',
+        'Accept: application/vnd.github.v3+json'
+    ];
+    if (!empty($token)) {
+        $headers[] = "Authorization: Bearer {$token}";
+    }
+    return $headers;
+}
+
+/**
  * Parse the configuration file
  *
  * Configuration format:
  * repository: https://github.com/owner/repo/
  * branch: main
+ * token: your-github-personal-access-token (optional)
  * source_path : target_path
  *
  * @param string $configPath Path to the configuration file
@@ -42,6 +142,7 @@ function parseConfig($configPath) {
     $config = [
         'repository' => '',
         'branch' => 'main',
+        'token' => '',
         'mappings' => []
     ];
 
@@ -62,6 +163,12 @@ function parseConfig($configPath) {
         // Parse branch setting
         if (preg_match('/^branch\s*:\s*(.+)$/i', $line, $matches)) {
             $config['branch'] = trim($matches[1]);
+            continue;
+        }
+
+        // Parse token setting
+        if (preg_match('/^token\s*:\s*(.+)$/i', $line, $matches)) {
+            $config['token'] = trim($matches[1]);
             continue;
         }
 
@@ -129,9 +236,10 @@ function getGitHubApiUrl($repository, $branch, $dirPath) {
  * @param string $repository Repository URL
  * @param string $branch Branch name
  * @param string $filePath File path in repository
+ * @param string $token GitHub personal access token (optional)
  * @return int|false Unix timestamp or false on error
  */
-function getGitHubFileModTime($repository, $branch, $filePath) {
+function getGitHubFileModTime($repository, $branch, $filePath, $token = '') {
     $repository = rtrim($repository, '/');
     if (preg_match('#github\.com/([^/]+)/([^/]+)#', $repository, $matches)) {
         $owner = $matches[1];
@@ -140,24 +248,17 @@ function getGitHubFileModTime($repository, $branch, $filePath) {
         // Use commits API to get the last commit date for this file
         $apiUrl = "https://api.github.com/repos/{$owner}/{$repo}/commits?path={$filePath}&sha={$branch}&per_page=1";
 
-        $context = stream_context_create([
-            'http' => [
-                'method' => 'GET',
-                'header' => [
-                    'User-Agent: PHP-GitHub-Sync-Script',
-                    'Accept: application/vnd.github.v3+json'
-                ],
-                'timeout' => 30
-            ]
-        ]);
-
-        $response = @file_get_contents($apiUrl, false, $context);
-        if ($response === false) {
+        $result = httpGet($apiUrl, buildGitHubHeaders($token), 30);
+        if ($result['body'] === false) {
             return false;
         }
 
-        $commits = json_decode($response, true);
-        if (!empty($commits) && isset($commits[0]['commit']['committer']['date'])) {
+        if ($result['http_code'] !== null && $result['http_code'] !== 200) {
+            return false;
+        }
+
+        $commits = json_decode($result['body'], true);
+        if (!empty($commits) && is_array($commits) && isset($commits[0]['commit']['committer']['date'])) {
             return strtotime($commits[0]['commit']['committer']['date']);
         }
     }
@@ -170,38 +271,59 @@ function getGitHubFileModTime($repository, $branch, $filePath) {
  * @param string $repository Repository URL
  * @param string $branch Branch name
  * @param string $dirPath Directory path
- * @return array List of file names
+ * @param string $token GitHub personal access token (optional)
+ * @return array|string List of file names on success, error message string on failure
  */
-function listGitHubDirectory($repository, $branch, $dirPath) {
+function listGitHubDirectory($repository, $branch, $dirPath, $token = '') {
     $apiUrl = getGitHubApiUrl($repository, $branch, $dirPath);
     if (empty($apiUrl)) {
-        return [];
+        return 'Invalid repository URL';
     }
 
-    $context = stream_context_create([
-        'http' => [
-            'method' => 'GET',
-            'header' => [
-                'User-Agent: PHP-GitHub-Sync-Script',
-                'Accept: application/vnd.github.v3+json'
-            ],
-            'timeout' => 30
-        ]
-    ]);
+    $result = httpGet($apiUrl, buildGitHubHeaders($token), 30);
 
-    $response = @file_get_contents($apiUrl, false, $context);
-    if ($response === false) {
-        return [];
+    if ($result['body'] === false) {
+        $errorDetail = $result['error'] ?? 'Unknown error';
+        return "HTTP request failed: {$errorDetail}";
     }
 
-    $items = json_decode($response, true);
+    // Check for non-200 HTTP status codes
+    if ($result['http_code'] !== null && $result['http_code'] !== 200) {
+        // Try to extract GitHub API error message
+        $apiResponse = json_decode($result['body'], true);
+        $apiMessage = isset($apiResponse['message']) ? $apiResponse['message'] : '';
+
+        if ($result['http_code'] === 403) {
+            $rateLimitInfo = '';
+            if (strpos($apiMessage, 'rate limit') !== false) {
+                $rateLimitInfo = ' API rate limit exceeded. Add a GitHub token to the config (token: YOUR_TOKEN) for higher limits.';
+            }
+            return "GitHub API returned 403 Forbidden.{$rateLimitInfo}" . ($apiMessage ? " API message: {$apiMessage}" : '');
+        } elseif ($result['http_code'] === 404) {
+            return "Directory not found in repository: {$dirPath}";
+        } else {
+            return "GitHub API returned HTTP {$result['http_code']}" . ($apiMessage ? ": {$apiMessage}" : '');
+        }
+    }
+
+    $items = json_decode($result['body'], true);
     if (!is_array($items)) {
-        return [];
+        return "Invalid JSON response from GitHub API";
+    }
+
+    // GitHub API returns a JSON object (not array) when there's an error
+    // Check for the 'message' key which indicates an API error response
+    if (isset($items['message'])) {
+        $message = $items['message'];
+        if (strpos($message, 'rate limit') !== false) {
+            return "GitHub API rate limit exceeded. Add a GitHub token to the config (token: YOUR_TOKEN) for higher limits. Message: {$message}";
+        }
+        return "GitHub API error: {$message}";
     }
 
     $files = [];
     foreach ($items as $item) {
-        if ($item['type'] === 'file') {
+        if (is_array($item) && isset($item['type']) && $item['type'] === 'file') {
             $files[] = $item['name'];
         }
     }
@@ -213,18 +335,22 @@ function listGitHubDirectory($repository, $branch, $dirPath) {
  * Download a file from GitHub
  *
  * @param string $url Raw GitHub URL
+ * @param string $token GitHub personal access token (optional)
  * @return string|false File content or false on error
  */
-function downloadFile($url) {
-    $context = stream_context_create([
-        'http' => [
-            'method' => 'GET',
-            'header' => 'User-Agent: PHP-GitHub-Sync-Script',
-            'timeout' => 60
-        ]
-    ]);
-
-    return @file_get_contents($url, false, $context);
+function downloadFile($url, $token = '') {
+    $headers = ['User-Agent: PHP-GitHub-Sync-Script'];
+    if (!empty($token)) {
+        $headers[] = "Authorization: Bearer {$token}";
+    }
+    $result = httpGet($url, $headers, 60);
+    if ($result['body'] === false) {
+        return false;
+    }
+    if ($result['http_code'] !== null && $result['http_code'] !== 200) {
+        return false;
+    }
+    return $result['body'];
 }
 
 /**
@@ -255,6 +381,7 @@ function syncFiles($config) {
 
     $repository = $config['repository'];
     $branch = $config['branch'];
+    $token = $config['token'] ?? '';
 
     foreach ($config['mappings'] as $mapping) {
         $source = $mapping['source'];
@@ -264,10 +391,16 @@ function syncFiles($config) {
         if (substr($source, -2) === '/*') {
             // List directory and process all files
             $dirPath = substr($source, 0, -2);
-            $files = listGitHubDirectory($repository, $branch, $dirPath);
+            $files = listGitHubDirectory($repository, $branch, $dirPath, $token);
+
+            if (is_string($files)) {
+                // Error message returned
+                $results['errors'][] = "Could not list directory: {$dirPath}. Reason: {$files}";
+                continue;
+            }
 
             if (empty($files)) {
-                $results['errors'][] = "Could not list directory: {$dirPath}";
+                $results['errors'][] = "Could not list directory: {$dirPath}. Directory is empty or does not exist.";
                 continue;
             }
 
@@ -276,7 +409,8 @@ function syncFiles($config) {
                     $repository,
                     $branch,
                     "{$dirPath}/{$fileName}",
-                    rtrim($target, '/') . '/' . $fileName
+                    rtrim($target, '/') . '/' . $fileName,
+                    $token
                 );
 
                 if ($result['status'] === 'success') {
@@ -292,7 +426,7 @@ function syncFiles($config) {
             $fileName = basename($source);
             $targetPath = rtrim($target, '/') . '/' . $fileName;
 
-            $result = syncSingleFile($repository, $branch, $source, $targetPath);
+            $result = syncSingleFile($repository, $branch, $source, $targetPath, $token);
 
             if ($result['status'] === 'success') {
                 $results['success'][] = $result['message'];
@@ -314,11 +448,12 @@ function syncFiles($config) {
  * @param string $branch Branch name
  * @param string $sourcePath Source path in repository
  * @param string $targetPath Local target path
+ * @param string $token GitHub personal access token (optional)
  * @return array Result with status and message
  */
-function syncSingleFile($repository, $branch, $sourcePath, $targetPath) {
+function syncSingleFile($repository, $branch, $sourcePath, $targetPath, $token = '') {
     // Get GitHub file modification time
-    $remoteModTime = getGitHubFileModTime($repository, $branch, $sourcePath);
+    $remoteModTime = getGitHubFileModTime($repository, $branch, $sourcePath, $token);
 
     // Check local file modification time
     $localModTime = 0;
@@ -336,7 +471,7 @@ function syncSingleFile($repository, $branch, $sourcePath, $targetPath) {
 
     // Download file
     $rawUrl = getGitHubRawUrl($repository, $branch, $sourcePath);
-    $content = downloadFile($rawUrl);
+    $content = downloadFile($rawUrl, $token);
 
     if ($content === false) {
         return [
