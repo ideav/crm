@@ -346,6 +346,11 @@
     flex: 1;
 }
 
+/* Folder menu items (no href/link) - displayed in uppercase to distinguish from pages */
+.app-menu-item-folder .menu-text {
+    text-transform: uppercase;
+}
+
 /* Parent menu items with children */
 .app-menu-item-parent {
     position: relative;

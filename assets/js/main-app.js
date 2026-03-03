@@ -242,6 +242,11 @@ class MainAppController {
             menuItem.setAttribute('data-href', href);
         }
 
+        // Add folder class for items without href (no link) - displayed in uppercase
+        if (!href) {
+            menuItem.classList.add('app-menu-item-folder');
+        }
+
         // Icon - decode HTML entities that may have been escaped by server template
         const iconSpan = document.createElement('span');
         iconSpan.className = 'menu-icon';
