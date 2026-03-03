@@ -257,8 +257,8 @@ class IntegramTable {
 
             const instanceName = this.options.instanceName;
 
-            // Show create record button next to title when data source is a table (issue #693)
-            const createBtnHtml = this.options.dataSource === 'table'
+            // Show create record button next to title when data source is a table (issue #693, #697)
+            const createBtnHtml = this.getDataSourceType() === 'table'
                 ? `<button class="column-add-btn title-create-btn" onclick="window.${ instanceName }.openTitleCreateForm()" title="Создать запись"><i class="pi pi-plus"></i></button>`
                 : '';
 
@@ -328,12 +328,12 @@ class IntegramTable {
                 let json;
                 let newRows = [];
 
-                if (this.options.dataSource === 'table') {
-                    // Load data from table format (object/{typeId}/?JSON_OBJ&F_U={parentId})
+                if (this.getDataSourceType() === 'table') {
+                    // Load data from table format (object/{typeId}/?JSON_OBJ&F_U={parentId}) (issue #697)
                     json = await this.loadDataFromTable(append);
                     newRows = json.rows || [];
                 } else {
-                    // Load data from report format (default behavior)
+                    // Load data from report format (default behavior) (issue #697)
                     json = await this.loadDataFromReport(append);
                     newRows = json.rows || [];
                     // Auto-set table title from report header if not explicitly provided (issue #537)
@@ -5887,9 +5887,9 @@ class IntegramTable {
          * @returns {boolean} - True if the button should be shown
          */
         shouldShowGroupedCellAddButton() {
-            // Check if this is object/table format
+            // Check if this is object/table format (issue #697)
             const isObjectFormat = (this.rawObjectData && this.rawObjectData.length > 0 && this.objectTableId)
-                || this.options.dataSource === 'table';
+                || this.getDataSourceType() === 'table';
 
             return isObjectFormat;
         }
@@ -10057,8 +10057,8 @@ class IntegramTable {
                 let json;
                 const maxLimit = 1000000; // Request up to 1 million records in single request
 
-                if (this.options.dataSource === 'table' || (this.objectTableId && !this.options.tableTypeId)) {
-                    // Load data from table format
+                if (this.getDataSourceType() === 'table' || (this.objectTableId && !this.options.tableTypeId)) {
+                    // Load data from table format (issue #697)
                     // Use objectTableId if tableTypeId is not explicitly set (auto-detected JSON_OBJ format)
                     const savedTableTypeId = this.options.tableTypeId;
                     if (!this.options.tableTypeId && this.objectTableId) {
