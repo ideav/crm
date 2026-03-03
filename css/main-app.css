@@ -417,7 +417,7 @@
 /* Main Content */
 .app-content {
     flex: 1;
-    padding: 1.5rem 2rem;
+    padding: 12px;
     background-color: var(--bg-primary);
     overflow-y: auto;
     min-height: calc(100vh - 70px);
