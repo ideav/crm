@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Тест: Дефект при редактировании выпадающего списка после изменения порядка колонок</title>
-    <link rel="stylesheet" href="../assets/css/integram-table.css">
+    <link rel="stylesheet" href="../css/integram-table.css">
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -67,7 +67,7 @@
 
     <div id="test-table"></div>
 
-    <script src="../assets/js/integram-table.js"></script>
+    <script src="../js/integram-table.js"></script>
     <script>
         // This test demonstrates the fix for issue #207
         // The bug occurred when:
@@ -81,7 +81,7 @@
         console.log('Scenario: Column reordering + dropdown editing + cancel without selection');
 
         // Note: This is a manual test file that demonstrates the issue
-        // The actual fix is in assets/js/integram-table.js in the cancelInlineEdit() method
+        // The actual fix is in js/integram-table.js in the cancelInlineEdit() method
         //
         // Before fix:
         //   const column = this.columns[colIndex]; // Wrong! Uses visual index

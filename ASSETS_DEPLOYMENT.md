@@ -13,7 +13,7 @@ The `templates/info.html` has been refactored according to BASIC_RULES.md to fol
 
 ### CSS File
 **Location:** `/css/info.css`
-**Source:** See `assets/css/info.css` in this repository
+**Source:** See `css/info.css` in this repository
 
 This file contains all styles specific to the info.html workspace:
 - Quick links badges styling
@@ -23,7 +23,7 @@ This file contains all styles specific to the info.html workspace:
 
 ### JavaScript File
 **Location:** `/js/info.js`
-**Source:** See `assets/js/info.js` in this repository
+**Source:** See `js/info.js` in this repository
 
 This file contains:
 - Quick links loader (`loadQuickLinks()`)
@@ -34,12 +34,12 @@ This file contains:
 
 1. **Copy CSS file:**
    ```bash
-   cp assets/css/info.css /path/to/integram/public/css/info.css
+   cp css/info.css /path/to/integram/public/css/info.css
    ```
 
 2. **Copy JavaScript file:**
    ```bash
-   cp assets/js/info.js /path/to/integram/public/js/info.js
+   cp js/info.js /path/to/integram/public/js/info.js
    ```
 
 3. **The template file** `templates/info.html` references these assets with versioning:
