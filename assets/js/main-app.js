@@ -65,6 +65,7 @@ class MainAppController {
         this.highlightActiveMenuItem();
         this.initUserAvatar();
         this.setupEditMode();
+        this.setupMenuSearch();
     }
 
     setupSidebarToggle() {
@@ -347,6 +348,158 @@ class MainAppController {
                 item.setAttribute('draggable', this.editMode ? 'true' : 'false');
             });
         });
+    }
+
+    setupMenuSearch() {
+        const searchInput = document.getElementById('menu-search');
+        const clearBtn = document.getElementById('menu-search-clear');
+        const menuContainer = document.getElementById('app-menu');
+        if (!searchInput || !menuContainer) return;
+
+        let debounceTimer = null;
+
+        searchInput.addEventListener('input', () => {
+            const query = searchInput.value.trim().toLowerCase();
+
+            // Show/hide clear button
+            if (clearBtn) {
+                clearBtn.style.display = query ? '' : 'none';
+            }
+
+            // Debounce search for performance
+            if (debounceTimer) {
+                clearTimeout(debounceTimer);
+            }
+            debounceTimer = setTimeout(() => {
+                this.performMenuSearch(query);
+            }, 150);
+        });
+
+        // Clear search
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                searchInput.value = '';
+                clearBtn.style.display = 'none';
+                this.performMenuSearch('');
+                searchInput.focus();
+            });
+        }
+
+        // Clear search on Escape key
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                searchInput.value = '';
+                if (clearBtn) clearBtn.style.display = 'none';
+                this.performMenuSearch('');
+                searchInput.blur();
+            }
+        });
+    }
+
+    performMenuSearch(query) {
+        const menuContainer = document.getElementById('app-menu');
+        if (!menuContainer) return;
+
+        // Remove existing no-results message
+        const existingNoResults = menuContainer.querySelector('.menu-no-results');
+        if (existingNoResults) {
+            existingNoResults.remove();
+        }
+
+        // Get all menu items and submenus
+        const allMenuItems = menuContainer.querySelectorAll('.app-menu-item');
+        const allSubmenus = menuContainer.querySelectorAll('.app-submenu');
+
+        // If query is empty, reset all items to default state
+        if (!query) {
+            allMenuItems.forEach(item => {
+                item.classList.remove('search-hidden', 'search-match', 'search-parent-match');
+            });
+            allSubmenus.forEach(submenu => {
+                submenu.classList.remove('search-hidden', 'search-has-matches');
+            });
+            // Re-apply active menu highlighting
+            this.highlightActiveMenuItem();
+            return;
+        }
+
+        // First, mark all items as hidden and clear previous matches
+        allMenuItems.forEach(item => {
+            item.classList.add('search-hidden');
+            item.classList.remove('search-match', 'search-parent-match');
+        });
+        allSubmenus.forEach(submenu => {
+            submenu.classList.add('search-hidden');
+            submenu.classList.remove('search-has-matches');
+        });
+
+        // Find matching items
+        const matchingIds = new Set();
+        allMenuItems.forEach(item => {
+            const menuId = item.getAttribute('data-menu-id');
+            const textSpan = item.querySelector('.menu-text');
+            const itemText = textSpan ? textSpan.textContent.toLowerCase() : '';
+
+            if (itemText.includes(query)) {
+                matchingIds.add(menuId);
+                item.classList.remove('search-hidden');
+                item.classList.add('search-match');
+            }
+        });
+
+        // For each matching item, ensure all parent items are visible
+        matchingIds.forEach(menuId => {
+            this.showParentMenuItems(menuId);
+        });
+
+        // Expand submenus that contain matches
+        allSubmenus.forEach(submenu => {
+            const hasVisibleChildren = submenu.querySelector('.app-menu-item:not(.search-hidden)');
+            if (hasVisibleChildren) {
+                submenu.classList.remove('search-hidden');
+                submenu.classList.add('search-has-matches', 'expanded');
+                // Also expand parent item
+                const parentItem = submenu.previousElementSibling;
+                if (parentItem && parentItem.classList.contains('app-menu-item-parent')) {
+                    parentItem.classList.add('expanded');
+                }
+            }
+        });
+
+        // Show "no results" message if no matches found
+        const visibleItems = menuContainer.querySelectorAll('.app-menu-item:not(.search-hidden)');
+        if (visibleItems.length === 0) {
+            const noResults = document.createElement('div');
+            noResults.className = 'menu-no-results';
+            noResults.textContent = 'Ничего не найдено';
+            menuContainer.appendChild(noResults);
+        }
+    }
+
+    showParentMenuItems(menuId) {
+        const menuItem = document.querySelector(`.app-menu-item[data-menu-id="${menuId}"]`);
+        if (!menuItem) return;
+
+        let parentId = menuItem.getAttribute('data-menu-up');
+        while (parentId) {
+            const parentItem = document.querySelector(`.app-menu-item[data-menu-id="${parentId}"]`);
+            if (!parentItem) break;
+
+            // Show parent item
+            parentItem.classList.remove('search-hidden');
+            parentItem.classList.add('search-parent-match');
+
+            // Show submenu containing this item
+            const submenu = parentItem.nextElementSibling;
+            if (submenu && submenu.classList.contains('app-submenu')) {
+                submenu.classList.remove('search-hidden');
+                submenu.classList.add('search-has-matches', 'expanded');
+                parentItem.classList.add('expanded');
+            }
+
+            // Move to next parent
+            parentId = parentItem.getAttribute('data-menu-up');
+        }
     }
 
     setupDragDropHandlers(menuItem) {
