@@ -23,6 +23,7 @@
     <!-- Navigation Bar -->
     <nav class="navbar">
         <div class="navbar-left">
+            <button id="mobile-sidebar-toggle" class="mobile-sidebar-toggle" type="button" aria-label="Открыть меню" title="Открыть меню"><i class="pi pi-bars"></i></button>
             <a href="/{_global_.z}/" class="navbar-brand">
                 <img src="/images/logo.png" alt="Logo" class="logo">
                 <span class="brand-name">{_global_.z}</span>
@@ -57,6 +58,9 @@
             </div>
         </div>
     </nav>
+
+    <!-- Mobile sidebar backdrop overlay -->
+    <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
 
     <!-- Main Application Layout -->
     <div class="app-layout">
