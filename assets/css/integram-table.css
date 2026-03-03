@@ -148,6 +148,54 @@
     box-shadow: none !important;
 }
 
+/* Standalone btn-link styles (issue #660) - works without Bootstrap */
+.btn-link {
+    background-color: transparent;
+    border: none;
+    padding: 0;
+    font-size: inherit;
+    line-height: inherit;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.btn-link:hover {
+    text-decoration: none;
+    background-color: var(--md-hover);
+}
+
+.btn-link:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+/* Standalone text-dark style (issue #660) - works without Bootstrap */
+.text-dark {
+    color: var(--md-text-primary) !important;
+}
+
+/* Combined btn-link text-dark for table controls (issue #660) */
+.integram-table-controls .btn-link.text-dark {
+    color: var(--md-text-primary);
+    background-color: transparent;
+    border: none;
+    padding: 8px 8px;
+    border-radius: 4px;
+    transition: var(--md-transition);
+    font-weight: 500;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+.integram-table-controls .btn-link.text-dark:hover {
+    background-color: var(--md-hover);
+    text-decoration: none;
+}
+
+.integram-table-controls .btn-link.text-dark:active {
+    background-color: rgba(25, 118, 210, 0.12);
+}
+
 .integram-table th {
     background-color: #f5f5f5;
     padding: 10px;
