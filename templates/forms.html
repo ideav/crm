@@ -147,6 +147,7 @@
     flex: 1;
     max-width: 100%;
     position: relative;
+    overflow: hidden;
 }
 
 .panel-card.editing {
@@ -176,6 +177,7 @@
 
 .panel-content {
     min-height: 200px;
+    overflow-x: auto;
 }
 
 .panel-meta {
@@ -1476,9 +1478,9 @@ function renderReportTable(panelId, reportId, filter, config, container) {
 
         let html = '';
 
-        // Display report header if present
+        // Update panel title with report header (source name) instead of displaying it inside
         if (json.header) {
-            html += '<div class="report-header">' + escapeHtml(json.header) + '</div>';
+            updatePanelTitle(panelId, json.header);
         }
 
         // In edit mode, show column configuration button
@@ -1616,9 +1618,9 @@ function renderTableAsReport(panelId, tableId, filter, config, container) {
 
             let html = '';
 
-            // Display table name as header
+            // Update panel title with table name (source name) instead of displaying it inside
             if (metadata.val) {
-                html += '<div class="report-header">' + escapeHtml(getDisplayValue(metadata.val)) + '</div>';
+                updatePanelTitle(panelId, getDisplayValue(metadata.val));
             }
 
             // In edit mode, show column configuration button
@@ -2055,8 +2057,13 @@ function parseReferenceValue(value) {
 // ============================================================
 // Get Display Value for Reference Field
 // Shows only the name part for reference fields (id:name -> name)
+// Returns empty string for null, undefined, or empty values
 // ============================================================
 function getDisplayValue(value) {
+    // Handle null, undefined, and empty values - return empty string
+    if (value === null || value === undefined || value === '') {
+        return '';
+    }
     const ref = parseReferenceValue(value);
     return ref ? ref.name : value;
 }
@@ -2079,6 +2086,19 @@ function getMetadata(tableId, callback) {
         }
         callback(json);
     });
+}
+
+// ============================================================
+// Update Panel Title with Data Source Name
+// ============================================================
+function updatePanelTitle(panelId, sourceName) {
+    const panelEl = document.getElementById('panel-' + panelId);
+    if (!panelEl) return;
+
+    const titleEl = panelEl.querySelector('.panel-title');
+    if (titleEl && sourceName) {
+        titleEl.textContent = sourceName;
+    }
 }
 
 // ============================================================
