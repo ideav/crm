@@ -896,6 +896,10 @@ class MainAppController {
                 iconsGrid.querySelectorAll('.icon-picker-item').forEach(b => b.classList.remove('selected'));
                 btn.classList.add('selected');
                 selectedIcon = btn.getAttribute('data-icon');
+                // Clear emoji input when PrimeVue icon is selected
+                // so that the new PrimeVue icon is saved instead of old emoji
+                emojiInput.value = '';
+                emojiPreview.textContent = '';
             });
 
             iconsGrid.appendChild(btn);
@@ -918,9 +922,11 @@ class MainAppController {
         const emojiPreview = modal.querySelector('#emoji-preview');
 
         // If current icon is an emoji, show it
+        // Decode HTML entities (e.g., &#128196; -> 📄) before displaying
         if (config.icon && !config.icon.includes('<')) {
-            emojiInput.value = config.icon;
-            emojiPreview.textContent = config.icon;
+            const decodedEmoji = this.decodeHtmlEntities(config.icon);
+            emojiInput.value = decodedEmoji;
+            emojiPreview.textContent = decodedEmoji;
             // Switch to emoji tab
             modal.querySelector('[data-tab="emoji"]').click();
         }
