@@ -1632,6 +1632,7 @@
 .subordinate-nested-count {
     /* Issue #737: Use same center alignment as .subordinate-link-cell */
     text-align: center;
+    padding: 10px 3px !important;
 }
 
 /* Subordinate table link in main table cells */
