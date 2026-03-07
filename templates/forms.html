@@ -773,17 +773,26 @@ function loadForms() {
 
         if (loading) loading.classList.add('hidden');
 
-        if (!json || !json.object) {
+        // JSON_OBJ returns array format: [{i: id, u: parent, o: order, r: [val1, val2, ...]}, ...]
+        if (!json || !Array.isArray(json) || json.length === 0) {
             container.innerHTML = '<p>' + t9n('[RU]Нет форм[EN]No forms') + '</p>';
             return;
         }
 
-        FormConstructor.forms = json.object;
+        // Transform JSON_OBJ format to standard format for internal use
+        FormConstructor.forms = json.map(function(item) {
+            return {
+                id: item.i,
+                val: item.r ? item.r[0] : '',  // First column contains the name
+                parent: item.u,
+                order: item.o
+            };
+        });
 
         let html = '';
-        json.object.forEach(function(form) {
+        FormConstructor.forms.forEach(function(form) {
             html += '<div class="form-item">';
-            html += '<span class="form-item-name">' + escapeHtml(form.val || form.name || 'Form ' + form.id) + '</span>';
+            html += '<span class="form-item-name">' + escapeHtml(form.val || 'Form ' + form.id) + '</span>';
             html += '<div class="form-item-actions">';
             html += '<a href="/' + FormConstructor.db + '/forms/' + form.id + '" class="btn btn-sm btn-secondary">' + t9n('[RU]Открыть[EN]Open') + '</a>';
             html += '<a href="/' + FormConstructor.db + '/forms/' + form.id + '?EDIT" class="btn btn-sm btn-primary">' + t9n('[RU]Редактировать[EN]Edit') + '</a>';
@@ -807,16 +816,25 @@ function loadReports() {
     apiRequest('GET', 'object/22?JSON_OBJ&LIMIT=1000', null, function(json) {
         const select = document.getElementById('reportSource');
 
-        if (!json || !json.object) {
+        // JSON_OBJ returns array format: [{i: id, u: parent, o: order, r: [val1, val2, ...]}, ...]
+        if (!json || !Array.isArray(json) || json.length === 0) {
             select.innerHTML = '<option value="">' + t9n('[RU]Нет запросов[EN]No queries') + '</option>';
             return;
         }
 
-        FormConstructor.reports = json.object;
+        // Transform JSON_OBJ format to standard format for internal use
+        FormConstructor.reports = json.map(function(item) {
+            return {
+                id: item.i,
+                val: item.r ? item.r[0] : '',  // First column contains the name
+                parent: item.u,
+                order: item.o
+            };
+        });
 
         let html = '<option value="">' + t9n('[RU]Выберите запрос[EN]Select query') + '</option>';
-        json.object.forEach(function(report) {
-            html += '<option value="' + report.id + '">' + escapeHtml(report.val || report.name || 'Report ' + report.id) + '</option>';
+        FormConstructor.reports.forEach(function(report) {
+            html += '<option value="' + report.id + '">' + escapeHtml(report.val || 'Report ' + report.id) + '</option>';
         });
 
         select.innerHTML = html;
@@ -858,14 +876,17 @@ function loadFormPanels(formId) {
         const container = document.getElementById('panelsContainer');
         const emptyState = document.getElementById('emptyState');
 
-        // Get form name
+        // Get form name - JSON_OBJ returns array format
         apiRequest('GET', 'object/137/' + formId + '?JSON_OBJ', null, function(formJson) {
-            if (formJson && formJson.object && formJson.object[0]) {
-                document.getElementById('formTitle').textContent = formJson.object[0].val || formJson.object[0].name || 'Form';
+            // JSON_OBJ returns array format: [{i: id, u: parent, o: order, r: [val1, val2, ...]}, ...]
+            if (formJson && Array.isArray(formJson) && formJson.length > 0) {
+                const form = formJson[0];
+                document.getElementById('formTitle').textContent = (form.r ? form.r[0] : '') || 'Form';
             }
         });
 
-        if (!json || !json.object || json.object.length === 0) {
+        // JSON_OBJ returns array format: [{i: id, u: parent, o: order, r: [val1, val2, ...]}, ...]
+        if (!json || !Array.isArray(json) || json.length === 0) {
             container.innerHTML = '';
             emptyState.classList.remove('hidden');
 
@@ -876,7 +897,54 @@ function loadFormPanels(formId) {
             return;
         }
 
-        FormConstructor.panels = json.object;
+        // Transform JSON_OBJ format to standard format for internal use
+        // For panels, we need to fetch metadata to map r[index] to requisite IDs
+        loadPanelMetadataAndRender(json, container, emptyState);
+    });
+}
+
+// ============================================================
+// Load Panel Metadata and Render
+// ============================================================
+function loadPanelMetadataAndRender(panelsData, container, emptyState) {
+    // Fetch metadata for table 138 (panels) to understand requisite structure
+    apiRequest('GET', 'metadata/138?JSON', null, function(metadata) {
+        const panels = [];
+        const reqs = {};
+
+        // Build mapping from requisite index to requisite ID
+        const reqMapping = [];
+        if (metadata && metadata.reqs) {
+            metadata.reqs.forEach(function(req, index) {
+                reqMapping.push(req.id);
+            });
+        }
+
+        // Transform each panel from JSON_OBJ format
+        panelsData.forEach(function(item) {
+            const panelId = item.i;
+            panels.push({
+                id: panelId,
+                val: item.r ? item.r[0] : '',  // First column contains the panel name
+                parent: item.u,
+                order: item.o
+            });
+
+            // Map r[index+1] values to requisite IDs
+            const panelReqs = {};
+            if (item.r && reqMapping.length > 0) {
+                for (let i = 0; i < reqMapping.length && (i + 1) < item.r.length; i++) {
+                    const reqId = reqMapping[i];
+                    const value = item.r[i + 1];  // r[0] is the name, requisites start at r[1]
+                    if (value !== '' && value !== null && value !== undefined) {
+                        panelReqs[reqId] = value;
+                    }
+                }
+            }
+            reqs[panelId] = panelReqs;
+        });
+
+        FormConstructor.panels = panels;
         emptyState.classList.add('hidden');
 
         // Show add panel button in edit mode
@@ -885,7 +953,7 @@ function loadFormPanels(formId) {
         }
 
         // Render panels
-        renderPanels(json.object, json.reqs || {});
+        renderPanels(panels, reqs);
     });
 }
 
