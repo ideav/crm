@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Issue #733 - Split Subordinate Link</title>
+    <link rel="stylesheet" href="https://unpkg.com/primeicons@6.0.1/primeicons.css">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        .test-case {
+            margin-bottom: 30px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .test-case h2 {
+            margin-top: 0;
+            color: #555;
+        }
+
+        :root {
+            --md-primary: #1976d2;
+            --md-primary-dark: #1565c0;
+            --md-text-secondary: #666;
+            --md-transition: all 0.2s ease;
+        }
+
+        /* Styles from integram-table.css */
+        .subordinate-link-cell {
+            text-align: center;
+            padding: 10px;
+            background: #fafafa;
+            border: 1px solid #eee;
+        }
+
+        /* Table icon link - opens subordinate table in new window (issue #729, #733) */
+        .subordinate-table-icon-link {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4px;
+            border-radius: 4px;
+            color: var(--md-text-secondary, #666);
+            text-decoration: none !important;
+            transition: var(--md-transition);
+            vertical-align: middle;
+            font-size: 16px;
+        }
+
+        .subordinate-table-icon-link:hover {
+            background-color: rgba(25, 118, 210, 0.08);
+            color: var(--md-primary);
+        }
+
+        /* Count link - opens subordinate table in modal (issue #733) */
+        .subordinate-count-link {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 6px;
+            border-radius: 4px;
+            color: var(--md-primary);
+            text-decoration: none !important;
+            transition: var(--md-transition);
+            vertical-align: middle;
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .subordinate-count-link:hover {
+            background-color: rgba(25, 118, 210, 0.08);
+            color: var(--md-primary-dark);
+        }
+
+        .result {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        .pass {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .fail {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .comparison {
+            display: flex;
+            gap: 40px;
+            margin-top: 15px;
+        }
+
+        .comparison > div {
+            flex: 1;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .comparison h3 {
+            margin-top: 0;
+            font-size: 14px;
+            color: #666;
+        }
+
+        /* Old styles for comparison */
+        .subordinate-table-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            color: var(--md-primary);
+            text-decoration: none !important;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: var(--md-transition);
+        }
+
+        .subordinate-table-link:hover {
+            background-color: rgba(25, 118, 210, 0.08);
+            color: var(--md-primary-dark);
+        }
+
+        .subordinate-table-link .table-icon {
+            font-size: 16px;
+        }
+
+        .subordinate-table-link .subordinate-count {
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .subordinate-open-new-window {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-left: 4px;
+            padding: 4px;
+            border-radius: 4px;
+            color: var(--md-text-secondary, #666);
+            text-decoration: none !important;
+            transition: var(--md-transition);
+            vertical-align: middle;
+        }
+
+        .subordinate-open-new-window:hover {
+            background-color: rgba(25, 118, 210, 0.08);
+            color: var(--md-primary);
+        }
+
+        .subordinate-open-new-window i {
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>Test Issue #733 - Split Subordinate Link</h1>
+        <p>Issue #733 requests to split the subordinate table link into two separate clickable elements:</p>
+        <ul>
+            <li><strong>Table icon</strong> - Opens subordinate table in a new window</li>
+            <li><strong>Count number</strong> - Opens subordinate table in a modal (existing behavior)</li>
+        </ul>
+
+        <div class="test-case">
+            <h2>Before vs After Comparison</h2>
+            <div class="comparison">
+                <div>
+                    <h3>BEFORE (PR #730)</h3>
+                    <div class="subordinate-link-cell">
+                        <a href="#" class="subordinate-table-link" onclick="alert('Opens modal'); return false;" title="Open modal">
+                            <span class="table-icon"><i class="pi pi-table"></i></span>
+                            <span class="subordinate-count">(5)</span>
+                        </a>
+                        <a href="#" class="subordinate-open-new-window" onclick="alert('Opens new window'); return false;" title="Open new window">
+                            <i class="pi pi-external-link"></i>
+                        </a>
+                    </div>
+                    <p style="font-size: 12px; color: #999; margin-top: 10px;">Table icon + count (modal) | External link icon (new window)</p>
+                </div>
+                <div>
+                    <h3>AFTER (Issue #733)</h3>
+                    <div class="subordinate-link-cell">
+                        <a href="/testdb/table/42?F_U=123" class="subordinate-table-icon-link" target="42" title="Open new window" onclick="alert('Opens new window'); return false;">
+                            <i class="pi pi-table"></i>
+                        </a>
+                        <a href="#" class="subordinate-count-link" onclick="alert('Opens modal'); return false;" title="Open modal">
+                            (5)
+                        </a>
+                    </div>
+                    <p style="font-size: 12px; color: #999; margin-top: 10px;">Table icon (new window) | Count (modal)</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-case">
+            <h2>Test 1: New Structure Elements</h2>
+            <p>The subordinate link should now be split into two separate elements:</p>
+
+            <div class="subordinate-link-cell" id="test-cell">
+                <a href="/testdb/table/42?F_U=123" class="subordinate-table-icon-link" target="42" title="Open new window" onclick="event.stopPropagation();">
+                    <i class="pi pi-table"></i>
+                </a>
+                <a href="#" class="subordinate-count-link" onclick="alert('Opening subordinate table in modal'); return false;" title="Open modal">
+                    (5)
+                </a>
+            </div>
+
+            <div class="result" id="test1-result"></div>
+        </div>
+
+        <div class="test-case">
+            <h2>Test 2: Verify Link Attributes</h2>
+            <p>Both links should have correct attributes:</p>
+            <ul>
+                <li>Table icon link: href with table URL, target for new window</li>
+                <li>Count link: onclick handler for modal</li>
+            </ul>
+
+            <div class="result" id="test2-result"></div>
+        </div>
+
+        <div class="test-case">
+            <h2>Test 3: Hover Effects</h2>
+            <p>Hover over the elements below to see the hover effects:</p>
+
+            <div style="display: flex; gap: 30px; margin-top: 15px;">
+                <div style="text-align: center;">
+                    <p><strong>Table Icon (new window):</strong></p>
+                    <a href="#" class="subordinate-table-icon-link" onclick="return false;" title="Open new window">
+                        <i class="pi pi-table"></i>
+                    </a>
+                </div>
+                <div style="text-align: center;">
+                    <p><strong>Count (modal):</strong></p>
+                    <a href="#" class="subordinate-count-link" onclick="return false;" title="Open modal">
+                        (5)
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Test 1: Check if both new elements are present
+        (function() {
+            const cell = document.getElementById('test-cell');
+            const tableIconLink = cell.querySelector('.subordinate-table-icon-link');
+            const countLink = cell.querySelector('.subordinate-count-link');
+
+            const result = document.getElementById('test1-result');
+
+            if (tableIconLink && countLink) {
+                result.className = 'result pass';
+                result.textContent = 'PASS: Both table icon link and count link are present.';
+            } else {
+                result.className = 'result fail';
+                result.textContent = 'FAIL: Missing elements.';
+            }
+        })();
+
+        // Test 2: Check link attributes
+        (function() {
+            const cell = document.getElementById('test-cell');
+            const tableIconLink = cell.querySelector('.subordinate-table-icon-link');
+            const countLink = cell.querySelector('.subordinate-count-link');
+            const result = document.getElementById('test2-result');
+
+            const tableHref = tableIconLink.getAttribute('href');
+            const tableTarget = tableIconLink.getAttribute('target');
+            const countOnclick = countLink.getAttribute('onclick');
+
+            const hrefValid = tableHref.includes('table/') && tableHref.includes('?F_U=');
+            const targetValid = tableTarget && tableTarget === '42';
+            const onclickValid = countOnclick && countOnclick.includes('modal');
+
+            const messages = [];
+            messages.push('Table icon href: ' + tableHref + (hrefValid ? ' OK' : ' FAIL'));
+            messages.push('Table icon target: ' + tableTarget + (targetValid ? ' OK' : ' FAIL'));
+            messages.push('Count onclick: ' + (onclickValid ? 'Contains modal handler OK' : 'FAIL'));
+
+            if (hrefValid && targetValid && onclickValid) {
+                result.className = 'result pass';
+                result.innerHTML = 'PASS:<br>' + messages.join('<br>');
+            } else {
+                result.className = 'result fail';
+                result.innerHTML = 'FAIL:<br>' + messages.join('<br>');
+            }
+        })();
+    </script>
+</body>
+</html>

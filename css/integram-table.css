@@ -1664,27 +1664,42 @@
     font-weight: 500;
 }
 
-/* Open in new window link next to subordinate table link (issue #729) */
-.subordinate-open-new-window {
+/* Table icon link - opens subordinate table in new window (issue #729, #733) */
+.subordinate-table-icon-link {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    margin-left: 4px;
     padding: 4px;
     border-radius: 4px;
     color: var(--md-text-secondary, #666);
     text-decoration: none !important;
     transition: var(--md-transition);
     vertical-align: middle;
+    font-size: 16px;
 }
 
-.subordinate-open-new-window:hover {
+.subordinate-table-icon-link:hover {
     background-color: rgba(25, 118, 210, 0.08);
     color: var(--md-primary);
 }
 
-.subordinate-open-new-window i {
-    font-size: 14px;
+/* Count link - opens subordinate table in modal (issue #733) */
+.subordinate-count-link {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 6px;
+    border-radius: 4px;
+    color: var(--md-primary);
+    text-decoration: none !important;
+    transition: var(--md-transition);
+    vertical-align: middle;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.subordinate-count-link:hover {
+    background-color: rgba(25, 118, 210, 0.08);
+    color: var(--md-primary-dark);
 }
 
 /* Subordinate modal opened from main table */
