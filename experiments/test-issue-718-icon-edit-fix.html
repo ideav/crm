@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Issue #718 - Icon Edit Fix</title>
+    <link rel="stylesheet" href="https://unpkg.com/primeicons/primeicons.css">
+    <style>
+        body { font-family: sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
+        .test-case { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        .test-case h3 { margin-top: 0; color: #333; }
+        .icon-display { font-size: 24px; margin: 10px 0; display: inline-block; padding: 10px; background: #f5f5f5; border-radius: 4px; }
+        .status { padding: 5px 10px; border-radius: 3px; display: inline-block; font-weight: bold; }
+        .pass { background: #d4edda; color: #155724; }
+        .fail { background: #f8d7da; color: #721c24; }
+        code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; }
+
+        /* Icon picker simulation styles */
+        .icon-picker { margin: 15px 0; }
+        .icon-picker-tabs { display: flex; gap: 5px; margin-bottom: 10px; }
+        .icon-picker-tab { padding: 8px 15px; border: 1px solid #ccc; background: #f5f5f5; cursor: pointer; border-radius: 4px 4px 0 0; }
+        .icon-picker-tab.active { background: white; border-bottom-color: white; }
+        .icon-picker-content { border: 1px solid #ccc; padding: 15px; border-radius: 0 4px 4px 4px; }
+        .icon-picker-grid { display: flex; flex-wrap: wrap; gap: 5px; max-height: 150px; overflow-y: auto; }
+        .icon-picker-item { width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border: 1px solid #ddd; border-radius: 4px; cursor: pointer; background: white; }
+        .icon-picker-item:hover { background: #e9ecef; }
+        .icon-picker-item.selected { border-color: #007bff; background: #e7f1ff; }
+        .emoji-input-wrapper { display: flex; align-items: center; gap: 10px; }
+        .emoji-input-wrapper input { flex: 1; padding: 8px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px; }
+        .emoji-preview { font-size: 24px; width: 40px; text-align: center; }
+
+        .simulation-box { background: #f9f9f9; padding: 20px; border-radius: 8px; margin: 20px 0; }
+        .simulation-box h4 { margin-top: 0; }
+        .btn { padding: 8px 16px; cursor: pointer; border: none; border-radius: 4px; }
+        .btn-primary { background: #007bff; color: white; }
+        .btn-secondary { background: #6c757d; color: white; }
+    </style>
+</head>
+<body>
+    <h1>Test Issue #718 - Icon Edit Fix</h1>
+    <p>This test verifies two fixes:</p>
+    <ol>
+        <li><strong>Emoji display:</strong> HTML entities like <code>&amp;#128196;</code> should be decoded and displayed as actual emoji in the input field</li>
+        <li><strong>PrimeVue icon selection:</strong> When selecting a PrimeVue icon, the emoji input should be cleared so the new icon is saved</li>
+    </ol>
+
+    <div id="test-results"></div>
+
+    <h2>Interactive Simulation</h2>
+    <div class="simulation-box">
+        <h4>Simulate Edit Modal (with emoji HTML entity)</h4>
+        <p>Current icon value (from server): <code id="current-icon-value">&#128196;</code></p>
+
+        <div class="icon-picker">
+            <div class="icon-picker-tabs">
+                <button type="button" class="icon-picker-tab" data-tab="primevue">PrimeVue</button>
+                <button type="button" class="icon-picker-tab active" data-tab="emoji">Emoji</button>
+            </div>
+            <div class="icon-picker-content" id="icon-picker-primevue" style="display: none;">
+                <div class="icon-picker-grid" id="primevue-icons-grid"></div>
+            </div>
+            <div class="icon-picker-content" id="icon-picker-emoji">
+                <div class="emoji-input-wrapper">
+                    <input type="text" id="modal-emoji" placeholder="Enter or paste emoji" maxlength="4">
+                    <div class="emoji-preview" id="emoji-preview"></div>
+                </div>
+            </div>
+        </div>
+
+        <p><strong>Selected icon (to be saved):</strong> <span id="selected-icon-display" class="icon-display">-</span></p>
+        <button class="btn btn-primary" id="save-btn">Save</button>
+        <button class="btn btn-secondary" id="reset-btn">Reset Simulation</button>
+    </div>
+
+    <script>
+        // decodeHtmlEntities function (from main-app.js)
+        function decodeHtmlEntities(str) {
+            if (!str) return str;
+            const textarea = document.createElement('textarea');
+            textarea.innerHTML = str;
+            return textarea.value;
+        }
+
+        // Test 1: Verify decodeHtmlEntities works correctly
+        const testCases = [
+            {
+                name: 'Decode document emoji HTML entity',
+                input: '&#128196;',
+                expected: '\u{1F4C4}',  // Unicode for document emoji
+                description: 'Should decode &#128196; to actual emoji'
+            },
+            {
+                name: 'Decode wolf emoji HTML entity',
+                input: '&#128058;',
+                expected: '\u{1F43A}',
+                description: 'Should decode &#128058; (wolf) to actual emoji'
+            },
+            {
+                name: 'Pass through already decoded emoji',
+                input: '\u{1F4C4}',
+                expected: '\u{1F4C4}',
+                description: 'Already decoded emoji should pass through unchanged'
+            },
+            {
+                name: 'Pass through PrimeVue icon HTML',
+                input: '<i class="pi pi-file-word"></i>',
+                expected: '<i class="pi pi-file-word"></i>',
+                description: 'PrimeVue icon HTML should pass through unchanged'
+            }
+        ];
+
+        const resultsDiv = document.getElementById('test-results');
+        let passCount = 0;
+        let failCount = 0;
+
+        testCases.forEach((tc, idx) => {
+            const result = decodeHtmlEntities(tc.input);
+            const passed = result === tc.expected;
+
+            if (passed) passCount++;
+            else failCount++;
+
+            const caseDiv = document.createElement('div');
+            caseDiv.className = 'test-case';
+            caseDiv.innerHTML = `
+                <h3>Test ${idx + 1}: ${tc.name}</h3>
+                <p>${tc.description}</p>
+                <p><strong>Input:</strong> <code>${tc.input.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></p>
+                <p><strong>Expected:</strong> <code>${tc.expected.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></p>
+                <p><strong>Got:</strong> <code>${result.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code></p>
+                <p><strong>Rendered:</strong> <span class="icon-display">${result}</span></p>
+                <span class="status ${passed ? 'pass' : 'fail'}">${passed ? 'PASS' : 'FAIL'}</span>
+            `;
+            resultsDiv.appendChild(caseDiv);
+        });
+
+        // Summary
+        const summaryDiv = document.createElement('div');
+        summaryDiv.innerHTML = `
+            <h2>Unit Test Summary</h2>
+            <p><strong>Total:</strong> ${testCases.length} tests</p>
+            <p class="status ${passCount === testCases.length ? 'pass' : 'fail'}">
+                <strong>Passed:</strong> ${passCount} / ${testCases.length}
+            </p>
+        `;
+        resultsDiv.insertBefore(summaryDiv, resultsDiv.firstChild);
+
+        // Interactive simulation
+        const PRIMEVUE_ICONS = [
+            'pi-home', 'pi-user', 'pi-file', 'pi-file-word', 'pi-file-pdf',
+            'pi-folder', 'pi-calendar', 'pi-cog', 'pi-bell', 'pi-envelope'
+        ];
+
+        const iconsGrid = document.getElementById('primevue-icons-grid');
+        const emojiInput = document.getElementById('modal-emoji');
+        const emojiPreview = document.getElementById('emoji-preview');
+        const selectedIconDisplay = document.getElementById('selected-icon-display');
+        const currentIconValue = document.getElementById('current-icon-value');
+
+        let selectedIcon = '';
+
+        function initSimulation() {
+            // Simulate loading icon from server (HTML entity)
+            const configIcon = '&#128196;';
+            currentIconValue.textContent = configIcon;
+
+            // FIX 1: Decode HTML entity before displaying in input
+            if (configIcon && !configIcon.includes('<')) {
+                const decodedEmoji = decodeHtmlEntities(configIcon);
+                emojiInput.value = decodedEmoji;
+                emojiPreview.textContent = decodedEmoji;
+                selectedIcon = decodedEmoji;
+            }
+
+            updateSelectedIconDisplay();
+        }
+
+        function updateSelectedIconDisplay() {
+            const emoji = emojiInput.value.trim();
+            const finalIcon = emoji || selectedIcon;
+            selectedIconDisplay.innerHTML = finalIcon || '-';
+        }
+
+        // Populate PrimeVue icons
+        PRIMEVUE_ICONS.forEach(iconClass => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'icon-picker-item';
+            btn.innerHTML = `<i class="pi ${iconClass}"></i>`;
+            btn.setAttribute('data-icon', `<i class="pi ${iconClass}"></i>`);
+
+            btn.addEventListener('click', () => {
+                iconsGrid.querySelectorAll('.icon-picker-item').forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+                selectedIcon = btn.getAttribute('data-icon');
+
+                // FIX 2: Clear emoji input when PrimeVue icon is selected
+                emojiInput.value = '';
+                emojiPreview.textContent = '';
+
+                updateSelectedIconDisplay();
+            });
+
+            iconsGrid.appendChild(btn);
+        });
+
+        // Tab switching
+        document.querySelectorAll('.icon-picker-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.icon-picker-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+
+                const tabName = tab.getAttribute('data-tab');
+                document.getElementById('icon-picker-primevue').style.display = tabName === 'primevue' ? '' : 'none';
+                document.getElementById('icon-picker-emoji').style.display = tabName === 'emoji' ? '' : 'none';
+            });
+        });
+
+        // Emoji input handler
+        emojiInput.addEventListener('input', () => {
+            const emoji = emojiInput.value;
+            emojiPreview.textContent = emoji;
+            if (emoji) {
+                selectedIcon = emoji;
+                iconsGrid.querySelectorAll('.icon-picker-item').forEach(b => b.classList.remove('selected'));
+            }
+            updateSelectedIconDisplay();
+        });
+
+        // Save button
+        document.getElementById('save-btn').addEventListener('click', () => {
+            const emoji = emojiInput.value.trim();
+            const finalIcon = emoji || selectedIcon;
+            alert('Saving icon: ' + (finalIcon || '(empty)'));
+        });
+
+        // Reset button
+        document.getElementById('reset-btn').addEventListener('click', () => {
+            iconsGrid.querySelectorAll('.icon-picker-item').forEach(b => b.classList.remove('selected'));
+            selectedIcon = '';
+            initSimulation();
+        });
+
+        // Initialize
+        initSimulation();
+    </script>
+</body>
+</html>
