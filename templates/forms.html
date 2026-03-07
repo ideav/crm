@@ -671,6 +671,7 @@ const FormConstructor = {
     reports: [],
     tables: [],
     charts: {},
+    metadataCache: {},  // Cache for table metadata (metadata/tableId?JSON responses)
     db: '{_global_.z}',
     xsrf: '{_global_.xsrf}',
     token: '{_global_.token}',
@@ -792,7 +793,8 @@ function loadForms() {
         let html = '';
         FormConstructor.forms.forEach(function(form) {
             html += '<div class="form-item">';
-            html += '<span class="form-item-name">' + escapeHtml(form.val || 'Form ' + form.id) + '</span>';
+            // For reference fields (id:name format), display only the name
+            html += '<span class="form-item-name">' + escapeHtml(getDisplayValue(form.val) || 'Form ' + form.id) + '</span>';
             html += '<div class="form-item-actions">';
             html += '<a href="/' + FormConstructor.db + '/forms/' + form.id + '" class="btn btn-sm btn-secondary">' + t9n('[RU]Открыть[EN]Open') + '</a>';
             html += '<a href="/' + FormConstructor.db + '/forms/' + form.id + '?EDIT" class="btn btn-sm btn-primary">' + t9n('[RU]Редактировать[EN]Edit') + '</a>';
@@ -834,7 +836,8 @@ function loadReports() {
 
         let html = '<option value="">' + t9n('[RU]Выберите запрос[EN]Select query') + '</option>';
         FormConstructor.reports.forEach(function(report) {
-            html += '<option value="' + report.id + '">' + escapeHtml(report.val || 'Report ' + report.id) + '</option>';
+            // For reference fields (id:name format), display only the name
+            html += '<option value="' + report.id + '">' + escapeHtml(getDisplayValue(report.val) || 'Report ' + report.id) + '</option>';
         });
 
         select.innerHTML = html;
@@ -858,7 +861,8 @@ function loadTables() {
 
         let html = '<option value="">' + t9n('[RU]Выберите таблицу[EN]Select table') + '</option>';
         json.forEach(function(table) {
-            html += '<option value="' + table.id + '">' + escapeHtml(table.val || 'Table ' + table.id) + '</option>';
+            // For reference fields (id:name format), display only the name
+            html += '<option value="' + table.id + '">' + escapeHtml(getDisplayValue(table.val) || 'Table ' + table.id) + '</option>';
         });
 
         select.innerHTML = html;
@@ -881,7 +885,8 @@ function loadFormPanels(formId) {
             // JSON_OBJ returns array format: [{i: id, u: parent, o: order, r: [val1, val2, ...]}, ...]
             if (formJson && Array.isArray(formJson) && formJson.length > 0) {
                 const form = formJson[0];
-                document.getElementById('formTitle').textContent = (form.r ? form.r[0] : '') || 'Form';
+                // For reference fields (id:name format), display only the name
+                document.getElementById('formTitle').textContent = getDisplayValue(form.r ? form.r[0] : '') || 'Form';
             }
         });
 
@@ -907,8 +912,8 @@ function loadFormPanels(formId) {
 // Load Panel Metadata and Render
 // ============================================================
 function loadPanelMetadataAndRender(panelsData, container, emptyState) {
-    // Fetch metadata for table 138 (panels) to understand requisite structure
-    apiRequest('GET', 'metadata/138?JSON', null, function(metadata) {
+    // Fetch metadata for table 138 (panels) using cache
+    getMetadata(138, function(metadata) {
         const panels = [];
         const reqs = {};
 
@@ -938,6 +943,11 @@ function loadPanelMetadataAndRender(panelsData, container, emptyState) {
                     const value = item.r[i + 1];  // r[0] is the name, requisites start at r[1]
                     if (value !== '' && value !== null && value !== undefined) {
                         panelReqs[reqId] = value;
+                        // For reference fields (id:name format), also store parsed ref
+                        const ref = parseReferenceValue(value);
+                        if (ref) {
+                            panelReqs['ref_' + reqId] = value;  // Keep original for editing
+                        }
                     }
                 }
             }
@@ -996,7 +1006,8 @@ function createPanelElement(panel, panelReqs) {
 
     // Panel header
     let headerHtml = '<div class="panel-header">';
-    headerHtml += '<span class="panel-title">' + escapeHtml(panel.val || panel.name || 'Panel ' + panel.id) + '</span>';
+    // For reference fields (id:name format), display only the name
+    headerHtml += '<span class="panel-title">' + escapeHtml(getDisplayValue(panel.val) || panel.name || 'Panel ' + panel.id) + '</span>';
 
     if (FormConstructor.editMode) {
         headerHtml += '<div class="panel-actions">';
@@ -1019,9 +1030,9 @@ function createPanelElement(panel, panelReqs) {
     // Panel meta (edit mode)
     if (FormConstructor.editMode) {
         headerHtml += '<div class="panel-meta">';
-        headerHtml += '<t9n>[RU]Тип[EN]Type</t9n>: ' + escapeHtml(getPanelTypeName(panelType));
+        headerHtml += '<t9n>[RU]Тип[EN]Type</t9n>: ' + escapeHtml(getPanelTypeName(getDisplayValue(panelType)));
         if (reportId) {
-            headerHtml += ' | <t9n>[RU]Запрос[EN]Report</t9n>: ' + reportId;
+            headerHtml += ' | <t9n>[RU]Запрос[EN]Report</t9n>: ' + escapeHtml(getDisplayValue(reportId));
         }
         headerHtml += '</div>';
     }
@@ -1125,7 +1136,10 @@ function renderChart(panelId, chartType, reportId, filter, config, container) {
         }
 
         // Prepare chart data
-        const labels = json.data[0] || [];
+        // For reference fields (id:name format), display only the name in labels
+        const labels = (json.data[0] || []).map(function(val) {
+            return getDisplayValue(val);
+        });
         const datasets = [];
 
         for (let i = 1; i < json.columns.length; i++) {
@@ -1222,6 +1236,8 @@ function renderPivotTable(panelId, reportId, filter, config, container) {
             const row = [];
             for (let j = 0; j < json.columns.length; j++) {
                 let val = json.data[j] ? json.data[j][i] : '';
+                // For reference fields (id:name format), display only the name
+                val = getDisplayValue(val);
                 // Strip HTML tags
                 val = String(val).replace(/<[^>]*>/g, '');
                 row.push(val);
@@ -1307,7 +1323,9 @@ function renderReportTable(panelId, reportId, filter, container) {
         for (let i = 0; i < rowCount; i++) {
             html += '<tr>';
             for (let j = 0; j < json.columns.length; j++) {
-                const val = json.data[j] ? json.data[j][i] : '';
+                let val = json.data[j] ? json.data[j][i] : '';
+                // For reference fields (id:name format), display only the name
+                val = getDisplayValue(val);
                 html += '<td>' + val + '</td>'; // Keep HTML for links etc
             }
             html += '</tr>';
@@ -1332,8 +1350,8 @@ function renderReportTable(panelId, reportId, filter, container) {
 // Render Data Entry Form
 // ============================================================
 function renderDataEntryForm(panelId, tableType, reportId, filter, container) {
-    // Get table metadata to build form
-    apiRequest('GET', 'metadata/' + tableType + '?JSON', null, function(json) {
+    // Get table metadata to build form (using cache)
+    getMetadata(tableType, function(json) {
         if (!json || !json.reqs) {
             container.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Не удалось загрузить структуру таблицы[EN]Failed to load table structure') + '</p></div>';
             return;
@@ -1674,6 +1692,51 @@ function t9n(str) {
     // Default: return Russian text
     const match = str.match(/\[RU\](.*?)\[EN\]/);
     return match ? match[1] : str;
+}
+
+// ============================================================
+// Parse Reference Field Value
+// Reference fields come in format "id:name", e.g., "169:МоёМеню"
+// Returns { id: string, name: string } or null if not a reference
+// ============================================================
+function parseReferenceValue(value) {
+    if (!value || typeof value !== 'string') return null;
+    const colonIndex = value.indexOf(':');
+    if (colonIndex <= 0) return null;
+    const id = value.substring(0, colonIndex);
+    const name = value.substring(colonIndex + 1);
+    // Only treat as reference if id part is numeric
+    if (!/^\d+$/.test(id)) return null;
+    return { id: id, name: name };
+}
+
+// ============================================================
+// Get Display Value for Reference Field
+// Shows only the name part for reference fields (id:name -> name)
+// ============================================================
+function getDisplayValue(value) {
+    const ref = parseReferenceValue(value);
+    return ref ? ref.name : value;
+}
+
+// ============================================================
+// Get Metadata with Caching
+// Fetches metadata for a table, using cache if available
+// ============================================================
+function getMetadata(tableId, callback) {
+    // Check cache first
+    if (FormConstructor.metadataCache[tableId]) {
+        callback(FormConstructor.metadataCache[tableId]);
+        return;
+    }
+
+    // Fetch and cache
+    apiRequest('GET', 'metadata/' + tableId + '?JSON', null, function(json) {
+        if (json) {
+            FormConstructor.metadataCache[tableId] = json;
+        }
+        callback(json);
+    });
 }
 </script>
 
