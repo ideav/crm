@@ -6883,7 +6883,7 @@ class IntegramTable {
                     }
 
                     // Load subordinate table if needed
-                    if (tabId.startsWith('sub-') && tab.dataset.arrId) {
+                    if (tabId.startsWith('sub-') && tab.dataset.arrId && this.currentEditModal) {
                         const arrId = tab.dataset.arrId;
                         const reqId = tab.dataset.reqId;
                         const parentRecordId = this.currentEditModal.recordId;
