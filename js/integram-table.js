@@ -1480,7 +1480,11 @@ class IntegramTable {
                     recordId = this.rawObjectData[rowIndex].i;
                 }
                 if (recordId) {
-                    displayValue = `<a href="#" class="subordinate-table-link" onclick="window.${ instanceName }.openSubordinateTableFromCell(event, ${ column.arr_id }, ${ recordId }); return false;" title="Открыть подчиненную таблицу"><span class="table-icon"><i class="pi pi-table"></i></span><span class="subordinate-count">(${ count })</span></a>`;
+                    // Build URL for "Open in new window" link (issue #729)
+                    const pathParts = window.location.pathname.split('/');
+                    const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+                    const subordinateTableUrl = `/${dbName}/table/${column.arr_id}?F_U=${recordId}`;
+                    displayValue = `<a href="#" class="subordinate-table-link" onclick="window.${ instanceName }.openSubordinateTableFromCell(event, ${ column.arr_id }, ${ recordId }); return false;" title="Открыть подчиненную таблицу"><span class="table-icon"><i class="pi pi-table"></i></span><span class="subordinate-count">(${ count })</span></a><a href="${subordinateTableUrl}" class="subordinate-open-new-window" target="${column.arr_id}" title="Открыть в новом окне" onclick="event.stopPropagation();"><i class="pi pi-external-link"></i></a>`;
                 } else {
                     displayValue = `<span class="table-icon"><i class="pi pi-table"></i></span><span class="subordinate-count">(${ count })</span>`;
                 }

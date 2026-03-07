@@ -1664,6 +1664,29 @@
     font-weight: 500;
 }
 
+/* Open in new window link next to subordinate table link (issue #729) */
+.subordinate-open-new-window {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 4px;
+    padding: 4px;
+    border-radius: 4px;
+    color: var(--md-text-secondary, #666);
+    text-decoration: none !important;
+    transition: var(--md-transition);
+    vertical-align: middle;
+}
+
+.subordinate-open-new-window:hover {
+    background-color: rgba(25, 118, 210, 0.08);
+    color: var(--md-primary);
+}
+
+.subordinate-open-new-window i {
+    font-size: 14px;
+}
+
 /* Subordinate modal opened from main table */
 .subordinate-modal {
     max-width: 800px;
