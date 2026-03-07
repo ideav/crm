@@ -1014,7 +1014,7 @@ function loadPanelData(panelId, panelReqs) {
 // Load Panel Buttons
 // ============================================================
 function loadPanelButtons(panelId, container) {
-    apiRequest('GET', 'object/150?F_U=' + panelId, null, function(json) {
+    apiRequest('GET', 'object/150?F_U=' + panelId + '&JSON', null, function(json) {
         if (!json || !json['&main.a.&uni_obj.&uni_obj_all']) {
             return;
         }
@@ -1207,7 +1207,7 @@ function savePivotConfig(panelId, pivotId) {
     delete config.aggregators;
     delete config.renderers;
 
-    apiRequest('POST', '_m_set/' + panelId, { 't225': JSON.stringify(config) }, function(json) {
+    apiRequest('POST', '_m_set/' + panelId + '?JSON', { 't225': JSON.stringify(config) }, function(json) {
         alert(t9n('[RU]Настройки сохранены[EN]Settings saved'));
     });
 }
@@ -1265,7 +1265,7 @@ function renderReportTable(panelId, reportId, filter, container) {
 // ============================================================
 function renderDataEntryForm(panelId, tableType, reportId, filter, container) {
     // Get table metadata to build form
-    apiRequest('GET', 'metadata/' + tableType, null, function(json) {
+    apiRequest('GET', 'metadata/' + tableType + '?JSON', null, function(json) {
         if (!json || !json.reqs) {
             container.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Не удалось загрузить структуру таблицы[EN]Failed to load table structure') + '</p></div>';
             return;
@@ -1321,7 +1321,7 @@ function submitDataEntryForm(event, panelId, tableType) {
         data[key] = value;
     });
 
-    apiRequest('POST', '_m_new/' + tableType + '?up=1', data, function(json) {
+    apiRequest('POST', '_m_new/' + tableType + '?up=1&JSON', data, function(json) {
         if (json && json.obj) {
             alert(t9n('[RU]Запись создана[EN]Record created'));
             form.reset();
@@ -1451,7 +1451,7 @@ function createNewForm(event) {
         return false;
     }
 
-    apiRequest('POST', '_m_new/137?up=1', { 't137': name }, function(json) {
+    apiRequest('POST', '_m_new/137?up=1&JSON', { 't137': name }, function(json) {
         if (json && json.obj) {
             window.location.href = '/' + FormConstructor.db + '/forms/' + json.obj + '?EDIT';
         } else {
@@ -1492,7 +1492,7 @@ function addPanel() {
         data['t161'] = reportId;
     }
 
-    apiRequest('POST', '_m_new/138?up=' + FormConstructor.currentFormId, data, function(json) {
+    apiRequest('POST', '_m_new/138?up=' + FormConstructor.currentFormId + '&JSON', data, function(json) {
         if (json && json.obj) {
             hideAddPanelModal();
             loadFormPanels(FormConstructor.currentFormId);
@@ -1518,7 +1518,7 @@ function savePanel() {
         't257': nextAction
     };
 
-    apiRequest('POST', '_m_set/' + panelId, data, function(json) {
+    apiRequest('POST', '_m_set/' + panelId + '?JSON', data, function(json) {
         hideEditPanelModal();
         loadFormPanels(FormConstructor.currentFormId);
     });
@@ -1531,7 +1531,7 @@ function deletePanel() {
         return;
     }
 
-    apiRequest('POST', '_m_del/' + panelId, {}, function(json) {
+    apiRequest('POST', '_m_del/' + panelId + '?JSON', {}, function(json) {
         hideEditPanelModal();
         loadFormPanels(FormConstructor.currentFormId);
     });
@@ -1539,7 +1539,7 @@ function deletePanel() {
 
 function movePanel(panelId, direction) {
     const endpoint = direction < 0 ? '_m_up/' : '_m_down/';
-    apiRequest('POST', endpoint + panelId, {}, function(json) {
+    apiRequest('POST', endpoint + panelId + '?JSON', {}, function(json) {
         loadFormPanels(FormConstructor.currentFormId);
     });
 }
@@ -1566,7 +1566,7 @@ function addButtonToPanel() {
         't218': btnClass // Class field
     };
 
-    apiRequest('POST', '_m_new/150?up=' + panelId, data, function(json) {
+    apiRequest('POST', '_m_new/150?up=' + panelId + '&JSON', data, function(json) {
         if (json && json.obj) {
             hideAddButtonModal();
             loadFormPanels(FormConstructor.currentFormId);
