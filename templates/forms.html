@@ -1163,6 +1163,15 @@ function loadPanelData(panelId, panelReqs) {
     // Load buttons
     loadPanelButtons(panelId, buttonsEl);
 
+    // Parse config to check for explicit panel type
+    let configJson = {};
+    try {
+        configJson = typeof config === 'string' ? JSON.parse(config) : config;
+    } catch (e) {
+        configJson = {};
+    }
+    const explicitPanelType = configJson.panelType;
+
     // Determine panel type and render accordingly
     if (panelType === 'Pivot' && reportId) {
         renderPivotTable(panelId, reportId, filter, config, contentEl);
@@ -1170,6 +1179,9 @@ function loadPanelData(panelId, panelReqs) {
         renderChart(panelId, panelType, reportId, filter, config, contentEl);
     } else if (panelType === 'Report' || (!panelType && reportId)) {
         renderReportTable(panelId, reportId, filter, config, contentEl);
+    } else if (explicitPanelType === 'Report' && parseInt(panelType)) {
+        // Report panel with table/object data source - render table data as report
+        renderTableAsReport(panelId, panelType, filter, config, contentEl);
     } else if (parseInt(panelType)) {
         // It's a table/object type - render data entry form
         renderDataEntryForm(panelId, panelType, reportId, filter, contentEl);
@@ -1527,6 +1539,151 @@ function renderReportTable(panelId, reportId, filter, config, container) {
 }
 
 // ============================================================
+// Render Table Data as Report
+// This renders object/table data in a report table format
+// (unlike DataEntry which renders as a form)
+// ============================================================
+function renderTableAsReport(panelId, tableId, filter, config, container) {
+    // First, get table metadata to know the columns
+    getMetadata(tableId, function(metadata) {
+        if (!metadata || !metadata.reqs) {
+            container.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Не удалось загрузить структуру таблицы[EN]Failed to load table structure') + '</p></div>';
+            return;
+        }
+
+        // Build URL for fetching table data
+        const filterParam = filter ? decodeHtmlEntities(filter) + '&' : '';
+        const url = 'object/' + tableId + '?' + filterParam + 'JSON_OBJ&LIMIT=1000';
+
+        apiRequest('GET', url, null, function(json) {
+            if (!json || !Array.isArray(json) || json.length === 0) {
+                container.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Нет данных[EN]No data') + '</p></div>';
+                return;
+            }
+
+            // Parse config for column visibility and order
+            let reportConfig = {};
+            try {
+                reportConfig = config && typeof config === 'string' ? JSON.parse(config) : (config || {});
+            } catch (e) {
+                reportConfig = {};
+            }
+
+            // Build columns from metadata
+            // First column is always the object name (r[0])
+            const allColumns = [{ id: 'name', name: metadata.val || t9n('[RU]Название[EN]Name') }];
+            metadata.reqs.forEach(function(req, index) {
+                allColumns.push({
+                    id: 'req_' + req.id,
+                    name: req.val || 'Field ' + req.id,
+                    reqIndex: index
+                });
+            });
+
+            // Get column order (o) and visible columns (v) from config
+            let columnOrder = reportConfig.o || allColumns.map(function(c) { return c.id; });
+            let visibleColumns = reportConfig.v || allColumns.map(function(c) { return c.id; });
+
+            // Ensure all columns are accounted for (new columns may have been added)
+            const currentColumnIds = new Set(allColumns.map(function(c) { return c.id; }));
+            const configColumnIds = new Set(columnOrder);
+
+            // Add any new columns to the end
+            allColumns.forEach(function(col) {
+                if (!configColumnIds.has(col.id)) {
+                    columnOrder.push(col.id);
+                    visibleColumns.push(col.id);
+                }
+            });
+
+            // Filter out deleted columns from order
+            columnOrder = columnOrder.filter(function(id) {
+                return currentColumnIds.has(id);
+            });
+            visibleColumns = visibleColumns.filter(function(id) {
+                return currentColumnIds.has(id);
+            });
+
+            // Build ordered visible columns array
+            const orderedVisibleColumns = columnOrder
+                .filter(function(id) {
+                    return visibleColumns.includes(id);
+                })
+                .map(function(id) {
+                    return allColumns.find(function(c) { return c.id === id; });
+                })
+                .filter(Boolean);
+
+            let html = '';
+
+            // Display table name as header
+            if (metadata.val) {
+                html += '<div class="report-header">' + escapeHtml(getDisplayValue(metadata.val)) + '</div>';
+            }
+
+            // In edit mode, show column configuration button
+            if (FormConstructor.editMode) {
+                html += '<div class="column-config-bar">';
+                html += '<button class="btn btn-sm btn-secondary" onclick="showColumnConfigModalForTable(' + panelId + ')">';
+                html += '<i class="pi pi-cog"></i> ' + t9n('[RU]Настройки колонок[EN]Column Settings');
+                html += '</button>';
+                html += '</div>';
+            }
+
+            // Store column data for configuration modal
+            FormConstructor.reportColumns = FormConstructor.reportColumns || {};
+            FormConstructor.reportColumns[panelId] = {
+                all: allColumns,
+                order: columnOrder,
+                visible: visibleColumns,
+                isTableSource: true
+            };
+
+            html += '<table class="report-table">';
+
+            // Header
+            html += '<thead><tr>';
+            orderedVisibleColumns.forEach(function(col) {
+                html += '<th>' + escapeHtml(col.name) + '</th>';
+            });
+            html += '</tr></thead>';
+
+            // Body - JSON_OBJ format: [{i: id, u: parent, o: order, r: [val1, val2, ...]}, ...]
+            html += '<tbody>';
+            json.forEach(function(row) {
+                html += '<tr>';
+                orderedVisibleColumns.forEach(function(col) {
+                    let val = '';
+                    if (col.id === 'name') {
+                        // First column is the object name (r[0])
+                        val = row.r ? row.r[0] : '';
+                    } else if (col.reqIndex !== undefined) {
+                        // Requisite value (r[reqIndex + 1], since r[0] is the name)
+                        val = row.r ? row.r[col.reqIndex + 1] : '';
+                    }
+                    // For reference fields (id:name format), display only the name
+                    val = getDisplayValue(val);
+                    html += '<td>' + escapeHtml(val || '') + '</td>';
+                });
+                html += '</tr>';
+            });
+            html += '</tbody>';
+
+            html += '</table>';
+            container.innerHTML = html;
+        });
+    });
+}
+
+// ============================================================
+// Show Column Config Modal for Table-based Report
+// ============================================================
+function showColumnConfigModalForTable(panelId) {
+    // Reuse the existing column config modal
+    showColumnConfigModal(panelId);
+}
+
+// ============================================================
 // Render Data Entry Form
 // ============================================================
 function renderDataEntryForm(panelId, tableType, reportId, filter, container) {
@@ -1750,7 +1907,12 @@ function addPanel() {
     } else if (selectedPanelType === 'DataEntry' && tableId) {
         data['t184'] = tableId;
     } else if (selectedPanelType === 'Report') {
-        // Report type doesn't need t184
+        // Report panel type: if table is selected as data source, save tableId to t184
+        // and store the explicit panel type in config to distinguish from DataEntry
+        if (tableId && !reportId) {
+            data['t184'] = tableId;
+            data['t225'] = JSON.stringify({ panelType: 'Report' });
+        }
     }
 
     // Set report
