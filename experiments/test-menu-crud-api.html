@@ -65,6 +65,50 @@
     </div>
 
     <div class="section">
+        <h2>Update Menu Item</h2>
+        <pre><code>POST: /_m_set/{menuItemId}?JSON</code></pre>
+
+        <h3>Parameters (form-urlencoded):</h3>
+        <dl class="params">
+            <dt>_xsrf</dt>
+            <dd>XSRF token from window.xsrf</dd>
+            <dt>t151</dt>
+            <dd>Menu item name (string)</dd>
+            <dt>t153</dt>
+            <dd>Menu item URL/href (string)</dd>
+            <dt>t391</dt>
+            <dd>Menu item icon (string - can be PrimeVue icon HTML or emoji)</dd>
+        </dl>
+
+        <h3>Notes:</h3>
+        <ul>
+            <li>Uses the same field IDs as the create endpoint</li>
+            <li>All three fields (name, href, icon) should be provided</li>
+        </ul>
+
+        <h3>JavaScript Implementation:</h3>
+        <pre><code>async function updateMenuItem(menuId, name, href, icon) {
+    const url = '/_m_set/' + encodeURIComponent(menuId) + '?JSON';
+
+    const params = new URLSearchParams();
+    params.append('_xsrf', window.xsrf || '');
+    params.append('t151', name);
+    params.append('t153', href);
+    params.append('t391', icon);
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString()
+    });
+
+    if (!response.ok) {
+        throw new Error('Failed to update menu item');
+    }
+}</code></pre>
+    </div>
+
+    <div class="section">
         <h2>Delete Menu Item</h2>
         <pre><code>POST: /_m_del/{menuItemId}?JSON</code></pre>
 

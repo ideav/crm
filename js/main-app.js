@@ -1084,43 +1084,78 @@ class MainAppController {
     }
 
     async updateMenuItem(menuId, name, href, icon) {
-        // For updating menu items, we need to use the appropriate API
-        // This typically involves updating the record in the menu table
+        // Update menu item via API
+        // POST: /{db}/_m_set/{menuId}?JSON
+        // Parameters: t151 (name), t153 (href), t391 (icon)
         const item = this.menuItems[menuId];
         if (!item) return;
 
-        // Update local data
-        item.name = name;
-        item.href = href;
-        item.icon = icon;
+        const dbName = typeof db !== 'undefined' ? db : '';
+        const url = '/' + dbName + '/_m_set/' + encodeURIComponent(menuId) + '?JSON';
 
-        // Find and update the DOM element
-        const menuElement = this.menuElements[menuId];
-        if (menuElement) {
-            const textSpan = menuElement.querySelector('.menu-text');
-            if (textSpan) {
-                textSpan.textContent = name;
-            }
-            const iconSpan = menuElement.querySelector('.menu-icon');
-            if (iconSpan) {
-                if (icon && icon.indexOf('<') !== -1) {
-                    iconSpan.innerHTML = icon;
-                } else if (icon && icon.trim() !== '') {
-                    iconSpan.innerHTML = icon;
-                } else {
-                    iconSpan.innerHTML = '<i class="pi pi-file"></i>';
+        const params = new URLSearchParams();
+        params.append('_xsrf', window.xsrf || '');
+        params.append('t151', name);
+        params.append('t153', href);
+        params.append('t391', icon);
+
+        try {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: params.toString()
+            });
+
+            if (response.ok) {
+                // Successfully saved - update local data
+                item.name = name;
+                item.href = href;
+                item.icon = icon;
+
+                // Find and update the DOM element
+                const menuElement = this.menuElements[menuId];
+                if (menuElement) {
+                    const textSpan = menuElement.querySelector('.menu-text');
+                    if (textSpan) {
+                        textSpan.textContent = name;
+                    }
+                    const iconSpan = menuElement.querySelector('.menu-icon');
+                    if (iconSpan) {
+                        if (icon && icon.indexOf('<') !== -1) {
+                            iconSpan.innerHTML = icon;
+                        } else if (icon && icon.trim() !== '') {
+                            iconSpan.innerHTML = icon;
+                        } else {
+                            iconSpan.innerHTML = '<i class="pi pi-file"></i>';
+                        }
+                    }
+                    if (href) {
+                        menuElement.href = '/' + dbName + '/' + href;
+                        menuElement.setAttribute('data-href', href);
+                    }
                 }
-            }
-            if (href) {
-                const dbName = typeof db !== 'undefined' ? db : '';
-                menuElement.href = '/' + dbName + '/' + href;
-                menuElement.setAttribute('data-href', href);
-            }
-        }
 
-        // Note: Actual save to backend would require appropriate API endpoint
-        // For name/href changes, this might use a record update endpoint
-        console.log('Updated menu item locally:', { menuId, name, href, icon });
+                // Update global menuData if it exists
+                if (typeof menuData !== 'undefined' && Array.isArray(menuData)) {
+                    const menuDataItem = menuData.find(m => m.menu_id === menuId);
+                    if (menuDataItem) {
+                        menuDataItem.name = name;
+                        menuDataItem.href = href;
+                        menuDataItem.icon = icon;
+                    }
+                }
+
+                console.log('Updated menu item:', { menuId, name, href, icon });
+            } else {
+                console.error('Failed to update menu item:', response.status);
+                alert('Ошибка обновления пункта меню: ' + response.status);
+            }
+        } catch (err) {
+            console.error('Error updating menu item:', err);
+            alert('Ошибка обновления пункта меню: ' + err.message);
+        }
     }
 
     async deleteMenuItem(menuId) {
