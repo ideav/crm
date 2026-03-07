@@ -1064,7 +1064,12 @@ function loadPanelData(panelId, panelReqs) {
     const buttonsEl = document.getElementById('panel-buttons-' + panelId);
 
     const panelType = panelReqs[184] || panelReqs['184'] || '';
-    const reportId = (panelReqs['ref_161'] || '').split(':').pop() || panelReqs[161] || panelReqs['161'] || '';
+    // Extract report ID - prefer numeric ID over name for API calls
+    // Reference fields come in format "id:name" (e.g., "169:МоёМеню")
+    // We should use the ID (169) for API calls, not the name
+    const reportRefValue = panelReqs['ref_161'] || panelReqs[161] || panelReqs['161'] || '';
+    const reportRef = parseReferenceValue(reportRefValue);
+    const reportId = reportRef ? reportRef.id : reportRefValue;
     const filter = panelReqs[181] || panelReqs['181'] || '';
     const config = panelReqs[225] || panelReqs['225'] || '{}';
 
@@ -1127,9 +1132,13 @@ function loadPanelButtons(panelId, container) {
 // Render Chart (using Chart.js)
 // ============================================================
 function renderChart(panelId, chartType, reportId, filter, config, container) {
-    const filterParam = filter ? '?' + decodeHtmlEntities(filter) : '';
+    // Build URL with correct parameter separator
+    // If filter exists: report/id?filter_params&JSON
+    // If no filter: report/id?JSON
+    const filterParam = filter ? decodeHtmlEntities(filter) + '&' : '';
+    const url = 'report/' + reportId + '?' + filterParam + 'JSON';
 
-    apiRequest('GET', 'report/' + reportId + filterParam + '&JSON', null, function(json) {
+    apiRequest('GET', url, null, function(json) {
         if (!json || !json.data || !json.columns) {
             container.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Нет данных[EN]No data') + '</p></div>';
             return;
@@ -1218,9 +1227,13 @@ function generateColors(count) {
 // Render Pivot Table
 // ============================================================
 function renderPivotTable(panelId, reportId, filter, config, container) {
-    const filterParam = filter ? '?' + decodeHtmlEntities(filter) : '';
+    // Build URL with correct parameter separator
+    // If filter exists: report/id?filter_params&JSON
+    // If no filter: report/id?JSON
+    const filterParam = filter ? decodeHtmlEntities(filter) + '&' : '';
+    const url = 'report/' + reportId + '?' + filterParam + 'JSON';
 
-    apiRequest('GET', 'report/' + reportId + filterParam + '&JSON', null, function(json) {
+    apiRequest('GET', url, null, function(json) {
         if (!json || !json.data || !json.columns) {
             container.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Нет данных[EN]No data') + '</p></div>';
             return;
@@ -1300,9 +1313,13 @@ function savePivotConfig(panelId, pivotId) {
 // Render Report Table
 // ============================================================
 function renderReportTable(panelId, reportId, filter, container) {
-    const filterParam = filter ? '?' + decodeHtmlEntities(filter) : '';
+    // Build URL with correct parameter separator
+    // If filter exists: report/id?filter_params&JSON
+    // If no filter: report/id?JSON
+    const filterParam = filter ? decodeHtmlEntities(filter) + '&' : '';
+    const url = 'report/' + reportId + '?' + filterParam + 'JSON';
 
-    apiRequest('GET', 'report/' + reportId + filterParam + '&JSON', null, function(json) {
+    apiRequest('GET', url, null, function(json) {
         if (!json || !json.data || !json.columns) {
             container.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Нет данных[EN]No data') + '</p></div>';
             return;
