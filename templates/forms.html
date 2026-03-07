@@ -412,6 +412,66 @@
     display: none !important;
 }
 
+/* Report Header */
+.report-header {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: var(--text-color, #333);
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #007bff;
+}
+
+/* Column Config UI */
+.column-config-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    padding: 8px;
+    background: #f8f9fa;
+    border-radius: 4px;
+}
+
+.column-config-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.column-config-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    margin-bottom: 5px;
+    background: #fff;
+    cursor: grab;
+}
+
+.column-config-item:hover {
+    background: #f5f5f5;
+}
+
+.column-config-item.dragging {
+    opacity: 0.5;
+    background: #e6f0ff;
+}
+
+.column-config-item input[type="checkbox"] {
+    margin: 0;
+}
+
+.column-config-item .drag-handle {
+    color: #888;
+    cursor: grab;
+}
+
+.column-config-item .column-name {
+    flex: 1;
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
     .forms-header {
@@ -654,6 +714,33 @@
             </button>
             <button class="btn btn-primary" onclick="addButtonToPanel()">
                 <t9n>[RU]Добавить[EN]Add</t9n>
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Column Config Modal -->
+<div class="modal-overlay hidden" id="columnConfigModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><t9n>[RU]Настройки колонок отчета[EN]Report Column Settings</t9n></h3>
+            <button class="modal-close" onclick="hideColumnConfigModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="columnConfigPanelId">
+            <p style="margin-bottom: 15px; color: #666;">
+                <t9n>[RU]Отметьте видимые колонки и перетащите для изменения порядка[EN]Check visible columns and drag to reorder</t9n>
+            </p>
+            <div class="column-config-list" id="columnConfigList">
+                <!-- Column items will be added here -->
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="hideColumnConfigModal()">
+                <t9n>[RU]Отмена[EN]Cancel</t9n>
+            </button>
+            <button class="btn btn-primary" onclick="saveColumnConfig()">
+                <t9n>[RU]Сохранить[EN]Save</t9n>
             </button>
         </div>
     </div>
@@ -1082,13 +1169,13 @@ function loadPanelData(panelId, panelReqs) {
     } else if (['XYChart', 'PieChart', 'Histogram', 'Bubble'].includes(panelType) && reportId) {
         renderChart(panelId, panelType, reportId, filter, config, contentEl);
     } else if (panelType === 'Report' || (!panelType && reportId)) {
-        renderReportTable(panelId, reportId, filter, contentEl);
+        renderReportTable(panelId, reportId, filter, config, contentEl);
     } else if (parseInt(panelType)) {
         // It's a table/object type - render data entry form
         renderDataEntryForm(panelId, panelType, reportId, filter, contentEl);
     } else if (reportId) {
         // Default to report table
-        renderReportTable(panelId, reportId, filter, contentEl);
+        renderReportTable(panelId, reportId, filter, config, contentEl);
     } else {
         contentEl.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Настройте источник данных для этой панели[EN]Configure data source for this panel') + '</p></div>';
     }
@@ -1312,7 +1399,7 @@ function savePivotConfig(panelId, pivotId) {
 // ============================================================
 // Render Report Table
 // ============================================================
-function renderReportTable(panelId, reportId, filter, container) {
+function renderReportTable(panelId, reportId, filter, config, container) {
     // Build URL with correct parameter separator
     // If filter exists: report/id?filter_params&JSON
     // If no filter: report/id?JSON
@@ -1325,11 +1412,86 @@ function renderReportTable(panelId, reportId, filter, container) {
             return;
         }
 
-        let html = '<table class="report-table">';
+        // Parse config for column visibility and order
+        let reportConfig = {};
+        try {
+            reportConfig = config ? JSON.parse(config) : {};
+        } catch (e) {
+            reportConfig = {};
+        }
+
+        // Get column order (o) and visible columns (v) from config
+        // If not set, use all columns in original order
+        const allColumns = json.columns;
+        let columnOrder = reportConfig.o || allColumns.map(c => c.id);
+        let visibleColumns = reportConfig.v || allColumns.map(c => c.id);
+
+        // Ensure all columns are accounted for (new columns may have been added)
+        const currentColumnIds = new Set(allColumns.map(c => c.id));
+        const configColumnIds = new Set(columnOrder);
+
+        // Add any new columns to the end
+        allColumns.forEach(function(col) {
+            if (!configColumnIds.has(col.id)) {
+                columnOrder.push(col.id);
+                visibleColumns.push(col.id);
+            }
+        });
+
+        // Filter out deleted columns from order
+        columnOrder = columnOrder.filter(function(id) {
+            return currentColumnIds.has(id);
+        });
+        visibleColumns = visibleColumns.filter(function(id) {
+            return currentColumnIds.has(id);
+        });
+
+        // Build ordered visible columns array
+        const orderedVisibleColumns = columnOrder
+            .filter(function(id) {
+                return visibleColumns.includes(id);
+            })
+            .map(function(id) {
+                return allColumns.find(function(c) { return c.id === id; });
+            })
+            .filter(Boolean);
+
+        // Build column index map for data access
+        const columnIndexMap = {};
+        allColumns.forEach(function(col, idx) {
+            columnIndexMap[col.id] = idx;
+        });
+
+        let html = '';
+
+        // Display report header if present
+        if (json.header) {
+            html += '<div class="report-header">' + escapeHtml(json.header) + '</div>';
+        }
+
+        // In edit mode, show column configuration button
+        if (FormConstructor.editMode) {
+            html += '<div class="column-config-bar">';
+            html += '<button class="btn btn-sm btn-secondary" onclick="showColumnConfigModal(' + panelId + ')">';
+            html += '<i class="pi pi-cog"></i> ' + t9n('[RU]Настройки колонок[EN]Column Settings');
+            html += '</button>';
+            html += '</div>';
+        }
+
+        // Store column data for configuration modal
+        FormConstructor.reportColumns = FormConstructor.reportColumns || {};
+        FormConstructor.reportColumns[panelId] = {
+            all: allColumns,
+            order: columnOrder,
+            visible: visibleColumns,
+            indexMap: columnIndexMap
+        };
+
+        html += '<table class="report-table">';
 
         // Header
         html += '<thead><tr>';
-        json.columns.forEach(function(col) {
+        orderedVisibleColumns.forEach(function(col) {
             html += '<th>' + escapeHtml(col.name) + '</th>';
         });
         html += '</tr></thead>';
@@ -1339,20 +1501,21 @@ function renderReportTable(panelId, reportId, filter, container) {
         const rowCount = json.data[0] ? json.data[0].length : 0;
         for (let i = 0; i < rowCount; i++) {
             html += '<tr>';
-            for (let j = 0; j < json.columns.length; j++) {
-                let val = json.data[j] ? json.data[j][i] : '';
+            orderedVisibleColumns.forEach(function(col) {
+                const dataIdx = columnIndexMap[col.id];
+                let val = json.data[dataIdx] ? json.data[dataIdx][i] : '';
                 // For reference fields (id:name format), display only the name
                 val = getDisplayValue(val);
                 html += '<td>' + val + '</td>'; // Keep HTML for links etc
-            }
+            });
             html += '</tr>';
         }
         html += '</tbody>';
 
         // Totals
-        if (json.columns.some(c => c.totals !== undefined)) {
+        if (orderedVisibleColumns.some(c => c.totals !== undefined)) {
             html += '<tfoot><tr>';
-            json.columns.forEach(function(col) {
+            orderedVisibleColumns.forEach(function(col) {
                 html += '<td><strong>' + (col.totals || '') + '</strong></td>';
             });
             html += '</tr></tfoot>';
@@ -1753,6 +1916,124 @@ function getMetadata(tableId, callback) {
             FormConstructor.metadataCache[tableId] = json;
         }
         callback(json);
+    });
+}
+
+// ============================================================
+// Column Configuration Modal Functions
+// ============================================================
+function showColumnConfigModal(panelId) {
+    const columnData = FormConstructor.reportColumns && FormConstructor.reportColumns[panelId];
+    if (!columnData) {
+        alert(t9n('[RU]Данные колонок не найдены[EN]Column data not found'));
+        return;
+    }
+
+    document.getElementById('columnConfigPanelId').value = panelId;
+
+    // Build column list based on current order
+    const listContainer = document.getElementById('columnConfigList');
+    let html = '';
+
+    columnData.order.forEach(function(colId, index) {
+        const column = columnData.all.find(function(c) { return c.id === colId; });
+        if (!column) return;
+
+        const isVisible = columnData.visible.includes(colId);
+        html += '<div class="column-config-item" data-column-id="' + colId + '" draggable="true">';
+        html += '<span class="drag-handle"><i class="pi pi-bars"></i></span>';
+        html += '<input type="checkbox" ' + (isVisible ? 'checked' : '') + ' onchange="toggleColumnVisibility(this, \'' + colId + '\')">';
+        html += '<span class="column-name">' + escapeHtml(column.name) + '</span>';
+        html += '</div>';
+    });
+
+    listContainer.innerHTML = html;
+
+    // Initialize drag and drop
+    initColumnDragAndDrop();
+
+    document.getElementById('columnConfigModal').classList.remove('hidden');
+}
+
+function hideColumnConfigModal() {
+    document.getElementById('columnConfigModal').classList.add('hidden');
+}
+
+function toggleColumnVisibility(checkbox, colId) {
+    const panelId = document.getElementById('columnConfigPanelId').value;
+    const columnData = FormConstructor.reportColumns[panelId];
+    if (!columnData) return;
+
+    if (checkbox.checked) {
+        if (!columnData.visible.includes(colId)) {
+            columnData.visible.push(colId);
+        }
+    } else {
+        columnData.visible = columnData.visible.filter(function(id) { return id !== colId; });
+    }
+}
+
+function initColumnDragAndDrop() {
+    const container = document.getElementById('columnConfigList');
+    const items = container.querySelectorAll('.column-config-item');
+    let draggedItem = null;
+
+    items.forEach(function(item) {
+        item.addEventListener('dragstart', function(e) {
+            draggedItem = this;
+            this.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        });
+
+        item.addEventListener('dragend', function() {
+            this.classList.remove('dragging');
+            draggedItem = null;
+        });
+
+        item.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+
+            if (draggedItem && draggedItem !== this) {
+                const rect = this.getBoundingClientRect();
+                const midY = rect.top + rect.height / 2;
+                if (e.clientY < midY) {
+                    container.insertBefore(draggedItem, this);
+                } else {
+                    container.insertBefore(draggedItem, this.nextSibling);
+                }
+            }
+        });
+    });
+}
+
+function saveColumnConfig() {
+    const panelId = document.getElementById('columnConfigPanelId').value;
+    const columnData = FormConstructor.reportColumns[panelId];
+    if (!columnData) return;
+
+    // Get new column order from DOM
+    const container = document.getElementById('columnConfigList');
+    const items = container.querySelectorAll('.column-config-item');
+    const newOrder = [];
+
+    items.forEach(function(item) {
+        newOrder.push(item.getAttribute('data-column-id'));
+    });
+
+    // Update the stored order
+    columnData.order = newOrder;
+
+    // Build config JSON with order (o) and visible columns (v)
+    const config = {
+        o: newOrder,
+        v: columnData.visible
+    };
+
+    // Save to panel using t225 (config field)
+    apiRequest('POST', '_m_set/' + panelId + '?JSON', { 't225': JSON.stringify(config) }, function(json) {
+        hideColumnConfigModal();
+        loadFormPanels(FormConstructor.currentFormId);
     });
 }
 </script>
