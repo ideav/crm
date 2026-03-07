@@ -1,1088 +1,1618 @@
+<!--
+    Form Constructor / Forms Builder
+    templates/forms.html
+
+    Two modes:
+    1. Edit mode (GET parameter EDIT) - configure panels, add/remove elements
+    2. Display mode - render configured panels with data
+
+    Panel types:
+    - Charts: XYChart (line), PieChart, Histogram, Bubble
+    - Report tables with configurable columns
+    - Pivot tables
+    - Data entry forms
+
+    Data sources: Tables (objects) or Reports (queries)
+    Form metadata: table 137
+    Panel metadata: table 138
+-->
 <style>
-.list { position: absolute; }
-.list-open {
-    z-index: 10000;
-    background-color: #fafafa;
-    border: 1px solid #eeeeee;
+/* Form Constructor Styles */
+.forms-constructor {
+    padding: 20px;
+    max-width: 1400px;
+    margin: 0 auto;
 }
-.saving {
-    border-color: green;
-    border-width: 2px;
+
+.forms-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 10px;
 }
-.btns, .inline {
-    display: inline-block;
+
+.forms-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--text-color, #333);
+    margin: 0;
 }
-.icon8 {
-    padding: 8px;
+
+.forms-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
 }
-.alert-default {
-    display: inline-block;
-    border-color: lightgray;
-    color: rgb(51, 51, 51);
+
+.btn {
+    padding: 8px 16px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-size: 14px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s;
+}
+
+.btn-primary {
+    background: #007bff;
+    color: white;
+    border-color: #007bff;
+}
+
+.btn-primary:hover {
+    background: #0056b3;
+}
+
+.btn-secondary {
+    background: #f8f9fa;
+    color: #333;
+    border-color: #ddd;
+}
+
+.btn-secondary:hover {
+    background: #e9ecef;
+}
+
+.btn-danger {
+    background: #dc3545;
+    color: white;
+    border-color: #dc3545;
+}
+
+.btn-danger:hover {
+    background: #c82333;
+}
+
+.btn-sm {
+    padding: 4px 10px;
+    font-size: 12px;
+}
+
+/* Form List */
+.forms-list {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.forms-list h3 {
+    margin: 0 0 15px 0;
+    font-size: 1.1rem;
+    color: #555;
+}
+
+.form-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.form-item:last-child {
+    border-bottom: none;
+}
+
+.form-item-name {
+    flex: 1;
+    font-weight: 500;
+}
+
+.form-item-actions {
+    display: flex;
+    gap: 5px;
+}
+
+/* Panels Container */
+.panels-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+}
+
+/* Panel Card */
+.panel-card {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 15px;
+    min-width: 300px;
+    flex: 1;
+    max-width: 100%;
+    position: relative;
+}
+
+.panel-card.editing {
+    border-color: #007bff;
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.1);
+}
+
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.panel-title {
+    font-weight: 600;
+    font-size: 1rem;
+    color: #333;
+}
+
+.panel-actions {
+    display: flex;
+    gap: 5px;
+}
+
+.panel-content {
+    min-height: 200px;
+}
+
+.panel-meta {
+    font-size: 12px;
+    color: #888;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #f0f0f0;
+}
+
+/* Chart Container */
+.chart-container {
+    width: 100%;
+    min-height: 300px;
+}
+
+/* Table Report */
+.report-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.report-table th,
+.report-table td {
+    padding: 8px 12px;
+    text-align: left;
+    border: 1px solid #e0e0e0;
+}
+
+.report-table th {
+    background: #f8f9fa;
+    font-weight: 600;
+}
+
+.report-table tr:hover {
+    background: #f5f5f5;
+}
+
+/* Data Entry Form */
+.data-entry-form {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.form-field label {
+    font-weight: 500;
+    color: #555;
+}
+
+.form-field input,
+.form-field select,
+.form-field textarea {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.form-field input:focus,
+.form-field select:focus,
+.form-field textarea:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.1);
+}
+
+/* Add Panel Modal */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-content {
     background: white;
+    border-radius: 8px;
+    padding: 20px;
+    max-width: 500px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
 }
-.alert-secondary {
-    display: inline-block;
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #e0e0e0;
 }
-.f-styles-toggle{
-    border-bottom: 1px dashed;
+
+.modal-header h3 {
+    margin: 0;
+    font-size: 1.2rem;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: #888;
+    padding: 0;
+    line-height: 1;
+}
+
+.modal-close:hover {
+    color: #333;
+}
+
+.modal-body {
+    margin-bottom: 20px;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+/* Panel Type Selection */
+.panel-type-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.panel-type-option {
+    border: 2px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 15px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.panel-type-option:hover {
+    border-color: #007bff;
+    background: #f8f9ff;
+}
+
+.panel-type-option.selected {
+    border-color: #007bff;
+    background: #e6f0ff;
+}
+
+.panel-type-icon {
+    font-size: 2rem;
+    margin-bottom: 8px;
+}
+
+.panel-type-name {
+    font-weight: 500;
+}
+
+/* Pivot Table Styles */
+.pivot-container {
+    overflow-x: auto;
+}
+
+/* Loading State */
+.loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+    color: #888;
+}
+
+.loading::before {
+    content: '';
+    width: 20px;
+    height: 20px;
+    border: 2px solid #ddd;
+    border-top-color: #007bff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-right: 10px;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: 40px;
+    color: #888;
+}
+
+.empty-state-icon {
+    font-size: 3rem;
+    margin-bottom: 15px;
+    opacity: 0.5;
+}
+
+/* Edit Mode Indicator */
+.edit-mode-badge {
+    background: #ffc107;
+    color: #333;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+/* Panel Buttons */
+.panel-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 15px;
+}
+
+/* Hidden utility */
+.hidden {
+    display: none !important;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .forms-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .panel-card {
+        min-width: 100%;
+    }
+
+    .panel-type-grid {
+        grid-template-columns: 1fr;
+    }
 }
 </style>
-<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
-<script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
+
+<!-- Include required libraries -->
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="/css/pivot.min.css" crossorigin="anonymous" />
+<script src="/js/pivot.min.js" crossorigin="anonymous"></script>
+<script src="/js/plotly.min.js"></script>
+<script src="/js/plotly_renderers.min.js" crossorigin="anonymous"></script>
 <script src="/js/js.js"></script>
-<div class="t9n">
-<div id="show" class="list hidden">
-<a id="showanchor" onclick="byId('FormsList').classList.remove('hidden');byId('show').classList.add('hidden')"><img class="icon8" title="<t9n>[RU]Список форм[EN]Forms list</t9n>" src="https://img.icons8.com/ios/25/222222/list.png"></a>
+
+<!-- Main Constructor Container -->
+<div class="forms-constructor t9n" id="formsConstructor">
+    <!-- Header -->
+    <div class="forms-header">
+        <h1 class="forms-title" id="formTitle">
+            <t9n>[RU]Конструктор форм[EN]Form Constructor</t9n>
+        </h1>
+        <div class="forms-actions">
+            <span class="edit-mode-badge hidden" id="editModeBadge">
+                <t9n>[RU]Режим редактирования[EN]Edit Mode</t9n>
+            </span>
+            <button class="btn btn-secondary hidden" id="toggleEditBtn" onclick="toggleEditMode()">
+                <i class="pi pi-pencil"></i>
+                <t9n>[RU]Редактировать[EN]Edit</t9n>
+            </button>
+            <button class="btn btn-primary hidden" id="addPanelBtn" onclick="showAddPanelModal()">
+                <i class="pi pi-plus"></i>
+                <t9n>[RU]Добавить панель[EN]Add Panel</t9n>
+            </button>
+        </div>
+    </div>
+
+    <!-- Form Selection (shown when no form selected) -->
+    <div class="forms-list" id="formsListContainer">
+        <h3><t9n>[RU]Выберите форму или создайте новую[EN]Select a form or create new</t9n></h3>
+        <div id="formsList">
+            <!-- Forms will be loaded here -->
+            <div class="loading" id="formsLoading">
+                <t9n>[RU]Загрузка форм...[EN]Loading forms...</t9n>
+            </div>
+        </div>
+        <div style="margin-top: 15px;">
+            <form id="createFormForm" onsubmit="return createNewForm(event)">
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" id="newFormName" placeholder="<t9n>[RU]Имя новой формы[EN]New form name</t9n>"
+                           class="form-control" style="flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;">
+                    <button type="submit" class="btn btn-primary">
+                        <t9n>[RU]Создать форму[EN]Create Form</t9n>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Panels Container (shown when form selected) -->
+    <div class="panels-container hidden" id="panelsContainer">
+        <!-- Panels will be rendered here -->
+    </div>
+
+    <!-- Empty State (shown when form has no panels) -->
+    <div class="empty-state hidden" id="emptyState">
+        <div class="empty-state-icon"><i class="pi pi-th-large"></i></div>
+        <p><t9n>[RU]Эта форма пока пуста. Добавьте панель для начала работы.[EN]This form is empty. Add a panel to get started.</t9n></p>
+    </div>
 </div>
-<div id="FormsList" class="list list-open p-3 shadow hidden" onclick="event.stopPropagation?event.stopPropagation():(event.cancelBubble=true);">
-<p>
-    <t9n>[RU]Выберите форму или добавьте новую[EN]Pick a form or add a new one</t9n>
-    <a id="closeList" onclick="byId('FormsList').classList.add('hidden');byId('show').classList.remove('hidden')">
-        &nbsp;&nbsp;&nbsp;&nbsp;<img class="icon8" title="<t9n>[RU]Скрыть список[EN]Hide the list</t9n>" src="https://img.icons8.com/ios/25/222222/close-window.png">
-    </a>
-</p>
-<div>
-<form method="post" action="/{_global_.z}/_m_new/137?up=1" onsubmit="addbtn.disabled=true; return true;">
-    <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
-    <input type="hidden" name="next_act" value="{_global_.action}?edit">
-    <table>
-    <tr>
-    	<td><input placeholder="<t9n>[RU]Введите имя[EN]Enter the name</t9n>" type="text" name="t137" class="form-control form-control-sm"></td>
-    	<td><input type="submit" name="addbtn" class="btn btn-primary btn-sm" value="<t9n>[RU]Создать форму[EN]Create the form</t9n>"></td>
-    </tr>
-    </table>
-</form>
+
+<!-- Add Panel Modal -->
+<div class="modal-overlay hidden" id="addPanelModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><t9n>[RU]Добавить панель[EN]Add Panel</t9n></h3>
+            <button class="modal-close" onclick="hideAddPanelModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-field">
+                <label><t9n>[RU]Название панели[EN]Panel Name</t9n></label>
+                <input type="text" id="panelName" placeholder="<t9n>[RU]Введите название[EN]Enter name</t9n>">
+            </div>
+
+            <div class="form-field" style="margin-top: 15px;">
+                <label><t9n>[RU]Тип панели[EN]Panel Type</t9n></label>
+                <div class="panel-type-grid" id="panelTypeGrid">
+                    <div class="panel-type-option" data-type="XYChart" onclick="selectPanelType(this)">
+                        <div class="panel-type-icon"><i class="pi pi-chart-line"></i></div>
+                        <div class="panel-type-name"><t9n>[RU]Линейный график[EN]Line Chart</t9n></div>
+                    </div>
+                    <div class="panel-type-option" data-type="PieChart" onclick="selectPanelType(this)">
+                        <div class="panel-type-icon"><i class="pi pi-chart-pie"></i></div>
+                        <div class="panel-type-name"><t9n>[RU]Круговая диаграмма[EN]Pie Chart</t9n></div>
+                    </div>
+                    <div class="panel-type-option" data-type="Histogram" onclick="selectPanelType(this)">
+                        <div class="panel-type-icon"><i class="pi pi-chart-bar"></i></div>
+                        <div class="panel-type-name"><t9n>[RU]Гистограмма[EN]Histogram</t9n></div>
+                    </div>
+                    <div class="panel-type-option" data-type="Pivot" onclick="selectPanelType(this)">
+                        <div class="panel-type-icon"><i class="pi pi-table"></i></div>
+                        <div class="panel-type-name"><t9n>[RU]Сводная таблица[EN]Pivot Table</t9n></div>
+                    </div>
+                    <div class="panel-type-option" data-type="Report" onclick="selectPanelType(this)">
+                        <div class="panel-type-icon"><i class="pi pi-list"></i></div>
+                        <div class="panel-type-name"><t9n>[RU]Отчет (таблица)[EN]Report (Table)</t9n></div>
+                    </div>
+                    <div class="panel-type-option" data-type="DataEntry" onclick="selectPanelType(this)">
+                        <div class="panel-type-icon"><i class="pi pi-file-edit"></i></div>
+                        <div class="panel-type-name"><t9n>[RU]Форма ввода[EN]Data Entry Form</t9n></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-field" style="margin-top: 15px;">
+                <label><t9n>[RU]Источник данных[EN]Data Source</t9n></label>
+                <select id="dataSourceType" onchange="toggleDataSourceFields()">
+                    <option value=""><t9n>[RU]Выберите тип[EN]Select type</t9n></option>
+                    <option value="table"><t9n>[RU]Таблица (объект)[EN]Table (Object)</t9n></option>
+                    <option value="report"><t9n>[RU]Запрос (отчет)[EN]Query (Report)</t9n></option>
+                </select>
+            </div>
+
+            <div class="form-field hidden" id="tableSourceField" style="margin-top: 10px;">
+                <label><t9n>[RU]Выберите таблицу[EN]Select Table</t9n></label>
+                <select id="tableSource">
+                    <option value=""><t9n>[RU]Загрузка...[EN]Loading...</t9n></option>
+                </select>
+            </div>
+
+            <div class="form-field hidden" id="reportSourceField" style="margin-top: 10px;">
+                <label><t9n>[RU]Выберите запрос[EN]Select Query</t9n></label>
+                <select id="reportSource">
+                    <option value=""><t9n>[RU]Загрузка...[EN]Loading...</t9n></option>
+                </select>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="hideAddPanelModal()">
+                <t9n>[RU]Отмена[EN]Cancel</t9n>
+            </button>
+            <button class="btn btn-primary" onclick="addPanel()">
+                <t9n>[RU]Добавить[EN]Add</t9n>
+            </button>
+        </div>
+    </div>
 </div>
-<br/>
-<div id="list">
-    <p class="mb-2">
-        <a href="/{_global_.z}/form/:id:">&nbsp;:val:&nbsp;</a>&nbsp;
-        <a href="/{_global_.z}/form/:id:?edit" title="<t9n>[RU]Экспресс-редактор[EN]Express edit</t9n>"><svg width="28" height="28" viewBox="0 0 28 28" fill="none"><path d="M15 4L5 16H14L13 24L23 12H14L15 4Z" stroke="#666666" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>&nbsp;
-        <a href="/{_global_.z}/myform/:id:" title="<t9n>[RU]Расширенный редактор[EN]Form editor</t9n>"><svg width="28" height="28" viewBox="0 0 28 28" fill="none"><path d="M18 5L23 10L10 23H5V18L18 5Z" stroke="#666666" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>
-    </p>
+
+<!-- Edit Panel Modal -->
+<div class="modal-overlay hidden" id="editPanelModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><t9n>[RU]Настройки панели[EN]Panel Settings</t9n></h3>
+            <button class="modal-close" onclick="hideEditPanelModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="editPanelId">
+            <div class="form-field">
+                <label><t9n>[RU]Название панели[EN]Panel Name</t9n></label>
+                <input type="text" id="editPanelName">
+            </div>
+            <div class="form-field" style="margin-top: 15px;">
+                <label><t9n>[RU]Цвет шрифта[EN]Font Color</t9n></label>
+                <input type="color" id="editPanelColor" value="#333333">
+            </div>
+            <div class="form-field" style="margin-top: 15px;">
+                <label><t9n>[RU]Цвет фона[EN]Background Color</t9n></label>
+                <input type="color" id="editPanelBgColor" value="#ffffff">
+            </div>
+            <div class="form-field" style="margin-top: 15px;">
+                <label><t9n>[RU]Фильтр[EN]Filter</t9n></label>
+                <input type="text" id="editPanelFilter" placeholder="<t9n>[RU]Например: FR_Дата=1.1&TO_Дата=31.1[EN]Example: FR_Date=1.1&TO_Date=31.1</t9n>">
+            </div>
+            <div class="form-field" style="margin-top: 15px;">
+                <label><t9n>[RU]Действие после отправки[EN]Next Action</t9n></label>
+                <input type="text" id="editPanelNextAction" placeholder="<t9n>[RU]URL или действие[EN]URL or action</t9n>">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-danger" onclick="deletePanel()">
+                <t9n>[RU]Удалить[EN]Delete</t9n>
+            </button>
+            <button class="btn btn-secondary" onclick="hideEditPanelModal()">
+                <t9n>[RU]Отмена[EN]Cancel</t9n>
+            </button>
+            <button class="btn btn-primary" onclick="savePanel()">
+                <t9n>[RU]Сохранить[EN]Save</t9n>
+            </button>
+        </div>
+    </div>
 </div>
+
+<!-- Add Button Modal -->
+<div class="modal-overlay hidden" id="addButtonModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3><t9n>[RU]Добавить кнопку[EN]Add Button</t9n></h3>
+            <button class="modal-close" onclick="hideAddButtonModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="buttonPanelId">
+            <div class="form-field">
+                <label><t9n>[RU]Текст кнопки[EN]Button Text</t9n></label>
+                <input type="text" id="buttonText">
+            </div>
+            <div class="form-field" style="margin-top: 15px;">
+                <label><t9n>[RU]Действие[EN]Action</t9n></label>
+                <select id="buttonActionType" onchange="toggleButtonActionFields()">
+                    <option value="js"><t9n>[RU]Вызов функции JS[EN]Call JS Function</t9n></option>
+                    <option value="link"><t9n>[RU]Переход по ссылке[EN]Navigate to Link</t9n></option>
+                </select>
+            </div>
+            <div class="form-field" id="jsActionField" style="margin-top: 10px;">
+                <label><t9n>[RU]Имя функции[EN]Function Name</t9n></label>
+                <input type="text" id="buttonJsFunction" placeholder="<t9n>[RU]Например: myFunction()[EN]Example: myFunction()</t9n>">
+            </div>
+            <div class="form-field hidden" id="linkActionField" style="margin-top: 10px;">
+                <label><t9n>[RU]URL ссылки[EN]Link URL</t9n></label>
+                <input type="text" id="buttonLinkUrl" placeholder="<t9n>[RU]Например: /workplace?param=value[EN]Example: /workplace?param=value</t9n>">
+            </div>
+            <div class="form-field" style="margin-top: 15px;">
+                <label><t9n>[RU]CSS класс кнопки[EN]Button CSS Class</t9n></label>
+                <input type="text" id="buttonClass" value="btn btn-primary" placeholder="btn btn-primary">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="hideAddButtonModal()">
+                <t9n>[RU]Отмена[EN]Cancel</t9n>
+            </button>
+            <button class="btn btn-primary" onclick="addButtonToPanel()">
+                <t9n>[RU]Добавить[EN]Add</t9n>
+            </button>
+        </div>
+    </div>
 </div>
-</div> <!--//t9n-->
+
 <script>
-var timer,lastK,ddlItem,t=[],r=[],def=[],notNull=[],report=[],setDef=[],RepCols=[];
-var amChart=[],series=[],dateAxis=[],valueAxis=[];
-var charts={'Pivot':{'descr':'Pivot table'},
-        'XYChart':{'descr':t9n('[RU]Линейный график[EN]Line chart'),'amType':'XYChart'},
-	    'PieChart':{'descr':t9n('[RU]Круговая диаграмма[EN]Pie chart'),'amType':'PieChart'},
-	    'Histogram':{'descr':t9n('[RU]Гистограмма[EN]Histogram'),'amType':'XYChart'},
-	    'Bubble':{'descr':t9n('[RU]Пузырьки[EN]Bubble map'),'amType':'XYChart'}};
-<!-- Begin:&Edit_Typs -->
-t[{ID}]={t:{T},r:"{REF_VAL}",u:{UNIQ},v:"{VAL}"};
-if("{ORD}"){if(r[{ID}]===undefined)r[{ID}]={};r[{ID}]["{ORD}"]={i:"{REQ_ID}",t:"{REQ_T}",a:"{ATTRS}",r:"{REFT}"};}
-<!-- End:&Edit_Typs -->
-function hideList(){
-    if(!byId('FormsList').classList.contains('hidden'))
-        byId('closeList').click();
-}
-function align(i){
-    switch(i){
-		case 'PWD':
-		case 'DATE':
-		case 'BOOLEAN':
-			return 'CENTER';
-		case 'NUMBER':
-		case 'SIGNED':
-			return 'RIGHT';
-	}
-	return 'LEFT';
-}
-function unEscapeHtml(text){ // Restore the escaped HTML characters
-    var map={'&amp;':'&','&lt;':'<','&gt;':'>','&quot;':'"','&#039;':"'"};
-    return text.replace(/&.+;/g,function(m){return map[m];});
-}
-function defaults(v,i){
-    switch(v){
-        case "[NOW]":
-            var d=new Date();
-            v=d.getDate()+"."+(d.getMonth()+1)+"."+d.getFullYear()+' '+d.getHours()+':'+d.getMinutes()+':'+d.getSeconds();
-            break;
-        case "[TODAY]":
-            var d=new Date();
-            v=d.getDate()+"."+(d.getMonth()+1)+"."+d.getFullYear();
-            break;
-        case "[TOMORROW]":
-            var d=new Date(new Date().getTime() + (24 * 60 * 60 * 1000));
-            v=d.getDate()+"."+(d.getMonth()+1)+"."+d.getFullYear();
-            break;
-        case "[USER_ID]":
-            v='{_global_.user_id}';
-            break;
-        case "[USER]":
-            v='{_global_.user}';
-            break;
-        default:
-            if(i&&v.length>0)
-                newApi('GET','object/22?JSON&F_22='+v,'defReport','',i);
-    }
-    return v;
-}
-function callDefReport(json,i){
-    if(json.data[0].length)
-        $('#'+i).val(json.data[0].shift());
-}
-function defReport(json,i){
-    if(json.object&&json.object[0].id)
-        newApi('GET','report/'+json.object[0].id+'?JSON','callDefReport','',i);
-}
-function check(panel,typ){
-	for(var i in notNull[panel])
-		if(byId(i).value==''){
-			alert(t9n('[RU]Заполните поле [EN]Fill in th field ')+notNull[panel][i]+'!');
-			return false;
-		}
-    return true;
-}
-function setDefValue(i,h){
-    if(byId(i))
-    switch(byId(i).tagName){
-    case 'INPUT':
-        byId(i).value=h;
-        break;
-    case 'SELECT':
-        byId(i).value=h;
-        break;
-    case 'BOOLEAN':
-        if(h.length)
-            byId(i).checked=true;
-    default:
-        byId(i).innerHTML=h;
-        break;
-    }
-}
-function myApi(m,u,b,prefix,vars){
-    prefix=prefix||''; // prefix is blank by default
-    var json,i,j,k,l,h='',req,obj=new XMLHttpRequest(); 
-    obj.open(m,'/api/{_global_.z}/'+u,true); // Открываем асинхронное соединение заданным методом по нужному адресу
-    obj.setRequestHeader('X-Authorization','{_global_.token}');
-    if(m=='POST'){ // Если это POST запрос, то передаем заданные параметры
-        obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
-        vars=vars||''; // По умолчанию список параметров пуст
-        vars='_xsrf='+xsrf+'&'+vars; // добавляем токен xsrf, необходимый для POST-запроса
-        obj.send(vars); // отправляем параметры
-    }
-    else
-        obj.send(); // отправили запрос и теперь будем ждать ответ, а пока - выходим
-    obj.onload=function(e){
-        try{json=JSON.parse(this.responseText);}
-        catch(e){console.log(this.responseText);console.log(e);}
-        obj.abort();
-        switch(b){
-        case 'FormsList':
-            if(json['&main.a.&uni_obj.&uni_obj_all'])
-                for(i in json['&main.a.&uni_obj.&uni_obj_all'].val)
-                    h+=byId('list').innerHTML.replace(/:id:/g, json['&main.a.&uni_obj.&uni_obj_all'].id[i])
-                                            .replace(':val:', json['&main.a.&uni_obj.&uni_obj_all'].val[i]);
-            byId('list').innerHTML=h;
-            if('{_global_.id}'){
-                byId('show').classList.remove('hidden');
-                byId('AddPanel').classList.remove('hidden');
-            }
-            else
-                byId('FormsList').classList.remove('hidden');
-            break;
-        case 'InsertReportValues': // Put the report results on the form
-            k=0;
-            for(i in json["data"])
-                if(setDef[l=prefix+'_'+json["columns"][k++]]!==undefined)
-                    for(j in setDef[l])
-                        setDefValue(setDef[l][j],json["data"][i][0]); // Output only the first record of the report
-            // Color the panel in case we got colors in the report
-			if(json["data"]["color"])
-				byId(prefix).style.color=json["data"]["color"][0];
-			if(json["data"]["bgcolor"])
-				byId(prefix).style.background=json["data"]["bgcolor"][0];
-            break;
+// ============================================================
+// Form Constructor - Global State
+// ============================================================
+const FormConstructor = {
+    editMode: false,
+    currentFormId: null,
+    forms: [],
+    panels: [],
+    reports: [],
+    tables: [],
+    charts: {},
+    db: '{_global_.z}',
+    xsrf: '{_global_.xsrf}',
+    token: '{_global_.token}',
 
-        case 'Buttons':
-            var a,c;
-            l=byId('Panel_'+prefix+'_Buttons').innerHTML;
-            if(json['&main.a.&uni_obj.&uni_obj_all']){
-                for(i in json['&main.a.&uni_obj.&uni_obj_all'].id){
-                    a=json['&object_reqs'][json['&main.a.&uni_obj.&uni_obj_all'].id[i]].shift();
-                    c=json['&object_reqs'][json['&main.a.&uni_obj.&uni_obj_all'].id[i]].shift();
-					h+=l.replace(':btn_name:',json['&main.a.&uni_obj.&uni_obj_all'].val[i])
-						.replace(':btn_action:',a)
-						.replace(':btn_class:',c.length?c:'btn-sm btn-outline-secondary'); // Apply the default style if empty
-                }
-				byId('Panel_'+prefix+'_Buttons').innerHTML=h;
-                byId('Panel_'+prefix+'_Buttons').style.display='block';
-            }
-            break;
-            
-        case 'Pivot': // Construct the Pivot
-            PanelID=prefix.panel;
-            // Put the Pivot object onto the panel
-            byId('Panel_'+PanelID+'_Report').innerHTML='<div id="pivot'+PanelID+'"></div>';
-            series[PanelID]=[];
-            series[PanelID][0]=[];
-            // Transform the report for the Pivot plugin
-            for(i in json.columns)
-                series[PanelID][0][i]=json.columns[i].name;
-            k=0;
-            for(i in json.data[0]){
-                k++;
-                series[PanelID][k]=[];
-                for(j in json.columns)
-                    series[PanelID][k][j]=json.data[j][i].replace(/<a[^>]*>(.*)<\/a>/i,'$1');
-            }
-            // Initialize the Pivot with the saved config, if any
-            if(prefix.config!=undefined)
-                prefix.config=JSON.parse(prefix.config);
-            else
-                prefix.config=[]; 
-            var derivers = $.pivotUtilities.derivers;
-            var renderers = $.extend($.pivotUtilities.renderers, $.pivotUtilities.plotly_renderers);
-            prefix.config.renderers = renderers;
-            $('#pivot'+PanelID).pivotUI(series[PanelID],prefix.config,true);
-            
-            // Show the Pivot and its instructions
-            byId('Panel_'+PanelID+'_Report').classList.remove('hidden');
-            byId('Panel_'+PanelID+'_Actions').innerHTML=byId('savePivot').innerHTML.replace(/:id:/g,PanelID);
-            break;
+    // Panel type definitions
+    panelTypes: {
+        'XYChart': { name: t9n('[RU]Линейный график[EN]Line Chart'), chartType: 'line' },
+        'PieChart': { name: t9n('[RU]Круговая диаграмма[EN]Pie Chart'), chartType: 'pie' },
+        'Histogram': { name: t9n('[RU]Гистограмма[EN]Histogram'), chartType: 'bar' },
+        'Pivot': { name: t9n('[RU]Сводная таблица[EN]Pivot Table') },
+        'Report': { name: t9n('[RU]Отчет[EN]Report') },
+        'DataEntry': { name: t9n('[RU]Форма ввода[EN]Data Entry') }
+    }
+};
 
-        case 'savePivot': // Saved pivot config
-            byId('Panel_'+prefix+'_Actions').innerHTML=byId('savePivot').innerHTML.replace(/:id:/g,prefix);
-            break;
+// ============================================================
+// Initialization
+// ============================================================
+document.addEventListener('DOMContentLoaded', function() {
+    // Check for EDIT parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    FormConstructor.editMode = urlParams.has('EDIT') || urlParams.has('edit');
 
-        case 'ShowChart': // Construct the chart
-    	    var panelID=prefix.panel;
-            byId('Panel_'+panelID+'_Report').innerHTML='<div id="chartdiv'+panelID+'"></div>';
-            am4core.ready(function() {
-                // Themes
-                am4core.useTheme(am4themes_animated);
-                // Create chart instance
-                amChart[panelID] = am4core.create('chartdiv'+panelID, am4charts[charts[prefix.chart].amType]);
-                // Transform the report for the AmChart plugin
-                for(i in json.data[0])
-                    for(j in json.data){
-                        if(amChart[panelID].data[i]==undefined)
-                            amChart[panelID].data[i]=[];
-                        amChart[panelID].data[i][j]=json.data[j][i];
-                    }
-                ShowChart(panelID,prefix.chart,json);
-                if(prefix.config){
-                    $('#'+panelID).find('.f-styles-input').val(prefix.config);
-                    $('#chartdiv'+panelID).attr('style',prefix.config);
-                }
-                else
-                    $('#'+panelID).find('.f-styles-input').val($('#chartdiv'+panelID).attr('style'));
-                if(edit)
-                    $('#'+panelID).find('.f-styles').show();
+    // Get form ID from URL
+    const pathParts = window.location.pathname.split('/');
+    const formIdIndex = pathParts.indexOf('forms') + 1;
+    if (formIdIndex > 0 && pathParts[formIdIndex]) {
+        FormConstructor.currentFormId = pathParts[formIdIndex];
+    }
+
+    // Also check for id in URL parameter
+    if ('{_global_.id}' && '{_global_.id}' !== '') {
+        FormConstructor.currentFormId = '{_global_.id}';
+    }
+
+    // Initialize UI
+    updateEditModeUI();
+
+    // Load data
+    loadForms();
+    loadReports();
+    loadTables();
+
+    // If form ID is set, load that form
+    if (FormConstructor.currentFormId) {
+        loadFormPanels(FormConstructor.currentFormId);
+    }
+
+    // Localize
+    if (typeof localize === 'function') {
+        localize();
+    }
+});
+
+// ============================================================
+// API Functions
+// ============================================================
+function apiRequest(method, endpoint, data, callback) {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, '/api/' + FormConstructor.db + '/' + endpoint, true);
+    xhr.setRequestHeader('X-Authorization', FormConstructor.token);
+
+    if (method === 'POST') {
+        xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    }
+
+    xhr.onload = function() {
+        try {
+            const json = JSON.parse(this.responseText);
+            if (callback) callback(json);
+        } catch (e) {
+            console.error('API Error:', e, this.responseText);
+            if (callback) callback(null);
+        }
+    };
+
+    xhr.onerror = function() {
+        console.error('API Request failed');
+        if (callback) callback(null);
+    };
+
+    if (method === 'POST' && data) {
+        let params = '_xsrf=' + encodeURIComponent(FormConstructor.xsrf);
+        for (const key in data) {
+            params += '&' + encodeURIComponent(key) + '=' + encodeURIComponent(data[key]);
+        }
+        xhr.send(params);
+    } else {
+        xhr.send();
+    }
+}
+
+// ============================================================
+// Load Forms List
+// ============================================================
+function loadForms() {
+    apiRequest('GET', 'object/137?JSON_OBJ&LIMIT=1000', null, function(json) {
+        const container = document.getElementById('formsList');
+        const loading = document.getElementById('formsLoading');
+
+        if (loading) loading.classList.add('hidden');
+
+        if (!json || !json.object) {
+            container.innerHTML = '<p>' + t9n('[RU]Нет форм[EN]No forms') + '</p>';
+            return;
+        }
+
+        FormConstructor.forms = json.object;
+
+        let html = '';
+        json.object.forEach(function(form) {
+            html += '<div class="form-item">';
+            html += '<span class="form-item-name">' + escapeHtml(form.val || form.name || 'Form ' + form.id) + '</span>';
+            html += '<div class="form-item-actions">';
+            html += '<a href="/' + FormConstructor.db + '/forms/' + form.id + '" class="btn btn-sm btn-secondary">' + t9n('[RU]Открыть[EN]Open') + '</a>';
+            html += '<a href="/' + FormConstructor.db + '/forms/' + form.id + '?EDIT" class="btn btn-sm btn-primary">' + t9n('[RU]Редактировать[EN]Edit') + '</a>';
+            html += '</div>';
+            html += '</div>';
+        });
+
+        container.innerHTML = html;
+
+        // If we have a current form, hide the list
+        if (FormConstructor.currentFormId) {
+            document.getElementById('formsListContainer').classList.add('hidden');
+        }
+    });
+}
+
+// ============================================================
+// Load Reports (Queries) List
+// ============================================================
+function loadReports() {
+    apiRequest('GET', 'object/22?JSON_OBJ&LIMIT=1000', null, function(json) {
+        const select = document.getElementById('reportSource');
+
+        if (!json || !json.object) {
+            select.innerHTML = '<option value="">' + t9n('[RU]Нет запросов[EN]No queries') + '</option>';
+            return;
+        }
+
+        FormConstructor.reports = json.object;
+
+        let html = '<option value="">' + t9n('[RU]Выберите запрос[EN]Select query') + '</option>';
+        json.object.forEach(function(report) {
+            html += '<option value="' + report.id + '">' + escapeHtml(report.val || report.name || 'Report ' + report.id) + '</option>';
+        });
+
+        select.innerHTML = html;
+    });
+}
+
+// ============================================================
+// Load Tables List
+// ============================================================
+function loadTables() {
+    // Load all types that have requisites (can be used as data sources)
+    apiRequest('GET', 'metadata?JSON', null, function(json) {
+        const select = document.getElementById('tableSource');
+
+        if (!json || !Array.isArray(json)) {
+            select.innerHTML = '<option value="">' + t9n('[RU]Нет таблиц[EN]No tables') + '</option>';
+            return;
+        }
+
+        FormConstructor.tables = json;
+
+        let html = '<option value="">' + t9n('[RU]Выберите таблицу[EN]Select table') + '</option>';
+        json.forEach(function(table) {
+            html += '<option value="' + table.id + '">' + escapeHtml(table.val || 'Table ' + table.id) + '</option>';
+        });
+
+        select.innerHTML = html;
+    });
+}
+
+// ============================================================
+// Load Form Panels
+// ============================================================
+function loadFormPanels(formId) {
+    document.getElementById('formsListContainer').classList.add('hidden');
+    document.getElementById('panelsContainer').classList.remove('hidden');
+
+    apiRequest('GET', 'object/138?F_U=' + formId + '&JSON_OBJ', null, function(json) {
+        const container = document.getElementById('panelsContainer');
+        const emptyState = document.getElementById('emptyState');
+
+        // Get form name
+        apiRequest('GET', 'object/137/' + formId + '?JSON_OBJ', null, function(formJson) {
+            if (formJson && formJson.object && formJson.object[0]) {
+                document.getElementById('formTitle').textContent = formJson.object[0].val || formJson.object[0].name || 'Form';
+            }
+        });
+
+        if (!json || !json.object || json.object.length === 0) {
+            container.innerHTML = '';
+            emptyState.classList.remove('hidden');
+
+            // Show add panel button in edit mode
+            if (FormConstructor.editMode) {
+                document.getElementById('addPanelBtn').classList.remove('hidden');
+            }
+            return;
+        }
+
+        FormConstructor.panels = json.object;
+        emptyState.classList.add('hidden');
+
+        // Show add panel button in edit mode
+        if (FormConstructor.editMode) {
+            document.getElementById('addPanelBtn').classList.remove('hidden');
+        }
+
+        // Render panels
+        renderPanels(json.object, json.reqs || {});
+    });
+}
+
+// ============================================================
+// Render Panels
+// ============================================================
+function renderPanels(panels, reqs) {
+    const container = document.getElementById('panelsContainer');
+    container.innerHTML = '';
+
+    panels.forEach(function(panel) {
+        const panelReqs = reqs[panel.id] || {};
+        const panelEl = createPanelElement(panel, panelReqs);
+        container.appendChild(panelEl);
+
+        // Load panel data
+        loadPanelData(panel.id, panelReqs);
+    });
+}
+
+// ============================================================
+// Create Panel Element
+// ============================================================
+function createPanelElement(panel, panelReqs) {
+    const div = document.createElement('div');
+    div.className = 'panel-card' + (FormConstructor.editMode ? ' editing' : '');
+    div.id = 'panel-' + panel.id;
+    div.setAttribute('data-panel-id', panel.id);
+
+    // Get panel config
+    const panelType = panelReqs[184] || panelReqs['184'] || ''; // Object type or chart type
+    const reportId = panelReqs[161] || panelReqs['161'] || ''; // Report ID
+    const fontColor = panelReqs[254] || panelReqs['254'] || '#333333';
+    const bgColor = panelReqs[255] || panelReqs['255'] || '#ffffff';
+    const config = panelReqs[225] || panelReqs['225'] || '{}';
+
+    // Apply colors
+    if (fontColor) div.style.color = fontColor;
+    if (bgColor) div.style.backgroundColor = bgColor;
+
+    // Panel header
+    let headerHtml = '<div class="panel-header">';
+    headerHtml += '<span class="panel-title">' + escapeHtml(panel.val || panel.name || 'Panel ' + panel.id) + '</span>';
+
+    if (FormConstructor.editMode) {
+        headerHtml += '<div class="panel-actions">';
+        headerHtml += '<button class="btn btn-sm btn-secondary" onclick="movePanel(' + panel.id + ', -1)" title="' + t9n('[RU]Вверх[EN]Up') + '"><i class="pi pi-arrow-up"></i></button>';
+        headerHtml += '<button class="btn btn-sm btn-secondary" onclick="movePanel(' + panel.id + ', 1)" title="' + t9n('[RU]Вниз[EN]Down') + '"><i class="pi pi-arrow-down"></i></button>';
+        headerHtml += '<button class="btn btn-sm btn-secondary" onclick="showEditPanelModal(' + panel.id + ')" title="' + t9n('[RU]Настройки[EN]Settings') + '"><i class="pi pi-cog"></i></button>';
+        headerHtml += '<button class="btn btn-sm btn-secondary" onclick="showAddButtonModal(' + panel.id + ')" title="' + t9n('[RU]Добавить кнопку[EN]Add Button') + '"><i class="pi pi-plus"></i></button>';
+        headerHtml += '</div>';
+    }
+    headerHtml += '</div>';
+
+    // Panel buttons container
+    headerHtml += '<div class="panel-buttons" id="panel-buttons-' + panel.id + '"></div>';
+
+    // Panel content
+    headerHtml += '<div class="panel-content" id="panel-content-' + panel.id + '">';
+    headerHtml += '<div class="loading">' + t9n('[RU]Загрузка...[EN]Loading...') + '</div>';
+    headerHtml += '</div>';
+
+    // Panel meta (edit mode)
+    if (FormConstructor.editMode) {
+        headerHtml += '<div class="panel-meta">';
+        headerHtml += '<t9n>[RU]Тип[EN]Type</t9n>: ' + escapeHtml(getPanelTypeName(panelType));
+        if (reportId) {
+            headerHtml += ' | <t9n>[RU]Запрос[EN]Report</t9n>: ' + reportId;
+        }
+        headerHtml += '</div>';
+    }
+
+    div.innerHTML = headerHtml;
+    return div;
+}
+
+// ============================================================
+// Get Panel Type Name
+// ============================================================
+function getPanelTypeName(typeId) {
+    if (FormConstructor.panelTypes[typeId]) {
+        return FormConstructor.panelTypes[typeId].name;
+    }
+    // Try to find in tables
+    const table = FormConstructor.tables.find(t => t.id == typeId);
+    if (table) {
+        return table.val || 'Table ' + typeId;
+    }
+    return typeId || t9n('[RU]Не указан[EN]Not set');
+}
+
+// ============================================================
+// Load Panel Data
+// ============================================================
+function loadPanelData(panelId, panelReqs) {
+    const contentEl = document.getElementById('panel-content-' + panelId);
+    const buttonsEl = document.getElementById('panel-buttons-' + panelId);
+
+    const panelType = panelReqs[184] || panelReqs['184'] || '';
+    const reportId = (panelReqs['ref_161'] || '').split(':').pop() || panelReqs[161] || panelReqs['161'] || '';
+    const filter = panelReqs[181] || panelReqs['181'] || '';
+    const config = panelReqs[225] || panelReqs['225'] || '{}';
+
+    // Load buttons
+    loadPanelButtons(panelId, buttonsEl);
+
+    // Determine panel type and render accordingly
+    if (panelType === 'Pivot' && reportId) {
+        renderPivotTable(panelId, reportId, filter, config, contentEl);
+    } else if (['XYChart', 'PieChart', 'Histogram', 'Bubble'].includes(panelType) && reportId) {
+        renderChart(panelId, panelType, reportId, filter, config, contentEl);
+    } else if (panelType === 'Report' || (!panelType && reportId)) {
+        renderReportTable(panelId, reportId, filter, contentEl);
+    } else if (parseInt(panelType)) {
+        // It's a table/object type - render data entry form
+        renderDataEntryForm(panelId, panelType, reportId, filter, contentEl);
+    } else if (reportId) {
+        // Default to report table
+        renderReportTable(panelId, reportId, filter, contentEl);
+    } else {
+        contentEl.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Настройте источник данных для этой панели[EN]Configure data source for this panel') + '</p></div>';
+    }
+}
+
+// ============================================================
+// Load Panel Buttons
+// ============================================================
+function loadPanelButtons(panelId, container) {
+    apiRequest('GET', 'object/150?F_U=' + panelId, null, function(json) {
+        if (!json || !json['&main.a.&uni_obj.&uni_obj_all']) {
+            return;
+        }
+
+        const buttons = json['&main.a.&uni_obj.&uni_obj_all'];
+        const buttonReqs = json['&object_reqs'] || {};
+
+        let html = '';
+        for (let i in buttons.id) {
+            const btnId = buttons.id[i];
+            const btnName = buttons.val[i];
+            const btnReqs = buttonReqs[btnId] || [];
+            const btnAction = btnReqs[0] || '';
+            const btnClass = btnReqs[1] || 'btn btn-secondary';
+
+            if (btnAction.indexOf('javascript:') === 0 || btnAction.indexOf('(') > 0) {
+                html += '<button class="' + escapeHtml(btnClass) + '" onclick="' + escapeHtml(btnAction.replace('javascript:', '')) + '">' + escapeHtml(btnName) + '</button>';
+            } else {
+                html += '<a href="/' + FormConstructor.db + '/' + escapeHtml(btnAction) + '" class="' + escapeHtml(btnClass) + '">' + escapeHtml(btnName) + '</a>';
+            }
+        }
+
+        container.innerHTML = html;
+        if (html) {
+            container.style.display = 'flex';
+        }
+    });
+}
+
+// ============================================================
+// Render Chart (using Chart.js)
+// ============================================================
+function renderChart(panelId, chartType, reportId, filter, config, container) {
+    const filterParam = filter ? '?' + decodeHtmlEntities(filter) : '';
+
+    apiRequest('GET', 'report/' + reportId + filterParam + '&JSON', null, function(json) {
+        if (!json || !json.data || !json.columns) {
+            container.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Нет данных[EN]No data') + '</p></div>';
+            return;
+        }
+
+        // Prepare chart data
+        const labels = json.data[0] || [];
+        const datasets = [];
+
+        for (let i = 1; i < json.columns.length; i++) {
+            const colors = generateColors(labels.length);
+            datasets.push({
+                label: json.columns[i].name,
+                data: json.data[i] || [],
+                backgroundColor: colors.background,
+                borderColor: colors.border,
+                borderWidth: 1
             });
-            break;
+        }
 
-        case 'ShowReport': // Construct the report table
-            h='<TABLE class="table table-bordered report-table"><TR style="background-color:#f9f9f9;">';
-            // Table header
-            var color,colorCol,bgColorCol;
-            if(report[prefix]===undefined){ // Do we have specific columns set?
-                report[prefix]=[]; // NO - show all of them
-                for(i in json["columns"]) // Create a list and put all the columns on it
-                    report[prefix].push({"column":json["columns"][i].id,"data":json["data"][i],"alias":json["columns"][i].name
-                                    ,"format":json["columns"][i].format,"total":(json["columns"][i].totals?json["columns"][i].totals:"")});
-            }
-            else{ // YES - show the chosen ones
-                for(i in report[prefix])
-                    for(j in json["columns"]) // Set the corresponding order for columns
-                        if(report[prefix][i].column==json["columns"][j].id){
-                            report[prefix][i].format=json["columns"][j].format;
-                            report[prefix][i].data=json["data"][j];
-                            if(json["columns"][j].totals!=undefined)
-                                report[prefix][i].total=json["columns"][j].totals;
-                            break;
-                        }
-            }
-            for(i in report[prefix]){
-                h+='<TD ALIGN="center"><B>'+report[prefix][i].alias
-                if(edit&&report[prefix][i].chosen){
-                    h+='<br />';
-                    if(i>0)
-                        h+='<a onclick="post(\'_m_up/'+report[prefix][i].chosen+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+t9n('[RU]Переместить колонку левее[EN]Move the column left')+'"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/chevron-left.png"/></a>';
-                    h+='<a onclick="post(\'_m_del/'+report[prefix][i].chosen+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+t9n('[RU]Удалить колонку[EN]Delete the column')+'"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/delete-sign.png"/></a>';
-                }
-                h+='</B></TD>';
-            }
-            
-            for(i in json["columns"]){
-                // Fill in the default values in panels if any
-                if(setDef[l=prefix+'_'+json["columns"][i].id]!==undefined)
-                    for(j in setDef[l])
-                        setDefValue(setDef[l][j],json["data"][i][0]);
-                // Get the color and bgcolor columns
-                if(json["columns"][i].name.toLowerCase()=='color')
-                    colorCol=i;
-                if(json["columns"][i].name.toLowerCase()=='bgcolor')
-                    bgColorCol=i;
-            }
-            // Table contents
-            for(j in json["data"][0]){ // we're iterating the first column
-				color=''; // Color the row using color and bgcolor fields, if any
-				if(colorCol)
-					color=' color:'+json["data"][colorCol][j]+';'; // Text color
-				if(bgColorCol)
-					color+=' background:'+json["data"][bgColorCol][j]; // Background color
-				if(color!='')
-					color=' style="'+color+'"'; // Combine colors into a style definition
-                h+='<TR'+color+'>';
-                k=0;
-                for(i in report[prefix])
-                    h+='<TD ALIGN="'+align(report[prefix][i].format)+'">'+report[prefix][i].data[j]+'</TD>';
-                h+='</TR>';
-            }
-            if(json["columns"][i].totals!=undefined){ // Fill in Totals, if any
-                h+='<TR>';
-                for(i in report[prefix])
-                    h+='<TD ALIGN="right"><b>'+report[prefix][i].total+'</b></TD>';
-                h+='</TR>';
-            }
-            h+='</TABLE>';
-            byId('Panel_'+prefix+'_Report').innerHTML=h; // Show the result to the user
-            byId('Panel_'+prefix+'_Report').classList.remove('hidden');
-            break;
+        // Create canvas
+        const canvasId = 'chart-' + panelId;
+        container.innerHTML = '<div class="chart-container"><canvas id="' + canvasId + '"></canvas></div>';
 
-        case 'FillDDL': // Fill in a dropdown list for a new object
-            h=ddlItem.replace(':val:','').replace(':id:','').replace(':selected:',''); // The first empty <option>
-            j='&main.a.&uni_obj.&uni_obj_all';
-            if(json[j])
-                for(i in json[j].val)
-                    h+=ddlItem.replace(':val:',json[j].val[i])
-                        .replace(':id:',json[j].id[i])
-                        .replace(':selected:',json[j].id[i]==def[prefix]||json[j].val.length===1?'selected':'');
-            if(i>=19)
-                byId('e'+json.type.id).classList.remove('hidden');
-            byId(prefix).innerHTML=h;
-            for(i in params)
-                if(i.substr(0,1)==='t'&&parseInt(i.substr(1)))
-                    $('[name='+i+']').val(params[i]);
-            break;
+        const ctx = document.getElementById(canvasId).getContext('2d');
 
-        case 'FillPanel':
-            if(!json['&main.a.&object']) // Return in case no object found
-                break;
-            byId('create_'+prefix).innerHTML='';
-            byId('Form_'+prefix).action='/{_global_.z}/_m_save/'+json['&main.a.&object']['id'];
-            byId('Panel_'+prefix+'_Actions').innerHTML=byId('Panel_'+prefix+'_Actions').innerHTML.replace(/:obj:/g,json['&main.a.&object']['id']);
-            byId('controls_'+prefix).style.display='block';
-            for(i in json)
-                if(byId(i.substring(36))){ // Do we have a template for this type of req?
-                    h=byId(i.substring(36)).innerHTML; // Fetch the template
-                    if(json[i]['typ'] && json[i]['val']){ // Reqs with a regular textbox have Type and Val
-                        for(j in json[i]['typ'])
-                            if(byId(prefix+'_'+json[i]['typ'][j])){
-                                if(json[i]['val'][j].indexOf('<a target="_blank" href="'===0)) // Check if we have a picture file here and form an <img > tag to show it
-                                    if(new Array('gif','png','jpg','jpeg','bmp').indexOf(json[i]['val'][j].substring(26).split(".").pop().split('<').shift().toLowerCase())!=-1)
-                                        json[i]['val'][j]='<img style="max-width:400px;" src="/'+json[i]['val'][j].substring(26).split("\"").shift()+'"><br/>'+json[i]['val'][j];
-                                byId(prefix+'_'+json[i]['typ'][j]).innerHTML=h.replace(':panel:',prefix)
-                                                                            .replace(':val:',json[i]['val'][j])
-                                                                            .replace('id=":fid:'+i.substring(36)+'"','')
-                                                                            .replace(/:typ:/g,json[i]['typ'][j]);
-                            }
+        // Map panel type to Chart.js type
+        let chartJsType = 'line';
+        if (chartType === 'PieChart') chartJsType = 'pie';
+        else if (chartType === 'Histogram') chartJsType = 'bar';
+        else if (chartType === 'Bubble') chartJsType = 'bubble';
+
+        // Create chart
+        FormConstructor.charts[panelId] = new Chart(ctx, {
+            type: chartJsType,
+            data: {
+                labels: labels,
+                datasets: datasets
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
                     }
-                    else
-                    if(i=='&main.a.&object.&object_reqs.&editreq_array'){ // Array
-                        for(j in json[i]['typ']){
-                            for(k in r[json['&main.a.&object']['typ']]) // Find the requisite's type to locate the field to fill in
-                                if(r[json['&main.a.&object']['typ']][k].t==json[i]['typ'][j])
-                                    req=r[json['&main.a.&object']['typ']][k].i;
-                            if(byId(prefix+'_'+req))
-                                byId(prefix+'_'+req).innerHTML=h.replace(':val:',json[i]['_parent_.arr_num'][j]) 
-                                                                .replace(/:typ:/g,json[i]['typ'][j])
-                                                                .replace(':parent:',json['&main.a.&object']['id']);
-                        }
-                    }
-                    else
-                    if(i=='&main.a.&object.&object_reqs.&editreq_boolean') // Boolean
-                        for(j in json[i]['typ'])
-                            if(byId(prefix+'_'+json[i]['typ'][j]))
-                                byId(prefix+'_'+json[i]['typ'][j]).innerHTML=h.replace(':checked:',json[i]['checked'][j])
-                                                                            .replace(/:typ:/g,json[i]['typ'][j]);
                 }
-                else if(i=='&main.a.&object') // It is the Object's value
-                    byId(json[i]["id"]).value=json["obj"].val;
+            }
+        });
+    });
+}
 
-            var item,ddl='';
-            l=json['&main.a.&object.&object_reqs.&editreq_reference'].typ;
-            for(i in l)
-                for(j in f)
-                    if(f[j].p==prefix && f[j].Field==l[i]){ // If we got this requisite on the panel
-                        item=byId(f[j].i).innerHTML; // Fetch the DDL item template
-                        ddl=item.replace(':id:','').replace(':val:','').replace(':selected:',''); // The first option is empty
-                        h='&main.a.&object.&object_reqs.&editreq_reference.&add_obj_ref_reqs';
-                        for(k in json[h].id)
-                            if(l[i]==json[h].r[k])
-                                ddl+=item.replace(':id:',json[h]['id'][k])
-                                        .replace(':selected:',json[h]['selected'][k])
-                                        .replace(':val:',json[h]['val'][k]);
-                        byId(f[j].i).innerHTML=ddl;
-                    }
-            if(json['&main.a.&object'].up!=1){
-                byId('confirm_'+prefix).innerHTML=byId('confirm_'+prefix).innerHTML.replace(':parent:',json['&main.a.&object'].up);
-                byId('PanelHead').innerHTML=' ('+json['&main.a.&object'].up+'): '+byId('PanelHead').innerHTML;
-            }
-            break;
+// ============================================================
+// Generate Chart Colors
+// ============================================================
+function generateColors(count) {
+    const colors = [
+        'rgba(54, 162, 235, 0.6)',
+        'rgba(255, 99, 132, 0.6)',
+        'rgba(255, 206, 86, 0.6)',
+        'rgba(75, 192, 192, 0.6)',
+        'rgba(153, 102, 255, 0.6)',
+        'rgba(255, 159, 64, 0.6)',
+        'rgba(199, 199, 199, 0.6)',
+        'rgba(83, 102, 255, 0.6)',
+        'rgba(255, 99, 255, 0.6)',
+        'rgba(99, 255, 132, 0.6)'
+    ];
 
-        case 'Parent': // In case we got the parent object's info, enable the Create button
-            if(json['&main.a.&uni_obj.&uni_obj_parent']){
-                byId('PanelHead').innerHTML=json['&main.a.&uni_obj.&uni_obj_parent'].typ+' ('+json['&main.a.&uni_obj'].up+'): '+byId('PanelHead').innerHTML;
-                byId('up_'+prefix).value=json['&main.a.&uni_obj'].up;
-                byId('Button_'+prefix).disabled=false;
-            }
-            else
-                byId('PanelHead').innerHTML='(родитель не найден): '+byId('PanelHead').innerHTML;
-            break;
+    const borderColors = colors.map(c => c.replace('0.6', '1'));
 
-        case 'FormPanels':
-            var id,field,fields,typ,chart,origtype,rep,base,color,bgcolor,filter,PanelID,ctrl;
-            ddlItem=byId(':fid:').innerHTML;
-            l=json['&main.a.&uni_obj.&uni_obj_parent'];
-            if(l.tid==137)
-                document.title=l.name; // Set the title
-            else{
-                byId('OneForm').innerHTML='Форма не найдена!';
-                byId('OneForm').style.display='block';
-                break;
-            }
-            if(document.documentElement.clientWidth>700)
-                byId('frame').style='margin:20px';
-            // Set the form header - the panels' parent name
-            byId('Title').innerHTML=byId('Title').innerHTML.replace(/:val:/g,l.name);
-            // Fetch the panel template
-            l=byId(b).innerHTML;
-            byId(b).innerHTML='';
-            if(json['&main.a.&uni_obj.&uni_obj_all']!==undefined)
-            for(i in json['&main.a.&uni_obj.&uni_obj_all'].val){
-                PanelID=json['&main.a.&uni_obj.&uni_obj_all'].id[i];
-                // Remember the Type of the Object and the Report used, if any
-                typ=json['&object_reqs'][PanelID][0];
-                if(parseInt(typ))
-                    chart=undefined;
-                else{
-                    chart=typ;
-                    typ=undefined;
-                }
-                h='';
-				id=0;
-                if(params['F_'+typ]) // Check if we have an object of certain type defined
-                    id=params['F_'+typ];
-                else  // or just created here
-                if(params['new'] && document.location.hash.substring(1)>0){
-                    origtype=params['new'].split('/').shift();
-                    if(origtype==typ)
-                        id=document.location.hash.substring(1)
-                    else // Check if it was an array requisite
-                    for(j in r)
-                        for(k in r[j])
-                            if(r[j][k].i==typ && r[j][k].t==origtype){
-                                id=document.location.hash.substring(1);
-                                break;
-                            }
-                }
-                if(id!=0) // In case we have an object requested, fetch its details
-                    myApi('GET','edit_obj/'+id,'FillPanel',PanelID); // and fill in its fields
-                rep=json.reqs[PanelID]["ref_161"]===undefined?'':json.reqs[PanelID]["ref_161"].split(':').pop();
-                if((rep!='')&&edit)
-        		    myApi('GET','object/28?F_U='+rep+'&F_107=!%&PanelID='+PanelID,'RepCols', PanelID);
-                h+=l.replace(/:id:/g,PanelID)
-                    .replace(':src:',typ)
-                    .replace(':val:',json['&main.a.&uni_obj.&uni_obj_all'].val[i])
-                    .replace(/:type:/g,typ)
-                    .replace(/:addFieldClass:/g,chart?'hidden':'')
-                    .replace(':object:',(typ&&t[typ])?t[typ].v:chart?charts[chart].descr:'--')
-                    .replace(':reportID:',rep==''?'--':json.reqs[PanelID]['ref_161'].substring(3)) // Report ID
-                    .replace(':report:',rep==''?'--':json.reqs[PanelID][161]); // Report name
-				if(json['&object_reqs'][PanelID][3].indexOf('(0)')==-1)
-        		    myApi('GET','object/150?F_U='+PanelID,'Buttons',PanelID);
-				// Check if we're a requisite (we should have a parent record then)
-				origtype=0;
-                for(j in r)
-                    for(k in r[j])
-                        if(r[j][k].i==typ){
-                            origtype=typ;
-                            typ=r[j][k].t;
-                            break;
-                        }
-                // Insert the Object edit control
-                if(typ)
-                    h=h.replace(':ObjectEdit:',byId('_short').innerHTML.replace(':fid:',id==0?PanelID:id))
-                        .replace('_short','')
-                        .replace(':val:','')
-						.replace(/:panel:/g,PanelID)
-                        .replace(/:typ:/g,typ);
-                else // Remove the object edit form in case we have no Object set
-                    h=h.replace(':ObjectEdit:','');
-                // Draw the panel
-                byId(b).innerHTML+=h;
+    const background = [];
+    const border = [];
+    for (let i = 0; i < count; i++) {
+        background.push(colors[i % colors.length]);
+        border.push(borderColors[i % borderColors.length]);
+    }
 
-                if(origtype){ // We need a parent
-                    byId('Button_'+PanelID).disabled=true; // Disable the controls until we check the parent
-                    if(params['up']) // We have a parent set in UP
-                        myApi('GET','object/'+typ+'/?F_U='+params['up'],'Parent',PanelID);
-                    else if(params['F_'+j]) // or by the type code filter
-                        myApi('GET','object/'+typ+'/?F_U='+params['F_'+j],'Parent',PanelID);
-                }
-                // Fill in the Panel's fields
-                h=fields=ctrl='';
-                notNull[PanelID]=[];
-                field=byId('Panel_'+PanelID+'_Fields').innerHTML;
-                for(j in f)
-                    if(f[j].p==PanelID){
-                        base=0;
-                        // This is a report field
-                        if(f[j].ReportField!=''){
-                            if(f[j].FieldAlias=='')
-                                f[j].FieldAlias=f[j].ReportField;
-                        }
-                        else
-                        // This is a form's type requisite - find it among requisites
-                        for(k in r[typ])
-                            if(r[typ][k].i==f[j].Field){
-                                if(r[r[typ][k].t] && t[r[typ][k].t].r=='') // In case the requisite has reqs - it is an array
-                                    base=1;
-                                else
-                                    base=t[r[typ][k].t].t;
-                                if(f[j].FieldAlias=='')
-                                    f[j].FieldAlias=t[r[typ][k].t].v;
-                                if(r[typ][k].a.indexOf(':ALIAS=')+1){ // This requisite has an Alias
-                                    tmp=r[typ][k].a.split(':ALIAS=').pop().split(':').shift();
-                                    f[j].FieldAlias=tmp+' ('+f[j].FieldAlias+')';
-                                    r[typ][k].a=r[typ][k].a.replace(':ALIAS='+tmp+':','');
-                                }
-                                if(r[typ][k].a.indexOf(':!NULL:')+1){ // This field must not be empty
-                                    notNull[PanelID][f[j].i]=f[j].FieldAlias;
-                                    f[j].FieldAlias='<b><font color="red">'+f[j].FieldAlias+'</font></b>';
-                                    r[typ][k].a=r[typ][k].a.replace(':!NULL:','');
-                                }
-                                r[typ][k].a=r[typ][k].a.replace(':MULTI:','');
-                                break;
-                            }
-                        if(edit){
-                            ctrl='<a onclick="post(\'_m_del/'+f[j].i+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+t9n('[RU]Удалить поле[EN]Delete the input')+'"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/delete-sign.png"/></a>';
-                            if(fields!='')
-                                ctrl='<a onclick="post(\'_m_up/'+f[j].i+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+t9n('[RU]Переместить поле выше[EN]Move the input up')+'"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/up.png"/></a>'
-                                        +ctrl;
-                        }
-                        if(base==0){ // This is a report field
-                            if(report[PanelID]===undefined)
-                                report[PanelID]=[];
-                            report[PanelID].push({"column":f[j].Field,"data":{},"alias":(f[j].FieldAlias==''?f[j].ReportFieldAlias:f[j].FieldAlias),"format":"","total":"","chosen":f[j].i});
-                            fields+=field.replace(':Type:',f[j].Field)
-                                        .replace(':FieldLabel:',f[j].FieldAlias==''?f[j].ReportFieldAlias:f[j].FieldAlias)
-                                        .replace(':control:','<div style="margin-top:5px;margin-bottom:5px;font-weight:bold;" id="'+f[j].i+'"></div>')
-                                        .replace(':ctrl:',ctrl);
-                        }
-                        else if(byId(bt[base])){ // This is a known base type
-                            fields+=field.replace(':Type:',f[j].Field)
-                                        .replace(':FieldLabel:',f[j].FieldAlias)
-                                        .replace(':control:',byId(bt[base]).innerHTML.replace(':val:',f[j].FieldValue.length?f[j].FieldValue:defaults(r[typ][k].a,f[j].i))
-                                                                                .replace(bt[base],'')
-                                                                                .replace(':fid:',f[j].i)
-                                                                                .replace(':checked:',f[j].FieldValue.length||defaults(r[typ][k].a.length)?'checked':'')
-                                                                                .replace(/:typ:/g,f[j].Field))
-                                        .replace(':ctrl:',ctrl);
-                        }
-                        else if(r[typ][k].r){ // This is a reference
-							if(id==0){
-								myApi('GET','object/'+t[r[typ][k].t].t,'FillDDL',f[j].i);
-								def[f[j].i]=defaults(r[typ][k].a,f[j].i); // Fetch and save the default value
-							}
-                            fields+=field.replace(':Type:',f[j].Field)
-                                        .replace(':FieldLabel:',f[j].FieldAlias)
-                                        .replace(':control:',byId('_reference').innerHTML.replace(/:fid:/g,f[j].i)
-                                                                                        .replace(/:eid:/g,t[r[typ][k].t].t)
-                                                                                        .replace('_reference','')
-                                                                                        .replace(/:typ:/g,f[j].Field))
-                                        .replace(':ctrl:',ctrl);
-                        }
-                        else // Unknown type
-                            fields+=field.replace(':Type:',f[j].Field)
-                                        .replace(':FieldLabel:',f[j].FieldAlias)
-                                        .replace(':control:',byId("_pwd").innerHTML.replace(':val:',''))
-                                        .replace(':ctrl:',ctrl);
-                    }
-				// Color the panel as requested or with the defaults
-				color=json['&object_reqs'][PanelID][4]==''?'#333333':json['&object_reqs'][PanelID][4];
-				bgcolor=json['&object_reqs'][PanelID][5]==''?'white':json['&object_reqs'][PanelID][5];
-				byId(PanelID).style.color=color;
-				byId(PanelID).style.background=bgcolor;
-				// Set NextAction in case it's given
-				if(json['&object_reqs'][PanelID][6]!='')
-				    byId('next_act_'+PanelID).value=json['&object_reqs'][PanelID][6];
-				// Get the filter
-				filter=json['&object_reqs'][PanelID][7]==''?'':'?'+unEscapeHtml(json['&object_reqs'][PanelID][7])
-				filter+=window.location.search.replace('?',filter==''?'?':'&');
-				// Display the panel
-				if(chart){
-				    if(chart=='Pivot')
-                        myApi('GET','report/'+rep+filter,'Pivot',{'panel':PanelID,'config':json.reqs[PanelID][225]});
-				    else
-                        myApi('GET','report/'+rep+filter,'ShowChart',{'panel':PanelID,'chart':chart,'config':json.reqs[PanelID][225]});
-				    continue;
-				}
-                if(!typ){ // No Object chosen, display the report as is
-                    myApi('GET','report/'+rep+filter,'ShowReport',PanelID);
-                    byId('Panel_'+PanelID+'_Report').innerHTML='[Report_'+rep+']';
-                    //byId('Panel_'+PanelID+'_Report').classList.remove('hidden');
-                    byId('Panel_'+PanelID+'_Actions').innerHTML='';
-                }
-                else{
-                    byId('Panel_'+PanelID+'_Fields').innerHTML=fields;
-                    if(rep)
-                        myApi('GET','report/'+rep+filter,'InsertReportValues',PanelID);
-                }
-                // Append the requisites to the dropdown list in the form to add a field
-                if(byId(typ)&&edit){
-                    h='';
-                	for(i in r[typ])
-                	    if($('input[name=t'+r[typ][i].i+'],select[name=t'+r[typ][i].i+'],textarea[name=t'+r[typ][i].i+']').length===0){
-                    		h+='<option value="'+r[typ][i].i+'">';
-                    		if(r[typ][i].a.indexOf(':ALIAS=')+1) // We have an alias for this ref requisite
-                    		    h+=r[typ][i].a.split(':ALIAS=').pop().split(':').shift()+' ('+t[r[typ][i].t].v+')</option>';
-                    		else
-                    		    h+=t[r[typ][i].t].v+'</option>';
-                    	}
-                    byId('field'+PanelID).innerHTML=h;
-                }
+    return { background, border };
+}
+
+// ============================================================
+// Render Pivot Table
+// ============================================================
+function renderPivotTable(panelId, reportId, filter, config, container) {
+    const filterParam = filter ? '?' + decodeHtmlEntities(filter) : '';
+
+    apiRequest('GET', 'report/' + reportId + filterParam + '&JSON', null, function(json) {
+        if (!json || !json.data || !json.columns) {
+            container.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Нет данных[EN]No data') + '</p></div>';
+            return;
+        }
+
+        // Transform data for pivot
+        const pivotData = [];
+        const headers = json.columns.map(c => c.name);
+        pivotData.push(headers);
+
+        const rowCount = json.data[0] ? json.data[0].length : 0;
+        for (let i = 0; i < rowCount; i++) {
+            const row = [];
+            for (let j = 0; j < json.columns.length; j++) {
+                let val = json.data[j] ? json.data[j][i] : '';
+                // Strip HTML tags
+                val = String(val).replace(/<[^>]*>/g, '');
+                row.push(val);
             }
-            byId('OneForm').style.display='block'; // Show the form and its panels
-            for(i in params)
-                if(i.substr(0,1)==='t'&&parseInt(i.substr(1)))
-                    $('[name='+i+']').val(params[i]);
-            break;
-        case 'RepCols':
-            if(json['&main.a.&uni_obj.&uni_obj_all']){
-                for(i in json['&main.a.&uni_obj.&uni_obj_all'].id){
-                    l=json['&object_reqs'][json['&main.a.&uni_obj.&uni_obj_all'].id[i]][0]+' ('+json['&main.a.&uni_obj.&uni_obj_all'].val[i]+')</option>';
-                    h+='<option value="'+json['&main.a.&uni_obj.&uni_obj_all'].id[i]+'">'+l;
-                }
-                byId('field'+prefix).innerHTML+=h;
+            pivotData.push(row);
+        }
+
+        // Create pivot container
+        const pivotId = 'pivot-' + panelId;
+        container.innerHTML = '<div class="pivot-container" id="' + pivotId + '"></div>';
+
+        // Parse config
+        let pivotConfig = {};
+        try {
+            pivotConfig = config ? JSON.parse(config) : {};
+        } catch (e) {
+            pivotConfig = {};
+        }
+
+        // Initialize pivot
+        if (typeof $ !== 'undefined' && $.fn.pivotUI) {
+            const renderers = $.extend($.pivotUtilities.renderers, $.pivotUtilities.plotly_renderers || {});
+            pivotConfig.renderers = renderers;
+
+            $('#' + pivotId).pivotUI(pivotData, pivotConfig, true);
+
+            // Add save button in edit mode
+            if (FormConstructor.editMode) {
+                const saveBtn = document.createElement('button');
+                saveBtn.className = 'btn btn-sm btn-primary';
+                saveBtn.style.marginTop = '10px';
+                saveBtn.textContent = t9n('[RU]Сохранить настройки pivot[EN]Save Pivot Config');
+                saveBtn.onclick = function() {
+                    savePivotConfig(panelId, pivotId);
+                };
+                container.appendChild(saveBtn);
             }
-            break;
+        } else {
+            container.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Pivot библиотека не загружена[EN]Pivot library not loaded') + '</p></div>';
+        }
+    });
+}
+
+// ============================================================
+// Save Pivot Config
+// ============================================================
+function savePivotConfig(panelId, pivotId) {
+    if (typeof $ === 'undefined' || !$.fn.pivotUI) return;
+
+    const config = JSON.parse(JSON.stringify($('#' + pivotId).data('pivotUIOptions')));
+    delete config.aggregators;
+    delete config.renderers;
+
+    apiRequest('POST', '_m_set/' + panelId, { 't225': JSON.stringify(config) }, function(json) {
+        alert(t9n('[RU]Настройки сохранены[EN]Settings saved'));
+    });
+}
+
+// ============================================================
+// Render Report Table
+// ============================================================
+function renderReportTable(panelId, reportId, filter, container) {
+    const filterParam = filter ? '?' + decodeHtmlEntities(filter) : '';
+
+    apiRequest('GET', 'report/' + reportId + filterParam + '&JSON', null, function(json) {
+        if (!json || !json.data || !json.columns) {
+            container.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Нет данных[EN]No data') + '</p></div>';
+            return;
+        }
+
+        let html = '<table class="report-table">';
+
+        // Header
+        html += '<thead><tr>';
+        json.columns.forEach(function(col) {
+            html += '<th>' + escapeHtml(col.name) + '</th>';
+        });
+        html += '</tr></thead>';
+
+        // Body
+        html += '<tbody>';
+        const rowCount = json.data[0] ? json.data[0].length : 0;
+        for (let i = 0; i < rowCount; i++) {
+            html += '<tr>';
+            for (let j = 0; j < json.columns.length; j++) {
+                const val = json.data[j] ? json.data[j][i] : '';
+                html += '<td>' + val + '</td>'; // Keep HTML for links etc
+            }
+            html += '</tr>';
+        }
+        html += '</tbody>';
+
+        // Totals
+        if (json.columns.some(c => c.totals !== undefined)) {
+            html += '<tfoot><tr>';
+            json.columns.forEach(function(col) {
+                html += '<td><strong>' + (col.totals || '') + '</strong></td>';
+            });
+            html += '</tr></tfoot>';
+        }
+
+        html += '</table>';
+        container.innerHTML = html;
+    });
+}
+
+// ============================================================
+// Render Data Entry Form
+// ============================================================
+function renderDataEntryForm(panelId, tableType, reportId, filter, container) {
+    // Get table metadata to build form
+    apiRequest('GET', 'metadata/' + tableType, null, function(json) {
+        if (!json || !json.reqs) {
+            container.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Не удалось загрузить структуру таблицы[EN]Failed to load table structure') + '</p></div>';
+            return;
+        }
+
+        let html = '<form class="data-entry-form" id="form-' + panelId + '" onsubmit="return submitDataEntryForm(event, ' + panelId + ', ' + tableType + ')">';
+
+        json.reqs.forEach(function(req) {
+            html += '<div class="form-field">';
+            html += '<label>' + escapeHtml(req.val || 'Field ' + req.id) + '</label>';
+
+            // Determine field type
+            if (req.type == 11 || req.type === 'boolean') {
+                html += '<input type="checkbox" name="t' + req.id + '" value="1">';
+            } else if (req.type == 12 || req.type === 'memo') {
+                html += '<textarea name="t' + req.id + '" rows="3"></textarea>';
+            } else if (req.type == 9 || req.type === 'date') {
+                html += '<input type="date" name="t' + req.id + '">';
+            } else if (req.type == 4 || req.type === 'datetime') {
+                html += '<input type="datetime-local" name="t' + req.id + '">';
+            } else if (req.type == 13 || req.type == 14 || req.type === 'number') {
+                html += '<input type="number" name="t' + req.id + '">';
+            } else if (req.ref) {
+                // Reference field - would need to load options
+                html += '<select name="t' + req.id + '"><option value="">-- ' + t9n('[RU]Выберите[EN]Select') + ' --</option></select>';
+            } else {
+                html += '<input type="text" name="t' + req.id + '">';
+            }
+
+            html += '</div>';
+        });
+
+        html += '<div class="form-field">';
+        html += '<button type="submit" class="btn btn-primary">' + t9n('[RU]Сохранить[EN]Save') + '</button>';
+        html += '</div>';
+        html += '</form>';
+
+        container.innerHTML = html;
+    });
+}
+
+// ============================================================
+// Submit Data Entry Form
+// ============================================================
+function submitDataEntryForm(event, panelId, tableType) {
+    event.preventDefault();
+
+    const form = document.getElementById('form-' + panelId);
+    const formData = new FormData(form);
+    const data = {};
+
+    formData.forEach(function(value, key) {
+        data[key] = value;
+    });
+
+    apiRequest('POST', '_m_new/' + tableType + '?up=1', data, function(json) {
+        if (json && json.obj) {
+            alert(t9n('[RU]Запись создана[EN]Record created'));
+            form.reset();
+        } else {
+            alert(t9n('[RU]Ошибка сохранения[EN]Save error'));
+        }
+    });
+
+    return false;
+}
+
+// ============================================================
+// Edit Mode Functions
+// ============================================================
+function updateEditModeUI() {
+    const badge = document.getElementById('editModeBadge');
+    const toggleBtn = document.getElementById('toggleEditBtn');
+    const addBtn = document.getElementById('addPanelBtn');
+
+    if (FormConstructor.editMode) {
+        badge.classList.remove('hidden');
+        addBtn.classList.remove('hidden');
+        toggleBtn.classList.add('hidden');
+    } else {
+        badge.classList.add('hidden');
+        if (FormConstructor.currentFormId) {
+            toggleBtn.classList.remove('hidden');
         }
     }
 }
-// Seek the DDL items using the filter
-function seekExt(el,id,prefix){
-    if(lastK!=el.value||el.value==''){
-        window.clearTimeout(timer); // Set a delay to let the user finish their input
-        lastK=el.value;
-        // Запустить поиск через 250мс после последнего нажатия клавиши в поле поиска
-        timer=setTimeout(function(){myApi('GET','object/'+id+'?JSON&F_'+id+'=%25'+lastK+'%25','FillDDL',prefix)},250);
-    }
-}
-function ShowChart(panelID,chart,json){
-    var style;
-    var interfaceColors = new am4core.InterfaceColorSet();
-    switch(chart){
-        case 'XYChart':
-            style="width:100%; min-height: 400px";
-            dateAxis[panelID] = amChart[panelID].xAxes.push(new am4charts.CategoryAxis());
-            dateAxis[panelID].renderer.grid.template.location = 0;
-            dateAxis[panelID].renderer.minGridDistance = 130;
-            valueAxis[panelID] = amChart[panelID].yAxes.push(new am4charts.ValueAxis());
-            amChart[panelID].data = []
-            json.columns.forEach((column, index) => {
-                json.data[index].forEach((value, j) => {
-                    if (amChart[panelID].data[j]){
-                        amChart[panelID].data[j][column.name] = value;
-                    } else {
-                        amChart[panelID].data[j] = {
-                            [column.name]: value
-                        }   
-                    }
-                })
-            })
-            dateAxis[panelID].dataFields.category = Object.keys(amChart[panelID].data[0])[0];
-            Object.keys(amChart[panelID].data[0]).map((field, index) => {
-                let categoryX = Object.keys(amChart[panelID].data[0])[0]
-                if (index > 0) {
-                    if (Number.isNaN(+amChart[panelID].data[0][field])) {
-                        valueAxis[panelID] = amChart[panelID].yAxes.push(new am4charts.CategoryAxis());
-                        valueAxis[panelID].dataFields.category = field;
-                        valueAxis[panelID].syncWithAxis = amChart[panelID].yAxes.getIndex(0);
-                    }
-                    series[panelID] = amChart[panelID].series.push(new am4charts.LineSeries());
-                    series[panelID].yAxis = valueAxis[panelID]
-                    series[panelID].dataFields.valueY = field;
-                    series[panelID].dataFields.categoryY = field;
-                    series[panelID].dataFields.categoryX = categoryX;
-                    series[panelID].name = field;
-                    series[panelID].tooltipText = "{"+"0}";
-                    series[panelID].strokeWidth = 2;
-                    var bullet = series[panelID].bullets.push(new am4charts.CircleBullet());
-                    bullet.circle.stroke = am4core.color("#fff");
-                    bullet.circle.strokeWidth = 2;
-                }
-            })
-            amChart[panelID].legend = new am4charts.Legend();
-            amChart[panelID].cursor = new am4charts.XYCursor();
-            var mult;
-            if(json.data[0].length>20)
-                mult=25;
-            else if(json.data[0].length>10)
-                mult=50;
-            else if(json.data[0].length>5)
-                mult=75;
-            if(mult!==undefined)
-                $('#'+panelID).css('width',Math.min($( window ).width(),json.data[0].length*mult)+'px');
-            break;
-        case 'PieChart':
-            style="min-width:450px; height: 100%";
-            series[panelID] = amChart[panelID].series.push(new am4charts.PieSeries());
-            series[panelID].dataFields.value = "1";
-            series[panelID].slices.template.propertyFields.fill = "2";
-            series[panelID].dataFields.category = "0";
-            series[panelID].slices.template.stroke = am4core.color("#fff");
-            series[panelID].slices.template.strokeOpacity = 1;
-            break;
-    }
-    byId('Panel_'+panelID+'_Report').classList.remove('hidden');
-    byId('chartdiv'+panelID).style=style;
-    // Show help info
-    if(edit&&byId(chart))
-        byId('Panel_'+panelID+'_Actions').innerHTML=byId(chart).innerHTML.replace(/:id:/g,panelID).replace(':i:','0');
-										 
-}
-function savePivot(i){
-    byId('savePivot'+i).innerHTML='<br /><img src="/i/ajax.gif">';
-    var config=JSON.parse(JSON.stringify($("#pivot"+i).data("pivotUIOptions")));
-    //delete some values which will not serialize to JSON
-    delete config["aggregators"];
-    delete config["renderers"];
-    myApi('POST','_m_set/'+i+'?t225='+JSON.stringify(config),'savePivot',i);
-}
-(function($,window){
-    var adjustAnchor=function(){
-        var $anchor=$(':target');
-        if($anchor.length>0)
-            window.scrollTo(0,$anchor.offset().top-50);
-    };
-    $(window).on('hashchange load',function(){
-        adjustAnchor();
-    });
-})(jQuery,window);
-// Fetch the form panels
-var edit=false;
-<!-- Begin:_Edit -->//{_request_.edit}
-edit=true;
-<!-- End:_Edit -->
-if('{_global_.id}'==='')
-    edit=true;
-else
-    myApi('GET','object/138?F_U={_global_.id}','FormPanels');
-if(edit)
-    myApi('GET','object/137','FormsList');
-var f=[];
-<!-- Begin:intFormFields -->
-f.push({i:{FieldID},p:{PanelID},Field:{Field},FieldAlias:"{FieldAlias}",ReportField:"{ReportField}",ReportFieldAlias:"{ReportFieldAlias}",FieldValue:"{default}"});
-<!-- End:intFormFields -->
-for(var i in f) // Prepare an array for default values of the fields
-    if(f[i].ReportFieldAlias.length){ // Remember the report fields to fill in from their reports
-        if(setDef[f[i].p+'_'+f[i].Field]===undefined)
-            setDef[f[i].p+'_'+f[i].Field]=[]; // There might be several fields of the same type in the panel
-        setDef[f[i].p+'_'+f[i].Field].push(f[i].i); // make a list of them
-    }
-    else if(f[i].FieldValue.length){
-        if(setDef[f[i].FieldValue]===undefined)
-            setDef[f[i].FieldValue]=[]; // There could be several targets for the same value
-        setDef[f[i].FieldValue].push(f[i].i); // collect all the fields to fill in
-    }
-// Gather all the GET parameters into an array
-var params = window.location.search.replace('?','').split('&').reduce(
-    function(p,e){var a=e.split('=');p[decodeURIComponent(a[0])]=decodeURIComponent(a[1]);return p;},{});
-// Set the base types dictionary
-var bt=[];
-bt[1]="_array";bt[3]="_short";bt[12]="_memo";bt[2]="_html";bt[8]="_chars";bt[10]="_file";bt[9]="_date";bt[4]="_datetime";bt[14]="_signed";bt[11]="_boolean";bt[13]="_number";bt[6]="_pwd";
-</script>
-<div id="frame" onclick="hideList()">
-<div id="OneForm" style="display:none;">
-<div id="one" class="mt-3 mb-4">
-<center>
-    <h4 class="ml-5 mr-5" id="Title">
-        :val:
-        <!-- Begin:_Run --><!--{_request_.edit}-->
-        <a target=":val:" href="/{_global_.z}/form/{_global_.id}" id="runForm"><img class="icon8 ml-2 p-2" title="Запустить в новом окне" src="https://img.icons8.com/ios/25/aaaaaa/play.png"></a>
-        <!-- End:_Run -->
-    </h4>
-</center>
-</div>
-<div id="FormPanels" class="row">
-<div id=":id:" class="alert alert-default mr-3 i-panel" source-type=":src:" style="display:inline-block; border-color:lightgray;">
-<div id="Panel_:id:_Buttons" style="display:none;">
-    <a href="/{_global_.z}/:btn_action:"><input type="submit" class="btn :btn_class:" style="margin-right:10px;margin-bottom:10px;" value=":btn_name:"></a>
-</div>
-<form method="post" id="Form_:id:" action="/{_global_.z}/_m_new/:typ:" enctype="multipart/form-data" onsubmit="if(check(':id:',':typ:'))btn.disabled=true;else{event.preventDefault?event.preventDefault():(event.returnValue=false);}">
-    <input type="hidden" id="up_:id:" name="up" value="1">
-    <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
-    <input type="hidden" id="next_act_:id:" name="next_act" value="{_global_.action}/{_global_.id}?new=:typ:">
-    <table class="w-100 t9n">
-    <tr>
-    <td>
-        <!-- Begin:_PanelType --><!--{_request_.edit}-->
-        <p class="text-muted"><t9n>[RU]Тип[EN]Type</t9n>:&nbsp;:object:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<t9n>[RU]Отчет[EN]Report</t9n>
-            :&nbsp;<a target="_blank" href="/{_global_.z}/sql/:reportID:">:report:</a>
-        </p>
-        <!-- End:_PanelType -->
-        <h4 id="PanelHead">:val:
-        <!-- Begin:_PanelHead --><!--{_request_.edit}-->
-        <a onclick="post('_m_up/:id:?next_act={_global_.action}/{_global_.id}%3Fedit%26')" title="<t9n>[RU]Переместить панель выше[EN]Move panel up</t9n>"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/up.png"/></a>
-        <a class="del-panel" onclick="post('_m_del/:id:?next_act={_global_.action}/{_global_.id}%3Fedit%26')" title="<t9n>[RU]Удалить панель[EN]Delete the panel</t9n>"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/delete-sign.png"/></a>
-        <!-- End:_PanelHead -->
-        </h4>
-        :ObjectEdit:
-    </td>
-    </tr>
-    <tr>
-    <td id="Panel_:id:_Report">
-    	<table width="100%" style="margin-top:5px; margin-bottom:5px;">
-    	<tr>
-    	<td>
-    		<table width="100%" style="margin-bottom:5px;" id="Panel_:id:_Fields">
-    		<tr>
-    		<td align="right">:FieldLabel:</td>
-    		<td>&nbsp;</td>
-    		<td><div id=":id:_:Type:">:control:</div></td><!-- Begin:_Ctrl --><!--{_request_.edit}--><td align="right">:ctrl:</td><!-- End:_Ctrl -->
-    		</tr>
-    		</table>
-    	</td>
-    	</tr>
-    	</table>
-    </td>
-    </tr>
-    <tr>
-    <td>
-    <div id="Panel_:id:_Actions">
-        <div id="create_:id:"><input type="submit" id="Button_:id:" name="btn" class="btn btn-sm btn-outline-secondary :addFieldClass:" value="<t9n>[RU]Создать[EN]Create</t9n>"></div>
-        <div id="controls_:id:" style="display:none;">
-        	<table style="margin-top:5px; margin-bottom:5px;">
-        	<tr>
-        	<td><input type="submit" name="btn" class="btn btn-sm btn-outline-secondary m-3" value="<t9n>[RU]Сохранить[EN]Save</t9n>"></td>
-        	<td>
-            <button type="button" class="btn btn-warning btn-sm m-3" onclick="byId('controls_:id:').style.display='none';byId('confirm_:id:').style.display='block';"><t9n>[RU]Удалить[EN]Delete</t9n></button>
-        	</td>
-        	<td><a href="/{_global_.z}/{_global_.action}/{_global_.id}"><button type="button" class="btn btn-sm btn-outline-secondary m-3"><t9n>[RU]Создать ещё[EN]Create new</t9n>...</button></a>
-        	</tr>
-        	</table>
-    	</div>
-        <div id="confirm_:id:" style="display:none; border:2px #f0ad4e solid; -moz-border-radius: 10px; -webkit-border-radius:10px; -khtml-border-radius:10px; border-radius:10px; padding:6px; ">
-    	<p><b><t9n>[RU]Подтвердите удаление записи[EN]Confirm to delete</t9n></b></p>
-    	<A onclick="post('_m_del/:obj:?next_act={_global_.action}/{_global_.id}%3Fdeleted=:typ:%26up=:parent:')"><button type="button" class="btn btn-warning btn-sm m-3"><t9n>[RU]Да, удалить[EN]Yes, delete</t9n></button></A>
-    	<button type="button" class="btn btn-outline-secondary btn-sm m-3" onclick="byId('controls_:id:').style.display='block';byId('confirm_:id:').style.display='none';">&nbsp;<t9n>[RU]Отменить[EN]Cancel</t9n>&nbsp;</button>
-    	</div>
-    </div>	
-    </td>
-    </tr>
-    </table>
-</form>
-<!-- Begin:_AddField --><!--{_request_.edit}-->
-<form method="post" action="/{_global_.z}/_m_new/144?up=:id:" onsubmit="addbtn.disabled = true; return true;" class="t9n mt-3 :addFieldClass:">
-    <input type="hidden" name="next_act" value="{_global_.action}/{_global_.id}?edit&">			
-    <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
-    <t9n>[RU]Добавить поле:[EN]Add a field</t9n>&nbsp;
-    <select name="t144" id="field:id:" class="form-control"></select>
-    <div class="input-group mb-3">
-        <input type="text" name="t186" placeholder="<t9n>[RU]Введите имя для поля[EN]Enter the field name</t9n>" class="form-control">
-        <div class="input-group-append">
-            <input type="submit" name="addbtn" class="btn btn-outline-secondary m-0" value="<t9n>[RU]Добавить[EN]Add</t9n>">
-        </div>
-    </div>
-</form>
-<!-- End:_AddField -->
-<div class="f-styles mt-2" style="display:none">
-    <span class="f-styles-toggle" onclick="$(this).closest('.f-styles').find('.f-styles-input').toggle(200)">Стили блока диаграммы</span>
-    <textarea class="form-control mt-1 f-styles-input" style="display:none" onchange="saveConfig(this)"></textarea>
-</div>
-</div> <!--/Panel-->
-</div> <!--/Panels-->
-</div> <!--/OneForm-->
-</div> <!--/Frame-->
-<!-- Begin:_Editor --><!--{_request_.edit}-->
-<div id="AddPanel" class="alert alert-default t9n hidden">
-<form method="post" action="/{_global_.z}/_m_new/138?up={_global_.id}" onsubmit="if(validatePanel())paneladd.disabled=true;else{event.returnValue=false;event.preventDefault()}">
-<input type="hidden" name="_xsrf" value="{_global_.xsrf}">
-<input type="hidden" name="next_act" value="{_global_.action}/{_global_.id}?edit&">
-<input placeholder="<t9n>[RU]Введите имя для новой панели[EN]Enter the new panel name</t9n>" type="text" id="PanelName" name="t138" class="form-control">
-    <b><br /><t9n>[RU]Источник данных[EN]Data source</t9n></b>
-    <a onclick="byId('add_panel').innerHTML=byId('add_panel').innerHTML==''?byId('panel').innerHTML:''"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/333333/help.png"/></a>
-<div id="add_panel"></div>
-	<t9n>[RU]Тип[EN]Type</t9n>:
-	<select id="PanelType" name="t184" class="form-control">
-	</select>
-	<t9n>[RU]Запрос[EN]Report</t9n>:
-	<select id="PanelReport" name="t161" class="form-control">
-		<option> </option>
-		<!-- Begin:intReports --><option id="{ID}" value="{ID}">{Name}</option>
-		<!-- End:intReports -->
-	</select>
-<input type="submit" name="paneladd" class="btn btn-sm btn-outline-secondary" value="<t9n>[RU]Добавить панель[EN]Add the panel</t9n>">
-</form>
-</div>
-<script>
-function validatePanel(){
-    if(byId('PanelType').value=='' && byId('PanelReport').value==''){
-        alert(t9n('[RU]Выберите тип или запрос[EN]Pick a Type or Report</t9n>!'));
-        return false;
-    }
-    if(!parseInt(byId('PanelType').value) && !byId('PanelReport').value){
-        alert(t9n('[RU]Выберите запрос для графика[EN]Pick a Report for this chart</t9n>!'));
-        return false;
-    }
-    if(byId('PanelName').value=='')
-        byId('PanelName').value=parseInt(byId('PanelType').value)?byId(byId('PanelType').value).innerHTML:byId(byId('PanelReport').value).innerHTML;
-    return true;
-}
-function saveConfigDone(json,vars){
-    $('#chartdiv'+vars.i).attr('style',vars.config);
-}
-function saveConfig(el){
-    const i=$(el).closest('.i-panel').attr('id');
-    var fd=new FormData();
-	fd.append('t225',el.value);
-    newApi('POST','_m_save/'+i+'?JSON','saveConfigDone',fd,{i:i,config:el.value});
-}
-function pickColor(el,panel){
-    if(el.value){
-        el.style.backgroundColor=el.value;
-        el.parentNode.innerHTML+=byId('colors:id:').innerHTML.replace(':id:',panel)
-    }
-    else if(el==el.parentNode.innerHTML)
-        el.style.backgroundColor='white';
-    else
-        byId(el.id).replaceWith('');
-}
-document.title=t9n('[RU]Конструктор форм[EN]Form builder');
-var h='<option> </option>';
-for(i in t)
-    if(r[i]){
-        h+='<option id="'+i+'" value="'+i+'">'+t[i].v+'</option>';
-        for(j in r[i])
-            if(r[r[i][j].t])
-                h+='<option id="'+r[i][j].i+'" value="'+r[i][j].i+'">'+t[i].v+' - '+t[r[i][j].t].v+'</option>';
-    }
-for(i in charts)
-	h+='<option value="'+i+'">*** '+charts[i].descr+' ***</option>';
-byId('PanelType').innerHTML=h;
-</script>
-<!-- End:_Editor -->
-<!--************ Templates ************-->
-<div class="hidden">
-<div id="_reference">
-<TABLE>
-<TR>
-<TD>
-    <select name="t:typ:" id=":fid:" class="form-control form-control-sm type-field">
-        <option value=":id:" :selected:>:val:</option>
-    </select>
-</TD>
-<TD class="hidden" id="e:eid:"><input placeholder="фильтр" class="form-control form-control-sm" type="text" size="15" onkeyup="seekExt(this,:eid:,:fid:)"></TD>
-</TR>
-</TABLE>
-</div>
-<div id="_array"><div style="margin:5px;"><A id=":fid:_array" href="/{_global_.z}/object/:typ:/?F_U=:parent:"><B>(:val:)</B></A></div></div>
-<div id="_short"><input class="form-control form-control-sm type-field" type="text" id=":fid:_short" name="t:typ:" value=":val:"></div>
-<div id="_memo"><TEXTAREA class="form-control form-control-sm type-field" id=":fid:_memo" name="t:typ:" ROWS=2>:val:</TEXTAREA></div>
-<div id="_html"><TEXTAREA class="form-control form-control-sm type-field" id=":fid:_html" name="t:typ:" ROWS=3>:val:</TEXTAREA></div>
-<div id="_chars"><input class="form-control form-control-sm type-field" type="text" id=":fid:_chars" name="t:typ:" value=":val:"></div>
-<div id="_file">:val: <input class="form-control form-control-sm type-field" type="file" id=":fid:_file" name="t:typ:" value=""></div>
-<div id="_date"><input class="form-control form-control-sm type-field" type="text" id=":fid:_date" name="t:typ:" value=":val:"></div>
-<div id="_datetime"><input class="form-control form-control-sm type-field" type="text" id=":fid:_datetime" name="t:typ:" value=":val:"></div>
-<div id="_signed"><input class="form-control form-control-sm type-field" type="text" id=":fid:_signed" name="t:typ:" value=":val:"></div>
-<div id="_boolean"><div style="margin:5px;"><input type="checkbox" id=":fid:_boolean" name="t:typ:" value="1" class="type-field" :checked:/><input type="hidden" name="b:typ:" value="1"></div></div>
-<div id="_number"><input class="form-control form-control-sm type-field" type="text" id=":fid:_number" name="t:typ:" value=":val:"></div>
-<div id="_pwd"><input class="form-control form-control-sm type-field" type="password" name="t:typ:"></div>
-<div id="defaults">
-<div class="alert alert-warning" style="margin:15px">
-    <p><t9n>[RU]Вы можете использовать следующие значения по умолчанию[EN]You can use the following defaults</t9n>:</p>
-    :defaults:
-</div>
-</div>
-<div id="panel">
-<div class="alert alert-warning" style="margin:15px">
-	<p><t9n>[RU]Форма состоит из одной или нескольких панелей. При добавлении панели вы выбираете тип и/или запрос, который будет отображен в панели. Если вы одновременно укажете и тип, и запрос, то данные из первой строки отчета будут отображены на форме вместе с выбранными полями типа.[EN]The form consists of one or more panels. When adding a panel, you select the type and/or report that will be displayed in the panel. If you specify both the type and the report at the same time, then the data from the first line of the report will be displayed on the form along with the selected type fields.</t9n></p>
-	<p><t9n>[RU]При выборе только типа, в панели отобразятся выбранные поля этого типа.[EN]If you select only a type, the panel displays the selected fields of that type.</t9n></p>
-	<p><t9n>[RU]Если будет указан только запрос, то в панели будут отображены выбранные из соответствующего запроса поля. Если поля не выбраны, то отчет по этому запросу отобразится целиком.[EN]If only the report is specified, the panel will display the fields selected from it. If no fields are selected, it will be displayed in its entirety.</t9n></p>
-	<p><t9n>[RU]Если в качестве типа выбран график (в конце выпадающего списка), то в панели будет отображен этот график с данными из выбранного запроса.[EN]If a chart is selected (see the bottom of the drop-down list), then this chart will be displayed in the panel using data from the selected query.</t9n></p>
-</div>
-</div>
-<div id="help">
-<div class="alert alert-warning" style="margin:15px">
-	<t9n>[RU]Вы можете задать цвет фона и шрифта для строк отчета или для всей панели. Можно использовать значения цветов, [EN]You can set background and font colors for report lines or for the entire panel. Use any color values </t9n>
-	<a href="https://html5book.ru/css-colors/" target="_blank"><t9n>[RU]поддерживаемые в [EN]supported in HTML</t9n></a>.
-	<t9n>[RU] Если цвета заданы здесь, то они применяются ко всей панели.[EN]If colors are specified here, then they are applied to the entire panel.</t9n>
-	<br /><t9n>[RU]Также можно добавить колонки с именами color и bgcolor в назначенный этой панели отчет. Цвета, заданные в отчете, будут применены к каждой строчке отчета.
-	           [EN]You can also add columns named <i>color</i> and <i>bgcolor</i> to the report assigned to this panel. The colors specified in the report will be applied to each line of the report.</t9n>
-</div>
-</div>
-<div id="filter">
-<div class="alert alert-warning" style="margin:15px">
-    <t9n>[RU]Этот фильтр будет применен при запросе отчета, заданного для этой панели, например, FR_Дата=1.1&TO_Дата=31.1 задаст фильтр для поля Дата: с 1 по 31 января текущего года.
-        [EN]This filter will be applied to the report specified for this panel, for example, FR_Date=1.1&TO_Date=31.1 will set the filter for the Date field: from January 1 to January 31 of the current year.</t9n>
-</div>
-</div>
-<div id="next">
-<div class="alert alert-warning" style="margin:15px">
-	<t9n>[RU]По умолчанию после отправки формы управление передается обратно этой же форме.
-        	<br />Адрес {_global_.action}/{_global_.id}&nbsp;&mdash; имя этого обработчика формы и её id ({_global_.id}).
-        	<br />Здесь вы можете задать другое действие или форму, а также передать им параметры.
-	    [EN]By default, after submitting a form, control is passed back to the same form.
-        	<br />The address of {_global_.action}/{_global_.id} is the name of this form handler and its id ({_global_.id}).
-        	<br />Here you can define another action or form, as well as pass parameters to them.
-	    </t9n>
-</div>
-</div>
-<div id="savePivot">
-    <div id="savePivot:id:"><br />
-        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="savePivot(:id:)"><t9n>[RU]Сохранить вид pivot[EN]Save pivot config</t9n></button><br />
-    </div>
-</div>
-<div id="PieChart"><br />
-    <br /><i><t9n>[RU]Как построить отчет для графика:[EN]How to build a report for the chart</t9n></i><br />
-	<t9n>[RU]Первая колонка отчета: Категории (названия отображаемых параметров)
-        	<br />Вторая колонка: Значение в данной категории
-        	<br />Третья колонка: Цвет отображения сегмента данной категории
-	    [EN]First column: Category (the name of the measured parameter)
-        	<br />2nd column: the Value in this category
-        	<br />3rd column: Color of the chart segment for this category
-    </t9n>
-</div>
-<div id="XYChart">
-    <!--
-    <t9n>[RU]Цвета графиков[EN]Chart colors</t9n>: <div id="colors:id:" class="inline">
-        <select id="color:i:_:id:" onchange="pickColor(this,:id:)"><option value="">auto</option>
-            <option val="red" style="background-color:red">red</option>
-            <option val="green" style="background-color:green">green</option>
-            <option val="blue" style="background-color:blue">blue</option>
-            <option val="gray" style="background-color:gray">gray</option>
-            <option val="#CC33CC" style="background-color:#CC33CC">bordo</option>
-            <option val="orange" style="background-color:orange">orange</option>
-        </select>
-    </div>
-    -->
-    <i><t9n>[RU]Как построить отчет для этой диаграммы:[EN]How to build a report for the chart</t9n></i><br />
-	<t9n>[RU]Названия колонок&nbsp;&mdash; имена осей
-	        <br />Первая колонка отчета: Значение по оси X
-        	<br />Вторая и последующие колонки: Значения по оси Y для параметра, соответствующего имени колонки
-	    [EN]Column names&nbsp;&mdash; lines' labels
-	        <br />First column: the X value
-        	<br />2nd column and all the following: the Y value
-    </t9n>
-</div>
-</div>
-<script src="/js/core.js"></script>
-<script src="/js/charts.js"></script>
-<script src="/js/animated.js"></script>
-<link rel="stylesheet" href="/css/pivot.min.css" integrity="sha512-BDStKWno6Ga+5cOFT9BUnl9erQFzfj+Qmr5MDnuGqTQ/QYDO1LPdonnF6V6lBO6JI13wg29/XmPsufxmCJ8TvQ==" crossorigin="anonymous" />
 
-<script src="/js/plotly.min.js"></script>
-<script src="/js/pivot.min.js" integrity="sha512-XgJh9jgd6gAHu9PcRBBAp0Hda8Tg87zi09Q2639t0tQpFFQhGpeCgaiEFji36Ozijjx9agZxB0w53edOFGCQ0g==" crossorigin="anonymous"></script>
-<script src="/js/plotly_renderers.min.js" integrity="sha512-nGY6wbyP3gWxAjsZwsjWahe9nKLCTTyTLn1dpwuNHb9CKLjogHAMVIbbr4wNYL0dKOsWTCrlpx9RDY+bB1MFrQ==" crossorigin="anonymous"></script>
-<script>
-localize();
+function toggleEditMode() {
+    const url = new URL(window.location);
+    if (FormConstructor.editMode) {
+        url.searchParams.delete('EDIT');
+        url.searchParams.delete('edit');
+    } else {
+        url.searchParams.set('EDIT', '1');
+    }
+    window.location.href = url.toString();
+}
+
+// ============================================================
+// Panel Type Selection
+// ============================================================
+var selectedPanelType = null;
+
+function selectPanelType(el) {
+    document.querySelectorAll('.panel-type-option').forEach(function(opt) {
+        opt.classList.remove('selected');
+    });
+    el.classList.add('selected');
+    selectedPanelType = el.getAttribute('data-type');
+}
+
+function toggleDataSourceFields() {
+    const sourceType = document.getElementById('dataSourceType').value;
+    document.getElementById('tableSourceField').classList.toggle('hidden', sourceType !== 'table');
+    document.getElementById('reportSourceField').classList.toggle('hidden', sourceType !== 'report');
+}
+
+function toggleButtonActionFields() {
+    const actionType = document.getElementById('buttonActionType').value;
+    document.getElementById('jsActionField').classList.toggle('hidden', actionType !== 'js');
+    document.getElementById('linkActionField').classList.toggle('hidden', actionType !== 'link');
+}
+
+// ============================================================
+// Modal Functions
+// ============================================================
+function showAddPanelModal() {
+    selectedPanelType = null;
+    document.querySelectorAll('.panel-type-option').forEach(function(opt) {
+        opt.classList.remove('selected');
+    });
+    document.getElementById('panelName').value = '';
+    document.getElementById('dataSourceType').value = '';
+    document.getElementById('tableSourceField').classList.add('hidden');
+    document.getElementById('reportSourceField').classList.add('hidden');
+    document.getElementById('addPanelModal').classList.remove('hidden');
+}
+
+function hideAddPanelModal() {
+    document.getElementById('addPanelModal').classList.add('hidden');
+}
+
+function showEditPanelModal(panelId) {
+    const panel = FormConstructor.panels.find(p => p.id == panelId);
+    if (!panel) return;
+
+    document.getElementById('editPanelId').value = panelId;
+    document.getElementById('editPanelName').value = panel.val || panel.name || '';
+
+    // TODO: Load panel settings
+    document.getElementById('editPanelModal').classList.remove('hidden');
+}
+
+function hideEditPanelModal() {
+    document.getElementById('editPanelModal').classList.add('hidden');
+}
+
+function showAddButtonModal(panelId) {
+    document.getElementById('buttonPanelId').value = panelId;
+    document.getElementById('buttonText').value = '';
+    document.getElementById('buttonActionType').value = 'js';
+    document.getElementById('buttonJsFunction').value = '';
+    document.getElementById('buttonLinkUrl').value = '';
+    document.getElementById('buttonClass').value = 'btn btn-primary';
+    document.getElementById('jsActionField').classList.remove('hidden');
+    document.getElementById('linkActionField').classList.add('hidden');
+    document.getElementById('addButtonModal').classList.remove('hidden');
+}
+
+function hideAddButtonModal() {
+    document.getElementById('addButtonModal').classList.add('hidden');
+}
+
+// ============================================================
+// CRUD Operations
+// ============================================================
+function createNewForm(event) {
+    event.preventDefault();
+
+    const name = document.getElementById('newFormName').value.trim();
+    if (!name) {
+        alert(t9n('[RU]Введите имя формы[EN]Enter form name'));
+        return false;
+    }
+
+    apiRequest('POST', '_m_new/137?up=1', { 't137': name }, function(json) {
+        if (json && json.obj) {
+            window.location.href = '/' + FormConstructor.db + '/forms/' + json.obj + '?EDIT';
+        } else {
+            alert(t9n('[RU]Ошибка создания формы[EN]Error creating form'));
+        }
+    });
+
+    return false;
+}
+
+function addPanel() {
+    if (!selectedPanelType) {
+        alert(t9n('[RU]Выберите тип панели[EN]Select panel type'));
+        return;
+    }
+
+    const name = document.getElementById('panelName').value.trim() || getPanelTypeName(selectedPanelType);
+    const sourceType = document.getElementById('dataSourceType').value;
+    const tableId = document.getElementById('tableSource').value;
+    const reportId = document.getElementById('reportSource').value;
+
+    // Prepare data
+    const data = {
+        't138': name
+    };
+
+    // Set panel type (object ID or chart type)
+    if (['XYChart', 'PieChart', 'Histogram', 'Pivot', 'Bubble'].includes(selectedPanelType)) {
+        data['t184'] = selectedPanelType;
+    } else if (selectedPanelType === 'DataEntry' && tableId) {
+        data['t184'] = tableId;
+    } else if (selectedPanelType === 'Report') {
+        // Report type doesn't need t184
+    }
+
+    // Set report
+    if (reportId) {
+        data['t161'] = reportId;
+    }
+
+    apiRequest('POST', '_m_new/138?up=' + FormConstructor.currentFormId, data, function(json) {
+        if (json && json.obj) {
+            hideAddPanelModal();
+            loadFormPanels(FormConstructor.currentFormId);
+        } else {
+            alert(t9n('[RU]Ошибка добавления панели[EN]Error adding panel'));
+        }
+    });
+}
+
+function savePanel() {
+    const panelId = document.getElementById('editPanelId').value;
+    const name = document.getElementById('editPanelName').value;
+    const color = document.getElementById('editPanelColor').value;
+    const bgColor = document.getElementById('editPanelBgColor').value;
+    const filter = document.getElementById('editPanelFilter').value;
+    const nextAction = document.getElementById('editPanelNextAction').value;
+
+    const data = {
+        't138': name,
+        't254': color,
+        't255': bgColor,
+        't181': filter,
+        't257': nextAction
+    };
+
+    apiRequest('POST', '_m_set/' + panelId, data, function(json) {
+        hideEditPanelModal();
+        loadFormPanels(FormConstructor.currentFormId);
+    });
+}
+
+function deletePanel() {
+    const panelId = document.getElementById('editPanelId').value;
+
+    if (!confirm(t9n('[RU]Удалить эту панель?[EN]Delete this panel?'))) {
+        return;
+    }
+
+    apiRequest('POST', '_m_del/' + panelId, {}, function(json) {
+        hideEditPanelModal();
+        loadFormPanels(FormConstructor.currentFormId);
+    });
+}
+
+function movePanel(panelId, direction) {
+    const endpoint = direction < 0 ? '_m_up/' : '_m_down/';
+    apiRequest('POST', endpoint + panelId, {}, function(json) {
+        loadFormPanels(FormConstructor.currentFormId);
+    });
+}
+
+function addButtonToPanel() {
+    const panelId = document.getElementById('buttonPanelId').value;
+    const text = document.getElementById('buttonText').value;
+    const actionType = document.getElementById('buttonActionType').value;
+    const jsFunction = document.getElementById('buttonJsFunction').value;
+    const linkUrl = document.getElementById('buttonLinkUrl').value;
+    const btnClass = document.getElementById('buttonClass').value;
+
+    if (!text) {
+        alert(t9n('[RU]Введите текст кнопки[EN]Enter button text'));
+        return;
+    }
+
+    const action = actionType === 'js' ? jsFunction : linkUrl;
+
+    // Button is stored in table 150
+    const data = {
+        't150': text,
+        't216': action, // Action field
+        't218': btnClass // Class field
+    };
+
+    apiRequest('POST', '_m_new/150?up=' + panelId, data, function(json) {
+        if (json && json.obj) {
+            hideAddButtonModal();
+            loadFormPanels(FormConstructor.currentFormId);
+        } else {
+            alert(t9n('[RU]Ошибка добавления кнопки[EN]Error adding button'));
+        }
+    });
+}
+
+// ============================================================
+// Utility Functions
+// ============================================================
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+function decodeHtmlEntities(str) {
+    if (!str) return '';
+    const textarea = document.createElement('textarea');
+    textarea.innerHTML = str;
+    return textarea.value;
+}
+
+function t9n(str) {
+    // Simple translation function
+    if (typeof localize === 'function') {
+        // Use the existing localize system
+        const lang = document.documentElement.lang || 'ru';
+        const match = str.match(/\[RU\](.*?)\[EN\](.*)/);
+        if (match) {
+            return lang === 'en' ? match[2] : match[1];
+        }
+    }
+    // Default: return Russian text
+    const match = str.match(/\[RU\](.*?)\[EN\]/);
+    return match ? match[1] : str;
+}
 </script>
-<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js" integrity="sha384-B4gt1jrGC7Jh4AgTPSdUtOBvfO8shuf57BaghqFfPlYxofvL8/KUEfYiJOMMV+rV" crossorigin="anonymous"></script>
+
+<!-- Include main.js for localization -->
 <script src="/js/main.js"></script>
+<script>
+if (typeof localize === 'function') {
+    localize();
+}
+</script>
