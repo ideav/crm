@@ -1633,6 +1633,7 @@
     /* Issue #737: Use same center alignment as .subordinate-link-cell */
     text-align: center;
     padding: 10px 3px !important;
+    white-space: nowrap;
 }
 
 /* Subordinate table link in main table cells */
