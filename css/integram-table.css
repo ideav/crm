@@ -1630,8 +1630,8 @@
 }
 
 .subordinate-nested-count {
-    color: var(--md-text-hint);
-    font-style: italic;
+    /* Issue #737: Use same center alignment as .subordinate-link-cell */
+    text-align: center;
 }
 
 /* Subordinate table link in main table cells */
