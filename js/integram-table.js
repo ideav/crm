@@ -6539,6 +6539,9 @@ class IntegramTable {
             document.body.appendChild(overlay);
             document.body.appendChild(modal);
 
+            // Store recordId on the modal element for subordinate table loading in nested modals
+            modal.dataset.recordId = recordId;
+
             // Store modal context for subordinate tables - ONLY for the first level (parent form)
             // Don't overwrite when opening subordinate record forms (nested modals)
             if (modalDepth === 1) {
@@ -6883,10 +6886,11 @@ class IntegramTable {
                     }
 
                     // Load subordinate table if needed
-                    if (tabId.startsWith('sub-') && tab.dataset.arrId && this.currentEditModal) {
+                    // Use modal.dataset.recordId to support nested modals (issue #741)
+                    const parentRecordId = modal.dataset.recordId;
+                    if (tabId.startsWith('sub-') && tab.dataset.arrId && parentRecordId) {
                         const arrId = tab.dataset.arrId;
                         const reqId = tab.dataset.reqId;
-                        const parentRecordId = this.currentEditModal.recordId;
 
                         // Check if already loaded
                         if (!targetContent.dataset.loaded) {
