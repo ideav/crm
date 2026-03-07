@@ -730,7 +730,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // ============================================================
 function apiRequest(method, endpoint, data, callback) {
     const xhr = new XMLHttpRequest();
-    xhr.open(method, '/api/' + FormConstructor.db + '/' + endpoint, true);
+    xhr.open(method, '/' + FormConstructor.db + '/' + endpoint, true);
     xhr.setRequestHeader('X-Authorization', FormConstructor.token);
 
     if (method === 'POST') {
