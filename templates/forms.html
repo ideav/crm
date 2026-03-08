@@ -137,6 +137,15 @@
     gap: 20px;
 }
 
+/* Panel Group - for grouping panels vertically */
+.panel-group {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    flex: 1;
+    min-width: 300px;
+}
+
 /* Panel Card */
 .panel-card {
     background: #fff;
@@ -173,6 +182,22 @@
 .panel-actions {
     display: flex;
     gap: 5px;
+    align-items: center;
+}
+
+.panel-group-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #6c757d;
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: 11px;
+    margin-right: 5px;
 }
 
 .panel-content {
@@ -655,6 +680,10 @@
                 <input type="color" id="editPanelBgColor" value="#ffffff">
             </div>
             <div class="form-field" style="margin-top: 15px;">
+                <label><t9n>[RU]Группа[EN]Group</t9n></label>
+                <input type="number" id="editPanelGroup" placeholder="<t9n>[RU]Номер группы (панели с одинаковой группой отображаются вертикально)[EN]Group number (panels with same group display vertically)</t9n>" min="0">
+            </div>
+            <div class="form-field" style="margin-top: 15px;">
                 <label><t9n>[RU]Фильтр[EN]Filter</t9n></label>
                 <input type="text" id="editPanelFilter" placeholder="<t9n>[RU]Например: FR_Дата=1.1&TO_Дата=31.1[EN]Example: FR_Date=1.1&TO_Date=31.1</t9n>">
             </div>
@@ -1044,6 +1073,7 @@ function loadPanelMetadataAndRender(panelsData, container, emptyState) {
         });
 
         FormConstructor.panels = panels;
+        FormConstructor.panelReqs = reqs;  // Store panel requisites for editing
         emptyState.classList.add('hidden');
 
         // Show add panel button in edit mode
@@ -1063,13 +1093,65 @@ function renderPanels(panels, reqs) {
     const container = document.getElementById('panelsContainer');
     container.innerHTML = '';
 
+    // Group panels by their group value (256)
+    // Panels with the same group are displayed vertically in the same div
+    const groupedPanels = {};
+    const ungroupedPanels = [];
+
     panels.forEach(function(panel) {
         const panelReqs = reqs[panel.id] || {};
-        const panelEl = createPanelElement(panel, panelReqs);
-        container.appendChild(panelEl);
+        const group = panelReqs[256] || panelReqs['256'] || '';
 
-        // Load panel data
-        loadPanelData(panel.id, panelReqs);
+        if (group !== '' && group !== null && group !== undefined) {
+            if (!groupedPanels[group]) {
+                groupedPanels[group] = [];
+            }
+            groupedPanels[group].push({ panel: panel, reqs: panelReqs });
+        } else {
+            ungroupedPanels.push({ panel: panel, reqs: panelReqs });
+        }
+    });
+
+    // Track which groups have been rendered (to maintain panel order)
+    const renderedGroups = new Set();
+
+    // Render panels in original order, but group panels with same group value
+    panels.forEach(function(panel) {
+        const panelReqs = reqs[panel.id] || {};
+        const group = panelReqs[256] || panelReqs['256'] || '';
+
+        if (group !== '' && group !== null && group !== undefined) {
+            // Check if this group has already been rendered
+            if (renderedGroups.has(group)) {
+                return; // Skip, already rendered as part of the group
+            }
+
+            // Mark this group as rendered
+            renderedGroups.add(group);
+
+            // Create a group container div for panels with the same group
+            const groupDiv = document.createElement('div');
+            groupDiv.className = 'panel-group';
+            groupDiv.setAttribute('data-group', group);
+
+            // Add all panels in this group to the group container
+            groupedPanels[group].forEach(function(item) {
+                const panelEl = createPanelElement(item.panel, item.reqs);
+                groupDiv.appendChild(panelEl);
+            });
+
+            container.appendChild(groupDiv);
+
+            // Load data for all panels in this group
+            groupedPanels[group].forEach(function(item) {
+                loadPanelData(item.panel.id, item.reqs);
+            });
+        } else {
+            // Ungrouped panel - render directly
+            const panelEl = createPanelElement(panel, panelReqs);
+            container.appendChild(panelEl);
+            loadPanelData(panel.id, panelReqs);
+        }
     });
 }
 
@@ -1087,6 +1169,7 @@ function createPanelElement(panel, panelReqs) {
     const reportId = panelReqs[161] || panelReqs['161'] || ''; // Report ID
     const fontColor = panelReqs[254] || panelReqs['254'] || '#333333';
     const bgColor = panelReqs[255] || panelReqs['255'] || '#ffffff';
+    const group = panelReqs[256] || panelReqs['256'] || ''; // Group number
     const config = panelReqs[225] || panelReqs['225'] || '{}';
 
     // Apply colors
@@ -1100,6 +1183,10 @@ function createPanelElement(panel, panelReqs) {
 
     if (FormConstructor.editMode) {
         headerHtml += '<div class="panel-actions">';
+        // Display group badge if group is set
+        if (group !== '' && group !== null && group !== undefined) {
+            headerHtml += '<span class="panel-group-badge" title="' + t9n('[RU]Группа[EN]Group') + '">' + escapeHtml(group) + '</span>';
+        }
         headerHtml += '<button class="btn btn-sm btn-secondary" onclick="movePanel(' + panel.id + ', -1)" title="' + t9n('[RU]Вверх[EN]Up') + '"><i class="pi pi-arrow-up"></i></button>';
         headerHtml += '<button class="btn btn-sm btn-secondary" onclick="movePanel(' + panel.id + ', 1)" title="' + t9n('[RU]Вниз[EN]Down') + '"><i class="pi pi-arrow-down"></i></button>';
         headerHtml += '<button class="btn btn-sm btn-secondary" onclick="showEditPanelModal(' + panel.id + ')" title="' + t9n('[RU]Настройки[EN]Settings') + '"><i class="pi pi-cog"></i></button>';
@@ -1850,10 +1937,18 @@ function showEditPanelModal(panelId) {
     const panel = FormConstructor.panels.find(p => p.id == panelId);
     if (!panel) return;
 
+    const panelReqs = (FormConstructor.panelReqs && FormConstructor.panelReqs[panelId]) || {};
+
     document.getElementById('editPanelId').value = panelId;
     document.getElementById('editPanelName').value = panel.val || panel.name || '';
 
-    // TODO: Load panel settings
+    // Load panel settings from requisites
+    document.getElementById('editPanelColor').value = panelReqs[254] || panelReqs['254'] || '#333333';
+    document.getElementById('editPanelBgColor').value = panelReqs[255] || panelReqs['255'] || '#ffffff';
+    document.getElementById('editPanelGroup').value = panelReqs[256] || panelReqs['256'] || '';
+    document.getElementById('editPanelFilter').value = panelReqs[181] || panelReqs['181'] || '';
+    document.getElementById('editPanelNextAction').value = panelReqs[257] || panelReqs['257'] || '';
+
     document.getElementById('editPanelModal').classList.remove('hidden');
 }
 
@@ -1950,6 +2045,7 @@ function savePanel() {
     const name = document.getElementById('editPanelName').value;
     const color = document.getElementById('editPanelColor').value;
     const bgColor = document.getElementById('editPanelBgColor').value;
+    const group = document.getElementById('editPanelGroup').value;
     const filter = document.getElementById('editPanelFilter').value;
     const nextAction = document.getElementById('editPanelNextAction').value;
 
@@ -1957,6 +2053,7 @@ function savePanel() {
         't138': name,
         't254': color,
         't255': bgColor,
+        't256': group,
         't181': filter,
         't257': nextAction
     };
