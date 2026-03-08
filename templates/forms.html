@@ -814,7 +814,9 @@
 // Form Constructor - Global State
 // ============================================================
 const FormConstructor = {
+    version: '2026-03-08-debug-tracing',  // Version for cache debugging
     editMode: false,
+    debugMode: false,  // Set to true to enable value tracing (see console)
     currentFormId: null,
     forms: [],
     panels: [],
@@ -838,12 +840,39 @@ const FormConstructor = {
 };
 
 // ============================================================
+// Debug Logging - traces value transformation from JSON to table
+// Enable via URL parameter ?DEBUG or by setting FormConstructor.debugMode = true in console
+// ============================================================
+function debugLog(context, data) {
+    if (!FormConstructor.debugMode) return;
+    console.log('[FormConstructor Debug]', context, data);
+}
+
+function debugLogValue(stage, colName, rawValue, transformedValue) {
+    if (!FormConstructor.debugMode) return;
+    console.log('[Value Trace]', {
+        stage: stage,
+        column: colName,
+        rawValue: rawValue,
+        rawType: typeof rawValue,
+        rawIsUndefined: rawValue === undefined,
+        rawIsNull: rawValue === null,
+        rawIsEmpty: rawValue === '',
+        transformedValue: transformedValue,
+        transformedType: typeof transformedValue
+    });
+}
+
+// ============================================================
 // Initialization
 // ============================================================
 document.addEventListener('DOMContentLoaded', function() {
     // Check for EDIT parameter
     const urlParams = new URLSearchParams(window.location.search);
     FormConstructor.editMode = urlParams.has('EDIT') || urlParams.has('edit');
+
+    // Check for DEBUG parameter to enable value tracing
+    FormConstructor.debugMode = urlParams.has('DEBUG') || urlParams.has('debug');
 
     // Get form ID from URL
     const pathParts = window.location.pathname.split('/');
@@ -855,6 +884,15 @@ document.addEventListener('DOMContentLoaded', function() {
     // Also check for id in URL parameter
     if ('{_global_.id}' && '{_global_.id}' !== '') {
         FormConstructor.currentFormId = '{_global_.id}';
+    }
+
+    // Log debug mode status and version (always log version in debug mode)
+    if (FormConstructor.debugMode) {
+        console.log('%c[FormConstructor Debug Mode ENABLED]', 'background: #ffcc00; color: #000; padding: 4px 8px; font-weight: bold;');
+        console.log('Version:', FormConstructor.version);
+        console.log('Value tracing will log how data flows from JSON to table cells.');
+        console.log('Look for [Value Trace] entries to see: rawValue → getDisplayValue → escapeHtml → cell');
+        console.log('To disable: remove ?DEBUG from URL');
     }
 
     // Initialize UI
@@ -891,6 +929,7 @@ function apiRequest(method, endpoint, data, callback) {
     xhr.onload = function() {
         try {
             const json = JSON.parse(this.responseText);
+            debugLog('apiRequest response', { endpoint: endpoint, json: json });
             if (callback) callback(json);
         } catch (e) {
             console.error('API Error:', e, this.responseText);
@@ -1473,16 +1512,23 @@ function renderPivotTable(panelId, reportId, filter, config, container) {
         pivotData.push(headers);
 
         const rowCount = json.data[0] ? json.data[0].length : 0;
+        debugLog('renderPivotTable - data structure', { columns: json.columns, dataArraysCount: json.data ? json.data.length : 0, rowCount: rowCount });
         for (let i = 0; i < rowCount; i++) {
             const row = [];
             for (let j = 0; j < json.columns.length; j++) {
                 // Ensure we handle undefined/null values from array access
                 const dataCol = json.data[j];
-                let val = (dataCol && dataCol[i] !== undefined && dataCol[i] !== null) ? dataCol[i] : '';
+                const rawVal = dataCol ? dataCol[i] : undefined;
+                let val = (rawVal !== undefined && rawVal !== null) ? rawVal : '';
+                if (i === 0) debugLogValue('1-arrayAccess', headers[j] + ' (col:' + j + ')', rawVal, val);
                 // For reference fields (id:name format), display only the name
+                const beforeDisplayVal = val;
                 val = getDisplayValue(val);
+                if (i === 0) debugLogValue('2-getDisplayValue', headers[j], beforeDisplayVal, val);
                 // Strip HTML tags, ensure empty string for undefined/null
-                val = String(val || '').replace(/<[^>]*>/g, '');
+                const beforeStripVal = val || '';
+                val = String(beforeStripVal).replace(/<[^>]*>/g, '');
+                if (i === 0) debugLogValue('3-stripHtml', headers[j], beforeStripVal, val);
                 row.push(val);
             }
             pivotData.push(row);
@@ -1653,15 +1699,21 @@ function renderReportTable(panelId, reportId, filter, config, container) {
         // Body
         html += '<tbody>';
         const rowCount = json.data[0] ? json.data[0].length : 0;
+        debugLog('renderReportTable - data structure', { columns: json.columns, dataArraysCount: json.data ? json.data.length : 0, rowCount: rowCount });
         for (let i = 0; i < rowCount; i++) {
+            if (i === 0) debugLog('renderReportTable - first row raw data', json.data.map(function(col, idx) { return { colIdx: idx, value: col ? col[0] : 'no column' }; }));
             html += '<tr>';
             orderedVisibleColumns.forEach(function(col) {
                 const dataIdx = columnIndexMap[col.id];
                 // Ensure we handle undefined/null values from array access
                 const dataCol = json.data[dataIdx];
-                let val = (dataCol && dataCol[i] !== undefined && dataCol[i] !== null) ? dataCol[i] : '';
+                const rawVal = dataCol ? dataCol[i] : undefined;
+                let val = (rawVal !== undefined && rawVal !== null) ? rawVal : '';
+                debugLogValue('1-arrayAccess', col.name + ' (dataIdx:' + dataIdx + ', row:' + i + ')', rawVal, val);
                 // For reference fields (id:name format), display only the name
+                const beforeDisplayVal = val;
                 val = getDisplayValue(val);
+                debugLogValue('2-getDisplayValue', col.name, beforeDisplayVal, val);
                 html += '<td>' + (val || '') + '</td>'; // Keep HTML for links etc, handle undefined/null
             });
             html += '</tr>';
@@ -1716,12 +1768,14 @@ function renderTableAsReport(panelId, tableId, filter, config, container) {
             // Build columns from metadata
             // First column is always the object name (r[0])
             const allColumns = [{ id: 'name', name: metadata.val || t9n('[RU]Название[EN]Name') }];
+            debugLog('renderTableAsReport - metadata', { tableId: tableId, tableName: metadata.val, reqsCount: metadata.reqs ? metadata.reqs.length : 0, reqs: metadata.reqs });
             metadata.reqs.forEach(function(req, index) {
                 allColumns.push({
                     id: 'req_' + req.id,
                     name: req.val || 'Field ' + req.id,
                     reqIndex: index
                 });
+                debugLog('renderTableAsReport - column mapping', { reqId: req.id, reqName: req.val, metadataIndex: index, dataArrayIndex: index + 1 });
             });
 
             // Get column order (o) and visible columns (v) from config
@@ -1796,23 +1850,36 @@ function renderTableAsReport(panelId, tableId, filter, config, container) {
 
             // Body - JSON_OBJ format: [{i: id, u: parent, o: order, r: [val1, val2, ...]}, ...]
             html += '<tbody>';
-            json.forEach(function(row) {
+            debugLog('renderTableAsReport - columns', { allColumns: allColumns, orderedVisibleColumns: orderedVisibleColumns });
+            json.forEach(function(row, rowIdx) {
+                debugLog('renderTableAsReport - row ' + rowIdx, { rowId: row.i, rArray: row.r, rLength: row.r ? row.r.length : 'no r array' });
                 html += '<tr>';
                 orderedVisibleColumns.forEach(function(col) {
-                    let val = '';
+                    let rawVal;
+                    let arrayIdx;
                     if (col.id === 'name') {
                         // First column is the object name (r[0])
-                        // Ensure we handle undefined/null values from array access
-                        val = (row.r && row.r[0] !== undefined && row.r[0] !== null) ? row.r[0] : '';
+                        arrayIdx = 0;
+                        rawVal = row.r ? row.r[0] : undefined;
                     } else if (col.reqIndex !== undefined) {
                         // Requisite value (r[reqIndex + 1], since r[0] is the name)
-                        // Ensure we handle undefined/null values from array access
-                        const idx = col.reqIndex + 1;
-                        val = (row.r && row.r[idx] !== undefined && row.r[idx] !== null) ? row.r[idx] : '';
+                        arrayIdx = col.reqIndex + 1;
+                        rawVal = row.r ? row.r[arrayIdx] : undefined;
+                    } else {
+                        arrayIdx = 'N/A';
+                        rawVal = undefined;
                     }
+                    // Ensure we handle undefined/null values from array access
+                    let val = (rawVal !== undefined && rawVal !== null) ? rawVal : '';
+                    debugLogValue('1-arrayAccess', col.name + ' (idx:' + arrayIdx + ')', rawVal, val);
                     // For reference fields (id:name format), display only the name
+                    const beforeDisplayVal = val;
                     val = getDisplayValue(val);
-                    html += '<td>' + escapeHtml(val || '') + '</td>';
+                    debugLogValue('2-getDisplayValue', col.name, beforeDisplayVal, val);
+                    const beforeEscapeVal = val || '';
+                    const afterEscapeVal = escapeHtml(beforeEscapeVal);
+                    debugLogValue('3-escapeHtml', col.name, beforeEscapeVal, afterEscapeVal);
+                    html += '<td>' + afterEscapeVal + '</td>';
                 });
                 html += '</tr>';
             });
