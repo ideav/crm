@@ -1462,8 +1462,8 @@ function renderPivotTable(panelId, reportId, filter, config, container) {
                 let val = json.data[j] ? json.data[j][i] : '';
                 // For reference fields (id:name format), display only the name
                 val = getDisplayValue(val);
-                // Strip HTML tags
-                val = String(val).replace(/<[^>]*>/g, '');
+                // Strip HTML tags, ensure empty string for undefined/null
+                val = String(val || '').replace(/<[^>]*>/g, '');
                 row.push(val);
             }
             pivotData.push(row);
@@ -1641,7 +1641,7 @@ function renderReportTable(panelId, reportId, filter, config, container) {
                 let val = json.data[dataIdx] ? json.data[dataIdx][i] : '';
                 // For reference fields (id:name format), display only the name
                 val = getDisplayValue(val);
-                html += '<td>' + val + '</td>'; // Keep HTML for links etc
+                html += '<td>' + (val || '') + '</td>'; // Keep HTML for links etc, handle undefined/null
             });
             html += '</tr>';
         }
