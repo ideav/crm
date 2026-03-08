@@ -556,10 +556,6 @@
             <span class="edit-mode-badge hidden" id="editModeBadge">
                 <t9n>[RU]Режим редактирования[EN]Edit Mode</t9n>
             </span>
-            <button class="btn btn-secondary hidden" id="toggleEditBtn" onclick="toggleEditMode()">
-                <i class="pi pi-pencil"></i>
-                <t9n>[RU]Редактировать[EN]Edit</t9n>
-            </button>
             <button class="btn btn-primary hidden" id="addPanelBtn" onclick="showAddPanelModal()">
                 <i class="pi pi-plus"></i>
                 <t9n>[RU]Добавить панель[EN]Add Panel</t9n>
@@ -1899,30 +1895,14 @@ function submitDataEntryForm(event, panelId, tableType) {
 // ============================================================
 function updateEditModeUI() {
     const badge = document.getElementById('editModeBadge');
-    const toggleBtn = document.getElementById('toggleEditBtn');
     const addBtn = document.getElementById('addPanelBtn');
 
     if (FormConstructor.editMode) {
         badge.classList.remove('hidden');
         addBtn.classList.remove('hidden');
-        toggleBtn.classList.add('hidden');
     } else {
         badge.classList.add('hidden');
-        if (FormConstructor.currentFormId) {
-            toggleBtn.classList.remove('hidden');
-        }
     }
-}
-
-function toggleEditMode() {
-    const url = new URL(window.location);
-    if (FormConstructor.editMode) {
-        url.searchParams.delete('EDIT');
-        url.searchParams.delete('edit');
-    } else {
-        url.searchParams.set('EDIT', '1');
-    }
-    window.location.href = url.toString();
 }
 
 // ============================================================
