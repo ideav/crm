@@ -1905,7 +1905,6 @@ function updateEditModeUI() {
     if (FormConstructor.editMode) {
         badge.classList.remove('hidden');
         addBtn.classList.remove('hidden');
-        toggleBtn.classList.add('hidden');
     } else {
         badge.classList.add('hidden');
         if (FormConstructor.currentFormId) {
@@ -1922,7 +1921,6 @@ function toggleEditMode() {
     } else {
         url.searchParams.set('EDIT', '1');
     }
-    window.location.href = url.toString();
 }
 
 // ============================================================
