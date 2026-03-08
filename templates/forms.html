@@ -159,6 +159,26 @@
     overflow: hidden;
 }
 
+/* Overflow Mode: Scroll - panel has fixed height with scrolling */
+.panel-card.overflow-scroll {
+    max-height: 500px;
+}
+
+.panel-card.overflow-scroll .panel-content {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+/* Overflow Mode: Stretch - panel grows to fit content */
+.panel-card.overflow-stretch {
+    max-height: none;
+}
+
+.panel-card.overflow-stretch .panel-content {
+    max-height: none;
+    overflow-y: visible;
+}
+
 .panel-card.editing {
     border-color: #007bff;
     box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.1);
@@ -691,6 +711,14 @@
                 <label><t9n>[RU]Действие после отправки[EN]Next Action</t9n></label>
                 <input type="text" id="editPanelNextAction" placeholder="<t9n>[RU]URL или действие[EN]URL or action</t9n>">
             </div>
+            <div class="form-field" style="margin-top: 15px;">
+                <label><t9n>[RU]Режим отображения содержимого[EN]Content Display Mode</t9n></label>
+                <select id="editPanelOverflowMode">
+                    <option value=""><t9n>[RU]По умолчанию[EN]Default</t9n></option>
+                    <option value="scroll"><t9n>[RU]Скроллить (фиксированная высота)[EN]Scroll (fixed height)</t9n></option>
+                    <option value="stretch"><t9n>[RU]Растягивать (по размеру содержимого)[EN]Stretch (fit content)</t9n></option>
+                </select>
+            </div>
         </div>
         <div class="modal-footer">
             <button class="btn btn-danger" onclick="deletePanel()">
@@ -1171,10 +1199,18 @@ function createPanelElement(panel, panelReqs) {
     const bgColor = panelReqs[255] || panelReqs['255'] || '#ffffff';
     const group = panelReqs[256] || panelReqs['256'] || ''; // Group number
     const config = panelReqs[225] || panelReqs['225'] || '{}';
+    const overflowMode = panelReqs[258] || panelReqs['258'] || ''; // Overflow mode (scroll/stretch)
 
     // Apply colors
     if (fontColor) div.style.color = fontColor;
     if (bgColor) div.style.backgroundColor = bgColor;
+
+    // Apply overflow mode
+    if (overflowMode === 'scroll') {
+        div.classList.add('overflow-scroll');
+    } else if (overflowMode === 'stretch') {
+        div.classList.add('overflow-stretch');
+    }
 
     // Panel header
     let headerHtml = '<div class="panel-header">';
@@ -1945,6 +1981,9 @@ function showEditPanelModal(panelId) {
     // Load panel settings from requisites
     document.getElementById('editPanelColor').value = panelReqs[254] || panelReqs['254'] || '#333333';
     document.getElementById('editPanelBgColor').value = panelReqs[255] || panelReqs['255'] || '#ffffff';
+    document.getElementById('editPanelFilter').value = panelReqs[181] || panelReqs['181'] || '';
+    document.getElementById('editPanelNextAction').value = panelReqs[257] || panelReqs['257'] || '';
+    document.getElementById('editPanelOverflowMode').value = panelReqs[258] || panelReqs['258'] || '';
     document.getElementById('editPanelGroup').value = panelReqs[256] || panelReqs['256'] || '';
     document.getElementById('editPanelFilter').value = panelReqs[181] || panelReqs['181'] || '';
     document.getElementById('editPanelNextAction').value = panelReqs[257] || panelReqs['257'] || '';
@@ -2048,6 +2087,7 @@ function savePanel() {
     const group = document.getElementById('editPanelGroup').value;
     const filter = document.getElementById('editPanelFilter').value;
     const nextAction = document.getElementById('editPanelNextAction').value;
+    const overflowMode = document.getElementById('editPanelOverflowMode').value;
 
     const data = {
         't138': name,
@@ -2055,7 +2095,8 @@ function savePanel() {
         't255': bgColor,
         't256': group,
         't181': filter,
-        't257': nextAction
+        't257': nextAction,
+        't258': overflowMode
     };
 
     apiRequest('POST', '_m_set/' + panelId + '?JSON', data, function(json) {
