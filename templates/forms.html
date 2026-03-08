@@ -1459,7 +1459,9 @@ function renderPivotTable(panelId, reportId, filter, config, container) {
         for (let i = 0; i < rowCount; i++) {
             const row = [];
             for (let j = 0; j < json.columns.length; j++) {
-                let val = json.data[j] ? json.data[j][i] : '';
+                // Ensure we handle undefined/null values from array access
+                const dataCol = json.data[j];
+                let val = (dataCol && dataCol[i] !== undefined && dataCol[i] !== null) ? dataCol[i] : '';
                 // For reference fields (id:name format), display only the name
                 val = getDisplayValue(val);
                 // Strip HTML tags, ensure empty string for undefined/null
@@ -1638,7 +1640,9 @@ function renderReportTable(panelId, reportId, filter, config, container) {
             html += '<tr>';
             orderedVisibleColumns.forEach(function(col) {
                 const dataIdx = columnIndexMap[col.id];
-                let val = json.data[dataIdx] ? json.data[dataIdx][i] : '';
+                // Ensure we handle undefined/null values from array access
+                const dataCol = json.data[dataIdx];
+                let val = (dataCol && dataCol[i] !== undefined && dataCol[i] !== null) ? dataCol[i] : '';
                 // For reference fields (id:name format), display only the name
                 val = getDisplayValue(val);
                 html += '<td>' + (val || '') + '</td>'; // Keep HTML for links etc, handle undefined/null
@@ -1781,10 +1785,13 @@ function renderTableAsReport(panelId, tableId, filter, config, container) {
                     let val = '';
                     if (col.id === 'name') {
                         // First column is the object name (r[0])
-                        val = row.r ? row.r[0] : '';
+                        // Ensure we handle undefined/null values from array access
+                        val = (row.r && row.r[0] !== undefined && row.r[0] !== null) ? row.r[0] : '';
                     } else if (col.reqIndex !== undefined) {
                         // Requisite value (r[reqIndex + 1], since r[0] is the name)
-                        val = row.r ? row.r[col.reqIndex + 1] : '';
+                        // Ensure we handle undefined/null values from array access
+                        const idx = col.reqIndex + 1;
+                        val = (row.r && row.r[idx] !== undefined && row.r[idx] !== null) ? row.r[idx] : '';
                     }
                     // For reference fields (id:name format), display only the name
                     val = getDisplayValue(val);
