@@ -130,11 +130,12 @@
     gap: 5px;
 }
 
-/* Panels Container */
+/* Panels Container - Adaptive non-proportional flex layout */
 .panels-container {
     display: flex;
     flex-wrap: wrap;
     gap: 20px;
+    align-items: flex-start; /* Panels align at top, not stretch to equal height */
 }
 
 /* Panel Group - for grouping panels vertically */
@@ -142,34 +143,44 @@
     display: flex;
     flex-direction: column;
     gap: 20px;
-    flex: 1;
-    min-width: 300px;
+    /* Adaptive: fit content width, don't grow proportionally */
+    flex: 0 1 auto;
+    min-width: 200px;
+    max-width: 100%;
+    width: fit-content;
 }
 
-/* Panel Card */
+/* Panel Card - Adaptive sizing based on content */
 .panel-card {
     background: #fff;
     border: 1px solid #e0e0e0;
     border-radius: 8px;
     padding: 15px;
-    min-width: 300px;
-    flex: 1;
+    min-width: 200px;
+    /* Adaptive: fit content, don't grow proportionally */
+    flex: 0 1 auto;
     max-width: 100%;
     position: relative;
     overflow: hidden;
+    width: fit-content;
 }
 
-/* Overflow Mode: Scroll - panel has fixed height with scrolling */
+/* When panel is inside a group, take full width of group */
+.panel-group .panel-card {
+    width: 100%;
+}
+
+/* Overflow Mode: Scroll - panel has fixed height based on viewport, scrollable */
 .panel-card.overflow-scroll {
-    max-height: 500px;
+    max-height: calc(100vh - 100px); /* Viewport height minus header/padding */
 }
 
 .panel-card.overflow-scroll .panel-content {
-    max-height: 400px;
+    max-height: calc(100vh - 200px);
     overflow-y: auto;
 }
 
-/* Overflow Mode: Stretch - panel grows to fit content */
+/* Overflow Mode: Stretch - panel grows beyond viewport if needed */
 .panel-card.overflow-stretch {
     max-height: none;
 }
@@ -221,7 +232,7 @@
 }
 
 .panel-content {
-    min-height: 200px;
+    min-height: 50px; /* Reduced from 200px for adaptive sizing */
     overflow-x: auto;
 }
 
@@ -518,6 +529,12 @@
 
     .panel-card {
         min-width: 100%;
+        width: 100%;
+    }
+
+    .panel-group {
+        min-width: 100%;
+        width: 100%;
     }
 
     .panel-type-grid {

@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Adaptive Panel Layout (Issue #765)</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+            margin: 0;
+        }
+        h1, h2 {
+            color: #333;
+        }
+        .test-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .test-section h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        .description {
+            color: #666;
+            margin-bottom: 15px;
+        }
+
+        /* ============================================================
+         * NEW ADAPTIVE PANEL STYLES (proposed for forms.html)
+         * ============================================================ */
+
+        /* Panels Container - Adaptive non-proportional flex layout */
+        .panels-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            align-items: flex-start; /* Panels align at top, not stretch */
+        }
+
+        /* Panel Group - for grouping panels vertically */
+        .panel-group {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            /* Key change: fit-content instead of flex: 1 */
+            flex: 0 1 auto;
+            min-width: 200px;
+            max-width: 100%;
+            /* Allow group to shrink if needed */
+            width: fit-content;
+        }
+
+        /* Panel Card - Adaptive sizing */
+        .panel-card {
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            min-width: 200px;
+            /* Key change: don't grow, shrink if needed, auto size */
+            flex: 0 1 auto;
+            max-width: 100%;
+            position: relative;
+            /* Width based on content */
+            width: fit-content;
+        }
+
+        /* When panel is inside a group, take full width of group */
+        .panel-group .panel-card {
+            width: 100%;
+        }
+
+        /* Overflow Mode: Scroll - panel has fixed max-height with scrolling */
+        .panel-card.overflow-scroll {
+            max-height: calc(100vh - 100px); /* Viewport height minus some padding */
+        }
+
+        .panel-card.overflow-scroll .panel-content {
+            max-height: calc(100vh - 200px);
+            overflow-y: auto;
+        }
+
+        /* Overflow Mode: Stretch - panel grows beyond viewport if needed */
+        .panel-card.overflow-stretch {
+            max-height: none;
+        }
+
+        .panel-card.overflow-stretch .panel-content {
+            max-height: none;
+            overflow-y: visible;
+        }
+
+        /* Default behavior for panels without explicit mode */
+        .panel-content {
+            min-height: 50px;
+            overflow-x: auto;
+        }
+
+        .panel-card.editing {
+            border-color: #007bff;
+            box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.1);
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .panel-title {
+            font-weight: 600;
+            font-size: 1rem;
+            color: #333;
+            white-space: nowrap;
+        }
+
+        .panel-actions {
+            display: flex;
+            gap: 5px;
+            align-items: center;
+        }
+
+        .panel-group-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #6c757d;
+            color: white;
+            font-size: 11px;
+            font-weight: 600;
+            min-width: 22px;
+            height: 22px;
+            padding: 0 6px;
+            border-radius: 11px;
+            margin-right: 5px;
+        }
+
+        .btn {
+            padding: 4px 10px;
+            font-size: 12px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            background: #f8f9fa;
+            cursor: pointer;
+        }
+
+        /* Responsive - on small screens */
+        @media (max-width: 768px) {
+            .panel-card {
+                min-width: 100%;
+                width: 100%;
+            }
+            .panel-group {
+                min-width: 100%;
+                width: 100%;
+            }
+        }
+
+        /* Demo content styles */
+        .chart-placeholder {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 500;
+        }
+        .table-placeholder {
+            border-collapse: collapse;
+            width: 100%;
+        }
+        .table-placeholder th, .table-placeholder td {
+            border: 1px solid #e0e0e0;
+            padding: 8px 12px;
+            text-align: left;
+        }
+        .table-placeholder th {
+            background: #f8f9fa;
+        }
+        .form-placeholder {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .form-placeholder input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .pass { color: #28a745; font-weight: bold; }
+        .fail { color: #dc3545; font-weight: bold; }
+        .info { color: #17a2b8; }
+    </style>
+</head>
+<body>
+    <h1>Test Adaptive Panel Layout (Issue #765)</h1>
+    <p class="description">
+        Testing the new adaptive non-proportional grid layout for panels.<br>
+        <strong>Requirements:</strong><br>
+        1. Panels take as much space as their content needs (width and height)<br>
+        2. Panels with same group show vertically in one element<br>
+        3. Wrap to next row when doesn't fit<br>
+        4. Scroll/Stretch mode for single-row overflow
+    </p>
+
+    <div class="test-section">
+        <h3>Test 1: Adaptive Width - Different Content Sizes</h3>
+        <p class="description">Each panel should size based on its content, not proportionally.</p>
+        <div class="panels-container" id="test1-container">
+            <!-- Will be populated by JS -->
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h3>Test 2: Grouped Panels (Vertical Stacking)</h3>
+        <p class="description">Panels with same group value stack vertically in a single grid element.</p>
+        <div class="panels-container" id="test2-container">
+            <!-- Will be populated by JS -->
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h3>Test 3: Wrapping Behavior</h3>
+        <p class="description">Panels wrap to next row when they don't fit. Resize window to test.</p>
+        <div class="panels-container" id="test3-container">
+            <!-- Will be populated by JS -->
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h3>Test 4: Overflow Modes - Scroll vs Stretch</h3>
+        <p class="description">
+            Left: overflow-scroll (fixed max-height, scrollable)<br>
+            Right: overflow-stretch (no max-height, expands beyond viewport)
+        </p>
+        <div class="panels-container" id="test4-container">
+            <!-- Will be populated by JS -->
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h3>Test 5: Mixed Layout - Real World Scenario</h3>
+        <p class="description">Simulating a real dashboard with charts, tables, and forms of varying sizes.</p>
+        <div class="panels-container" id="test5-container">
+            <!-- Will be populated by JS -->
+        </div>
+    </div>
+
+    <script>
+        // Helper to create panel elements
+        function createPanel(id, title, content, options = {}) {
+            const { group, overflowMode, editing } = options;
+
+            const div = document.createElement('div');
+            div.className = 'panel-card';
+            if (editing) div.classList.add('editing');
+            if (overflowMode === 'scroll') div.classList.add('overflow-scroll');
+            if (overflowMode === 'stretch') div.classList.add('overflow-stretch');
+            div.id = 'panel-' + id;
+
+            let headerHtml = '<div class="panel-header">';
+            headerHtml += '<span class="panel-title">' + title + '</span>';
+            if (editing) {
+                headerHtml += '<div class="panel-actions">';
+                if (group) {
+                    headerHtml += '<span class="panel-group-badge">' + group + '</span>';
+                }
+                headerHtml += '<button class="btn">Settings</button>';
+                headerHtml += '</div>';
+            }
+            headerHtml += '</div>';
+            headerHtml += '<div class="panel-content">' + content + '</div>';
+
+            div.innerHTML = headerHtml;
+            return div;
+        }
+
+        // Test 1: Adaptive Width
+        function test1() {
+            const container = document.getElementById('test1-container');
+
+            // Small panel - narrow content
+            const small = createPanel(1, 'Small Info',
+                '<div style="width: 150px;">Short text</div>', { editing: true });
+
+            // Medium panel - wider content
+            const medium = createPanel(2, 'Medium Chart',
+                '<div class="chart-placeholder" style="width: 300px; height: 150px;">300x150 Chart</div>', { editing: true });
+
+            // Large panel - wide table
+            const large = createPanel(3, 'Large Table',
+                '<table class="table-placeholder"><tr><th>Column 1</th><th>Column 2</th><th>Column 3</th><th>Column 4</th><th>Column 5</th></tr>' +
+                '<tr><td>Data</td><td>Data</td><td>Data</td><td>Data</td><td>Data</td></tr></table>', { editing: true });
+
+            container.appendChild(small);
+            container.appendChild(medium);
+            container.appendChild(large);
+        }
+
+        // Test 2: Grouped Panels
+        function test2() {
+            const container = document.getElementById('test2-container');
+
+            // Standalone panel
+            const standalone = createPanel(10, 'Standalone Panel',
+                '<div class="chart-placeholder" style="width: 200px; height: 150px;">Chart</div>', { editing: true });
+            container.appendChild(standalone);
+
+            // Group 1 - three panels stacked
+            const group1 = document.createElement('div');
+            group1.className = 'panel-group';
+            group1.setAttribute('data-group', '1');
+
+            group1.appendChild(createPanel(11, 'Group 1 - Panel A',
+                '<div style="width: 180px;">Info A</div>', { group: '1', editing: true }));
+            group1.appendChild(createPanel(12, 'Group 1 - Panel B',
+                '<div style="width: 180px;">Info B</div>', { group: '1', editing: true }));
+            group1.appendChild(createPanel(13, 'Group 1 - Panel C',
+                '<div style="width: 180px;">Info C</div>', { group: '1', editing: true }));
+
+            container.appendChild(group1);
+
+            // Another standalone
+            const standalone2 = createPanel(14, 'Another Standalone',
+                '<div class="form-placeholder" style="width: 250px;">' +
+                '<input placeholder="Name"><input placeholder="Email"><button class="btn">Submit</button></div>', { editing: true });
+            container.appendChild(standalone2);
+        }
+
+        // Test 3: Wrapping Behavior
+        function test3() {
+            const container = document.getElementById('test3-container');
+
+            for (let i = 1; i <= 6; i++) {
+                const width = 200 + (i * 30);
+                const panel = createPanel(20 + i, 'Panel ' + i,
+                    '<div class="chart-placeholder" style="width: ' + width + 'px; height: 100px;">' + width + 'px wide</div>', { editing: true });
+                container.appendChild(panel);
+            }
+        }
+
+        // Test 4: Overflow Modes
+        function test4() {
+            const container = document.getElementById('test4-container');
+
+            // Scroll mode - should have max-height and scroll
+            const scrollContent = '<div style="width: 300px;">';
+            for (let i = 1; i <= 30; i++) {
+                scrollContent += '<p>Row ' + i + ' - This is content that may overflow</p>';
+            }
+            const scrollPanel = createPanel(30, 'Scroll Mode Panel',
+                scrollContent + '</div>', { overflowMode: 'scroll', editing: true });
+            container.appendChild(scrollPanel);
+
+            // Stretch mode - should grow without limit
+            const stretchContent = '<div style="width: 300px;">';
+            for (let i = 1; i <= 30; i++) {
+                stretchContent += '<p>Row ' + i + ' - This is content that stretches</p>';
+            }
+            const stretchPanel = createPanel(31, 'Stretch Mode Panel',
+                stretchContent + '</div>', { overflowMode: 'stretch', editing: true });
+            container.appendChild(stretchPanel);
+        }
+
+        // Test 5: Real World Scenario
+        function test5() {
+            const container = document.getElementById('test5-container');
+
+            // Dashboard-like layout
+            // Pie chart (small)
+            container.appendChild(createPanel(40, 'Sales by Region',
+                '<div class="chart-placeholder" style="width: 200px; height: 200px;">Pie Chart</div>', { editing: true }));
+
+            // Group: KPIs stacked vertically
+            const kpiGroup = document.createElement('div');
+            kpiGroup.className = 'panel-group';
+            kpiGroup.appendChild(createPanel(41, 'Revenue',
+                '<div style="font-size: 2em; font-weight: bold; color: #28a745;">$1.2M</div>', { group: '1', editing: true }));
+            kpiGroup.appendChild(createPanel(42, 'Customers',
+                '<div style="font-size: 2em; font-weight: bold; color: #007bff;">5,420</div>', { group: '1', editing: true }));
+            kpiGroup.appendChild(createPanel(43, 'Growth',
+                '<div style="font-size: 2em; font-weight: bold; color: #fd7e14;">+15%</div>', { group: '1', editing: true }));
+            container.appendChild(kpiGroup);
+
+            // Line chart (medium)
+            container.appendChild(createPanel(44, 'Trend Analysis',
+                '<div class="chart-placeholder" style="width: 400px; height: 200px;">Line Chart</div>', { editing: true }));
+
+            // Data table (large)
+            container.appendChild(createPanel(45, 'Recent Orders',
+                '<table class="table-placeholder">' +
+                '<tr><th>Order ID</th><th>Customer</th><th>Amount</th><th>Status</th><th>Date</th></tr>' +
+                '<tr><td>#1234</td><td>John Doe</td><td>$150</td><td>Shipped</td><td>Today</td></tr>' +
+                '<tr><td>#1233</td><td>Jane Smith</td><td>$280</td><td>Processing</td><td>Yesterday</td></tr>' +
+                '<tr><td>#1232</td><td>Bob Wilson</td><td>$95</td><td>Delivered</td><td>2 days ago</td></tr>' +
+                '</table>', { editing: true }));
+        }
+
+        // Run all tests
+        test1();
+        test2();
+        test3();
+        test4();
+        test5();
+
+        console.log('All tests rendered. Check visual output in browser.');
+    </script>
+</body>
+</html>
