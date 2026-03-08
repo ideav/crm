@@ -814,6 +814,7 @@
 // Form Constructor - Global State
 // ============================================================
 const FormConstructor = {
+    version: '2026-03-08-debug-tracing',  // Version for cache debugging
     editMode: false,
     debugMode: false,  // Set to true to enable value tracing (see console)
     currentFormId: null,
@@ -885,9 +886,10 @@ document.addEventListener('DOMContentLoaded', function() {
         FormConstructor.currentFormId = '{_global_.id}';
     }
 
-    // Log debug mode status
+    // Log debug mode status and version (always log version in debug mode)
     if (FormConstructor.debugMode) {
         console.log('%c[FormConstructor Debug Mode ENABLED]', 'background: #ffcc00; color: #000; padding: 4px 8px; font-weight: bold;');
+        console.log('Version:', FormConstructor.version);
         console.log('Value tracing will log how data flows from JSON to table cells.');
         console.log('Look for [Value Trace] entries to see: rawValue → getDisplayValue → escapeHtml → cell');
         console.log('To disable: remove ?DEBUG from URL');
