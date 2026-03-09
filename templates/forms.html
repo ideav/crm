@@ -1979,7 +1979,7 @@ function updateEditModeUI() {
     const toggleBtn = document.getElementById('toggleEditBtn');
     const addBtn = document.getElementById('addPanelBtn');
 
-    if (FormConstructor.editMode) {
+    if (FormConstructor.editMode && FormConstructor.currentFormId) {
         addBtn.classList.remove('hidden');
     } else {
         addBtn.classList.add('hidden');
