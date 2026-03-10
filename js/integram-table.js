@@ -1856,6 +1856,9 @@ class IntegramTable {
                             }
                             return `<td class="${ cellClass } new-row-cell-disabled" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ escapedValue }</td>`;
                         }
+                        // Issue #809: First column of new row has no record ID yet - use 'new' placeholder
+                        // so canEdit evaluates to true and cell gets data-editable="true" attribute
+                        recordId = 'new';
                     }
 
                     if (window.INTEGRAM_DEBUG) {
@@ -2461,6 +2464,12 @@ class IntegramTable {
             const rowIndex = parseInt(cell.dataset.rowIndex);
 
             if (!colId || !colType) {
+                return;
+            }
+
+            // Issue #809: If this is the first column of a pending new row, delegate to startNewRowFirstColumnEdit
+            if (recordId === 'new' && this.pendingNewRow && this.pendingNewRow.rowIndex === rowIndex) {
+                this.startNewRowFirstColumnEdit(cell, rowIndex);
                 return;
             }
 
