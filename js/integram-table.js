@@ -2202,12 +2202,56 @@ class IntegramTable {
                 originalValue: currentValue
             };
 
+            // Highlight required fields in the row when data source is a table (issue #779)
+            if (this.getDataSourceType() === 'table') {
+                this.highlightRequiredCells(cell);
+            }
+
             // Create inline editor based on format or reference type
             if (isRef) {
                 this.renderReferenceEditor(cell, currentValue);
             } else {
                 this.renderInlineEditor(cell, currentValue, format);
             }
+        }
+
+        /**
+         * Highlight cells with required fields (:!NULL: in attrs) in the same row (issue #779)
+         * Called when entering edit mode for a table data source
+         * @param {HTMLElement} cell - The cell being edited
+         */
+        highlightRequiredCells(cell) {
+            const row = cell.closest('tr');
+            if (!row) return;
+
+            // Build ordered columns list (same logic as in render())
+            const orderedColumns = this.columnOrder
+                .map(id => this.columns.find(c => c.id === id))
+                .filter(c => c && this.visibleColumns.includes(c.id));
+
+            // Iterate all cells in the row and highlight those with required attrs
+            const cells = row.querySelectorAll('td[data-col]');
+            cells.forEach(td => {
+                const colIndex = parseInt(td.dataset.col);
+                if (isNaN(colIndex)) return;
+                const column = orderedColumns[colIndex];
+                if (column && column.attrs && column.attrs.includes(':!NULL:')) {
+                    td.classList.add('required-field-editing');
+                }
+            });
+        }
+
+        /**
+         * Remove required field highlighting from all cells in the row (issue #779)
+         * Called when exiting edit mode
+         * @param {HTMLElement} cell - The cell that was being edited
+         */
+        clearRequiredCellHighlights(cell) {
+            const row = cell.closest('tr');
+            if (!row) return;
+            row.querySelectorAll('td.required-field-editing').forEach(td => {
+                td.classList.remove('required-field-editing');
+            });
         }
 
         extractCellValue(cell) {
@@ -2955,14 +2999,18 @@ class IntegramTable {
             } catch (error) {
                 console.error('Error saving reference edit:', error);
                 this.showToast(`Ошибка сохранения: ${error.message}`, 'error');
-                // Restore original content on error
+                // Restore original content on error (cancelInlineEdit also clears required highlights)
                 this.cancelInlineEdit(cell.dataset.originalContent);
             } finally {
                 // Clean up
-                if (this.currentEditingCell && this.currentEditingCell.outsideClickHandler) {
-                    document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
+                if (this.currentEditingCell) {
+                    // Remove required field highlighting (issue #779)
+                    this.clearRequiredCellHighlights(this.currentEditingCell.cell);
+                    if (this.currentEditingCell.outsideClickHandler) {
+                        document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
+                    }
+                    this.currentEditingCell = null;
                 }
-                this.currentEditingCell = null;
 
                 // Navigate to pending cell if set (issue #518)
                 if (this.pendingCellClick) {
@@ -3361,14 +3409,18 @@ class IntegramTable {
             } catch (error) {
                 console.error('Error saving inline edit:', error);
                 this.showToast(`Ошибка сохранения: ${ error.message }`, 'error');
-                // Restore original content on error
+                // Restore original content on error (cancelInlineEdit also clears required highlights)
                 this.cancelInlineEdit(cell.dataset.originalContent);
             } finally {
                 // Clean up
-                if (this.currentEditingCell && this.currentEditingCell.outsideClickHandler) {
-                    document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
+                if (this.currentEditingCell) {
+                    // Remove required field highlighting (issue #779)
+                    this.clearRequiredCellHighlights(this.currentEditingCell.cell);
+                    if (this.currentEditingCell.outsideClickHandler) {
+                        document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
+                    }
+                    this.currentEditingCell = null;
                 }
-                this.currentEditingCell = null;
 
                 // Navigate to pending cell if set (issue #518)
                 if (this.pendingCellClick) {
@@ -3503,6 +3555,9 @@ class IntegramTable {
             }
 
             const { cell } = this.currentEditingCell;
+
+            // Remove required field highlighting (issue #779)
+            this.clearRequiredCellHighlights(cell);
 
             // Restore original content
             // Note: Use typeof check instead of truthiness check because originalContent
@@ -6059,6 +6114,14 @@ class IntegramTable {
         }
 
         async fetchMetadata(typeId) {
+            // Use globalMetadata if available - it already contains metadata for all tables (issue #779)
+            if (this.globalMetadata) {
+                const cachedItem = this.globalMetadata.find(item => item.id === typeId || item.id === Number(typeId));
+                if (cachedItem) {
+                    return cachedItem;
+                }
+            }
+
             const apiBase = this.getApiBase();
             const response = await fetch(`${ apiBase }/metadata/${ typeId }`);
 

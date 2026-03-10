@@ -1821,6 +1821,12 @@
    Inline Cell Editing Styles
    ======================================== */
 
+/* Highlight required fields (attrs contains :!NULL:) when row is in edit mode (issue #779) */
+.required-field-editing {
+    outline: 2px solid #d32f2f !important;
+    outline-offset: -2px;
+}
+
 /* Make cells with inline editing capability visually distinct on hover */
 .inline-editable {
     cursor: text;
