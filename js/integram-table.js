@@ -578,10 +578,8 @@ class IntegramTable {
 
             // First load, fetch metadata to get column information
             if (this.columns.length === 0) {
-                const apiBase = this.getApiBase();
-                const metadataUrl = `${ apiBase }/metadata/${ this.options.tableTypeId }`;
-                const metadataResponse = await fetch(metadataUrl);
-                const metadata = await metadataResponse.json();
+                // Use fetchMetadata() to leverage globalMetadata cache and avoid redundant requests (issue #783)
+                const metadata = await this.fetchMetadata(this.options.tableTypeId);
 
                 // Auto-set table title from metadata if not explicitly provided
                 if (!this.options.title && (metadata.val || metadata.value || metadata.name)) {
@@ -898,10 +896,8 @@ class IntegramTable {
 
             // Fetch metadata if columns are not yet loaded
             if (this.columns.length === 0) {
-                const apiBase = this.getApiBase();
-                const metadataUrl = `${ apiBase }/metadata/${ typeId }`;
-                const metadataResponse = await fetch(metadataUrl);
-                const metadata = await metadataResponse.json();
+                // Use fetchMetadata() to leverage globalMetadata cache and avoid redundant requests (issue #783)
+                const metadata = await this.fetchMetadata(typeId);
 
                 // Auto-set table title from metadata if not explicitly provided
                 if (!this.options.title && (metadata.val || metadata.value)) {
@@ -10659,14 +10655,30 @@ async function openCreateRecordForm(tableTypeId, parentId, fieldValues = {}) {
         }
 
         // Fetch metadata for the table type
-        const metadataUrl = `${apiBase}/metadata/${tableTypeId}`;
-        const metadataResponse = await fetch(metadataUrl);
-
-        if (!metadataResponse.ok) {
-            throw new Error(`Failed to fetch metadata: ${metadataResponse.statusText}`);
+        // Use globalMetadata from an existing IntegramTable instance if available (issue #783)
+        let metadata = null;
+        if (window._integramTableInstances && window._integramTableInstances.length > 0) {
+            for (const inst of window._integramTableInstances) {
+                if (inst && inst.globalMetadata) {
+                    const cached = inst.globalMetadata.find(item => item.id === tableTypeId || item.id === Number(tableTypeId));
+                    if (cached) {
+                        metadata = cached;
+                        break;
+                    }
+                }
+            }
         }
 
-        const metadata = await metadataResponse.json();
+        if (!metadata) {
+            const metadataUrl = `${apiBase}/metadata/${tableTypeId}`;
+            const metadataResponse = await fetch(metadataUrl);
+
+            if (!metadataResponse.ok) {
+                throw new Error(`Failed to fetch metadata: ${metadataResponse.statusText}`);
+            }
+
+            metadata = await metadataResponse.json();
+        }
 
         // Convert fieldValues to recordData format for pre-filling
         // Input: {'t3888': 357, 't3886': 'Отказались'}
