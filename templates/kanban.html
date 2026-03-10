@@ -1,56 +1,40 @@
 <style>
-    /* CSS Variables */
+    /* Kanban CSS Variables */
     :root {
-        --primary-color: #2563eb;
-        --primary-hover: #1d4ed8;
-        --primary-light: #3b82f6;
-        --background: #f8fafc;
-        --surface: #ffffff;
-        --border-color: #e2e8f0;
-        --text-primary: #1e293b;
-        --text-secondary: #64748b;
-        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-        --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-
-        /* Status header colors - darker gradient from red to purple for better white text readability */
-        --status-color-3689: #a85555;  /* Darker red - Лид */
-        --status-color-3689-light: #b86b6b;
-        --status-color-3691: #b87355;  /* Darker red-orange - Первичный контакт */
-        --status-color-3691-light: #c68565;
-        --status-color-3693: #b88655;  /* Darker orange - Квалификация */
-        --status-color-3693-light: #c69865;
-        --status-color-3695: #b8a555;  /* Darker yellow-orange - Отправлено КП */
-        --status-color-3695-light: #c6b365;
-        --status-color-2849: #a5b855;  /* Darker yellow - Презентация / демо */
-        --status-color-2849-light: #b3c665;
-        --status-color-2843: #86b855;  /* Darker yellow-green - Согласование */
-        --status-color-2843-light: #98c665;
-        --status-color-2806: #55b875;  /* Darker green - Триал / апробация */
-        --status-color-2806-light: #65c686;
-        --status-color-3697: #55b8a5;  /* Darker teal - Закрытие сделки */
-        --status-color-3697-light: #65c6b3;
-        --status-color-3699: #5586b8;  /* Darker blue - Оплата */
-        --status-color-3699-light: #6598c6;
-        --status-color-3701: #7355b8;  /* Darker blue-purple - Повторная оплата */
-        --status-color-3701-light: #8565c6;
-        --status-color-2824: #a555b8;  /* Darker purple - Отказ / срыв сделки */
-        --status-color-2824-light: #b365c6;
+        --kanban-primary-color: #2563eb;
+        --kanban-primary-hover: #1d4ed8;
+        --kanban-primary-light: #3b82f6;
+        --kanban-background: #f8fafc;
+        --kanban-surface: #ffffff;
+        --kanban-border-color: #e2e8f0;
+        --kanban-text-primary: #1e293b;
+        --kanban-text-secondary: #64748b;
+        --kanban-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        --kanban-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
     }
 
-    /* Kanban specific styles */
+    /* Kanban Container - fill parent height */
+    #kanban-container {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* Kanban Board */
     .kanban-board {
         display: flex;
         gap: 16px;
-        overflow-x: scroll; /* Always show horizontal scrollbar */
+        overflow-x: auto;
         padding: 10px;
-        height: calc(100vh - 127px);
+        flex: 1;
+        min-height: 0;
         align-items: flex-start;
     }
 
+    /* Kanban Column */
     .kanban-column {
         min-width: 300px;
-        background-color: var(--surface);
+        background-color: var(--kanban-surface);
         border-radius: 4px;
         box-shadow: 0 2px 1px -1px rgba(0,0,0,0.2),
                     0 1px 1px 0 rgba(0,0,0,0.14),
@@ -63,7 +47,7 @@
 
     .kanban-column-header {
         padding: 10px;
-        background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-light) 100%);
+        background: linear-gradient(135deg, var(--kanban-primary-color) 0%, var(--kanban-primary-light) 100%);
         color: white;
         font-weight: 500;
         font-size: 1rem;
@@ -72,76 +56,7 @@
         justify-content: space-between;
         align-items: center;
         flex-shrink: 0;
-        box-shadow: 0 2px 4px -1px rgba(0,0,0,0.2),
-                    0 4px 5px 0 rgba(0,0,0,0.14),
-                    0 1px 10px 0 rgba(0,0,0,0.12);
-        position: relative;
-    }
-
-    .kanban-add-button {
-        position: absolute;
-        right: 50px;
-        top: 50%;
-        transform: translateY(-50%);
-        background-color: rgba(255, 255, 255, 0.9);
-        color: var(--text-primary);
-        border: none;
-        border-radius: 50%;
-        width: 32px;
-        height: 32px;
-        display: none;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        font-size: 20px;
-        font-weight: 600;
-        transition: all 0.2s ease;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-    }
-
-    .kanban-add-button:hover {
-        background-color: white;
-        transform: translateY(-50%) scale(1.1);
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-    }
-
-    .kanban-column-header:hover .kanban-add-button {
-        display: flex;
-    }
-
-    /* Status-specific header colors */
-    .kanban-column-header[data-status-id="3689"] {
-        background: linear-gradient(135deg, var(--status-color-3689) 0%, var(--status-color-3689-light) 100%);
-    }
-    .kanban-column-header[data-status-id="3691"] {
-        background: linear-gradient(135deg, var(--status-color-3691) 0%, var(--status-color-3691-light) 100%);
-    }
-    .kanban-column-header[data-status-id="3693"] {
-        background: linear-gradient(135deg, var(--status-color-3693) 0%, var(--status-color-3693-light) 100%);
-    }
-    .kanban-column-header[data-status-id="3695"] {
-        background: linear-gradient(135deg, var(--status-color-3695) 0%, var(--status-color-3695-light) 100%);
-    }
-    .kanban-column-header[data-status-id="2849"] {
-        background: linear-gradient(135deg, var(--status-color-2849) 0%, var(--status-color-2849-light) 100%);
-    }
-    .kanban-column-header[data-status-id="2843"] {
-        background: linear-gradient(135deg, var(--status-color-2843) 0%, var(--status-color-2843-light) 100%);
-    }
-    .kanban-column-header[data-status-id="2806"] {
-        background: linear-gradient(135deg, var(--status-color-2806) 0%, var(--status-color-2806-light) 100%);
-    }
-    .kanban-column-header[data-status-id="3697"] {
-        background: linear-gradient(135deg, var(--status-color-3697) 0%, var(--status-color-3697-light) 100%);
-    }
-    .kanban-column-header[data-status-id="3699"] {
-        background: linear-gradient(135deg, var(--status-color-3699) 0%, var(--status-color-3699-light) 100%);
-    }
-    .kanban-column-header[data-status-id="3701"] {
-        background: linear-gradient(135deg, var(--status-color-3701) 0%, var(--status-color-3701-light) 100%);
-    }
-    .kanban-column-header[data-status-id="2824"] {
-        background: linear-gradient(135deg, var(--status-color-2824) 0%, var(--status-color-2824-light) 100%);
+        box-shadow: 0 2px 4px -1px rgba(0,0,0,0.2);
     }
 
     .kanban-column-count {
@@ -152,6 +67,12 @@
         font-weight: 500;
     }
 
+    .kanban-column-sum {
+        font-size: 0.875rem;
+        margin-left: 8px;
+        opacity: 0.9;
+    }
+
     .kanban-column-body {
         padding: 12px;
         overflow-y: auto;
@@ -159,17 +80,18 @@
         min-height: 0;
     }
 
+    /* Kanban Card */
     .kanban-card {
-        background-color: var(--surface);
+        background-color: var(--kanban-surface);
         max-width: 322px;
         border: none;
         border-radius: 4px;
         padding: 16px;
-        padding-right: 44px; /* Make space for vertical icons on the right */
+        padding-right: 44px;
         margin-bottom: 12px;
         cursor: move;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        position: relative; /* Enable absolute positioning for icons */
+        position: relative;
         box-shadow: 0 2px 1px -1px rgba(0,0,0,0.2),
                     0 1px 1px 0 rgba(0,0,0,0.14),
                     0 1px 3px 0 rgba(0,0,0,0.12);
@@ -189,63 +111,42 @@
 
     .kanban-column-body.drag-over {
         background-color: rgba(37, 99, 235, 0.1);
-        border: 2px dashed var(--primary-color);
+        border: 2px dashed var(--kanban-primary-color);
         border-radius: 8px;
-    }
-
-    .kanban-card-title-row {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin-bottom: 8px;
     }
 
     .kanban-card-title {
         font-weight: 600;
         font-size: 1rem;
-        color: var(--text-primary);
-        text-decoration: none;
-        cursor: pointer;
-        flex: 1;
+        color: var(--kanban-text-primary);
+        margin-bottom: 8px;
     }
 
-    .kanban-card-title:hover {
-        color: var(--primary-color);
-        text-decoration: underline;
-    }
-
-    .kanban-card-external-link {
-        color: var(--text-secondary);
-        text-decoration: none;
+    .kanban-card-description {
         font-size: 0.875rem;
-        padding: 2px 4px;
-        border-radius: 4px;
-        transition: all 0.2s ease;
-        flex-shrink: 0;
-        z-index: 1;
-    }
-
-    .kanban-card-external-link:hover {
-        color: var(--primary-color);
-        background-color: rgba(37, 99, 235, 0.1);
-    }
-
-    .kanban-card-field {
-        font-size: 0.875rem;
-        color: var(--text-secondary);
+        color: var(--kanban-text-secondary);
         margin-bottom: 4px;
     }
 
-    .kanban-card-field-label {
-        font-weight: 500;
-        color: var(--text-primary);
+    .kanban-card-contact {
+        font-size: 0.875rem;
+        color: var(--kanban-text-secondary);
+        margin-bottom: 4px;
     }
 
     .kanban-card-amount {
         font-size: 1rem;
         font-weight: 600;
-        color: var(--primary-color);
+        color: var(--kanban-primary-color);
         margin-top: 8px;
+    }
+
+    .kanban-card-date {
+        position: absolute;
+        top: 6px;
+        right: 6px;
+        font-size: 0.75rem;
+        color: var(--kanban-text-secondary);
     }
 
     .kanban-card-contacts {
@@ -253,9 +154,8 @@
         bottom: 6px;
         right: 6px;
         display: flex;
-        flex-direction: column; /* Stack icons vertically */
-        align-items: flex-end; /* Align icons to the right */
-        gap: 3px; /* Smaller gap for vertical stacking */
+        flex-direction: column;
+        gap: 3px;
     }
 
     .kanban-card-contact-icon {
@@ -266,7 +166,6 @@
         align-items: center;
         justify-content: center;
         transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-        text-decoration: none;
         font-size: 14px;
         box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
     }
@@ -279,2401 +178,660 @@
 
     .kanban-card-contact-icon.active:hover {
         background-color: rgba(25, 118, 210, 0.25);
-        color: #1565c0;
         transform: scale(1.1);
-        box-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.1);
     }
 
     .kanban-card-contact-icon.inactive {
-        background-color: rgba(226, 232, 240, 0.5); /* More transparent gray */
-        color: rgba(148, 163, 184, 0.5); /* More transparent gray text */
+        background-color: rgba(226, 232, 240, 0.5);
+        color: rgba(148, 163, 184, 0.5);
         cursor: not-allowed;
-        pointer-events: none;
     }
 
-    .kanban-card-date {
-        position: absolute;
-        top: 6px;
-        right: 6px;
-        font-size: 0.75rem;
-        color: var(--text-secondary);
-        text-align: right;
-    }
-
-    .kanban-card-tasks-button {
-        height: 20px;
-        border-radius: 4px;
-        padding: 4px 12px;
-        font-size: 0.875rem;
-        border: none;
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-        text-decoration: none; /* For anchor tags */
-        text-transform: none;
-        letter-spacing: 0.0178571429em;
-    }
-
-    .kanban-card-tasks-button.has-tasks {
-        background-color: #b8a555;
-        color: white;
-        box-shadow: 0 2px 1px -1px rgba(0,0,0,0.2),
-                    0 1px 1px 0 rgba(0,0,0,0.14),
-                    0 1px 3px 0 rgba(0,0,0,0.12);
-    }
-
-    .kanban-card-tasks-button.has-tasks:hover {
-        background-color: #a59449;
-        transform: translateY(-1px);
-        box-shadow: 0 3px 3px -2px rgba(0,0,0,0.2),
-                    0 3px 4px 0 rgba(0,0,0,0.14),
-                    0 1px 8px 0 rgba(0,0,0,0.12);
-    }
-
-    .kanban-card-tasks-button.no-tasks {
-        background-color: rgba(0, 0, 0, 0.12);
-        color: rgba(0, 0, 0, 0.38);
-        cursor: pointer;
-    }
-
-    .kanban-card-tasks-button.no-tasks:hover {
-        background-color: rgba(0, 0, 0, 0.18);
-        color: rgba(0, 0, 0, 0.5);
-        transform: translateY(-1px);
-    }
-
-    .kanban-card-deals-button {
-        height: 20px;
-        border-radius: 4px;
-        padding: 4px 12px;
-        font-size: 0.875rem;
-        border: none;
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-        text-decoration: none; /* For anchor tags */
-        text-transform: none;
-        letter-spacing: 0.0178571429em;
-        margin-left: 10px;
-    }
-
-    .kanban-card-deals-button.has-deals {
-        background-color: #55b875;
-        color: white;
-        box-shadow: 0 2px 1px -1px rgba(0,0,0,0.2),
-                    0 1px 1px 0 rgba(0,0,0,0.14),
-                    0 1px 3px 0 rgba(0,0,0,0.12);
-    }
-
-    .kanban-card-deals-button.has-deals:hover {
-        background-color: #4aa668;
-        transform: translateY(-1px);
-        box-shadow: 0 3px 3px -2px rgba(0,0,0,0.2),
-                    0 3px 4px 0 rgba(0,0,0,0.14),
-                    0 1px 8px 0 rgba(0,0,0,0.12);
-    }
-
-    .kanban-card-deals-button.no-deals {
-        background-color: rgba(0, 0, 0, 0.12);
-        color: rgba(0, 0, 0, 0.38);
-        cursor: pointer;
-    }
-
-    .kanban-card-deals-button.no-deals:hover {
-        background-color: rgba(0, 0, 0, 0.18);
-        color: rgba(0, 0, 0, 0.5);
-        transform: translateY(-1px);
-    }
-
-    .kanban-card-tasks-row {
-        display: flex;
-        align-items: center;
-        gap: 2px;
-        margin-top: 8px;
-        position: relative;
-        z-index: 1;
-    }
-
-    .kanban-add-task-button {
-        width: 20px;
-        height: 20px;
-        border-radius: 4px;
-        border: none;
-        background-color: #b8a555;
-        color: white;
-        font-size: 14px;
-        font-weight: 600;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: all 0.2s ease;
-        padding: 0;
-        line-height: 1;
-        box-shadow: 0 2px 1px -1px rgba(0,0,0,0.2),
-                    0 1px 1px 0 rgba(0,0,0,0.14),
-                    0 1px 3px 0 rgba(0,0,0,0.12);
-    }
-
-    .kanban-add-task-button:hover {
-        background-color: var(--primary-hover);
-        transform: scale(1.1);
-        box-shadow: 0 3px 3px -2px rgba(0,0,0,0.2),
-                    0 3px 4px 0 rgba(0,0,0,0.14),
-                    0 1px 8px 0 rgba(0,0,0,0.12);
-    }
-
-    .kanban-add-deal-button {
-        width: 20px;
-        height: 20px;
-        border-radius: 4px;
-        border: none;
-        background-color: #55b875;
-        color: white;
-        font-size: 14px;
-        font-weight: 600;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: all 0.2s ease;
-        padding: 0;
-        line-height: 1;
-        box-shadow: 0 2px 1px -1px rgba(0,0,0,0.2),
-                    0 1px 1px 0 rgba(0,0,0,0.14),
-                    0 1px 3px 0 rgba(0,0,0,0.12);
-    }
-
-    .kanban-add-deal-button:hover {
-        background-color: #4aa668;
-        transform: scale(1.1);
-        box-shadow: 0 3px 3px -2px rgba(0,0,0,0.2),
-                    0 3px 4px 0 rgba(0,0,0,0.14),
-                    0 1px 8px 0 rgba(0,0,0,0.12);
-    }
-
-    .loading {
+    /* Loading and Error States */
+    .kanban-loading {
         text-align: center;
         padding: 40px;
-        color: var(--text-secondary);
+        color: var(--kanban-text-secondary);
     }
 
-    .error {
+    .kanban-error {
         background-color: #fee2e2;
         color: #991b1b;
         padding: 16px;
         border-radius: 8px;
         margin: 20px;
     }
-
-    /* Modal styles */
-    .kanban-modal-overlay {
-        display: none;
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(0, 0, 0, 0.5);
-        z-index: 1000;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .kanban-modal-overlay.active {
-        display: flex;
-    }
-
-    .kanban-modal {
-        background-color: var(--surface);
-        border-radius: 8px;
-        box-shadow: var(--shadow-lg);
-        max-width: 500px;
-        width: 90%;
-        max-height: 90vh;
-        overflow-y: auto;
-    }
-
-    .kanban-modal-header {
-        padding: 20px 24px;
-        border-bottom: 1px solid var(--border-color);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-
-    .kanban-modal-title {
-        font-size: 1.25rem;
-        font-weight: 600;
-        color: var(--text-primary);
-        margin: 0;
-    }
-
-    .kanban-modal-close {
-        background: none;
-        border: none;
-        font-size: 24px;
-        color: var(--text-secondary);
-        cursor: pointer;
-        padding: 0;
-        width: 32px;
-        height: 32px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 4px;
-        transition: all 0.2s ease;
-    }
-
-    .kanban-modal-close:hover {
-        background-color: var(--background);
-        color: var(--text-primary);
-    }
-
-    .kanban-modal-body {
-        padding: 24px;
-    }
-
-    .kanban-form-group {
-        position: relative;
-        margin-bottom: 20px;
-    }
-
-    .kanban-form-label {
-        position: absolute;
-        top: -8px;
-        left: 8px;
-        background-color: var(--surface);
-        padding: 0 4px;
-        font-weight: 500;
-        color: var(--text-primary);
-        font-size: 0.75rem;
-        z-index: 1;
-    }
-
-    .kanban-form-label.required::after {
-        content: ' *';
-        color: #dc3545;
-    }
-
-    .kanban-form-input,
-    .kanban-form-select {
-        width: 100%;
-        padding: 12px 12px 8px 12px;
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
-        font-size: 0.875rem;
-        transition: all 0.2s ease;
-    }
-
-    .kanban-form-input:focus,
-    .kanban-form-select:focus {
-        outline: none;
-        border-color: var(--primary-color);
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-    }
-
-    .kanban-form-input.error,
-    .kanban-form-select.error {
-        border-color: #dc3545;
-    }
-
-    .kanban-form-static {
-        padding: 8px 12px;
-        background-color: var(--background);
-        border-radius: 6px;
-        color: var(--text-secondary);
-        font-size: 0.875rem;
-    }
-
-    .kanban-modal-footer {
-        padding: 16px 24px;
-        border-top: 1px solid var(--border-color);
-        display: flex;
-        justify-content: flex-end;
-        gap: 12px;
-    }
-
-    .kanban-button {
-        padding: 8px 16px;
-        border-radius: 6px;
-        font-weight: 500;
-        font-size: 0.875rem;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        border: none;
-    }
-
-    .kanban-button-primary {
-        background-color: var(--primary-color);
-        color: white;
-    }
-
-    .kanban-button-primary:hover {
-        background-color: var(--primary-hover);
-        transform: translateY(-1px);
-        box-shadow: var(--shadow-sm);
-    }
-
-    .kanban-button-primary:disabled {
-        background-color: var(--text-secondary);
-        cursor: not-allowed;
-        transform: none;
-    }
-
-    .kanban-button-secondary {
-        background-color: var(--background);
-        color: var(--text-primary);
-    }
-
-    .kanban-button-secondary:hover {
-        background-color: var(--border-color);
-    }
-
-    /* Control panel styles */
-    .kanban-controls {
-        background-color: var(--surface);
-        padding: 10px;
-        box-shadow: var(--shadow-sm);
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        flex-wrap: wrap;
-    }
-
-    .kanban-control-group {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        min-height: 38px;
-    }
-
-    .kanban-control-label {
-        font-weight: 500;
-        color: var(--text-primary);
-        font-size: 0.875rem;
-        align-self: center;
-    }
-
-    /* Quick search input styles */
-    .kanban-search-input {
-        padding: 6px 12px;
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
-        font-size: 0.75rem;
-        width: 210px;
-        transition: all 0.2s ease;
-        background-color: var(--surface);
-        color: var(--text-primary);
-    }
-
-    .kanban-search-input:focus {
-        outline: none;
-        border-color: var(--primary-color);
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-    }
-
-    .kanban-search-input::placeholder {
-        color: var(--text-secondary);
-    }
-
-    /* Toggle switch styles */
-    .kanban-toggle {
-        display: inline-flex;
-        background-color: var(--background);
-        border-radius: 6px;
-        padding: 2px;
-        gap: 2px;
-    }
-
-    .kanban-toggle-option {
-        padding: 6px 16px;
-        border-radius: 4px;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        font-size: 0.875rem;
-        font-weight: 500;
-        color: var(--text-secondary);
-        background-color: transparent;
-        border: none;
-        white-space: nowrap;
-    }
-
-    .kanban-toggle-option:hover {
-        color: var(--text-primary);
-    }
-
-    .kanban-toggle-option.active {
-        background-color: var(--primary-color);
-        color: white;
-        box-shadow: var(--shadow-sm);
-    }
-
-    /* Radio button styles */
-    .kanban-radio-group {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-    }
-
-    .kanban-radio-label {
-        display: inline-flex;
-        align-items: center;
-        cursor: pointer;
-        padding: 6px 12px;
-        border-radius: 6px;
-        border: 1px solid var(--border-color);
-        background-color: var(--surface);
-        font-size: 0.875rem;
-        transition: all 0.2s ease;
-        white-space: nowrap;
-        margin-bottom: 0;
-    }
-
-    .kanban-radio-label:hover {
-        border-color: var(--primary-color);
-        background-color: var(--background);
-    }
-
-    .kanban-radio-label input[type="radio"] {
-        margin-right: 6px;
-        cursor: pointer;
-    }
-
-    .kanban-radio-label input[type="radio"]:checked + span {
-        font-weight: 600;
-        color: var(--primary-color);
-    }
-
-    .kanban-radio-label:has(input[type="radio"]:checked) {
-        border-color: var(--primary-color);
-        background-color: rgba(37, 99, 235, 0.05);
-    }
-
-    /* Manager select dropdown */
-    .kanban-select {
-        padding: 6px 12px;
-        border-radius: 6px;
-        border: 1px solid var(--border-color);
-        background-color: var(--surface);
-        font-size: 0.875rem;
-        color: var(--text-primary);
-        cursor: pointer;
-        transition: all 0.2s ease;
-        min-width: 150px;
-    }
-
-    .kanban-select:hover {
-        border-color: var(--primary-color);
-        background-color: var(--background);
-    }
-
-    .kanban-select:focus {
-        outline: none;
-        border-color: var(--primary-color);
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-    }
-
-    /* Edit form modal styles */
-    .kanban-edit-modal-overlay {
-        display: none;
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(0, 0, 0, 0.5);
-        z-index: 1001;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .kanban-edit-modal-overlay.active {
-        display: flex;
-    }
-
-    .kanban-edit-modal {
-        background-color: var(--surface);
-        border-radius: 8px;
-        box-shadow: var(--shadow-lg);
-        max-width: 600px;
-        width: 90%;
-        max-height: 90vh;
-        display: flex;
-        flex-direction: column;
-    }
-
-    .kanban-edit-modal-header {
-        padding: 16px 24px;
-        border-bottom: 1px solid var(--border-color);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        flex-shrink: 0;
-    }
-
-    .kanban-edit-modal-title {
-        font-size: 1.125rem;
-        font-weight: 600;
-        color: var(--text-primary);
-        margin: 0;
-    }
-
-    .kanban-edit-modal-close {
-        background: none;
-        border: none;
-        font-size: 24px;
-        color: var(--text-secondary);
-        cursor: pointer;
-        padding: 0;
-        width: 32px;
-        height: 32px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 4px;
-        transition: all 0.2s ease;
-    }
-
-    .kanban-edit-modal-close:hover {
-        background-color: var(--background);
-        color: var(--text-primary);
-    }
-
-    .kanban-edit-modal-body {
-        padding: 24px;
-        overflow-y: auto;
-        flex: 1;
-    }
-
-    .kanban-edit-modal-footer {
-        padding: 16px 24px;
-        border-top: 1px solid var(--border-color);
-        display: flex;
-        justify-content: flex-end;
-        gap: 12px;
-        flex-shrink: 0;
-    }
-
-    .kanban-edit-form-group {
-        margin-bottom: 16px;
-    }
-
-    .kanban-edit-form-label {
-        display: block;
-        font-weight: 500;
-        color: var(--text-primary);
-        font-size: 0.875rem;
-        margin-bottom: 6px;
-    }
-
-    .kanban-edit-form-label.required::after {
-        content: ' *';
-        color: #dc3545;
-    }
-
-    .kanban-edit-form-input,
-    .kanban-edit-form-select,
-    .kanban-edit-form-textarea {
-        width: 100%;
-        padding: 10px 12px;
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
-        font-size: 0.875rem;
-        transition: all 0.2s ease;
-        background-color: var(--surface);
-    }
-
-    .kanban-edit-form-textarea {
-        resize: vertical;
-        min-height: 80px;
-    }
-
-    .kanban-edit-form-input:focus,
-    .kanban-edit-form-select:focus,
-    .kanban-edit-form-textarea:focus {
-        outline: none;
-        border-color: var(--primary-color);
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
-    }
-
-    .kanban-edit-form-input.error,
-    .kanban-edit-form-select.error,
-    .kanban-edit-form-textarea.error {
-        border-color: #dc3545;
-    }
-
-    .kanban-edit-loading {
-        text-align: center;
-        padding: 40px;
-        color: var(--text-secondary);
-    }
 </style>
 
-<!-- Control panel above kanban -->
-<div class="kanban-controls">
-    <div class="kanban-control-group">
-        <input type="text" id="quickSearch" class="kanban-search-input" placeholder="Быстрый поиск" oninput="performQuickSearch()">
-    </div>
-    <div class="kanban-control-group">
-        <div class="kanban-toggle">
-            <button class="kanban-toggle-option" id="toggleSales" onclick="setFilterType('sales')">Продажи</button>
-            <button class="kanban-toggle-option" id="togglePartners" onclick="setFilterType('partners')">Партнеры</button>
-        </div>
-    </div>
-    <div class="kanban-control-group">
-        <select id="managerSelect" class="kanban-select" onchange="onManagerChange()">
-            <!-- Will be populated dynamically -->
-        </select>
-    </div>
-    <div class="kanban-control-group">
-        <span class="kanban-control-label">Продукт:</span>
-        <div class="kanban-radio-group" id="productRadioGroup">
-            <!-- Will be populated dynamically -->
-        </div>
-    </div>
-</div>
-
-<div id="kanban"></div>
-
-<!-- Modal for adding new record -->
-<div id="addRecordModal" class="kanban-modal-overlay">
-    <div class="kanban-modal">
-        <div class="kanban-modal-header">
-            <h3 class="kanban-modal-title">Добавить запись</h3>
-            <button class="kanban-modal-close" onclick="closeAddRecordModal()">&times;</button>
-        </div>
-        <div class="kanban-modal-body">
-            <form id="addRecordForm">
-                <div class="kanban-form-group">
-                    <label class="kanban-form-label required">Название</label>
-                    <input type="text" class="kanban-form-input" id="recordName" name="recordName">
-                </div>
-                <div class="kanban-form-group">
-                    <label class="kanban-form-label">ИНН</label>
-                    <input type="text" class="kanban-form-input" id="recordInn" name="recordInn">
-                </div>
-                <div class="kanban-form-group">
-                    <label class="kanban-form-label">Статус</label>
-                    <div class="kanban-form-static" id="recordStatus"></div>
-                </div>
-                <div class="kanban-form-group">
-                    <label class="kanban-form-label required">Партнер</label>
-                    <select class="kanban-form-select" id="recordPartner" name="recordPartner">
-                        <option value="">Выберите партнера</option>
-                    </select>
-                </div>
-                <div class="kanban-form-group">
-                    <label class="kanban-form-label">Дистрибьютор</label>
-                    <select class="kanban-form-select" id="recordDistributor" name="recordDistributor">
-                        <option value="">Выберите дистрибьютора</option>
-                    </select>
-                </div>
-                <div class="kanban-form-group">
-                    <label class="kanban-form-label required">Телефон</label>
-                    <input type="text" class="kanban-form-input" id="recordPhone" name="recordPhone">
-                </div>
-                <div class="kanban-form-group">
-                    <label class="kanban-form-label required">Email</label>
-                    <input type="email" class="kanban-form-input" id="recordEmail" name="recordEmail">
-                </div>
-                <div class="kanban-form-group">
-                    <label class="kanban-form-label">Контактное лицо</label>
-                    <input type="text" class="kanban-form-input" id="recordContact" name="recordContact">
-                </div>
-                <div class="kanban-form-group">
-                    <label class="kanban-form-label required">Источник</label>
-                    <select class="kanban-form-select" id="recordSource" name="recordSource">
-                        <option value="">Выберите источник</option>
-                    </select>
-                </div>
-                <div class="kanban-form-group">
-                    <label class="kanban-form-label">Сумма</label>
-                    <input type="number" class="kanban-form-input" id="recordAmount" name="recordAmount">
-                </div>
-            </form>
-        </div>
-        <div class="kanban-modal-footer">
-            <button class="kanban-button kanban-button-primary" onclick="submitAddRecord()" id="submitButton">Сохранить</button>
-            <button class="kanban-button kanban-button-secondary" onclick="closeAddRecordModal()">Отменить</button>
-        </div>
-    </div>
-</div>
-
-<!-- Modal for editing client -->
-<!-- Client edit modal - will be replaced with IntegramTable form -->
-<div id="editClientModal" class="kanban-edit-modal-overlay">
-    <div class="kanban-edit-modal">
-        <div class="kanban-edit-modal-body" id="editClientModalBody">
-            <div class="kanban-edit-loading">Загрузка...</div>
-        </div>
-    </div>
-</div>
-
-<!-- Modal for creating task -->
-<div id="createTaskModal" class="kanban-edit-modal-overlay">
-    <div class="kanban-edit-modal">
-        <div class="kanban-edit-modal-header">
-            <h3 class="kanban-edit-modal-title">Добавить задачу</h3>
-            <button class="kanban-edit-modal-close" onclick="closeTaskCreateModal()">&times;</button>
-        </div>
-        <div class="kanban-edit-modal-body" id="createTaskModalBody">
-            <div class="kanban-edit-loading">Загрузка...</div>
-        </div>
-        <div class="kanban-edit-modal-footer">
-            <button class="kanban-button kanban-button-primary" onclick="submitCreateTask()" id="createTaskSubmitButton">Создать</button>
-            <button class="kanban-button kanban-button-secondary" onclick="closeTaskCreateModal()">Отменить</button>
-        </div>
-    </div>
-</div>
-
-<!-- Modal for creating deal -->
-<div id="createDealModal" class="kanban-edit-modal-overlay">
-    <div class="kanban-edit-modal">
-        <div class="kanban-edit-modal-header">
-            <h3 class="kanban-edit-modal-title">Добавить сделку</h3>
-            <button class="kanban-edit-modal-close" onclick="closeDealCreateModal()">&times;</button>
-        </div>
-        <div class="kanban-edit-modal-body" id="createDealModalBody">
-            <div class="kanban-edit-loading">Загрузка...</div>
-        </div>
-        <div class="kanban-edit-modal-footer">
-            <button class="kanban-button kanban-button-primary" onclick="submitCreateDeal()" id="createDealSubmitButton">Создать</button>
-            <button class="kanban-button kanban-button-secondary" onclick="closeDealCreateModal()">Отменить</button>
-        </div>
-    </div>
-</div>
-
-<!-- Include IntegramTable component -->
-<link rel="stylesheet" href="/css/integram-table.css">
-<script src="/js/integram-table.js"></script>
+<div id="kanban-container"></div>
 
 <script>
-// Overrides
-var integramTableOverrides = {
-  'ddls': {
-    638: 'report/5230?JSON_KV',
-    4874: 'report/3796?JSON_KV'
-  },
-  fieldHooks: [
-    {
-      watch: 443,                       // data-ref-id of the field to watch
-      target: 4874,                     // data-ref-id of the field whose options change
-      onEmpty: { FR_partners: '!%' },    // extra query params when watched field is empty
-      onFilled: { FR_partners: '%' }   // extra query params when watched field has a value
+/**
+ * Kanban Board Component
+ *
+ * Usage:
+ * var kanban = new KanbanBoard('kanban-container', {
+ *     // Data source configuration
+ *     dataSource: {
+ *         type: 'report',  // 'report' or 'object'
+ *         endpoint: 'report/Мой%20канбан?JSON',  // For report type
+ *         // OR for object type:
+ *         // endpoint: 'object/291?JSON_OBJ',
+ *         // tableId: '291'  // Required for object type to fetch metadata
+ *     },
+ *
+ *     // Statuses configuration
+ *     statuses: {
+ *         endpoint: 'report/Статусы?JSON_KV'
+ *     },
+ *
+ *     // Field mapping (map kanban parameters to data source field names)
+ *     fieldMapping: {
+ *         title: 'Карточка',      // or 'Проект', 'Клиент', 'Лид'
+ *         description: 'Описание',
+ *         contact: 'Контакт',
+ *         status: 'Статус',
+ *         statusId: 'СтатусID',
+ *         date: 'Дата',
+ *         phone: 'Телефон',
+ *         email: 'Email',
+ *         amount: 'Сумма',
+ *         activity: 'Activity',
+ *         cardId: 'ID'           // Card identifier field
+ *     },
+ *
+ *     // Status field mapping
+ *     statusMapping: {
+ *         name: 'Статус',
+ *         id: 'СтатусID',
+ *         color: 'Цвет'         // or 'color'
+ *     }
+ * });
+ */
+
+(function(window) {
+    'use strict';
+
+    function KanbanBoard(containerId, config) {
+        this.containerId = containerId;
+        this.container = document.getElementById(containerId);
+        this.config = this._mergeConfig(config);
+        this.data = [];
+        this.statuses = [];
+        this.metadata = null;
+        this.statusFieldId = null;
+        this.activityFieldId = null;
+
+        this.init();
     }
-  ]
-};
 
-// Kanban functionality
-var kanbanData = [];
-var statusesData = [];
-var tasksDataLoaded = false;
-var statusesDataLoaded = false;
-var editFormStatusesData = []; // Statuses for edit form (all statuses, unfiltered)
-var sourcesData = [];
-var distributorsData = [];
-var partnersData = [];
-var productsData = [];
-var managersData = [];
-var taskTypesData = [];
-var currentStatusId = null;
-var currentStatusName = null;
-var kanbanFormTable = null; // Reusable IntegramTable instance for add/edit forms
-var currentFilterType = 'sales'; // 'sales' or 'partners'
-var currentProductId = 'all'; // 'all' or specific product ID
-var currentManagerId = null; // Selected manager ID, defaults to window.uid
-var searchQuery = ''; // Quick search query
-// Check if there's a saved manager ID in cookie
-var savedManagerId = getCookie('kanban_manager_id');
-currentManagerId = savedManagerId;
-
-console.log('populateManagerSelect '+savedManagerId);
-populateManagerSelect();
-
-// Cookie management functions
-function setCookie(name, value, days) {
-    var expires = "";
-    if (days) {
-        var date = new Date();
-        date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-        expires = "; expires=" + date.toUTCString();
-    }
-    document.cookie = name + "=" + (value || "") + expires + "; path=/";
-}
-
-function getCookie(name) {
-    var nameEQ = name + "=";
-    var ca = document.cookie.split(';');
-    for (var i = 0; i < ca.length; i++) {
-        var c = ca[i];
-        while (c.charAt(0) == ' ') c = c.substring(1, c.length);
-        if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length, c.length);
-    }
-    return null;
-}
-
-// Set filter type (sales/partners)
-function setFilterType(type) {
-    currentFilterType = type;
-    setCookie('kanban_filter_type', type, 365);
-
-    // Update toggle UI
-    $('#toggleSales').toggleClass('active', type === 'sales');
-    $('#togglePartners').toggleClass('active', type === 'partners');
-
-    // Reload kanban data
-    loadKanbanData();
-}
-
-// Set product filter
-function setProductFilter(productId) {
-    currentProductId = productId;
-    setCookie('kanban_product_id', productId, 365);
-
-    // Reload kanban data
-    loadKanbanData();
-}
-
-// Handle manager selection change
-function onManagerChange() {
-    var select = document.getElementById('managerSelect');
-    currentManagerId = select.value;
-    setCookie('kanban_manager_id', currentManagerId, 365);
-
-    // Reload kanban data
-    loadKanbanData();
-}
-
-// Quick search function
-function performQuickSearch() {
-    searchQuery = document.getElementById('quickSearch').value.toLowerCase().trim();
-    renderKanban();
-}
-
-// Load products list
-function loadProductsList() {
-    var xhr = new XMLHttpRequest();
-    xhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/5172?JSON_KV', true);
-    xhr.onload = function() {
-        if (xhr.status === 200) {
-            try {
-                productsData = JSON.parse(xhr.responseText);
-                populateProductRadios();
-            } catch (e) {
-                console.error('Error parsing products data:', e);
+    KanbanBoard.prototype._mergeConfig = function(config) {
+        var defaults = {
+            dataSource: {
+                type: 'report',
+                endpoint: '',
+                tableId: null
+            },
+            statuses: {
+                endpoint: ''
+            },
+            fieldMapping: {
+                title: 'Карточка',
+                description: 'Описание',
+                contact: 'Контакт',
+                status: 'Статус',
+                statusId: 'СтатусID',
+                date: 'Дата',
+                phone: 'Телефон',
+                email: 'Email',
+                amount: 'Сумма',
+                activity: 'Activity',
+                cardId: 'ID'
+            },
+            statusMapping: {
+                name: 'Статус',
+                id: 'СтатусID',
+                color: 'Цвет'
             }
-        } else {
-            console.error('Error loading products:', xhr.status);
-        }
+        };
+
+        return this._deepMerge(defaults, config || {});
     };
-    xhr.onerror = function() {
-        console.error('Network error loading products');
-    };
-    xhr.send();
-}
 
-// Populate product radio buttons
-function populateProductRadios() {
-    var radioGroup = $('#productRadioGroup');
-    radioGroup.empty();
-
-    // Add "Все" option
-    var allLabel = $('<label class="kanban-radio-label"></label>');
-    var allRadio = $('<input type="radio" name="product" value="all">');
-    var allText = $('<span>Все</span>');
-
-    if (currentProductId === 'all') {
-        allRadio.prop('checked', true);
-    }
-
-    allRadio.on('change', function() {
-        if (this.checked) {
-            setProductFilter('all');
-        }
-    });
-
-    allLabel.append(allRadio).append(allText);
-    radioGroup.append(allLabel);
-
-    // Add individual product options
-    productsData.forEach(function(product) {
-        var label = $('<label class="kanban-radio-label"></label>');
-        var radio = $('<input type="radio" name="product" value="' + product['ПродуктID'] + '">');
-        var text = $('<span>' + product['Продукт'] + '</span>');
-
-        if (currentProductId === product['ПродуктID']) {
-            radio.prop('checked', true);
-        }
-
-        radio.on('change', function() {
-            if (this.checked) {
-                setProductFilter(product['ПродуктID']);
+    KanbanBoard.prototype._deepMerge = function(target, source) {
+        var result = {};
+        for (var key in target) {
+            if (target.hasOwnProperty(key)) {
+                result[key] = target[key];
             }
+        }
+        for (var key in source) {
+            if (source.hasOwnProperty(key)) {
+                if (typeof source[key] === 'object' && source[key] !== null && !Array.isArray(source[key])) {
+                    result[key] = this._deepMerge(result[key] || {}, source[key]);
+                } else {
+                    result[key] = source[key];
+                }
+            }
+        }
+        return result;
+    };
+
+    KanbanBoard.prototype.init = function() {
+        this._showLoading();
+        this._loadData();
+    };
+
+    KanbanBoard.prototype._showLoading = function() {
+        this.container.innerHTML = '<div class="kanban-loading">Загрузка данных...</div>';
+    };
+
+    KanbanBoard.prototype._showError = function(message) {
+        this.container.innerHTML = '<div class="kanban-error">' + this._escapeHtml(message) + '</div>';
+    };
+
+    KanbanBoard.prototype._escapeHtml = function(text) {
+        if (text === null || text === undefined) return '';
+        var div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    };
+
+    KanbanBoard.prototype._getApiUrl = function(endpoint) {
+        return 'https://' + window.location.hostname + '/' + window.db + '/' + endpoint;
+    };
+
+    KanbanBoard.prototype._loadData = function() {
+        var self = this;
+        var loadedCount = 0;
+        var totalLoads = 2; // statuses + data (+ metadata for object type)
+
+        if (this.config.dataSource.type === 'object') {
+            totalLoads = 3;
+        }
+
+        var checkAllLoaded = function() {
+            loadedCount++;
+            if (loadedCount === totalLoads) {
+                self._render();
+            }
+        };
+
+        // Load statuses
+        this._fetchJson(this.config.statuses.endpoint, function(data) {
+            self.statuses = data || [];
+            checkAllLoaded();
+        }, function(error) {
+            self._showError('Ошибка загрузки статусов: ' + error);
         });
 
-        label.append(radio).append(text);
-        radioGroup.append(label);
-    });
-}
+        // Load metadata for object type
+        if (this.config.dataSource.type === 'object' && this.config.dataSource.tableId) {
+            this._fetchJson('metadata/' + this.config.dataSource.tableId, function(data) {
+                self.metadata = data;
+                self._extractFieldIds();
+                checkAllLoaded();
+            }, function(error) {
+                self._showError('Ошибка загрузки метаданных: ' + error);
+            });
+        }
 
-// Restore user preferences from cookies
-function restoreUserPreferences() {
-    var savedFilterType = getCookie('kanban_filter_type');
-    var savedProductId = getCookie('kanban_product_id');
+        // Load main data
+        this._fetchJson(this.config.dataSource.endpoint, function(data) {
+            self._processData(data);
+            checkAllLoaded();
+        }, function(error) {
+            self._showError('Ошибка загрузки данных: ' + error);
+        });
+    };
 
-    if (savedFilterType) {
-        currentFilterType = savedFilterType;
-    }
+    KanbanBoard.prototype._fetchJson = function(endpoint, onSuccess, onError) {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', this._getApiUrl(endpoint), true);
+        xhr.onload = function() {
+            if (xhr.status === 200) {
+                try {
+                    var data = JSON.parse(xhr.responseText);
+                    onSuccess(data);
+                } catch (e) {
+                    onError('Ошибка парсинга JSON: ' + e.message);
+                }
+            } else {
+                onError('HTTP ' + xhr.status);
+            }
+        };
+        xhr.onerror = function() {
+            onError('Ошибка сети');
+        };
+        xhr.send();
+    };
 
-    if (savedProductId) {
-        currentProductId = savedProductId;
-    }
+    KanbanBoard.prototype._extractFieldIds = function() {
+        // Extract status and activity field IDs from metadata for API calls
+        if (!this.metadata || !this.metadata.reqs) return;
 
-    // Update toggle UI
-    $('#toggleSales').toggleClass('active', currentFilterType === 'sales');
-    $('#togglePartners').toggleClass('active', currentFilterType === 'partners');
-}
+        var mapping = this.config.fieldMapping;
+        var reqs = this.metadata.reqs;
 
-// Helper function to lighten a color by a percentage
-function lightenColor(color, percent) {
-    // Handle hex colors (e.g., #a85555)
-    if (color.startsWith('#')) {
+        for (var i = 0; i < reqs.length; i++) {
+            var req = reqs[i];
+            if (req.val === mapping.status || req.val === 'Статус') {
+                this.statusFieldId = req.id;
+            }
+            if (req.val === mapping.activity || req.val === 'Activity') {
+                this.activityFieldId = req.id;
+            }
+        }
+    };
+
+    KanbanBoard.prototype._processData = function(rawData) {
+        var self = this;
+        var mapping = this.config.fieldMapping;
+
+        if (this.config.dataSource.type === 'report') {
+            // Report format: { columns: [...], data: [[...], [...]], header: "..." }
+            if (rawData.columns && rawData.data) {
+                var columns = rawData.columns;
+                var columnMap = {};
+
+                // Create column index map
+                for (var i = 0; i < columns.length; i++) {
+                    columnMap[columns[i].name] = i;
+                    // Extract field type IDs for status change API
+                    if (columns[i].name === mapping.status || columns[i].name === 'Статус') {
+                        this.statusFieldId = columns[i].type;
+                    }
+                    if (columns[i].name === mapping.activity || columns[i].name === 'Activity') {
+                        this.activityFieldId = columns[i].type;
+                    }
+                }
+
+                // Convert data rows to objects
+                this.data = rawData.data.map(function(row) {
+                    var item = {};
+                    for (var key in columnMap) {
+                        if (columnMap.hasOwnProperty(key)) {
+                            item[key] = row[columnMap[key]];
+                        }
+                    }
+                    // Add ID from the first column with 'ID' suffix
+                    for (var j = 0; j < columns.length; j++) {
+                        if (columns[j].name.endsWith('ID')) {
+                            item['_cardId'] = row[j];
+                            break;
+                        }
+                    }
+                    return item;
+                });
+            }
+        } else if (this.config.dataSource.type === 'object') {
+            // Object format: array of objects with 'i' (id), 'r' (row array)
+            if (Array.isArray(rawData) && this.metadata && this.metadata.reqs) {
+                var reqs = this.metadata.reqs;
+                this.data = rawData.map(function(item) {
+                    var obj = { '_cardId': item.i };
+                    var row = item.r || [];
+
+                    for (var i = 0; i < reqs.length && i < row.length; i++) {
+                        var fieldName = reqs[i].val;
+                        var value = row[i];
+
+                        // Handle reference values (format: "id:value")
+                        if (typeof value === 'string' && value.indexOf(':') !== -1) {
+                            var parts = value.split(':');
+                            obj[fieldName + 'ID'] = parts[0];
+                            obj[fieldName] = parts.slice(1).join(':');
+                        } else {
+                            obj[fieldName] = value;
+                        }
+                    }
+                    return obj;
+                });
+            }
+        } else if (Array.isArray(rawData)) {
+            // JSON_KV format: array of objects
+            this.data = rawData;
+        }
+    };
+
+    KanbanBoard.prototype._render = function() {
+        var self = this;
+        var mapping = this.config.fieldMapping;
+        var statusMapping = this.config.statusMapping;
+
+        // Sort data by Activity field (descending)
+        this.data.sort(function(a, b) {
+            var activityA = a[mapping.activity] || '';
+            var activityB = b[mapping.activity] || '';
+            return activityB.localeCompare(activityA);
+        });
+
+        var html = '<div class="kanban-board">';
+
+        // Create columns for each status
+        for (var i = 0; i < this.statuses.length; i++) {
+            var status = this.statuses[i];
+            var statusName = status[statusMapping.name];
+            var statusId = status[statusMapping.id];
+            var statusColor = status[statusMapping.color] || status['color'] || null;
+
+            // Filter cards for this status
+            var cards = this.data.filter(function(card) {
+                var cardStatusId = card[mapping.statusId];
+                var cardStatus = card[mapping.status];
+                return cardStatusId == statusId || cardStatus === statusName;
+            });
+
+            // Calculate total sum
+            var totalSum = 0;
+            cards.forEach(function(card) {
+                var amount = card[mapping.amount];
+                if (amount) {
+                    var numAmount = parseFloat(String(amount).replace(/\s/g, ''));
+                    if (!isNaN(numAmount)) {
+                        totalSum += numAmount;
+                    }
+                }
+            });
+
+            // Build header style
+            var headerStyle = '';
+            if (statusColor) {
+                var lightColor = this._lightenColor(statusColor, 8);
+                headerStyle = ' style="background: linear-gradient(135deg, ' + statusColor + ' 0%, ' + lightColor + ' 100%);"';
+            }
+
+            html += '<div class="kanban-column">';
+            html += '<div class="kanban-column-header" data-status-id="' + statusId + '"' + headerStyle + '>';
+            html += '<span>' + this._escapeHtml(statusName);
+            if (totalSum > 0) {
+                html += '<span class="kanban-column-sum">(' + totalSum.toLocaleString('ru-RU') + ')</span>';
+            }
+            html += '</span>';
+            html += '<span class="kanban-column-count">' + cards.length + '</span>';
+            html += '</div>';
+            html += '<div class="kanban-column-body" data-status-id="' + statusId + '">';
+
+            // Render cards
+            for (var j = 0; j < cards.length; j++) {
+                html += this._renderCard(cards[j]);
+            }
+
+            html += '</div></div>';
+        }
+
+        html += '</div>';
+        this.container.innerHTML = html;
+
+        this._initDragAndDrop();
+    };
+
+    KanbanBoard.prototype._renderCard = function(card) {
+        var mapping = this.config.fieldMapping;
+        var cardId = card['_cardId'] || card[mapping.cardId] || '';
+
+        // Try multiple field names for title
+        var title = card[mapping.title];
+        if (!title) {
+            var titleFields = ['Карточка', 'Проект', 'Клиент', 'Лид'];
+            for (var i = 0; i < titleFields.length; i++) {
+                if (card[titleFields[i]]) {
+                    title = card[titleFields[i]];
+                    break;
+                }
+            }
+        }
+
+        var description = card[mapping.description] || '';
+        var contact = card[mapping.contact] || '';
+        var date = card[mapping.date] || '';
+        var phone = card[mapping.phone] || '';
+        var email = card[mapping.email] || '';
+        var amount = card[mapping.amount] || '';
+        var statusId = card[mapping.statusId] || '';
+
+        var html = '<div class="kanban-card" draggable="true" data-card-id="' + cardId + '" data-status-id="' + statusId + '">';
+
+        // Title
+        html += '<div class="kanban-card-title">' + this._escapeHtml(title || 'Без названия') + '</div>';
+
+        // Description
+        if (description) {
+            html += '<div class="kanban-card-description">' + this._escapeHtml(description) + '</div>';
+        }
+
+        // Contact
+        if (contact) {
+            html += '<div class="kanban-card-contact">' + this._escapeHtml(contact) + '</div>';
+        }
+
+        // Amount
+        if (amount) {
+            html += '<div class="kanban-card-amount">' + this._escapeHtml(amount) + '</div>';
+        }
+
+        // Date (top-right corner)
+        if (date) {
+            html += '<div class="kanban-card-date">' + this._escapeHtml(date) + '</div>';
+        }
+
+        // Contact icons (phone and email)
+        html += '<div class="kanban-card-contacts">';
+
+        if (phone && phone.trim()) {
+            html += '<span class="kanban-card-contact-icon active" title="' + this._escapeHtml(phone) + '" data-copy="' + this._escapeHtml(phone) + '">&#x1F4DE;</span>';
+        } else {
+            html += '<span class="kanban-card-contact-icon inactive" title="Телефон недоступен">&#x1F4DE;</span>';
+        }
+
+        if (email && email.trim()) {
+            html += '<span class="kanban-card-contact-icon active" title="' + this._escapeHtml(email) + '" data-copy="' + this._escapeHtml(email) + '">&#x1F4E7;</span>';
+        } else {
+            html += '<span class="kanban-card-contact-icon inactive" title="Email недоступен">&#x1F4E7;</span>';
+        }
+
+        html += '</div>';
+        html += '</div>';
+
+        return html;
+    };
+
+    KanbanBoard.prototype._lightenColor = function(color, percent) {
+        if (!color || !color.startsWith('#')) return color;
+
         var num = parseInt(color.slice(1), 16);
-        var r = (num >> 16) + Math.round(2.55 * percent);
-        var g = ((num >> 8) & 0x00FF) + Math.round(2.55 * percent);
-        var b = (num & 0x0000FF) + Math.round(2.55 * percent);
-
-        // Ensure values stay within 0-255 range
-        r = Math.min(255, r);
-        g = Math.min(255, g);
-        b = Math.min(255, b);
+        var r = Math.min(255, (num >> 16) + Math.round(2.55 * percent));
+        var g = Math.min(255, ((num >> 8) & 0x00FF) + Math.round(2.55 * percent));
+        var b = Math.min(255, (num & 0x0000FF) + Math.round(2.55 * percent));
 
         return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0');
-    }
-
-    // Handle rgb/rgba colors
-    if (color.startsWith('rgb')) {
-        var matches = color.match(/\d+/g);
-        if (matches && matches.length >= 3) {
-            var r = Math.min(255, parseInt(matches[0]) + Math.round(2.55 * percent));
-            var g = Math.min(255, parseInt(matches[1]) + Math.round(2.55 * percent));
-            var b = Math.min(255, parseInt(matches[2]) + Math.round(2.55 * percent));
-
-            if (matches.length === 4) {
-                return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + matches[3] + ')';
-            }
-            return 'rgb(' + r + ', ' + g + ', ' + b + ')';
-        }
-    }
-
-    // If color format is not recognized, return original color
-    return color;
-}
-
-function loadKanbanData(){
-    $('#kanban').html('<div class="loading">Загрузка данных канбана...</div>');
-    tasksDataLoaded = false;
-    statusesDataLoaded = false;
-
-    // Use fixed report IDs
-    var tasksReportId = '3769';
-    var statusesReportId = '3796';
-
-    // Build FR_partners parameter based on current filter type
-    var frPartnersValue = currentFilterType === 'partners' ? '%25' : '!%25';
-
-    // Build FR_product parameter if a specific product is selected
-    var productParam = '';
-    if (currentProductId !== 'all') {
-        productParam = '&FR_product=' + encodeURIComponent(currentProductId);
-    }
-
-    // Build FR_manager parameter - always pass it
-    var managerParam = '&FR_manager=' + encodeURIComponent(currentManagerId || '');
-console.log('loadKanbanData');
-
-    // Load tasks
-    var xhr1 = new XMLHttpRequest();
-    xhr1.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + tasksReportId + '?JSON_KV&FR_partners=' + frPartnersValue + productParam + managerParam, true);
-    xhr1.onload = function(){
-        if(xhr1.status === 200){
-            try{
-                kanbanData = JSON.parse(xhr1.responseText);
-                tasksDataLoaded = true;
-                checkDataLoaded();
-            } catch(e){
-                showError('Ошибка парсинга данных задач: ' + e.message);
-            }
-        } else {
-            showError('Ошибка загрузки задач: ' + xhr1.status);
-        }
     };
-    xhr1.onerror = function(){
-        showError('Ошибка сети при загрузке задач');
-    };
-    xhr1.send();
 
-    // Load statuses
-    var xhr2 = new XMLHttpRequest();
-    xhr2.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + statusesReportId + '?JSON_KV&FR_partners=' + frPartnersValue + productParam + managerParam, true);
-    xhr2.onload = function(){
-        if(xhr2.status === 200){
-            try{
-                statusesData = JSON.parse(xhr2.responseText);
-                statusesDataLoaded = true;
-                checkDataLoaded();
-            } catch(e){
-                showError('Ошибка парсинга данных статусов: ' + e.message);
-            }
-        } else {
-            showError('Ошибка загрузки статусов: ' + xhr2.status);
-        }
-    };
-    xhr2.onerror = function(){
-        showError('Ошибка сети при загрузке статусов');
-    };
-    xhr2.send();
-}
+    KanbanBoard.prototype._initDragAndDrop = function() {
+        var self = this;
+        var draggedElement = null;
 
-function checkDataLoaded(){
-    // Render kanban when both requests have completed, even if data is empty
-    if(tasksDataLoaded && statusesDataLoaded){
-        renderKanban();
-    }
-}
-
-function showError(message){
-    $('#kanban').html('<div class="error">' + message + '</div>');
-}
-
-function renderKanban(){
-    var html = '<div class="kanban-board">';
-
-    // Create a column for each status
-    statusesData.forEach(function(status){
-        var statusName = status['Статус'];
-        var statusId = status['СтатусID'];
-
-        // Filter tasks for this status
-        // Use flexible matching to handle cases where СтатусID might contain the status name instead of ID
-        var tasks = kanbanData.filter(function(task){
-            // First check if task matches status
-            var matchesStatus = false;
-            // Try matching by СтатусID (numeric ID or string ID)
-            if(task['СтатусID'] === statusId){
-                matchesStatus = true;
-            }
-            // Fallback: if task's СтатусID contains the status name, match by name
-            if(task['СтатусID'] === statusName){
-                matchesStatus = true;
-            }
-            // Also try matching task's Статус with status's Статус as a final fallback
-            if(task['Статус'] && task['Статус'] === statusName){
-                matchesStatus = true;
-            }
-
-            if(!matchesStatus) return false;
-
-            // If there's a search query, filter by all fields
-            if(searchQuery && searchQuery !== ''){
-                var searchableText = [
-                    task['Лид'] || '',
-                    task['Контактное лицо'] || '',
-                    task['Примечание'] || '',
-                    task['Сумма'] || '',
-                    task['Телефон'] || '',
-                    task['Email'] || '',
-                    task['Дата'] || ''
-                ].join(' ').toLowerCase();
-
-                return searchableText.indexOf(searchQuery) !== -1;
-            }
-
-            return true;
-        });
-
-        // Calculate total sum for this status
-        var totalSum = 0;
-        tasks.forEach(function(task){
-            if(task['Сумма']){
-                // Remove spaces and convert to number
-                var sumStr = task['Сумма'].replace(/\s/g, '');
-                var sum = parseFloat(sumStr);
-                if(!isNaN(sum)){
-                    totalSum += sum;
-                }
+        // Click handler for copy icons
+        this.container.addEventListener('click', function(e) {
+            var icon = e.target.closest('.kanban-card-contact-icon.active');
+            if (icon && icon.dataset.copy) {
+                self._copyToClipboard(icon.dataset.copy, icon);
+                e.stopPropagation();
             }
         });
 
-        // Format sum with spaces as thousand separators
-        var formattedSum = totalSum.toLocaleString('ru-RU');
-
-        html += '<div class="kanban-column">';
-
-        // Check if status has a color field and use it for the header
-        var headerStyle = '';
-        if(status['color']){
-            // Use the color from API if available
-            // Generate a lighter version of the color for the gradient by increasing brightness
-            var baseColor = status['color'];
-            var lightColor = lightenColor(baseColor, 8); // Lighten by 8% to match existing gradient style
-            headerStyle = ' style="background: linear-gradient(135deg, ' + baseColor + ' 0%, ' + lightColor + ' 100%);"';
-        }
-
-        html += '<div class="kanban-column-header" data-status-id="' + statusId + '" data-status-name="' + statusName + '"' + headerStyle + '>';
-        // Truncate status name to 28 characters with '...' if longer
-        var displayStatusName = statusName.length > 28 ? statusName.substring(0, 28) + '...' : statusName;
-        html += '<span title="' + statusName + '">' + displayStatusName + ' (' + formattedSum + ' ₽)</span>';
-        html += '<button class="kanban-add-button" onclick="openAddRecordModal(\'' + statusId + '\', \'' + statusName.replace(/'/g, "\\'") + '\')">+</button>';
-        html += '<span class="kanban-column-count">' + tasks.length + '</span>';
-        html += '</div>';
-        html += '<div class="kanban-column-body" data-status-id="' + statusId + '">';
-
-        // Render tasks in this column
-        tasks.forEach(function(task){
-            html += renderCard(task);
+        // Drag start
+        this.container.addEventListener('dragstart', function(e) {
+            if (e.target.classList.contains('kanban-card')) {
+                draggedElement = e.target;
+                e.target.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+            }
         });
 
-        html += '</div>';
-        html += '</div>';
-    });
-
-    html += '</div>';
-    $('#kanban').html(html);
-
-    // Initialize drag and drop
-    initDragAndDrop();
-}
-
-function renderCard(task){
-    var html = '<div class="kanban-card" draggable="true" data-lead-id="' + task['ЛидID'] + '" data-status-id="' + task['СтатусID'] + '">';
-
-    // Create title as clickable element to open inline edit form
-    var editUrl = '/' + db + '/edit_obj/' + task['ЛидID'];
-    html += '<div class="kanban-card-title-row">';
-    html += '<span class="kanban-card-title" onclick="openClientEditForm(\'' + task['ЛидID'] + '\'); event.stopPropagation();">' + (task['Лид'] || '') + '</span>';
-    html += '<a target="eo" href="' + editUrl + '" class="kanban-card-external-link" onclick="event.stopPropagation();" title="Открыть в новом окне">↗</a>';
-    html += '</div>';
-
-    if(task['Контактное лицо']){
-        html += '<div class="kanban-card-field"><span class="kanban-card-field-label">Контакт:</span> ' + task['Контактное лицо'] + '</div>';
-    }
-
-    if(task['Примечание']){
-        html += '<div class="kanban-card-field"><span class="kanban-card-field-label">Примечание:</span> ' + task['Примечание'] + '</div>';
-    }
-
-    if(task['Сумма']){
-        html += '<div class="kanban-card-amount">' + task['Сумма'] + ' ₽</div>';
-    }
-
-    // Date in top-right corner of the card
-    if(task['Дата']){
-        html += '<div class="kanban-card-date">' + task['Дата'] + '</div>';
-    }
-
-    // Add contact icons at bottom right (vertically stacked)
-    html += '<div class="kanban-card-contacts">';
-
-    // Phone icon (on top)
-    var hasPhone = task['Телефон'] && task['Телефон'].trim() !== '';
-    if(hasPhone){
-        html += '<span class="kanban-card-contact-icon active" title="' + task['Телефон'] + '" onclick="copyContact(\'' + task['Телефон'] + '\', \'phone\', event)"><i class="pi pi-phone"></i></span>';
-    } else {
-        html += '<span class="kanban-card-contact-icon inactive" title="Телефон недоступен"><i class="pi pi-phone"></i></span>';
-    }
-
-    // Email icon (below)
-    var hasEmail = task['Email'] && task['Email'].trim() !== '';
-    if(hasEmail){
-        html += '<span class="kanban-card-contact-icon active" title="' + task['Email'] + '" onclick="copyContact(\'' + task['Email'] + '\', \'email\', event)"><i class="pi pi-envelope"></i></span>';
-    } else {
-        html += '<span class="kanban-card-contact-icon inactive" title="Email недоступен"><i class="pi pi-envelope"></i></span>';
-    }
-
-    html += '</div>';
-
-    // Add tasks badge with "+" button at the bottom of the card
-    var tasksCount = task['Задачи'] ? parseInt(task['Задачи']) : 0;
-    var buttonClass = tasksCount > 0 ? 'has-tasks' : 'no-tasks';
-
-    // Use fixed FR parameter
-    var tasksUrl = '';
-    if(task['ЛидID']){
-        tasksUrl = '/' + db + '/table/3596?FR_4547=@' + task['ЛидID'];
-    }
-
-    html += '<div class="kanban-card-tasks-row">';
-    // Always render clickable link - leads to tasks page (shows all tasks including closed when count is 0)
-    if(tasksUrl){
-        html += '<a href="' + tasksUrl + '" target="tasks" class="kanban-card-tasks-button ' + buttonClass + '" data-lead-id="' + task['ЛидID'] + '" onclick="event.stopPropagation();">';
-        html += 'Задачи:&nbsp;<span class="tasks-count">' + tasksCount + '</span>';
-        html += '</a>';
-    } else {
-        html += '<span class="kanban-card-tasks-button ' + buttonClass + '" data-lead-id="' + task['ЛидID'] + '">';
-        html += 'Задачи:&nbsp;<span class="tasks-count">' + tasksCount + '</span>';
-        html += '</span>';
-    }
-    html += '<button class="kanban-add-task-button" onclick="openTaskCreateForm(\'' + task['ЛидID'] + '\', this); event.stopPropagation();" title="Добавить задачу">+</button>';
-
-    // Add deals badge next to tasks badge
-    var dealsCount = task['Сделок'] ? parseInt(task['Сделок']) : 0;
-    var dealsButtonClass = dealsCount > 0 ? 'has-deals' : 'no-deals';
-    var dealsUrl = '';
-    if(task['ЛидID']){
-        dealsUrl = '/' + db + '/smartq/6271?FR_КлиентID=' + task['ЛидID'];
-    }
-
-    // Always render clickable link - leads to deals page (shows all deals including completed/cancelled when count is 0)
-    if(dealsUrl){
-        html += '<a href="' + dealsUrl + '" target="deals" class="kanban-card-deals-button ' + dealsButtonClass + '" data-lead-id="' + task['ЛидID'] + '" onclick="event.stopPropagation();">';
-        html += 'Сделки:&nbsp;<span class="deals-count">' + dealsCount + '</span>';
-        html += '</a>';
-    } else {
-        html += '<span class="kanban-card-deals-button ' + dealsButtonClass + '" data-lead-id="' + task['ЛидID'] + '">';
-        html += 'Сделки:&nbsp;<span class="deals-count">' + dealsCount + '</span>';
-        html += '</span>';
-    }
-    html += '<button class="kanban-add-deal-button" onclick="openDealCreateForm(\'' + task['ЛидID'] + '\', this); event.stopPropagation();" title="Добавить сделку">+</button>';
-
-    html += '</div>';
-
-    html += '</div>';
-    return html;
-}
-
-function initDragAndDrop(){
-    var draggedElement = null;
-    var scrollInterval = null;
-
-    // Handle drag start
-    $(document).on('dragstart', '.kanban-card', function(e){
-        draggedElement = this;
-        $(this).addClass('dragging');
-        e.originalEvent.dataTransfer.effectAllowed = 'move';
-        e.originalEvent.dataTransfer.setData('text/html', this.innerHTML);
-    });
-
-    // Handle drag end
-    $(document).on('dragend', '.kanban-card', function(e){
-        $(this).removeClass('dragging');
-        $('.kanban-column-body').removeClass('drag-over');
-        // Clear scroll interval
-        if(scrollInterval) {
-            clearInterval(scrollInterval);
-            scrollInterval = null;
-        }
-    });
-
-    // Handle drag over with auto-scroll
-    $(document).on('dragover', '.kanban-column-body', function(e){
-        if(e.preventDefault){
-            e.preventDefault();
-        }
-        e.originalEvent.dataTransfer.dropEffect = 'move';
-        $(this).addClass('drag-over');
-
-        // Auto-scroll kanban board based on mouse position
-        var board = $('.kanban-board')[0];
-        var clientX = e.originalEvent.clientX;
-        var boardRect = board.getBoundingClientRect();
-        var scrollThreshold = 50;
-
-        // Clear existing scroll interval
-        if(scrollInterval) clearInterval(scrollInterval);
-
-        // Scroll left if near left edge
-        if(clientX < boardRect.left + scrollThreshold){
-            scrollInterval = setInterval(function(){
-                board.scrollLeft -= 10;
-            }, 20);
-        }
-        // Scroll right if near right edge
-        else if(clientX > boardRect.right - scrollThreshold){
-            scrollInterval = setInterval(function(){
-                board.scrollLeft += 10;
-            }, 20);
-        }
-
-        return false;
-    });
-
-    // Handle drag enter
-    $(document).on('dragenter', '.kanban-column-body', function(e){
-        $(this).addClass('drag-over');
-    });
-
-    // Handle drag leave
-    $(document).on('dragleave', '.kanban-column-body', function(e){
-        $(this).removeClass('drag-over');
-        // Clear scroll interval when leaving all column bodies
-        var anyDragOver = $('.kanban-column-body.drag-over').length > 0;
-        if(!anyDragOver && scrollInterval) {
-            clearInterval(scrollInterval);
-            scrollInterval = null;
-        }
-    });
-
-    // Handle drop
-    $(document).on('drop', '.kanban-column-body', function(e){
-        if(e.stopPropagation){
-            e.stopPropagation();
-        }
-        $(this).removeClass('drag-over');
-
-        if(draggedElement){
-            var newStatusId = $(this).data('status-id');
-            var oldStatusId = $(draggedElement).data('status-id');
-            var leadId = $(draggedElement).data('lead-id');
-
-            // Only update if status changed
-            if(newStatusId !== oldStatusId){
-                // Move card visually
-                $(this).append(draggedElement);
-                $(draggedElement).data('status-id', newStatusId);
-
-                // Update counts
-                updateColumnCounts();
-
-                // Update via API
-                updateTaskStatus(leadId, newStatusId);
+        // Drag end
+        this.container.addEventListener('dragend', function(e) {
+            if (e.target.classList.contains('kanban-card')) {
+                e.target.classList.remove('dragging');
+                var columns = self.container.querySelectorAll('.kanban-column-body');
+                columns.forEach(function(col) {
+                    col.classList.remove('drag-over');
+                });
             }
-        }
+        });
 
-        return false;
-    });
+        // Drag over
+        this.container.addEventListener('dragover', function(e) {
+            var columnBody = e.target.closest('.kanban-column-body');
+            if (columnBody) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                columnBody.classList.add('drag-over');
+            }
+        });
 
-    // Handle general mouse move for auto-scroll without dragging
-    var mouseScrollInterval = null;
-    $(document).on('mousemove', function(e){
-        var board = $('.kanban-board')[0];
-        if(!board) return;
+        // Drag leave
+        this.container.addEventListener('dragleave', function(e) {
+            var columnBody = e.target.closest('.kanban-column-body');
+            if (columnBody && !columnBody.contains(e.relatedTarget)) {
+                columnBody.classList.remove('drag-over');
+            }
+        });
 
-        var clientX = e.clientX;
-        var boardRect = board.getBoundingClientRect();
-        var scrollThreshold = 50;
+        // Drop
+        this.container.addEventListener('drop', function(e) {
+            var columnBody = e.target.closest('.kanban-column-body');
+            if (columnBody && draggedElement) {
+                e.preventDefault();
+                columnBody.classList.remove('drag-over');
 
-        // Clear existing scroll interval
-        if(mouseScrollInterval) clearInterval(mouseScrollInterval);
+                var newStatusId = columnBody.dataset.statusId;
+                var oldStatusId = draggedElement.dataset.statusId;
+                var cardId = draggedElement.dataset.cardId;
 
-        // Scroll left if near left edge
-        if(clientX < boardRect.left + scrollThreshold && boardRect.left >= 0){
-            mouseScrollInterval = setInterval(function(){
-                if(board.scrollLeft > 0){
-                    board.scrollLeft -= 10;
+                if (newStatusId !== oldStatusId) {
+                    // Move card visually
+                    columnBody.appendChild(draggedElement);
+                    draggedElement.dataset.statusId = newStatusId;
+
+                    // Update counts
+                    self._updateColumnCounts();
+
+                    // Update via API
+                    self._updateCardStatus(cardId, newStatusId);
                 }
-            }, 20);
-        }
-        // Scroll right if near right edge
-        else if(clientX > boardRect.right - scrollThreshold && boardRect.right <= window.innerWidth){
-            mouseScrollInterval = setInterval(function(){
-                if(board.scrollLeft < board.scrollWidth - board.clientWidth){
-                    board.scrollLeft += 10;
-                }
-            }, 20);
-        }
-        // Stop scrolling if mouse is in the middle
-        else {
-            if(mouseScrollInterval) {
-                clearInterval(mouseScrollInterval);
-                mouseScrollInterval = null;
             }
-        }
-    });
+        });
+    };
 
-    // Clear scroll interval when mouse leaves the window
-    $(document).on('mouseleave', function(){
-        if(mouseScrollInterval) {
-            clearInterval(mouseScrollInterval);
-            mouseScrollInterval = null;
-        }
-    });
-}
+    KanbanBoard.prototype._copyToClipboard = function(text, element) {
+        var temp = document.createElement('input');
+        document.body.appendChild(temp);
+        temp.value = text;
+        temp.select();
+        document.execCommand('copy');
+        document.body.removeChild(temp);
 
-function updateColumnCounts(){
-    $('.kanban-column').each(function(){
-        var count = $(this).find('.kanban-card').length;
-        $(this).find('.kanban-column-count').text(count);
-    });
-}
+        // Visual feedback
+        var originalContent = element.innerHTML;
+        element.innerHTML = '&#x2713;';
+        element.style.backgroundColor = 'rgba(34, 197, 94, 0.25)';
+        element.style.color = 'rgba(34, 197, 94, 0.9)';
 
-function updateTaskStatus(leadId, newStatusId){
-    var timestamp = Math.floor(Date.now() / 1000);
-    var xhr = new XMLHttpRequest();
-    xhr.open('POST', 'https://' + window.location.hostname + '/' + db + '/_m_set/' + leadId + '?JSON', true);
-    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-    xhr.onload = function(){
-        if(xhr.status === 200){
-            try{
-                var response = JSON.parse(xhr.responseText);
-                console.log('Status updated:', response);
-            } catch(e){
-                console.error('Error parsing response:', e);
+        setTimeout(function() {
+            element.innerHTML = originalContent;
+            element.style.backgroundColor = '';
+            element.style.color = '';
+        }, 1500);
+    };
+
+    KanbanBoard.prototype._updateColumnCounts = function() {
+        var columns = this.container.querySelectorAll('.kanban-column');
+        columns.forEach(function(column) {
+            var count = column.querySelectorAll('.kanban-card').length;
+            var countSpan = column.querySelector('.kanban-column-count');
+            if (countSpan) {
+                countSpan.textContent = count;
             }
-        } else {
-            console.error('Error updating status:', xhr.status);
+        });
+    };
+
+    KanbanBoard.prototype._updateCardStatus = function(cardId, newStatusId) {
+        var self = this;
+
+        if (!this.statusFieldId) {
+            console.error('Kanban: Status field ID not found');
+            return;
         }
-    };
-    xhr.onerror = function(){
-        console.error('Network error updating status');
-    };
 
-    var postData = 't4874=' + newStatusId + '&t4863=' + timestamp + '&_xsrf=' + xsrf;
-    xhr.send(postData);
-}
+        var timestamp = Math.floor(Date.now() / 1000);
+        var postData = 't' + this.statusFieldId + '=' + encodeURIComponent(newStatusId);
 
-// Copy contact to clipboard
-function copyContact(value, type, event){
-    // Prevent card drag from starting
-    if(event){
-        event.stopPropagation();
-    }
+        if (this.activityFieldId) {
+            postData += '&t' + this.activityFieldId + '=' + timestamp;
+        }
 
-    // Copy to clipboard using the legacy method for compatibility
-    var $temp = $("<input>");
-    $("body").append($temp);
-    $temp.val(value).select();
-    document.execCommand("copy");
-    $temp.remove();
+        postData += '&_xsrf=' + window.xsrf;
 
-    // Show visual feedback
-    var icon = event.target.closest('.kanban-card-contact-icon');
-    if (!icon) return;
-    var originalHTML = icon.innerHTML;
-    var originalTitle = icon.title;
-
-    // Change icon to checkmark temporarily
-    icon.innerHTML = '<i class="pi pi-check"></i>';
-    icon.title = 'Скопировано в буфер';
-    icon.style.backgroundColor = 'rgba(34, 197, 94, 0.25)'; // Green background
-    icon.style.color = 'rgba(34, 197, 94, 0.9)'; // Green text
-
-    // Restore original icon after 1.5 seconds
-    setTimeout(function(){
-        icon.innerHTML = originalHTML;
-        icon.title = originalTitle;
-        icon.style.backgroundColor = '';
-        icon.style.color = '';
-    }, 1500);
-}
-
-// Load sources, distributors, and partners data
-function loadSourcesAndDistributors(){
-    // Load sources
-    var xhr1 = new XMLHttpRequest();
-    xhr1.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/4500?JSON_KV', true);
-    xhr1.onload = function(){
-        if(xhr1.status === 200){
-            try{
-                sourcesData = JSON.parse(xhr1.responseText);
-                populateSourcesDropdown();
-            } catch(e){
-                console.error('Error parsing sources data:', e);
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', this._getApiUrl('_m_set/' + cardId + '?JSON'), true);
+        xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+        xhr.onload = function() {
+            if (xhr.status === 200) {
+                console.log('Kanban: Status updated for card', cardId);
+            } else {
+                console.error('Kanban: Error updating status:', xhr.status);
             }
-        } else {
-            console.error('Error loading sources:', xhr1.status);
-        }
-    };
-    xhr1.onerror = function(){
-        console.error('Network error loading sources');
-    };
-    xhr1.send();
-
-    // Load distributors
-    var xhr2 = new XMLHttpRequest();
-    xhr2.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/4506?JSON_KV', true);
-    xhr2.onload = function(){
-        if(xhr2.status === 200){
-            try{
-                distributorsData = JSON.parse(xhr2.responseText);
-                populateDistributorsDropdown();
-            } catch(e){
-                console.error('Error parsing distributors data:', e);
-            }
-        } else {
-            console.error('Error loading distributors:', xhr2.status);
-        }
-    };
-    xhr2.onerror = function(){
-        console.error('Network error loading distributors');
-    };
-    xhr2.send();
-
-    // Load partners
-    var xhr3 = new XMLHttpRequest();
-    xhr3.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/5089?JSON_KV', true);
-    xhr3.onload = function(){
-        if(xhr3.status === 200){
-            try{
-                partnersData = JSON.parse(xhr3.responseText);
-                populatePartnersDropdown();
-            } catch(e){
-                console.error('Error parsing partners data:', e);
-            }
-        } else {
-            console.error('Error loading partners:', xhr3.status);
-        }
-    };
-    xhr3.onerror = function(){
-        console.error('Network error loading partners');
-    };
-    xhr3.send();
-}
-
-function populateSourcesDropdown(){
-    var select = $('#recordSource');
-    select.find('option:not(:first)').remove();
-    sourcesData.forEach(function(source){
-        var option = $('<option></option>');
-        option.val(source['ИсточникID']);
-        option.text(source['Источник']);
-        select.append(option);
-    });
-}
-
-function populateDistributorsDropdown(){
-    var select = $('#recordDistributor');
-    select.find('option:not(:first)').remove();
-    distributorsData.forEach(function(distributor){
-        var option = $('<option></option>');
-        option.val(distributor['ДистрибьюторID']);
-        option.text(distributor['Дистрибьютор']);
-        select.append(option);
-    });
-}
-
-function populatePartnersDropdown(){
-    var select = $('#recordPartner');
-    select.find('option:not(:first)').remove();
-    partnersData.forEach(function(partner){
-        var option = $('<option></option>');
-        option.val(partner['ПартнерID']);
-        option.text(partner['Партнер']);
-        select.append(option);
-    });
-}
-
-// Load managers list for task executor dropdown
-function loadManagersList(){
-    var xhr = new XMLHttpRequest();
-    xhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/5230?JSON_KV', true);
-    xhr.onload = function(){
-        if(xhr.status === 200){
-            try{
-                console.log('loadManagersList');
-                managersData = JSON.parse(xhr.responseText);
-                populateManagerSelect();
-            } catch(e){
-                console.error('Error parsing managers data:', e);
-            }
-        } else {
-            console.error('Error loading managers:', xhr.status);
-        }
-    };
-    xhr.onerror = function(){
-        console.error('Network error loading managers');
-    };
-    xhr.send();
-}
-
-// Populate manager select dropdown
-function populateManagerSelect() {
-    var select = document.getElementById('managerSelect');
-    if (!select) return;
-
-    // Clear existing options
-    select.innerHTML = '';
-
-    // Populate options
-    managersData.forEach(function(manager) {
-        var option = document.createElement('option');
-        option.value = manager['ПользовательID'];
-        option.text = manager['Пользователь'];
-
-        // Set selected: prioritize saved cookie, then window.uid
-        if (savedManagerId) {
-            if (manager['ПользовательID'] == savedManagerId) {
-                option.selected = true;
-                currentManagerId = savedManagerId;
-            }
-        } else if (typeof window.uid !== 'undefined' && manager['ПользовательID'] == window.uid) {
-            option.selected = true;
-            currentManagerId = window.uid;
-        }
-
-        select.appendChild(option);
-    });
-
-    // If no manager was selected, select the first one
-    if (!currentManagerId && managersData.length > 0) {
-        currentManagerId = managersData[0]['ПользовательID'];
-        select.value = currentManagerId;
-    }
-}
-
-// Load task types list for task type dropdown
-function loadTaskTypesList(){
-    var xhr = new XMLHttpRequest();
-    xhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/5241?JSON_KV', true);
-    xhr.onload = function(){
-        if(xhr.status === 200){
-            try{
-                taskTypesData = JSON.parse(xhr.responseText);
-            } catch(e){
-                console.error('Error parsing task types data:', e);
-            }
-        } else {
-            console.error('Error loading task types:', xhr.status);
-        }
-    };
-    xhr.onerror = function(){
-        console.error('Network error loading task types');
-    };
-    xhr.send();
-}
-
-function getKanbanFormTable() {
-    if (!kanbanFormTable) {
-        var tempContainer = document.createElement('div');
-        tempContainer.id = 'temp-kanban-form-container';
-        tempContainer.style.display = 'none';
-        document.body.appendChild(tempContainer);
-
-        // Temporarily override init to prevent unnecessary network requests
-        var origInit = IntegramTable.prototype.init;
-        IntegramTable.prototype.init = function() {
-            this.loadColumnState();
-            this.loadSettings();
         };
-
-        kanbanFormTable = new IntegramTable('temp-kanban-form-container', {
-            apiUrl: '/' + db + '/type/' + clientTypeId,
-            instanceName: 'kanbanClientForm'
-        });
-
-        IntegramTable.prototype.init = origInit;
-
-        // Override loadData to trigger kanban reload after save
-        kanbanFormTable.loadData = function() {
-            loadKanbanData();
-            return Promise.resolve();
+        xhr.onerror = function() {
+            console.error('Kanban: Network error updating status');
         };
-    }
-    return kanbanFormTable;
-}
+        xhr.send(postData);
+    };
 
-async function openAddRecordModal(statusId, statusName){
-    currentStatusId = statusId;
-    currentStatusName = statusName;
+    // Public method to reload data
+    KanbanBoard.prototype.reload = function() {
+        this.data = [];
+        this.statuses = [];
+        this.init();
+    };
 
-    try {
-        var table = getKanbanFormTable();
+    // Expose to global scope
+    window.KanbanBoard = KanbanBoard;
 
-        // Open create form for type 332 (Client) — metadata is cached after first call
-        await table.openEditForm(null, clientTypeId, 0);
+})(window);
 
-        // Set the status field (requisite 4874) immediately after form renders
-        // loadReferenceOptions runs async and will pick up this value to display the label
-        var hiddenInput = document.querySelector('input.form-ref-value[name="t4874"]');
-        if (hiddenInput) {
-            hiddenInput.value = statusId;
-        }
-    } catch(e) {
-        console.error('Error opening add record form:', e);
-        alert('Ошибка при подготовке формы: ' + e.message);
-    }
-}
-
-function closeAddRecordModal(){
-    // The IntegramTable form will handle its own modal closing
-    // This function is kept for backward compatibility
-    currentStatusId = null;
-    currentStatusName = null;
-}
-
-// Auto-create deal when a product filter is selected and a new client is created
-document.addEventListener('integram-record-saved', function(e) {
-    var detail = e.detail;
-    if (detail.isCreate && String(detail.typeId) === String(clientTypeId) && currentProductId !== 'all') {
-        var params = new URLSearchParams();
-        params.append('t449', currentProductId);
-        params.append('_xsrf', xsrf);
-
-        fetch('/' + db + '/_m_new/' + dealTypeId + '?JSON&up=' + detail.recordId, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: params.toString()
-        }).then(function() {
-            console.log('Deal auto-created for client', detail.recordId, 'with product', currentProductId);
-        }).catch(function(err) {
-            console.error('Error auto-creating deal:', err);
-        });
-    }
-});
-
-function submitAddRecord(){
-    // Get form values
-    var name = $('#recordName').val().trim();
-    var sourceId = $('#recordSource').val();
-    var partnerId = $('#recordPartner').val();
-    var phone = $('#recordPhone').val().trim();
-    var email = $('#recordEmail').val().trim();
-
-    // Clear previous error states
-    $('.kanban-form-input, .kanban-form-select').removeClass('error');
-
-    // Validate required fields
-    var hasError = false;
-
-    if(!name){
-        $('#recordName').addClass('error');
-        hasError = true;
-    }
-
-    if(!sourceId){
-        $('#recordSource').addClass('error');
-        hasError = true;
-    }
+// Example initialization (can be overridden by specific page configuration)
+// This example shows how to configure the kanban for use
 /*
-    if(!partnerId){
-        $('#recordPartner').addClass('error');
-        hasError = true;
-    }
+document.addEventListener('DOMContentLoaded', function() {
+    var kanban = new KanbanBoard('kanban-container', {
+        dataSource: {
+            type: 'report',
+            endpoint: 'report/Мой%20канбан?JSON'
+        },
+        statuses: {
+            endpoint: 'report/Статусы?JSON_KV'
+        },
+        fieldMapping: {
+            title: 'Проект',
+            description: 'Описание',
+            contact: 'Контакт',
+            status: 'Статус',
+            statusId: 'СтатусID',
+            date: 'Дата',
+            phone: 'Телефон',
+            email: 'Email',
+            amount: 'Выручка, млн',
+            activity: 'Activity',
+            cardId: 'ПроектID'
+        },
+        statusMapping: {
+            name: 'Статус',
+            id: 'СтатусID',
+            color: 'Цвет'
+        }
+    });
+});
 */
-    if(!phone && !email){
-        $('#recordPhone').addClass('error');
-        $('#recordEmail').addClass('error');
-        hasError = true;
-    }
-
-    if(hasError){
-        alert('Пожалуйста, заполните все обязательные поля:\n- Название\n- Партнер\n- Источник\n- Телефон или Email');
-        return;
-    }
-
-    // Disable submit button
-    $('#submitButton').prop('disabled', true).text('Сохранение...');
-
-    // Prepare POST data for client (EntityID = 332)
-    var entityId = 332;
-    var inn = $('#recordInn').val().trim();
-    var distributorId = $('#recordDistributor').val();
-    var contact = $('#recordContact').val().trim();
-    var amount = $('#recordAmount').val().trim();
-
-    var postData = 't332=' + encodeURIComponent(name) +
-                   '&t4874=' + encodeURIComponent(currentStatusId) +
-                   '&_xsrf=' + xsrf;
-
-    if(inn){
-        postData += '&t637=' + encodeURIComponent(inn);
-    }
-    if(partnerId){
-        postData += '&t443=' + encodeURIComponent(partnerId);
-    }
-    if(distributorId){
-        postData += '&t4862=' + encodeURIComponent(distributorId);
-    }
-    if(phone){
-        postData += '&t4536=' + encodeURIComponent(phone);
-    }
-    if(email){
-        postData += '&t4537=' + encodeURIComponent(email);
-    }
-    if(contact){
-        postData += '&t4538=' + encodeURIComponent(contact);
-    }
-    if(sourceId){
-        postData += '&t4861=' + encodeURIComponent(sourceId);
-    }
-    if(amount){
-        postData += '&t4864=' + encodeURIComponent(amount);
-    }
-
-    // Submit via POST
-    var xhr = new XMLHttpRequest();
-    xhr.open('POST', 'https://' + window.location.hostname + '/' + db + '/_m_new/' + entityId + '?JSON&up=1', true);
-    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-    xhr.onload = function(){
-        $('#submitButton').prop('disabled', false).text('Сохранить');
-        if(xhr.status === 200){
-            try{
-                var response = JSON.parse(xhr.responseText);
-                console.log('Record created:', response);
-
-                // Check for warning in response - show it and stay in edit mode
-                // Pass response.obj to show a link to the found record if available
-                if(response.warning && response.warning !== ''){
-                    showKanbanWarningModal(response.warning, response.obj || null);
-                    // Don't close modal, stay in edit mode
-                    return;
-                }
-
-                closeAddRecordModal();
-                // Reload kanban to show new record
-                loadKanbanData();
-            } catch(e){
-                console.error('Error parsing response:', e);
-                alert('Запись создана, но возникла ошибка при обработке ответа');
-                closeAddRecordModal();
-                loadKanbanData();
-            }
-        } else {
-            console.error('Error creating record:', xhr.status, xhr.responseText);
-            alert('Ошибка при создании записи: ' + xhr.status);
-        }
-    };
-    xhr.onerror = function(){
-        $('#submitButton').prop('disabled', false).text('Сохранить');
-        console.error('Network error creating record');
-        alert('Ошибка сети при создании записи');
-    };
-    xhr.send(postData);
-}
-
-// Show warning modal with optional link to found record
-function showKanbanWarningModal(message, objId){
-    var modalId = 'kanban-warning-modal-' + Date.now();
-
-    // Build link HTML if objId is provided
-    var linkHtml = '';
-    if(objId){
-        var editUrl = '/' + db + '/edit_obj/' + objId;
-        linkHtml = '<a href="' + editUrl + '" target="_blank" class="integram-modal-link" style="display: block; margin-top: 12px; color: #1976d2; text-decoration: none; font-weight: 500;">Открыть найденную запись ↗</a>';
-    }
-
-    var modalHtml = '' +
-        '<div class="integram-modal-overlay" id="' + modalId + '">' +
-            '<div class="integram-modal" style="max-width: 500px;">' +
-                '<div class="integram-modal-header">' +
-                    '<h5>Предупреждение</h5>' +
-                '</div>' +
-                '<div class="integram-modal-body">' +
-                    '<div class="alert alert-warning" style="margin: 0;">' +
-                        escapeHtmlForModal(message) +
-                    '</div>' +
-                    linkHtml +
-                '</div>' +
-                '<div class="integram-modal-footer" style="padding: 15px; text-align: right;">' +
-                    '<button type="button" class="btn btn-primary" data-close-warning-modal="true">OK</button>' +
-                '</div>' +
-            '</div>' +
-        '</div>';
-
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-
-    var overlay = document.getElementById(modalId);
-    var closeBtn = overlay.querySelector('[data-close-warning-modal="true"]');
-
-    closeBtn.addEventListener('click', function(){
-        overlay.remove();
-    });
-
-    // Also close on click outside the modal
-    overlay.addEventListener('click', function(e){
-        if(e.target === overlay){
-            overlay.remove();
-        }
-    });
-}
-
-// Helper function to escape HTML for warning modal
-function escapeHtmlForModal(text){
-    if(text === null || text === undefined) return '';
-    return String(text).replace(/&/g, '&amp;')
-                       .replace(/</g, '&lt;')
-                       .replace(/>/g, '&gt;')
-                       .replace(/"/g, '&quot;')
-                       .replace(/'/g, '&#039;');
-}
-
-// Close modal when clicking outside
-$(document).on('click', function(event){
-    if(event.target.id === 'addRecordModal'){
-        closeAddRecordModal();
-    }
-});
-
-// Load data on page load
-$(document).ready(function(){
-    restoreUserPreferences();
-    loadKanbanData();
-    loadSourcesAndDistributors();
-    loadProductsList();
-    loadManagersList();
-    loadTaskTypesList();
-    loadEditFormStatuses();
-});
-
-// Load all statuses for edit form (unfiltered)
-function loadEditFormStatuses(){
-    var xhr = new XMLHttpRequest();
-    xhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/3796?JSON_KV&FR_partners=%25', true);
-    xhr.onload = function(){
-        if(xhr.status === 200){
-            try{
-                editFormStatusesData = JSON.parse(xhr.responseText);
-            } catch(e){
-                console.error('Error parsing edit form statuses:', e);
-            }
-        }
-    };
-    xhr.send();
-}
-
-// Client edit modal functionality
-var currentEditClientId = null;
-var clientMetadataCache = null;
-var clientTypeId = 332;  // Client type ID
-
-async function openClientEditForm(clientId){
-    currentEditClientId = null;
-
-    try {
-        var table = getKanbanFormTable();
-
-        // Hide the old modal if it exists
-        $('#editClientModal').removeClass('active');
-
-        // Open edit form — metadata is cached after first call, kanban reloads after save
-        await table.openEditForm(clientId, clientTypeId, 0);
-    } catch(e) {
-        console.error('Error opening edit form:', e);
-        alert('Ошибка при подготовке формы: ' + e.message);
-    }
-}
-
-function closeEditClientModal(){
-    $('#editClientModal').removeClass('active');
-    currentEditClientId = null;
-}
-
-
-// Task creation modal functionality
-var currentTaskLeadId = null;
-var currentTaskButton = null;
-var taskTypeId = 3596;  // Task type ID (Задача для команды)
-
-function openTaskCreateForm(leadId, button){
-    currentTaskLeadId = leadId;
-    currentTaskButton = button;
-    $('#createTaskModal').addClass('active');
-    renderTaskCreateForm();
-}
-
-function closeTaskCreateModal(){
-    $('#createTaskModal').removeClass('active');
-    currentTaskLeadId = null;
-    currentTaskButton = null;
-}
-
-function renderTaskCreateForm(){
-    var html = '<form id="createTaskForm">';
-
-    // Task name field
-    html += '<div class="kanban-edit-form-group">';
-    html += '<label class="kanban-edit-form-label required">Название задачи</label>';
-    html += '<input type="text" class="kanban-edit-form-input" id="taskName" name="t3596">';
-    html += '</div>';
-
-    // Executor field (Исполнитель)
-    html += '<div class="kanban-edit-form-group">';
-    html += '<label class="kanban-edit-form-label">Исполнитель</label>';
-    html += '<select class="kanban-edit-form-select" id="taskExecutor" name="t3942">';
-    html += '<option value="">Выберите исполнителя</option>';
-    managersData.forEach(function(manager){
-        var selected = (typeof window.uid !== 'undefined' && manager['ПользовательID'] == window.uid) ? 'selected' : '';
-        html += '<option value="' + manager['ПользовательID'] + '" ' + selected + '>' + manager['Пользователь'] + '</option>';
-    });
-    html += '</select>';
-    html += '</div>';
-
-    // Task type field (Тип задачи)
-    html += '<div class="kanban-edit-form-group">';
-    html += '<label class="kanban-edit-form-label">Тип задачи</label>';
-    html += '<select class="kanban-edit-form-select" id="taskType" name="t4299">';
-    html += '<option value="">Выберите тип задачи</option>';
-    taskTypesData.forEach(function(taskType){
-        html += '<option value="' + taskType['Тип задачиID'] + '">' + taskType['Тип задачи'] + '</option>';
-    });
-    html += '</select>';
-    html += '</div>';
-
-    // Due date field
-    html += '<div class="kanban-edit-form-group">';
-    html += '<label class="kanban-edit-form-label required">Срок выполнения</label>';
-    html += '<input type="datetime-local" class="kanban-edit-form-input" id="taskDueDate" name="taskDueDatePicker" required>';
-    html += '<input type="hidden" id="taskDueDateHidden" name="t3888">';
-    html += '</div>';
-
-    html += '</form>';
-
-    $('#createTaskModalBody').html(html);
-
-    // Handle datetime picker change
-    $('#taskDueDate').on('change', function(){
-        var value = $(this).val();
-        if(value){
-            // Convert to DD.MM.YYYY HH:MM format
-            var date = new Date(value);
-            var day = String(date.getDate()).padStart(2, '0');
-            var month = String(date.getMonth() + 1).padStart(2, '0');
-            var year = date.getFullYear();
-            var hours = String(date.getHours()).padStart(2, '0');
-            var minutes = String(date.getMinutes()).padStart(2, '0');
-            $('#taskDueDateHidden').val(day + '.' + month + '.' + year + ' ' + hours + ':' + minutes);
-        } else {
-            $('#taskDueDateHidden').val('');
-        }
-    });
-
-    // Handle task type selection - auto-fill task name when empty
-    $('#taskType').on('change', function(){
-        var taskNameField = $('#taskName');
-        var currentTaskName = taskNameField.val().trim();
-
-        // Only auto-fill if task name field is empty
-        if(!currentTaskName){
-            var selectedOption = $(this).find('option:selected');
-            var taskTypeName = selectedOption.text();
-
-            // Only set if a valid task type is selected (not the placeholder)
-            if(selectedOption.val()){
-                taskNameField.val(taskTypeName);
-            }
-        }
-    });
-}
-
-function submitCreateTask(){
-    if(!currentTaskLeadId) return;
-
-    var taskName = $('#taskName').val().trim();
-    if(!taskName){
-        $('#taskName').addClass('error');
-        alert('Название задачи обязательно для заполнения');
-        return;
-    }
-
-    var dueDate = $('#taskDueDateHidden').val();
-    if(!dueDate){
-        $('#taskDueDate').addClass('error');
-        alert('Срок выполнения обязателен для заполнения');
-        return;
-    }
-
-    $('#createTaskSubmitButton').prop('disabled', true).text('Создание...');
-
-    // Build POST data
-    var postData = 't' + taskTypeId + '=' + encodeURIComponent(taskName);
-    postData += '&t4547=' + encodeURIComponent(currentTaskLeadId);  // Link to lead (client ID)
-
-    // Add current user ID
-    if(typeof window.uid !== 'undefined' && window.uid){
-        postData += '&t4844=' + encodeURIComponent(window.uid);
-    }
-
-    // Add executor (Исполнитель)
-    var executor = $('#taskExecutor').val();
-    if(executor){
-        postData += '&t3942=' + encodeURIComponent(executor);
-    }
-
-    // Add task type (Тип задачи)
-    var taskType = $('#taskType').val();
-    if(taskType){
-        postData += '&t4299=' + encodeURIComponent(taskType);
-    }
-
-    // dueDate already validated above
-    postData += '&t3888=' + encodeURIComponent(dueDate);
-
-    postData += '&_xsrf=' + xsrf;
-
-    var xhr = new XMLHttpRequest();
-    xhr.open('POST', 'https://' + window.location.hostname + '/' + db + '/_m_new/' + taskTypeId + '?JSON&up=1', true);
-    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-    xhr.onload = function(){
-        $('#createTaskSubmitButton').prop('disabled', false).text('Создать');
-        if(xhr.status === 200){
-            try{
-                var response = JSON.parse(xhr.responseText);
-                console.log('Task created:', response);
-
-                // Update task count in the badge
-                updateTaskCount(currentTaskLeadId);
-
-                closeTaskCreateModal();
-            } catch(e){
-                console.error('Error parsing response:', e);
-                updateTaskCount(currentTaskLeadId);
-                closeTaskCreateModal();
-            }
-        } else {
-            console.error('Error creating task:', xhr.status, xhr.responseText);
-            alert('Ошибка при создании задачи: ' + xhr.status);
-        }
-    };
-    xhr.onerror = function(){
-        $('#createTaskSubmitButton').prop('disabled', false).text('Создать');
-        console.error('Network error creating task');
-        alert('Ошибка сети при создании задачи');
-    };
-    xhr.send(postData);
-}
-
-function updateTaskCount(leadId){
-    // Find the task button for this lead and update the count
-    var taskButton = $('.kanban-card-tasks-button[data-lead-id="' + leadId + '"]');
-    if(taskButton.length > 0){
-        var countSpan = taskButton.find('.tasks-count');
-        if(countSpan.length > 0){
-            var currentCount = parseInt(countSpan.text()) || 0;
-            var newCount = currentCount + 1;
-            countSpan.text(newCount);
-
-            // Update button class if it was 'no-tasks'
-            if(taskButton.hasClass('no-tasks')){
-                taskButton.removeClass('no-tasks').addClass('has-tasks');
-
-                // Convert span to anchor with link
-                var card = taskButton.closest('.kanban-card');
-                var cardLeadId = card.data('lead-id');
-                var tasksUrl = '/' + db + '/table/3596?FR_4547=@' + cardLeadId;
-
-                var newButton = $('<a href="' + tasksUrl + '" target="tasks" class="kanban-card-tasks-button has-tasks" data-lead-id="' + leadId + '" onclick="event.stopPropagation();">Задачи: <span class="tasks-count">' + newCount + '</span></a>');
-                taskButton.replaceWith(newButton);
-            }
-        }
-    }
-}
-
-// Deal creation modal functionality
-var currentDealLeadId = null;
-var currentDealButton = null;
-var dealTypeId = 430;  // Deal type ID (Сделка)
-
-function openDealCreateForm(leadId, button){
-    currentDealLeadId = leadId;
-    currentDealButton = button;
-    $('#createDealModal').addClass('active');
-    renderDealCreateForm();
-}
-
-function closeDealCreateModal(){
-    $('#createDealModal').removeClass('active');
-    currentDealLeadId = null;
-    currentDealButton = null;
-}
-
-function renderDealCreateForm(){
-    var html = '<form id="createDealForm">';
-
-    // Quantity field (Количество)
-    html += '<div class="kanban-edit-form-group">';
-    html += '<label class="kanban-edit-form-label">Количество</label>';
-    html += '<input type="number" class="kanban-edit-form-input" id="dealQuantity" name="t447" value="1" min="1" step="1">';
-    html += '</div>';
-
-    // Product field (Продукт) - required
-    html += '<div class="kanban-edit-form-group">';
-    html += '<label class="kanban-edit-form-label required">Продукт</label>';
-    html += '<select class="kanban-edit-form-select" id="dealProduct" name="t449" required>';
-    html += '<option value="">Выберите продукт</option>';
-    productsData.forEach(function(product){
-        // Default to currently selected product in productRadioGroup
-        var selected = (currentProductId !== 'all' && product['ПродуктID'] == currentProductId) ? 'selected' : '';
-        html += '<option value="' + product['ПродуктID'] + '" ' + selected + '>' + product['Продукт'] + '</option>';
-    });
-    html += '</select>';
-    html += '</div>';
-
-    // Amount field (Стоимость)
-    html += '<div class="kanban-edit-form-group">';
-    html += '<label class="kanban-edit-form-label">Стоимость (₽)</label>';
-    html += '<input type="number" class="kanban-edit-form-input" id="dealAmount" name="t5309" min="0" step="0.01">';
-    html += '</div>';
-
-    // Partner field (Партнер)
-    html += '<div class="kanban-edit-form-group">';
-    html += '<label class="kanban-edit-form-label">Партнер</label>';
-    html += '<select class="kanban-edit-form-select" id="dealPartner" name="t479">';
-    html += '<option value="">Выберите партнера</option>';
-    partnersData.forEach(function(partner){
-        html += '<option value="' + partner['ПартнерID'] + '">' + partner['Партнер'] + '</option>';
-    });
-    html += '</select>';
-    html += '</div>';
-
-    // Note field (Примечание)
-    html += '<div class="kanban-edit-form-group">';
-    html += '<label class="kanban-edit-form-label">Примечание</label>';
-    html += '<textarea class="kanban-edit-form-textarea" id="dealNote" name="t636" rows="4"></textarea>';
-    html += '</div>';
-
-    html += '</form>';
-
-    $('#createDealModalBody').html(html);
-}
-
-function submitCreateDeal(){
-    if(!currentDealLeadId) return;
-
-    var productId = $('#dealProduct').val();
-    if(!productId){
-        $('#dealProduct').addClass('error');
-        alert('Продукт обязателен для заполнения');
-        return;
-    }
-
-    $('#createDealSubmitButton').prop('disabled', true).text('Создание...');
-
-    // Build POST data
-    var postData = '';
-
-    // Add quantity (t447)
-    var quantity = $('#dealQuantity').val();
-    if(quantity){
-        postData += 't447=' + encodeURIComponent(quantity);
-    }
-
-    // Add hardcoded t5315=1
-    postData += '&t5315=1';
-
-    // Add product (t449) - required
-    postData += '&t449=' + encodeURIComponent(productId);
-
-    // Add amount (t5309)
-    var amount = $('#dealAmount').val();
-    if(amount){
-        postData += '&t5309=' + encodeURIComponent(amount);
-    }
-
-    // Add note (t636)
-    var note = $('#dealNote').val();
-    if(note){
-        postData += '&t636=' + encodeURIComponent(note);
-    }
-
-    // Add partner (t479)
-    var partnerId = $('#dealPartner').val();
-    if(partnerId){
-        postData += '&t479=' + encodeURIComponent(partnerId);
-    }
-
-    postData += '&_xsrf=' + xsrf;
-
-    var xhr = new XMLHttpRequest();
-    xhr.open('POST', 'https://' + window.location.hostname + '/' + db + '/_m_new/' + dealTypeId + '?JSON&up=' + currentDealLeadId, true);
-    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-    xhr.onload = function(){
-        $('#createDealSubmitButton').prop('disabled', false).text('Создать');
-        if(xhr.status === 200){
-            try{
-                var response = JSON.parse(xhr.responseText);
-                console.log('Deal created:', response);
-
-                // Update deal count in the badge
-                updateDealCount(currentDealLeadId);
-
-                closeDealCreateModal();
-            } catch(e){
-                console.error('Error parsing response:', e);
-                updateDealCount(currentDealLeadId);
-                closeDealCreateModal();
-            }
-        } else {
-            console.error('Error creating deal:', xhr.status, xhr.responseText);
-            alert('Ошибка при создании сделки: ' + xhr.status);
-        }
-    };
-    xhr.onerror = function(){
-        $('#createDealSubmitButton').prop('disabled', false).text('Создать');
-        console.error('Network error creating deal');
-        alert('Ошибка сети при создании сделки');
-    };
-    xhr.send(postData);
-}
-
-function updateDealCount(leadId){
-    // Find the deal button for this lead and update the count
-    var dealButton = $('.kanban-card-deals-button[data-lead-id="' + leadId + '"]');
-    if(dealButton.length > 0){
-        var countSpan = dealButton.find('.deals-count');
-        if(countSpan.length > 0){
-            var currentCount = parseInt(countSpan.text()) || 0;
-            var newCount = currentCount + 1;
-            countSpan.text(newCount);
-
-            // Update button class if it was 'no-deals'
-            if(dealButton.hasClass('no-deals')){
-                dealButton.removeClass('no-deals').addClass('has-deals');
-
-                // Convert span to anchor with link
-                var card = dealButton.closest('.kanban-card');
-                var cardLeadId = card.data('lead-id');
-                var dealsUrl = '/' + db + '/smartq/6271?FR_КлиентID=' + cardLeadId;
-
-                var newButton = $('<a href="' + dealsUrl + '" target="deals" class="kanban-card-deals-button has-deals" data-lead-id="' + leadId + '" onclick="event.stopPropagation();">Сделки: <span class="deals-count">' + newCount + '</span></a>');
-                dealButton.replaceWith(newButton);
-            }
-        }
-    }
-}
-
-// Helper function to escape HTML
-function escapeHtml(text){
-    // Handle null, undefined, and their string representations
-    if(text === null || text === undefined) return '';
-    var str = String(text).trim();
-    var strLower = str.toLowerCase();
-    if(strLower === 'undefined' || strLower === 'null' || str === '') return '';
-    return str.replace(/&/g, '&amp;')
-              .replace(/</g, '&lt;')
-              .replace(/>/g, '&gt;')
-              .replace(/"/g, '&quot;')
-              .replace(/'/g, '&#039;');
-}
-
-// Helper function to safely get value (handles undefined/null strings)
-function safeValue(value){
-    if(value === null || value === undefined) return '';
-    var str = String(value).trim();
-    var strLower = str.toLowerCase();
-    if(strLower === 'undefined' || strLower === 'null' || str === '') return '';
-    return str;
-}
-
-// Helper function to safely get requisite value
-function getReqValue(reqs, key){
-    if(!reqs || !reqs[key]) return '';
-    var req = reqs[key];
-    // Handle case where req itself might be a primitive value instead of an object
-    if(typeof req !== 'object' || req === null) return '';
-    var value = req.value;
-    // Handle null, undefined, and their string representations
-    if(value === null || value === undefined) return '';
-    var str = String(value).trim();
-    var strLower = str.toLowerCase();
-    if(strLower === 'undefined' || strLower === 'null' || str === '') return '';
-    return str;
-}
-
-// Close modals when clicking outside
-$(document).on('click', function(event){
-    if(event.target.id === 'editClientModal'){
-        closeEditClientModal();
-    }
-    if(event.target.id === 'createTaskModal'){
-        closeTaskCreateModal();
-    }
-    if(event.target.id === 'createDealModal'){
-        closeDealCreateModal();
-    }
-});
 </script>
