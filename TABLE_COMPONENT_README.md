@@ -45,7 +45,7 @@
 - `js/integram-table.js` - standalone JS модуль (класс IntegramTable)
 - `css/integram-table.css` - стили компонента в Material Design
 - `templates/integram-table.html` - legacy HTML версия (deprecated)
-- `templates/table-example.html` - пример использования с демо-данными и документацией
+- `experiments/table-example.html` - пример использования с демо-данными и документацией
 
 ## Дизайн
 
