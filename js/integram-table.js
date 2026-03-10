@@ -2286,13 +2286,16 @@ class IntegramTable {
                     const parentRecordId = rawItem.i ? String(rawItem.i) : '';
 
                     // Determine if this is the first column
-                    // First column has column.id === this.objectTableId
-                    const isFirstColumn = colId === String(this.objectTableId);
+                    // For table data source: column.id='0', paramId=tableId, so colType===objectTableId identifies first column
+                    // For object format: column.id=tableId, so colId===objectTableId also works
+                    // Using colType handles both cases (colType = paramId for table source, column.id for object format)
+                    const isFirstColumn = colType === String(this.objectTableId);
 
                     if (window.INTEGRAM_DEBUG) {
                         console.log('[determineParentRecord] Object format detected:');
                         console.log('  - rowIndex:', rowIndex);
                         console.log('  - colId:', colId);
+                        console.log('  - colType:', colType);
                         console.log('  - objectTableId:', this.objectTableId);
                         console.log('  - isFirstColumn:', isFirstColumn);
                         console.log('  - rawItem.i (record ID):', rawItem.i);
