@@ -590,24 +590,25 @@ class IntegramTable {
                 // Convert metadata to columns format
                 const columns = [];
 
-                // Add main value column
+                // Add main value column (use metadata.id as column id for correct FR_{id} filter params - issue #793)
                 columns.push({
-                    id: '0',
+                    id: String(metadata.id),
                     type: metadata.type || 'SHORT',
                     format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
                     name: metadata.val || metadata.name || 'Значение',
                     granted: 1,
                     ref: 0,
+                    orig: metadata.id,
                     paramId: metadata.id // For cell editing: use t{metadata.id} for first column
                 });
 
-                // Add requisite columns
+                // Add requisite columns (use req.id as column id for correct FR_{id} filter params - issue #793)
                 if (metadata.reqs && Array.isArray(metadata.reqs)) {
                     metadata.reqs.forEach((req, idx) => {
                         const attrs = this.parseAttrs(req.attrs);
                         const isReference = req.hasOwnProperty('ref_id');
                         columns.push({
-                            id: String(idx + 1),
+                            id: String(req.id),
                             type: req.type || 'SHORT',
                             format: this.mapTypeIdToFormat(req.type || 'SHORT'),
                             name: attrs.alias || req.val,
@@ -908,9 +909,9 @@ class IntegramTable {
                 // Convert metadata to columns format
                 const columns = [];
 
-                // Add main value column
+                // Add main value column (use metadata.id as column id for correct FR_{id} filter params - issue #793)
                 columns.push({
-                    id: '0',
+                    id: String(metadata.id),
                     type: metadata.type || 'SHORT',
                     format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
                     name: metadata.val || metadata.name || 'Значение',
@@ -920,14 +921,14 @@ class IntegramTable {
                     paramId: metadata.id // For cell editing: use t{metadata.id} for first column
                 });
 
-                // Add requisite columns
+                // Add requisite columns (use req.id as column id for correct FR_{id} filter params - issue #793)
                 if (metadata.reqs && Array.isArray(metadata.reqs)) {
                     metadata.reqs.forEach((req, idx) => {
                         const attrs = this.parseAttrs(req.attrs);
                         const isReference = req.hasOwnProperty('ref_id');
 
                         columns.push({
-                            id: String(idx + 1),
+                            id: String(req.id),
                             type: req.type || 'SHORT',
                             format: this.mapTypeIdToFormat(req.type || 'SHORT'),
                             name: attrs.alias || req.val,
@@ -2332,9 +2333,8 @@ class IntegramTable {
                     const parentRecordId = rawItem.i ? String(rawItem.i) : '';
 
                     // Determine if this is the first column
-                    // For table data source: column.id='0', paramId=tableId, so colType===objectTableId identifies first column
-                    // For object format: column.id=tableId, so colId===objectTableId also works
-                    // Using colType handles both cases (colType = paramId for table source, column.id for object format)
+                    // Both table data source and object format now use metadata.id as column.id (issue #793)
+                    // colType === objectTableId identifies the first column (colType = paramId = metadata.id)
                     const isFirstColumn = colType === String(this.objectTableId);
 
                     if (window.INTEGRAM_DEBUG) {
