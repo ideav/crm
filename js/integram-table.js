@@ -596,7 +596,7 @@ class IntegramTable {
                     id: '0',
                     type: metadata.type || 'SHORT',
                     format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
-                    name: metadata.name || 'Значение',
+                    name: metadata.val || metadata.name || 'Значение',
                     granted: 1,
                     ref: 0,
                     paramId: metadata.id // For cell editing: use t{metadata.id} for first column
