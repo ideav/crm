@@ -448,11 +448,11 @@ class AuthManager {
     constructor(apiConfig, i18n) {
         this.apiConfig = apiConfig;
         this.i18n = i18n;
-        this.validDbs = []; // list of db names with valid tokens, ordered (idb_my first)
+        this.validDbs = []; // list of db names from idb_* cookies, ordered (idb_my first)
         this.selectedDb = null;
     }
 
-    async init() {
+    init() {
         const dbNames = CookieUtil.getAllIdb();
         if (dbNames.length === 0) {
             this.showLoginButton();
@@ -466,23 +466,12 @@ class AuthManager {
             return a.localeCompare(b);
         });
 
-        // Validate token for each db
-        const host = this.apiConfig.host;
-        const validationResults = await Promise.all(
-            dbNames.map(async (db) => {
-                const data = await validateToken(host, db);
-                return { db, valid: !!data };
-            })
-        );
+        // Use cookie presence as proxy for db availability; token validation
+        // happens only when user selects a db (see navigateToDb / renderDropdown).
+        this.validDbs = dbNames;
 
-        this.validDbs = validationResults.filter(r => r.valid).map(r => r.db);
-
-        if (this.validDbs.length === 0) {
-            this.showLoginButton();
-        } else {
-            this.selectedDb = this.validDbs[0];
-            this.showDbButton();
-        }
+        this.selectedDb = this.validDbs[0];
+        this.showDbButton();
     }
 
     getDbLabel(dbName) {
@@ -530,25 +519,53 @@ class AuthManager {
             const item = document.createElement('a');
             item.className = 'db-dropdown-item';
             item.textContent = this.getDbLabel(db);
-            item.href = 'https://' + this.apiConfig.host + '/' + db;
+            item.href = '#';
             item.target = db; // Open in tab named after the database
             if (db === this.selectedDb) item.classList.add('db-dropdown-item-active');
-            item.addEventListener('click', (e) => {
+            item.addEventListener('click', async (e) => {
+                e.preventDefault();
                 e.stopPropagation();
-                // Select this db as current and close dropdown
+                dropdown.style.display = 'none';
+                // Validate token only upon db selection
+                const host = this.apiConfig.host;
+                const data = await validateToken(host, db);
+                if (!data) {
+                    // Token invalid – remove from list and refresh UI
+                    this.validDbs = this.validDbs.filter(d => d !== db);
+                    if (this.validDbs.length === 0) {
+                        this.showLoginButton();
+                    } else {
+                        if (this.selectedDb === db) this.selectedDb = this.validDbs[0];
+                        this.showDbButton();
+                    }
+                    return;
+                }
+                // Navigate to the selected db in a named tab
+                window.open('https://' + host + '/' + db, db);
                 this.selectedDb = db;
                 this.showDbButton();
-                dropdown.style.display = 'none';
-                // Link will navigate to the db in new tab via href and target
             });
             dropdown.appendChild(item);
         });
     }
 
-    navigateToDb() {
-        if (this.selectedDb) {
-            window.location.href = 'https://' + this.apiConfig.host + '/' + this.selectedDb;
+    async navigateToDb() {
+        if (!this.selectedDb) return;
+        const host = this.apiConfig.host;
+        const db = this.selectedDb;
+        const data = await validateToken(host, db);
+        if (!data) {
+            // Token invalid – remove from list and refresh UI
+            this.validDbs = this.validDbs.filter(d => d !== db);
+            if (this.validDbs.length === 0) {
+                this.showLoginButton();
+            } else {
+                this.selectedDb = this.validDbs[0];
+                this.showDbButton();
+            }
+            return;
         }
+        window.location.href = 'https://' + host + '/' + db;
     }
 
     async login(email, password) {
@@ -728,7 +745,7 @@ class App {
                 const result = await this.auth.login(email, password);
                 if (result.success) {
                     this.hideAuthPanel();
-                    await this.auth.init();
+                    this.auth.init();
                 } else {
                     alert(result.message);
                 }
@@ -779,7 +796,7 @@ class App {
         }
 
         // Check auth state from cookies
-        await this.auth.init();
+        this.auth.init();
     }
 
     showAuthPanel() {
