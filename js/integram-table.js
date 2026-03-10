@@ -3176,7 +3176,7 @@ class IntegramTable {
 
             let formHtml = `
                 <div class="edit-form-header">
-                    <h5>${title}</h5>
+                    <h3>${title}</h3>
                     <button class="edit-form-close" data-close-modal-ref="true"><i class="pi pi-times"></i></button>
                 </div>
                 <div class="edit-form-body">
@@ -4039,7 +4039,7 @@ class IntegramTable {
             const instanceName = this.options.instanceName;
 
             modal.innerHTML = `
-                <h5>Настройки колонок</h5>
+                <h3>Настройки колонок</h3>
                 <div class="column-settings-list" id="column-settings-list-${instanceName}">
                     ${ this.columns.map(col => `
                         <div class="column-settings-item">
@@ -4129,7 +4129,7 @@ class IntegramTable {
             modal.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; padding: 20px; border-radius: 4px; box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22); z-index: 1002; max-width: 450px; width: 90%;';
 
             modal.innerHTML = `
-                <h5 style="margin: 0 0 20px 0; font-weight: 500; font-size: 20px;">Добавить новую колонку</h5>
+                <h3 style="margin: 0 0 20px 0; font-weight: 500; font-size: 20px;">Добавить новую колонку</h3>
                 <div style="margin-bottom: 16px; position: relative;">
                     <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px;">Имя колонки:</label>
                     <input type="text" id="new-column-name-${instanceName}" class="form-control" placeholder="Введите имя колонки" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 14px; box-sizing: border-box;" autocomplete="off">
@@ -4601,7 +4601,7 @@ class IntegramTable {
             const instanceName = this.options.instanceName;
 
             modal.innerHTML = `
-                <h5>Настройка таблицы</h5>
+                <h3>Настройка таблицы</h3>
                 <div class="column-settings-list">
                     <div class="table-settings-item">
                         <button class="btn btn-sm btn-danger" id="reset-settings-btn">Сбросить настройки</button>
@@ -4789,7 +4789,7 @@ class IntegramTable {
             modal.className = 'column-settings-modal';
 
             modal.innerHTML = `
-                <h5>Полное значение</h5>
+                <h3>Полное значение</h3>
                 <div style="max-height: 400px; overflow-y: auto; margin: 15px 0; padding: 10px; background: #f8f9fa; border-radius: 4px;">
                     <pre style="white-space: pre-wrap; word-wrap: break-word; margin: 0;">${ fullValue }</pre>
                 </div>
@@ -4840,7 +4840,7 @@ class IntegramTable {
             );
 
             modal.innerHTML = `
-                <h5>Настройка группировки</h5>
+                <h3>Настройка группировки</h3>
                 <p style="color: var(--md-text-secondary); font-size: 14px; margin-bottom: 15px;">
                     Выберите поля для группировки. Порядок выбора определяет вложенность групп.
                 </p>
@@ -6584,7 +6584,7 @@ class IntegramTable {
             let formHtml = `
                 <div class="edit-form-header">
                     <div class="edit-form-header-title-row">
-                        <h5>${ title }</h5>
+                        <h3>${ title }</h3>
                         ${ recordIdHtml }
                     </div>
                     <button class="edit-form-close" data-close-modal="true"><i class="pi pi-times"></i></button>
@@ -7063,7 +7063,7 @@ class IntegramTable {
 
                 modal.innerHTML = `
                     <div class="edit-form-header">
-                        <h5>${ typeName }</h5>
+                        <h3>${ typeName }</h3>
                         <button class="edit-form-close subordinate-modal-close"><i class="pi pi-times"></i></button>
                     </div>
                     <div class="edit-form-body">
@@ -7635,7 +7635,7 @@ class IntegramTable {
 
             let formHtml = `
                 <div class="edit-form-header">
-                    <h5>${ title }</h5>
+                    <h3>${ title }</h3>
                     <button class="edit-form-close subordinate-close-btn"><i class="pi pi-times"></i></button>
                 </div>
                 <div class="edit-form-body">
@@ -8541,7 +8541,7 @@ class IntegramTable {
 
             let formHtml = `
                 <div class="edit-form-header">
-                    <h5>${title}</h5>
+                    <h3>${title}</h3>
                     <button class="edit-form-close" data-close-form-ref-modal="true"><i class="pi pi-times"></i></button>
                 </div>
                 <div class="edit-form-body">
@@ -8723,7 +8723,7 @@ class IntegramTable {
 
             let modalHtml = `
                 <div class="form-field-settings-header">
-                    <h5>Настройка полей формы</h5>
+                    <h3>Настройка полей формы</h3>
                     <button class="form-field-settings-close">&times;</button>
                 </div>
                 <div class="form-field-settings-body">
@@ -9363,7 +9363,7 @@ class IntegramTable {
                     <div class="integram-modal-overlay" id="${ modalId }">
                         <div class="integram-modal" style="max-width: 400px;">
                             <div class="integram-modal-header">
-                                <h5>Подтверждение удаления</h5>
+                                <h3>Подтверждение удаления</h3>
                             </div>
                             <div class="integram-modal-body">
                                 <p style="margin: 0;">Вы уверены, что хотите удалить эту запись?</p>
@@ -9818,7 +9818,7 @@ class IntegramTable {
                 <div class="integram-modal-overlay" id="${ modalId }">
                     <div class="integram-modal" style="max-width: 500px;">
                         <div class="integram-modal-header">
-                            <h5>Предупреждение</h5>
+                            <h3>Предупреждение</h3>
                         </div>
                         <div class="integram-modal-body">
                             <div class="alert alert-warning" style="margin: 0;">
@@ -9873,7 +9873,7 @@ class IntegramTable {
                 <div class="integram-modal-overlay" id="${ modalId }">
                     <div class="integram-modal" style="max-width: 500px;">
                         <div class="integram-modal-header">
-                            <h5>Предупреждение</h5>
+                            <h3>Предупреждение</h3>
                         </div>
                         <div class="integram-modal-body">
                             <div class="alert alert-warning" style="margin: 0;">
@@ -10027,7 +10027,7 @@ class IntegramTable {
                 <div class="integram-modal-overlay" id="${ progressId }">
                     <div class="integram-modal" style="max-width: 500px;">
                         <div class="integram-modal-header">
-                            <h5>Удаление записей</h5>
+                            <h3>Удаление записей</h3>
                         </div>
                         <div class="integram-modal-body">
                             <div class="bulk-delete-progress-bar-container">
@@ -10949,7 +10949,7 @@ class IntegramCreateFormHelper {
         let formHtml = `
             <div class="edit-form-header">
                 <div class="edit-form-header-titles">
-                    <h5>${title}</h5>
+                    <h3>${title}</h3>
                     ${parentSubtitleHtml}
                 </div>
                 <button class="edit-form-close" data-close-modal="true"><i class="pi pi-times"></i></button>
