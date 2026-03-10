@@ -2915,7 +2915,10 @@ class IntegramTable {
 
                 params.append(`t${colType}`, selectedId);
 
-                const url = `${apiBase}/_m_set/${parentInfo.parentRecordId}?JSON`;
+                // Use _m_save for first column (issue #775), _m_set for requisites
+                const url = parentInfo.isFirstColumn
+                    ? `${apiBase}/_m_save/${parentInfo.parentRecordId}?JSON`
+                    : `${apiBase}/_m_set/${parentInfo.parentRecordId}?JSON`;
 
 
                 const response = await fetch(url, {
