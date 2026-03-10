@@ -1,0 +1,1010 @@
+<center><h3 class="mt-2"><t9n>[RU]Универсальная загрузка файлов[EN]Custom file upload</t9n></h3></center>
+<style>
+.dict {
+    display: inline-block;
+    padding: 5px 5px;
+    background-color: #fff;
+    border: 1px solid #666;
+    margin-bottom: 5px;
+    margin-right: -1px;
+    font-size: small;
+}
+.base-type {
+    color: lightgray;
+}
+.has-formula {
+    border-bottom: 5px solid green;
+}
+.du {
+    border-bottom: 1px dotted #fff;
+    text-decoration: none;
+}
+.search-results{
+    border: 1px solid #efefef;
+    position: absolute;
+    padding: .5rem 0;
+    background-color: #fff;
+    display: none;
+    z-index: 2;
+}
+.auto-parent{
+    width: 70px;
+}
+.auto-parent{
+    -moz-appearance:textfield;
+}
+.auto-parent::-webkit-outer-spin-button,
+.auto-parent::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+}
+</style>
+<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z" crossorigin="anonymous">
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
+<script src="/js/js.js"></script>
+<div id="choice">
+    <select class="form-control reps" onchange="if(this.value==='new')createType();else intApi('GET','object/'+this.value+'?JSON','type')" id="chosenType">
+        <option id="dummy"></option>
+        <option id="from_file" value="new"></option>
+    </select>
+    <select class="form-control" onchange="if(this.value!=='')applySet(this.value)" id="settings">
+        <option id="saved_set"></option>
+    </select>
+</div>
+<div id="input-area" class="m-1 t9n" style="display:none">
+    <table>
+        <tr><td class="pr-2"><a href="/{_global_.z}/{_global_.action}" title="<t9n>[RU]Вернуться к выбору таблицы[EN]Choose another table</t9n>"><img class="icon8" src="https://img.icons8.com/ios/25/555555/left.png"></a></td><td class="pt-2"><h4 id="chosen"></h4></td></tr>
+    </table>
+    <div class="mb-5 p-1 p-sm-2 shadow">
+        <t9n>[RU]Вставьте текст из файла в это поле или выберите файл для загрузки:[EN]Put your file content here or select a file to upload:</t9n>
+        <textarea rows="5" class="form-control mb-2 mt-1" id="input"></textarea>
+        <t9n>[RU]JSON или любой текстовый файл: CSV, TXT и т.п. Форматы XLS и XLSX пока не поддерживаются (просто скопируйте кусок вашего экселя в поле выше).[EN]JSON or any text file: CSV, TXT, etc. No XLS and XLSX accepted (copy/paste the content of XLS here instead)</t9n>
+        <input class="form-control mb-2" type="file" id="selectFiles" value="Import" />
+        <!--
+        <t9n>[RU]можно загрузить этот файл по ссылке[EN]you may also upload the file via a link</t9n>:
+        <input class="form-control" type="text" id="selectLink" /><br />
+        -->
+        <div class="d-inline-block pb-3" id="try"><button onclick="importParse()" class="btn btn-primary"><t9n>[RU]Проверить[EN]Validate</t9n></button></div>
+        <div class="d-inline-block pb-3"><button onclick="$('#tune').toggle()" id="tune-btn" class="btn btn-outline-secondary"><t9n>[RU]Настроить[EN]Settings</t9n></button></div>
+    </div>
+    <div id="tune" class="bg-light mb-5 pl-1 pl-sm-2 pr-1 pr-sm-2 pb-2 pt-3 shadow" style="display:none; border-top: 1px solid #efefef;">
+        <h5><t9n>[RU]Настройки импорта[EN]Import settings</t9n></h5>
+        <div class="d-inline-block pb-1 mr-4 pt-1">
+            <label><input id="header" type="checkbox">&nbsp;<t9n>[RU]Первая строка содержит заголовок[EN]The fisrt line is the table header</t9n></label><br />
+            <label><input id="trim" type="checkbox" checked>&nbsp;<t9n>[RU]Обрезать пробелы справа и слева[EN]Trim the spaces</t9n></label>
+        </div>
+        <div class="d-inline-block pb-1 mr-4 pt-1"><t9n>[RU]Разделитель полей[EN]Fields delimiter</t9n> <input type="text" id="delim" size="4" placeholder="auto"> <a onclick="$('#delim').val('\t');$('#upload').hide();$('#refresh').show();" style="border-bottom: 1px dashed">TAB</a></div>
+        <div class="d-inline-block pb-1 mr-4 pt-1"><t9n>[RU]Разделитель строк[EN]Lines delimiter</t9n> <input type="text" id="caret" size="4" placeholder="auto"></div>
+        <div class="d-inline-block pb-1 mr-4 pt-1"><t9n>[RU]Кодировка[EN]Encoding</t9n>
+            <select class="form-control form-control-sm" onchange="resetEncoding()" id="encoding">
+                <option value="utf-8">UTF-8</option>
+                <option value="windows-1251">Windows-1251</option>
+            </select>
+        </div>
+        <div id="sample" style="/*overflow-x: auto;*/ display:none" class="mt-1">
+            <t9n>[RU]Первые две строки файла[EN]The first two lines parsed</t9n>:
+            <table class="table-sm table-bordered mb-3 bg-white"><tbody id="1st2"></tbody></table>
+        </div>
+        <br /><span id="order"><t9n>[RU]Вы можете настроить последовательность полей, как они идут в вашем файле:[EN]Set the fields order according to your file</t9n></span><br />
+        <div id="sortable" style="white-space: nowrap; display: flex; /*overflow-x: auto*/" class="mt-1"></div>
+        <p onclick="$(this).hide();$('#formula').show()" id="formula-cap"><a id="edit-formulas" style="border-bottom: 1px dashed"><t9n>[RU]Формулы для вычисления полей[EN]Field calculation formulas</t9n></a></p>
+        <div class="input-group mb-3" id="formula" style="display: none;">
+            <div class="input-group-prepend">
+                <select class="form-control" onchange="markSelected(this.value)" id="fields">
+                </select>
+            </div>
+            <input type="text" placeholder="<t9n>[RU]Ввести формулу для расчета поля[EN]Set the formula to calculate the field value</t9n>" class="form-control" id="set-formula">
+            <div class="input-group-append">
+            <button class="btn btn-outline-secondary" type="button" onclick="doSaveFormula()" id="set-formula-btn"><t9n>[RU]Сохранить[EN]Save</t9n></button>
+            </div>
+        </div>
+        <div class="pb-1 mr-4 pt-1" id="unique-cap" style="display:none">
+            <label title="<t9n>[RU]Невозможно добавить одинаковые независимые объекты (на реквизиты ограничение не распространяется[EN]Forbid to add non unique objects (not applicable to attributes)</t9n>)">
+                <input id="unique" type="checkbox">&nbsp;<t9n>[RU]Сделать первую колонку в таблице уникальной[EN]Make the first column of this table unique</t9n>
+            </label>
+        </div>
+        <div class="row" id="save-set-form">
+            <div class="col-12 col-sm-8 col-md-6 col-lg-5">
+                <div class="input-group mb-3">
+                    <input type="text" class="form-control" value="<t9n>[RU]Новая[EN]New</t9n>" id="save-set">
+                    <div class="input-group-append">
+                    <button class="btn btn-outline-secondary" type="button" onclick="doSaveSet()" id="save-set-btn"><t9n>[RU]Сохранить настройку[EN]Save settings</t9n></button>
+                    <button class="btn btn-outline-secondary" id="save-set-wait" style="display:none"><img src="/i/ajax.gif"></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="log" class="bg-secondary overflow-auto small shadow-sm text-white p-2 mb-2" style="max-height: 100px; display:none"></div>
+    <div id="progress" class="bg-info text-white shadow p-2" style="display:none"></div>
+    <div id="errors" class="bg-danger text-white p-2 mt-1" style="display:none"></div>
+    <div class="pb-3" id="refresh" style="display:none"><button onclick="importParse();" class="btn btn-outline-secondary">Обновить</button></div>
+    <div id="upload" style="display:none">
+        <button onclick="$('#do-upload,.confirm').toggle()" class="btn btn-warning" id="do-upload"><t9n>[RU]Загрузить[EN]Upload</t9n></button>
+        <button onclick="$('#do-upload,.confirm').toggle()" class="btn btn-outline-secondary confirm" style="display:none"><t9n>[RU]Отменить[EN]Cancel</t9n></button>
+        <button onclick="$('#do-upload,.confirm').toggle();$('#upload').hide();doImport()" class="btn btn-warning confirm" style="display:none"><t9n>[RU]Да, грузим[EN]Yes, do upload</t9n></button>
+        <button onclick="$('#stats').toggle()" class="btn btn-outline-secondary" id="show-stats"><t9n>[RU]Статистика[EN]Show stats</t9n></button>
+    </div>
+    <div id="stats" class="pl-1 pr-1 pt-3 pb-1 mt-3 mb-4 shadow" style="display:none"></div>
+    <div id="up" class="mt-4" style="display:none">
+        <div class="d-inline-block">
+            <t9n>[RU]Выберите родительскую запись для загрузки[EN]Select the parent record to upload its attributes</t9n>
+            <input type="text" id="searchParent" class="form-control" onfocusout="validateParent()" onfocus="searchDb(event)" onkeyup="searchDb(event)" placeholder="<t9n>[RU]Поиск по значению или #ID[EN]Search by value or #ID</t9n>">
+            <div class="search-results shadow-lg"></div>
+            <p class="mt-2">
+                <t9n>[RU]или укажите колонку исходного файла, откуда взять родителя или его ID[EN]or set the number of the column in the source file to get the parent or its ID</t9n>:
+                <input style="display: none;" />
+                <table>
+                    <tr>
+                        <td><input type="number" name="ap" class="form-control auto-parent" onchange="setAutoParent(this.value)" min="0" autocomplete="off" placeholder="N" />
+                        <td class="pl-3 pt-2"><label><input id="createParent" type="checkbox">&nbsp;Создавать родителя, если его нет</label>
+                    </tr>
+                </table>
+            </p>
+        </div>
+    </div>
+    <div id="resume" class="mt-4"></div>
+    <div id="preview" style="/*overflow-x: auto*/" class="mt-3 mb-5"></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.1/papaparse.min.js" integrity="sha512-EbdJQSugx0nVWrtyK3JdQQ/03mS3Q1UiAhRtErbwl1YL/+e2hZdlIcSURxxh7WXHTzn83sjlh2rysACoJGfb6g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+var input,sourceMap=[],importMap={},chosenType,chosenTypeName,chosenSet,upType,uploadSets={},toImport=[],saveSet,formulas={},statArr={},origMap={}
+    ,types={},bt={},revBt={},toCreate=[],newType,chunkSize=1000,autoParent
+    ,ajax='<img src="/i/ajax.gif">'
+    ,typeOption='<option value=":id:" id=":id:">:name:</option>'
+    ,counter=1;
+$('#dummy').html(t9n('[RU]Выберите таблицу для загрузки[EN]Select a table to upload'));
+$('#from_file').html(t9n('[RU]*** Создать новую таблицу из файла ***[EN]*** Create new table from file ***'));
+$('#saved_set').html(t9n('[RU]или выберите сохраненную настройку[EN]or select a saved setting'));
+$('title').html(t9n('[RU]Универсальный импорт[EN]Smart import'));
+function resetEncoding(){
+    if(chosenType===undefined)
+        $('#sortable').html('');
+    importParse();
+}
+function setAutoParent(par){
+    autoParent=par===''?undefined:par;
+    if(autoParent){
+        $('#searchParent').val('');
+        $('#do-upload').attr('disabled',false);
+    }
+    else
+        $('.auto-parent').val('');
+    gatherSet();
+    importParse();
+}
+function validateParent(){
+    const el=$('#searchParent');
+    if(el.attr('up-name')&&el.value!==$(el).attr('up-name')){
+        el.value=$(el).attr('up-name');
+        setAutoParent();
+    }
+}
+function createType(count){
+    intApi('GET','edit_types?JSON','base');
+    $('#chosen').html(t9n('[RU]Новая[EN]New'));
+    $('#order').html(t9n('[RU]Вы можете настроить поля, как они будут сохранены в базе:[EN]Tune the fields settings the way you want them to be uploaded:'));
+    $('#choice').remove();
+    $('#input-area,#unique-cap').show();
+    $('#header').prop('checked',true);
+    $('#save-set-form').hide();
+    byId('chosen').title=t9n('[RU]Название таблицы задается как первая колонка в таблице настроек ниже[EN]To change this name set it in the first column of the table in Settings');
+}
+function doCreateType(){
+    var i,j,k,req,ok=true,chosenTypeBase;
+    for(i in sourceMap)
+        if(sourceMap[i].skip===0){
+            chosenTypeName=$('#n'+sourceMap[i].id).val(); // The table name might be renamed
+            chosenTypeBase=sourceMap[i].base;
+            break;
+        }
+    if(chosenTypeBase===undefined){
+        putMsg('errors',t9n('[RU]Не выбрано ни одной колонки - нечего создавать[EN]No columns chosen - nothing to create',true));
+        return;
+    }
+    for(j in types.val)
+        if(types.val[j].toLowerCase()===chosenTypeName.toLowerCase()&&types.t[j]===chosenTypeBase)
+            if(types.req_id[j]===''){
+                putMsg('log',t9n('[RU]Термин[EN]The term')+' <b>'+chosenTypeName+'</b> ('+bt[chosenTypeBase]+') '+t9n('[RU]найден[EN]already exists')+' ('+newType+')',true);
+                newType=types.id[j];
+                for(k in types.req_id)
+                    if(types.req_t[k]==newType){
+                        putMsg('errors',t9n('[RU]Термин[EN]The term named')+' <b>'+chosenTypeName+'</b> ('+bt[chosenTypeBase]+') '+t9n('[RU]найден и является колонкой таблицы[EN]already exists and is a column of this table')+' <b>'+types.val[k]
+                                        +'</b>. <a class="du text-white" onclick="$(\'#n0\').focus()">'+t9n('[RU]Переименуйте его![EN]Rename it please!')+'</a>',true);
+                        newType=undefined;
+                        return;
+                    }
+                break;
+            }
+            else{
+                putMsg('errors',t9n('[RU]Таблица[EN]The table')+' <b>'+chosenTypeName+'</b> ('+bt[chosenTypeBase]+') '
+                        +t9n('[RU]найдена и имеет колонки. Загрузите данные в существующую таблицу или[EN]already exists and has its columns. Please upload the data into that table')
+                        +' <a class="du text-white" onclick="$(\'.ui-state-default input\')[0].focus()">'+t9n('[RU]измените имя[EN]rename it')+'</a>',true);
+                return;
+            }
+    for(i in sourceMap)
+        if(sourceMap[i].skip===0)
+            for(j in sourceMap)
+                if(i!==j&&sourceMap[i].name===sourceMap[j].name&&sourceMap[j].skip===0){
+                    putMsg('errors',t9n('[RU]Найдены одинаковые имена колонок[EN]Duplicated column names found')+': <b>'+sourceMap[j].name+'</b>'
+                            +', <a class="du text-white" onclick="$(\'#n'+j+'\').focus()">'+t9n('[RU]переименуйте их[EN]rename it')+'</a>.',true);
+                    return;
+                }
+    while(toCreate.length)
+        toCreate.shift();
+    if(newType===undefined)
+        toCreate.push({url:'_d_new/?JSON&t='+chosenTypeBase+($('#unique').prop('checked')?'&unique=1':''),next:'parent',par:'val='+chosenTypeName
+                        ,msg:t9n('[RU]Cоздана таблица[EN]The table has been created')+' <b>'+chosenTypeName+'</b> ('+bt[chosenTypeBase]+')'});
+    for(i in sourceMap)
+        if(sourceMap[i].skip===0){
+            if(sourceMap[i].name===''){
+                putMsg('errors',t9n('[RU]Недопустимо пустое название новой таблицы или колонки[EN]Please set a name for the new table or column'),true);
+                return;
+            }
+            i++;
+            for(j in sourceMap)
+                if(j>=i)
+                    if(sourceMap[j].skip===0){
+                        req=ref=undefined;
+                        if(sourceMap[j].name===''){
+                            ok=false;
+                            putMsg('errors',t9n('[RU]Недопустимо пустое название новой колонки[EN]The column name must be not empty')+' #'+j,true);
+                        }
+                        for(k in types.val)
+                            if(types.val[k].toLowerCase().trim()===sourceMap[j].name.toLowerCase().trim()&&types.t[k]===sourceMap[j].base){
+                                req=types.id[k];
+                                if(types.req_id[k]!==''&&sourceMap[j].link===0){
+                                    putMsg('errors',t9n('[RU]Уже существует таблица <b>'+sourceMap[j].name+'</b> ('+bt[sourceMap[j].base]+')'
+                                                    +'[EN]Table <b>'+sourceMap[j].name+'</b> ('+bt[sourceMap[j].base]+') already exists')
+                                            +'. <a class="du text-white" onclick="$(\'#n'+j+'\').focus()">'+t9n('[RU]Переименуйте эту колонку[EN]Rename this column')+'</a>.'
+                                        ,true);
+                                    return;
+                                }
+                            }
+                        if(req===undefined){
+                            toCreate.push({url:'_d_new/?JSON&t='+sourceMap[j].base,next:'postTypes',par:'val='+sourceMap[j].name,msg:t9n('[RU]Добавлен термин [EN]The term created: ')+sourceMap[j].name});
+                            if(sourceMap[j].link>0)
+                                toCreate.push({url:'_d_ref/:obj:?JSON',next:'postTypes',msg:t9n('[RU]Ссылка на [EN]A reference to')+' '+sourceMap[j].name});
+                            toCreate.push({url:'_d_req/:parent:?JSON&t=:obj:'+(sourceMap[j].link===2?'&multiselect=1':'')
+                                        ,next:'postTypes',msg:t9n('[RU]Добавлена колонка[EN]The column created')+' '+sourceMap[j].name});
+                        }
+                        else{
+                            putMsg('log',t9n('[RU]Будет использован термин[EN]The term to be used:')+' '+sourceMap[j].name,true);
+                            if(sourceMap[j].link>0){
+                                for(k in types.ref_val)
+                                    if(types.ref_val[k]===req){
+                                        ref=types.id[k];
+                                        toCreate.push({url:'_d_req/:parent:?JSON&t='+ref+(sourceMap[j].link===2?'&multiselect=1':'')
+                                                    ,next:'postTypes',msg:t9n('[RU]Использована ссылка на[EN]Reused the reference to')+' <b>'+sourceMap[j].name+'</b>'});
+                                        break;
+                                    }
+                                if(ref===undefined){
+                                    toCreate.push({url:'_d_ref/'+req+'?JSON',next:'postTypes',msg:t9n('[RU]Ссылка на[EN]A reference to')+' '+sourceMap[j].name});
+                                    toCreate.push({url:'_d_req/:parent:?JSON&t=:obj:'+(sourceMap[j].link===2?'&multiselect=1':'')
+                                                ,next:'postTypes',msg:t9n('[RU]Колонка[EN]The column')+' '+sourceMap[j].name+t9n('[RU] добавлена[EN] was created')});
+                                }
+                            }
+                            else
+                                toCreate.push({url:'_d_req/:parent:?JSON&t='+req,next:'postTypes',msg:t9n('[RU]Колонка[EN]The column')+' '+sourceMap[j].name+t9n('[RU] добавлена[EN] was created')});
+                        }
+                    }
+								  
+            if(ok){
+                $('#try').remove();
+                postTypes(toCreate.shift());
+            }
+            return;
+        }
+    putMsg('errors',t9n('[RU]Нет полей для импорта[EN]No lines to import'));
+}
+function postTypes(q,json){
+    if(q===undefined){
+        $('#chosenType').val(chosenType=newType);
+        $('#chosenTypeName').val(chosenTypeName);
+        doImport();
+    }
+    else{
+        if(json!==undefined)
+            q.url=q.url.replace(':obj:',json.obj);
+        if(newType||q.url.indexOf(':parent:')===-1)
+            intApi('POST',q.url.replace(':parent:',newType),q.next,q.par||'',q.msg);    
+    }
+}
+function putMsg(target,text,append){
+    $('#'+target).html((append===undefined?'':$('#'+target).html())+text+'<br />').show();
+}
+function escapeSlashesNSemicolons(v){
+    return v.toString().replace(/\\/gm,'\\\\').replace(/;/gm,'\\;');
+//    return v.replace(/\\/gm,'\\\\').replace(/;/gm,'\\;');
+//    return v.replace(/\\/gm,'\\\\').replace(/(?<!\\);/gm,'\\;');
+}
+function doImport(count){
+    if(chosenType===undefined)
+        doCreateType();
+    if(chosenType===undefined)
+        return;
+    count=count||1;
+    if(count===1)
+        $('#progress').html(t9n('[RU]Отправка по[EN]Send')+' '+chunkSize+t9n('[RU] записей[EN] records in every batch')+ajax).show();
+    var file='',i,j,k;
+    for(i=count;i<count+chunkSize;i++){
+        if(toImport[i]===undefined)
+            break;
+        if(newType===undefined){
+            k=0;
+            if(autoParent){
+                file+=escapeSlashesNSemicolons(toImport[i][0])+';';
+                k++;
+            }
+            for(j in origMap)
+                file+=toImport[i][k]===undefined?';':escapeSlashesNSemicolons(toImport[i][k])+';',
+                k++;
+        }
+        else{
+            for(j in sourceMap)
+                if(sourceMap[j].skip===0)
+                    file+=toImport[i][j]===undefined?';':escapeSlashesNSemicolons(toImport[i][j])+';'
+        }
+        file+='\r\n';
+    }
+    if(file!==''){
+        file='DATA\r\n'+file;
+        var fd = new FormData();
+        fd.append('bki_file',new File([file],'import.bki'));
+        fd.append('import','1');
+        if($('#searchParent').attr('up-id'))
+            fd.append('F_U',$('#searchParent').attr('up-id'));
+        if($('#createParent').prop('checked'))
+            fd.append('createParent',1);
+        if(autoParent)
+            fd.append('autoParent',getUpType(chosenType));
+        intApi('POST','object/'+chosenType+'?JSON&import=1','upload',fd,i);
+    }
+}
+function doSaveFormula(){
+    formulas[$('#fields').val()]=$('#set-formula').val();
+    if($('#set-formula').val()!==''){
+        $('.ui-state-default[id="'+$('#fields').val()+'"').addClass('has-formula');
+        $('option[value="'+$('#fields').val()+'"').addClass('text-success');
+    }
+    else{
+        $('option[value="'+$('#fields').val()+'"').removeClass('text-success');
+        $('.ui-state-default[id="'+$('#fields').val()+'"').removeClass('has-formula');
+    }
+}
+function markSelected(v){
+    $('.ui-state-default,.ui-state-default>input,.ui-state-default>span>select').css('background-color','transparent');
+    $('.ui-state-default[id="'+v+'"],.ui-state-default[id="'+v+'"]>input,.ui-state-default[id="'+v+'"]>span>select').css('background-color','lightblue');
+    $('#set-formula').val(formulas[v]||'');
+}
+function addSortableType(id,val,base){
+    return '<div onclick="if(event.target===this)toFormula(this)" class="ui-state-default dict p-1  bg-white" id="'+id+'" style="text-align:center; font-size: .85em">'
+            +'<img class="icon8" id="l'+id+'" src="https://img.icons8.com/ios/22/aaaaaa/link.png" onclick="setLink(this)" title="'
+                +t9n('[RU]Включите этот значок, если это поле будет ссылкой на справочник[EN]Check this box to make this a reference to the dictionary')+'">&nbsp;'
+            +'<input id="n'+id+'" size="'+(val.length+1)+'" onkeyup="this.size=this.value.length+1" onchange="$(\'#upload\').hide();$(\'#refresh\').show();" style="border:none" type="text" value="'+val+'">'
+            +'<hr class="m-2"><span class="base-type">'+base+'</span>'
+            +'<br><input id="s'+id+'" type="checkbox" checked class="mt-3" title="Снимите галку, чтобы пропустить это поле" onchange="$(\'#upload\').hide();$(\'#refresh\').show();"></div>';
+}
+function setLink(el){
+    if($(el).hasClass('multiselect'))
+        $(el).prop('src','https://img.icons8.com/ios/22/aaaaaa/link.png').removeClass('is-link').removeClass('multiselect')
+            .attr('title',t9n('[RU]Включите этот значок, если это поле будет ссылкой на справочник[EN]Click this to make this a reference to the dictionary'));
+    else if($(el).hasClass('is-link'))
+        $(el).prop('src','https://img.icons8.com/ios/22/111111/multiple-choice.png').addClass('multiselect')
+            .attr('title',t9n('[RU]Кликните, чтобы сделать это поле не справочным[EN]Click this to make the field non-dictionary'));
+    else
+        $(el).prop('src','https://img.icons8.com/ios/22/111111/link.png').addClass('is-link')
+            .attr('title',t9n('[RU]Кликните ещё раз, чтобы разрешить множественный выбор из справочника[EN]Click this again to enable multiple selection from dictionary'));
+    $('#upload').hide();
+    $('#refresh').show();
+    importParse();
+}
+function addSortable(id,val,base,baseId){
+    return '<div onclick="toFormula(this)" class="ui-state-default dict p-1  bg-white" id="'+id+'" name="'+val+'">'+addBr(val)+'<br />'
+        +'<input hidden id="t'+id+'" value="'+baseId+'"><input hidden id="n'+id+'" value="'+val+'">'
+        +'<span class="base-type">'+base.toLowerCase()+'</span></div>';
+}
+function toFormula(el){
+    if($('#fields').val()!=='')
+        $('#set-formula').val($('#set-formula').val()+'['+$('#n'+el.id).val()+']').focus();
+}
+function doSaveSet(){
+    gatherSet();
+    if($('#save-set').val()!=='')
+        if(byId('save-set').value.indexOf('"')===-1){
+            $('#save-set-btn').hide();
+            $('#save-set-wait').show();
+            intApi('GET','object/269?JSON&F_271=UPLOAD&F_269='+encodeURIComponent($('#save-set').val()),'check-set');
+        }
+        else
+            alert(t9n('[RU]Недопустимый символ " в имени настройки![EN]Please do not use " in the settings name'));
+}
+function applySet(v){
+    chosenSet=v;
+    $('#chosenType').val(uploadSets[v].type);
+    formulas=uploadSets[chosenSet].formulas;
+    intApi('GET','object/'+uploadSets[v].type+'?JSON','type');
+}
+function addBr(v){
+    return v.replace(/(\w{2,100}) /g,'$1<br>');
+}
+function getUpType(i){
+    i=i.toString();
+    for(var j in dataItems.req_t)
+        if(dataItems.req_t[j]===i)
+            return dataItems.id[j];
+}
+function getParent(i){
+    i=i.toString();
+    for(var j in dataItems.req_t)
+        if(dataItems.req_t[j]===i)
+            return dataItems.val[j];
+    return '';
+}
+function getType(i){
+    i=i.toString();
+    for(var j in dataItems.id)
+        if(dataItems.id[j]===i)
+            return dataTypes[dataItems.t[j]];
+    return '';
+}
+var lastS,lastV,searchUrl,timerId;
+function searchDb(event){
+    var el=byId('searchParent');
+    if(event.keyCode===27)
+        return;
+    if(event.keyCode===13){
+        if($(el).next().find('.newItem').length>0)
+            $(el).next().find('.newItem').click();
+        else
+            $(el).next().find('.default-val').click();
+        return;
+    }
+    clearTimeout(timerId);
+    searchUrl='object/'+upType+'?JSON&F_'+upType+'=';
+    if(lastV===el.value&&el.value.length>0){
+        if(lastV===lastS){
+            if(($(el).next().html()||'').length>0)
+                $(el).next().show();
+        }
+        else if(el.value.substr(0,1)==='#'&&parseInt(el.value.substr(1))){
+            lastS=el.value;
+            intApi('GET',searchUrl+'@'+parseInt(el.value.substr(1)),'searchDb');
+        }
+        else if(getType(upType)==='DATE'||getType(upType)==='DATETIME')
+            intApi('GET',searchUrl+(lastS=el.value),'searchDb');
+        else
+            intApi('GET',searchUrl+'%25'+(lastS=el.value).replace(' ','%25')+'%25','searchDb');
+    }
+    else if((el.value===undefined)||(el.value.length===0))
+        intApi('GET',searchUrl,'searchDb');
+    else
+        timerId=setTimeout(searchDb,333,event);
+    lastV=el.value;
+}
+// Функция для отправки асинхронного запроса по https api с обработкой его результата
+function intApi(m,u,b,vars,index){ // Параметры: метод, адрес, действие - ветка switch, параметры, ID целевого элемента
+    vars=vars||''; // По умолчанию список параметров пуст
+    var h='',i,j,json,obj=new XMLHttpRequest(); // Объявляем переменную под JSON и API по HTTPS
+    obj.open(m,'/'+db+'/'+u,true); // Открываем асинхронное соединение заданным методом по нужному адресу
+    if(m=='POST'){ // Если это POST запрос, то передаем заданные параметры
+        if(typeof vars=='object')
+            vars.append('_xsrf',xsrf);
+        else{
+            obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+            vars='_xsrf='+xsrf+'&'+vars; // добавляем токен xsrf, необходимый для POST-запроса
+        }
+    }
+    obj.onload=function(e){ // Когда запрос вернет результат - сработает эта функция
+        try{ // в this.responseText лежит ответ от сервера
+            json=JSON.parse(this.responseText); // Пытаемся разобрать ответ как JSON
+        }
+        catch(e){ // Если произошла ошибка при разборе JSON
+            h=this.responseText;
+        }
+        obj.abort(); // Закрываем соединение
+        switch(b){ // Отрабатываем заданную команду - переходим в соответствующую ветку case
+            case 'types':
+                dataItems=json.edit_types;
+                dataTypes=json.types;
+                for(i in dataItems[0])
+                    if(dataItems.ord[i]==='1'&&dataItems.req_t[i]!==''){
+                        j=getParent(dataItems[0][i]);
+                        h+=typeOption.replace(':name:',dataItems[4][i]+(j===''?'':' ('+j+')'))
+                                    .replace(/:id:/g,dataItems[0][i]);
+                    }
+                $('#chosenType').append(h);
+                break;
+                break;
+                
+            case 'type':
+                chosenType=json.type.id;
+                chosenTypeName=json.type.val;
+                origMap[json.type.id]=0;
+                for(i in json.req_order)
+                    origMap[json.req_order[i]]=parseInt(i)+1;
+                j=0;
+                if(chosenSet===undefined){
+                    $('#save-set').val(chosenTypeName);
+                    h=addSortable(json.type.id,json.type.val,json.type.base,json.base.id);
+                    for(i in json.req_order)
+                        h+=addSortable(json.req_order[i],json.req_type[json.req_order[i]],json.req_base[json.req_order[i]],json.req_base_id[json.req_order[i]]);
+                }
+                else{
+                    $('#save-set').val(chosenSet);
+                    var m=[];
+                    for(i in uploadSets[chosenSet].importMap){
+                        if(json.req_type[i])
+                            m[uploadSets[chosenSet].importMap[i]]=addSortable(i,json.req_type[i],json.req_base[i],json.req_base_id[i]);
+                        else
+                            m[uploadSets[chosenSet].importMap[i]]=addSortable(json.type.id,json.type.val,json.type.base,json.base.id);
+                    }
+                    j=0;
+                    for(i in m){
+                        while(j<i)
+                            if(uploadSets[chosenSet].autoParent&&uploadSets[chosenSet].autoParent==j)
+                                j++;
+                            else
+                                m[j++]=addSortable('','','---','---');
+                        j++;
+                    }
+                    h=m.join('');
+                    $('#header').prop('checked',uploadSets[chosenSet].header);
+                    $('#trim').prop('checked',uploadSets[chosenSet].trim);
+                    $('#delim').val(uploadSets[chosenSet].delimiter);
+                    $('#caret').val(uploadSets[chosenSet].newline);
+                }
+                h+='<div class="pl-2 pt-1 h3" title="'+t9n('[RU]Добавить пропуск — пустое поле[EN]Add an empty field to skip this column')+'" onclick="$(addSortable(\'\',\'\',\'--\',\'--\')).insertBefore(this)"><a>+</a></div>';
+                $('#sortable').html(h);
+                j=getParent(chosenType);
+                if(j!==''){
+                    j+=' > ';
+                    upType=getUpType(chosenType);
+                    $('#do-upload').attr('disabled',true)
+                        .attr('title',t9n('[RU]Выберите родительскую запись для загрузки[EN]Select the parent record to upload its attributes'));
+                    $('#up').show();
+                }
+                $('#chosen').html(j+chosenTypeName+(chosenSet===undefined?'':' ('+chosenSet+')'));
+                $('#choice').remove();
+                $('#input-area').show();
+                gatherSet();
+                for(i in formulas){
+                    $('.ui-state-default[id="'+i+'"]').addClass('has-formula');
+                    $('#f'+i).addClass('text-success');
+                }
+                if(uploadSets[chosenSet]&&uploadSets[chosenSet].autoParent){
+                    $('.auto-parent').val(uploadSets[chosenSet].autoParent);
+                    setAutoParent(uploadSets[chosenSet].autoParent);
+                }
+                if(uploadSets[chosenSet]&&uploadSets[chosenSet].createParent)
+                    $('#createParent').prop('checked',true);
+                if(uploadSets[chosenSet]&&uploadSets[chosenSet].searchParent)
+                    selectItem(uploadSets[chosenSet].searchParent,'#'+uploadSets[chosenSet].searchParent);
+                break;
+                
+            case 'base':
+                for(i in json.types){
+                    bt[i]=json.types[i];
+                    revBt[json.types[i]]=i;
+                }
+                types=json.edit_types;
+                break;
+                
+            case 'parent':
+                newType=json.obj;
+                
+            case 'postTypes':
+                postTypes(toCreate.shift(),json);
+                putMsg('log',index,true);
+                break;
+            
+            case 'sets':
+                for(i in json.object){
+                    try{
+                        uploadSets[json.object[i].val]=JSON.parse(json.reqs[json.object[i].id][273]);
+                        h+='<option value="'+json.object[i].val+'">'+json.object[i].val+'</option>';
+                    }
+                    catch(e){
+                        h+='<option value="" class="text-danger">'+json.object[i].val+t9n('[RU] (ошибка шаблона)[EN] (template error)')+'</option>';
+                    }
+                }
+                $('#settings').html($('#settings').html()+h);
+                break;
+            
+            case 'check-set':
+                saveSet={type:chosenType,name:chosenTypeName,header:($('#header').prop('checked')?1:0),trim:($('#trim').prop('checked')?1:0)
+                        ,delimiter:$('#delim').val(),newline:$('#caret').val(),importMap:importMap,formulas:formulas};
+                if(autoParent)
+                    saveSet['autoParent']=autoParent;
+                if($('#searchParent').val().length>0)
+                    saveSet['searchParent']=$('#searchParent').attr('up-id');
+                if($('#createParent').prop('checked'))
+                    saveSet['createParent']=true;
+                if(json.object)
+                    intApi('POST','_m_set/'+json.object[0].id+'?JSON&t273='+encodeURIComponent(JSON.stringify(saveSet)),'save-set');
+                else
+                    intApi('POST','_m_new/269?JSON&up=1&t271=UPLOAD&t269='+encodeURIComponent($('#save-set').val())+'&t273='+encodeURIComponent(JSON.stringify(saveSet)),'save-set');
+                break;
+                
+            case 'upload':
+                $('#progress').html(t9n('[RU]Отправка по 1000 записей, обработано[EN]Send records in batches of 1000 lines, processed')+' '+(index-1)+' ('+Math.round(index/toImport.length*100)+'%) '+(index<toImport.length?ajax:''));
+                if(json===undefined)
+                    $('#errors').html(h).show();
+                else
+                    doImport(index);
+                break;
+                
+            case 'save-set':
+                $('#save-set-wait').hide();
+                $('#save-set-btn').show();
+                break;
+                
+            case 'searchDb':
+                var req0,req1;
+                for(i in json.req_order)
+                    if(i==0)
+                        req0=json.req_order[i];
+                    else if(i==1)
+                        req1=json.req_order[i];
+                    else
+                        break;
+                for(i in json.object)
+                    if($('#searchParent').val()===json.object[i].val)
+                        j=true;
+                    else
+                        h+='<a onclick="selectItem('+json.object[i].id+',this.innerHTML)" class="dropdown-item">#'+json.object[i].id+': '+escape(json.object[i].val)
+                                +(req0?' / '+escape((json.reqs[json.object[i].id]?json.reqs[json.object[i].id][req0]:'')||''):'')
+                                +(req1?' / '+escape((json.reqs[json.object[i].id]?json.reqs[json.object[i].id][req0]:'')||''):'')
+                            +'</a>';
+                if(h==='')
+                    if(parseInt(lastS)&&index===undefined)
+                        intApi('GET',searchUrl+'@'+parseInt(lastS),'searchDb',undefined,'by ID');
+                $('.search-results').html(h).show();
+        }
+    }
+    obj.send(vars); // отправили запрос и теперь будем ждать ответ, а пока - выходим
+}
+function selectItem(dicId,val){
+    $('#searchParent').val(val).attr('up-id',dicId).attr('up-name',val);
+    $('#do-upload').attr('disabled',false);
+    $('.search-results').hide();
+    setAutoParent();
+}
+intApi('GET','object/269?JSON&F_271=UPLOAD','sets')
+intApi('GET','edit_types?JSON','types');
+var isfloatMask = /^\d*(\.|,)\d*$/
+    ,commaFloatMask = /^(\d{0,3}(,)?)+\.\d*$/
+    ,dotFloatMask = /^(\d{0,3}(\.)?)+,\d*$/
+    ,dateMask = /^\d{0,4}(\.|\/)\d{0,4}(\.|\/)\d{0,4}$/
+	,dateTimeMask = /^\d{1,4}(\.|\/|-)\d{1,2}(\.|\/|-)\d{1,4} \d{1,2}(:|-)\d{1,2}((:|-)\d{1,2})??$/
+    ,isoDateTimeMask = /^([\+-]?\d{4,4}(?!\d{2,2}\b))((-?)((0[1-9]|1[0-2])(\3([12]\d|0[1-9]|3[01]))?|W([0-4]\d|5[0-2])(-?[1-7])?|(00[1-9]|0[1-9]\d|[12]\d{2,2}|3([0-5]\d|6[1-6])))([T\s]((([01]\d|2[0-3])((:?)[0-5]\d)?|24\:?00)([\.,]\d+(?!:))?)?(\17[0-5]\d([\.,]\d+)?)?([zZ]|([\+-])([01]\d|2[0-3]):?([0-5]\d)?)?)?)?$/
+    ,emailMask = /^[A-za-z0-9._-]*@[A-za-z0-9_-]*\.[A-Za-z0-9.]*$/;
+function guessBase(str){
+    str=str||'';
+    if(str==='')
+        return "SHORT";
+    if(typeof str !== 'string')
+        str=str.toString();
+    if(str.length>90)
+        return "CHARS";
+    var nan = isNaN(Number(str.replace(/,/,'.')));
+    if(dateMask.test(str))
+        return "DATE";
+    else if(!nan){
+        if (str.replace(',','.').indexOf('.')===-1)
+            return "NUMBER";
+        else
+            return "SIGNED";
+    }
+    else if(isfloatMask.test(str) || commaFloatMask.test(str) || dotFloatMask.test(str)) return "SIGNED";
+    else if(dateTimeMask.test(str)) return "DATETIME";
+    else if(isoDateTimeMask.test(str)) return "DATETIME";
+    else if(emailMask.test(str)) return "SHORT";
+    return "SHORT";
+}
+function gatherSet(){
+    var i=0,h='<option class="text-light" value="">-- '+t9n('[RU]выберите[EN]Choose')+' --</option>';
+    $('.ui-state-default').each(function(){
+        if(this.id==='')
+            sourceMap[i]={};
+        else{
+            h+='<option value="'+this.id+'" id="f'+this.id+'">'+$('#n'+this.id).val()+'</option>';
+            if(chosenType===undefined)
+                sourceMap[i]={id:this.id,base:$('#t'+this.id).val(),name:$('#n'+this.id).val(),skip:$('#s'+this.id).prop('checked')?0:1
+                            ,link:$('#l'+this.id).hasClass('is-link')?($('#l'+this.id).hasClass('multiselect')?2:1):0};
+            else
+                sourceMap[i]={id:this.id,base:$('#t'+this.id).val(),name:$('#n'+this.id).val(),skip:0};
+            importMap[this.id]=autoParent<=i+1?i+1:i;
+        }
+        i++;
+    });
+    $('#fields').html(h);
+    $('#set-formula').val('');
+    $('#upload').hide();
+    $('#refresh').show();
+}
+function parseType(input){
+    var base,h='';
+    if($('#sortable').html()===''||input.data[0].length!==sourceMap.length){
+        for(i in input.data[0]){
+            base=input.data[1]===undefined?'SHORT':guessBase(input.data[1][i]);
+            h+=addSortableType(i,input.data[0][i],chooseBase(i,base));
+        }
+        $('#sortable').html(h);
+    }
+    $('#tune').show();
+    $('#tune-btn').hide();
+    //$('#save-set-form').hide();
+    gatherSet();
+}
+function chooseBase(i,v){ 
+    var h='<select name="t" id="t'+i+'" onchange="$(\'#upload\').hide();$(\'#refresh\').show();" style="border:none">';
+    for(i in bt)
+        h+='<option value="'+i+'"'+(v==bt[i]?' selected':'')+'>'+bt[i].toLowerCase()+'</option>';
+    return h+'</select>';
+}
+function importParse(){
+    if($('#input').val().length>0)
+        Papa.parse($('#input').val(),{delimiter:$('#delim').val(),linebreak:$('#caret').val(),skipEmptyLines:true
+            ,LocalChunkSize:1048024
+            ,RemoteChunkSize:1048024
+            ,chunk: (results, parser) => {
+            	importDoParse(results);
+            }
+        });
+    else{
+    	var file,files = document.getElementById('selectFiles').files;
+    	if(files.length <= 0)
+    	    if($('#selectLink').val().length>0){
+    	        fetch($('#selectLink').val(),{mode:'no-cors'}).then(res=>file=new File([res.blob()],'filename'));
+    	        console.log(file);
+    	        var dt=new DataTransfer();
+                dt.items.add(file);
+                var files=dt.files;
+    	    }
+    	if(files.length <= 0)
+    		return false;
+    	var fr = new FileReader();
+    	fr.onload = function(e){
+    	    if(files[0].name.substr(-5).toLowerCase()==='.json')
+                Papa.parse(Papa.unparse(e.target.result),{skipEmptyLines:true
+                    ,LocalChunkSize:1048024
+                    ,RemoteChunkSize:1048024
+                    ,chunk: (results, parser) => {
+                    	importDoParse(results);
+                    }
+                });
+            else
+                Papa.parse(e.target.result,{delimiter:$('#delim').val(),linebreak:$('#caret').val(),skipEmptyLines:true
+                    ,LocalChunkSize:1048024
+                    ,RemoteChunkSize:1048024
+                    ,chunk: (results, parser) => {
+                    	importDoParse(results);
+                    }
+                });
+    	};
+    	fr.readAsText(files.item(0),$('#encoding').val());
+    }
+    $('#refresh').hide();
+}
+var evalErrs={},evalExpr={};
+function importDoParse(input){
+    $('#progress,#errors,#log').html('').hide();
+    var val,i,j=0,jMap,reverseMap={}
+        ,err=0,skippedInvalid=0,empties=0,sampleHeader='',sampleLine='',expr,l=0,line
+        ,stats='<h5>'+t9n('[RU]Статистика[EN]Totals')+'</h5><table class="table table-sm table-bordered mt-2"><thead><tr><td></td>';
+    if(chosenType===undefined){
+        parseType(input);
+        $('#chosen').html('');
+    }
+    for(i in input.data[0]){
+        sampleHeader+='<td style="font-size: .85em;">'+input.data[0][i].replace('<','&lt').replace('>','&gt')+'</td>';
+        if(input.data[1])
+            sampleLine+='<td style="font-size: .85em;">'+input.data[1][i]+'</td>';
+    }
+    $('#1st2').html('<tr>'+sampleHeader+'</tr><tr>'+sampleLine+'</tr>');
+    $('#sample').show();
+    toImport=[];
+    statArr={};
+    for(j in sourceMap){
+        statArr[j]={empty:0,invalid:0,min:'',max:'',avg:'',sum:0};
+        stats+='<td>'+sourceMap[j].name+'</td>';
+        if(chosenType===undefined) 
+            reverseMap[sourceMap[j].name]=sourceMap[j].id;
+        else
+            reverseMap[sourceMap[j].name]=importMap[sourceMap[j].id];
+    }
+    mainloop:for(i in input.data)
+        if(!$('#header').prop('checked')||i!=0){
+            l++;
+            if(autoParent)
+                toImport[l]=Array(input.data[i][autoParent-1]);
+            else
+                toImport[l]=[];
+            for(j in sourceMap)
+                if(sourceMap[j].skip===0){
+                    if(chosenType===undefined){
+                        val=input.data[i][sourceMap[j].id];
+                        jMap=j;
+                    }
+                    else{
+                        val=input.data[i][importMap[sourceMap[j].id]];
+                        jMap=origMap[sourceMap[j].id];
+                        if(autoParent)
+                            jMap=parseInt(jMap)+1;
+                    }
+                    if($('#trim').prop('checked'))
+                        if(val!==' ')
+                            val=(val||'').trim();
+                    if(j==='0'&&val===''){
+                        skippedInvalid++;
+                        l--;
+                        toImport.pop();
+                        continue mainloop;
+                    }
+                    if(formulas[sourceMap[j].id]){
+                        expr=formulas[sourceMap[j].id].replace(/\[(.+?)\]/mug,function($1,$2){
+                                if(reverseMap[$2]!==undefined)
+                                    return input.data[i][reverseMap[$2]];
+                                return '['+$2+']';
+                            });
+                        try{
+                            toImport[l][jMap]=eval(expr);
+                            evalExpr[l+'-'+jMap]=expr;
+                            procStats(j,toImport[l][jMap].toString(),sourceMap[j].base);
+                        }
+                        catch(e){
+                            evalErrs[l+'-'+jMap]={title:expr,err:e};
+                            err++;
+                            statArr[j].invalid++;
+                        }
+                    }
+                    else if(val!==undefined)
+                        procStats(j,toImport[l][jMap]=val,sourceMap[j].base);
+                    else{
+                        empties++;
+                        statArr[j].empty++;
+                    }
+                    if(val==='')
+                        statArr[j].empty++;
+                }
+        }
+    for(j in sourceMap){
+        statArr[j].avg=parseFloat(Math.round((statArr[j].sum/l + Number.EPSILON) * 100) / 100);
+        statArr[j].sum=parseFloat(Math.round((statArr[j].sum + Number.EPSILON) * 100) / 100);
+    }
+    for(i in statArr[j]){
+        stats+='<tr><td>'+i+'</td>';
+        for(j in sourceMap){
+            stats+='<td'+(i==='invalid'&&statArr[j][i]>0?' style="background-color:orange;"':'')
+                        +(sourceMap[j].base==='14'/*SIGNED*/||sourceMap[j].base==='13'/*NUMBER*/||i==='empty'||i==='invalid'?' align="right"':'')+'>';
+            if((i!=='avg'&&i!=='sum')||(sourceMap[j].base==='14'/*SIGNED*/||sourceMap[j].base==='13'/*NUMBER*/))
+                stats+=((i==='empty'||i==='invalid')&&statArr[j][i]===0)?'':statArr[j][i];
+            stats+='</td>';
+        }
+        stats+='</tr>';
+    }
+    if(l>chunkSize){
+        line=', '+t9n('[RU]страница[EN]page')+' <select onchange="drawPage(this.value)">';
+        for(i=1;i<=Math.ceil(l/chunkSize);i++)
+            line+='<option value="'+i+'">'+i+'</option>'
+        line+='</select>';
+    }
+    else
+        line='';
+    $('#stats').html(stats);
+    $('#resume').html('<h5>'+t9n('[RU]Предварительный просмотр результатов импорта (всего строк[EN]Import preview (total lines')+': <b>'+l+'</b>'+(err>0?'<font color="orange">, '+t9n('[RU]ошибок[EN]errors')+': '+err+'</font>':'')
+                        +(empties>0?'<font color="gray">, '+t9n('[RU]пустых ячеек[EN]empty cells')+': '+empties+'</font>':'')
+                        +(skippedInvalid>0?'<font color="orange">, '+t9n('[RU]пропущено пустых[EN]empty skipped')+': '+skippedInvalid+'</font>':'')+')'+line+'</h5>');
+    drawPage(1);
+    if((l==0&&chosenType!==undefined)||sourceMap.length==0){
+        $('#upload').hide();
+    }
+    else{
+        $('#upload').show();
+    }
+    $('#formula-cap').show();
+    $('#formula').hide();
+}
+function drawPage(n){
+    var i,j=0,line,link,h='<table class="table table-sm table-bordered mt-1"><thead><tr>';
+    if(autoParent)
+        h+='<td>'+getParent(chosenType)+'</td>';
+    for(i in sourceMap)
+        if(sourceMap[i].skip===0){
+            link='';
+            if(chosenType===undefined&&j>0)
+                if(sourceMap[i].link===1)
+                    link='<img src="https://img.icons8.com/ios/16/111111/link.png" title="'+t9n('[RU]Справочное значение[EN]Select from dictionary')+'">&nbsp;';
+                else if(sourceMap[i].link===2)
+                    link='<img src="https://img.icons8.com/ios/16/111111/multiple-choice.png" title="'+t9n('[RU]Выбор нескольких из справочника[EN]Multiple choice from dictionary')+'">&nbsp;';
+            h+='<td id="'+sourceMap[i].id+'">'+link+sourceMap[i].name
+                +(chosenType===undefined?'<br /><span style="font-size: 75%; color: gray">'+bt[sourceMap[i].base]+'</span>':'')
+                +'</td>';
+            if($('#chosen').html()==='')
+                $('#chosen').html(sourceMap[i].name);
+            j++;
+        }
+    h+='</tr></thead><tbody id="page">';
+    for(i=1+n*chunkSize-chunkSize;i<=n*chunkSize;i++){
+        if(!toImport[i])
+            break;
+        line='';
+        if(autoParent)
+            line+='<td>'+toImport[i][0]+'</td>';
+        for(j in sourceMap)
+            if(sourceMap[j].skip===0){
+                if(chosenType===undefined)
+                    jMap=j;
+                else{
+                    jMap=origMap[sourceMap[j].id];
+                    if(autoParent)
+                        jMap=parseInt(jMap)+1;
+                }
+                if(evalErrs[i+'-'+jMap])
+                    line+='<td style="background-color:orange;" title="'+evalErrs[i+'-'+jMap].title+'">'+evalErrs[i+'-'+jMap].err+'</td>';
+                else if(toImport[i][jMap])
+                    line+='<td'+(evalExpr[i+'-'+jMap]?' title="'+evalExpr[i+'-'+jMap]+'"  style="background-color:palegreen;"':'')+'>'
+                            +toImport[i][jMap].toString().replace('<','&lt').replace('>','&gt')+'</td>';
+                else
+                    line+='<td style="background-color:#eeeeee;"></td>';
+            }
+        h+='<tr>'+line+'</tr>';
+    }
+    h+='</tbody></table>';
+    $('#preview').html(h);
+}
+function procStats(j,val,type){
+    if((type==='4'/*DATETIME*/&&!dateTimeMask.test(val)&&isNaN(Number(val)))
+            ||(type==='9'/*DATE*/&&!dateMask.test(val)))
+        statArr[j].invalid++;
+    else if(type==='14'/*SIGNED*/||type==='13'/*NUMBER*/){
+        if(isNaN(Number(val.replace(',','.').replace(/\D/g,''))))
+            statArr[j].invalid++;
+        else{
+            val=parseFloat(val.replace(',','.').replace(/ /g,''))||0;
+            statArr[j].sum+=val;
+            if(statArr[j].min>val||statArr[j].min==='')
+                statArr[j].min=val;
+            else if(statArr[j].max<val||statArr[j].max==='')
+                statArr[j].max=val;
+        }
+    }
+    else if(statArr[j].min>val||statArr[j].min==='')
+        statArr[j].min=val;
+    else if(statArr[j].max<val||statArr[j].max==='')
+        statArr[j].max=val;
+}
+function getPage(n){
+    var h='',i=0;
+    for(i=1+n*chunkSize-chunkSize;i<=n*chunkSize;i++){
+        if(toImport[i]===undefined)
+            break;
+        h+='<tr>';
+        for(j in sourceMap)
+            h+='<td>'+(toImport[i][j]||'')+'</td>';
+        h+='</tr>';
+    }
+    $('#page').html(h);
+}
+function escape(htmlStr){
+   return htmlStr.toString().replace(/&/g,"&amp;")
+         .replace(/</g,"&lt;")
+         .replace(/>/g,"&gt;")
+         .replace(/"/g,"&quot;")
+         .replace(/'/g,"&#39;");
+}
+$(function(){
+    $("#sortable").sortable({update:function(){gatherSet();importParse();}});
+    $("#sortable").disableSelection();
+});
+$(document).ready(function(){
+    $('html').click(function(event){
+        if($(event.target).attr('id')!=='searchParent')
+            $('.search-results').hide();
+    });
+});
+localize();
+</script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js" integrity="sha384-B4gt1jrGC7Jh4AgTPSdUtOBvfO8shuf57BaghqFfPlYxofvL8/KUEfYiJOMMV+rV" crossorigin="anonymous"></script>
+<script src="/js/main.js"></script>
