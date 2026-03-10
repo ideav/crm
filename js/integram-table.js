@@ -65,6 +65,7 @@ class IntegramTable {
             this.checkboxMode = false;  // Whether checkbox selection column is visible
             this.selectedRows = new Set();  // Set of selected row indices
             this.globalMetadata = null;  // Global metadata for determining parent relationships
+            this.globalMetadataPromise = null;  // Promise for in-progress globalMetadata fetch (issue #789)
             this.currentEditingCell = null;  // Track currently editing cell
             this.pendingCellClick = null;  // Track pending cell click for focus preservation (issue #518)
             this.sortColumn = null;  // Column ID being sorted (null = no sort)
@@ -194,7 +195,7 @@ class IntegramTable {
             this.loadColumnState();
             this.loadSettings();
             this.loadConfigFromUrl();  // Load filters, groups, sorting from URL (issue #510)
-            this.loadGlobalMetadata();  // Load metadata once at initialization
+            this.globalMetadataPromise = this.loadGlobalMetadata();  // Store promise so fetchMetadata() can await it (issue #789)
             this.loadParentInfo();  // Load parent info for breadcrumb title (issue #571)
             this.loadData();
         }
@@ -6126,6 +6127,17 @@ class IntegramTable {
                 const cachedItem = this.globalMetadata.find(item => item.id === typeId || item.id === Number(typeId));
                 if (cachedItem) {
                     return cachedItem;
+                }
+            }
+
+            // If globalMetadata is still loading, wait for it to avoid a redundant /metadata/{id} fetch (issue #789)
+            if (this.globalMetadataPromise) {
+                await this.globalMetadataPromise;
+                if (this.globalMetadata) {
+                    const cachedItem = this.globalMetadata.find(item => item.id === typeId || item.id === Number(typeId));
+                    if (cachedItem) {
+                        return cachedItem;
+                    }
                 }
             }
 
