@@ -1,0 +1,748 @@
+<style>
+.topm-20 { padding-top: 20px; }
+.table td {
+    border-top: none;
+    vertical-align: middle;
+    padding: 0;
+    border-bottom: 1px solid #dee2e6;
+}
+.panel { font-size: 14px; }
+.space {
+    display: inline-block;
+    width: 7px;
+    height: 8px;
+}
+.dubspace {
+    display: inline-block;
+    width: 14px;
+}
+.hi8 { height: 8px; }
+#table137 { display:none; }
+.msgs {
+    position: fixed;
+    width: 100%;
+    z-index: 100;
+}
+.controls-left a:hover {
+    background-color:#f7f7f7;
+    border-radius:5px;
+    text-decoration: none;
+}
+.close-btn{
+    position: absolute;
+    right: 0;
+    display: none;
+}
+</style>
+<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z" crossorigin="anonymous">
+<link rel="stylesheet" href="https://unpkg.com/primeicons/primeicons.css">
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
+<script src="/js/js.js"></script>
+<script type="text/javascript">
+document.title=t9n('[RU]Редактор структуры таблиц[EN]Table structure editor');
+var editable=ext=false,curid=0,isRef=false,prefix=0
+    ,ajax='<img style="margin:1px" width="25px" src="/i/ajax.gif">'
+	,nullmask=/:!NULL:/i
+	,multimask=/:MULTI:/i
+	,aliasmask=/:ALIAS=(.+):/i;
+var HTML='',o=[],s=[],a=[],v=[];
+<!-- Begin:_ID -->
+curid='{_global_.id}';
+<!-- End:_ID -->
+<!-- Begin:_Ext -->{_request_.ext}
+ext=true;
+<!-- End:_Ext -->
+var bt=new Array();
+var str='';
+<!-- Begin:&Types -->str+='<option value="{TYP}">{VAL}</option>';bt[{TYP}]='{VAL}';
+<!-- End:&Types -->
+</script>
+<div id="messages" class="msgs" onclick="this.innerHTML=''"></div>
+<!-- Begin:&Editables -->{OK}
+<FORM id="addForm" style="position:fixed; background-color: white; z-index: 1; margin:5px; width:100%; max-width: 1050px;" method="post" action="/{_global_.Z}/_d_new/" onsubmit="if(byId('val').value==''){alert(t9n('[RU]Введите название таблицы[EN]Input the term name!'));event.returnValue=false;event.preventDefault();}else addbtn.disabled=true;">
+    <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
+    <div class="row t9n p-0 m-0">
+        <div class="col-6 col-sm-4 col-md-3 pl-0 pr-1">
+            <input type="text" id="val" name="val" placeholder="<t9n>[RU]Поиск / Новая таблица[EN]Search / New table</t9n>" MAXLENGTH="127" onkeyup="filterTypes()" class="form-control">
+        </div>
+        <div class="col-6 col-sm-4 col-md-3 p-0">
+            <div class="input-group mb-2">
+                <SELECT name="t" id="baseTypes" onchange="filterTypes()" class="form-control"><option value="0">SHORT</option></SELECT>
+                <div class="input-group-append">
+                    <a href="#basehelp" onclick="hideUnHide('basehelp')" title="<t9n>[RU]Описание базовых типов[EN]Description of base types</t9n>"><img class="icon8 p-2" src="/i/help.png"/></a>
+                </div>
+            </div>
+            
+        </div>
+        <div class="col-6 col-sm-4 col-md-2 pt-2">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="unique" value="1" id="flexCheckDefault" title="<t9n>[RU]Невозможно добавить одинаковые независимые записи (на колонки ограничение не распространяется)[EN]It is impossible to add identical independent objects (the restriction does not apply to attributes)</t9n>">
+                <label class="form-check-label" for="flexCheckDefault"><t9n>[RU]Уникальный[EN]Unique</t9n></label>
+            </div>
+        </div>
+        <div class="col-6 col-sm-4 col-md-2 p-0">
+            <button type="submit" class="btn btn-primary mb-2 pl-5 pr-5" name="addbtn" id="addbtn"><t9n>[RU]Создать[EN]Create</t9n></button>
+        </div>
+    </div>
+</FORM>
+<script type="text/javascript">
+function filterTypes(){
+    if($('#val').val()==='')
+        $('table[id^=table]').each(function(){
+            if(!simpleHidden||!$(this).hasClass('simple-term'))
+                $(this).show();
+            else
+                $(this).hide();
+        });
+    else
+        $('table[id^=table]').each(function(){
+            if((new RegExp('>[^<]*'+$('#val').val()+'[^>]*<','gmui')).test(this.innerHTML))
+                $(this).show();
+            else
+                $(this).hide();
+        });
+    $('#addbtn').prop('disabled',false);
+    $('.card-header').css('background-color','');
+    for(var i in t)
+        if(t[i].v.toLowerCase()===$('#val').val().toLowerCase().trim()&&t[i].t==$('#baseTypes').val()){
+            $('#addbtn').prop('disabled',true);
+            $('#id'+i).closest('.card-header').css('background-color','lightblue')
+            break;
+        }
+}
+function hideUnHide(i){
+    if(byId(i).classList.contains('hidden'))
+        byId(i).classList.remove('hidden');
+    else
+        byId(i).className+=' hidden';
+}
+function hide(i){
+    if(byId(i).classList.contains('hidden'))
+        return;
+    byId(i).classList.add('hidden');
+}
+function unHide(i){
+    if(byId(i).classList.contains('hidden'))
+        byId(i).classList.remove('hidden');
+}
+editable=true;
+addEventListener("keyup", function(event) {
+	if (event.keyCode == 36){
+		var daE = document.activeElement;
+		if (daE.type)
+			if((daE.type.toLowerCase()=="textarea") || (daE.type.toLowerCase()=="text"))
+				return;
+		byId('val').select();
+	}
+});
+str+='<option value="0">------------</option></select>';bt[0]='Tab delimiter';
+byId('baseTypes').innerHTML=str;
+</script>
+<!-- End:&Editables -->
+<div class="col-12" style="padding-left:33px;">
+<table id="basehelp" class="table table-striped hidden t9n">
+<tr><th><t9n>[RU]Базовый тип[EN]Basic type</t9n></th><th><t9n>[RU]Описание[EN]Description</t9n></th><th><t9n>[RU]Пример[EN]Example</t9n></th></tr>
+<tr><td>SHORT</td><td><t9n>[RU]Короткая строка (до 127 символов)[EN]Short string (up to 127 characters)</t9n></td><td><t9n>[RU]Интеграл[EN]Integral</t9n></td></tr>
+<tr><td>CHARS</td><td><t9n>[RU]Строка без ограничения длины[EN]String without length restriction</t9n></td><td></td></tr>
+<tr><td>DATE</td><td><t9n>[RU]Дата[EN]Date</t9n></td><td>30.10.2019</td></tr>
+<tr><td>NUMBER</td><td><t9n>[RU]Целое число (числа выравниваются по правому краю)[EN]Integer (numbers are aligned to the right)</t9n></td><td align="right">100500</td></tr>
+<tr><td>SIGNED</td><td><t9n>[RU]Число с десятичной частью[EN]A number with a decimal part</t9n></td><td align="right">12.50</td></tr>
+<tr><td>BOOLEAN</td><td><t9n>[RU]Логическое значение (Да / Нет)[EN]Boolean value (Yes / No)</t9n></td><td align="center"><img width="24" height="24" alt="" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAIMSURBVDhPrZS7rkFBFIZtwnENcWnEpSDRipJC4yHUSrwESr0oRO0hNCIRFYWKxCWhcIvGJRIO5481Mht7dnHO+Yox/7LXb83a1kj3+13zH2jZ5595qeh0Og2Hw9VqdblcWEiAVqt1uVyhUMjj8VCEG8Gl2+0ej8evBxQUcb1e8bwkSbFYzOv1IsKN+v3+YrHw+XzBYJAi6mw2m9FoZLVak8kkCuQ9wolQiLoLqqhWq1ixx6HA4XDY7/eQ3Oh8Puv1+m9VCoVCq9UqFouTyQTSYDBgRSLSuRFCODnaLKJSqcxms9vtNp1OS6XSYDBAEFmIIP3FiLwUQSHtdhsNJdDKcDhMKZBIfzdSBIXUajWyAE6nM5vNsu8+jd5oNBrz+RwbtLZcLlMQmEymfD5vNpuZfqJsVK/Xm80m8uGFlV4TkU6n/X4/EzIUjODS6XSwQT5eE9VFpFKpRCLBxCvCo30SiURQDhMfKBhlMpl4PM7EE0xWLpdjQgnlit68RA2WIzya3EvUYDncSKfT4Y/HxAPyUmkwPU8Dy40cDgde03a7ZfoBvEQNxsPr9RrjZrfbIfk1gjuh1+tBut1uo9FIQRGoBS6YMgxKNBrFtHOj3W63XC7H4zFuBoqog1oCgQCuHfwwTseNcBvgZoGE0VuzPkGmzWbDitqxQYQbAXjh5JhDplUhF4vFQvLF6PdoND8daqPs9t5UTwAAAABJRU5ErkJggg=="></td></tr>
+<tr><td>MEMO</td><td><t9n>[RU]Текст – как CHARS, но многострочное[EN]Text like CHARS, but multi-line</t9n></td><td></td></tr>
+<tr><td>DATETIME</td><td><t9n>[RU]Дата и время[EN]Date and time</t9n></td><td>05.11.2019 13:35:40</td></tr>
+<tr><td>FILE</td><td><t9n>[RU]Файл – можно загрузить файл как значение колонки[EN]File – you can upload a file as value</t9n></td><td>pult.html</td></tr>
+<tr><td>HTML</td><td><t9n>[RU]HTML-текст – теги HTML не экранируются при выводе[EN]HTML-text – HTML tags are not escaped when output</t9n></td><td>&lt;span&gt;777&lt;/span&gt;</td></tr>
+<tr><td>BUTTON</td><td><t9n>[RU]Действие (кнопка) над записью[EN]Action (button) on an instance of the type</t9n></td><td align="center"><img width="133" height="32" alt="" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIUAAAAgCAIAAACzaSw2AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAASeSURBVGhD7ZpPayJJFMAryx6FJAhBJjCZhjnLEvtkhz1IQMhBr3Po8WC8pvUDjB5076OenT4kfoCYQyAQchjSsgeTMZ4DHRdmyEgkBnJ3X/2xu7qjrc4atw/1u1ivqrr61Xv1Xj3RleFwiAS+4Tf2KfAHwh/+ws5XT09P9/f3z8/PVBQsgUAgEAqFVldXmWz5A5xhmubW1tba2trKygodE7wqYPnBYNDtdiVJslzC8hVEBjhjfX1dOGNpgKnB4GB2MD7rsvwBaQoig7YFywTMzt8R9n0uIuN/wWV2UV/5C+EPfyH84S8W6I9+Q5OzJ30mCX6J2fzRLss81Q7rFyya6f7oVGU5Y+ZPWyN09TAtaw0RCK/BFH/0T7LpQyV/WklusB6EwjnwyS4TBIvF2x/9y3MDpfY5ZzDCiWSQNUkAAdqRCcLdUZZIrosE/Eq6MY4hnAmzjXbDGrZHe6STC0S6iDUBv5cPU5JUy23SJs+W2x07zzpz7CR92F5sso0eG+IfwbAF8a35Erwm04HMmp0hAdIQbTi5+RyJaI0HJo3h4fggEjk4xjN+HmsRZ7tyQ+YMHxogacc/qYTXtIaG37DEngLIg5+/WW1NO7AUgAd5cXhTcT8IcM9iafQax0Y89HGsSXfH7cI2BVnfaZkXtuL34glvfM/46Jlw5KW3ViS46Z8US01Vr5JY2diJRZGyu0PayUpNRYdfyOHqHBUNpVAYBVk4Zw9RlPynUbRtJPdTqP7VPsuxT7pULMLkTjVtFvZjrNtFv/FXCaVUhYkMtZYLs2b4Y0Exzi9JIEzVx4HybpM2golKJTEyBdHTuPvOxMXh6Y8NSULI/McOZxff7wwUlZi+Lt5ICjLMH+Ocag2NY/Odgm5N7pVgSlTak9O3+UJi/KvwsUD5wgdQdiLBtxJqmth+U/VpluIs68TxspYPnCkrfcg6valn2HxgltzlfX9sStFXOQVzEUwU8lEuhlz0GsUimjj6C0TzZ6SOBPT34JsyiVZ8T8SLks5GWnqKTJ6GWmPzWzW1nrFvo0l4+yO4s6uMjeXOCb5I8Vmmh+4lP0wDqbE/xgUZHlKkN0xyQiqI95LTuMFklS/weC6KeyWpNmnUpvO1zkJ5Hn3Cf6ow14Tt9y4vmnwCnB/PrGDh7Q96No3SHu9YXLSkz3ErmNhXUT1NixyiMQsmKC0ydaXwkWhPcje5AwidcqY+tmYDyIWk5D/MvOumYaT0HHjdm3YZ0ouapjE0hz7Ei7EdGHJ5kSw4F/2/LyafQpvf2edE4Gy2klBK7skl1oNQSm9p1GTwXeRM0uJxGIyqahSh2y+ybMAAxKllJrgJz1A2PlpBKZy1uKSMEPjbWtz1XWcqqs40GQPk7jprzqMPvj+svap6i3kxd5rP7sXlIulO6XqqniZNbzgdZtsaLbMgv9HGfwBXh84ScAZwvWuVnotj5lrTD/DGn5KvBEtG+MNfsP+XXF1dbW9vi59slw/Y//r6OhKJUJHFRyAQGAwGtC1YJmB2MD4TLH+EQqFut/v4+EjDRbAEwNRgcDA7GJ91WfkKEP9PXD4T/58o8AmivvITCP0L8SPVJ0ao0YcAAAAASUVORK5CYII="></td></tr>
+<tr><td>PWD</td><td><t9n>[RU]Пароль, маскируется на экране набором «******»[EN]The password is masked on the screen by stars «******»</t9n></td><td></td></tr>
+<tr><td>GRANT</td><td><t9n>[RU]Объект системы – выбор из таблиц системы[EN]The object of the system – one of the registered types</t9n></td><td></td></tr>
+<tr><td>CALCULATABLE</td><td><t9n>[RU]Вычисляемое поле, временно не поддерживается[EN]A calculatable field, temporarily is not supported</t9n></td><td></td></tr>
+<tr><td>REPORT_COLUMN&nbsp;</td><td><t9n>[RU]Колонка запроса – выбор из таблиц[EN]Query field – one of the registered types</t9n></td><td></td></tr>
+<tr><td>PATH</td><td><t9n>[RU]Путь к файлу в системе[EN]Path to the file in the system</t9n></td><td></td></tr>
+<tr><td>------------</td><td><t9n>[RU]Разделитель закладок для формы редактирования[EN]A tab delimiter to group attributes on the edit form</t9n></td><td></td></tr>
+</table>
+
+    <div style="padding: 10px 0 0 0" class="controls-left">
+        <a onclick="document.location.reload()" title="Обновить страницу и свернуть все объекты"><svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M25 5.99763V11.9976M25 11.9976H19M25 11.9976L20.36 7.63763C19.2853 6.56235 17.9556 5.77684 16.4952 5.35441C15.0348 4.93198 13.4911 4.88639 12.0083 5.22189C10.5255 5.5574 9.1518 6.26307 8.01547 7.27305C6.87913 8.28304 6.01717 9.56442 5.51 10.9976M3 21.9976V15.9976M3 15.9976H9M3 15.9976L7.64 20.3576C8.71475 21.4329 10.0444 22.2184 11.5048 22.6409C12.9652 23.0633 14.5089 23.1089 15.9917 22.7734C17.4745 22.4379 18.8482 21.7322 19.9845 20.7222C21.1209 19.7122 21.9828 18.4308 22.49 16.9976" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"></path>
+        </svg> Обновить</a>
+        &nbsp; &nbsp;<a title="Показать/скрыть служебные объекты" onclick="$('#table137,.show-service').toggle(showHideDelay)"><svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" class="show-service" style="display:none">
+        <path d="M3 14C3 14 7 6 14 6C21 6 25 14 25 14C25 14 21 22 14 22C7 22 3 14 3 14Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"></path>
+        <path d="M14 17C15.6569 17 17 15.6569 17 14C17 12.3431 15.6569 11 14 11C12.3431 11 11 12.3431 11 14C11 15.6569 12.3431 17 14 17Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"></path>
+        </svg><svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" class="show-service">
+        <path d="M16.12 16.12C15.8454 16.4147 15.5141 16.6512 15.1462 16.8151C14.7782 16.9791 14.3809 17.0673 13.9781 17.0744C13.5753 17.0815 13.1752 17.0074 12.8016 16.8565C12.4281 16.7056 12.0887 16.481 11.8038 16.1962C11.519 15.9113 11.2944 15.5719 11.1435 15.1984C10.9926 14.8248 10.9185 14.4247 10.9256 14.0219C10.9327 13.6191 11.0209 13.2218 11.1849 12.8538C11.3488 12.4859 11.5853 12.1546 11.88 11.88M3 3L25 25M19.94 19.94C18.2306 21.243 16.1491 21.9649 14 22C7 22 3 14 3 14C4.24389 11.6819 5.96914 9.65661 8.06 8.06L19.94 19.94ZM11.9 6.24C12.5883 6.07888 13.2931 5.99834 14 6C21 6 25 14 25 14C24.393 15.1356 23.6691 16.2047 22.84 17.19L11.9 6.24Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg> Служебные</a>
+        &nbsp; &nbsp;<a title="Показать/скрыть простые термины" onclick="showHideSimple()"><svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" class="show-simple" style="display:none">
+        <path d="M3 14C3 14 7 6 14 6C21 6 25 14 25 14C25 14 21 22 14 22C7 22 3 14 3 14Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"></path>
+        <path d="M14 17C15.6569 17 17 15.6569 17 14C17 12.3431 15.6569 11 14 11C12.3431 11 11 12.3431 11 14C11 15.6569 12.3431 17 14 17Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"></path>
+        </svg><svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" class="show-simple">
+        <path d="M16.12 16.12C15.8454 16.4147 15.5141 16.6512 15.1462 16.8151C14.7782 16.9791 14.3809 17.0673 13.9781 17.0744C13.5753 17.0815 13.1752 17.0074 12.8016 16.8565C12.4281 16.7056 12.0887 16.481 11.8038 16.1962C11.519 15.9113 11.2944 15.5719 11.1435 15.1984C10.9926 14.8248 10.9185 14.4247 10.9256 14.0219C10.9327 13.6191 11.0209 13.2218 11.1849 12.8538C11.3488 12.4859 11.5853 12.1546 11.88 11.88M3 3L25 25M19.94 19.94C18.2306 21.243 16.1491 21.9649 14 22C7 22 3 14 3 14C4.24389 11.6819 5.96914 9.65661 8.06 8.06L19.94 19.94ZM11.9 6.24C12.5883 6.07888 13.2931 5.99834 14 6C21 6 25 14 25 14C24.393 15.1356 23.6691 16.2047 22.84 17.19L11.9 6.24Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg> Простые</a>
+    </div>
+</div>
+
+<div id="obj" style="overflow: auto"></div>
+<script type="text/javascript">
+var simpleHidden=true,serviceHidden=true,showHideDelay=200;
+function showHideSimple(){
+    if(simpleHidden)
+        $('.simple-term').show(showHideDelay);
+    else
+        $('.simple-term').hide(showHideDelay);
+    simpleHidden=!simpleHidden;
+    $('.show-simple').toggle(showHideDelay);
+}
+var t={},r={};
+<!-- Begin:&Edit_Typs -->if(t[{ID}]===undefined) t[{ID}]={t:{T},r:"{REF_VAL}",u:{UNIQ},v:"{VAL}"};
+if(0{ORD}){if(r[{ID}]===undefined) r[{ID}]={};r[{ID}]["{ORD}"]={ i:"{REQ_ID}",t:"{REQ_T}",a:"{ATTRS}",r:"{REFT}"};}
+<!-- End:&Edit_Typs -->
+//console.log(t);
+//console.log(r);
+function hideMenu(i){
+    if(i)
+        $('#'+i).find('.close-btn').hide();
+	drawReqs(i,false,true);
+	if(r[i]==undefined)
+		$('#req'+i).hide();
+	$('#m'+i).html('').hide();
+	$('#id'+i).show();
+}
+function toggleMenu(i){
+	var menu=diclink=createlink="",hasRefs=false;
+	$('.et-line').remove();
+	if(curid!==i||$('#m'+i).is(':hidden')){
+	    hideMenu(curid);
+	    curid=i;
+        $('#'+i).find('.close-btn').show();
+		if(t[i].r!="")
+			diclink='<div class="space"></div><a href="#'+t[i].r+'" title="'+t9n('[RU]Перейти к исходной таблице[EN]Go to the type definition')+'"><img class="icon8" src="/i/accuracy.png"/></a>&nbsp;';
+		else
+		for(var j in t) // Check if there's a ref to this type
+			if(t[j].r==i){
+				diclink='<div class="space"></div><a href="#'+j+'" title="'+t9n('[RU]Ссылка на справочник[EN]Link to the reference list')+'"><img class="icon8" src="/i/accuracy.png"/></a>&nbsp;'
+				        +'<div class="space"></div><a href="/{_global_.Z}/object/'+i+'" target="'+i+'" title="'+t9n('[RU]Войти в справочник[EN]Enter the directory')+'"><img class="icon8" src="/i/dictionary.png"/></a>&nbsp;';
+			    hasRefs=true;
+				break;
+			}
+		if(editable){
+			if(t[i].r!="")
+				menu+='<a onclick="toggleMenu('+i+');" title="'+t9n('[RU]Кликните еще раз, чтобы свернуть[EN]Click again to collapse')+'">'+t[t[i].t].v +'</a><br/>';
+			else if(t[i].t==0){
+				menu+='<FORM method="post" action="/{_global_.z}/_d_save/'+i+'/"><input type="hidden" name="_xsrf" value="{_global_.xsrf}">'
+					+'<p><input type="text" name="val" value="'+t[i].v+'" MAXLENGTH="127" class="form-control sm"></p>'
+					+'<input type="submit" name="savebtn" class="btn btn-primary btn-sm" value="'+t9n('[RU]Сохранить[EN]Save')+'" />&nbsp;&nbsp;&nbsp;<A class="btn btn-outline-secondary btn-sm" onclick="toggleMenu('+i+');">'+t9n('[RU]Отменить[EN]Cancel')+'</a></FORM>';
+			}
+			else{
+				menu+='<FORM method="post" action="/{_global_.z}/_d_save/'+i+'/"><input type="hidden" name="_xsrf" value="{_global_.xsrf}">';
+				menu+='<input type="text" name="val" value="'+t[i].v+'" MAXLENGTH="127" class="form-control sm">';
+				menu+='<select name="t" class="form-control">';
+				for(var k in bt)
+					if(k!=0)
+						menu+='<option value="'+k+'" id="'+i+'_'+k+'">'+bt[k]+'</option>';
+				menu+='</select>';
+				menu+='<table width="100%" style="margin-top: 8px;"><tr><td><div class="dubspace"></div><label title="'+t9n('[RU]Невозможно добавить одинаковые независимые объекты[EN]You cannot add identical independent objects')+'"><input type="checkbox" name="unique" value="1" '+(t[i].u ? "CHECKED":"")+' /><div class="space"></div>'+t9n('[RU]Уникальный[EN]Unique')+'</div></label></td>';
+				menu+='<td align="right"><input type="submit" name="savebtn" class="btn btn-primary btn-sm" value="'+t9n('[RU]Сохранить[EN]Save')+'" />&nbsp;&nbsp;&nbsp;<A class="btn btn-outline-secondary btn-sm" onclick="toggleMenu('+i+');">'+t9n('[RU]Отменить[EN]Cancel')+'</a></td></tr></table></FORM>';
+				if(diclink=="")
+    				diclink+='<a onclick="post(\'_d_ref/'+i+'\')" title="'+t9n('[RU]Создать ссылку на эту таблицу (использовать её как справочник)[EN]Create a link to this type (use it as a reference)')
+    				        +'"><img class="icon8" src="/i/add-link.png"/><div class="space"></div>'+t9n('[RU]Создать ссылку[EN]Create link')+'</a><br />';
+			}
+			menu+='<div class="hi8"></div><table width="100%" style="margin-top: 8px;"><tr><td align="left">'+diclink+'</td>';
+			if(!hasRefs){
+			    outer:
+        		for(var j in r) // Check if it's a someone's req
+            		for(var k in r[j])
+            			if(hasRefs=(r[j][k].t==i))
+            				break outer;
+			}
+			if(!hasRefs){
+			    if(r[i]===undefined)
+        			menu+='<td align="right"><a onclick="myApi(\'POST\',\'_d_del/'+i+'?JSON\',\'del\');setAjax(this)">';
+        		else
+        			menu+='<td align="right"><a onclick="post(\'_d_del/'+i+'\')">';
+        		menu+='<img class="icon8" src="/i/delete.png"/><div class="space"></div>'+t9n('[RU]Удалить таблицу[EN]Delete the type')+'</a></td>';
+			}
+			menu+='</tr></table>'
+		}
+		else{
+			menu+=diclink+t[i].v+'<br /><div style="padding:6px;"><input type="checkbox" title="'+t9n('[RU]Невозможно добавить одинаковые независимые записи[EN]You cannot add identical independent objects')+'" DISABLED '+t[i].u+' />'+t9n('[RU]Уникальный[EN]Unique')+'</div>';
+			menu+='<div width="100%" align="right"><A onclick="toggleMenu('+i+');">'+t9n('[RU]Скрыть[EN]Hide')+'</a></div>';
+		}
+		byId('m'+i).innerHTML=menu;
+		if(byId(i+'_'+t[i].t)){
+			byId(i+'_'+t[i].t).setAttribute("SELECTED", "SELECTED");
+			byId(i+'_'+t[i].t).selected=true;
+		}
+		if(t[i].t!=0)
+			drawReqs(i,true,true);
+		if(byId('req'+i))
+    		byId('req'+i).style.display='block';
+		byId('m'+i).style.display='inline';
+		byId('id'+i).style.display='none';
+	}
+	else
+    	hideMenu(i);
+}
+function drawObj(i,p,virt){
+    var h;
+	if((i==p)||(o[i]!==undefined))
+		return;
+	if(virt){
+		return '<table id="table'+i+'" class="simple-term" style="display:none"><tr><td width="33px">&nbsp;</td><td valign="top">'+wrapObj(i)+'</td></tr></table>';
+	}
+	o[i]="";
+	if(r[i]===undefined)
+		h='<table id="table'+i+'"><tr><td width="33px">&nbsp;</td><td valign="top">'+wrapObj(i)+'</td></tr></table>';
+	else
+		h='<table id="table'+i+'"'+(p==''?' class="mb-4"':'')+'><tr><td width="33px">&nbsp;</td><td valign="top">'+wrapObj(i)+'</td><td valign="top"><div style="display:inline;" id="obj'+i+'">:obj'+i+':</div></td></tr></table>';
+	HTML=HTML.replace(':obj'+p+':',h+':obj'+p+':')
+	drawReqs(i,(i==curid && ext),false);
+	if(t[i].u)
+		t[i].u="CHECKED";
+	else
+		t[i].u="";
+	return true;
+}
+function getBT(t){
+	if(bt[t]===undefined)
+		return "reference";
+	return bt[t].toLowerCase();
+}
+function wrapObj(i){
+	var obj='<div class="topm-20" id="'+i+'"><div class="card">'
+        	+'<svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg" class="close-btn" onclick="toggleMenu('+i+');">'
+            +'<path d="M8.64284 8.64287L13.3571 13.3572M13.3571 8.64287L8.64284 13.3572M5.49999 3.92859H16.5C17.3679 3.92859 18.0714 4.63214 18.0714 5.50002V16.5C18.0714 17.3679 17.3679 18.0714 16.5 18.0714H5.49999C4.63211 18.0714 3.92856 17.3679 3.92856 16.5V5.50002C3.92856 4.63214 4.63211 3.92859 5.49999 3.92859Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+	obj+='<div class="card-header" onmouseover="if($(\'#m'+i+'\').is(\':hidden\'))$(this).parent().find(\'.et-lines\').mouseover()" onmouseleave="$(\'.et-line\').remove()">';
+	if(t[i].r!="")
+		obj+='<a href="/{_global_.Z}/object/'+t[i].r+'" title="'+t9n('[RU]Войти в справочник[EN]View the directory')+'"><img class="icon8" src="/i/dictionary.png"/></a>';
+	obj+=' <a id="id'+i+'" style="display:inline;" onclick="toggleMenu('+i+');"> '+(t[i].r!="" ? t[t[i].t].v : t[i].v)+'</a>';
+	obj+='<div id="m'+i+'" style="display:none;"></div>';
+    if(t[i].t==0)
+		obj+='</div>';
+    else if(r[i]===undefined)
+		obj+='</div><div class="card-body" style="padding-bottom:5px; padding-top:5px; display:none;" id="req'+i+'">:req'+i+':</div></div></div>';
+	else
+		obj+='</div><div class="card-body" style="padding-bottom:5px; padding-top:5px; " id="req'+i+'">:req'+i+':</div></div></div>';
+	return obj;
+}
+function closeDef(i){
+    byId('a'+i).classList.remove('hidden');
+    byId('def'+i).classList.add('hidden');
+    byId('edit-alias'+i).classList.remove('hidden');
+}
+function setMulti(i){
+    myApi('POST','_d_multi/'+i+'?JSON','d');
+}
+function editDef(i,u){
+    byId('a'+i).classList.add('hidden');
+    byId('edit-alias'+i).classList.add('hidden');
+    byId('def'+i).innerHTML='<FORM method="post" action="/{_global_.z}/_d_alias/'+i+'/?up='+u+'"><input type="hidden" name="_xsrf" value="{_global_.xsrf}">'
+        +'<input type="text" class="form-control" id="def'+i+'val" name="val" value="'+a[i].alias+'" MAXLENGTH="127" title="'+t9n('[RU]Задайте псевдоним этой колонки: ссылка на[EN]Specify an alias of this type: link to')+a[i].ref+'">'
+        +'<div class="input-group"><button class="btn btn-outline-secondary" type="submit">'+t9n('[RU]Сохранить[EN]Save')+'</button>'
+        +'<button class="btn btn-outline-secondary" type="button" onclick="closeDef('+i+');">'+t9n('[RU]Отменить[EN]Cancel')+'</button>'
+        +'</div></form>';
+    byId('def'+i).classList.remove('hidden');
+    byId('def'+i+'val').focus();
+}
+function refreshDD(i,id){
+    myApi('GET','object/'+id+'?JSON&F_'+id+'=%25'+byId('v'+i).value+'%25','def_ref_dd','',i);
+}
+function saveBtn(i,id){
+    if(byId('dd'+id))
+        if(byId('dd'+id).innerHTML==ajax)
+            myApi('GET','object/'+id+'?JSON','def_ref_dd','',i);
+    if(v[i]===undefined)
+        v[i]=byId('v'+i).value;
+    else if(v[i]===byId('v'+i).value)
+        hide('s'+i);
+    else
+        unHide('s'+i);
+}
+function checkHash(i){
+    if(!byId(i))
+        document.location.href='/{_global_.Z}/edit_types/'+i+'#'+i;
+    $('#'+i).show().focus();
+    setTimeout(function(){
+        console.log($('#'+i).is(':visible'));
+        $('#'+i)[0].scrollIntoView();
+        },100);
+}
+function drawReqs(i,ext,force){
+	var def_ref_dd,def_ref_class,base,reqs=id=def_val=alias='',nullable,multiple;
+	var seek_alias=new Array();
+	if(ext)
+		reqs+='<table class="table" width="100%">';
+	for(var req in r[i]){
+		nullable=r[i][req].a.search(nullmask)!==-1;
+		multiple=r[i][req].a.search(multimask)===-1;
+		def_val=r[i][req].a.replace(nullmask, '')
+		                    .replace(multimask, '');
+		seek_alias=def_val.match(aliasmask);
+        if(!t[r[i][req].t]){
+		    console.log('No t[r['+i+']['+req+'].t]');
+		    continue;
+        }
+		base=getBT(t[r[i][req].t].t);
+		if(r[i][req].r==""){ // Not a Reference attribute
+			alias='';
+			id=r[i][req].t;
+			name='<a href="#'+id+'" id="l'+id+'" onclick="checkHash('+id+')" title="'+base+'">'+t[id].v+'</a>'; // Plain req
+			if(r[id]!==undefined)
+				name='<div style="display:inline;"><b onmouseleave="$(\'.et-line\').remove()" class="et-lines" onmouseover="drawLine(this,'+id+')">'+name+'</b></div>'; // Array of values
+		    if(base=='date'){
+	    		def_ref_class=' class="dropdown-toggle" data-toggle="dropdown" autocomplete="off"';
+			    def_ref_dd='<ul class="dropdown-menu">'
+		            +'<li class="p-2"><a onclick="byId(\'v'+r[i][req].i+'\').value=\'[TODAY]\';saveBtn('+r[i][req].i+')">[TODAY] – '+t9n('[RU]сегодняшний день, например, 15, если сейчас 15.09.2016 г.[EN]Current date, e.g. 15 when today is 15 SEP 2020')+'</a></li>'
+		            +'<li class="p-2"><a onclick="byId(\'v'+r[i][req].i+'\').value=\'[YESTERDAY]\';saveBtn('+r[i][req].i+')">[YESTERDAY] – '+t9n('[RU]вчерашний день, например, 31.10.2016, если сейчас 1.11.2016 г.[EN]yesterday date')+'</a></li>'
+		            +'<li class="p-2"><a onclick="byId(\'v'+r[i][req].i+'\').value=\'[TOMORROW]\';saveBtn('+r[i][req].i+')">[TOMORROW] – '+t9n('[RU]завтрашний день.[EN]tomorrow date')+'</a></li>'
+		            +'<li class="p-2"><a onclick="byId(\'v'+r[i][req].i+'\').value=\'[MONTH_AGO]\';saveBtn('+r[i][req].i+')">[MONTH_AGO] – '+t9n('[RU]день месяц назад, например, 28.02.2016, если сейчас 28.03.2016 г.[EN]a day a month ago, for example, 28.02.2016, if it is now 28.03.2016')+'</a></li>'
+                    +'</ul>';
+		    }
+		    else if(base=='datetime'){
+	    		def_ref_class=' class="dropdown-toggle" data-toggle="dropdown" autocomplete="off"';
+			    def_ref_dd='<ul class="dropdown-menu">'
+		            +'<li class="p-2"><a onclick="byId(\'v'+r[i][req].i+'\').value=\'[NOW]\';saveBtn('+r[i][req].i+')">[NOW] – '+t9n('[RU]текущие дата и время[EN]current date and time')+'</a></li></ul>';
+		    }
+			else
+    			def_ref_dd=def_ref_class='';
+		}
+		else{ // Reference req
+			if(seek_alias===null)
+				alias='';
+			else{
+				alias=seek_alias[1];
+				def_val=def_val.replace(aliasmask, '');
+			}
+			id=t[r[i][req].t].t;
+			aid=r[i][req].i;
+			if(alias=='')
+				a[aid]={alias:t[id].v,ref:id};
+			else
+				a[aid]={alias:alias,ref:id};
+			name='<div class="hidden" id="def'+aid+'"></div><div style="display:inline;" id="a'+aid+'"><a onmouseleave="$(\'.et-line\').remove()" onmouseover="drawLine(this,'+id+')" href="#'+r[i][req].t+'" title="'+base+'"><b>'+a[aid].alias+'</b></a>';
+			name+=' <a href="#'+id+'" id="l'+id+'" class="et-lines" onmouseleave="$(\'.et-line\').remove()" onmouseover="drawLine(this,'+id+')" onclick="checkHash('+id+')" title="'+base+'">('+t[id].v+')</a></div>';
+			if(ext && editable)
+				name+='<div id="edit-alias'+aid+'" style="display:inline-block;">&nbsp;&nbsp;<a onclick="editDef('+aid+','+i+')" title="'+t9n('[RU]Редактировать псевдоним колонки[EN]Edit the alias of an attribute')
+				    +'" onclick="byId(\'edit-alias'+aid+'\').classList.add(\'hidden\')"><img class="icon8" src="/i/edit.png"/></a>&nbsp;</div>'
+				    +'<div id="edit-alias'+aid+'" style="display:inline-block;">&nbsp;&nbsp;<a onclick="setMulti('+aid+')" title="'
+				        +(multiple?t9n('[RU]Разрешить выбор нескольких значений[EN]Enable multiselect'):t9n('[RU]Запретить выбор нескольких значений[EN]Disable multiselect'))
+				    +'" onclick="byId(\'edit-alias'+aid+'\').classList.add(\'hidden\')"><img class="icon8" src="/i/multiple-choice-'+(multiple?'aaaaaa':'333333')+'.png"/></a>&nbsp;</div>';
+			def_ref_dd='<ul id="dd'+id+'" class="dropdown-menu">'+ajax+'</ul>';
+			def_ref_class=' class="dropdown-toggle" data-toggle="dropdown" autocomplete="off" onkeyup="refreshDD('+r[i][req].i+','+id+')"';
+		}
+		if(ext){
+			reqs+='<tr id="row'+r[i][req].i+'"><td>'+name+'</td><td><nobr>';
+			if(editable){
+				reqs+='<A id="del_req'+r[i][req].i+'" onclick="myApi(\'POST\',\'_d_del_req/'+r[i][req].i+'?JSON\',\'d\');setAjax(this)" TITLE="'+t9n('[RU]Удалить[EN]Delete')+'"><img class="icon8" src="/i/delete-sign.png"/></A>';
+				reqs+='&nbsp;<A onclick="myApi(\'POST\',\'_d_up/'+r[i][req].i+'?JSON\',\'d\');setAjax(this)" TITLE="'+t9n('[RU]Поднять выше[EN]Move up')+'"><img class="icon8" src="/i/up.png"/></A>';
+				if(t[r[i][req].t].t==0)
+					reqs+='</td><td colspan="2">&nbsp;</td>';
+				else{
+					reqs+='&nbsp;<A onclick="myApi(\'POST\',\'_d_null/'+r[i][req].i+'?JSON&up='+i+'\',\'d\');setAjax(this)" TITLE="'
+					        +(nullable?t9n('[RU]Нажмите, чтобы сделать поле необязательным[EN]Click to make the field non-required')
+					               :t9n('[RU]Нажмите, чтобы сделать поле обязательным[EN]Click to make this field required'))
+					    +'"><img class="icon8" src="/i/high-importance-'+(nullable?'ee0000':'999999')+'.png"/></A>';
+					reqs+='&nbsp;<nobr></td><td valign="top"><FORM method="post" id="frm'+r[i][req].i+'" action="/{_global_.Z}/_d_attrs/'+r[i][req].i+'/?up='+i+'"><input type="hidden" name="_xsrf" value="{_global_.xsrf}">';
+					reqs+=nullable?'<input type="hidden" name="set_null" value="1">':'';
+					reqs+=multiple?'':'<input type="hidden" name="multi" value="1">';
+					if(alias!=t[id].v)
+						reqs+='<input type="hidden" name="alias" value="'+alias+'">';
+					reqs+='<input id="v'+r[i][req].i+'" type="text" size="10" name="val" value="'+def_val+'" onfocus="saveBtn('+r[i][req].i+','+id+')" oninput=saveBtn('+r[i][req].i+')'+def_ref_class+'>'+def_ref_dd+'</FORM>'
+    					+'<div id="s'+r[i][req].i+'" class="hidden"><a onclick="byId(\'frm'+r[i][req].i+'\').submit();"><img class="icon8" src="/i/save.png"/></a>&nbsp;'
+					    +'&nbsp;<a onclick="byId(\'v'+r[i][req].i+'\').value=v['+r[i][req].i+'];saveBtn('+r[i][req].i+')"><img class="icon8" src="/i/cancel.png"/></a>';
+				}
+			}
+			else{
+				if(nullable)
+					reqs+='&nbsp;<A TITLE="'+t9n('[RU]Обязательное поле[EN]Required field')+'""><img class="icon8" src="/i/requirement-ee0000.png"/></A>&nbsp;';
+				else
+					reqs+='&nbsp;<A TITLE="'+t9n('[RU]Необязательное поле[EN]Non-required field')+'""><img class="icon8" src="/i/requirement.png"/></A>';
+				reqs+='</td><td><input type="text" name="val" value="'+def_val+'" style="background-color:lightgray;">';
+			}
+			reqs+='</td></tr>';
+		}
+		else
+			reqs+='<a href="#'+id+'" title="'+base+'">'+name+'</a>&nbsp;<br />';
+		if(r[i][req].r!=""){
+			drawObj(t[r[i][req].t].t,i,false)
+		}
+		else
+		if(r[r[i][req].t]!==undefined)
+			drawObj(r[i][req].t,i,false)
+	}
+	if(ext){
+		reqs+='</table>';
+		if(editable){ // Draw the Add req DDList and button
+			reqs+='<FORM id="add'+i+'" method="post" action="/{_global_.Z}/_d_req/'+i+'" onsubmit="addReq('+i+')"><input type="hidden" name="_xsrf" value="{_global_.xsrf}">';
+			reqs+='<div class="input-group input-group-sm"><select style="max-width:300px; " name="t" id="sel'+i+'" class="form-control" onchange="check('+i+',this.value)"><option value=""> </option>';
+			var my=new Array();
+			my[i]=i;
+			for(j in r[i]) // Get the already used Reqs
+				if(r[i][j].r=="") // Skip Refs, for we can add it several times
+					my[r[i][j].t]=1;
+			if(t[i].r==""){
+			    reqs+='<option value="new">--- '+t9n('[RU]добавить новое[EN]add new')+' ---</option>';
+				for(j in s)
+					if(my[s[j].i]===undefined){
+						reqs+='<option value="'+s[j].i+'">'+ ((t[s[j].i].r=="") ? t[s[j].i].v+' ('+getBT(t[s[j].i].t)+')': '-->'+t[s[j].i].v) +'</option>';
+						my[s[j].i]=1;
+			        }
+			}
+			else
+				for(j in r[t[i].r])
+					if(my[r[t[i].r][j].t]===undefined)
+						reqs+='<option value="'+r[t[i].r][j].t+'">'+ ((t[r[t[i].r][j].t].r=="") ? t[r[t[i].r][j].t].v : '-->'+t[r[t[i].r][j].t].v) +'</option>';
+			reqs+='</select><span class="input-group-btn"><input type="submit" class="btn btn-outline-secondary btn-sm" name="addreqbtn'+i+'" id="addreqbtn'+i+'" value="'+t9n('[RU]Добавить колонку[EN]Add attribute')+'" ></span></div></FORM>'
+			    +'<FORM id="new'+i+'" class="hidden" method="post" action="/{_global_.Z}/_d_req/" onsubmit="event.returnValue=false;event.preventDefault();validateNewType('+i+');">'
+			    +'<div class="input-group input-group-sm"><input type="hidden" name="_xsrf" value="{_global_.xsrf}">'
+			    +'<table><tr><td colspan="3"><input id="input'+i+'" type="text" class="form-control" style="margin-bottom:5px;"></td>'
+			    +'<tr><td><div><SELECT id="t'+i+'" class="form-control form-control-sm">'+str+'</SELECT></div></td>'
+			    +'<TD align="center" title="'+t9n('[RU]Поставьте галку, если это будет справочное значение: Тип, Категория и т.п.[EN]Check the box if this is a reference value: Type, Category, etc.')+'">'
+    			    +'&nbsp;'+t9n('[RU]Ссылка[EN]Link')+'&nbsp;<br /><input id="ref'+i+'" type="checkbox" value="1" /></TD>'
+			    +'<td><input type="submit" class="btn btn-outline-secondary btn-sm" id="newtypbtn'+i+'" value="'+t9n('[RU]Создать[EN]Add')+'" ></td></tr></table>'
+			    +'</div></FORM>';
+		}
+	}
+	if(force){
+	    if(byId('req'+i))
+    	    byId('req'+i).innerHTML=reqs;
+	}
+    else
+	    HTML=HTML.replace(':req'+i+':',reqs)
+}
+function addReq(i){
+    if(byId('sel'+i).value!==''){
+        byId('addreqbtn'+i).disabled=true;
+        if(r[byId('sel'+i).value]!==undefined||isRef)
+            return;
+        myApi('POST','_d_req/'+i+'?JSON&t='+byId('sel'+i).value,'d');
+        
+    }
+    event.returnValue=false;
+    event.preventDefault();
+}
+function drawLine(el,i){
+    var start=$(el).closest('div')[0].getBoundingClientRect()
+        ,end=byId('id'+i).getBoundingClientRect()
+        ,angle=30*Math.PI/180,arrLen=10;
+    var x1=arrLen,x2=end.left-start.right-arrLen
+        ,y1=(start.top<=end.top?-5:start.top-end.bottom+arrLen)+2*arrLen
+        ,y2=(start.top<=end.top?end.top-start.bottom+3*arrLen:arrLen);
+    var ab=Math.sqrt((x2-x1)**2+(y2-y1)**2)
+        ,ac=Math.sqrt(arrLen**2+ab**2-2*arrLen*ab*Math.cos(angle));
+    var k=ac/ab,angleA=Math.acos((ac**2+ab**2-arrLen**2)/(2*ac*ab));
+    if(x2+arrLen>0)
+        $('#obj').append('<svg class="et-line" height="'+(Math.abs(start.bottom-end.bottom)+2*arrLen)+'" width="'+(x2+arrLen)
+            +'" style="position:absolute;top:'+(scrollY-2*arrLen+(start.top<=end.top?start.bottom:end.bottom))+'px;left:'+(start.right+3)+'px">'
+            +'<line x1="0" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="darkgray" />'
+            +'<line x1="'+(x1+k*((x2-x1)*Math.cos(angleA)-(y2-y1)*Math.sin(angleA)))+'"'
+                +' y1="'+(y1+k*((x2-x1)*Math.sin(angleA)+(y2-y1)*Math.cos(angleA)))+'" x2="'+x2+'" y2="'+y2+'" stroke="darkgray" />'
+            +'<line x1="'+(x1+k*((x2-x1)*Math.cos(-angleA)-(y2-y1)*Math.sin(-angleA)))+'"'
+                +' y1="'+(y1+k*((x2-x1)*Math.sin(-angleA)+(y2-y1)*Math.cos(-angleA)))+'" x2="'+x2+'" y2="'+y2+'" stroke="darkgray" />'
+            +'</svg>');
+}
+function setAjax(el){
+    el.innerHTML=ajax;
+}
+function validateNewType(id){
+    if(byId('input'+id).value==''){
+        alert(t9n('[RU]Введите название таблицы![EN]Enter the name of the table'));
+        return;
+    }
+    var val=byId('input'+id).value,
+        typ=byId('t'+id).value;
+    for(i in t)
+        if((t[i].v==val) && ((t[i].t==typ && !byId('ref'+id).checked) || (byId('ref'+id).checked && (t[i].r>0)))){
+            hideUnHide('add'+id);
+            hideUnHide('new'+id);
+            byId('sel'+id).value=i;
+            byId('addreqbtn'+id).click();
+            return;
+        }
+    byId('newtypbtn'+id).disabled=true;
+    myApi('POST','_d_new?next_act=nul','newtyp','val='+val+'&t='+typ,id);
+}
+// Функция для отправки асинхронного запроса по https api с обработкой его результата
+function myApi(m,u,b,vars,index){ // Параметры: метод, адрес, действие - ветка switch, параметры
+    vars=vars||''; // По умолчанию список параметров пуст
+    var h='',i,err,json,obj=new XMLHttpRequest(); // Объявляем переменную под JSON и API по HTTPS
+    obj.open(m,'/'+db+'/'+u,true); // Открываем асинхронное соединение заданным методом по нужному адресу
+    if(m=='POST'){ // Если это POST запрос, то передаем заданные параметры
+        obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+        vars='_xsrf='+xsrf+'&'+vars; // добавляем токен xsrf, необходимый для POST-запроса
+        obj.send(vars); // отправляем параметры
+    }
+    else
+        obj.send(); // отправили запрос и теперь будем ждать ответ, а пока - выходим
+    obj.onload=function(e){ // Когда запрос вернет результат - сработает эта функция
+        try{ // в this.responseText лежит ответ от сервера
+            json=JSON.parse(this.responseText); // Пытаемся разобрать ответ как JSON
+        }
+        catch(e){ // Если произошла ошибка при разборе JSON
+            console.log(e); // то выводим детали этой ошибки в консоль браузера
+            console.log(this.responseText);
+            showMsg(this.responseText);
+        }
+        obj.abort(); // Закрываем соединение
+        switch(b){ // Отрабатываем заданную команду - переходим в соответствующую ветку case
+            case 'newtyp':
+                if(json.obj>0){
+                    hideUnHide('add'+index);
+                    hideUnHide('new'+index);
+                    byId('sel'+index).innerHTML='<option value="'+json.obj+'">'+byId('input'+index).value+'</option>'+byId('sel'+index).innerHTML;
+                    byId('sel'+index).focus();
+                    if(isRef=byId('ref'+index).checked){
+                        byId('ref'+index).checked=false;
+                        myApi('POST','_d_ref/'+json.obj+'?next_act=nul','newref','',index);
+                    }
+                    else
+                        addReq(index);
+                        //byId('addreqbtn'+index).click();
+                }
+                break;
+            case 'def_ref_dd':
+                if(json.object!==undefined){
+                    for(i in json.object)
+                        h+='<li class="p-2"><a onclick="byId(\'v'+index+'\').value='+json.object[i].id+';saveBtn('+index+')">'+json.object[i].val+'</a></li>';
+                    if(json.type.id==18)
+                        h='<li class="p-2"><a onclick="byId(\'v'+index+'\').value=\'[USER_ID]\';saveBtn('+index+')">ID пользователя, вошедшего в систему</a></li>'+h;
+                    byId('dd'+json.type.id).innerHTML=h;
+                }
+                break;
+            case 'newref':
+                if(json.obj>0){
+                    byId('sel'+index).innerHTML='<option value="'+json.obj+'">-->'+byId('input'+index).value+'</option>'+byId('sel'+index).innerHTML;
+                    byId('addreqbtn'+index).click();
+                }
+                break;
+            case 'd':
+                if(json.obj){
+                    curid=json.obj;
+                    ext=1;
+                    myApi('GET','edit_types?JSON','types');
+                }
+                else
+                    showMsg(json[0].error?json[0].error:t9n('[RU]Ошибка[EN]Error'));
+                break;
+            case 'del':
+                if(json.id>0){
+                    $('#table'+json.id).remove();
+                    delete t[json.id];
+                    for(i in s)
+                        if(s[i].i==json.id)
+                            delete s[i];
+                    delete r[json.id];
+                }
+                break;
+            case 'types':
+                if(json.edit_types.id!==undefined){
+                    t={};
+                    r={};
+                    arr=json.edit_types;
+                    for(i in arr.id){
+                        if(t[arr.id[i]]===undefined)
+                            t[arr.id[i]]={t:arr.t[i],r:arr.ref_val[i],u:arr.uniq[i],v:arr.val[i]};
+                        if(arr.ord[i]!=''){
+                            if(r[arr.id[i]]===undefined)
+                                r[arr.id[i]]={};
+                            r[arr.id[i]][arr.ord[i]]={i:arr.req_id[i],t:arr.req_t[i],a:arr.attrs[i],r:arr.reft[i]};
+                        }
+                    }
+                    drawReqs(curid,true,true);
+                }
+                break;
+        }
+    }
+}
+function showMsg(err,mode){
+    byId('messages').innerHTML='<div class="alert alert-'+(mode||'danger')+'" role="alert">'+err+'</div>';
+    setTimeout(function(){byId('messages').innerHTML=''},7000);
+}
+function check(i,v){
+    if(v!=='new')
+        return;
+    hideUnHide('add'+i);
+    hideUnHide('new'+i);
+    byId('newtypbtn'+i).disabled=false;
+    byId('input'+i).focus();
+}
+function sVal(i, ii){
+	i.v=i.v.toUpperCase();
+	ii.v=ii.v.toUpperCase();
+	if(i.v>ii.v)
+		return 1;
+	else if(i.v<ii.v)
+		return -1;
+	return 0;
+}
+function getParent(id){
+	var res="";
+	for(var i in r)
+		for(var req in r[i])
+			if(r[i][req].t==id)
+				return i;
+			else if(!t[r[i][req].t])
+			    console.log('No t[r['+i+']['+req+'].t]');
+			else if(t[r[i][req].t]["t"]==id)
+				res=i;
+	return res;
+}
+function findLoop(i,p,depth){
+    depth=depth||0;
+    if(depth++>1000)
+        return true;
+    for(j in r[i])
+        if(t[r[i][j].t].r==''){ // Check if we have a loop for a plain attribute
+            if((r[i][j].t==p) || findLoop(r[i][j].t,p,depth))
+                return true;
+        }
+        else // or a ref attribute
+            if((t[r[i][j].t].r==p) || findLoop(t[r[i][j].t].r,p,depth))
+                return true;
+    return false;
+}
+function drawChart(){
+    var p,j=0;
+    HTML=':obj:';
+    // Sort the types list
+    for(i in t)
+    	s[j++]={v:t[i].v, i:i};
+    s.sort(sVal);
+    // Draw the types having other types as attributes
+    for(i in r)
+    	if((o[i]===undefined) && (t[i]["r"]=="")){
+    		p=getParent(i);
+    		if((o[p]!==undefined) || (p==""))
+    			drawObj(i,p,false);
+    		else
+    		if(findLoop(i,i,1))
+    			drawObj(i,"",false);
+    	}
+    // Draw those having neither references, nor arrays 
+    for(i in r)
+    	if(t[i]["r"]!="")
+    		drawObj(i,"",false);
+    // Add the rest in a chunk at once for better performance
+    for(i in s)
+    	if(o[s[i].i]===undefined){
+    		HTML+=drawObj(s[i].i,"",true);
+    	    o[s[i].i]="";
+    	}
+    byId('obj').innerHTML=HTML.replace(/:obj\d*:/g,'');
+}
+(function($,window){
+    var adjustAnchor=function(){
+        var $anchor=$(':target'),vh=$('#nav').outerHeight()+$('#addForm').outerHeight();
+        $('#addForm').css('top',$('#nav').outerHeight()+'px');
+        $('.content').css('padding-top',vh+'px');
+        if($anchor.length>0)
+            window.scrollTo(0,$anchor.offset().top-vh);
+        $('#table'+document.location.hash.substr(1)).show(250);
+    };
+    $(window).on('hashchange load',function(){
+        adjustAnchor();
+    });
+})(jQuery,window);
+drawChart();
+</script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js" integrity="sha384-B4gt1jrGC7Jh4AgTPSdUtOBvfO8shuf57BaghqFfPlYxofvL8/KUEfYiJOMMV+rV" crossorigin="anonymous"></script>
+<script src="/js/main.js"></script>
