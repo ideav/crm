@@ -2934,3 +2934,62 @@ tr.row-selected {
         width: calc(100% - 16px);
     }
 }
+
+/* ========================================
+   Add New Row Button and Styles (issue #807)
+   ======================================== */
+
+/* Add row button in scroll counter area */
+.add-row-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    margin-right: 12px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: var(--md-primary);
+    color: white;
+    cursor: pointer;
+    transition: var(--md-transition);
+    box-shadow: var(--md-elevation-1);
+    vertical-align: middle;
+}
+
+.add-row-btn:hover {
+    background: var(--md-primary-dark);
+    box-shadow: var(--md-elevation-2);
+    transform: scale(1.05);
+}
+
+.add-row-btn:active {
+    transform: scale(0.95);
+}
+
+.add-row-btn i {
+    font-size: 14px;
+}
+
+/* New row editing state */
+.new-row-editing {
+    background-color: rgba(25, 118, 210, 0.04);
+}
+
+/* Required fields in new row (red border) */
+.required-field-new-row {
+    outline: 2px solid #d32f2f !important;
+    outline-offset: -2px;
+}
+
+/* Disabled cells in new row (non-first columns before save) */
+.new-row-cell-disabled {
+    background-color: rgba(0, 0, 0, 0.04);
+    color: var(--md-text-hint);
+    cursor: not-allowed;
+}
+
+.new-row-cell-disabled:hover {
+    background-color: rgba(0, 0, 0, 0.04) !important;
+}
