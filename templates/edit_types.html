@@ -70,7 +70,7 @@ var str='';
             <div class="input-group mb-2">
                 <SELECT name="t" id="baseTypes" onchange="filterTypes()" class="form-control"><option value="0">SHORT</option></SELECT>
                 <div class="input-group-append">
-                    <a href="#basehelp" onclick="hideUnHide('basehelp')" title="<t9n>[RU]Описание базовых типов[EN]Description of base types</t9n>"><img class="icon8 p-2" src="/i/help.png"/></a>
+                    <a href="#basehelp" onclick="hideUnHide('basehelp')" title="<t9n>[RU]Описание базовых типов[EN]Description of base types</t9n>"><i class="pi pi-question-circle p-2" style="font-size: 1.25rem;"></i></a>
                 </div>
             </div>
             
@@ -215,12 +215,12 @@ function toggleMenu(i){
 	    curid=i;
         $('#'+i).find('.close-btn').show();
 		if(t[i].r!="")
-			diclink='<div class="space"></div><a href="#'+t[i].r+'" title="'+t9n('[RU]Перейти к исходной таблице[EN]Go to the type definition')+'"><img class="icon8" src="/i/accuracy.png"/></a>&nbsp;';
+			diclink='<div class="space"></div><a href="#'+t[i].r+'" title="'+t9n('[RU]Перейти к исходной таблице[EN]Go to the type definition')+'"><i class="pi pi-link" style="font-size: 1.25rem;"></i></a>&nbsp;';
 		else
 		for(var j in t) // Check if there's a ref to this type
 			if(t[j].r==i){
-				diclink='<div class="space"></div><a href="#'+j+'" title="'+t9n('[RU]Ссылка на справочник[EN]Link to the reference list')+'"><img class="icon8" src="/i/accuracy.png"/></a>&nbsp;'
-				        +'<div class="space"></div><a href="/{_global_.Z}/object/'+i+'" target="'+i+'" title="'+t9n('[RU]Войти в справочник[EN]Enter the directory')+'"><img class="icon8" src="/i/dictionary.png"/></a>&nbsp;';
+				diclink='<div class="space"></div><a href="#'+j+'" title="'+t9n('[RU]Ссылка на справочник[EN]Link to the reference list')+'"><i class="pi pi-link" style="font-size: 1.25rem;"></i></a>&nbsp;'
+				        +'<div class="space"></div><a href="/{_global_.Z}/object/'+i+'" target="'+i+'" title="'+t9n('[RU]Войти в справочник[EN]Enter the directory')+'"><i class="pi pi-book" style="font-size: 1.25rem;"></i></a>&nbsp;';
 			    hasRefs=true;
 				break;
 			}
@@ -244,7 +244,7 @@ function toggleMenu(i){
 				menu+='<td align="right"><input type="submit" name="savebtn" class="btn btn-primary btn-sm" value="'+t9n('[RU]Сохранить[EN]Save')+'" />&nbsp;&nbsp;&nbsp;<A class="btn btn-outline-secondary btn-sm" onclick="toggleMenu('+i+');">'+t9n('[RU]Отменить[EN]Cancel')+'</a></td></tr></table></FORM>';
 				if(diclink=="")
     				diclink+='<a onclick="post(\'_d_ref/'+i+'\')" title="'+t9n('[RU]Создать ссылку на эту таблицу (использовать её как справочник)[EN]Create a link to this type (use it as a reference)')
-    				        +'"><img class="icon8" src="/i/add-link.png"/><div class="space"></div>'+t9n('[RU]Создать ссылку[EN]Create link')+'</a><br />';
+    				        +'"><i class="pi pi-plus-circle" style="font-size: 1.25rem;"></i><div class="space"></div>'+t9n('[RU]Создать ссылку[EN]Create link')+'</a><br />';
 			}
 			menu+='<div class="hi8"></div><table width="100%" style="margin-top: 8px;"><tr><td align="left">'+diclink+'</td>';
 			if(!hasRefs){
@@ -259,7 +259,7 @@ function toggleMenu(i){
         			menu+='<td align="right"><a onclick="myApi(\'POST\',\'_d_del/'+i+'?JSON\',\'del\');setAjax(this)">';
         		else
         			menu+='<td align="right"><a onclick="post(\'_d_del/'+i+'\')">';
-        		menu+='<img class="icon8" src="/i/delete.png"/><div class="space"></div>'+t9n('[RU]Удалить таблицу[EN]Delete the type')+'</a></td>';
+        		menu+='<i class="pi pi-trash" style="font-size: 1.25rem;"></i><div class="space"></div>'+t9n('[RU]Удалить таблицу[EN]Delete the type')+'</a></td>';
 			}
 			menu+='</tr></table>'
 		}
@@ -313,7 +313,7 @@ function wrapObj(i){
             +'<path d="M8.64284 8.64287L13.3571 13.3572M13.3571 8.64287L8.64284 13.3572M5.49999 3.92859H16.5C17.3679 3.92859 18.0714 4.63214 18.0714 5.50002V16.5C18.0714 17.3679 17.3679 18.0714 16.5 18.0714H5.49999C4.63211 18.0714 3.92856 17.3679 3.92856 16.5V5.50002C3.92856 4.63214 4.63211 3.92859 5.49999 3.92859Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 	obj+='<div class="card-header" onmouseover="if($(\'#m'+i+'\').is(\':hidden\'))$(this).parent().find(\'.et-lines\').mouseover()" onmouseleave="$(\'.et-line\').remove()">';
 	if(t[i].r!="")
-		obj+='<a href="/{_global_.Z}/object/'+t[i].r+'" title="'+t9n('[RU]Войти в справочник[EN]View the directory')+'"><img class="icon8" src="/i/dictionary.png"/></a>';
+		obj+='<a href="/{_global_.Z}/object/'+t[i].r+'" title="'+t9n('[RU]Войти в справочник[EN]View the directory')+'"><i class="pi pi-book" style="font-size: 1.25rem;"></i></a>';
 	obj+=' <a id="id'+i+'" style="display:inline;" onclick="toggleMenu('+i+');"> '+(t[i].r!="" ? t[t[i].t].v : t[i].v)+'</a>';
 	obj+='<div id="m'+i+'" style="display:none;"></div>';
     if(t[i].t==0)
@@ -422,40 +422,40 @@ function drawReqs(i,ext,force){
 			name+=' <a href="#'+id+'" id="l'+id+'" class="et-lines" onmouseleave="$(\'.et-line\').remove()" onmouseover="drawLine(this,'+id+')" onclick="checkHash('+id+')" title="'+base+'">('+t[id].v+')</a></div>';
 			if(ext && editable)
 				name+='<div id="edit-alias'+aid+'" style="display:inline-block;">&nbsp;&nbsp;<a onclick="editDef('+aid+','+i+')" title="'+t9n('[RU]Редактировать псевдоним колонки[EN]Edit the alias of an attribute')
-				    +'" onclick="byId(\'edit-alias'+aid+'\').classList.add(\'hidden\')"><img class="icon8" src="/i/edit.png"/></a>&nbsp;</div>'
+				    +'" onclick="byId(\'edit-alias'+aid+'\').classList.add(\'hidden\')"><i class="pi pi-pencil" style="font-size: 1.25rem;"></i></a>&nbsp;</div>'
 				    +'<div id="edit-alias'+aid+'" style="display:inline-block;">&nbsp;&nbsp;<a onclick="setMulti('+aid+')" title="'
 				        +(multiple?t9n('[RU]Разрешить выбор нескольких значений[EN]Enable multiselect'):t9n('[RU]Запретить выбор нескольких значений[EN]Disable multiselect'))
-				    +'" onclick="byId(\'edit-alias'+aid+'\').classList.add(\'hidden\')"><img class="icon8" src="/i/multiple-choice-'+(multiple?'aaaaaa':'333333')+'.png"/></a>&nbsp;</div>';
+				    +'" onclick="byId(\'edit-alias'+aid+'\').classList.add(\'hidden\')"><i class="pi pi-list" style="font-size: 1.25rem; color: '+(multiple?'#aaa':'#333')+';"></i></a>&nbsp;</div>';
 			def_ref_dd='<ul id="dd'+id+'" class="dropdown-menu">'+ajax+'</ul>';
 			def_ref_class=' class="dropdown-toggle" data-toggle="dropdown" autocomplete="off" onkeyup="refreshDD('+r[i][req].i+','+id+')"';
 		}
 		if(ext){
 			reqs+='<tr id="row'+r[i][req].i+'"><td>'+name+'</td><td><nobr>';
 			if(editable){
-				reqs+='<A id="del_req'+r[i][req].i+'" onclick="myApi(\'POST\',\'_d_del_req/'+r[i][req].i+'?JSON\',\'d\');setAjax(this)" TITLE="'+t9n('[RU]Удалить[EN]Delete')+'"><img class="icon8" src="/i/delete-sign.png"/></A>';
-				reqs+='&nbsp;<A onclick="myApi(\'POST\',\'_d_up/'+r[i][req].i+'?JSON\',\'d\');setAjax(this)" TITLE="'+t9n('[RU]Поднять выше[EN]Move up')+'"><img class="icon8" src="/i/up.png"/></A>';
+				reqs+='<A id="del_req'+r[i][req].i+'" onclick="myApi(\'POST\',\'_d_del_req/'+r[i][req].i+'?JSON\',\'d\');setAjax(this)" TITLE="'+t9n('[RU]Удалить[EN]Delete')+'"><i class="pi pi-times-circle" style="font-size: 1.25rem;"></i></A>';
+				reqs+='&nbsp;<A onclick="myApi(\'POST\',\'_d_up/'+r[i][req].i+'?JSON\',\'d\');setAjax(this)" TITLE="'+t9n('[RU]Поднять выше[EN]Move up')+'"><i class="pi pi-arrow-up" style="font-size: 1.25rem;"></i></A>';
 				if(t[r[i][req].t].t==0)
 					reqs+='</td><td colspan="2">&nbsp;</td>';
 				else{
 					reqs+='&nbsp;<A onclick="myApi(\'POST\',\'_d_null/'+r[i][req].i+'?JSON&up='+i+'\',\'d\');setAjax(this)" TITLE="'
 					        +(nullable?t9n('[RU]Нажмите, чтобы сделать поле необязательным[EN]Click to make the field non-required')
 					               :t9n('[RU]Нажмите, чтобы сделать поле обязательным[EN]Click to make this field required'))
-					    +'"><img class="icon8" src="/i/high-importance-'+(nullable?'ee0000':'999999')+'.png"/></A>';
+					    +'"><i class="pi pi-exclamation-circle" style="font-size: 1.25rem; color: '+(nullable?'#e00':'#999')+';"></i></A>';
 					reqs+='&nbsp;<nobr></td><td valign="top"><FORM method="post" id="frm'+r[i][req].i+'" action="/{_global_.Z}/_d_attrs/'+r[i][req].i+'/?up='+i+'"><input type="hidden" name="_xsrf" value="{_global_.xsrf}">';
 					reqs+=nullable?'<input type="hidden" name="set_null" value="1">':'';
 					reqs+=multiple?'':'<input type="hidden" name="multi" value="1">';
 					if(alias!=t[id].v)
 						reqs+='<input type="hidden" name="alias" value="'+alias+'">';
 					reqs+='<input id="v'+r[i][req].i+'" type="text" size="10" name="val" value="'+def_val+'" onfocus="saveBtn('+r[i][req].i+','+id+')" oninput=saveBtn('+r[i][req].i+')'+def_ref_class+'>'+def_ref_dd+'</FORM>'
-    					+'<div id="s'+r[i][req].i+'" class="hidden"><a onclick="byId(\'frm'+r[i][req].i+'\').submit();"><img class="icon8" src="/i/save.png"/></a>&nbsp;'
-					    +'&nbsp;<a onclick="byId(\'v'+r[i][req].i+'\').value=v['+r[i][req].i+'];saveBtn('+r[i][req].i+')"><img class="icon8" src="/i/cancel.png"/></a>';
+    					+'<div id="s'+r[i][req].i+'" class="hidden"><a onclick="byId(\'frm'+r[i][req].i+'\').submit();"><i class="pi pi-save" style="font-size: 1.25rem;"></i></a>&nbsp;'
+					    +'&nbsp;<a onclick="byId(\'v'+r[i][req].i+'\').value=v['+r[i][req].i+'];saveBtn('+r[i][req].i+')"><i class="pi pi-times" style="font-size: 1.25rem;"></i></a>';
 				}
 			}
 			else{
 				if(nullable)
-					reqs+='&nbsp;<A TITLE="'+t9n('[RU]Обязательное поле[EN]Required field')+'""><img class="icon8" src="/i/requirement-ee0000.png"/></A>&nbsp;';
+					reqs+='&nbsp;<A TITLE="'+t9n('[RU]Обязательное поле[EN]Required field')+'""><i class="pi pi-exclamation-triangle" style="font-size: 1.25rem; color: #e00;"></i></A>&nbsp;';
 				else
-					reqs+='&nbsp;<A TITLE="'+t9n('[RU]Необязательное поле[EN]Non-required field')+'""><img class="icon8" src="/i/requirement.png"/></A>';
+					reqs+='&nbsp;<A TITLE="'+t9n('[RU]Необязательное поле[EN]Non-required field')+'""><i class="pi pi-exclamation-triangle" style="font-size: 1.25rem; color: #999;"></i></A>';
 				reqs+='</td><td><input type="text" name="val" value="'+def_val+'" style="background-color:lightgray;">';
 			}
 			reqs+='</td></tr>';
