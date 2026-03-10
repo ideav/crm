@@ -2556,6 +2556,12 @@ class IntegramTable {
                     newValue = editor.value;
                 }
 
+                // Issue #787: Prevent saving empty value for first column
+                if (this.currentEditingCell.parentInfo && this.currentEditingCell.parentInfo.isFirstColumn && newValue === '') {
+                    this.showToast('Значение первой колонки не может быть пустым', 'error');
+                    return;
+                }
+
                 // Only save if value changed
                 if (newValue !== this.currentEditingCell.originalValue) {
                     await this.saveInlineEdit(newValue);
