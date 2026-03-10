@@ -1319,7 +1319,8 @@ class IntegramTable {
             // Use displayValue (resolved text label) when available, otherwise use raw value (issue #551)
             const displayValue = currentFilter.displayValue !== undefined ? currentFilter.displayValue : currentFilter.value;
 
-            // For REF format columns (reference/lookup fields), render a multi-select dropdown (issue #795)
+            // For REF format columns (reference/lookup fields), render a dropdown trigger button (issue #795, #797)
+            // The dropdown is a floating overlay that appears on top of the filter row, not inside it
             if (format === 'REF') {
                 // Parse currently selected IDs from filter value
                 // Single: '@145' → selectedIds = {'145'}
@@ -1340,27 +1341,37 @@ class IntegramTable {
                         if (id) selectedIds.add(id);
                     }
                 }
-                // Options will be loaded asynchronously after render via loadRefFilterOptions()
-                // Render a placeholder select; options are populated by loadRefFilterOptions()
+                // Build display text from cached options or show count
                 const cachedOptions = this.refOptionsCache[column.id] || [];
-                const optionsHtml = cachedOptions.map(([id, text]) => {
-                    const isSelected = selectedIds.has(String(id));
-                    const escapedText = String(text).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                    return `<option value="${ id }"${ isSelected ? ' selected' : '' }>${ escapedText }</option>`;
-                }).join('');
+                let displayText = '';
+                if (selectedIds.size > 0) {
+                    const selectedTexts = cachedOptions
+                        .filter(([id]) => selectedIds.has(String(id)))
+                        .map(([, text]) => text);
+                    if (selectedTexts.length > 0) {
+                        displayText = selectedTexts.length > 2
+                            ? `${selectedTexts.length} выбрано`
+                            : selectedTexts.join(', ');
+                    } else {
+                        // IDs are selected but not found in cache yet
+                        displayText = `${selectedIds.size} выбрано`;
+                    }
+                }
+                const escapedDisplayText = displayText.replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
                 return `
                     <td>
                         <div class="filter-cell-wrapper">
                             <span class="filter-icon-inside" data-column-id="${ column.id }">
                                 ${ currentFilter.type }
                             </span>
-                            <select multiple
-                                    class="filter-ref-select"
+                            <button type="button"
+                                    class="filter-ref-trigger"
                                     data-column-id="${ column.id }"
-                                    size="1"
-                                    style="min-width:80px;">
-                                ${ optionsHtml }
-                            </select>
+                                    data-selected-ids="${ Array.from(selectedIds).join(',') }"
+                                    title="${ escapedDisplayText || 'Выбрать значение...' }">
+                                <span class="filter-ref-trigger-text">${ escapedDisplayText || 'Выбрать...' }</span>
+                                <span class="filter-ref-trigger-arrow">▼</span>
+                            </button>
                         </div>
                     </td>
                 `;
@@ -2117,41 +2128,14 @@ class IntegramTable {
                 });
             });
 
-            // Add change listeners for reference field filter dropdowns (issue #795)
-            const refFilterSelects = this.container.querySelectorAll('.filter-ref-select');
-            refFilterSelects.forEach(select => {
-                select.addEventListener('change', (e) => {
-                    const colId = select.dataset.columnId;
-                    const selectedOptions = Array.from(select.selectedOptions).map(o => o.value);
-                    if (!this.filters[colId]) {
-                        this.filters[colId] = { type: '=', value: '' };
-                    }
-                    if (selectedOptions.length === 0) {
-                        // No selection - clear filter
-                        this.filters[colId].value = '';
-                        this.filters[colId].type = '=';
-                    } else if (selectedOptions.length === 1) {
-                        // Single selection: store as @{id} so API receives FR_col=@id (issue #795)
-                        this.filters[colId].value = '@' + selectedOptions[0];
-                        this.filters[colId].type = '=';
-                    } else {
-                        // Multiple selection: store as @IN(id1,id2,...) for API (issue #795)
-                        this.filters[colId].value = '@IN(' + selectedOptions.join(',') + ')';
-                        this.filters[colId].type = '(,)';
-                    }
-                    // Update the filter icon to reflect the current type
-                    const icon = this.container.querySelector(`.filter-icon-inside[data-column-id="${ colId }"]`);
-                    if (icon) icon.textContent = this.filters[colId].type;
-
-                    // Check if this filter overrides URL GET parameters (issue #500)
-                    this.handleFilterOverride(colId, this.filters[colId].value);
-
-                    // Reload data immediately (no debounce needed for select)
-                    this.data = [];
-                    this.loadedRecords = 0;
-                    this.hasMore = true;
-                    this.totalRows = null;
-                    this.loadData(false);
+            // Add click listeners for reference field filter dropdown triggers (issue #795, #797)
+            const refFilterTriggers = this.container.querySelectorAll('.filter-ref-trigger');
+            refFilterTriggers.forEach(trigger => {
+                trigger.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const colId = trigger.dataset.columnId;
+                    this.openRefFilterDropdown(colId, trigger);
                 });
             });
 
@@ -4091,11 +4075,12 @@ class IntegramTable {
                         if (filterInput) {
                             filterInput.value = '';
                         }
-                        // Clear selection on REF filter dropdowns (issue #795)
-                        const refSelect = this.container.querySelector(`.filter-ref-select[data-column-id="${columnId}"]`);
-                        if (refSelect) {
-                            Array.from(refSelect.options).forEach(o => { o.selected = false; });
+                        // Clear selection on REF filter triggers (issue #795, #797)
+                        // Close any open dropdown and update trigger display
+                        if (this.currentRefFilterDropdown && this.currentRefFilterDropdown.colId === columnId) {
+                            this.closeRefFilterDropdown();
                         }
+                        this.updateRefFilterTriggerDisplay(columnId);
 
                         // Reset data and load from beginning
                         this.data = [];
@@ -6410,9 +6395,10 @@ class IntegramTable {
         }
 
         /**
-         * Load reference options for all REF-format filter columns and populate the dropdowns (issue #795).
+         * Load reference options for all REF-format filter columns (issue #795, #797).
          * Called after render() when filtersEnabled is true.
          * Options are fetched from _ref_reqs/{colId}?JSON&LIMIT=50 and cached in this.refOptionsCache.
+         * After loading, updates the trigger button display text.
          */
         async loadRefFilterOptions() {
             if (!this.container || !this.filtersEnabled) return;
@@ -6425,42 +6411,293 @@ class IntegramTable {
                         options = await this.fetchReferenceOptions(col.id);
                         this.refOptionsCache[col.id] = options;
                     }
-                    // Find the select element in the DOM and populate it
-                    const select = this.container.querySelector(`.filter-ref-select[data-column-id="${ col.id }"]`);
-                    if (!select) continue;
-                    // Remember currently selected values before re-populating
-                    const selectedIds = new Set(
-                        Array.from(select.selectedOptions).map(o => o.value)
-                    );
-                    // Also include values from this.filters (may be set from URL params)
-                    // Values are stored as '@id' (single) or '@IN(id1,id2)' (multiple)
-                    const currentFilter = this.filters[col.id];
-                    if (currentFilter && currentFilter.value && currentFilter.type !== '%' && currentFilter.type !== '!%') {
-                        const rawVal = currentFilter.value;
-                        const inMatch = rawVal.match(/^@IN\((.+)\)$/);
-                        if (inMatch) {
-                            inMatch[1].split(',').forEach(id => {
-                                const trimmed = id.trim();
-                                if (trimmed) selectedIds.add(trimmed);
-                            });
-                        } else if (rawVal.startsWith('@')) {
-                            const id = rawVal.substring(1);
-                            if (id) selectedIds.add(id);
-                        }
-                    }
-                    // Rebuild options
-                    select.innerHTML = options.map(([id, text]) => {
-                        const isSelected = selectedIds.has(String(id));
-                        const escapedText = String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                        return `<option value="${ id }"${ isSelected ? ' selected' : '' }>${ escapedText }</option>`;
-                    }).join('');
-                    // Adjust size for usability (show up to 5 options visible)
-                    select.size = Math.min(options.length, 5) || 1;
+                    // Update the trigger button display text
+                    this.updateRefFilterTriggerDisplay(col.id);
                 } catch (e) {
                     if (window.INTEGRAM_DEBUG) {
                         console.warn(`[loadRefFilterOptions] Failed to load options for column ${col.id}:`, e);
                     }
                 }
+            }
+        }
+
+        /**
+         * Update the display text of a reference filter trigger button (issue #797).
+         * @param {string} colId - Column ID
+         */
+        updateRefFilterTriggerDisplay(colId) {
+            const trigger = this.container.querySelector(`.filter-ref-trigger[data-column-id="${colId}"]`);
+            if (!trigger) return;
+
+            const currentFilter = this.filters[colId];
+            const cachedOptions = this.refOptionsCache[colId] || [];
+
+            // Parse currently selected IDs from filter value
+            const selectedIds = new Set();
+            if (currentFilter && currentFilter.value && currentFilter.type !== '%' && currentFilter.type !== '!%') {
+                const rawVal = currentFilter.value;
+                const inMatch = rawVal.match(/^@IN\((.+)\)$/);
+                if (inMatch) {
+                    inMatch[1].split(',').forEach(id => {
+                        const trimmed = id.trim();
+                        if (trimmed) selectedIds.add(trimmed);
+                    });
+                } else if (rawVal.startsWith('@')) {
+                    const id = rawVal.substring(1);
+                    if (id) selectedIds.add(id);
+                }
+            }
+
+            // Build display text
+            let displayText = '';
+            if (selectedIds.size > 0) {
+                const selectedTexts = cachedOptions
+                    .filter(([id]) => selectedIds.has(String(id)))
+                    .map(([, text]) => text);
+                if (selectedTexts.length > 0) {
+                    displayText = selectedTexts.length > 2
+                        ? `${selectedTexts.length} выбрано`
+                        : selectedTexts.join(', ');
+                } else {
+                    displayText = `${selectedIds.size} выбрано`;
+                }
+            }
+
+            const textEl = trigger.querySelector('.filter-ref-trigger-text');
+            if (textEl) {
+                textEl.textContent = displayText || 'Выбрать...';
+            }
+            trigger.dataset.selectedIds = Array.from(selectedIds).join(',');
+            trigger.title = displayText || 'Выбрать значение...';
+        }
+
+        /**
+         * Open a floating dropdown for reference field filter selection (issue #797).
+         * The dropdown appears on top of the filter row and includes a search field.
+         * @param {string} colId - Column ID
+         * @param {HTMLElement} triggerElement - The trigger button element
+         */
+        openRefFilterDropdown(colId, triggerElement) {
+            // Close any existing dropdown
+            this.closeRefFilterDropdown();
+
+            const cachedOptions = this.refOptionsCache[colId] || [];
+            const currentFilter = this.filters[colId] || { type: '=', value: '' };
+
+            // Parse currently selected IDs
+            const selectedIds = new Set();
+            if (currentFilter.value && currentFilter.type !== '%' && currentFilter.type !== '!%') {
+                const rawVal = currentFilter.value;
+                const inMatch = rawVal.match(/^@IN\((.+)\)$/);
+                if (inMatch) {
+                    inMatch[1].split(',').forEach(id => {
+                        const trimmed = id.trim();
+                        if (trimmed) selectedIds.add(trimmed);
+                    });
+                } else if (rawVal.startsWith('@')) {
+                    const id = rawVal.substring(1);
+                    if (id) selectedIds.add(id);
+                }
+            }
+
+            // Create dropdown overlay
+            const dropdown = document.createElement('div');
+            dropdown.className = 'filter-ref-dropdown-overlay';
+            dropdown.dataset.columnId = colId;
+
+            // Build options HTML with checkboxes
+            const optionsHtml = cachedOptions.length > 0
+                ? cachedOptions.map(([id, text]) => {
+                    const isSelected = selectedIds.has(String(id));
+                    const escapedText = String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    return `
+                        <label class="filter-ref-option" data-id="${id}">
+                            <input type="checkbox" value="${id}" ${isSelected ? 'checked' : ''}>
+                            <span class="filter-ref-option-text">${escapedText}</span>
+                        </label>
+                    `;
+                }).join('')
+                : '<div class="filter-ref-empty">Загрузка...</div>';
+
+            dropdown.innerHTML = `
+                <div class="filter-ref-dropdown-header">
+                    <input type="text"
+                           class="filter-ref-search"
+                           placeholder="Поиск..."
+                           autocomplete="off">
+                    <button type="button" class="filter-ref-clear" title="Очистить выбор">✕</button>
+                </div>
+                <div class="filter-ref-options">
+                    ${optionsHtml}
+                </div>
+            `;
+
+            // Position the dropdown below the trigger
+            document.body.appendChild(dropdown);
+
+            const rect = triggerElement.getBoundingClientRect();
+            const dropdownHeight = Math.min(300, window.innerHeight - rect.bottom - 20);
+
+            dropdown.style.position = 'fixed';
+            dropdown.style.top = `${rect.bottom + 2}px`;
+            dropdown.style.left = `${rect.left}px`;
+            dropdown.style.minWidth = `${Math.max(rect.width, 200)}px`;
+            dropdown.style.maxHeight = `${dropdownHeight}px`;
+            dropdown.style.zIndex = '10000';
+
+            // Adjust position if dropdown would go off-screen to the right
+            const dropdownRect = dropdown.getBoundingClientRect();
+            if (dropdownRect.right > window.innerWidth - 10) {
+                dropdown.style.left = `${window.innerWidth - dropdownRect.width - 10}px`;
+            }
+
+            // Store reference to current dropdown
+            this.currentRefFilterDropdown = {
+                element: dropdown,
+                colId: colId,
+                triggerElement: triggerElement,
+                cachedOptions: cachedOptions
+            };
+
+            // Focus search input
+            const searchInput = dropdown.querySelector('.filter-ref-search');
+            searchInput.focus();
+
+            // Handle search input
+            let searchTimeout;
+            searchInput.addEventListener('input', (e) => {
+                const searchText = e.target.value.trim().toLowerCase();
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    this.filterRefDropdownOptions(searchText);
+                }, 150);
+            });
+
+            // Handle checkbox changes
+            const optionsContainer = dropdown.querySelector('.filter-ref-options');
+            optionsContainer.addEventListener('change', (e) => {
+                if (e.target.type === 'checkbox') {
+                    this.handleRefFilterSelection(colId);
+                }
+            });
+
+            // Handle clear button
+            const clearBtn = dropdown.querySelector('.filter-ref-clear');
+            clearBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                // Uncheck all checkboxes
+                dropdown.querySelectorAll('.filter-ref-option input[type="checkbox"]').forEach(cb => {
+                    cb.checked = false;
+                });
+                this.handleRefFilterSelection(colId);
+            });
+
+            // Handle keyboard events
+            searchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    this.closeRefFilterDropdown();
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    this.closeRefFilterDropdown();
+                }
+            });
+
+            // Close dropdown when clicking outside
+            setTimeout(() => {
+                document.addEventListener('click', this.handleRefFilterDropdownOutsideClick);
+            }, 0);
+        }
+
+        /**
+         * Handle outside click to close reference filter dropdown (issue #797).
+         */
+        handleRefFilterDropdownOutsideClick = (e) => {
+            if (!this.currentRefFilterDropdown) return;
+            const dropdown = this.currentRefFilterDropdown.element;
+            const trigger = this.currentRefFilterDropdown.triggerElement;
+            if (!dropdown.contains(e.target) && e.target !== trigger && !trigger.contains(e.target)) {
+                this.closeRefFilterDropdown();
+            }
+        }
+
+        /**
+         * Filter options in the reference filter dropdown based on search text (issue #797).
+         * @param {string} searchText - Search text to filter by
+         */
+        filterRefDropdownOptions(searchText) {
+            if (!this.currentRefFilterDropdown) return;
+            const dropdown = this.currentRefFilterDropdown.element;
+            const options = dropdown.querySelectorAll('.filter-ref-option');
+
+            options.forEach(option => {
+                const text = option.querySelector('.filter-ref-option-text').textContent.toLowerCase();
+                const matches = !searchText || text.includes(searchText);
+                option.style.display = matches ? '' : 'none';
+            });
+        }
+
+        /**
+         * Handle selection change in reference filter dropdown (issue #797).
+         * Updates the filter state and reloads data.
+         * @param {string} colId - Column ID
+         */
+        handleRefFilterSelection(colId) {
+            if (!this.currentRefFilterDropdown) return;
+            const dropdown = this.currentRefFilterDropdown.element;
+
+            // Get selected IDs
+            const selectedIds = [];
+            dropdown.querySelectorAll('.filter-ref-option input[type="checkbox"]:checked').forEach(cb => {
+                selectedIds.push(cb.value);
+            });
+
+            // Update filter state
+            if (!this.filters[colId]) {
+                this.filters[colId] = { type: '=', value: '' };
+            }
+
+            if (selectedIds.length === 0) {
+                // No selection - clear filter
+                this.filters[colId].value = '';
+                this.filters[colId].type = '=';
+            } else if (selectedIds.length === 1) {
+                // Single selection: store as @{id}
+                this.filters[colId].value = '@' + selectedIds[0];
+                this.filters[colId].type = '=';
+            } else {
+                // Multiple selection: store as @IN(id1,id2,...)
+                this.filters[colId].value = '@IN(' + selectedIds.join(',') + ')';
+                this.filters[colId].type = '(,)';
+            }
+
+            // Update the filter icon
+            const icon = this.container.querySelector(`.filter-icon-inside[data-column-id="${colId}"]`);
+            if (icon) icon.textContent = this.filters[colId].type;
+
+            // Update trigger display
+            this.updateRefFilterTriggerDisplay(colId);
+
+            // Check if this filter overrides URL GET parameters
+            this.handleFilterOverride(colId, this.filters[colId].value);
+
+            // Reload data immediately
+            this.data = [];
+            this.loadedRecords = 0;
+            this.hasMore = true;
+            this.totalRows = null;
+            this.loadData(false);
+        }
+
+        /**
+         * Close the reference filter dropdown (issue #797).
+         */
+        closeRefFilterDropdown() {
+            if (this.currentRefFilterDropdown) {
+                this.currentRefFilterDropdown.element.remove();
+                this.currentRefFilterDropdown = null;
+                document.removeEventListener('click', this.handleRefFilterDropdownOutsideClick);
             }
         }
 

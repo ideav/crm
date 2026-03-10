@@ -529,10 +529,13 @@
     color: var(--md-text-hint);
 }
 
-/* Reference field multi-select filter dropdown (issue #795) */
-.filter-ref-select {
+/* Reference field filter dropdown trigger button (issue #795, #797) */
+.filter-ref-trigger {
     flex: 1;
-    padding: 2px 4px 2px 23px;  /* Extra left padding for icon */
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 8px 4px 23px;  /* Extra left padding for icon */
     border: none;
     font-size: 13px;
     font-family: 'Roboto', sans-serif;
@@ -541,12 +544,143 @@
     width: 100%;
     box-sizing: border-box;
     cursor: pointer;
-    min-height: 24px;
+    height: 32px;
+    text-align: left;
+    min-width: 80px;
 }
 
-.filter-ref-select:focus {
+.filter-ref-trigger:hover {
+    background: var(--md-hover);
+}
+
+.filter-ref-trigger:focus {
     outline: none;
     box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.12);
+}
+
+.filter-ref-trigger-text {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--md-text-secondary);
+}
+
+.filter-ref-trigger-text:not(:empty) {
+    color: var(--md-text-primary);
+}
+
+.filter-ref-trigger-arrow {
+    flex-shrink: 0;
+    font-size: 10px;
+    color: var(--md-text-hint);
+    margin-left: 4px;
+}
+
+/* Reference field filter floating dropdown overlay (issue #797) */
+.filter-ref-dropdown-overlay {
+    background: var(--md-surface);
+    border-radius: 4px;
+    box-shadow: var(--md-elevation-3);
+    display: flex;
+    flex-direction: column;
+    font-family: 'Roboto', sans-serif;
+    overflow: hidden;
+    min-width: 200px;
+    max-width: 350px;
+}
+
+.filter-ref-dropdown-header {
+    display: flex;
+    align-items: center;
+    padding: 8px;
+    border-bottom: 1px solid var(--md-divider);
+    gap: 8px;
+}
+
+.filter-ref-search {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid var(--md-divider);
+    border-radius: 4px;
+    font-size: 14px;
+    font-family: 'Roboto', sans-serif;
+    color: var(--md-text-primary);
+    background: var(--md-surface);
+    outline: none;
+}
+
+.filter-ref-search:focus {
+    border-color: var(--md-primary);
+    box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.12);
+}
+
+.filter-ref-search::placeholder {
+    color: var(--md-text-hint);
+}
+
+.filter-ref-clear {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: transparent;
+    color: var(--md-text-secondary);
+    font-size: 16px;
+    cursor: pointer;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.filter-ref-clear:hover {
+    background: rgba(244, 67, 54, 0.1);
+    color: #f44336;
+}
+
+.filter-ref-options {
+    max-height: 250px;
+    overflow-y: auto;
+    padding: 4px 0;
+}
+
+.filter-ref-option {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    gap: 8px;
+    font-size: 14px;
+    color: var(--md-text-primary);
+}
+
+.filter-ref-option:hover {
+    background: var(--md-hover);
+}
+
+.filter-ref-option input[type="checkbox"] {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--md-primary);
+}
+
+.filter-ref-option-text {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.filter-ref-empty {
+    padding: 16px;
+    text-align: center;
+    color: var(--md-text-secondary);
+    font-style: italic;
 }
 
 /* Scroll counter (replaces pagination) */
