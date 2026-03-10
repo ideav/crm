@@ -529,6 +529,26 @@
     color: var(--md-text-hint);
 }
 
+/* Reference field multi-select filter dropdown (issue #795) */
+.filter-ref-select {
+    flex: 1;
+    padding: 2px 4px 2px 23px;  /* Extra left padding for icon */
+    border: none;
+    font-size: 13px;
+    font-family: 'Roboto', sans-serif;
+    color: var(--md-text-primary);
+    background: var(--md-surface);
+    width: 100%;
+    box-sizing: border-box;
+    cursor: pointer;
+    min-height: 24px;
+}
+
+.filter-ref-select:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.12);
+}
+
 /* Scroll counter (replaces pagination) */
 .scroll-counter {
     position: fixed;

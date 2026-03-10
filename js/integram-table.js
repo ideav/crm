@@ -61,6 +61,7 @@ class IntegramTable {
             this.metadataCache = {};  // Cache for metadata by type ID
             this.grantOptionsCache = null;  // Cache for GRANT dropdown options (issue #607)
             this.reportColumnOptionsCache = null;  // Cache for REPORT_COLUMN dropdown options (issue #607)
+            this.refOptionsCache = {};  // Cache for reference field filter dropdown options by column ID (issue #795)
             this.editableColumns = new Map();  // Map of column IDs to their corresponding ID column IDs
             this.checkboxMode = false;  // Whether checkbox selection column is visible
             this.selectedRows = new Set();  // Set of selected row indices
@@ -144,6 +145,15 @@ class IntegramTable {
             this.filterTypes['SIGNED'] = this.filterTypes['NUMBER'];
             this.filterTypes['GRANT'] = this.filterTypes['NUMBER'];
             this.filterTypes['REPORT_COLUMN'] = this.filterTypes['NUMBER'];
+            // REF format for reference/lookup fields with dropdown filter (issue #795)
+            // Values are stored with @-prefix: single = '@id', multi = '@IN(id1,id2)'
+            // The format FR_{T}={X} passes the full value as-is to the API parameter
+            this.filterTypes['REF'] = [
+                { symbol: '=', name: 'равно', format: 'FR_{ T }={ X }' },
+                { symbol: '(,)', name: 'в списке', format: 'FR_{ T }={ X }' },
+                { symbol: '%', name: 'не пустое', format: 'FR_{ T }=%' },
+                { symbol: '!%', name: 'пустое', format: 'FR_{ T }=!%' }
+            ];
 
             this.init();
         }
@@ -609,7 +619,8 @@ class IntegramTable {
                         columns.push({
                             id: String(idx + 1),
                             type: req.type || 'SHORT',
-                            format: this.mapTypeIdToFormat(req.type || 'SHORT'),
+                            // Use 'REF' format for reference fields to enable dropdown filter (issue #795)
+                            format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
                             name: attrs.alias || req.val,
                             granted: 1,  // In object format, allow editing all cells
                             ref: isReference ? req.orig : 0,
@@ -747,7 +758,8 @@ class IntegramTable {
                     columns.push({
                         id: String(req.id),
                         type: req.type || 'SHORT',
-                        format: this.mapTypeIdToFormat(req.type || 'SHORT'),
+                        // Use 'REF' format for reference fields to enable dropdown filter (issue #795)
+                        format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
                         name: attrs.alias || req.val,
                         granted: 1,  // In object format, allow editing all cells
                         ref: isReference ? req.orig : 0,
@@ -929,7 +941,8 @@ class IntegramTable {
                         columns.push({
                             id: String(idx + 1),
                             type: req.type || 'SHORT',
-                            format: this.mapTypeIdToFormat(req.type || 'SHORT'),
+                            // Use 'REF' format for reference fields to enable dropdown filter (issue #795)
+                            format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
                             name: attrs.alias || req.val,
                             granted: 1,  // In object format, allow editing all cells
                             ref: isReference ? req.orig : 0,
@@ -1027,7 +1040,7 @@ class IntegramTable {
          * All other types use '^' (starts with) by default.
          */
         getDefaultFilterType(format) {
-            const equalDefaultFormats = ['NUMBER', 'SIGNED', 'DATE', 'DATETIME'];
+            const equalDefaultFormats = ['NUMBER', 'SIGNED', 'DATE', 'DATETIME', 'REF'];
             return equalDefaultFormats.includes(format) ? '=' : '^';
         }
 
@@ -1280,6 +1293,11 @@ class IntegramTable {
             this.attachColumnResizeHandlers();
             this.attachScrollCounterPositioning();
 
+            // Load reference field filter options asynchronously for REF-format columns (issue #795)
+            if (this.filtersEnabled) {
+                this.loadRefFilterOptions();
+            }
+
             // Restore focus state after re-rendering
             if (focusState) {
                 const newInput = this.container.querySelector(`.filter-input-with-icon[data-column-id="${focusState.columnId}"]`);
@@ -1299,6 +1317,53 @@ class IntegramTable {
             const placeholder = columnIndex === 0 ? 'Фильтр...' : '';
             // Use displayValue (resolved text label) when available, otherwise use raw value (issue #551)
             const displayValue = currentFilter.displayValue !== undefined ? currentFilter.displayValue : currentFilter.value;
+
+            // For REF format columns (reference/lookup fields), render a multi-select dropdown (issue #795)
+            if (format === 'REF') {
+                // Parse currently selected IDs from filter value
+                // Single: '@145' → selectedIds = {'145'}
+                // Multi:  '@IN(145,146)' → selectedIds = {'145', '146'}
+                const selectedIds = new Set();
+                if (currentFilter.value && currentFilter.type !== '%' && currentFilter.type !== '!%') {
+                    const rawVal = currentFilter.value;
+                    const inMatch = rawVal.match(/^@IN\((.+)\)$/);
+                    if (inMatch) {
+                        // Multiple IDs: @IN(id1,id2,...)
+                        inMatch[1].split(',').forEach(id => {
+                            const trimmed = id.trim();
+                            if (trimmed) selectedIds.add(trimmed);
+                        });
+                    } else if (rawVal.startsWith('@')) {
+                        // Single ID: @id
+                        const id = rawVal.substring(1);
+                        if (id) selectedIds.add(id);
+                    }
+                }
+                // Options will be loaded asynchronously after render via loadRefFilterOptions()
+                // Render a placeholder select; options are populated by loadRefFilterOptions()
+                const cachedOptions = this.refOptionsCache[column.id] || [];
+                const optionsHtml = cachedOptions.map(([id, text]) => {
+                    const isSelected = selectedIds.has(String(id));
+                    const escapedText = String(text).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    return `<option value="${ id }"${ isSelected ? ' selected' : '' }>${ escapedText }</option>`;
+                }).join('');
+                return `
+                    <td>
+                        <div class="filter-cell-wrapper">
+                            <span class="filter-icon-inside" data-column-id="${ column.id }">
+                                ${ currentFilter.type }
+                            </span>
+                            <select multiple
+                                    class="filter-ref-select"
+                                    data-column-id="${ column.id }"
+                                    size="1"
+                                    style="min-width:80px;">
+                                ${ optionsHtml }
+                            </select>
+                        </div>
+                    </td>
+                `;
+            }
 
             return `
                 <td>
@@ -2048,6 +2113,44 @@ class IntegramTable {
                         this.totalRows = null;  // Reset total, user can click to fetch again
                         this.loadData(false);
                     }, 500);  // Wait 500ms after user stops typing
+                });
+            });
+
+            // Add change listeners for reference field filter dropdowns (issue #795)
+            const refFilterSelects = this.container.querySelectorAll('.filter-ref-select');
+            refFilterSelects.forEach(select => {
+                select.addEventListener('change', (e) => {
+                    const colId = select.dataset.columnId;
+                    const selectedOptions = Array.from(select.selectedOptions).map(o => o.value);
+                    if (!this.filters[colId]) {
+                        this.filters[colId] = { type: '=', value: '' };
+                    }
+                    if (selectedOptions.length === 0) {
+                        // No selection - clear filter
+                        this.filters[colId].value = '';
+                        this.filters[colId].type = '=';
+                    } else if (selectedOptions.length === 1) {
+                        // Single selection: store as @{id} so API receives FR_col=@id (issue #795)
+                        this.filters[colId].value = '@' + selectedOptions[0];
+                        this.filters[colId].type = '=';
+                    } else {
+                        // Multiple selection: store as @IN(id1,id2,...) for API (issue #795)
+                        this.filters[colId].value = '@IN(' + selectedOptions.join(',') + ')';
+                        this.filters[colId].type = '(,)';
+                    }
+                    // Update the filter icon to reflect the current type
+                    const icon = this.container.querySelector(`.filter-icon-inside[data-column-id="${ colId }"]`);
+                    if (icon) icon.textContent = this.filters[colId].type;
+
+                    // Check if this filter overrides URL GET parameters (issue #500)
+                    this.handleFilterOverride(colId, this.filters[colId].value);
+
+                    // Reload data immediately (no debounce needed for select)
+                    this.data = [];
+                    this.loadedRecords = 0;
+                    this.hasMore = true;
+                    this.totalRows = null;
+                    this.loadData(false);
                 });
             });
 
@@ -3983,10 +4086,15 @@ class IntegramTable {
                     if (symbol === '%' || symbol === '!%') {
                         this.filters[columnId].value = '';
 
-                        // Clear the input field
+                        // Clear the input field (for regular text inputs)
                         const filterInput = this.container.querySelector(`.filter-input-with-icon[data-column-id="${columnId}"]`);
                         if (filterInput) {
                             filterInput.value = '';
+                        }
+                        // Clear selection on REF filter dropdowns (issue #795)
+                        const refSelect = this.container.querySelector(`.filter-ref-select[data-column-id="${columnId}"]`);
+                        if (refSelect) {
+                            Array.from(refSelect.options).forEach(o => { o.selected = false; });
                         }
 
                         // Reset data and load from beginning
@@ -5531,6 +5639,14 @@ class IntegramTable {
                 return { type: '=', value: rawValue, isRefId: true, refId: refIdMatch[1] };
             }
 
+            // Check for ID-based IN list filter: @IN(id1,id2,...) for multi-select ref filters (issue #795)
+            // Example: FR_115=@IN(145,146) means filter reference column 115 by IDs 145 and 146
+            const refInMatch = rawValue.match(/^@IN\((.+)\)$/);
+            if (refInMatch) {
+                // Store the full @IN(...) value; applyFilter passes it through as-is using FR_{T}={X} format
+                return { type: '(,)', value: rawValue };
+            }
+
             // Check for IN() list filter: IN(val1,val2,...)
             const inMatch = rawValue.match(/^IN\((.+)\)$/);
             if (inMatch) {
@@ -6290,6 +6406,61 @@ class IntegramTable {
                     throw e;
                 }
                 throw new Error(`Invalid JSON response: ${ text }`);
+            }
+        }
+
+        /**
+         * Load reference options for all REF-format filter columns and populate the dropdowns (issue #795).
+         * Called after render() when filtersEnabled is true.
+         * Options are fetched from _ref_reqs/{colId}?JSON&LIMIT=50 and cached in this.refOptionsCache.
+         */
+        async loadRefFilterOptions() {
+            if (!this.container || !this.filtersEnabled) return;
+            const refColumns = this.columns.filter(col => (col.format || '') === 'REF');
+            for (const col of refColumns) {
+                try {
+                    // Use cache if available
+                    let options = this.refOptionsCache[col.id];
+                    if (!options) {
+                        options = await this.fetchReferenceOptions(col.id);
+                        this.refOptionsCache[col.id] = options;
+                    }
+                    // Find the select element in the DOM and populate it
+                    const select = this.container.querySelector(`.filter-ref-select[data-column-id="${ col.id }"]`);
+                    if (!select) continue;
+                    // Remember currently selected values before re-populating
+                    const selectedIds = new Set(
+                        Array.from(select.selectedOptions).map(o => o.value)
+                    );
+                    // Also include values from this.filters (may be set from URL params)
+                    // Values are stored as '@id' (single) or '@IN(id1,id2)' (multiple)
+                    const currentFilter = this.filters[col.id];
+                    if (currentFilter && currentFilter.value && currentFilter.type !== '%' && currentFilter.type !== '!%') {
+                        const rawVal = currentFilter.value;
+                        const inMatch = rawVal.match(/^@IN\((.+)\)$/);
+                        if (inMatch) {
+                            inMatch[1].split(',').forEach(id => {
+                                const trimmed = id.trim();
+                                if (trimmed) selectedIds.add(trimmed);
+                            });
+                        } else if (rawVal.startsWith('@')) {
+                            const id = rawVal.substring(1);
+                            if (id) selectedIds.add(id);
+                        }
+                    }
+                    // Rebuild options
+                    select.innerHTML = options.map(([id, text]) => {
+                        const isSelected = selectedIds.has(String(id));
+                        const escapedText = String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                        return `<option value="${ id }"${ isSelected ? ' selected' : '' }>${ escapedText }</option>`;
+                    }).join('');
+                    // Adjust size for usability (show up to 5 options visible)
+                    select.size = Math.min(options.length, 5) || 1;
+                } catch (e) {
+                    if (window.INTEGRAM_DEBUG) {
+                        console.warn(`[loadRefFilterOptions] Failed to load options for column ${col.id}:`, e);
+                    }
+                }
             }
         }
 
