@@ -2213,6 +2213,7 @@ class IntegramTable {
 
         /**
          * Highlight cells with required fields (:!NULL: in attrs) in the same row (issue #779)
+         * Only highlights cells that are currently empty (issue #785)
          * Called when entering edit mode for a table data source
          * @param {HTMLElement} cell - The cell being edited
          */
@@ -2225,14 +2226,18 @@ class IntegramTable {
                 .map(id => this.columns.find(c => c.id === id))
                 .filter(c => c && this.visibleColumns.includes(c.id));
 
-            // Iterate all cells in the row and highlight those with required attrs
+            // Iterate all cells in the row and highlight those with required attrs that are currently empty
             const cells = row.querySelectorAll('td[data-col]');
             cells.forEach(td => {
                 const colIndex = parseInt(td.dataset.col);
                 if (isNaN(colIndex)) return;
                 const column = orderedColumns[colIndex];
                 if (column && column.attrs && column.attrs.includes(':!NULL:')) {
-                    td.classList.add('required-field-editing');
+                    // Only highlight if the cell is currently empty (issue #785)
+                    const currentValue = this.extractCellValue(td);
+                    if (!currentValue) {
+                        td.classList.add('required-field-editing');
+                    }
                 }
             });
         }
