@@ -1,0 +1,1162 @@
+<script>
+    if(parseInt(id)>0)
+        $('.navbar').remove();
+</script>
+<style>
+.dict-list{
+    max-width: 900px;
+    padding: 3px 3px 3px 0;
+    display: flex;
+    flex-wrap: wrap;
+}
+.dict-item:hover,.data-item:hover {
+    padding: 9px;
+    margin: 5px 10px 5px 0;
+}
+.grant-step {
+    color: red;
+    cursor: pointer;
+    font-weight: bold;
+}
+.dict-item,.data-item,.dash-bar {
+    font: 400 14px;
+    color: #4675AC;
+    margin: 0 5px 0 5px;
+    padding: 7px;
+    margin: 7px 14px 7px 0;
+    border: 1px solid #CCDFFF;
+    border-radius: 5px;
+    transition: all 0.25s;
+    background: linear-gradient(to right, #f6f6f6, #fafafa);
+    cursor: pointer;
+    text-align: center;
+}
+.dict-new-item,.data-item,.dash-bar {
+    font: 400 14px;
+    color: #4675AC;
+    margin: 0 5px 0 5px;
+    padding: 7px;
+    margin: 7px 14px 7px 0;
+    border: 1px solid #CCDFFF;
+    border-radius: 5px;
+    transition: all 0.25s;
+    cursor: pointer;
+    text-align: center;
+}
+.dict-href:hover{
+    text-decoration: none;
+}
+.ctrls:hover{
+    background: #eee;
+}
+.dict-item:hover,.data-item:hover{
+    background: #eee;
+    box-shadow: 0px 5px 7px rgba(0, 97, 254, 0.21);
+    color: #333;
+}
+.google-visualization-charteditor-category-label {
+    color: #666;
+    font-family: Arial,sans-serif;
+    margin-left: 8px;
+    margin-right: 8px;
+    position: relative;
+    text-decoration: inherit;
+}
+#qb-name {
+    font-size: 1.8rem;
+    text-align: center;
+}
+#qb-descr {
+    font-size: 1.25rem;
+    text-align: center;
+}
+.q-no-border {
+    border: none;
+}
+.bg-transparent {
+    background-color: transparent;
+}
+.date-def {
+    border-bottom: 1px dashed;
+    cursor: pointer;
+    font-size: small;
+}
+.cover-container{
+    margin: -1rem -1rem 2rem -1rem;
+    position: relative;
+}
+.logo-container{
+    position: absolute;
+}
+.q-logo{
+    max-width: 50%;
+}
+#runForm{
+    text-align: left;
+    max-width: 1024px;
+}
+</style>
+<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z" crossorigin="anonymous">
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
+<script src="/js/js.js"></script>
+
+<div id="messages" class="msgs w-100" onclick="this.innerHTML=''" style="position:fixed; top:50px;"></div>
+<div class="select-dash" id="dashlist" style="display:none">
+    <div class="pl-1 pl-sm-3 pt-3"><h4>Выберите опрос или создайте новый:</h4></div>
+    <div class="pl-1 pl-sm-3 dict-list" id="bi">
+        <a class="dict-href"  id=":id:" onclick="selectQuiz(this.id)">
+            <div class="dash-bar">
+                <span class="google-visualization-charteditor-category-label">:name:</span>
+            </div>
+        </a>
+    </div>
+</div>
+<div id="dash" class="m-1 m-sm-3 p-1 p-sm-3 shadow" style="display:none">
+    <div class="select-type"><h4>Выберите таблицу, в которую будут сохранены данные:</h4>
+        <div class="dict-list" id="sources">
+            <a class="dict-href">
+                <div class="dict-item" onclick="selectTable(':id:')">
+                    <span class="google-visualization-charteditor-category-label chart-type">
+                        <img title="Таблица" class="icon8 mb-1" src="/i/grid-16.png"> &nbsp;:name:
+                    </span>
+                </div>
+            </a>
+        </div>
+    </div>
+    <div class="pb-3 selected-type" style="display:none">
+        <a class="nav-link-active float-right" href="/{_global_.z}/{_global_.action}" title="Вернуться к списку опросов">
+            <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M20 8L8 20M8 8L20 20" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        </a>
+        Таблица: <div id="chosen-type" class="pt-3 d-inline w-25"></div>
+        &nbsp;<img class="icon8" id="deselect" src="/i/delete-sign-20-red.png" title="Вернуться к выбору таблицы" onclick="deselectTable()">
+        <div class="" id="hiddens"></div>
+    </div>
+    <center>
+        <div id="form" class="shadow p-1 p-sm-3" style="display:none; text-align:left; max-width:1024px">
+            <a target="_form" class="nav-link-active pr-1 pr-sm-3 pt-2 float-right form-url" style="display:none;" title="Запустить в новом окне">
+                <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M7 5L21 14L7 23V5Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </a>
+            <a onclick="$('.toggle-settings').toggle();if(quizId===undefined)saveQuiz()" class="nav-link-active pl-1 pl-sm-3 pt-2 float-left" title="Общие настройки формы">
+                <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M6 23V16M6 12V5M14 23V14M14 10V5M22 23V18M22 14V5M3 16H9M11 10H17M19 18H25" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </a>
+            <center>
+                <input type="text" name="name" id="qb-name" is-empty="1" placeholder="Название формы" class="form-control m-2 w-75 q-no-border q-save" onchange="this.setAttribute('is-empty','0')">
+            </center>
+            <div class="toggle-settings">
+                <input type="text" name="descr" id="qb-descr" placeholder="Краткое описание или приветствие" class="form-control m-2 q-no-border q-save">
+                <div id="fields">
+                </div>
+                <center>
+                    <div class="btn btn-primary m-4">
+                        <input type="text" name="submit" id="qb-submit" class="form-control text-light q-no-border q-save" value="Отправить" style="text-align: center; background-color: transparent;">
+                    </div>
+                </center>
+            </div>
+            <div class="toggle-settings" style="display:none;">
+                <h5 class="pt-4">Настройки</h5>
+                <div id="accordion">
+                  <div class="card">
+                    <div class="card-header" id="headingOne">
+                      <h5 class="mb-0">
+                        <button class="btn btn-link" data-toggle="collapse" data-target="#collapseOne" aria-expanded="true" aria-controls="collapseOne" onclick="if(grants===undefined)checkUser();">
+                          Права на заполнение формы, ссылки
+                        </button>
+                      </h5>
+                    </div>
+                    <div id="collapseOne" class="collapse" aria-labelledby="headingOne" data-parent="#accordion">
+                        <div class="card-body">
+                            <p class="font-weight-bold">У вас как администратора есть доступ к этой форме <a class="form-url" target="_form">здесь</a> 
+                                <a onclick="copyLink($('.form-url').attr('href'))" title="Скопировать ссылку">
+                                    <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M5.5 13.3571H4.71429C4.29752 13.3571 3.89782 13.1916 3.60312 12.8969C3.30842 12.6022 3.14286 12.2025 3.14286 11.7857V4.71429C3.14286 4.29752 3.30842 3.89782 3.60312 3.60312C3.89782 3.30842 4.29752 3.14286 4.71429 3.14286H11.7857C12.2025 3.14286 12.6022 3.30842 12.8969 3.60312C13.1916 3.89782 13.3571 4.29752 13.3571 4.71429V5.5M10.2143 8.64286H17.2857C18.1536 8.64286 18.8571 9.34641 18.8571 10.2143V17.2857C18.8571 18.1536 18.1536 18.8571 17.2857 18.8571H10.2143C9.34641 18.8571 8.64286 18.1536 8.64286 17.2857V10.2143C8.64286 9.34641 9.34641 8.64286 10.2143 8.64286Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                </a>
+                            </p>
+                            <p>При отправке формы данные будут записаны <a href="/" onclick="$(this).attr('href','/{_global_.z}/object/'+quiz.type)" target="_blank">в эту таблицу</a>. Вы можете изменить её в меню <a target="_blank" href="/{_global_.z}/edit_types">Структура</a>, добавив или удалив в ней нужные колонки.</p>
+                            <p class="font-weight-bold">Если вы желаете дать доступ к этой форме всем, у кого есть ссылка на неё, то необходимо дать людям права на запись <a href="/{_global_.z}/" onclick="$(this).attr('href','/{_global_.z}/object/'+quiz.type)" target="_blank">в эту таблицу</a> и чтение <a target="_blank" href="/" onclick="$(this).attr('href','/{_global_.z}/object/269?F_269=@'+quizId)">настроек формы</a>.</p>
+                            Это делается за 3 клика:<br />
+                            <ol>
+                                <li>Создать пользователя <i>quiz</i> и роль <i>Quiz</i> <span id="createUser"></span></li>
+                                <li>Дать права на запись в таблицу<span id="grantTable"></span></li>
+                                <li>Дать права на чтение настроек формы <span id="grantForm"></span></li>
+                            </ol>
+                            <p class="font-weight-bold" id="grants" style="display:none;">Дайте пользователю <a class="user-form-url" target="_form">эту ссылку</a> 
+                                <a onclick="copyLink($('.user-form-url').attr('href'))" title="Скопировать ссылку">
+                                    <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M5.5 13.3571H4.71429C4.29752 13.3571 3.89782 13.1916 3.60312 12.8969C3.30842 12.6022 3.14286 12.2025 3.14286 11.7857V4.71429C3.14286 4.29752 3.30842 3.89782 3.60312 3.60312C3.89782 3.30842 4.29752 3.14286 4.71429 3.14286H11.7857C12.2025 3.14286 12.6022 3.30842 12.8969 3.60312C13.1916 3.89782 13.3571 4.29752 13.3571 4.71429V5.5M10.2143 8.64286H17.2857C18.1536 8.64286 18.8571 9.34641 18.8571 10.2143V17.2857C18.8571 18.1536 18.1536 18.8571 17.2857 18.8571H10.2143C9.34641 18.8571 8.64286 18.1536 8.64286 17.2857V10.2143C8.64286 9.34641 9.34641 8.64286 10.2143 8.64286Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
+                                </a>
+                                или <a onclick="copyFrame($('.user-form-url').attr('href'))" title="Скопировать код iframe" class="href">скопируйте код iframe
+                                    <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M5.5 13.3571H4.71429C4.29752 13.3571 3.89782 13.1916 3.60312 12.8969C3.30842 12.6022 3.14286 12.2025 3.14286 11.7857V4.71429C3.14286 4.29752 3.30842 3.89782 3.60312 3.60312C3.89782 3.30842 4.29752 3.14286 4.71429 3.14286H11.7857C12.2025 3.14286 12.6022 3.30842 12.8969 3.60312C13.1916 3.89782 13.3571 4.29752 13.3571 4.71429V5.5M10.2143 8.64286H17.2857C18.1536 8.64286 18.8571 9.34641 18.8571 10.2143V17.2857C18.8571 18.1536 18.1536 18.8571 17.2857 18.8571H10.2143C9.34641 18.8571 8.64286 18.1536 8.64286 17.2857V10.2143C8.64286 9.34641 9.34641 8.64286 10.2143 8.64286Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg></a>
+                                для вставки на сторонний сайт
+                            </p>
+                        </div>
+                    </div>
+                  </div>
+                  <div class="card">
+                    <div class="card-header" id="headingTwo">
+                      <h5 class="mb-0">
+                        <button class="btn btn-link collapsed" data-toggle="collapse" data-target="#collapseTwo" aria-expanded="false" aria-controls="collapseTwo">
+                          Ответ при успешном или неуспешном заполнении
+                        </button>
+                      </h5>
+                    </div>
+                    <div id="collapseTwo" class="collapse" aria-labelledby="headingTwo" data-parent="#accordion">
+                        <div class="card-body">
+                            <p class="font-weight-bold">Задайте здесь текст сообщения после отправки формы</p>
+                            <label for="token">При успешной отправке:</label>
+                            <div class="alert alert-success mb-4" role="alert">
+                                <input type="text" name="success" class="form-control q-no-border bg-transparent q-save" value="Данные успешно отправлены, Спасибо!">
+                            </div>
+                            <label for="token">При ошибке отправки:</label>
+                            <div class="alert alert-danger" role="alert">
+                                <input type="text" name="fail" class="form-control q-no-border bg-transparent q-save" value="Ошибка отправки формы, обратитесь в support@ideav.online">
+                            </div>
+                        </div>
+                    </div>
+                  </div>
+                  <div class="card">
+                    <div class="card-header" id="headingThree">
+                      <h5 class="mb-0">
+                        <button class="btn btn-link collapsed" data-toggle="collapse" data-target="#collapseThree" aria-expanded="false" aria-controls="collapseThree">
+                          Внешний вид
+                        </button>
+                      </h5>
+                    </div>
+                    <div id="collapseThree" class="collapse" aria-labelledby="headingThree" data-parent="#accordion">
+                        <div class="card-body">
+                            <label for="width" class="mb-1">Максимальная ширина формы (px)</label>
+                            <input type="number" id="max-width" name="max-width" class="form-control mb-3 q-save" placeholder="Число в пикселях">
+                            <label for="logo" class="mb-1">Логотип (URL)</label>
+                            <input type="text" id="logo" name="logo" class="form-control mb-3 q-save" placeholder="URL к вашему логотипу (будет сверху в центре)">
+                            <label for="cover" class="mb-1">Обложка (URL)</label>
+                            <input type="text" id="cover" name="cover" class="form-control q-save" placeholder="URL к обложке (будет сверху во всю ширину)">
+                        </div>
+                    </div>
+                  </div>
+                  <div class="card">
+                    <div class="card-header" id="headingFour">
+                      <h5 class="mb-0">
+                        <button class="btn btn-link collapsed" data-toggle="collapse" data-target="#collapseFour" aria-expanded="false" aria-controls="collapseThree">
+                          Удалить опрос
+                        </button>
+                      </h5>
+                    </div>
+                    <div id="collapseFour" class="collapse" aria-labelledby="headingFour" data-parent="#accordion">
+                        <div class="card-body">
+                            <p class="font-weight-bold">Это действие нельзя отменить</p>
+                            <div class="input-group confirm-del">
+                    		    <button type="button" class="btn btn-warning" onclick="$('.confirm-del').toggle();">Удалить</button>
+                		    </div>
+                    	    <p class="confirm-del" style="display:none">Подтвердите удаление</p>
+                            <div class="confirm-del input-group mt-3 mb-3" style="display:none">
+                			    <button type="button" class="btn btn-warning mr-2" onclick="edited=false;post('_m_del/'+quizId+'?next_act=quiz%3Fdel='+quizId+'#')">Да, удалить</button>
+                			    <button type="button" class="btn btn-outline-secondary" onclick="$('.confirm-del').toggle();">Отменить</button>
+                        	</div>
+	                    </div>
+                    </div>
+                  </div>
+                </div>
+            </div>
+        </div>
+        <div id="addfields" class="p-1 p-sm-3 mt-3" style="display:none; text-align:left; max-width:1024px">
+            <span class="set-table">Задайте краткое название опроса&nbsp;&mdash; это будет имя первой колонки таблицы. Тип колонки советуем сделать <i>Дата и время</i>, так будет удобнее анализировать результаты. Само это поле будет скрыто на форме:</span>
+            <span class="set-col" style="display:none;">Добавьте поле вопроса на форму и укажите тип ответа:</span>
+            <div class="row p-0 m-0 mt-2">
+                <div class="col-12 col-sm-7 col-md-8 col-lg-3 pl-0 pr-0 mb-2">
+                    <input type="text" class="form-control" id="addfield" onkeyup="if(event.keyCode===13)addNewField()" placeholder="Введите вопрос">
+                    <div class="p-2 float-right list-type" style="display:none;">Тип списка:</div>
+                </div>
+                <div class="col-12 col-sm-5 col-md-4 col-lg-3 pl-0 pr-0 mb-2">
+                    <select class="form-control pl-1 pr-0" id="selecttype" onchange="checkRef(this)">
+                        <option value="3" view="SHORT">Строка до 127 символов</option>
+                        <option value="8" view="CHARS">Длинная строка</option>
+                        <option value="12" view="MEMO">Несколько строк (абзац)</option>
+                        <option value="0" view="DDL" class="req-only">Выбор из списка</option>
+                        <option value="11" view="BOOLEAN" class="req-only">Галка Да/Нет</option>
+                        <option value="9" view="DATE">Дата</option>
+                        <option value="4" view="DATETIME">Дата и время</option>
+                        <option value="13" view="NUMBER">Целое число</option>
+                        <option value="14" view="SIGNED">Число с точкой</option>
+                        <option value="10" view="FILE" class="req-only">Файл</option>
+                    </select>
+                    <select class="form-control pl-1 pr-0 list-type" id="selectreftype" style="display:none;">
+                        <option value="3">Строка до 127 символов</option>
+                        <option value="8">Длинная строка</option>
+                        <option value="12">Несколько строк (абзац)</option>
+                        <option value="9">Дата</option>
+                        <option value="4">Дата и время</option>
+                        <option value="13">Целое число</option>
+                        <option value="14">Число с точкой</option>
+                    </select>
+                </div>
+                <div class="col-12 col-sm-9 col-md-9 col-lg-4 pl-0 pr-0 mb-2 req-only">
+                    <div class="input-group">
+                        <table><tbody><tr><td class="p-2">или</td></tr></tbody></table>
+                        <select class="form-control pl-1 pr-0 mr-sm-2" id="selectfield" onchange="selectField(this.value)">
+                        </select>
+                    </div>
+                </div>
+                <div class="col-6 col-sm-3 col-md-3 col-lg-2 pl-0 pr-0 mb-2">
+                    <input type="submit" class="btn btn-outline-secondary btn-block" onclick="addNewField()" value="Добавить">
+                </div>
+            </div>
+        </div>
+        <div class="p-1 p-sm-3 pt-3 edit-panel" style="display:none; max-width:1024px">
+            <div class="input-group">
+                <input type="text" class="form-control" id="quizName" onchange="setEdited()" placeholder="Придумайте имя опроса, его будете видеть только вы">
+                <div class="input-group-append">
+                    <a class="btn btn-primary save-btn" onclick="saveQuiz()" style="display:none">Сохранить</a>
+                    <a class="btn btn-outline-secondary" id="save-wait" style="display:none"><img src="/i/ajax.gif"></a>
+                    <a class="btn btn-outline-secondary save-btn" onclick="document.location.href='/{_global_.z}/{_global_.action}'" style="display:none">Отменить</a>
+                </div>
+            </div>
+        </div>
+    </center>
+</div>
+<center>
+    <div id="runForm" class="shadow m-1 m-sm-3 p-1 p-sm-3" style="text-align:left; max-width:1024px; display:none">
+        <div class="cover-container" style="display:none">
+            <img class="w-100 q-cover" src="" style="display:none">
+            <center>
+                <div class="logo-container" style="display:none">
+                    <img class="q-logo" src="">
+                </div>
+            </center>
+        </div>
+        <center>
+            <h4 id="runFormName"></h4>
+            <font size="+1" id="runFormDescr"></font>
+        </center>
+        <div id="runFormFields">
+        </div>
+        <div id="submitResult" class=" m-1 m-sm-3"></div>
+        <center>
+            <button class="btn btn-primary m-4" id="runFormSubmit" onclick="submitForm()">Отправить</button>
+            <p class="text-muted"><a href="mailto:support@ideav.online">Сообщить о нарушении</a></p>
+            <p class="text-muted">Сделано в <a href="https://integram.io?from=quiz">Интеграм</a></p>
+        </center>
+    </div>
+</center>
+<script>
+var setSvg='<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="ctrls">'
+        +'    <path d="M12 14.5714C13.4201 14.5714 14.5714 13.4201 14.5714 12C14.5714 10.5798 13.4201 9.42855 12 9.42855C10.5798 9.42855 9.42855 10.5798 9.42855 12C9.42855 13.4201 10.5798 14.5714 12 14.5714Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>'
+        +'    <path d="M18.3428 14.5714C18.2287 14.8299 18.1947 15.1167 18.2451 15.3948C18.2955 15.6728 18.4281 15.9294 18.6257 16.1314L18.6771 16.1828C18.8365 16.3421 18.963 16.5311 19.0492 16.7392C19.1355 16.9473 19.1799 17.1704 19.1799 17.3957C19.1799 17.621 19.1355 17.8441 19.0492 18.0522C18.963 18.2603 18.8365 18.4493 18.6771 18.6086C18.5179 18.7679 18.3288 18.8944 18.1207 18.9807C17.9126 19.0669 17.6896 19.1113 17.4643 19.1113C17.239 19.1113 17.0159 19.0669 16.8078 18.9807C16.5997 18.8944 16.4106 18.7679 16.2514 18.6086L16.2 18.5571C15.998 18.3595 15.7414 18.227 15.4633 18.1766C15.1853 18.1261 14.8985 18.1602 14.64 18.2743C14.3865 18.3829 14.1703 18.5633 14.018 18.7933C13.8657 19.0233 13.7839 19.2927 13.7828 19.5686V19.7143C13.7828 20.1689 13.6022 20.605 13.2807 20.9265C12.9592 21.2479 12.5232 21.4286 12.0686 21.4286C11.6139 21.4286 11.1779 21.2479 10.8564 20.9265C10.5349 20.605 10.3543 20.1689 10.3543 19.7143V19.6371C10.3476 19.3534 10.2558 19.0783 10.0907 18.8474C9.92561 18.6166 9.6949 18.4408 9.42855 18.3428C9.17003 18.2287 8.88325 18.1947 8.60519 18.2451C8.32714 18.2955 8.07056 18.4281 7.86855 18.6257L7.81713 18.6771C7.65791 18.8365 7.46885 18.963 7.26074 19.0492C7.05263 19.1355 6.82955 19.1799 6.60427 19.1799C6.37898 19.1799 6.15591 19.1355 5.9478 19.0492C5.73969 18.963 5.55062 18.8365 5.39141 18.6771C5.23202 18.5179 5.10558 18.3288 5.01931 18.1207C4.93304 17.9126 4.88863 17.6896 4.88863 17.4643C4.88863 17.239 4.93304 17.0159 5.01931 16.8078C5.10558 16.5997 5.23202 16.4106 5.39141 16.2514L5.44284 16.2C5.64044 15.998 5.773 15.7414 5.82341 15.4633C5.87383 15.1853 5.8398 14.8985 5.7257 14.64C5.61704 14.3865 5.43663 14.1703 5.20667 14.018C4.9767 13.8657 4.70723 13.7839 4.43141 13.7828H4.2857C3.83104 13.7828 3.395 13.6022 3.07351 13.2807C2.75202 12.9592 2.57141 12.5232 2.57141 12.0686C2.57141 11.6139 2.75202 11.1779 3.07351 10.8564C3.395 10.5349 3.83104 10.3543 4.2857 10.3543H4.36284C4.64655 10.3476 4.9217 10.2558 5.15252 10.0907C5.38335 9.92561 5.55917 9.6949 5.65713 9.42855C5.77122 9.17003 5.80526 8.88325 5.75484 8.60519C5.70443 8.32714 5.57187 8.07056 5.37427 7.86855L5.32284 7.81713C5.16345 7.65791 5.03701 7.46885 4.95074 7.26074C4.86447 7.05263 4.82006 6.82955 4.82006 6.60427C4.82006 6.37898 4.86447 6.15591 4.95074 5.9478C5.03701 5.73969 5.16345 5.55062 5.32284 5.39141C5.48205 5.23202 5.67112 5.10558 5.87923 5.01931C6.08734 4.93304 6.31041 4.88863 6.5357 4.88863C6.76098 4.88863 6.98405 4.93304 7.19217 5.01931C7.40028 5.10558 7.58934 5.23202 7.74855 5.39141L7.79998 5.44284C8.00199 5.64044 8.25857 5.773 8.53662 5.82341C8.81467 5.87383 9.10145 5.8398 9.35998 5.7257H9.42855C9.68207 5.61704 9.89828 5.43663 10.0506 5.20667C10.2029 4.9767 10.2846 4.70723 10.2857 4.43141V4.2857C10.2857 3.83104 10.4663 3.395 10.7878 3.07351C11.1093 2.75202 11.5453 2.57141 12 2.57141C12.4546 2.57141 12.8907 2.75202 13.2122 3.07351C13.5337 3.395 13.7143 3.83104 13.7143 4.2857V4.36284C13.7154 4.63866 13.7971 4.90813 13.9494 5.1381C14.1017 5.36806 14.3179 5.54847 14.5714 5.65713C14.8299 5.77122 15.1167 5.80526 15.3948 5.75484C15.6728 5.70443 15.9294 5.57187 16.1314 5.37427L16.1828 5.32284C16.3421 5.16345 16.5311 5.03701 16.7392 4.95074C16.9473 4.86447 17.1704 4.82006 17.3957 4.82006C17.621 4.82006 17.8441 4.86447 18.0522 4.95074C18.2603 5.03701 18.4493 5.16345 18.6086 5.32284C18.7679 5.48205 18.8944 5.67112 18.9807 5.87923C19.0669 6.08734 19.1113 6.31041 19.1113 6.5357C19.1113 6.76098 19.0669 6.98405 18.9807 7.19217C18.8944 7.40028 18.7679 7.58934 18.6086 7.74855L18.5571 7.79998C18.3595 8.00199 18.227 8.25857 18.1766 8.53662C18.1261 8.81467 18.1602 9.10145 18.2743 9.35998V9.42855C18.3829 9.68207 18.5633 9.89828 18.7933 10.0506C19.0233 10.2029 19.2927 10.2846 19.5686 10.2857H19.7143C20.1689 10.2857 20.605 10.4663 20.9265 10.7878C21.2479 11.1093 21.4286 11.5453 21.4286 12C21.4286 12.4546 21.2479 12.8907 20.9265 13.2122C20.605 13.5337 20.1689 13.7143 19.7143 13.7143H19.6371C19.3613 13.7154 19.0918 13.7971 18.8619 13.9494C18.6319 14.1017 18.4515 14.3179 18.3428 14.5714Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>'
+        +'</svg>'
+    ,reqSvg='<svg width="25" height="25" viewBox="0 0 25 25" fill="none" xmlns="http://www.w3.org/2000/svg" class="ctrls ctrls-required">'
+        +'    <mask id="path-1-inside-1_4_436" fill="white">'
+        +'        <path d="M12.5 21.4286C17.4311 21.4286 21.4286 17.4311 21.4286 12.5C21.4286 7.56887 17.4311 3.57141 12.5 3.57141C7.5689 3.57141 3.57144 7.56887 3.57144 12.5C3.57144 17.4311 7.5689 21.4286 12.5 21.4286Z"/>'
+        +'        <path d="M13.3929 16.0714C13.3929 16.5645 12.9931 16.9643 12.5 16.9643C12.0069 16.9643 11.6072 16.5645 11.6072 16.0714C11.6072 15.5783 12.0069 15.1786 12.5 15.1786C12.9931 15.1786 13.3929 15.5783 13.3929 16.0714Z"/>'
+        +'    </mask>'
+        +'    <path d="M13 8.92855C13 8.65241 12.7762 8.42855 12.5 8.42855C12.2239 8.42855 12 8.65241 12 8.92855H13ZM12 12.5C12 12.7761 12.2239 13 12.5 13C12.7762 13 13 12.7761 13 12.5H12ZM12 8.92855V12.5H13V8.92855H12ZM20.4286 12.5C20.4286 16.8788 16.8788 20.4286 12.5 20.4286V22.4286C17.9834 22.4286 22.4286 17.9834 22.4286 12.5H20.4286ZM12.5 20.4286C8.12118 20.4286 4.57144 16.8788 4.57144 12.5H2.57144C2.57144 17.9834 7.01661 22.4286 12.5 22.4286V20.4286ZM4.57144 12.5C4.57144 8.12115 8.12118 4.57141 12.5 4.57141V2.57141C7.01661 2.57141 2.57144 7.01658 2.57144 12.5H4.57144ZM12.5 4.57141C16.8788 4.57141 20.4286 8.12115 20.4286 12.5H22.4286C22.4286 7.01658 17.9834 2.57141 12.5 2.57141V4.57141ZM12.3929 16.0714C12.3929 16.0122 12.4408 15.9643 12.5 15.9643V17.9643C13.5454 17.9643 14.3929 17.1168 14.3929 16.0714H12.3929ZM12.5 15.9643C12.5592 15.9643 12.6072 16.0122 12.6072 16.0714H10.6072C10.6072 17.1168 11.4546 17.9643 12.5 17.9643V15.9643ZM12.6072 16.0714C12.6072 16.1306 12.5592 16.1786 12.5 16.1786V14.1786C11.4546 14.1786 10.6072 15.026 10.6072 16.0714H12.6072ZM12.5 16.1786C12.4408 16.1786 12.3929 16.1306 12.3929 16.0714H14.3929C14.3929 15.026 13.5454 14.1786 12.5 14.1786V16.1786Z" fill="#1A1A1A" mask="url(#path-1-inside-1_4_436)"/>'
+        +'</svg>'
+    ,hidSvg='<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="ctrls ctrls-hidden">'
+        +'    <path d="M13.8172 13.8172C13.5817 14.0698 13.2979 14.2724 12.9824 14.413C12.667 14.5535 12.3265 14.6291 11.9812 14.6352C11.636 14.6413 11.293 14.5778 10.9728 14.4484C10.6526 14.3191 10.3618 14.1266 10.1176 13.8824C9.87342 13.6383 9.68092 13.3474 9.55159 13.0272C9.42226 12.707 9.35875 12.3641 9.36484 12.0188C9.37093 11.6735 9.44651 11.333 9.58705 11.0176C9.72759 10.7022 9.93023 10.4183 10.1829 10.1829M2.57144 2.57144L21.4286 21.4286M17.0914 17.0914C15.6262 18.2083 13.8421 18.827 12 18.8572C6.00001 18.8572 2.57144 12 2.57144 12C3.63763 10.0131 5.11641 8.27711 6.90858 6.90858L17.0914 17.0914ZM10.2 5.34858C10.79 5.21048 11.3941 5.14145 12 5.14287C18 5.14287 21.4286 12 21.4286 12C20.9083 12.9734 20.2878 13.8898 19.5772 14.7343L10.2 5.34858Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>'
+        +'</svg>'
+    ,delSvg='<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="ctrls ctrls-hidden">'
+        +'    <path d="M17.1429 6.85718L6.85714 17.1429M6.85714 6.85718L17.1429 17.1429" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>'
+        +'</svg>'
+    ,hidBadge='<a class="badge badge-secondary p-1 mr-2" order=":order:" id="h:t:" orig-type=":orig-type:" style=":hidden:" onclick="setHidden(this)" title="Вернуть скрытое поле на форму">:name:</a>';
+function checkRef(el){
+    if(el.value.substr(0,1)==='0'){
+        $('.list-type').show();
+        $('#selectreftype').focus();
+    }
+    else
+        $('.list-type').hide();
+}
+function isRef(){
+    return $('#selecttype').val().substr(0,1)==='0';
+}
+function addNewField(){
+    var v=$('#addfield').val();
+    if(v.length===0)
+        return;
+    var i,base=isRef()?$('#selectreftype').val():$('#selecttype').val(),t=existingType(v,base);
+    if(quiz.type==='0')
+        createTable(t,v);
+    else if(t){
+        for(i in quiz.form)
+            if(quiz.form[i].type==t||(v.toUpperCase()===quiz.name.toUpperCase()&&quiz.type===t))
+                return showMsg('messages',t9n('[RU]Это поле уже существует: [EN]The field already exists: ')+v,'warning');
+        if(isRef()){
+            for(var j in dataItems.id)
+                if(dataItems.req_t[j]==t)
+                    return showMsg('messages',t9n('[RU]Это поле занято, нельзя сделать ссылку на него: [EN]The field is already occupied and cannot be linked: ')+v,'warning');
+            intApi('POST','_d_ref/'+t+'?JSON','createRef','',{req_t:t,val:v,ref_type:t,t:'REFERENCE'});
+        }
+        else
+            intApi('POST','_d_req/'+quiz.type+'?JSON&t='+t,'createReq','',{req_t:t,val:v,t:dataTypes[reqType(t)]});
+    }
+    else
+        createType(v);
+    $('#addfield').val('');
+    setEdited();
+}
+function createType(v){
+    var t=isRef()?$('#selectreftype').val():$('#selecttype').val();
+    intApi('POST','_d_new?JSON&val='+encodeURIComponent(v)+'&t='+t,'createType','',{val:v,t:t,isRef:isRef()});
+    $('#selecttype').val('3');
+    $('#addfield').attr('placeholder',t9n('[RU]Введите вопрос[EN]Enter a question'));
+    $('.set-col').show();
+    $('.set-table').hide();
+}
+function createTable(t,v){
+    if(t){
+        selectTable(t);
+        showMsg('messages',t9n('[RU]Таблица существует: [EN]The existing table chosen: ')+v,'info');
+    }
+    else
+        createType(v);
+}
+function selectField(v){
+    $('#addfield').val($('[value='+v+']').attr('name'));
+    $('#selecttype').val($('[value='+v+']').attr('type'));
+//    if(!isRef())
+//        $('.list-type').hide();
+}
+function selectQuiz(i){
+    if(i>0&&savedQuiz[i]){
+        quiz=JSON.parse(savedQuiz[quizId=i]);
+        $('#chosen-type').html(typeName(quiz.type)).attr('chosen-type',quiz.type);
+        $('.form-url').attr('href',location.protocol+'//'+location.host+'/{_global_.z}/{_global_.action}/'+quizId).show();
+        $('.select-type,.select-dash').hide();
+        $('.selected-type,#dash,.edit-panel').show();
+        $('#deselect').remove();
+        for(j in quiz)
+            $('.q-save[name='+j+']').val(quiz[j]);
+        $('#quizName').val($('#'+i).find('span').html());
+        drawForm();
+    }
+    else
+        document.location.href='/'+db+'/'+action+'/0';
+}
+function notReq(r,t){
+    for(var i in dataItems.id)
+        if(dataItems.id[i]===quiz.type&&dataItems.req_t[i]===r)
+            if(reqType(r)===t)
+                return false;
+    return true;
+}
+function fillInDataItems(){
+    var i,name,type,listed={},h='<option value="">выберите существующее поле</option>';
+	for(i in dataItems.id)
+	    if(!listed[dataItems.id[i]]&&notReq(dataItems.id[i],dataItems.t[i])&&(dataItems.ref_val[i]!==''||dataItems.req_id[i]===''))
+	        if(dataTypes[dataItems.t[i]]!=='REPORT_COLUMN'&&dataTypes[dataItems.t[i]]!=='GRANT'&&dataTypes[dataItems.t[i]]!=='PATH'&&dataTypes[dataItems.t[i]]!=='PWD'&&dataTypes[dataItems.t[i]]!=='HTML'&&dataTypes[dataItems.t[i]]!=='BUTTON'&&dataTypes[dataItems.t[i]]!=='CALCULATABLE'){
+	            listed[dataItems.id[i]]=true;
+	            if(dataItems.ref_val[i]===''){
+    	            name=dataItems.val[i];
+    	            nameType=name+' ('+($('#selecttype option[value='+dataItems.t[i]+']').html()||'').toLowerCase()+')';
+    	            type=dataItems.t[i];
+	            }
+                else{
+    	            name=typeName(dataItems.ref_val[i]);
+    	            nameType='--> '+name+' (из списка)';
+    	            type=0;
+                }
+		        h+='<option value="'+dataItems.id[i]+'" type="'+type+'" name="'+name+'">'+nameType+'</option>';
+    	    }
+	$('#selectfield').html(h);
+}
+function composeFormFromTypes(t){
+    var j,i=0;
+    while(quiz.form.length>0)
+        quiz.form.shift();
+    for(j in dataItems.id)
+        if(dataItems.id[j]===t){
+            if(i===0)
+                quiz.form[i++]={id:t
+                        ,type:t
+                        ,base:dataTypes[dataItems.t[j]]
+                        ,name:dataItems.val[j]
+                        ,view:$('#selecttype [value='+dataItems.t[j]+'][view]').attr('view')||'DDL'};
+            if(dataItems.req_id[j]!==''){
+                quiz.form[i]={id:dataItems.req_id[j]
+                        ,type:dataItems.req_t[j]
+                        ,base:dataTypes[reqType(dataItems.req_t[j])]||'REFERENCE'
+                        ,name:reqName(dataItems.req_id[j])
+                        ,view:dataTypes[reqType(dataItems.req_t[j])]||'DDL'};
+                if(quiz.form[i].base==='REFERENCE')
+                    quiz.form[i].ref_type=reqType(dataItems.req_t[j]);
+                i++;
+            }
+        }
+}
+function shownAndHidden(i,fld,f){
+    f.flds+='<div class="fld p-1 p-sm-3" id="'+fld.id+'" order="'+i+'" style="border:1px dotted transparent;'+(fld.hidden?'display:none;':'')+'" title="'+fld.name+'">'
+        +'    <div class="d-flex float-right pb-0 mt-0 short-ctrls" style="display:none">'
+        +(i>0?' <a onclick="deleteFld(this)" class="short-ctrls" style="display:none" title="Удалить поле">'+delSvg+'</a>':'')
+        +'      <a onclick="setRequired(this)" class="short-ctrls ml-2" style="display:none" title="Сделать обязательным для ввода">'
+                    +reqSvg.replace('#1A1A1A',fld.required?'#e00':'#1A1A1A')
+        +'      </a>'
+        +'      <a onclick="setHidden(this)" class="short-ctrls ml-2" style="display:none" title="Скрыть поле">'+hidSvg+'</a>'
+        +'      <a onclick="$(\'.set'+fld.id+'\').toggle()" class="short-ctrls ml-2" style="display:none" title="Настройки поля">'+setSvg+'</a>'
+        +'    </div>'
+        +'    <input name="label" class="form-control form-control-sm pl-0 pb-0 mb-1 w-50 q-no-border q-save q-fld" for="'+i+'" value="'+escapeHtml(fld.label||fld.name)+'"'
+        +'          '+(fld.required?' style="color:#e00"':'')+' placeholder="Введите вопрос или имя поля">'
+        +     inputBox[fld.view].replace(/:t:/g,fld.id)
+                        .replace('type="password"','type="text"')
+                        .replace(':value:',fld.placeholder||'')
+                        .replace(':reforig:',fld.ref_type||'')
+                        .replace(':placeholder:','Введите подсказку к вопросу')
+        +'</div>';
+    f.hiddens+=hidBadge.replace(':t:',fld.id)
+                    .replace(':name:',fld.name)
+                    .replace(':orig-type:',fld.type)
+                    .replace(':order:',i)
+                    .replace(':hidden:',fld.hidden?'':'display:none');
+    if(fld.base==='REFERENCE')
+        intApi('GET','object/'+refType(fld.type)+'?JSON','ddl','',{i:fld.id,view:fld.view});
+}
+function drawForm(){
+    var i,j,k,f={flds:'',hiddens:''};
+    for(i=0;i<quiz.form.length;i++)
+        if(quiz.form[i].id!==quiz.form[i].type&&!reqExists(quiz.form[i].id)&&quizId){ // The field might be deleted from the object
+            // Remove the field from the array
+            k=i--; // loop back to check the substitute line as well
+            for(j in quiz.form) // Shift it down first
+                if(j>k)
+                    [quiz.form[k],quiz.form[j]]=[quiz.form[j],quiz.form[k]],k++;
+            quiz.form.pop(); // then drop it
+        }
+        else if(inputBox[quiz.form[i].view])
+            shownAndHidden(i,quiz.form[i],f);
+    // Check if new fields were added to the object
+    for(j in dataItems.id)
+        if(dataItems.id[j]===quiz.type&&dataItems.req_id[j]!==''
+                &&f.hiddens.indexOf('id="h'+dataItems.req_id[j]+'"')===-1){ // Seek the id among hiddens
+            quiz.form[i]={id:dataItems.req_id[j].toString() // Add the field in case it's not found
+                        ,type:dataItems.req_t[j]
+                        ,base:reqBase(dataItems.req_t[j])||'REFERENCE'
+                        ,name:reqName(dataItems.req_id[j])
+                        ,view:reqBase(dataItems.req_t[j])||'DDL'
+                        ,hidden:true // Hide the new field by default
+            }
+            shownAndHidden(i,quiz.form[i],f);
+            i++;
+        }
+    $('#fields').html(f.flds);
+    $('#hiddens').html(f.hiddens);
+    $('#form,#addfields').show();
+    $('.q-save').change(qSave);
+    $('.q-save').focus(function(){
+        $('.assist-'+this.id).show();
+    });
+    $('.q-save').focusout(function(){
+        $('.assist-'+this.id).hide();
+    });
+    $('.fld').mouseover(function(){
+        $(this).find('.short-ctrls').show();
+        $(this).css('border','1px dotted #ddd').addClass('shadow-sm');
+    });
+    $('.fld').mouseout(function(){
+        $(this).find('.short-ctrls').hide();
+        $(this).css('border','1px dotted transparent').removeClass('shadow-sm');
+    });
+    if(i>0){
+        $('.set-table').hide();
+        $('.set-col').show();
+        $('.save-btn,.req-only').show();
+    }
+    else{
+        $('.req-only').hide();
+        $('#selecttype').val('4');
+        $('#addfield').attr('placeholder',t9n('[RU]Название таблицы опросов[EN]The name of the table for storing surveys'))
+    }
+    if(quizId&&!typeName(quiz.type))
+        showMsg('messages',t9n('[RU]Эта таблица больше не существует[EN]The table does not exist'));
+    fillInDataItems();
+    if(addRefItems!==''){
+        $('.set'+addRefItems).show();
+        $('.set'+addRefItems+' input').focus();
+        $('.list-type').hide();
+        addRefItems='';
+    }
+    else
+        $('#addfield').focus();
+}
+function setEdited(){
+    edited=true;
+    $('.save-btn').show();
+}
+function setRequired(el){
+    var o=$(el).closest('[order]').attr('order');
+    if(quiz.form[o].required){
+        delete quiz.form[o].required;
+        $(el).find('.ctrls-required path').attr('stroke','#1A1A1A');
+        $('div[order='+o+']').find('input[name=label]').css('color','').attr('title','');
+    }
+    else{
+        quiz.form[o].required=true;
+        $(el).find('.ctrls-required path').attr('stroke','#e00');
+        $('div[order='+o+']').find('input[name=label]').css('color','red').attr('title','Обязательно для заполнения');
+    }
+    setEdited();
+}
+function setHidden(el){
+    var o=$(el).attr('order')||$(el).closest('[order]').attr('order');
+    if(quiz.form[o].hidden)
+        delete quiz.form[o].hidden;
+    else
+        quiz.form[o].hidden=true;
+    $('#h'+quiz.form[o].id+',#'+quiz.form[o].id).toggle(160);
+    setEdited();
+}
+function qSave(event){
+    setEdited();
+    if($(event.target).hasClass('q-fld'))
+        quiz.form[$(event.target).closest('[order]').attr('order')][$(event.target).attr('name')]=event.target.value;
+    else
+        quiz[$(event.target).attr('name')]=event.target.value;
+}
+function selectTable(i){
+    $('#chosen-type').html(typeName(i)).attr('chosen-type',quiz.type=i);
+    if($('#qb-name').val()==='')
+        $('#qb-name').attr('is-empty','1')
+    if($('#qb-name').attr('is-empty')==='1')
+        $('#qb-name').val(quiz.name=typeName(i));
+    if($('#quizName').val()==='')
+        $('#quizName').attr('is-empty','1')
+    if($('#quizName').attr('is-empty')==='1')
+        $('#quizName').val(quiz.name);
+    $('.select-type').hide(50);
+    $('.edit-panel,.selected-type').show(50);
+    composeFormFromTypes(i);
+    drawForm();
+}
+function deselectTable(){
+    $('#chosen-type').html('').attr('chosen-type','');
+    $('.select-type').show(50);
+    $('.selected-type,.edit-panel,#form,#addfields').hide(50);
+    $('#fields').html('');
+}
+var quiz={ form:[] },quizId,dataList=$('#sources').html(),savedQuiz={},dataItems,dataTypes,edited,aliasmask=/:ALIAS=(.+):/i,grants,addRefItems='',view;
+function saveQuiz(){
+    var name=$('#quizName').val();
+    if(name.length>0){
+        if(name.indexOf('"')===-1){
+            $('.save-btn').hide();
+            $('#save-wait').show();
+            intApi('GET','object/269?JSON&F_271=QUIZ&F_269='+encodeURIComponent(name),'checkQuiz');
+            edited=false;
+        }
+        else
+            showMsg('messages',t9n('[RU]Недопустимый символ " в имени опроса[EN]Please do not use " in the quiz name'));
+    }
+    else
+        showMsg('messages',t9n('[RU]Задайте имя опроса[EN]Please set the quiz name'));
+}
+function randomSecret(){
+    return (Math.random().toString(36)+Math.random().toString(36)+Math.random().toString(36)).replace(/\./g,'').substr(1,8);
+}
+function checkUser(){
+    grants={};
+    $('#grants').hide();
+    intApi('GET','object/18?JSON&F_18=quiz','checkUser');
+}
+function createUser(){
+    var userSecret=randomSecret();
+    intApi('POST','_m_new/18?JSON&up=1&t18=quiz&NEW_115=Quiz&t130='+userSecret,'createUser','',userSecret);
+}
+function dropObj(i){
+    intApi('POST','_m_del/'+i+'?JSON','dropObj');
+    $('#grantTable,#grantForm').html('');
+}
+function grantTable(){
+    intApi('POST','_m_new/116?JSON&up='+grants.roleId+'&t116='+quiz.type+'&t136=54&t49=!%','grant','','grantTable');
+}
+function grantForm(mode){
+    intApi('POST','_m_new/116?JSON&up='+grants.roleId+'&t116=269&t136=53&t49='+(mode||''),'grant','','grantForm');
+}
+function submitForm(){
+    var vars=new FormData(),e='',o;
+    $('.q-fld').css('border','');
+    $('.q-fld').each(function(){
+        o=$(this).closest('[order]').attr('order');
+        if(quiz.form[o].base==='FILE'){
+            if(this.files[0])
+                vars.append(this.id,this.files[0]);
+        }
+        else if(quiz.form[o].base==='BOOLEAN'&&!quiz.form[o].hidden&&quiz.form[o].required&&!this.checked){
+            e+='Поставьте '+quiz.form[o].name+'<br />';
+            $(this).css('border','2px solid red');
+        }
+        else if(this.value.length>0)
+            vars.append(this.id,this.value);
+        else if(!quiz.form[o].hidden&&quiz.form[o].required){
+            e+=(quiz.form[o].base==='REFERENCE'?'Выберите ':'Введите ')+quiz.form[o].name+'<br />';
+            $(this).css('border','2px solid red');
+        }
+    });
+    if(e===''){
+        intApi('POST','_m_new/'+quiz.type+'?JSON&up=1','submitForm',vars);
+        $('#runFormSubmit').attr('disabled',true);
+    }
+    else
+        showMsg('submitResult',e,'warning',0);
+}
+function intApi(m,u,b,vars,index){ // Параметры: метод, адрес, действие - ветка switch, параметры, ID целевого элемента
+    vars=vars||''; // По умолчанию список параметров пуст
+    var h='',template,i,j,json,obj=new XMLHttpRequest(); // Объявляем переменную под JSON и API по HTTPS
+    obj.open(m,'/'+db+'/'+u,true); // Открываем асинхронное соединение заданным методом по нужному адресу
+    if(m=='POST'){ // Если это POST запрос, то передаем заданные параметры
+        if(typeof vars=='object')
+            vars.append('_xsrf',xsrf);
+        else{
+            obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+            vars='_xsrf='+xsrf+'&'+vars; // добавляем токен xsrf, необходимый для POST-запроса
+        }
+    }
+    obj.setRequestHeader('X-Authorization',token);
+    obj.onload=function(e){ // Когда запрос вернет результат - сработает эта функция
+        try{ // в this.responseText лежит ответ от сервера
+            json=JSON.parse(this.responseText); // Пытаемся разобрать ответ как JSON
+        }
+        catch(e){ // Если произошла ошибка при разборе JSON
+            h=this.responseText;
+        }
+        obj.abort(); // Закрываем соединение
+        switch(b){ // Отрабатываем заданную команду - переходим в соответствующую ветку case
+            case 'checkName':
+                if(json.object){
+                    errMsg('warning','Такое имя уже существует, выберите другое');
+                    $('#saveBtn').prop('disabled',false);
+                    return;
+                }
+                intApi('POST','_m_new/269?JSON&up=1&t271=QUIZ&t269='+index+'&t273='+encodeURIComponent(JSON.stringify(saveSet)),'save-set');
+                break;
+                
+            case 'dropObj':
+                checkUser();
+                break;
+                
+            case 'checkUser':
+                if(json.object===undefined)
+                    $('#createUser').html('&nbsp;&mdash; <a class="grant-step" onclick="createUser()">нажмите здесь</a>');
+                else{
+                    grants.userId=json.object[0].id;
+                    grants.roleId=json.reqs[grants.userId].ref_115.split(':').pop();
+                    grants.secret=json.reqs[grants.userId][130];
+                    $('#createUser').html(resultText('Готово','success','edit_obj/'+grants.userId)+grantAction('Удалить',grants.userId));
+                    intApi('GET','object/116?JSON&F_U='+grants.roleId,'checkRole');
+                }
+                break;
+                
+            case 'checkRole':
+                if(json.reqs)
+                    for(i in json.object)
+                        if(json.object[i].ref===quiz.type&&json.reqs[json.object[i].id][136]==='WRITE')
+                            $('#grantTable').html(resultText('Готово','success','object/116/?F_U='+grants.roleId)+grantAction('Удалить',json.object[i].id));
+                        else if(json.object[i].ref==='269'&&json.reqs[json.object[i].id][136]==='READ')
+                            $('#grantForm').html(resultText('Готово','success','object/116/?F_U='+grants.roleId)+grantAction('Удалить',json.object[i].id));
+                if($('#grantTable').html().length==0)
+                    return $('#grantTable').html('&nbsp;&mdash; <a class="grant-step" onclick="grantTable()">нажмите здесь</a>');
+                if($('#grantForm').html().length==0)
+                    return $('#grantForm').html('&nbsp;&mdash; <a class="grant-step" onclick="grantForm()">нажмите здесь</a>');
+                if(grants.secret){
+                    $('.user-form-url').attr('href',document.location.protocol+'//'+document.location.host+'/{_global_.z}/{_global_.action}/'+quizId+'?secret='+grants.secret).show();
+                    $('#grants').show();
+                }
+                break;
+                
+            case 'createUser':
+                if(json.id)
+                    checkUser();
+                else
+                    $('#createUser').html(resultText('Ошибка','danger','object/18'));
+                break;
+                
+            case 'grant':
+                if(json.id)
+                    checkUser();
+                else
+                    $('#'+index).html(resultText('Ошибка','danger','object/18'));
+                break;
+                
+            case 'addItem':
+                if(json.id)
+                    i=$('#t'+index.t).closest('[order]').attr('order');
+                    h=inputBox[quiz.form[i].view+'-OPTION'];
+                    $('#t'+index.t).append(h.replace(':value:',json.id)
+                                    .replace(':selected:','')
+                                    .replace(':t:',index.t)
+                                    .replace(':val:',index.val)
+                                );
+                break;
+                
+            case 'delFld':  // Drop the field and its hidden one
+                if(!json.id)
+                    return showMsg('messages',JSON.stringify(json));
+                $('.fld[order='+index+'],.badge[order='+index+']').remove();
+                $('.fld').each(function(){
+                    if(parseInt($(this).attr('order'))>index)
+                        $('#'+this.id+',#h'+this.id).attr('order',parseInt($(this).attr('order'))-1);
+                });
+                setEdited();
+                intApi('GET','edit_types?JSON','sources');
+                for(j in quiz.form)
+                    if(j>=index) // Swap array elements to move the one to be deleted to the end
+                        if(quiz.form[j- -1])
+                            [quiz.form[j- -1],quiz.form[j]]=[quiz.form[j],quiz.form[j- -1]];
+                        else
+                            quiz.form.pop(); // Remove the last item
+                break;
+                
+            case 'refreshsources':
+            case 'sources':
+                dataItems=json.edit_types;
+                dataTypes=json.types;
+                for(i in dataItems.id)
+                    if((dataItems.id[i]==='18'||parseInt(dataItems.id[i])>269)&&dataItems.ord[i]==='1'&&dataItems.req_t[i]!=='')
+                        h+=dataList.replace(':name:',dataItems.val[i])
+                            .replace(':id:',dataItems.id[i]);
+                h+=dataList.replace(':name:','Создать...')
+                    .replace(':id:','0')
+                    .replace('grid.png','plus.png')
+                    .replace('dict-item','dict-new-item');
+                $('#sources').html(h);
+                if(id==='0')
+                    $('#dash').show();
+                if(b==='refreshsources')
+                    drawForm();
+                break;
+                
+            case 'createRef': // Ref is created, add it as Req
+                intApi('POST','_d_req/'+quiz.type+'?JSON&t='+json.obj,'createReq',''
+                        ,{req_t:json.obj
+                            ,ref_type:index.req_t
+                            ,val:index.val
+                            ,t:index.t});
+                break;
+                
+            case 'createReq': // Req added
+                i=quiz.form.push({id:json.id.toString()
+                            ,type:index.req_t.toString()
+                            ,base:index.t
+                            ,name:index.val
+                            ,view:index.ref_type?'DDL':index.t});
+                if(index.ref_type){
+                    quiz.form[i-1].ref_type=index.ref_type;
+                    addRefItems=json.id; // Remember to open the field to fill in the new empty list
+                }
+                intApi('GET','edit_types?JSON','refreshsources');
+                break;
+                
+            case 'createType': // New type created
+                if(quiz.type==='0'){
+                    quiz.type=json.obj.toString();
+                    quiz.name=index.val;
+                    quiz.form.push({id:json.obj.toString()
+                                ,type:json.obj.toString()
+                                ,base:dataTypes[index.t]
+                                ,name:index.val
+                                ,view:$('#selecttype [value='+index.t+'][view]').attr('view')});
+                    if($('#qb-name').val()==='')
+                        $('#qb-name').val(index.val);
+                    if($('#quizName').val()==='')
+                        $('#quizName').val(index.val);
+                    if(index.t==='4'){
+                        var f={flds:'',hiddens:''};
+                        quiz.form[0].hidden=true;
+                        shownAndHidden(0,quiz.form[0],f);
+                        $('#hiddens').html(f.hiddens);
+                    }
+                    intApi('GET','edit_types?JSON','refreshsources');
+                }
+                else if(index.isRef)
+                    intApi('POST','_d_ref/'+json.obj+'?JSON','createRef','',{req_t:json.obj,val:index.val,t:dataTypes[index.t]});
+                else
+                    intApi('POST','_d_req/'+quiz.type+'?JSON&t='+json.obj,'createReq','',{req_t:json.obj,val:index.val,t:dataTypes[index.t]});
+                break;
+                
+            case 'ddl':
+                var blank=false,j=quiz.form[$('#'+index.i).attr('order')].default,template=inputBox[index.view+'-OPTION']
+                    ,t=$('#t'+index.i).closest('[reforig]').attr(('reforig'));
+                for(i in json.object){
+                    if(json.object[i].val.trim()==='')
+                        blank=true;
+                    h+=template.replace(':value:',json.object[i].id)
+                            .replace(':selected:',j==json.object[i].id?'selected':'')
+                            .replace(':t:',t)
+                            .replace(':val:',json.object[i].val.replace(/"/gm,'&quot;'));
+                }
+                if(!blank)
+                    h=template.replace(':value:','')
+                            .replace(':selected:','')
+                            .replace(':t:',t)
+                            .replace(':val:','&nbsp;')+h;
+                $('#t'+index.i).html(h);
+                break;
+                
+            case 'runForm':
+                quiz=JSON.parse(json.reqs[json.object[0].id][273]);
+                $('#runFormName').html(quiz.name||'');
+                $('#runFormDescr').html(quiz.descr||'');
+                $('#runFormSubmit').html(quiz.submit||'Отправить');
+                if(quiz.cover||quiz.logo){
+                    $('.cover-container').show();
+                    if(quiz.cover){
+                        $('.q-cover').attr('src',quiz.cover);
+                        $('.q-cover').show();
+                    }
+                    if(quiz.logo){
+                        $('.q-logo').attr('src',quiz.logo);
+                        $('.logo-container').show();
+                        if(quiz.cover)
+                            window.addEventListener('resize', function(event) {
+                                $('.q-logo').css('margin-top',-$('.q-cover')[0].height-$('.q-logo')[0].height/2+'px');
+                            }, true);
+                        else
+                            $('.logo-container').css('position','relative');
+                    }
+                }
+                if(quiz['max-width'])
+                    $('#runForm').css('max-width',quiz['max-width']+'px');
+                for(i in quiz.form){
+                        if(quiz.form[i].hidden)
+                            h+='<div order="'+i+'"><input id="t'+quiz.form[i].id+'" type="hidden" class="q-fld"'
+                                +' value="'+(quiz.form[i].default||search[quiz.form[i].label||quiz.form[i].name]||'')+'"></div>';
+                        else{
+                            h+='<div class="fld p-1 p-sm-3" id="'+quiz.form[i].id+'" order="'+i+'">'
+                                +'    <label class="mb-1" '+(quiz.form[i].required?'style="color:#e00" title="Поле обязательно для заполнения" is-mandatory="1"':'')+'>'
+                                        +(quiz.form[i].label||quiz.form[i].name)
+                                +'    </label>'
+                                +     inputBox[quiz.form[i].view].replace(/:t:/g,quiz.form[i].id)
+                                                .replace(':reforig:',quiz.form[i].ref_type)
+                                                .replace(':value:',search[quiz.form[i].label||quiz.form[i].name]||(quiz.form[i].default?defaults(quiz.form[i].default):''))
+                                                .replace(':placeholder:',quiz.form[i].placeholder||'Введите значение '+quiz.form[i].name)
+                                +'</div>';
+                            if(quiz.form[i].view==='DDL')
+                                intApi('GET','object/'+quiz.form[i].ref_type+'?JSON&LIMIT=1000','ddl','',{i:quiz.form[i].id,view:quiz.form[i].view});
+                        }
+                    }
+                    $('#runFormFields').html(h);
+                    $('#runForm').show();
+                    window.dispatchEvent(new Event('resize'));
+                break;
+                
+            case 'submitForm':
+                if(json.id){
+                    showMsg('submitResult','Данные успешно отправлены, Спасибо!','success',0);
+                    $('#runFormSubmit').remove();
+                }
+                else{
+                    showMsg('submitResult','Ошибка отправки формы','danger',10000);
+                    $('#submitForm').attr('disabled',false);
+                }
+                break;
+                
+            case 'dashlist':
+                template=$('#bi').html();
+                for(i in json.object){
+                    h+=template.replace(':name:',json.object[i].val)
+                            .replace(':id:',json.object[i].id);
+                    savedQuiz[json.object[i].id]=json.reqs[json.object[i].id][273];
+                }
+                h+=template.replace(':name:','Создать...')
+                        .replace(':id:','0');
+                $('#bi').html(h);
+                $('#0').find('.dash-bar').css('background','linear-gradient(92.58deg, #419CE1 4.59%, #1283DA 90.68%)');
+                $('#0').find('.google-visualization-charteditor-category-label').css('color','#eee');
+                $('#dashlist').show();
+                break;
+                
+            case 'checkQuiz':
+                var fd = new FormData();
+                fd.append('t273',JSON.stringify(quiz));
+                if(json.object)
+                    intApi('POST','_m_set/'+json.object[0].id+'?JSON','saveQuiz',fd);
+                else
+                    intApi('POST','_m_new/269?JSON&up=1&t271=QUIZ&t269='+encodeURIComponent($('#quizName').val()),'saveQuiz',fd);
+                break;
+                
+            case 'saveQuiz':
+                $('#save-wait').hide();
+                quizId=json.obj;
+                $('.form-url').attr('href','/{_global_.z}/{_global_.action}/'+quizId).show();
+                break;
+        }
+    }
+    obj.send(vars); // отправили запрос и теперь будем ждать ответ, а пока - выходим
+}
+function reqExists(i){
+    for(var j in dataItems.id)
+        if(dataItems.req_id[j]==i)
+            return true;
+}
+function reqType(i){
+    for(var j in dataItems.id)
+        if(dataItems.id[j]==i)
+            return dataItems.t[j];
+}
+function refType(i){
+    for(var j in dataItems.id)
+        if(dataItems.id[j]==i)
+            return dataItems.t[j];
+}
+function existingType(v,t){
+    v=v.toUpperCase();
+    for(var i in dataItems.id)
+        if(dataItems.val[i].toUpperCase()===v)
+            if((dataItems.t[i]===t)||(t.substr(0,1)==='0'&&dataItems.ref_val[i]!==''))
+                return dataItems.id[i];
+}
+function reqBase(i){
+    for(var j in dataItems.id)
+        if(dataItems.id[j]==i)
+            return dataTypes[reqType(dataItems.t[j])];
+}
+function typeName(i){
+    for(var j in dataItems.id)
+        if(dataItems.id[j]==i)
+            return dataItems.val[j];
+}
+function reqName(i){
+    var alias;
+    for(var j in dataItems.id)
+        if(dataItems.req_id[j]==i){
+            if(dataItems.ref_val[j]!==''){
+                alias=dataItems.attrs[j].match(aliasmask);
+                if(alias!==null)
+				    return alias[1];
+            }
+            return typeName(dataItems.req_t[j]);
+        }
+}
+if(id==='')
+    intApi('GET','object/269?JSON&F_271=QUIZ','dashlist');
+if(parseInt(id)>0){
+    $( document ).ready(function() {
+        $('.footer').remove();
+    });
+    intApi('GET','object/269?JSON&F_269=@'+id,'runForm','',id);
+}
+else
+    intApi('GET','edit_types?JSON','sources');
+var ddlAdd='<div class="input-group pt-2 set:t:" style="display:none;" title="Значения для списка">'
+            +'    <input type="text" class="form-control form-control-sm" placeholder="Добавить значение в список" onkeyup="if(event.keyCode===13)addItem(:t:)">'
+            +'    <div class="input-group-append"><button class="btn btn-primary btn-sm" onclick="addItem(:t:)">Сохранить</button></div>'
+            +'</div>'
+    ,inputBox={
+    'SHORT':'<input type="text" name="placeholder" id="t:t:" value=":value:" class="form-control q-save q-fld" placeholder=":placeholder:">',
+    'SIGNED':'<input type="text" name="placeholder" id="t:t:" value=":value:" class="form-control q-save q-fld" placeholder=":placeholder:">',
+    'NUMBER':'<input type="text" name="placeholder" id="t:t:" value=":value:" class="form-control q-save q-fld" placeholder=":placeholder:">',
+    'DATE':'<input type="date" id="t:t:" value=":value:" class="form-control datepicker q-save q-fld">'
+            +'<div class="pt-2 assist-t:t:" style="display:none;" title="Значение по умолчанию"><span class="date-def" onclick="setDef(:t:,\'[TODAY]\')">Сегодня</span>'
+            +' &nbsp; <span onclick="setDef(:t:)">Очистить</span></div>',
+    'DATETIME':'<input type="datetime-local" id="t:t:" data="DATETIME" value=":value:" class="form-control q-save q-fld">'
+            +'<div class="pt-2 assist-t:t:" style="display:none;" title="Значение по умолчанию"><span class="date-def" onclick="setDef(:t:,\'[NOW]\')">Текущее время</span></div>',
+    'DDL':'<select name="default" id="t:t:" class="form-control q-save q-fld" reforig=":reforig:"></select>'+ddlAdd,
+    'DDL-OPTION':'<option value=":value:" :selected:>:val:</option>',
+    'ONE':'<div id="t:t:" reforig=":reforig:"></div>'+ddlAdd,
+    'ONE-OPTION':'<div class="form-check"><label class="form-check-label"><input type="radio" class="form-check-input" value=":value:" name="opt:t:" :selected:>:val:</label></div>',
+    'MANY':'<div id="t:t:" reforig=":reforig:"></div>'+ddlAdd,
+    'MANY-OPTION':'<div class="form-check"><label class="form-check-label"><input type="checkbox" class="form-check-input" value=":value:" :selected:>:val:</label></div>',
+    'HTML':'<textarea name="placeholder" id="t:t:" class="form-control q-save q-fld" placeholder=":placeholder:">:value:</textarea>',
+    'MEMO':'<textarea name="placeholder" id="t:t:" class="form-control q-save q-fld" placeholder=":placeholder:">:value:</textarea>',
+    'CHARS':'<input type="text" name="placeholder" id="t:t:" value=":value:" class="form-control q-save q-fld" placeholder=":placeholder:">',
+    'FILE':'<input type="file" id="t:t:" value=":value:" class="form-control q-save q-fld">',
+    'BOOLEAN':'<div style="width:40px"><input type="checkbox" name="default" id="t:t:" value="1" class="form-control q-save q-fld"></div>',
+    'PWD':'<input type="password" name="placeholder" id="t:t:" value=":value:" class="form-control q-save q-fld" placeholder=":placeholder:">',
+    'CALCULATABLE':'<span>:value:</span>',
+};
+$(function(){
+    $("#fields").sortable({update:function(){reOrderFields()}});
+    $("#fields").disableSelection();
+});
+$(window).bind('beforeunload',function(){
+    if(edited)
+        return 'Есть несохраненные изменения. Покинуть форму?';
+});
+function defaults(v){
+    switch(v){
+        case '[TODAY]':
+            return new Date().toISOString().substr(0, 10);
+        case '[NOW]':
+            return new Date(new Date().getTime()-new Date().getTimezoneOffset()*60000).toISOString().substring(0,19);
+    }
+    return v;
+}
+function setDef(t,v){
+    var o=$(event.target).closest('[order]').attr('order');
+    if(v!==undefined){
+        quiz.form[o].default=v;
+        v=defaults(v);
+    }
+    else
+        if(quiz.form[o].default)
+            delete quiz.form[o].default;
+    $('#t'+t).val(v||'');
+    setEdited();
+}
+function setNull(t){
+    var o=$(event.target).closest('[order]').attr('order');
+    $('#t'+t).val('');
+}
+function reOrderFields(){
+    var i=0,j;
+    $('.fld').each(function(){
+        console.log('reorder');
+        if(quiz.form[i].id!==this.id)
+            for(j in quiz.form)
+                if(quiz.form[j].id===this.id){ // Swap these array elements
+                    $('#'+this.id+',#h'+this.id).attr('order',i);
+                    $('#'+quiz.form[i].id+',#h'+quiz.form[i].id).attr('order',j);
+                    [quiz.form[i],quiz.form[j]]=[quiz.form[j],quiz.form[i]];
+                    break;
+                }
+        i++;
+    });
+    setEdited();
+}
+function addItem(t){
+    var val=$('.set'+t+' input').val(),reforig=$('#t'+t).attr('reforig');
+    if(val.length>0)
+        intApi('POST','_m_new/'+reforig+'?JSON&up=1','addItem','t'+reforig+'='+encodeURIComponent(val),{t:t,val:val,reforig:reforig});
+    $('.set'+t+' input').val('');
+}
+function deleteFld(el){
+    var i=$(el).closest('[order]').attr('order');
+    intApi('POST','_d_del_req/'+quiz.form[i].id+'?JSON','delFld','',i);
+}
+var timer;
+function showMsg(i,err,mode,timeout){
+    byId(i).innerHTML='<div class="alert alert-'+(mode||'danger')+'" role="alert">'+err+'</div>';
+    if(timeout!==0)
+        timer=setTimeout(function(){byId(i).innerHTML=''},timeout||7000);
+}
+function resultText(t,mode,href){
+    return '&nbsp;&mdash; <a class="text-'+mode+'" target="grants" href="/{_global_.z}/'+href+'">'+t+'</a>';
+}
+function grantAction(t,i){
+    return '&nbsp;&nbsp;&nbsp;<a class="text-warning" onclick="dropObj('+i+')">'+t+'</a>';
+}
+function copyLink(link){
+    document.getElementById('copy_path').style='display:block';
+    document.getElementById('copy_path').value=link;
+    document.getElementById('copy_path').select();
+    document.execCommand('copy');
+    document.getElementById('copy_path').style='display:none';
+}
+function copyFrame(link){
+    document.getElementById('copy_path').style='display:block';
+    document.getElementById('copy_path').value=`<iframe src="${ link }" height="600px" width="100%" style="border:none;"></iframe>`;
+    document.getElementById('copy_path').select();
+    document.execCommand('copy');
+    document.getElementById('copy_path').style='display:none';
+}
+if(search.del)
+    showMsg('messages',t9n('[RU]Опрос удалён[EN]Quiz has been deleted'),'success');
+</script>
+<input id="copy_path" type="text" value="" style="display:none;">
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js" integrity="sha384-B4gt1jrGC7Jh4AgTPSdUtOBvfO8shuf57BaghqFfPlYxofvL8/KUEfYiJOMMV+rV" crossorigin="anonymous"></script>
+<script src="/js/main.js"></script>
