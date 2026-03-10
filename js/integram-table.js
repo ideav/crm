@@ -148,12 +148,18 @@ class IntegramTable {
             // REF format for reference/lookup fields with dropdown filter (issue #795)
             // Values are stored with @-prefix: single = '@id', multi = '@IN(id1,id2)'
             // The format FR_{T}={X} passes the full value as-is to the API parameter
+            // Text-based filters (~, ^, !) use displayValue for partial text matching (issue #799)
             this.filterTypes['REF'] = [
                 { symbol: '=', name: 'равно', format: 'FR_{ T }={ X }' },
                 { symbol: '(,)', name: 'в списке', format: 'FR_{ T }={ X }' },
+                { symbol: '~', name: 'содержит', format: 'FR_{ T }=%{ X }%' },
+                { symbol: '^', name: 'начинается с...', format: 'FR_{ T }={ X }%' },
+                { symbol: '!', name: 'не содержит', format: 'FR_{ T }=!%{ X }%' },
                 { symbol: '%', name: 'не пустое', format: 'FR_{ T }=%' },
                 { symbol: '!%', name: 'пустое', format: 'FR_{ T }=!%' }
             ];
+            // Text-based filter types for REF columns - these use text input instead of dropdown (issue #799)
+            this.refTextFilterTypes = new Set(['~', '^', '!']);
 
             this.init();
         }
@@ -1319,10 +1325,32 @@ class IntegramTable {
             // Use displayValue (resolved text label) when available, otherwise use raw value (issue #551)
             const displayValue = currentFilter.displayValue !== undefined ? currentFilter.displayValue : currentFilter.value;
 
-            // For REF format columns (reference/lookup fields), render a dropdown trigger button (issue #795, #797)
-            // The dropdown is a floating overlay that appears on top of the filter row, not inside it
+            // For REF format columns (reference/lookup fields), render either:
+            // - A text input for text-based filter types (~, ^, !) (issue #799)
+            // - A dropdown trigger button for dropdown-based filter types (=, (,)) (issue #795, #797)
             if (format === 'REF') {
-                // Parse currently selected IDs from filter value
+                // Check if current filter type is text-based (issue #799)
+                const isTextBasedFilter = this.refTextFilterTypes.has(currentFilter.type);
+
+                if (isTextBasedFilter) {
+                    // Render text input for text-based filters (issue #799)
+                    return `
+                        <td>
+                            <div class="filter-cell-wrapper">
+                                <span class="filter-icon-inside" data-column-id="${ column.id }">
+                                    ${ currentFilter.type }
+                                </span>
+                                <input type="text"
+                                       class="filter-input-with-icon filter-ref-text-input"
+                                       data-column-id="${ column.id }"
+                                       value="${ displayValue }"
+                                       placeholder="${ placeholder }">
+                            </div>
+                        </td>
+                    `;
+                }
+
+                // Parse currently selected IDs from filter value for dropdown mode
                 // Single: '@145' → selectedIds = {'145'}
                 // Multi:  '@IN(145,146)' → selectedIds = {'145', '146'}
                 const selectedIds = new Set();
@@ -4055,6 +4083,7 @@ class IntegramTable {
             menu.querySelectorAll('.filter-type-option').forEach(opt => {
                 opt.addEventListener('click', () => {
                     const symbol = opt.dataset.symbol;
+                    const oldType = this.filters[columnId]?.type;
                     if (!this.filters[columnId]) {
                         this.filters[columnId] = { type: this.getDefaultFilterType(format), value: '' };
                     }
@@ -4065,6 +4094,24 @@ class IntegramTable {
                     // Check if this filter overrides URL GET parameters (issue #500)
                     // This handles filter type changes, including Empty/Not Empty filters
                     this.handleFilterOverride(columnId, this.filters[columnId].value || symbol);
+
+                    // For REF columns, check if we need to switch between text input and dropdown modes (issue #799)
+                    if (format === 'REF') {
+                        const wasTextBased = this.refTextFilterTypes.has(oldType);
+                        const isTextBased = this.refTextFilterTypes.has(symbol);
+
+                        // If mode changed, clear the filter value and re-render
+                        if (wasTextBased !== isTextBased) {
+                            this.filters[columnId].value = '';
+                            // Close any open dropdown
+                            if (this.currentRefFilterDropdown && this.currentRefFilterDropdown.colId === columnId) {
+                                this.closeRefFilterDropdown();
+                            }
+                            // Re-render to switch between text input and dropdown
+                            this.render();
+                            return;
+                        }
+                    }
 
                     // For Empty (%) and Not Empty (!%) filters, clear input and apply immediately
                     if (symbol === '%' || symbol === '!%') {
