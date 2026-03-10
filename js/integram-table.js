@@ -4585,7 +4585,7 @@ class IntegramTable {
             const instanceName = this.options.instanceName;
 
             modal.innerHTML = `
-                <h3>Настройки колонок</h3>
+                <h3>Настройки колонок таблицы</h3>
                 <div class="column-settings-list" id="column-settings-list-${instanceName}">
                     ${ this.columns.map(col => `
                         <div class="column-settings-item">
@@ -5147,7 +5147,7 @@ class IntegramTable {
             const instanceName = this.options.instanceName;
 
             modal.innerHTML = `
-                <h3>Настройка таблицы</h3>
+                <h3>Настройка представления</h3>
                 <div class="column-settings-list">
                     <div class="table-settings-item">
                         <button class="btn btn-sm btn-danger" id="reset-settings-btn">Сбросить настройки</button>
