@@ -69,6 +69,7 @@ class IntegramTable {
             this.globalMetadataPromise = null;  // Promise for in-progress globalMetadata fetch (issue #789)
             this.currentEditingCell = null;  // Track currently editing cell
             this.pendingCellClick = null;  // Track pending cell click for focus preservation (issue #518)
+            this.pendingNewRow = null;  // Track pending new row being created (issue #807)
             this.sortColumn = null;  // Column ID being sorted (null = no sort)
             this.sortDirection = null;  // 'asc' or 'desc' (null = no sort)
 
@@ -1843,6 +1844,20 @@ class IntegramTable {
                     // For ALL columns in object format, use 'i' from rawObjectData
                     const rawItem = this.rawObjectData[rowIndex];
                     recordId = rawItem && rawItem.i ? String(rawItem.i) : '';
+
+                    // Issue #807: For new rows that are pending (_isNewRow=true),
+                    // only the first column should be editable
+                    if (rawItem && rawItem._isNewRow) {
+                        const isFirstColumn = column.id === String(this.objectTableId || this.options.tableTypeId);
+                        if (!isFirstColumn) {
+                            // Non-first columns of new row are not editable until row is saved
+                            if (window.INTEGRAM_DEBUG) {
+                                console.log(`  - New row: non-first column ${column.id} not editable until row is saved`);
+                            }
+                            return `<td class="${ cellClass } new-row-cell-disabled" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ escapedValue }</td>`;
+                        }
+                    }
+
                     if (window.INTEGRAM_DEBUG) {
                         console.log(`  - Object format detected - using rawObjectData[${rowIndex}].i = ${recordId}`);
                     }
@@ -2046,11 +2061,178 @@ class IntegramTable {
                 ? `<span class="total-count-unknown" onclick="window.${ instanceName }.fetchTotalCount()" title="Нажмите, чтобы узнать общее количество">?</span>`
                 : this.totalRows;
 
+            // Show add row button only for object-source tables (issue #807)
+            const isObjectSource = this.objectTableId || this.getDataSourceType() === 'table';
+            const addRowBtnHtml = isObjectSource
+                ? `<button class="add-row-btn" onclick="window.${ instanceName }.addNewRow()" title="Добавить запись"><i class="pi pi-plus"></i></button>`
+                : '';
+
             return `
                 <div class="scroll-counter">
+                    ${ addRowBtnHtml }
                     Показано ${ this.loadedRecords } из ${ totalDisplay }
                 </div>
             `;
+        }
+
+        /**
+         * Add a new empty row at the bottom of the table (issue #807)
+         * The row starts in edit mode with only the first column editable.
+         * After the first column is saved, all other cells become editable.
+         */
+        addNewRow() {
+            // Prevent adding multiple new rows at once
+            if (this.pendingNewRow) {
+                this.showToast('Завершите редактирование текущей новой строки', 'info');
+                return;
+            }
+
+            const tableTypeId = this.objectTableId || this.options.tableTypeId;
+            if (!tableTypeId) {
+                this.showToast('Ошибка: не найден тип таблицы', 'error');
+                return;
+            }
+
+            // Create empty row data with placeholder values
+            const emptyRow = this.columns.map(() => '');
+            const newRowIndex = this.data.length;
+
+            // Add empty row to data arrays
+            this.data.push(emptyRow);
+            this.loadedRecords++;
+
+            // Add placeholder to rawObjectData for the new row
+            // Mark as pending (no 'i' field yet since record not created)
+            this.rawObjectData.push({
+                i: null,  // Will be set after _m_new response
+                u: this.options.parentId || 1,
+                o: newRowIndex,
+                r: emptyRow,
+                _isNewRow: true  // Mark this as a pending new row
+            });
+
+            // Track the pending new row
+            this.pendingNewRow = {
+                rowIndex: newRowIndex,
+                tableTypeId: tableTypeId
+            };
+
+            // Re-render the table
+            this.render();
+
+            // After render, find the new row and start editing the first column
+            setTimeout(() => {
+                this.startNewRowEdit(newRowIndex);
+            }, 50);
+        }
+
+        /**
+         * Start editing the first column of a new row (issue #807)
+         * @param {number} rowIndex - Index of the new row
+         */
+        startNewRowEdit(rowIndex) {
+            const tbody = this.container.querySelector('tbody');
+            if (!tbody) return;
+
+            const rows = tbody.querySelectorAll('tr');
+            const newRow = rows[rowIndex];
+            if (!newRow) return;
+
+            // Find the first editable column cell (should match objectTableId)
+            const firstColumnId = String(this.objectTableId || this.options.tableTypeId);
+            const firstCell = newRow.querySelector(`td[data-col-id="${firstColumnId}"]`);
+
+            if (firstCell) {
+                // Start inline editing on the first cell
+                this.startNewRowFirstColumnEdit(firstCell, rowIndex);
+            } else {
+                // Fallback: try the first TD with data-col attribute
+                const firstTd = newRow.querySelector('td[data-col]');
+                if (firstTd) {
+                    this.startNewRowFirstColumnEdit(firstTd, rowIndex);
+                }
+            }
+        }
+
+        /**
+         * Start editing the first column of a new row with special handling (issue #807)
+         * Only the first column is editable until it's saved.
+         * @param {HTMLElement} cell - The first column cell
+         * @param {number} rowIndex - Index of the new row
+         */
+        startNewRowFirstColumnEdit(cell, rowIndex) {
+            const colId = cell.dataset.colId;
+            const column = this.columns.find(c => c.id === colId);
+            if (!column) return;
+
+            const format = column.format || this.mapTypeIdToFormat(column.type);
+
+            // Store editing context
+            this.currentEditingCell = {
+                cell,
+                recordId: null,  // No record ID yet
+                colId,
+                colType: column.paramId || column.id,
+                format,
+                isRef: false,
+                isNewRow: true,
+                rowIndex,
+                parentInfo: {
+                    isObjectFormat: true,
+                    isFirstColumn: true,
+                    parentType: this.objectTableId || this.options.tableTypeId,
+                    parentRecordId: null
+                },
+                originalValue: ''
+            };
+
+            // Highlight required fields in the row (issue #807)
+            this.highlightNewRowRequiredCells(cell);
+
+            // Create inline editor
+            this.renderInlineEditor(cell, '', format);
+        }
+
+        /**
+         * Highlight required cells in a new row (issue #807)
+         * Shows red border on cells that have :!NULL: in attrs
+         * @param {HTMLElement} cell - The cell being edited
+         */
+        highlightNewRowRequiredCells(cell) {
+            const row = cell.closest('tr');
+            if (!row) return;
+
+            // Mark the row as a new row for CSS targeting
+            row.classList.add('new-row-editing');
+
+            // Build ordered columns list (same logic as in render())
+            const orderedColumns = this.columnOrder
+                .map(id => this.columns.find(c => c.id === id))
+                .filter(c => c && this.visibleColumns.includes(c.id));
+
+            // Iterate all cells in the row and highlight those with required attrs
+            const cells = row.querySelectorAll('td[data-col]');
+            cells.forEach(td => {
+                const colIndex = parseInt(td.dataset.col);
+                if (isNaN(colIndex)) return;
+                const column = orderedColumns[colIndex];
+                if (column && column.attrs && column.attrs.includes(':!NULL:')) {
+                    td.classList.add('required-field-new-row');
+                }
+            });
+        }
+
+        /**
+         * Clear new row required field highlighting (issue #807)
+         * @param {HTMLElement} cell - The cell that was being edited
+         */
+        clearNewRowRequiredHighlights(cell) {
+            const row = cell.closest('tr');
+            if (!row) return;
+            row.classList.remove('new-row-editing');
+            row.querySelectorAll('td.required-field-new-row').forEach(td => {
+                td.classList.remove('required-field-new-row');
+            });
         }
 
         attachEventListeners() {
@@ -3459,7 +3641,13 @@ class IntegramTable {
                 return;
             }
 
-            const { cell, recordId, colId, colType, parentInfo } = this.currentEditingCell;
+            const { cell, recordId, colId, colType, parentInfo, isNewRow, rowIndex } = this.currentEditingCell;
+
+            // Handle new row first column save separately (issue #807)
+            if (isNewRow && parentInfo && parentInfo.isFirstColumn) {
+                await this.saveNewRowFirstColumn(newValue);
+                return;
+            }
 
             try {
                 // Determine API endpoint and parameters
@@ -3551,6 +3739,179 @@ class IntegramTable {
                     this.pendingCellClick = null;
                     this.navigateToCell(targetCell);
                 }
+            }
+        }
+
+        /**
+         * Save the first column value of a new row (issue #807)
+         * Creates a new record with _m_new/{tableTypeId}?JSON, passing only the first column value
+         * After successful creation, fetches the full row data with edit_obj
+         * @param {string} newValue - Value for the first column
+         */
+        async saveNewRowFirstColumn(newValue) {
+            if (!this.currentEditingCell || !this.pendingNewRow) {
+                return;
+            }
+
+            const { cell, rowIndex } = this.currentEditingCell;
+            const { tableTypeId } = this.pendingNewRow;
+
+            // Validate: first column value cannot be empty
+            if (!newValue || newValue.trim() === '') {
+                this.showToast('Значение первой колонки не может быть пустым', 'error');
+                return;
+            }
+
+            try {
+                const apiBase = this.getApiBase();
+                const params = new URLSearchParams();
+
+                // Add XSRF token
+                if (typeof xsrf !== 'undefined') {
+                    params.append('_xsrf', xsrf);
+                }
+
+                // Add only the first column value (t{tableTypeId} = value)
+                params.append(`t${tableTypeId}`, newValue);
+
+                // Use F_U from URL as parent (up) when F_U > 1 (issue #616)
+                const parentIdForNew = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
+                const url = `${apiBase}/_m_new/${tableTypeId}?JSON&up=${parentIdForNew}`;
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: params.toString()
+                });
+
+                const responseText = await response.text();
+
+                let result;
+                try {
+                    result = JSON.parse(responseText);
+                } catch (e) {
+                    if (responseText.includes('error') || !response.ok) {
+                        throw new Error(responseText);
+                    }
+                    result = { success: true };
+                }
+
+                if (result.error) {
+                    throw new Error(result.error);
+                }
+
+                // Extract created record ID from response
+                // According to the issue: "её id приходит в ключе obj JSON"
+                const createdId = result.obj || result.id || result.i;
+
+                if (!createdId) {
+                    throw new Error('Не удалось получить ID созданной записи');
+                }
+
+                // Update the rawObjectData with the real record ID
+                if (this.rawObjectData[rowIndex]) {
+                    this.rawObjectData[rowIndex].i = createdId;
+                    this.rawObjectData[rowIndex]._isNewRow = false;  // No longer pending
+                    this.rawObjectData[rowIndex]._isPartialRow = true;  // Partially created
+                }
+
+                // Update the first column display value
+                this.updateCellDisplay(cell, newValue, this.currentEditingCell.format);
+
+                // Clear the editing state for the first column
+                this.clearNewRowRequiredHighlights(cell);
+
+                // Clean up current editing cell
+                if (this.currentEditingCell.outsideClickHandler) {
+                    document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
+                }
+                this.currentEditingCell = null;
+
+                this.showToast('Запись создана', 'success');
+
+                // Now fetch the full row data with edit_obj to get default values
+                await this.fetchNewRowData(createdId, rowIndex);
+
+                // Clear pending new row state
+                this.pendingNewRow = null;
+
+            } catch (error) {
+                console.error('Error saving new row first column:', error);
+                this.showToast(`Ошибка создания записи: ${error.message}`, 'error');
+            }
+        }
+
+        /**
+         * Fetch the full row data after creating a new record (issue #807)
+         * Uses edit_obj/{recordId}?JSON to get all field values including defaults
+         * Then updates the row and makes all cells editable
+         * @param {string|number} recordId - ID of the newly created record
+         * @param {number} rowIndex - Index of the row in the data array
+         */
+        async fetchNewRowData(recordId, rowIndex) {
+            try {
+                const apiBase = this.getApiBase();
+                const response = await fetch(`${apiBase}/edit_obj/${recordId}?JSON`);
+
+                if (!response.ok) {
+                    console.error('Failed to fetch new row data:', response.status);
+                    return;
+                }
+
+                const data = await response.json();
+
+                if (!data || !data.obj) {
+                    console.warn('No object data in edit_obj response');
+                    return;
+                }
+
+                // Update the row data with the fetched values
+                // data.obj contains: { id, typ, typ_name, val, parent, reqs: [...] }
+                const obj = data.obj;
+
+                // Build the new row data from the object
+                // First column is obj.val, rest are from obj.reqs
+                const newRowData = [];
+                newRowData.push(obj.val || '');
+
+                if (obj.reqs && Array.isArray(obj.reqs)) {
+                    // obj.reqs is array of { id, val, type, ref_id?, ... }
+                    // We need to map them to our columns order
+                    const reqsById = {};
+                    obj.reqs.forEach(req => {
+                        reqsById[String(req.id)] = req;
+                    });
+
+                    // Skip the first column (which is the main value)
+                    for (let i = 1; i < this.columns.length; i++) {
+                        const column = this.columns[i];
+                        const reqId = column.paramId || column.id;
+                        const req = reqsById[String(reqId)];
+                        if (req) {
+                            newRowData.push(req.val || '');
+                        } else {
+                            newRowData.push('');
+                        }
+                    }
+                }
+
+                // Update the data array
+                this.data[rowIndex] = newRowData;
+
+                // Update rawObjectData
+                if (this.rawObjectData[rowIndex]) {
+                    this.rawObjectData[rowIndex].r = newRowData;
+                    this.rawObjectData[rowIndex]._isPartialRow = false;  // Now fully loaded
+                }
+
+                // Re-render the table to show the updated row with all cells editable
+                this.render();
+
+            } catch (error) {
+                console.error('Error fetching new row data:', error);
+                // Don't show error toast - the row was created successfully, just couldn't fetch defaults
             }
         }
 
@@ -3677,7 +4038,13 @@ class IntegramTable {
                 return;
             }
 
-            const { cell } = this.currentEditingCell;
+            const { cell, isNewRow, rowIndex } = this.currentEditingCell;
+
+            // Issue #807: If cancelling edit on a new row, remove the entire row
+            if (isNewRow && this.pendingNewRow) {
+                this.cancelNewRow(rowIndex);
+                return;
+            }
 
             // Remove required field highlighting (issue #779)
             this.clearRequiredCellHighlights(cell);
@@ -3720,6 +4087,36 @@ class IntegramTable {
                 this.pendingCellClick = null;
                 this.navigateToCell(targetCell);
             }
+        }
+
+        /**
+         * Cancel a new row that was being created (issue #807)
+         * Removes the row from data arrays and re-renders the table
+         * @param {number} rowIndex - Index of the new row to cancel
+         */
+        cancelNewRow(rowIndex) {
+            // Remove the row from data arrays
+            if (rowIndex !== undefined && rowIndex !== null) {
+                this.data.splice(rowIndex, 1);
+                this.rawObjectData.splice(rowIndex, 1);
+                this.loadedRecords--;
+            }
+
+            // Clear the pending new row state
+            this.pendingNewRow = null;
+
+            // Clean up current editing cell
+            if (this.currentEditingCell) {
+                if (this.currentEditingCell.outsideClickHandler) {
+                    document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
+                }
+                this.currentEditingCell = null;
+            }
+
+            // Re-render the table
+            this.render();
+
+            this.showToast('Создание записи отменено', 'info');
         }
 
         /**
