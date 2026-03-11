@@ -370,10 +370,15 @@
     }
 </style>
 
-<div id="cards-container">
-    <div class="cards-loading" id="cards-initial-loading">Загрузка данных...</div>
-</div>
-
+<div id="my-cards"
+     data-cards-view
+     data-table-type-id="{_global_.id}"
+     data-page-size="20"
+     data-cookie-prefix="cards-{_global_.id}"
+     data-title=""
+     data-instance-name="myCardsView"></div>
+<link rel="stylesheet" href="/css/integram-table.css" />
+<script src="/js/integram-table.js"></script>
 <script>
 /**
  * CardsView Component
