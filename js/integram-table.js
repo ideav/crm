@@ -3872,7 +3872,7 @@ class IntegramTable {
 
                 // Fetch the record using the JSON_OBJ format with record ID filter (issue #811)
                 // t{tableTypeId}=@{recordId} filters by the specific record ID
-                const fetchUrl = `${apiBase}/object/${tableTypeId}/?JSON_OBJ&t${tableTypeId}=@${recordId}`;
+                const fetchUrl = `${apiBase}/object/${tableTypeId}/?JSON_OBJ&FR_${tableTypeId}=@${recordId}`;
                 const response = await fetch(fetchUrl);
 
                 if (!response.ok) {
