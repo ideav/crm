@@ -449,10 +449,10 @@
         // Try to parse ISO / timestamp strings, return date-only part
         var s = String(v);
         // Already looks like a date
-        var m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+        var m = s.match(/^(\d\d\d\d-\d\d-\d\d)/);
         if (m) return m[1];
         // Try DD.MM.YYYY (already formatted)
-        var m2 = s.match(/^(\d{2}\.\d{2}\.\d{4})/);
+        var m2 = s.match(/^(\d\d\.\d\d\.\d\d\d\d)/);
         if (m2) return m2[1];
         // Try to parse as number (unix timestamp)
         var ts = Number(s);
@@ -506,15 +506,15 @@
         };
 
         // State
-        this.columns       = [];   // [{id, name, type}]
+        this.columns       = [];   // [{ id, name, type }]
         this.data          = [];   // array of row-arrays (parallel to this.columns)
-        this.rawObjectData = [];   // raw [{i,r}] from object API
+        this.rawObjectData = [];   // raw [{ i,r }] from object API
         this.loadedRecords = 0;
         this.hasMore       = true;
         this.isLoading     = false;
         this.metadata      = null;
         this.searchQuery   = '';
-        this.fieldFilters  = {};   // {colId: value}
+        this.fieldFilters  = {};   // { colId: value }
         this.sortColId     = null;
 
         // Customization settings (saved/loaded)
