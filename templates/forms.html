@@ -557,36 +557,36 @@
     <!-- Header -->
     <div class="forms-header">
         <h1 class="forms-title" id="formTitle">
-            <t9n>[RU]Конструктор форм[EN]Form Constructor</t9n>
+            Конструктор форм
         </h1>
         <div class="forms-actions">
             <button class="btn btn-secondary hidden" id="toggleEditBtn" onclick="toggleEditMode()">
                 <i class="pi pi-pencil"></i>
-                <t9n>[RU]Редактировать[EN]Edit</t9n>
+                Редактировать
             </button>
             <button class="btn btn-primary hidden" id="addPanelBtn" onclick="showAddPanelModal()">
                 <i class="pi pi-plus"></i>
-                <t9n>[RU]Добавить панель[EN]Add Panel</t9n>
+                Добавить панель
             </button>
         </div>
     </div>
 
     <!-- Form Selection (shown when no form selected) -->
     <div class="forms-list" id="formsListContainer">
-        <h3><t9n>[RU]Выберите форму или создайте новую[EN]Select a form or create new</t9n></h3>
+        <h3>Выберите форму или создайте новую</h3>
         <div id="formsList">
             <!-- Forms will be loaded here -->
             <div class="loading" id="formsLoading">
-                <t9n>[RU]Загрузка форм...[EN]Loading forms...</t9n>
+                Загрузка форм...
             </div>
         </div>
         <div style="margin-top: 15px;">
             <form id="createFormForm" onsubmit="return createNewForm(event)">
                 <div style="display: flex; gap: 10px;">
-                    <input type="text" id="newFormName" placeholder="<t9n>[RU]Имя новой формы[EN]New form name</t9n>"
+                    <input type="text" id="newFormName" placeholder="Имя новой формы"
                            class="form-control" style="flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;">
                     <button type="submit" class="btn btn-primary">
-                        <t9n>[RU]Создать форму[EN]Create Form</t9n>
+                        Создать форму
                     </button>
                 </div>
             </form>
@@ -601,7 +601,7 @@
     <!-- Empty State (shown when form has no panels) -->
     <div class="empty-state hidden" id="emptyState">
         <div class="empty-state-icon"><i class="pi pi-th-large"></i></div>
-        <p><t9n>[RU]Эта форма пока пуста. Добавьте панель для начала работы.[EN]This form is empty. Add a panel to get started.</t9n></p>
+        <p>Эта форма пока пуста. Добавьте панель для начала работы.</p>
     </div>
 </div>
 
@@ -609,74 +609,74 @@
 <div class="modal-overlay hidden" id="addPanelModal">
     <div class="modal-content">
         <div class="modal-header">
-            <h3><t9n>[RU]Добавить панель[EN]Add Panel</t9n></h3>
+            <h3>Добавить панель</h3>
             <button class="modal-close" onclick="hideAddPanelModal()">&times;</button>
         </div>
         <div class="modal-body">
             <div class="form-field">
-                <label><t9n>[RU]Название панели[EN]Panel Name</t9n></label>
-                <input type="text" id="panelName" placeholder="<t9n>[RU]Введите название[EN]Enter name</t9n>">
+                <label>Название панели</label>
+                <input type="text" id="panelName" placeholder="Введите название">
             </div>
 
             <div class="form-field" style="margin-top: 15px;">
-                <label><t9n>[RU]Тип панели[EN]Panel Type</t9n></label>
+                <label>Тип панели</label>
                 <div class="panel-type-grid" id="panelTypeGrid">
                     <div class="panel-type-option" data-type="XYChart" onclick="selectPanelType(this)">
                         <div class="panel-type-icon"><i class="pi pi-chart-line"></i></div>
-                        <div class="panel-type-name"><t9n>[RU]Линейный график[EN]Line Chart</t9n></div>
+                        <div class="panel-type-name">Линейный график</div>
                     </div>
                     <div class="panel-type-option" data-type="PieChart" onclick="selectPanelType(this)">
                         <div class="panel-type-icon"><i class="pi pi-chart-pie"></i></div>
-                        <div class="panel-type-name"><t9n>[RU]Круговая диаграмма[EN]Pie Chart</t9n></div>
+                        <div class="panel-type-name">Круговая диаграмма</div>
                     </div>
                     <div class="panel-type-option" data-type="Histogram" onclick="selectPanelType(this)">
                         <div class="panel-type-icon"><i class="pi pi-chart-bar"></i></div>
-                        <div class="panel-type-name"><t9n>[RU]Гистограмма[EN]Histogram</t9n></div>
+                        <div class="panel-type-name">Гистограмма</div>
                     </div>
                     <div class="panel-type-option" data-type="Pivot" onclick="selectPanelType(this)">
                         <div class="panel-type-icon"><i class="pi pi-table"></i></div>
-                        <div class="panel-type-name"><t9n>[RU]Сводная таблица[EN]Pivot Table</t9n></div>
+                        <div class="panel-type-name">Сводная таблица</div>
                     </div>
                     <div class="panel-type-option" data-type="Report" onclick="selectPanelType(this)">
                         <div class="panel-type-icon"><i class="pi pi-list"></i></div>
-                        <div class="panel-type-name"><t9n>[RU]Отчет (таблица)[EN]Report (Table)</t9n></div>
+                        <div class="panel-type-name">Отчет (таблица)</div>
                     </div>
                     <div class="panel-type-option" data-type="DataEntry" onclick="selectPanelType(this)">
                         <div class="panel-type-icon"><i class="pi pi-file-edit"></i></div>
-                        <div class="panel-type-name"><t9n>[RU]Форма ввода[EN]Data Entry Form</t9n></div>
+                        <div class="panel-type-name">Форма ввода</div>
                     </div>
                 </div>
             </div>
 
             <div class="form-field" style="margin-top: 15px;">
-                <label><t9n>[RU]Источник данных[EN]Data Source</t9n></label>
+                <label>Источник данных</label>
                 <select id="dataSourceType" onchange="toggleDataSourceFields()">
-                    <option value=""><t9n>[RU]Выберите тип[EN]Select type</t9n></option>
-                    <option value="table"><t9n>[RU]Таблица (объект)[EN]Table (Object)</t9n></option>
-                    <option value="report"><t9n>[RU]Запрос (отчет)[EN]Query (Report)</t9n></option>
+                    <option value="">Выберите тип</option>
+                    <option value="table">Таблица (объект)</option>
+                    <option value="report">Запрос (отчет)</option>
                 </select>
             </div>
 
             <div class="form-field hidden" id="tableSourceField" style="margin-top: 10px;">
-                <label><t9n>[RU]Выберите таблицу[EN]Select Table</t9n></label>
+                <label>Выберите таблицу</label>
                 <select id="tableSource">
-                    <option value=""><t9n>[RU]Загрузка...[EN]Loading...</t9n></option>
+                    <option value="">Загрузка...</option>
                 </select>
             </div>
 
             <div class="form-field hidden" id="reportSourceField" style="margin-top: 10px;">
-                <label><t9n>[RU]Выберите запрос[EN]Select Query</t9n></label>
+                <label>Выберите запрос</label>
                 <select id="reportSource">
-                    <option value=""><t9n>[RU]Загрузка...[EN]Loading...</t9n></option>
+                    <option value="">Загрузка...</option>
                 </select>
             </div>
         </div>
         <div class="modal-footer">
             <button class="btn btn-secondary" onclick="hideAddPanelModal()">
-                <t9n>[RU]Отмена[EN]Cancel</t9n>
+                Отмена
             </button>
             <button class="btn btn-primary" onclick="addPanel()">
-                <t9n>[RU]Добавить[EN]Add</t9n>
+                Добавить
             </button>
         </div>
     </div>
@@ -686,53 +686,53 @@
 <div class="modal-overlay hidden" id="editPanelModal">
     <div class="modal-content">
         <div class="modal-header">
-            <h3><t9n>[RU]Настройки панели[EN]Panel Settings</t9n></h3>
+            <h3>Настройки панели</h3>
             <button class="modal-close" onclick="hideEditPanelModal()">&times;</button>
         </div>
         <div class="modal-body">
             <input type="hidden" id="editPanelId">
             <div class="form-field">
-                <label><t9n>[RU]Название панели[EN]Panel Name</t9n></label>
+                <label>Название панели</label>
                 <input type="text" id="editPanelName">
             </div>
             <div class="form-field" style="margin-top: 15px;">
-                <label><t9n>[RU]Цвет шрифта[EN]Font Color</t9n></label>
+                <label>Цвет шрифта</label>
                 <input type="color" id="editPanelColor" value="#333333">
             </div>
             <div class="form-field" style="margin-top: 15px;">
-                <label><t9n>[RU]Цвет фона[EN]Background Color</t9n></label>
+                <label>Цвет фона</label>
                 <input type="color" id="editPanelBgColor" value="#ffffff">
             </div>
             <div class="form-field" style="margin-top: 15px;">
-                <label><t9n>[RU]Группа[EN]Group</t9n></label>
-                <input type="number" id="editPanelGroup" placeholder="<t9n>[RU]Номер группы (панели с одинаковой группой отображаются вертикально)[EN]Group number (panels with same group display vertically)</t9n>" min="0">
+                <label>Группа</label>
+                <input type="number" id="editPanelGroup" placeholder="Номер группы (панели с одинаковой группой отображаются вертикально)" min="0">
             </div>
             <div class="form-field" style="margin-top: 15px;">
-                <label><t9n>[RU]Фильтр[EN]Filter</t9n></label>
-                <input type="text" id="editPanelFilter" placeholder="<t9n>[RU]Например: FR_Дата=1.1&TO_Дата=31.1[EN]Example: FR_Date=1.1&TO_Date=31.1</t9n>">
+                <label>Фильтр</label>
+                <input type="text" id="editPanelFilter" placeholder="Например: FR_Дата=1.1&TO_Дата=31.1">
             </div>
             <div class="form-field" style="margin-top: 15px;">
-                <label><t9n>[RU]Действие после отправки[EN]Next Action</t9n></label>
-                <input type="text" id="editPanelNextAction" placeholder="<t9n>[RU]URL или действие[EN]URL or action</t9n>">
+                <label>Действие после отправки</label>
+                <input type="text" id="editPanelNextAction" placeholder="URL или действие">
             </div>
             <div class="form-field" style="margin-top: 15px;">
-                <label><t9n>[RU]Режим отображения содержимого[EN]Content Display Mode</t9n></label>
+                <label>Режим отображения содержимого</label>
                 <select id="editPanelOverflowMode">
-                    <option value=""><t9n>[RU]По умолчанию[EN]Default</t9n></option>
-                    <option value="scroll"><t9n>[RU]Скроллить (фиксированная высота)[EN]Scroll (fixed height)</t9n></option>
-                    <option value="stretch"><t9n>[RU]Растягивать (по размеру содержимого)[EN]Stretch (fit content)</t9n></option>
+                    <option value="">По умолчанию</option>
+                    <option value="scroll">Скроллить (фиксированная высота)</option>
+                    <option value="stretch">Растягивать (по размеру содержимого)</option>
                 </select>
             </div>
         </div>
         <div class="modal-footer">
             <button class="btn btn-danger" onclick="deletePanel()">
-                <t9n>[RU]Удалить[EN]Delete</t9n>
+                Удалить
             </button>
             <button class="btn btn-secondary" onclick="hideEditPanelModal()">
-                <t9n>[RU]Отмена[EN]Cancel</t9n>
+                Отмена
             </button>
             <button class="btn btn-primary" onclick="savePanel()">
-                <t9n>[RU]Сохранить[EN]Save</t9n>
+                Сохранить
             </button>
         </div>
     </div>
@@ -742,41 +742,41 @@
 <div class="modal-overlay hidden" id="addButtonModal">
     <div class="modal-content">
         <div class="modal-header">
-            <h3><t9n>[RU]Добавить кнопку[EN]Add Button</t9n></h3>
+            <h3>Добавить кнопку</h3>
             <button class="modal-close" onclick="hideAddButtonModal()">&times;</button>
         </div>
         <div class="modal-body">
             <input type="hidden" id="buttonPanelId">
             <div class="form-field">
-                <label><t9n>[RU]Текст кнопки[EN]Button Text</t9n></label>
+                <label>Текст кнопки</label>
                 <input type="text" id="buttonText">
             </div>
             <div class="form-field" style="margin-top: 15px;">
-                <label><t9n>[RU]Действие[EN]Action</t9n></label>
+                <label>Действие</label>
                 <select id="buttonActionType" onchange="toggleButtonActionFields()">
-                    <option value="js"><t9n>[RU]Вызов функции JS[EN]Call JS Function</t9n></option>
-                    <option value="link"><t9n>[RU]Переход по ссылке[EN]Navigate to Link</t9n></option>
+                    <option value="js">Вызов функции JS</option>
+                    <option value="link">Переход по ссылке</option>
                 </select>
             </div>
             <div class="form-field" id="jsActionField" style="margin-top: 10px;">
-                <label><t9n>[RU]Имя функции[EN]Function Name</t9n></label>
-                <input type="text" id="buttonJsFunction" placeholder="<t9n>[RU]Например: myFunction()[EN]Example: myFunction()</t9n>">
+                <label>Имя функции</label>
+                <input type="text" id="buttonJsFunction" placeholder="Например: myFunction()">
             </div>
             <div class="form-field hidden" id="linkActionField" style="margin-top: 10px;">
-                <label><t9n>[RU]URL ссылки[EN]Link URL</t9n></label>
-                <input type="text" id="buttonLinkUrl" placeholder="<t9n>[RU]Например: /workplace?param=value[EN]Example: /workplace?param=value</t9n>">
+                <label>URL ссылки</label>
+                <input type="text" id="buttonLinkUrl" placeholder="Например: /workplace?param=value">
             </div>
             <div class="form-field" style="margin-top: 15px;">
-                <label><t9n>[RU]CSS класс кнопки[EN]Button CSS Class</t9n></label>
+                <label>CSS класс кнопки</label>
                 <input type="text" id="buttonClass" value="btn btn-primary" placeholder="btn btn-primary">
             </div>
         </div>
         <div class="modal-footer">
             <button class="btn btn-secondary" onclick="hideAddButtonModal()">
-                <t9n>[RU]Отмена[EN]Cancel</t9n>
+                Отмена
             </button>
             <button class="btn btn-primary" onclick="addButtonToPanel()">
-                <t9n>[RU]Добавить[EN]Add</t9n>
+                Добавить
             </button>
         </div>
     </div>
@@ -786,13 +786,13 @@
 <div class="modal-overlay hidden" id="columnConfigModal">
     <div class="modal-content">
         <div class="modal-header">
-            <h3><t9n>[RU]Настройки колонок отчета[EN]Report Column Settings</t9n></h3>
+            <h3>Настройки колонок отчета</h3>
             <button class="modal-close" onclick="hideColumnConfigModal()">&times;</button>
         </div>
         <div class="modal-body">
             <input type="hidden" id="columnConfigPanelId">
             <p style="margin-bottom: 15px; color: #666;">
-                <t9n>[RU]Отметьте видимые колонки и перетащите для изменения порядка[EN]Check visible columns and drag to reorder</t9n>
+                Отметьте видимые колонки и перетащите для изменения порядка
             </p>
             <div class="column-config-list" id="columnConfigList">
                 <!-- Column items will be added here -->
@@ -800,10 +800,10 @@
         </div>
         <div class="modal-footer">
             <button class="btn btn-secondary" onclick="hideColumnConfigModal()">
-                <t9n>[RU]Отмена[EN]Cancel</t9n>
+                Отмена
             </button>
             <button class="btn btn-primary" onclick="saveColumnConfig()">
-                <t9n>[RU]Сохранить[EN]Save</t9n>
+                Сохранить
             </button>
         </div>
     </div>
@@ -830,12 +830,12 @@ const FormConstructor = {
 
     // Panel type definitions
     panelTypes: {
-        'XYChart': { name: t9n('[RU]Линейный график[EN]Line Chart'), chartType: 'line' },
-        'PieChart': { name: t9n('[RU]Круговая диаграмма[EN]Pie Chart'), chartType: 'pie' },
-        'Histogram': { name: t9n('[RU]Гистограмма[EN]Histogram'), chartType: 'bar' },
-        'Pivot': { name: t9n('[RU]Сводная таблица[EN]Pivot Table') },
-        'Report': { name: t9n('[RU]Отчет[EN]Report') },
-        'DataEntry': { name: t9n('[RU]Форма ввода[EN]Data Entry') }
+        'XYChart': { name: 'Линейный график', chartType: 'line' },
+        'PieChart': { name: 'Круговая диаграмма', chartType: 'pie' },
+        'Histogram': { name: 'Гистограмма', chartType: 'bar' },
+        'Pivot': { name: 'Сводная таблица' },
+        'Report': { name: 'Отчет' },
+        'DataEntry': { name: 'Форма ввода' }
     }
 };
 
@@ -965,7 +965,7 @@ function loadForms() {
 
         // JSON_OBJ returns array format: [{i: id, u: parent, o: order, r: [val1, val2, ...]}, ...]
         if (!json || !Array.isArray(json) || json.length === 0) {
-            container.innerHTML = '<p>' + t9n('[RU]Нет форм[EN]No forms') + '</p>';
+            container.innerHTML = '<p>' + 'Нет форм' + '</p>';
             return;
         }
 
@@ -985,8 +985,8 @@ function loadForms() {
             // For reference fields (id:name format), display only the name
             html += '<span class="form-item-name">' + escapeHtml(getDisplayValue(form.val) || 'Form ' + form.id) + '</span>';
             html += '<div class="form-item-actions">';
-            html += '<a href="/' + FormConstructor.db + '/forms/' + form.id + '" class="btn btn-sm btn-secondary">' + t9n('[RU]Открыть[EN]Open') + '</a>';
-            html += '<a href="/' + FormConstructor.db + '/forms/' + form.id + '?EDIT" class="btn btn-sm btn-primary">' + t9n('[RU]Редактировать[EN]Edit') + '</a>';
+            html += '<a href="/' + FormConstructor.db + '/forms/' + form.id + '" class="btn btn-sm btn-secondary">' + 'Открыть' + '</a>';
+            html += '<a href="/' + FormConstructor.db + '/forms/' + form.id + '?EDIT" class="btn btn-sm btn-primary">' + 'Редактировать' + '</a>';
             html += '</div>';
             html += '</div>';
         });
@@ -1009,7 +1009,7 @@ function loadReports() {
 
         // JSON_OBJ returns array format: [{i: id, u: parent, o: order, r: [val1, val2, ...]}, ...]
         if (!json || !Array.isArray(json) || json.length === 0) {
-            select.innerHTML = '<option value="">' + t9n('[RU]Нет запросов[EN]No queries') + '</option>';
+            select.innerHTML = '<option value="">' + 'Нет запросов' + '</option>';
             return;
         }
 
@@ -1023,7 +1023,7 @@ function loadReports() {
             };
         });
 
-        let html = '<option value="">' + t9n('[RU]Выберите запрос[EN]Select query') + '</option>';
+        let html = '<option value="">' + 'Выберите запрос' + '</option>';
         FormConstructor.reports.forEach(function(report) {
             // For reference fields (id:name format), display only the name
             html += '<option value="' + report.id + '">' + escapeHtml(getDisplayValue(report.val) || 'Report ' + report.id) + '</option>';
@@ -1042,13 +1042,13 @@ function loadTables() {
         const select = document.getElementById('tableSource');
 
         if (!json || !Array.isArray(json)) {
-            select.innerHTML = '<option value="">' + t9n('[RU]Нет таблиц[EN]No tables') + '</option>';
+            select.innerHTML = '<option value="">' + 'Нет таблиц' + '</option>';
             return;
         }
 
         FormConstructor.tables = json;
 
-        let html = '<option value="">' + t9n('[RU]Выберите таблицу[EN]Select table') + '</option>';
+        let html = '<option value="">' + 'Выберите таблицу' + '</option>';
         json.forEach(function(table) {
             // For reference fields (id:name format), display only the name
             html += '<option value="' + table.id + '">' + escapeHtml(getDisplayValue(table.val) || 'Table ' + table.id) + '</option>';
@@ -1264,12 +1264,12 @@ function createPanelElement(panel, panelReqs) {
         headerHtml += '<div class="panel-actions">';
         // Display group badge if group is set
         if (group !== '' && group !== null && group !== undefined) {
-            headerHtml += '<span class="panel-group-badge" title="' + t9n('[RU]Группа[EN]Group') + '">' + escapeHtml(group) + '</span>';
+            headerHtml += '<span class="panel-group-badge" title="' + 'Группа' + '">' + escapeHtml(group) + '</span>';
         }
-        headerHtml += '<button class="btn btn-sm btn-secondary" onclick="movePanel(' + panel.id + ', -1)" title="' + t9n('[RU]Вверх[EN]Up') + '"><i class="pi pi-arrow-up"></i></button>';
-        headerHtml += '<button class="btn btn-sm btn-secondary" onclick="movePanel(' + panel.id + ', 1)" title="' + t9n('[RU]Вниз[EN]Down') + '"><i class="pi pi-arrow-down"></i></button>';
-        headerHtml += '<button class="btn btn-sm btn-secondary" onclick="showEditPanelModal(' + panel.id + ')" title="' + t9n('[RU]Настройки[EN]Settings') + '"><i class="pi pi-cog"></i></button>';
-        headerHtml += '<button class="btn btn-sm btn-secondary" onclick="showAddButtonModal(' + panel.id + ')" title="' + t9n('[RU]Добавить кнопку[EN]Add Button') + '"><i class="pi pi-plus"></i></button>';
+        headerHtml += '<button class="btn btn-sm btn-secondary" onclick="movePanel(' + panel.id + ', -1)" title="' + 'Вверх' + '"><i class="pi pi-arrow-up"></i></button>';
+        headerHtml += '<button class="btn btn-sm btn-secondary" onclick="movePanel(' + panel.id + ', 1)" title="' + 'Вниз' + '"><i class="pi pi-arrow-down"></i></button>';
+        headerHtml += '<button class="btn btn-sm btn-secondary" onclick="showEditPanelModal(' + panel.id + ')" title="' + 'Настройки' + '"><i class="pi pi-cog"></i></button>';
+        headerHtml += '<button class="btn btn-sm btn-secondary" onclick="showAddButtonModal(' + panel.id + ')" title="' + 'Добавить кнопку' + '"><i class="pi pi-plus"></i></button>';
         headerHtml += '</div>';
     }
     headerHtml += '</div>';
@@ -1279,15 +1279,15 @@ function createPanelElement(panel, panelReqs) {
 
     // Panel content
     headerHtml += '<div class="panel-content" id="panel-content-' + panel.id + '">';
-    headerHtml += '<div class="loading">' + t9n('[RU]Загрузка...[EN]Loading...') + '</div>';
+    headerHtml += '<div class="loading">' + 'Загрузка...' + '</div>';
     headerHtml += '</div>';
 
     // Panel meta (edit mode)
     if (FormConstructor.editMode) {
         headerHtml += '<div class="panel-meta">';
-        headerHtml += '<t9n>[RU]Тип[EN]Type</t9n>: ' + escapeHtml(getPanelTypeName(getDisplayValue(panelType)));
+        headerHtml += 'Тип: ' + escapeHtml(getPanelTypeName(getDisplayValue(panelType)));
         if (reportId) {
-            headerHtml += ' | <t9n>[RU]Запрос[EN]Report</t9n>: ' + escapeHtml(getDisplayValue(reportId));
+            headerHtml += ' | Запрос: ' + escapeHtml(getDisplayValue(reportId));
         }
         headerHtml += '</div>';
     }
@@ -1308,7 +1308,7 @@ function getPanelTypeName(typeId) {
     if (table) {
         return table.val || 'Table ' + typeId;
     }
-    return typeId || t9n('[RU]Не указан[EN]Not set');
+    return typeId || 'Не указан';
 }
 
 // ============================================================
@@ -1357,7 +1357,7 @@ function loadPanelData(panelId, panelReqs) {
         // Default to report table
         renderReportTable(panelId, reportId, filter, config, contentEl);
     } else {
-        contentEl.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Настройте источник данных для этой панели[EN]Configure data source for this panel') + '</p></div>';
+        contentEl.innerHTML = '<div class="empty-state"><p>' + 'Настройте источник данных для этой панели' + '</p></div>';
     }
 }
 
@@ -1407,7 +1407,7 @@ function renderChart(panelId, chartType, reportId, filter, config, container) {
 
     apiRequest('GET', url, null, function(json) {
         if (!json || !json.data || !json.columns) {
-            container.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Нет данных[EN]No data') + '</p></div>';
+            container.innerHTML = '<div class="empty-state"><p>' + 'Нет данных' + '</p></div>';
             return;
         }
 
@@ -1502,7 +1502,7 @@ function renderPivotTable(panelId, reportId, filter, config, container) {
 
     apiRequest('GET', url, null, function(json) {
         if (!json || !json.data || !json.columns) {
-            container.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Нет данных[EN]No data') + '</p></div>';
+            container.innerHTML = '<div class="empty-state"><p>' + 'Нет данных' + '</p></div>';
             return;
         }
 
@@ -1563,14 +1563,14 @@ function renderPivotTable(panelId, reportId, filter, config, container) {
                 const saveBtn = document.createElement('button');
                 saveBtn.className = 'btn btn-sm btn-primary';
                 saveBtn.style.marginTop = '10px';
-                saveBtn.textContent = t9n('[RU]Сохранить настройки pivot[EN]Save Pivot Config');
+                saveBtn.textContent = 'Сохранить настройки pivot';
                 saveBtn.onclick = function() {
                     savePivotConfig(panelId, pivotId);
                 };
                 container.appendChild(saveBtn);
             }
         } else {
-            container.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Pivot библиотека не загружена[EN]Pivot library not loaded') + '</p></div>';
+            container.innerHTML = '<div class="empty-state"><p>' + 'Pivot библиотека не загружена' + '</p></div>';
         }
     });
 }
@@ -1590,7 +1590,7 @@ function savePivotConfig(panelId, pivotId) {
     const config = Object.assign({}, originalConfig, pivotOptions);
 
     apiRequest('POST', '_m_set/' + panelId + '?JSON', { 't225': JSON.stringify(config) }, function(json) {
-        alert(t9n('[RU]Настройки сохранены[EN]Settings saved'));
+        alert('Настройки сохранены');
     });
 }
 
@@ -1606,7 +1606,7 @@ function renderReportTable(panelId, reportId, filter, config, container) {
 
     apiRequest('GET', url, null, function(json) {
         if (!json || !json.data || !json.columns) {
-            container.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Нет данных[EN]No data') + '</p></div>';
+            container.innerHTML = '<div class="empty-state"><p>' + 'Нет данных' + '</p></div>';
             return;
         }
 
@@ -1671,7 +1671,7 @@ function renderReportTable(panelId, reportId, filter, config, container) {
         if (FormConstructor.editMode) {
             html += '<div class="column-config-bar">';
             html += '<button class="btn btn-sm btn-secondary" onclick="showColumnConfigModal(' + panelId + ')">';
-            html += '<i class="pi pi-cog"></i> ' + t9n('[RU]Настройки колонок[EN]Column Settings');
+            html += '<i class="pi pi-cog"></i> ' + 'Настройки колонок';
             html += '</button>';
             html += '</div>';
         }
@@ -1743,7 +1743,7 @@ function renderTableAsReport(panelId, tableId, filter, config, container) {
     // First, get table metadata to know the columns
     getMetadata(tableId, function(metadata) {
         if (!metadata || !metadata.reqs) {
-            container.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Не удалось загрузить структуру таблицы[EN]Failed to load table structure') + '</p></div>';
+            container.innerHTML = '<div class="empty-state"><p>' + 'Не удалось загрузить структуру таблицы' + '</p></div>';
             return;
         }
 
@@ -1753,7 +1753,7 @@ function renderTableAsReport(panelId, tableId, filter, config, container) {
 
         apiRequest('GET', url, null, function(json) {
             if (!json || !Array.isArray(json) || json.length === 0) {
-                container.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Нет данных[EN]No data') + '</p></div>';
+                container.innerHTML = '<div class="empty-state"><p>' + 'Нет данных' + '</p></div>';
                 return;
             }
 
@@ -1767,7 +1767,7 @@ function renderTableAsReport(panelId, tableId, filter, config, container) {
 
             // Build columns from metadata
             // First column is always the object name (r[0])
-            const allColumns = [{ id: 'name', name: metadata.val || t9n('[RU]Название[EN]Name') }];
+            const allColumns = [{ id: 'name', name: metadata.val || 'Название' }];
             debugLog('renderTableAsReport - metadata', { tableId: tableId, tableName: metadata.val, reqsCount: metadata.reqs ? metadata.reqs.length : 0, reqs: metadata.reqs });
             metadata.reqs.forEach(function(req, index) {
                 allColumns.push({
@@ -1823,7 +1823,7 @@ function renderTableAsReport(panelId, tableId, filter, config, container) {
             if (FormConstructor.editMode) {
                 html += '<div class="column-config-bar">';
                 html += '<button class="btn btn-sm btn-secondary" onclick="showColumnConfigModalForTable(' + panelId + ')">';
-                html += '<i class="pi pi-cog"></i> ' + t9n('[RU]Настройки колонок[EN]Column Settings');
+                html += '<i class="pi pi-cog"></i> ' + 'Настройки колонок';
                 html += '</button>';
                 html += '</div>';
             }
@@ -1906,7 +1906,7 @@ function renderDataEntryForm(panelId, tableType, reportId, filter, container) {
     // Get table metadata to build form (using cache)
     getMetadata(tableType, function(json) {
         if (!json || !json.reqs) {
-            container.innerHTML = '<div class="empty-state"><p>' + t9n('[RU]Не удалось загрузить структуру таблицы[EN]Failed to load table structure') + '</p></div>';
+            container.innerHTML = '<div class="empty-state"><p>' + 'Не удалось загрузить структуру таблицы' + '</p></div>';
             return;
         }
 
@@ -1929,7 +1929,7 @@ function renderDataEntryForm(panelId, tableType, reportId, filter, container) {
                 html += '<input type="number" name="t' + req.id + '">';
             } else if (req.ref) {
                 // Reference field - would need to load options
-                html += '<select name="t' + req.id + '"><option value="">-- ' + t9n('[RU]Выберите[EN]Select') + ' --</option></select>';
+                html += '<select name="t' + req.id + '"><option value="">-- ' + 'Выберите' + ' --</option></select>';
             } else {
                 html += '<input type="text" name="t' + req.id + '">';
             }
@@ -1938,7 +1938,7 @@ function renderDataEntryForm(panelId, tableType, reportId, filter, container) {
         });
 
         html += '<div class="form-field">';
-        html += '<button type="submit" class="btn btn-primary">' + t9n('[RU]Сохранить[EN]Save') + '</button>';
+        html += '<button type="submit" class="btn btn-primary">' + 'Сохранить' + '</button>';
         html += '</div>';
         html += '</form>';
 
@@ -1962,10 +1962,10 @@ function submitDataEntryForm(event, panelId, tableType) {
 
     apiRequest('POST', '_m_new/' + tableType + '?up=1&JSON', data, function(json) {
         if (json && json.obj) {
-            alert(t9n('[RU]Запись создана[EN]Record created'));
+            alert('Запись создана');
             form.reset();
         } else {
-            alert(t9n('[RU]Ошибка сохранения[EN]Save error'));
+            alert('Ошибка сохранения');
         }
     });
 
@@ -2093,7 +2093,7 @@ function createNewForm(event) {
 
     const name = document.getElementById('newFormName').value.trim();
     if (!name) {
-        alert(t9n('[RU]Введите имя формы[EN]Enter form name'));
+        alert('Введите имя формы');
         return false;
     }
 
@@ -2101,7 +2101,7 @@ function createNewForm(event) {
         if (json && json.obj) {
             window.location.href = '/' + FormConstructor.db + '/forms/' + json.obj + '?EDIT';
         } else {
-            alert(t9n('[RU]Ошибка создания формы[EN]Error creating form'));
+            alert('Ошибка создания формы');
         }
     });
 
@@ -2110,7 +2110,7 @@ function createNewForm(event) {
 
 function addPanel() {
     if (!selectedPanelType) {
-        alert(t9n('[RU]Выберите тип панели[EN]Select panel type'));
+        alert('Выберите тип панели');
         return;
     }
 
@@ -2148,7 +2148,7 @@ function addPanel() {
             hideAddPanelModal();
             loadFormPanels(FormConstructor.currentFormId);
         } else {
-            alert(t9n('[RU]Ошибка добавления панели[EN]Error adding panel'));
+            alert('Ошибка добавления панели');
         }
     });
 }
@@ -2182,7 +2182,7 @@ function savePanel() {
 function deletePanel() {
     const panelId = document.getElementById('editPanelId').value;
 
-    if (!confirm(t9n('[RU]Удалить эту панель?[EN]Delete this panel?'))) {
+    if (!confirm('Удалить эту панель?')) {
         return;
     }
 
@@ -2208,7 +2208,7 @@ function addButtonToPanel() {
     const btnClass = document.getElementById('buttonClass').value;
 
     if (!text) {
-        alert(t9n('[RU]Введите текст кнопки[EN]Enter button text'));
+        alert('Введите текст кнопки');
         return;
     }
 
@@ -2226,7 +2226,7 @@ function addButtonToPanel() {
             hideAddButtonModal();
             loadFormPanels(FormConstructor.currentFormId);
         } else {
-            alert(t9n('[RU]Ошибка добавления кнопки[EN]Error adding button'));
+            alert('Ошибка добавления кнопки');
         }
     });
 }
@@ -2240,21 +2240,6 @@ function decodeHtmlEntities(str) {
     const textarea = document.createElement('textarea');
     textarea.innerHTML = str;
     return textarea.value;
-}
-
-function t9n(str) {
-    // Simple translation function
-    if (typeof localize === 'function') {
-        // Use the existing localize system
-        const lang = document.documentElement.lang || 'ru';
-        const match = str.match(/\[RU\](.*?)\[EN\](.*)/);
-        if (match) {
-            return lang === 'en' ? match[2] : match[1];
-        }
-    }
-    // Default: return Russian text
-    const match = str.match(/\[RU\](.*?)\[EN\]/);
-    return match ? match[1] : str;
 }
 
 // ============================================================
@@ -2326,7 +2311,7 @@ function updatePanelTitle(panelId, sourceName) {
 function showColumnConfigModal(panelId) {
     const columnData = FormConstructor.reportColumns && FormConstructor.reportColumns[panelId];
     if (!columnData) {
-        alert(t9n('[RU]Данные колонок не найдены[EN]Column data not found'));
+        alert('Данные колонок не найдены');
         return;
     }
 

@@ -40,7 +40,7 @@
 <script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
 <script src="/js/js.js"></script>
 <script type="text/javascript">
-document.title=t9n('[RU]Редактор структуры таблиц[EN]Table structure editor');
+document.title='Редактор структуры таблиц';
 var editable=ext=false,curid=0,isRef=false,prefix=0
     ,ajax='<img style="margin:1px" width="25px" src="/i/ajax.gif">'
 	,nullmask=/:!NULL:/i
@@ -60,29 +60,29 @@ var str='';
 </script>
 <div id="messages" class="msgs" onclick="this.innerHTML=''"></div>
 <!-- Begin:&Editables -->{OK}
-<FORM id="addForm" style="position:fixed; background-color: white; z-index: 1; margin:5px; width:100%; max-width: 1050px;" method="post" action="/{_global_.Z}/_d_new/" onsubmit="if(byId('val').value==''){alert(t9n('[RU]Введите название таблицы[EN]Input the term name!'));event.returnValue=false;event.preventDefault();}else addbtn.disabled=true;">
+<FORM id="addForm" style="position:fixed; background-color: white; z-index: 1; margin:5px; width:100%; max-width: 1050px;" method="post" action="/{_global_.Z}/_d_new/" onsubmit="if(byId('val').value==''){alert('Введите название таблицы');event.returnValue=false;event.preventDefault();}else addbtn.disabled=true;">
     <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
     <div class="row t9n p-0 m-0">
         <div class="col-6 col-sm-4 col-md-3 pl-0 pr-1">
-            <input type="text" id="val" name="val" placeholder="<t9n>[RU]Поиск / Новая таблица[EN]Search / New table</t9n>" MAXLENGTH="127" onkeyup="filterTypes()" class="form-control">
+            <input type="text" id="val" name="val" placeholder="Поиск / Новая таблица" MAXLENGTH="127" onkeyup="filterTypes()" class="form-control">
         </div>
         <div class="col-6 col-sm-4 col-md-3 p-0">
             <div class="input-group mb-2">
                 <SELECT name="t" id="baseTypes" onchange="filterTypes()" class="form-control"><option value="0">SHORT</option></SELECT>
                 <div class="input-group-append">
-                    <a href="#basehelp" onclick="hideUnHide('basehelp')" title="<t9n>[RU]Описание базовых типов[EN]Description of base types</t9n>"><i class="pi pi-question-circle p-2" style="font-size: 1.25rem;"></i></a>
+                    <a href="#basehelp" onclick="hideUnHide('basehelp')" title="Описание базовых типов"><i class="pi pi-question-circle p-2" style="font-size: 1.25rem;"></i></a>
                 </div>
             </div>
             
         </div>
         <div class="col-6 col-sm-4 col-md-2 pt-2">
             <div class="form-check">
-                <input class="form-check-input" type="checkbox" name="unique" value="1" id="flexCheckDefault" title="<t9n>[RU]Невозможно добавить одинаковые независимые записи (на колонки ограничение не распространяется)[EN]It is impossible to add identical independent objects (the restriction does not apply to attributes)</t9n>">
-                <label class="form-check-label" for="flexCheckDefault"><t9n>[RU]Уникальный[EN]Unique</t9n></label>
+                <input class="form-check-input" type="checkbox" name="unique" value="1" id="flexCheckDefault" title="Невозможно добавить одинаковые независимые записи (на колонки ограничение не распространяется)">
+                <label class="form-check-label" for="flexCheckDefault">Уникальный</label>
             </div>
         </div>
         <div class="col-6 col-sm-4 col-md-2 p-0">
-            <button type="submit" class="btn btn-primary mb-2 pl-5 pr-5" name="addbtn" id="addbtn"><t9n>[RU]Создать[EN]Create</t9n></button>
+            <button type="submit" class="btn btn-primary mb-2 pl-5 pr-5" name="addbtn" id="addbtn">Создать</button>
         </div>
     </div>
 </FORM>
@@ -142,24 +142,24 @@ byId('baseTypes').innerHTML=str;
 <!-- End:&Editables -->
 <div class="col-12" style="padding-left:33px;">
 <table id="basehelp" class="table table-striped hidden t9n">
-<tr><th><t9n>[RU]Базовый тип[EN]Basic type</t9n></th><th><t9n>[RU]Описание[EN]Description</t9n></th><th><t9n>[RU]Пример[EN]Example</t9n></th></tr>
-<tr><td>SHORT</td><td><t9n>[RU]Короткая строка (до 127 символов)[EN]Short string (up to 127 characters)</t9n></td><td><t9n>[RU]Интеграл[EN]Integral</t9n></td></tr>
-<tr><td>CHARS</td><td><t9n>[RU]Строка без ограничения длины[EN]String without length restriction</t9n></td><td></td></tr>
-<tr><td>DATE</td><td><t9n>[RU]Дата[EN]Date</t9n></td><td>30.10.2019</td></tr>
-<tr><td>NUMBER</td><td><t9n>[RU]Целое число (числа выравниваются по правому краю)[EN]Integer (numbers are aligned to the right)</t9n></td><td align="right">100500</td></tr>
-<tr><td>SIGNED</td><td><t9n>[RU]Число с десятичной частью[EN]A number with a decimal part</t9n></td><td align="right">12.50</td></tr>
-<tr><td>BOOLEAN</td><td><t9n>[RU]Логическое значение (Да / Нет)[EN]Boolean value (Yes / No)</t9n></td><td align="center"><img width="24" height="24" alt="" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAIMSURBVDhPrZS7rkFBFIZtwnENcWnEpSDRipJC4yHUSrwESr0oRO0hNCIRFYWKxCWhcIvGJRIO5481Mht7dnHO+Yox/7LXb83a1kj3+13zH2jZ5595qeh0Og2Hw9VqdblcWEiAVqt1uVyhUMjj8VCEG8Gl2+0ej8evBxQUcb1e8bwkSbFYzOv1IsKN+v3+YrHw+XzBYJAi6mw2m9FoZLVak8kkCuQ9wolQiLoLqqhWq1ixx6HA4XDY7/eQ3Oh8Puv1+m9VCoVCq9UqFouTyQTSYDBgRSLSuRFCODnaLKJSqcxms9vtNp1OS6XSYDBAEFmIIP3FiLwUQSHtdhsNJdDKcDhMKZBIfzdSBIXUajWyAE6nM5vNsu8+jd5oNBrz+RwbtLZcLlMQmEymfD5vNpuZfqJsVK/Xm80m8uGFlV4TkU6n/X4/EzIUjODS6XSwQT5eE9VFpFKpRCLBxCvCo30SiURQDhMfKBhlMpl4PM7EE0xWLpdjQgnlit68RA2WIzya3EvUYDncSKfT4Y/HxAPyUmkwPU8Dy40cDgde03a7ZfoBvEQNxsPr9RrjZrfbIfk1gjuh1+tBut1uo9FIQRGoBS6YMgxKNBrFtHOj3W63XC7H4zFuBoqog1oCgQCuHfwwTseNcBvgZoGE0VuzPkGmzWbDitqxQYQbAXjh5JhDplUhF4vFQvLF6PdoND8daqPs9t5UTwAAAABJRU5ErkJggg=="></td></tr>
-<tr><td>MEMO</td><td><t9n>[RU]Текст – как CHARS, но многострочное[EN]Text like CHARS, but multi-line</t9n></td><td></td></tr>
-<tr><td>DATETIME</td><td><t9n>[RU]Дата и время[EN]Date and time</t9n></td><td>05.11.2019 13:35:40</td></tr>
-<tr><td>FILE</td><td><t9n>[RU]Файл – можно загрузить файл как значение колонки[EN]File – you can upload a file as value</t9n></td><td>pult.html</td></tr>
-<tr><td>HTML</td><td><t9n>[RU]HTML-текст – теги HTML не экранируются при выводе[EN]HTML-text – HTML tags are not escaped when output</t9n></td><td>&lt;span&gt;777&lt;/span&gt;</td></tr>
-<tr><td>BUTTON</td><td><t9n>[RU]Действие (кнопка) над записью[EN]Action (button) on an instance of the type</t9n></td><td align="center"><img width="133" height="32" alt="" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIUAAAAgCAIAAACzaSw2AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAASeSURBVGhD7ZpPayJJFMAryx6FJAhBJjCZhjnLEvtkhz1IQMhBr3Po8WC8pvUDjB5076OenT4kfoCYQyAQchjSsgeTMZ4DHRdmyEgkBnJ3X/2xu7qjrc4atw/1u1ivqrr61Xv1Xj3RleFwiAS+4Tf2KfAHwh/+ws5XT09P9/f3z8/PVBQsgUAgEAqFVldXmWz5A5xhmubW1tba2trKygodE7wqYPnBYNDtdiVJslzC8hVEBjhjfX1dOGNpgKnB4GB2MD7rsvwBaQoig7YFywTMzt8R9n0uIuN/wWV2UV/5C+EPfyH84S8W6I9+Q5OzJ30mCX6J2fzRLss81Q7rFyya6f7oVGU5Y+ZPWyN09TAtaw0RCK/BFH/0T7LpQyV/WklusB6EwjnwyS4TBIvF2x/9y3MDpfY5ZzDCiWSQNUkAAdqRCcLdUZZIrosE/Eq6MY4hnAmzjXbDGrZHe6STC0S6iDUBv5cPU5JUy23SJs+W2x07zzpz7CR92F5sso0eG+IfwbAF8a35Erwm04HMmp0hAdIQbTi5+RyJaI0HJo3h4fggEjk4xjN+HmsRZ7tyQ+YMHxogacc/qYTXtIaG37DEngLIg5+/WW1NO7AUgAd5cXhTcT8IcM9iafQax0Y89HGsSXfH7cI2BVnfaZkXtuL34glvfM/46Jlw5KW3ViS46Z8US01Vr5JY2diJRZGyu0PayUpNRYdfyOHqHBUNpVAYBVk4Zw9RlPynUbRtJPdTqP7VPsuxT7pULMLkTjVtFvZjrNtFv/FXCaVUhYkMtZYLs2b4Y0Exzi9JIEzVx4HybpM2golKJTEyBdHTuPvOxMXh6Y8NSULI/McOZxff7wwUlZi+Lt5ICjLMH+Ocag2NY/Odgm5N7pVgSlTak9O3+UJi/KvwsUD5wgdQdiLBtxJqmth+U/VpluIs68TxspYPnCkrfcg6valn2HxgltzlfX9sStFXOQVzEUwU8lEuhlz0GsUimjj6C0TzZ6SOBPT34JsyiVZ8T8SLks5GWnqKTJ6GWmPzWzW1nrFvo0l4+yO4s6uMjeXOCb5I8Vmmh+4lP0wDqbE/xgUZHlKkN0xyQiqI95LTuMFklS/weC6KeyWpNmnUpvO1zkJ5Hn3Cf6ow14Tt9y4vmnwCnB/PrGDh7Q96No3SHu9YXLSkz3ErmNhXUT1NixyiMQsmKC0ydaXwkWhPcje5AwidcqY+tmYDyIWk5D/MvOumYaT0HHjdm3YZ0ouapjE0hz7Ei7EdGHJ5kSw4F/2/LyafQpvf2edE4Gy2klBK7skl1oNQSm9p1GTwXeRM0uJxGIyqahSh2y+ybMAAxKllJrgJz1A2PlpBKZy1uKSMEPjbWtz1XWcqqs40GQPk7jprzqMPvj+svap6i3kxd5rP7sXlIulO6XqqniZNbzgdZtsaLbMgv9HGfwBXh84ScAZwvWuVnotj5lrTD/DGn5KvBEtG+MNfsP+XXF1dbW9vi59slw/Y//r6OhKJUJHFRyAQGAwGtC1YJmB2MD4TLH+EQqFut/v4+EjDRbAEwNRgcDA7GJ91WfkKEP9PXD4T/58o8AmivvITCP0L8SPVJ0ao0YcAAAAASUVORK5CYII="></td></tr>
-<tr><td>PWD</td><td><t9n>[RU]Пароль, маскируется на экране набором «******»[EN]The password is masked on the screen by stars «******»</t9n></td><td></td></tr>
-<tr><td>GRANT</td><td><t9n>[RU]Объект системы – выбор из таблиц системы[EN]The object of the system – one of the registered types</t9n></td><td></td></tr>
-<tr><td>CALCULATABLE</td><td><t9n>[RU]Вычисляемое поле, временно не поддерживается[EN]A calculatable field, temporarily is not supported</t9n></td><td></td></tr>
-<tr><td>REPORT_COLUMN&nbsp;</td><td><t9n>[RU]Колонка запроса – выбор из таблиц[EN]Query field – one of the registered types</t9n></td><td></td></tr>
-<tr><td>PATH</td><td><t9n>[RU]Путь к файлу в системе[EN]Path to the file in the system</t9n></td><td></td></tr>
-<tr><td>------------</td><td><t9n>[RU]Разделитель закладок для формы редактирования[EN]A tab delimiter to group attributes on the edit form</t9n></td><td></td></tr>
+<tr><th>Базовый тип</th><th>Описание</th><th>Пример</th></tr>
+<tr><td>SHORT</td><td>Короткая строка (до 127 символов)</td><td>Интеграл</td></tr>
+<tr><td>CHARS</td><td>Строка без ограничения длины</td><td></td></tr>
+<tr><td>DATE</td><td>Дата</td><td>30.10.2019</td></tr>
+<tr><td>NUMBER</td><td>Целое число (числа выравниваются по правому краю)</td><td align="right">100500</td></tr>
+<tr><td>SIGNED</td><td>Число с десятичной частью</td><td align="right">12.50</td></tr>
+<tr><td>BOOLEAN</td><td>Логическое значение (Да / Нет)</td><td align="center"><img width="24" height="24" alt="" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAIMSURBVDhPrZS7rkFBFIZtwnENcWnEpSDRipJC4yHUSrwESr0oRO0hNCIRFYWKxCWhcIvGJRIO5481Mht7dnHO+Yox/7LXb83a1kj3+13zH2jZ5595qeh0Og2Hw9VqdblcWEiAVqt1uVyhUMjj8VCEG8Gl2+0ej8evBxQUcb1e8bwkSbFYzOv1IsKN+v3+YrHw+XzBYJAi6mw2m9FoZLVak8kkCuQ9wolQiLoLqqhWq1ixx6HA4XDY7/eQ3Oh8Puv1+m9VCoVCq9UqFouTyQTSYDBgRSLSuRFCODnaLKJSqcxms9vtNp1OS6XSYDBAEFmIIP3FiLwUQSHtdhsNJdDKcDhMKZBIfzdSBIXUajWyAE6nM5vNsu8+jd5oNBrz+RwbtLZcLlMQmEymfD5vNpuZfqJsVK/Xm80m8uGFlV4TkU6n/X4/EzIUjODS6XSwQT5eE9VFpFKpRCLBxCvCo30SiURQDhMfKBhlMpl4PM7EE0xWLpdjQgnlit68RA2WIzya3EvUYDncSKfT4Y/HxAPyUmkwPU8Dy40cDgde03a7ZfoBvEQNxsPr9RrjZrfbIfk1gjuh1+tBut1uo9FIQRGoBS6YMgxKNBrFtHOj3W63XC7H4zFuBoqog1oCgQCuHfwwTseNcBvgZoGE0VuzPkGmzWbDitqxQYQbAXjh5JhDplUhF4vFQvLF6PdoND8daqPs9t5UTwAAAABJRU5ErkJggg=="></td></tr>
+<tr><td>MEMO</td><td>Текст – как CHARS, но многострочное</td><td></td></tr>
+<tr><td>DATETIME</td><td>Дата и время</td><td>05.11.2019 13:35:40</td></tr>
+<tr><td>FILE</td><td>Файл – можно загрузить файл как значение колонки</td><td>pult.html</td></tr>
+<tr><td>HTML</td><td>HTML-текст – теги HTML не экранируются при выводе</td><td>&lt;span&gt;777&lt;/span&gt;</td></tr>
+<tr><td>BUTTON</td><td>Действие (кнопка) над записью</td><td align="center"><img width="133" height="32" alt="" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIUAAAAgCAIAAACzaSw2AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAASeSURBVGhD7ZpPayJJFMAryx6FJAhBJjCZhjnLEvtkhz1IQMhBr3Po8WC8pvUDjB5076OenT4kfoCYQyAQchjSsgeTMZ4DHRdmyEgkBnJ3X/2xu7qjrc4atw/1u1ivqrr61Xv1Xj3RleFwiAS+4Tf2KfAHwh/+ws5XT09P9/f3z8/PVBQsgUAgEAqFVldXmWz5A5xhmubW1tba2trKygodE7wqYPnBYNDtdiVJslzC8hVEBjhjfX1dOGNpgKnB4GB2MD7rsvwBaQoig7YFywTMzt8R9n0uIuN/wWV2UV/5C+EPfyH84S8W6I9+Q5OzJ30mCX6J2fzRLss81Q7rFyya6f7oVGU5Y+ZPWyN09TAtaw0RCK/BFH/0T7LpQyV/WklusB6EwjnwyS4TBIvF2x/9y3MDpfY5ZzDCiWSQNUkAAdqRCcLdUZZIrosE/Eq6MY4hnAmzjXbDGrZHe6STC0S6iDUBv5cPU5JUy23SJs+W2x07zzpz7CR92F5sso0eG+IfwbAF8a35Erwm04HMmp0hAdIQbTi5+RyJaI0HJo3h4fggEjk4xjN+HmsRZ7tyQ+YMHxogacc/qYTXtIaG37DEngLIg5+/WW1NO7AUgAd5cXhTcT8IcM9iafQax0Y89HGsSXfH7cI2BVnfaZkXtuL34glvfM/46Jlw5KW3ViS46Z8US01Vr5JY2diJRZGyu0PayUpNRYdfyOHqHBUNpVAYBVk4Zw9RlPynUbRtJPdTqP7VPsuxT7pULMLkTjVtFvZjrNtFv/FXCaVUhYkMtZYLs2b4Y0Exzi9JIEzVx4HybpM2golKJTEyBdHTuPvOxMXh6Y8NSULI/McOZxff7wwUlZi+Lt5ICjLMH+Ocag2NY/Odgm5N7pVgSlTak9O3+UJi/KvwsUD5wgdQdiLBtxJqmth+U/VpluIs68TxspYPnCkrfcg6valn2HxgltzlfX9sStFXOQVzEUwU8lEuhlz0GsUimjj6C0TzZ6SOBPT34JsyiVZ8T8SLks5GWnqKTJ6GWmPzWzW1nrFvo0l4+yO4s6uMjeXOCb5I8Vmmh+4lP0wDqbE/xgUZHlKkN0xyQiqI95LTuMFklS/weC6KeyWpNmnUpvO1zkJ5Hn3Cf6ow14Tt9y4vmnwCnB/PrGDh7Q96No3SHu9YXLSkz3ErmNhXUT1NixyiMQsmKC0ydaXwkWhPcje5AwidcqY+tmYDyIWk5D/MvOumYaT0HHjdm3YZ0ouapjE0hz7Ei7EdGHJ5kSw4F/2/LyafQpvf2edE4Gy2klBK7skl1oNQSm9p1GTwXeRM0uJxGIyqahSh2y+ybMAAxKllJrgJz1A2PlpBKZy1uKSMEPjbWtz1XWcqqs40GQPk7jprzqMPvj+svap6i3kxd5rP7sXlIulO6XqqniZNbzgdZtsaLbMgv9HGfwBXh84ScAZwvWuVnotj5lrTD/DGn5KvBEtG+MNfsP+XXF1dbW9vi59slw/Y//r6OhKJUJHFRyAQGAwGtC1YJmB2MD4TLH+EQqFut/v4+EjDRbAEwNRgcDA7GJ91WfkKEP9PXD4T/58o8AmivvITCP0L8SPVJ0ao0YcAAAAASUVORK5CYII="></td></tr>
+<tr><td>PWD</td><td>Пароль, маскируется на экране набором «******»</td><td></td></tr>
+<tr><td>GRANT</td><td>Объект системы – выбор из таблиц системы</td><td></td></tr>
+<tr><td>CALCULATABLE</td><td>Вычисляемое поле, временно не поддерживается</td><td></td></tr>
+<tr><td>REPORT_COLUMN&nbsp;</td><td>Колонка запроса – выбор из таблиц</td><td></td></tr>
+<tr><td>PATH</td><td>Путь к файлу в системе</td><td></td></tr>
+<tr><td>------------</td><td>Разделитель закладок для формы редактирования</td><td></td></tr>
 </table>
 
     <div style="padding: 10px 0 0 0" class="controls-left">
@@ -215,22 +215,22 @@ function toggleMenu(i){
 	    curid=i;
         $('#'+i).find('.close-btn').show();
 		if(t[i].r!="")
-			diclink='<div class="space"></div><a href="#'+t[i].r+'" title="'+t9n('[RU]Перейти к исходной таблице[EN]Go to the type definition')+'"><i class="pi pi-link" style="font-size: 1.25rem;"></i></a>&nbsp;';
+			diclink='<div class="space"></div><a href="#'+t[i].r+'" title="'+'Перейти к исходной таблице'+'"><i class="pi pi-link" style="font-size: 1.25rem;"></i></a>&nbsp;';
 		else
 		for(var j in t) // Check if there's a ref to this type
 			if(t[j].r==i){
-				diclink='<div class="space"></div><a href="#'+j+'" title="'+t9n('[RU]Ссылка на справочник[EN]Link to the reference list')+'"><i class="pi pi-link" style="font-size: 1.25rem;"></i></a>&nbsp;'
-				        +'<div class="space"></div><a href="/{_global_.Z}/object/'+i+'" target="'+i+'" title="'+t9n('[RU]Войти в справочник[EN]Enter the directory')+'"><i class="pi pi-book" style="font-size: 1.25rem;"></i></a>&nbsp;';
+				diclink='<div class="space"></div><a href="#'+j+'" title="'+'Ссылка на справочник'+'"><i class="pi pi-link" style="font-size: 1.25rem;"></i></a>&nbsp;'
+				        +'<div class="space"></div><a href="/{_global_.Z}/object/'+i+'" target="'+i+'" title="'+'Войти в справочник'+'"><i class="pi pi-book" style="font-size: 1.25rem;"></i></a>&nbsp;';
 			    hasRefs=true;
 				break;
 			}
 		if(editable){
 			if(t[i].r!="")
-				menu+='<a onclick="toggleMenu('+i+');" title="'+t9n('[RU]Кликните еще раз, чтобы свернуть[EN]Click again to collapse')+'">'+t[t[i].t].v +'</a><br/>';
+				menu+='<a onclick="toggleMenu('+i+');" title="'+'Кликните еще раз, чтобы свернуть'+'">'+t[t[i].t].v +'</a><br/>';
 			else if(t[i].t==0){
 				menu+='<FORM method="post" action="/{_global_.z}/_d_save/'+i+'/"><input type="hidden" name="_xsrf" value="{_global_.xsrf}">'
 					+'<p><input type="text" name="val" value="'+t[i].v+'" MAXLENGTH="127" class="form-control sm"></p>'
-					+'<input type="submit" name="savebtn" class="btn btn-primary btn-sm" value="'+t9n('[RU]Сохранить[EN]Save')+'" />&nbsp;&nbsp;&nbsp;<A class="btn btn-outline-secondary btn-sm" onclick="toggleMenu('+i+');">'+t9n('[RU]Отменить[EN]Cancel')+'</a></FORM>';
+					+'<input type="submit" name="savebtn" class="btn btn-primary btn-sm" value="'+'Сохранить'+'" />&nbsp;&nbsp;&nbsp;<A class="btn btn-outline-secondary btn-sm" onclick="toggleMenu('+i+');">'+'Отменить'+'</a></FORM>';
 			}
 			else{
 				menu+='<FORM method="post" action="/{_global_.z}/_d_save/'+i+'/"><input type="hidden" name="_xsrf" value="{_global_.xsrf}">';
@@ -240,11 +240,11 @@ function toggleMenu(i){
 					if(k!=0)
 						menu+='<option value="'+k+'" id="'+i+'_'+k+'">'+bt[k]+'</option>';
 				menu+='</select>';
-				menu+='<table width="100%" style="margin-top: 8px;"><tr><td><div class="dubspace"></div><label title="'+t9n('[RU]Невозможно добавить одинаковые независимые объекты[EN]You cannot add identical independent objects')+'"><input type="checkbox" name="unique" value="1" '+(t[i].u ? "CHECKED":"")+' /><div class="space"></div>'+t9n('[RU]Уникальный[EN]Unique')+'</div></label></td>';
-				menu+='<td align="right"><input type="submit" name="savebtn" class="btn btn-primary btn-sm" value="'+t9n('[RU]Сохранить[EN]Save')+'" />&nbsp;&nbsp;&nbsp;<A class="btn btn-outline-secondary btn-sm" onclick="toggleMenu('+i+');">'+t9n('[RU]Отменить[EN]Cancel')+'</a></td></tr></table></FORM>';
+				menu+='<table width="100%" style="margin-top: 8px;"><tr><td><div class="dubspace"></div><label title="'+'Невозможно добавить одинаковые независимые объекты'+'"><input type="checkbox" name="unique" value="1" '+(t[i].u ? "CHECKED":"")+' /><div class="space"></div>'+'Уникальный'+'</div></label></td>';
+				menu+='<td align="right"><input type="submit" name="savebtn" class="btn btn-primary btn-sm" value="'+'Сохранить'+'" />&nbsp;&nbsp;&nbsp;<A class="btn btn-outline-secondary btn-sm" onclick="toggleMenu('+i+');">'+'Отменить'+'</a></td></tr></table></FORM>';
 				if(diclink=="")
-    				diclink+='<a onclick="post(\'_d_ref/'+i+'\')" title="'+t9n('[RU]Создать ссылку на эту таблицу (использовать её как справочник)[EN]Create a link to this type (use it as a reference)')
-    				        +'"><i class="pi pi-plus-circle" style="font-size: 1.25rem;"></i><div class="space"></div>'+t9n('[RU]Создать ссылку[EN]Create link')+'</a><br />';
+    				diclink+='<a onclick="post(\'_d_ref/'+i+'\')" title="'+'Создать ссылку на эту таблицу (использовать её как справочник)'
+    				        +'"><i class="pi pi-plus-circle" style="font-size: 1.25rem;"></i><div class="space"></div>'+'Создать ссылку'+'</a><br />';
 			}
 			menu+='<div class="hi8"></div><table width="100%" style="margin-top: 8px;"><tr><td align="left">'+diclink+'</td>';
 			if(!hasRefs){
@@ -259,13 +259,13 @@ function toggleMenu(i){
         			menu+='<td align="right"><a onclick="myApi(\'POST\',\'_d_del/'+i+'?JSON\',\'del\');setAjax(this)">';
         		else
         			menu+='<td align="right"><a onclick="post(\'_d_del/'+i+'\')">';
-        		menu+='<i class="pi pi-trash" style="font-size: 1.25rem;"></i><div class="space"></div>'+t9n('[RU]Удалить таблицу[EN]Delete the type')+'</a></td>';
+        		menu+='<i class="pi pi-trash" style="font-size: 1.25rem;"></i><div class="space"></div>'+'Удалить таблицу'+'</a></td>';
 			}
 			menu+='</tr></table>'
 		}
 		else{
-			menu+=diclink+t[i].v+'<br /><div style="padding:6px;"><input type="checkbox" title="'+t9n('[RU]Невозможно добавить одинаковые независимые записи[EN]You cannot add identical independent objects')+'" DISABLED '+t[i].u+' />'+t9n('[RU]Уникальный[EN]Unique')+'</div>';
-			menu+='<div width="100%" align="right"><A onclick="toggleMenu('+i+');">'+t9n('[RU]Скрыть[EN]Hide')+'</a></div>';
+			menu+=diclink+t[i].v+'<br /><div style="padding:6px;"><input type="checkbox" title="'+'Невозможно добавить одинаковые независимые записи'+'" DISABLED '+t[i].u+' />'+'Уникальный'+'</div>';
+			menu+='<div width="100%" align="right"><A onclick="toggleMenu('+i+');">'+'Скрыть'+'</a></div>';
 		}
 		byId('m'+i).innerHTML=menu;
 		if(byId(i+'_'+t[i].t)){
@@ -313,7 +313,7 @@ function wrapObj(i){
             +'<path d="M8.64284 8.64287L13.3571 13.3572M13.3571 8.64287L8.64284 13.3572M5.49999 3.92859H16.5C17.3679 3.92859 18.0714 4.63214 18.0714 5.50002V16.5C18.0714 17.3679 17.3679 18.0714 16.5 18.0714H5.49999C4.63211 18.0714 3.92856 17.3679 3.92856 16.5V5.50002C3.92856 4.63214 4.63211 3.92859 5.49999 3.92859Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 	obj+='<div class="card-header" onmouseover="if($(\'#m'+i+'\').is(\':hidden\'))$(this).parent().find(\'.et-lines\').mouseover()" onmouseleave="$(\'.et-line\').remove()">';
 	if(t[i].r!="")
-		obj+='<a href="/{_global_.Z}/object/'+t[i].r+'" title="'+t9n('[RU]Войти в справочник[EN]View the directory')+'"><i class="pi pi-book" style="font-size: 1.25rem;"></i></a>';
+		obj+='<a href="/{_global_.Z}/object/'+t[i].r+'" title="'+'Войти в справочник'+'"><i class="pi pi-book" style="font-size: 1.25rem;"></i></a>';
 	obj+=' <a id="id'+i+'" style="display:inline;" onclick="toggleMenu('+i+');"> '+(t[i].r!="" ? t[t[i].t].v : t[i].v)+'</a>';
 	obj+='<div id="m'+i+'" style="display:none;"></div>';
     if(t[i].t==0)
@@ -336,9 +336,9 @@ function editDef(i,u){
     byId('a'+i).classList.add('hidden');
     byId('edit-alias'+i).classList.add('hidden');
     byId('def'+i).innerHTML='<FORM method="post" action="/{_global_.z}/_d_alias/'+i+'/?up='+u+'"><input type="hidden" name="_xsrf" value="{_global_.xsrf}">'
-        +'<input type="text" class="form-control" id="def'+i+'val" name="val" value="'+a[i].alias+'" MAXLENGTH="127" title="'+t9n('[RU]Задайте псевдоним этой колонки: ссылка на[EN]Specify an alias of this type: link to')+a[i].ref+'">'
-        +'<div class="input-group"><button class="btn btn-outline-secondary" type="submit">'+t9n('[RU]Сохранить[EN]Save')+'</button>'
-        +'<button class="btn btn-outline-secondary" type="button" onclick="closeDef('+i+');">'+t9n('[RU]Отменить[EN]Cancel')+'</button>'
+        +'<input type="text" class="form-control" id="def'+i+'val" name="val" value="'+a[i].alias+'" MAXLENGTH="127" title="'+'Задайте псевдоним этой колонки: ссылка на'+a[i].ref+'">'
+        +'<div class="input-group"><button class="btn btn-outline-secondary" type="submit">'+'Сохранить'+'</button>'
+        +'<button class="btn btn-outline-secondary" type="button" onclick="closeDef('+i+');">'+'Отменить'+'</button>'
         +'</div></form>';
     byId('def'+i).classList.remove('hidden');
     byId('def'+i+'val').focus();
@@ -391,16 +391,16 @@ function drawReqs(i,ext,force){
 		    if(base=='date'){
 	    		def_ref_class=' class="dropdown-toggle" data-toggle="dropdown" autocomplete="off"';
 			    def_ref_dd='<ul class="dropdown-menu">'
-		            +'<li class="p-2"><a onclick="byId(\'v'+r[i][req].i+'\').value=\'[TODAY]\';saveBtn('+r[i][req].i+')">[TODAY] – '+t9n('[RU]сегодняшний день, например, 15, если сейчас 15.09.2016 г.[EN]Current date, e.g. 15 when today is 15 SEP 2020')+'</a></li>'
-		            +'<li class="p-2"><a onclick="byId(\'v'+r[i][req].i+'\').value=\'[YESTERDAY]\';saveBtn('+r[i][req].i+')">[YESTERDAY] – '+t9n('[RU]вчерашний день, например, 31.10.2016, если сейчас 1.11.2016 г.[EN]yesterday date')+'</a></li>'
-		            +'<li class="p-2"><a onclick="byId(\'v'+r[i][req].i+'\').value=\'[TOMORROW]\';saveBtn('+r[i][req].i+')">[TOMORROW] – '+t9n('[RU]завтрашний день.[EN]tomorrow date')+'</a></li>'
-		            +'<li class="p-2"><a onclick="byId(\'v'+r[i][req].i+'\').value=\'[MONTH_AGO]\';saveBtn('+r[i][req].i+')">[MONTH_AGO] – '+t9n('[RU]день месяц назад, например, 28.02.2016, если сейчас 28.03.2016 г.[EN]a day a month ago, for example, 28.02.2016, if it is now 28.03.2016')+'</a></li>'
+		            +'<li class="p-2"><a onclick="byId(\'v'+r[i][req].i+'\').value=\'[TODAY]\';saveBtn('+r[i][req].i+')">[TODAY] – '+'сегодняшний день, например, 15, если сейчас 15.09.2016 г.'+'</a></li>'
+		            +'<li class="p-2"><a onclick="byId(\'v'+r[i][req].i+'\').value=\'[YESTERDAY]\';saveBtn('+r[i][req].i+')">[YESTERDAY] – '+'вчерашний день, например, 31.10.2016, если сейчас 1.11.2016 г.'+'</a></li>'
+		            +'<li class="p-2"><a onclick="byId(\'v'+r[i][req].i+'\').value=\'[TOMORROW]\';saveBtn('+r[i][req].i+')">[TOMORROW] – '+'завтрашний день.'+'</a></li>'
+		            +'<li class="p-2"><a onclick="byId(\'v'+r[i][req].i+'\').value=\'[MONTH_AGO]\';saveBtn('+r[i][req].i+')">[MONTH_AGO] – '+'день месяц назад, например, 28.02.2016, если сейчас 28.03.2016 г.'+'</a></li>'
                     +'</ul>';
 		    }
 		    else if(base=='datetime'){
 	    		def_ref_class=' class="dropdown-toggle" data-toggle="dropdown" autocomplete="off"';
 			    def_ref_dd='<ul class="dropdown-menu">'
-		            +'<li class="p-2"><a onclick="byId(\'v'+r[i][req].i+'\').value=\'[NOW]\';saveBtn('+r[i][req].i+')">[NOW] – '+t9n('[RU]текущие дата и время[EN]current date and time')+'</a></li></ul>';
+		            +'<li class="p-2"><a onclick="byId(\'v'+r[i][req].i+'\').value=\'[NOW]\';saveBtn('+r[i][req].i+')">[NOW] – '+'текущие дата и время'+'</a></li></ul>';
 		    }
 			else
     			def_ref_dd=def_ref_class='';
@@ -421,10 +421,10 @@ function drawReqs(i,ext,force){
 			name='<div class="hidden" id="def'+aid+'"></div><div style="display:inline;" id="a'+aid+'"><a onmouseleave="$(\'.et-line\').remove()" onmouseover="drawLine(this,'+id+')" href="#'+r[i][req].t+'" title="'+base+'"><b>'+a[aid].alias+'</b></a>';
 			name+=' <a href="#'+id+'" id="l'+id+'" class="et-lines" onmouseleave="$(\'.et-line\').remove()" onmouseover="drawLine(this,'+id+')" onclick="checkHash('+id+')" title="'+base+'">('+t[id].v+')</a></div>';
 			if(ext && editable)
-				name+='<div id="edit-alias'+aid+'" style="display:inline-block;">&nbsp;&nbsp;<a onclick="editDef('+aid+','+i+')" title="'+t9n('[RU]Редактировать псевдоним колонки[EN]Edit the alias of an attribute')
+				name+='<div id="edit-alias'+aid+'" style="display:inline-block;">&nbsp;&nbsp;<a onclick="editDef('+aid+','+i+')" title="'+'Редактировать псевдоним колонки'
 				    +'" onclick="byId(\'edit-alias'+aid+'\').classList.add(\'hidden\')"><i class="pi pi-pencil" style="font-size: 1.25rem;"></i></a>&nbsp;</div>'
 				    +'<div id="edit-alias'+aid+'" style="display:inline-block;">&nbsp;&nbsp;<a onclick="setMulti('+aid+')" title="'
-				        +(multiple?t9n('[RU]Разрешить выбор нескольких значений[EN]Enable multiselect'):t9n('[RU]Запретить выбор нескольких значений[EN]Disable multiselect'))
+				        +(multiple?'Разрешить выбор нескольких значений':'Запретить выбор нескольких значений')
 				    +'" onclick="byId(\'edit-alias'+aid+'\').classList.add(\'hidden\')"><i class="pi pi-list" style="font-size: 1.25rem; color: '+(multiple?'#aaa':'#333')+';"></i></a>&nbsp;</div>';
 			def_ref_dd='<ul id="dd'+id+'" class="dropdown-menu">'+ajax+'</ul>';
 			def_ref_class=' class="dropdown-toggle" data-toggle="dropdown" autocomplete="off" onkeyup="refreshDD('+r[i][req].i+','+id+')"';
@@ -432,14 +432,14 @@ function drawReqs(i,ext,force){
 		if(ext){
 			reqs+='<tr id="row'+r[i][req].i+'"><td>'+name+'</td><td><nobr>';
 			if(editable){
-				reqs+='<A id="del_req'+r[i][req].i+'" onclick="myApi(\'POST\',\'_d_del_req/'+r[i][req].i+'?JSON\',\'d\');setAjax(this)" TITLE="'+t9n('[RU]Удалить[EN]Delete')+'"><i class="pi pi-times-circle" style="font-size: 1.25rem;"></i></A>';
-				reqs+='&nbsp;<A onclick="myApi(\'POST\',\'_d_up/'+r[i][req].i+'?JSON\',\'d\');setAjax(this)" TITLE="'+t9n('[RU]Поднять выше[EN]Move up')+'"><i class="pi pi-arrow-up" style="font-size: 1.25rem;"></i></A>';
+				reqs+='<A id="del_req'+r[i][req].i+'" onclick="myApi(\'POST\',\'_d_del_req/'+r[i][req].i+'?JSON\',\'d\');setAjax(this)" TITLE="'+'Удалить'+'"><i class="pi pi-times-circle" style="font-size: 1.25rem;"></i></A>';
+				reqs+='&nbsp;<A onclick="myApi(\'POST\',\'_d_up/'+r[i][req].i+'?JSON\',\'d\');setAjax(this)" TITLE="'+'Поднять выше'+'"><i class="pi pi-arrow-up" style="font-size: 1.25rem;"></i></A>';
 				if(t[r[i][req].t].t==0)
 					reqs+='</td><td colspan="2">&nbsp;</td>';
 				else{
 					reqs+='&nbsp;<A onclick="myApi(\'POST\',\'_d_null/'+r[i][req].i+'?JSON&up='+i+'\',\'d\');setAjax(this)" TITLE="'
-					        +(nullable?t9n('[RU]Нажмите, чтобы сделать поле необязательным[EN]Click to make the field non-required')
-					               :t9n('[RU]Нажмите, чтобы сделать поле обязательным[EN]Click to make this field required'))
+					        +(nullable?'Нажмите, чтобы сделать поле необязательным'
+					               :'Нажмите, чтобы сделать поле обязательным')
 					    +'"><i class="pi pi-exclamation-circle" style="font-size: 1.25rem; color: '+(nullable?'#e00':'#999')+';"></i></A>';
 					reqs+='&nbsp;<nobr></td><td valign="top"><FORM method="post" id="frm'+r[i][req].i+'" action="/{_global_.Z}/_d_attrs/'+r[i][req].i+'/?up='+i+'"><input type="hidden" name="_xsrf" value="{_global_.xsrf}">';
 					reqs+=nullable?'<input type="hidden" name="set_null" value="1">':'';
@@ -453,9 +453,9 @@ function drawReqs(i,ext,force){
 			}
 			else{
 				if(nullable)
-					reqs+='&nbsp;<A TITLE="'+t9n('[RU]Обязательное поле[EN]Required field')+'""><i class="pi pi-exclamation-triangle" style="font-size: 1.25rem; color: #e00;"></i></A>&nbsp;';
+					reqs+='&nbsp;<A TITLE="'+'Обязательное поле'+'""><i class="pi pi-exclamation-triangle" style="font-size: 1.25rem; color: #e00;"></i></A>&nbsp;';
 				else
-					reqs+='&nbsp;<A TITLE="'+t9n('[RU]Необязательное поле[EN]Non-required field')+'""><i class="pi pi-exclamation-triangle" style="font-size: 1.25rem; color: #999;"></i></A>';
+					reqs+='&nbsp;<A TITLE="'+'Необязательное поле'+'""><i class="pi pi-exclamation-triangle" style="font-size: 1.25rem; color: #999;"></i></A>';
 				reqs+='</td><td><input type="text" name="val" value="'+def_val+'" style="background-color:lightgray;">';
 			}
 			reqs+='</td></tr>';
@@ -480,7 +480,7 @@ function drawReqs(i,ext,force){
 				if(r[i][j].r=="") // Skip Refs, for we can add it several times
 					my[r[i][j].t]=1;
 			if(t[i].r==""){
-			    reqs+='<option value="new">--- '+t9n('[RU]добавить новое[EN]add new')+' ---</option>';
+			    reqs+='<option value="new">--- '+'добавить новое'+' ---</option>';
 				for(j in s)
 					if(my[s[j].i]===undefined){
 						reqs+='<option value="'+s[j].i+'">'+ ((t[s[j].i].r=="") ? t[s[j].i].v+' ('+getBT(t[s[j].i].t)+')': '-->'+t[s[j].i].v) +'</option>';
@@ -491,14 +491,14 @@ function drawReqs(i,ext,force){
 				for(j in r[t[i].r])
 					if(my[r[t[i].r][j].t]===undefined)
 						reqs+='<option value="'+r[t[i].r][j].t+'">'+ ((t[r[t[i].r][j].t].r=="") ? t[r[t[i].r][j].t].v : '-->'+t[r[t[i].r][j].t].v) +'</option>';
-			reqs+='</select><span class="input-group-btn"><input type="submit" class="btn btn-outline-secondary btn-sm" name="addreqbtn'+i+'" id="addreqbtn'+i+'" value="'+t9n('[RU]Добавить колонку[EN]Add attribute')+'" ></span></div></FORM>'
+			reqs+='</select><span class="input-group-btn"><input type="submit" class="btn btn-outline-secondary btn-sm" name="addreqbtn'+i+'" id="addreqbtn'+i+'" value="'+'Добавить колонку'+'" ></span></div></FORM>'
 			    +'<FORM id="new'+i+'" class="hidden" method="post" action="/{_global_.Z}/_d_req/" onsubmit="event.returnValue=false;event.preventDefault();validateNewType('+i+');">'
 			    +'<div class="input-group input-group-sm"><input type="hidden" name="_xsrf" value="{_global_.xsrf}">'
 			    +'<table><tr><td colspan="3"><input id="input'+i+'" type="text" class="form-control" style="margin-bottom:5px;"></td>'
 			    +'<tr><td><div><SELECT id="t'+i+'" class="form-control form-control-sm">'+str+'</SELECT></div></td>'
-			    +'<TD align="center" title="'+t9n('[RU]Поставьте галку, если это будет справочное значение: Тип, Категория и т.п.[EN]Check the box if this is a reference value: Type, Category, etc.')+'">'
-    			    +'&nbsp;'+t9n('[RU]Ссылка[EN]Link')+'&nbsp;<br /><input id="ref'+i+'" type="checkbox" value="1" /></TD>'
-			    +'<td><input type="submit" class="btn btn-outline-secondary btn-sm" id="newtypbtn'+i+'" value="'+t9n('[RU]Создать[EN]Add')+'" ></td></tr></table>'
+			    +'<TD align="center" title="'+'Поставьте галку, если это будет справочное значение: Тип, Категория и т.п.'+'">'
+    			    +'&nbsp;'+'Ссылка'+'&nbsp;<br /><input id="ref'+i+'" type="checkbox" value="1" /></TD>'
+			    +'<td><input type="submit" class="btn btn-outline-secondary btn-sm" id="newtypbtn'+i+'" value="'+'Создать'+'" ></td></tr></table>'
 			    +'</div></FORM>';
 		}
 	}
@@ -545,7 +545,7 @@ function setAjax(el){
 }
 function validateNewType(id){
     if(byId('input'+id).value==''){
-        alert(t9n('[RU]Введите название таблицы![EN]Enter the name of the table'));
+        alert('Введите название таблицы!');
         return;
     }
     var val=byId('input'+id).value,
@@ -621,7 +621,7 @@ function myApi(m,u,b,vars,index){ // Параметры: метод, адрес,
                     myApi('GET','edit_types?JSON','types');
                 }
                 else
-                    showMsg(json[0].error?json[0].error:t9n('[RU]Ошибка[EN]Error'));
+                    showMsg(json[0].error?json[0].error:'Ошибка');
                 break;
             case 'del':
                 if(json.id>0){

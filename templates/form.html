@@ -34,13 +34,13 @@
 <script src="/js/js.js"></script>
 <div class="t9n">
 <div id="show" class="list hidden">
-<a id="showanchor" onclick="byId('FormsList').classList.remove('hidden');byId('show').classList.add('hidden')"><img class="icon8" title="<t9n>[RU]Список форм[EN]Forms list</t9n>" src="https://img.icons8.com/ios/25/222222/list.png"></a>
+<a id="showanchor" onclick="byId('FormsList').classList.remove('hidden');byId('show').classList.add('hidden')"><img class="icon8" title="Список форм" src="https://img.icons8.com/ios/25/222222/list.png"></a>
 </div>
 <div id="FormsList" class="list list-open p-3 shadow hidden" onclick="event.stopPropagation?event.stopPropagation():(event.cancelBubble=true);">
 <p>
-    <t9n>[RU]Выберите форму или добавьте новую[EN]Pick a form or add a new one</t9n>
+    Выберите форму или добавьте новую
     <a id="closeList" onclick="byId('FormsList').classList.add('hidden');byId('show').classList.remove('hidden')">
-        &nbsp;&nbsp;&nbsp;&nbsp;<img class="icon8" title="<t9n>[RU]Скрыть список[EN]Hide the list</t9n>" src="https://img.icons8.com/ios/25/222222/close-window.png">
+        &nbsp;&nbsp;&nbsp;&nbsp;<img class="icon8" title="Скрыть список" src="https://img.icons8.com/ios/25/222222/close-window.png">
     </a>
 </p>
 <div>
@@ -49,8 +49,8 @@
     <input type="hidden" name="next_act" value="{_global_.action}?edit">
     <table>
     <tr>
-    	<td><input placeholder="<t9n>[RU]Введите имя[EN]Enter the name</t9n>" type="text" name="t137" class="form-control form-control-sm"></td>
-    	<td><input type="submit" name="addbtn" class="btn btn-primary btn-sm" value="<t9n>[RU]Создать форму[EN]Create the form</t9n>"></td>
+    	<td><input placeholder="Введите имя" type="text" name="t137" class="form-control form-control-sm"></td>
+    	<td><input type="submit" name="addbtn" class="btn btn-primary btn-sm" value="Создать форму"></td>
     </tr>
     </table>
 </form>
@@ -59,8 +59,8 @@
 <div id="list">
     <p class="mb-2">
         <a href="/{_global_.z}/form/:id:">&nbsp;:val:&nbsp;</a>&nbsp;
-        <a href="/{_global_.z}/form/:id:?edit" title="<t9n>[RU]Экспресс-редактор[EN]Express edit</t9n>"><svg width="28" height="28" viewBox="0 0 28 28" fill="none"><path d="M15 4L5 16H14L13 24L23 12H14L15 4Z" stroke="#666666" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>&nbsp;
-        <a href="/{_global_.z}/myform/:id:" title="<t9n>[RU]Расширенный редактор[EN]Form editor</t9n>"><svg width="28" height="28" viewBox="0 0 28 28" fill="none"><path d="M18 5L23 10L10 23H5V18L18 5Z" stroke="#666666" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>
+        <a href="/{_global_.z}/form/:id:?edit" title="Экспресс-редактор"><svg width="28" height="28" viewBox="0 0 28 28" fill="none"><path d="M15 4L5 16H14L13 24L23 12H14L15 4Z" stroke="#666666" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>&nbsp;
+        <a href="/{_global_.z}/myform/:id:" title="Расширенный редактор"><svg width="28" height="28" viewBox="0 0 28 28" fill="none"><path d="M18 5L23 10L10 23H5V18L18 5Z" stroke="#666666" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>
     </p>
 </div>
 </div>
@@ -69,10 +69,10 @@
 var timer,lastK,ddlItem,t=[],r=[],def=[],notNull=[],report=[],setDef=[],RepCols=[];
 var amChart=[],series=[],dateAxis=[],valueAxis=[];
 var charts={'Pivot':{'descr':'Pivot table'},
-        'XYChart':{'descr':t9n('[RU]Линейный график[EN]Line chart'),'amType':'XYChart'},
-	    'PieChart':{'descr':t9n('[RU]Круговая диаграмма[EN]Pie chart'),'amType':'PieChart'},
-	    'Histogram':{'descr':t9n('[RU]Гистограмма[EN]Histogram'),'amType':'XYChart'},
-	    'Bubble':{'descr':t9n('[RU]Пузырьки[EN]Bubble map'),'amType':'XYChart'}};
+        'XYChart':{'descr':'Линейный график','amType':'XYChart'},
+	    'PieChart':{'descr':'Круговая диаграмма','amType':'PieChart'},
+	    'Histogram':{'descr':'Гистограмма','amType':'XYChart'},
+	    'Bubble':{'descr':'Пузырьки','amType':'XYChart'}};
 <!-- Begin:&Edit_Typs -->
 t[{ID}]={t:{T},r:"{REF_VAL}",u:{UNIQ},v:"{VAL}"};
 if("{ORD}"){if(r[{ID}]===undefined)r[{ID}]={};r[{ID}]["{ORD}"]={i:"{REQ_ID}",t:"{REQ_T}",a:"{ATTRS}",r:"{REFT}"};}
@@ -134,7 +134,7 @@ function defReport(json,i){
 function check(panel,typ){
 	for(var i in notNull[panel])
 		if(byId(i).value==''){
-			alert(t9n('[RU]Заполните поле [EN]Fill in th field ')+notNull[panel][i]+'!');
+			alert('Заполните поле '+notNull[panel][i]+'!');
 			return false;
 		}
     return true;
@@ -304,8 +304,8 @@ function myApi(m,u,b,prefix,vars){
                 if(edit&&report[prefix][i].chosen){
                     h+='<br />';
                     if(i>0)
-                        h+='<a onclick="post(\'_m_up/'+report[prefix][i].chosen+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+t9n('[RU]Переместить колонку левее[EN]Move the column left')+'"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/chevron-left.png"/></a>';
-                    h+='<a onclick="post(\'_m_del/'+report[prefix][i].chosen+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+t9n('[RU]Удалить колонку[EN]Delete the column')+'"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/delete-sign.png"/></a>';
+                        h+='<a onclick="post(\'_m_up/'+report[prefix][i].chosen+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Переместить колонку левее'+'"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/chevron-left.png"/></a>';
+                    h+='<a onclick="post(\'_m_del/'+report[prefix][i].chosen+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Удалить колонку'+'"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/delete-sign.png"/></a>';
                 }
                 h+='</B></TD>';
             }
@@ -563,9 +563,9 @@ function myApi(m,u,b,prefix,vars){
                                 break;
                             }
                         if(edit){
-                            ctrl='<a onclick="post(\'_m_del/'+f[j].i+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+t9n('[RU]Удалить поле[EN]Delete the input')+'"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/delete-sign.png"/></a>';
+                            ctrl='<a onclick="post(\'_m_del/'+f[j].i+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Удалить поле'+'"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/delete-sign.png"/></a>';
                             if(fields!='')
-                                ctrl='<a onclick="post(\'_m_up/'+f[j].i+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+t9n('[RU]Переместить поле выше[EN]Move the input up')+'"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/up.png"/></a>'
+                                ctrl='<a onclick="post(\'_m_up/'+f[j].i+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Переместить поле выше'+'"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/up.png"/></a>'
                                         +ctrl;
                         }
                         if(base==0){ // This is a report field
@@ -825,14 +825,14 @@ bt[1]="_array";bt[3]="_short";bt[12]="_memo";bt[2]="_html";bt[8]="_chars";bt[10]
     <tr>
     <td>
         <!-- Begin:_PanelType --><!--{_request_.edit}-->
-        <p class="text-muted"><t9n>[RU]Тип[EN]Type</t9n>:&nbsp;:object:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<t9n>[RU]Отчет[EN]Report</t9n>
+        <p class="text-muted">Тип:&nbsp;:object:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Отчет
             :&nbsp;<a target="_blank" href="/{_global_.z}/sql/:reportID:">:report:</a>
         </p>
         <!-- End:_PanelType -->
         <h4 id="PanelHead">:val:
         <!-- Begin:_PanelHead --><!--{_request_.edit}-->
-        <a onclick="post('_m_up/:id:?next_act={_global_.action}/{_global_.id}%3Fedit%26')" title="<t9n>[RU]Переместить панель выше[EN]Move panel up</t9n>"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/up.png"/></a>
-        <a class="del-panel" onclick="post('_m_del/:id:?next_act={_global_.action}/{_global_.id}%3Fedit%26')" title="<t9n>[RU]Удалить панель[EN]Delete the panel</t9n>"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/delete-sign.png"/></a>
+        <a onclick="post('_m_up/:id:?next_act={_global_.action}/{_global_.id}%3Fedit%26')" title="Переместить панель выше"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/up.png"/></a>
+        <a class="del-panel" onclick="post('_m_del/:id:?next_act={_global_.action}/{_global_.id}%3Fedit%26')" title="Удалить панель"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/delete-sign.png"/></a>
         <!-- End:_PanelHead -->
         </h4>
         :ObjectEdit:
@@ -858,22 +858,22 @@ bt[1]="_array";bt[3]="_short";bt[12]="_memo";bt[2]="_html";bt[8]="_chars";bt[10]
     <tr>
     <td>
     <div id="Panel_:id:_Actions">
-        <div id="create_:id:"><input type="submit" id="Button_:id:" name="btn" class="btn btn-sm btn-outline-secondary :addFieldClass:" value="<t9n>[RU]Создать[EN]Create</t9n>"></div>
+        <div id="create_:id:"><input type="submit" id="Button_:id:" name="btn" class="btn btn-sm btn-outline-secondary :addFieldClass:" value="Создать"></div>
         <div id="controls_:id:" style="display:none;">
         	<table style="margin-top:5px; margin-bottom:5px;">
         	<tr>
-        	<td><input type="submit" name="btn" class="btn btn-sm btn-outline-secondary m-3" value="<t9n>[RU]Сохранить[EN]Save</t9n>"></td>
+        	<td><input type="submit" name="btn" class="btn btn-sm btn-outline-secondary m-3" value="Сохранить"></td>
         	<td>
-            <button type="button" class="btn btn-warning btn-sm m-3" onclick="byId('controls_:id:').style.display='none';byId('confirm_:id:').style.display='block';"><t9n>[RU]Удалить[EN]Delete</t9n></button>
+            <button type="button" class="btn btn-warning btn-sm m-3" onclick="byId('controls_:id:').style.display='none';byId('confirm_:id:').style.display='block';">Удалить</button>
         	</td>
-        	<td><a href="/{_global_.z}/{_global_.action}/{_global_.id}"><button type="button" class="btn btn-sm btn-outline-secondary m-3"><t9n>[RU]Создать ещё[EN]Create new</t9n>...</button></a>
+        	<td><a href="/{_global_.z}/{_global_.action}/{_global_.id}"><button type="button" class="btn btn-sm btn-outline-secondary m-3">Создать ещё...</button></a>
         	</tr>
         	</table>
     	</div>
         <div id="confirm_:id:" style="display:none; border:2px #f0ad4e solid; -moz-border-radius: 10px; -webkit-border-radius:10px; -khtml-border-radius:10px; border-radius:10px; padding:6px; ">
-    	<p><b><t9n>[RU]Подтвердите удаление записи[EN]Confirm to delete</t9n></b></p>
-    	<A onclick="post('_m_del/:obj:?next_act={_global_.action}/{_global_.id}%3Fdeleted=:typ:%26up=:parent:')"><button type="button" class="btn btn-warning btn-sm m-3"><t9n>[RU]Да, удалить[EN]Yes, delete</t9n></button></A>
-    	<button type="button" class="btn btn-outline-secondary btn-sm m-3" onclick="byId('controls_:id:').style.display='block';byId('confirm_:id:').style.display='none';">&nbsp;<t9n>[RU]Отменить[EN]Cancel</t9n>&nbsp;</button>
+    	<p><b>Подтвердите удаление записи</b></p>
+    	<A onclick="post('_m_del/:obj:?next_act={_global_.action}/{_global_.id}%3Fdeleted=:typ:%26up=:parent:')"><button type="button" class="btn btn-warning btn-sm m-3">Да, удалить</button></A>
+    	<button type="button" class="btn btn-outline-secondary btn-sm m-3" onclick="byId('controls_:id:').style.display='block';byId('confirm_:id:').style.display='none';">&nbsp;Отменить&nbsp;</button>
     	</div>
     </div>	
     </td>
@@ -884,12 +884,12 @@ bt[1]="_array";bt[3]="_short";bt[12]="_memo";bt[2]="_html";bt[8]="_chars";bt[10]
 <form method="post" action="/{_global_.z}/_m_new/144?up=:id:" onsubmit="addbtn.disabled = true; return true;" class="t9n mt-3 :addFieldClass:">
     <input type="hidden" name="next_act" value="{_global_.action}/{_global_.id}?edit&">			
     <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
-    <t9n>[RU]Добавить поле:[EN]Add a field</t9n>&nbsp;
+    Добавить поле:&nbsp;
     <select name="t144" id="field:id:" class="form-control"></select>
     <div class="input-group mb-3">
-        <input type="text" name="t186" placeholder="<t9n>[RU]Введите имя для поля[EN]Enter the field name</t9n>" class="form-control">
+        <input type="text" name="t186" placeholder="Введите имя для поля" class="form-control">
         <div class="input-group-append">
-            <input type="submit" name="addbtn" class="btn btn-outline-secondary m-0" value="<t9n>[RU]Добавить[EN]Add</t9n>">
+            <input type="submit" name="addbtn" class="btn btn-outline-secondary m-0" value="Добавить">
         </div>
     </div>
 </form>
@@ -907,30 +907,30 @@ bt[1]="_array";bt[3]="_short";bt[12]="_memo";bt[2]="_html";bt[8]="_chars";bt[10]
 <form method="post" action="/{_global_.z}/_m_new/138?up={_global_.id}" onsubmit="if(validatePanel())paneladd.disabled=true;else{event.returnValue=false;event.preventDefault()}">
 <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
 <input type="hidden" name="next_act" value="{_global_.action}/{_global_.id}?edit&">
-<input placeholder="<t9n>[RU]Введите имя для новой панели[EN]Enter the new panel name</t9n>" type="text" id="PanelName" name="t138" class="form-control">
-    <b><br /><t9n>[RU]Источник данных[EN]Data source</t9n></b>
+<input placeholder="Введите имя для новой панели" type="text" id="PanelName" name="t138" class="form-control">
+    <b><br />Источник данных</b>
     <a onclick="byId('add_panel').innerHTML=byId('add_panel').innerHTML==''?byId('panel').innerHTML:''"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/333333/help.png"/></a>
 <div id="add_panel"></div>
-	<t9n>[RU]Тип[EN]Type</t9n>:
+	Тип:
 	<select id="PanelType" name="t184" class="form-control">
 	</select>
-	<t9n>[RU]Запрос[EN]Report</t9n>:
+	Запрос:
 	<select id="PanelReport" name="t161" class="form-control">
 		<option> </option>
 		<!-- Begin:intReports --><option id="{ID}" value="{ID}">{Name}</option>
 		<!-- End:intReports -->
 	</select>
-<input type="submit" name="paneladd" class="btn btn-sm btn-outline-secondary" value="<t9n>[RU]Добавить панель[EN]Add the panel</t9n>">
+<input type="submit" name="paneladd" class="btn btn-sm btn-outline-secondary" value="Добавить панель">
 </form>
 </div>
 <script>
 function validatePanel(){
     if(byId('PanelType').value=='' && byId('PanelReport').value==''){
-        alert(t9n('[RU]Выберите тип или запрос[EN]Pick a Type or Report</t9n>!'));
+        alert('Выберите тип или запрос');
         return false;
     }
     if(!parseInt(byId('PanelType').value) && !byId('PanelReport').value){
-        alert(t9n('[RU]Выберите запрос для графика[EN]Pick a Report for this chart</t9n>!'));
+        alert('Выберите запрос для графика');
         return false;
     }
     if(byId('PanelName').value=='')
@@ -956,7 +956,7 @@ function pickColor(el,panel){
     else
         byId(el.id).replaceWith('');
 }
-document.title=t9n('[RU]Конструктор форм[EN]Form builder');
+document.title='Конструктор форм';
 var h='<option> </option>';
 for(i in t)
     if(r[i]){
@@ -998,62 +998,56 @@ byId('PanelType').innerHTML=h;
 <div id="_pwd"><input class="form-control form-control-sm type-field" type="password" name="t:typ:"></div>
 <div id="defaults">
 <div class="alert alert-warning" style="margin:15px">
-    <p><t9n>[RU]Вы можете использовать следующие значения по умолчанию[EN]You can use the following defaults</t9n>:</p>
+    <p>Вы можете использовать следующие значения по умолчанию:</p>
     :defaults:
 </div>
 </div>
 <div id="panel">
 <div class="alert alert-warning" style="margin:15px">
-	<p><t9n>[RU]Форма состоит из одной или нескольких панелей. При добавлении панели вы выбираете тип и/или запрос, который будет отображен в панели. Если вы одновременно укажете и тип, и запрос, то данные из первой строки отчета будут отображены на форме вместе с выбранными полями типа.[EN]The form consists of one or more panels. When adding a panel, you select the type and/or report that will be displayed in the panel. If you specify both the type and the report at the same time, then the data from the first line of the report will be displayed on the form along with the selected type fields.</t9n></p>
-	<p><t9n>[RU]При выборе только типа, в панели отобразятся выбранные поля этого типа.[EN]If you select only a type, the panel displays the selected fields of that type.</t9n></p>
-	<p><t9n>[RU]Если будет указан только запрос, то в панели будут отображены выбранные из соответствующего запроса поля. Если поля не выбраны, то отчет по этому запросу отобразится целиком.[EN]If only the report is specified, the panel will display the fields selected from it. If no fields are selected, it will be displayed in its entirety.</t9n></p>
-	<p><t9n>[RU]Если в качестве типа выбран график (в конце выпадающего списка), то в панели будет отображен этот график с данными из выбранного запроса.[EN]If a chart is selected (see the bottom of the drop-down list), then this chart will be displayed in the panel using data from the selected query.</t9n></p>
+	<p>Форма состоит из одной или нескольких панелей. При добавлении панели вы выбираете тип и/или запрос, который будет отображен в панели. Если вы одновременно укажете и тип, и запрос, то данные из первой строки отчета будут отображены на форме вместе с выбранными полями типа.</p>
+	<p>При выборе только типа, в панели отобразятся выбранные поля этого типа.</p>
+	<p>Если будет указан только запрос, то в панели будут отображены выбранные из соответствующего запроса поля. Если поля не выбраны, то отчет по этому запросу отобразится целиком.</p>
+	<p>Если в качестве типа выбран график (в конце выпадающего списка), то в панели будет отображен этот график с данными из выбранного запроса.</p>
 </div>
 </div>
 <div id="help">
 <div class="alert alert-warning" style="margin:15px">
-	<t9n>[RU]Вы можете задать цвет фона и шрифта для строк отчета или для всей панели. Можно использовать значения цветов, [EN]You can set background and font colors for report lines or for the entire panel. Use any color values </t9n>
-	<a href="https://html5book.ru/css-colors/" target="_blank"><t9n>[RU]поддерживаемые в [EN]supported in HTML</t9n></a>.
-	<t9n>[RU] Если цвета заданы здесь, то они применяются ко всей панели.[EN]If colors are specified here, then they are applied to the entire panel.</t9n>
-	<br /><t9n>[RU]Также можно добавить колонки с именами color и bgcolor в назначенный этой панели отчет. Цвета, заданные в отчете, будут применены к каждой строчке отчета.
-	           [EN]You can also add columns named <i>color</i> and <i>bgcolor</i> to the report assigned to this panel. The colors specified in the report will be applied to each line of the report.</t9n>
+	Вы можете задать цвет фона и шрифта для строк отчета или для всей панели. Можно использовать значения цветов, 
+	<a href="https://html5book.ru/css-colors/" target="_blank">поддерживаемые в </a>.
+	 Если цвета заданы здесь, то они применяются ко всей панели.
+	<br />Также можно добавить колонки с именами color и bgcolor в назначенный этой панели отчет. Цвета, заданные в отчете, будут применены к каждой строчке отчета.
+	           
 </div>
 </div>
 <div id="filter">
 <div class="alert alert-warning" style="margin:15px">
-    <t9n>[RU]Этот фильтр будет применен при запросе отчета, заданного для этой панели, например, FR_Дата=1.1&TO_Дата=31.1 задаст фильтр для поля Дата: с 1 по 31 января текущего года.
-        [EN]This filter will be applied to the report specified for this panel, for example, FR_Date=1.1&TO_Date=31.1 will set the filter for the Date field: from January 1 to January 31 of the current year.</t9n>
+    Этот фильтр будет применен при запросе отчета, заданного для этой панели, например, FR_Дата=1.1&TO_Дата=31.1 задаст фильтр для поля Дата: с 1 по 31 января текущего года.
+        
 </div>
 </div>
 <div id="next">
 <div class="alert alert-warning" style="margin:15px">
-	<t9n>[RU]По умолчанию после отправки формы управление передается обратно этой же форме.
+	По умолчанию после отправки формы управление передается обратно этой же форме.
         	<br />Адрес {_global_.action}/{_global_.id}&nbsp;&mdash; имя этого обработчика формы и её id ({_global_.id}).
         	<br />Здесь вы можете задать другое действие или форму, а также передать им параметры.
-	    [EN]By default, after submitting a form, control is passed back to the same form.
-        	<br />The address of {_global_.action}/{_global_.id} is the name of this form handler and its id ({_global_.id}).
-        	<br />Here you can define another action or form, as well as pass parameters to them.
-	    </t9n>
+	    
 </div>
 </div>
 <div id="savePivot">
     <div id="savePivot:id:"><br />
-        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="savePivot(:id:)"><t9n>[RU]Сохранить вид pivot[EN]Save pivot config</t9n></button><br />
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="savePivot(:id:)">Сохранить вид pivot</button><br />
     </div>
 </div>
 <div id="PieChart"><br />
-    <br /><i><t9n>[RU]Как построить отчет для графика:[EN]How to build a report for the chart</t9n></i><br />
-	<t9n>[RU]Первая колонка отчета: Категории (названия отображаемых параметров)
+    <br /><i>Как построить отчет для графика:</i><br />
+	Первая колонка отчета: Категории (названия отображаемых параметров)
         	<br />Вторая колонка: Значение в данной категории
         	<br />Третья колонка: Цвет отображения сегмента данной категории
-	    [EN]First column: Category (the name of the measured parameter)
-        	<br />2nd column: the Value in this category
-        	<br />3rd column: Color of the chart segment for this category
-    </t9n>
+	    
 </div>
 <div id="XYChart">
     <!--
-    <t9n>[RU]Цвета графиков[EN]Chart colors</t9n>: <div id="colors:id:" class="inline">
+    Цвета графиков: <div id="colors:id:" class="inline">
         <select id="color:i:_:id:" onchange="pickColor(this,:id:)"><option value="">auto</option>
             <option val="red" style="background-color:red">red</option>
             <option val="green" style="background-color:green">green</option>
@@ -1064,14 +1058,11 @@ byId('PanelType').innerHTML=h;
         </select>
     </div>
     -->
-    <i><t9n>[RU]Как построить отчет для этой диаграммы:[EN]How to build a report for the chart</t9n></i><br />
-	<t9n>[RU]Названия колонок&nbsp;&mdash; имена осей
+    <i>Как построить отчет для этой диаграммы:</i><br />
+	Названия колонок&nbsp;&mdash; имена осей
 	        <br />Первая колонка отчета: Значение по оси X
         	<br />Вторая и последующие колонки: Значения по оси Y для параметра, соответствующего имени колонки
-	    [EN]Column names&nbsp;&mdash; lines' labels
-	        <br />First column: the X value
-        	<br />2nd column and all the following: the Y value
-    </t9n>
+	    
 </div>
 </div>
 <script src="/js/core.js"></script>

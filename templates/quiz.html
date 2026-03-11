@@ -387,11 +387,11 @@ function addNewField(){
     else if(t){
         for(i in quiz.form)
             if(quiz.form[i].type==t||(v.toUpperCase()===quiz.name.toUpperCase()&&quiz.type===t))
-                return showMsg('messages',t9n('[RU]Это поле уже существует: [EN]The field already exists: ')+v,'warning');
+                return showMsg('messages','Это поле уже существует: '+v,'warning');
         if(isRef()){
             for(var j in dataItems.id)
                 if(dataItems.req_t[j]==t)
-                    return showMsg('messages',t9n('[RU]Это поле занято, нельзя сделать ссылку на него: [EN]The field is already occupied and cannot be linked: ')+v,'warning');
+                    return showMsg('messages','Это поле занято, нельзя сделать ссылку на него: '+v,'warning');
             intApi('POST','_d_ref/'+t+'?JSON','createRef','',{req_t:t,val:v,ref_type:t,t:'REFERENCE'});
         }
         else
@@ -406,14 +406,14 @@ function createType(v){
     var t=isRef()?$('#selectreftype').val():$('#selecttype').val();
     intApi('POST','_d_new?JSON&val='+encodeURIComponent(v)+'&t='+t,'createType','',{val:v,t:t,isRef:isRef()});
     $('#selecttype').val('3');
-    $('#addfield').attr('placeholder',t9n('[RU]Введите вопрос[EN]Enter a question'));
+    $('#addfield').attr('placeholder','Введите вопрос');
     $('.set-col').show();
     $('.set-table').hide();
 }
 function createTable(t,v){
     if(t){
         selectTable(t);
-        showMsg('messages',t9n('[RU]Таблица существует: [EN]The existing table chosen: ')+v,'info');
+        showMsg('messages','Таблица существует: '+v,'info');
     }
     else
         createType(v);
@@ -570,10 +570,10 @@ function drawForm(){
     else{
         $('.req-only').hide();
         $('#selecttype').val('4');
-        $('#addfield').attr('placeholder',t9n('[RU]Название таблицы опросов[EN]The name of the table for storing surveys'))
+        $('#addfield').attr('placeholder','Название таблицы опросов')
     }
     if(quizId&&!typeName(quiz.type))
-        showMsg('messages',t9n('[RU]Эта таблица больше не существует[EN]The table does not exist'));
+        showMsg('messages','Эта таблица больше не существует');
     fillInDataItems();
     if(addRefItems!==''){
         $('.set'+addRefItems).show();
@@ -650,10 +650,10 @@ function saveQuiz(){
             edited=false;
         }
         else
-            showMsg('messages',t9n('[RU]Недопустимый символ " в имени опроса[EN]Please do not use " in the quiz name'));
+            showMsg('messages','Недопустимый символ " в имени опроса');
     }
     else
-        showMsg('messages',t9n('[RU]Задайте имя опроса[EN]Please set the quiz name'));
+        showMsg('messages','Задайте имя опроса');
 }
 function randomSecret(){
     return (Math.random().toString(36)+Math.random().toString(36)+Math.random().toString(36)).replace(/\./g,'').substr(1,8);
@@ -1156,7 +1156,7 @@ function copyFrame(link){
 }
 localize();
 if(search.del)
-    showMsg('messages',t9n('[RU]Опрос удалён[EN]Quiz has been deleted'),'success');
+    showMsg('messages','Опрос удалён','success');
 </script>
 <input id="copy_path" type="text" value="" style="display:none;">
 <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js" integrity="sha384-B4gt1jrGC7Jh4AgTPSdUtOBvfO8shuf57BaghqFfPlYxofvL8/KUEfYiJOMMV+rV" crossorigin="anonymous"></script>
