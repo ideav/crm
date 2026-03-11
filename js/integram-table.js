@@ -3840,7 +3840,7 @@ class IntegramTable {
 
                 this.showToast('Запись создана', 'success');
 
-                // Now fetch the full row data with edit_obj to get default values
+                // Now fetch the full row data to get server-formatted/default values (issue #811)
                 await this.fetchNewRowData(createdId, rowIndex);
 
                 // Clear pending new row state
@@ -3853,16 +3853,27 @@ class IntegramTable {
         }
 
         /**
-         * Fetch the full row data after creating a new record (issue #807)
-         * Uses edit_obj/{recordId}?JSON to get all field values including defaults
-         * Then updates the row and makes all cells editable
+         * Fetch the full row data after creating a new record (issue #811)
+         * Uses object/{tableTypeId}/?JSON_OBJ&t{tableTypeId}=@{recordId} to get all field values
+         * including defaults and server-formatted values (e.g. numbers, dates).
+         * Then updates the row and makes all cells editable.
          * @param {string|number} recordId - ID of the newly created record
          * @param {number} rowIndex - Index of the row in the data array
          */
         async fetchNewRowData(recordId, rowIndex) {
             try {
                 const apiBase = this.getApiBase();
-                const response = await fetch(`${apiBase}/edit_obj/${recordId}?JSON`);
+                const tableTypeId = this.objectTableId || this.options.tableTypeId;
+
+                if (!tableTypeId) {
+                    console.warn('fetchNewRowData: tableTypeId not available, skipping row refresh');
+                    return;
+                }
+
+                // Fetch the record using the JSON_OBJ format with record ID filter (issue #811)
+                // t{tableTypeId}=@{recordId} filters by the specific record ID
+                const fetchUrl = `${apiBase}/object/${tableTypeId}/?JSON_OBJ&t${tableTypeId}=@${recordId}`;
+                const response = await fetch(fetchUrl);
 
                 if (!response.ok) {
                     console.error('Failed to fetch new row data:', response.status);
@@ -3871,42 +3882,16 @@ class IntegramTable {
 
                 const data = await response.json();
 
-                if (!data || !data.obj) {
-                    console.warn('No object data in edit_obj response');
+                // Response is JSON_OBJ array format: [{i, u, o, r}, ...]
+                if (!Array.isArray(data) || data.length === 0) {
+                    console.warn('fetchNewRowData: empty or invalid response from JSON_OBJ endpoint');
                     return;
                 }
 
-                // Update the row data with the fetched values
-                // data.obj contains: { id, typ, typ_name, val, parent, reqs: [...] }
-                const obj = data.obj;
+                const item = data[0];
+                const newRowData = item.r || [];
 
-                // Build the new row data from the object
-                // First column is obj.val, rest are from obj.reqs
-                const newRowData = [];
-                newRowData.push(obj.val || '');
-
-                if (obj.reqs && Array.isArray(obj.reqs)) {
-                    // obj.reqs is array of { id, val, type, ref_id?, ... }
-                    // We need to map them to our columns order
-                    const reqsById = {};
-                    obj.reqs.forEach(req => {
-                        reqsById[String(req.id)] = req;
-                    });
-
-                    // Skip the first column (which is the main value)
-                    for (let i = 1; i < this.columns.length; i++) {
-                        const column = this.columns[i];
-                        const reqId = column.paramId || column.id;
-                        const req = reqsById[String(reqId)];
-                        if (req) {
-                            newRowData.push(req.val || '');
-                        } else {
-                            newRowData.push('');
-                        }
-                    }
-                }
-
-                // Update the data array
+                // Update the data array with the server-formatted row data
                 this.data[rowIndex] = newRowData;
 
                 // Update rawObjectData
