@@ -199,7 +199,12 @@ function doCreateType(){
             break;
         }
     if(chosenTypeBase===undefined){
-        putMsg('errors','Не выбрано ни одной колонки - нечего создавать'{
+        putMsg('errors','Не выбрано ни одной колонки - нечего создавать',true);
+        return;
+    }
+    for(j in types.val)
+        if(types.val[j].toLowerCase()===chosenTypeName.toLowerCase()&&types.t[j]===chosenTypeBase)
+            if(types.req_id[j]===''){
                 putMsg('log','Термин'+' <b>'+chosenTypeName+'</b> ('+bt[chosenTypeBase]+') '+'найден'+' ('+newType+')',true);
                 newType=types.id[j];
                 for(k in types.req_id)
@@ -250,7 +255,6 @@ function doCreateType(){
                                 req=types.id[k];
                                 if(types.req_id[k]!==''&&sourceMap[j].link===0){
                                     putMsg('errors','Уже существует таблица <b>'+sourceMap[j].name+'</b> ('+bt[sourceMap[j].base]+')'
-                                                    +'' already exists')
                                             +'. <a class="du text-white" onclick="$(\'#n'+j+'\').focus()">'+'Переименуйте эту колонку'+'</a>.'
                                         ,true);
                                     return;
