@@ -1,5 +1,5 @@
 <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z" crossorigin="anonymous">
-<center><h3 class="mt-2"><t9n>[RU]Универсальная загрузка файлов[EN]Custom file upload</t9n></h3></center>
+<center><h3 class="mt-2">Универсальная загрузка файлов</h3></center>
 <style>
 .dict {
     display: inline-block;
@@ -53,62 +53,62 @@
 </div>
 <div id="input-area" class="m-1 t9n" style="display:none">
     <table>
-        <tr><td class="pr-2"><a href="/{_global_.z}/{_global_.action}" title="<t9n>[RU]Вернуться к выбору таблицы[EN]Choose another table</t9n>"><i class="pi pi-arrow-left" style="font-size: 1.25rem; color: #555;"></i></a></td><td class="pt-2"><h4 id="chosen"></h4></td></tr>
+        <tr><td class="pr-2"><a href="/{_global_.z}/{_global_.action}" title="Вернуться к выбору таблицы"><i class="pi pi-arrow-left" style="font-size: 1.25rem; color: #555;"></i></a></td><td class="pt-2"><h4 id="chosen"></h4></td></tr>
     </table>
     <div class="mb-5 p-1 p-sm-2 shadow">
-        <t9n>[RU]Вставьте текст из файла в это поле или выберите файл для загрузки:[EN]Put your file content here or select a file to upload:</t9n>
+        Вставьте текст из файла в это поле или выберите файл для загрузки:
         <textarea rows="5" class="form-control mb-2 mt-1" id="input"></textarea>
-        <t9n>[RU]JSON или любой текстовый файл: CSV, TXT и т.п. Форматы XLS и XLSX пока не поддерживаются (просто скопируйте кусок вашего экселя в поле выше).[EN]JSON or any text file: CSV, TXT, etc. No XLS and XLSX accepted (copy/paste the content of XLS here instead)</t9n>
+        JSON или любой текстовый файл: CSV, TXT и т.п. Форматы XLS и XLSX пока не поддерживаются (просто скопируйте кусок вашего экселя в поле выше).
         <input class="form-control mb-2" type="file" id="selectFiles" value="Import" />
         <!--
-        <t9n>[RU]можно загрузить этот файл по ссылке[EN]you may also upload the file via a link</t9n>:
+        можно загрузить этот файл по ссылке:
         <input class="form-control" type="text" id="selectLink" /><br />
         -->
-        <div class="d-inline-block pb-3" id="try"><button onclick="importParse()" class="btn btn-primary"><t9n>[RU]Проверить[EN]Validate</t9n></button></div>
-        <div class="d-inline-block pb-3"><button onclick="$('#tune').toggle()" id="tune-btn" class="btn btn-outline-secondary"><t9n>[RU]Настроить[EN]Settings</t9n></button></div>
+        <div class="d-inline-block pb-3" id="try"><button onclick="importParse()" class="btn btn-primary">Проверить</button></div>
+        <div class="d-inline-block pb-3"><button onclick="$('#tune').toggle()" id="tune-btn" class="btn btn-outline-secondary">Настроить</button></div>
     </div>
     <div id="tune" class="bg-light mb-5 pl-1 pl-sm-2 pr-1 pr-sm-2 pb-2 pt-3 shadow" style="display:none; border-top: 1px solid #efefef;">
-        <h5><t9n>[RU]Настройки импорта[EN]Import settings</t9n></h5>
+        <h5>Настройки импорта</h5>
         <div class="d-inline-block pb-1 mr-4 pt-1">
-            <label><input id="header" type="checkbox">&nbsp;<t9n>[RU]Первая строка содержит заголовок[EN]The fisrt line is the table header</t9n></label><br />
-            <label><input id="trim" type="checkbox" checked>&nbsp;<t9n>[RU]Обрезать пробелы справа и слева[EN]Trim the spaces</t9n></label>
+            <label><input id="header" type="checkbox">&nbsp;Первая строка содержит заголовок</label><br />
+            <label><input id="trim" type="checkbox" checked>&nbsp;Обрезать пробелы справа и слева</label>
         </div>
-        <div class="d-inline-block pb-1 mr-4 pt-1"><t9n>[RU]Разделитель полей[EN]Fields delimiter</t9n> <input type="text" id="delim" size="4" placeholder="auto"> <a onclick="$('#delim').val('\t');$('#upload').hide();$('#refresh').show();" style="border-bottom: 1px dashed">TAB</a></div>
-        <div class="d-inline-block pb-1 mr-4 pt-1"><t9n>[RU]Разделитель строк[EN]Lines delimiter</t9n> <input type="text" id="caret" size="4" placeholder="auto"></div>
-        <div class="d-inline-block pb-1 mr-4 pt-1"><t9n>[RU]Кодировка[EN]Encoding</t9n>
+        <div class="d-inline-block pb-1 mr-4 pt-1">Разделитель полей <input type="text" id="delim" size="4" placeholder="auto"> <a onclick="$('#delim').val('\t');$('#upload').hide();$('#refresh').show();" style="border-bottom: 1px dashed">TAB</a></div>
+        <div class="d-inline-block pb-1 mr-4 pt-1">Разделитель строк <input type="text" id="caret" size="4" placeholder="auto"></div>
+        <div class="d-inline-block pb-1 mr-4 pt-1">Кодировка
             <select class="form-control form-control-sm" onchange="resetEncoding()" id="encoding">
                 <option value="utf-8">UTF-8</option>
                 <option value="windows-1251">Windows-1251</option>
             </select>
         </div>
         <div id="sample" style="/*overflow-x: auto;*/ display:none" class="mt-1">
-            <t9n>[RU]Первые две строки файла[EN]The first two lines parsed</t9n>:
+            Первые две строки файла:
             <table class="table-sm table-bordered mb-3 bg-white"><tbody id="1st2"></tbody></table>
         </div>
-        <br /><span id="order"><t9n>[RU]Вы можете настроить последовательность полей, как они идут в вашем файле:[EN]Set the fields order according to your file</t9n></span><br />
+        <br /><span id="order">Вы можете настроить последовательность полей, как они идут в вашем файле:</span><br />
         <div id="sortable" style="white-space: nowrap; display: flex; /*overflow-x: auto*/" class="mt-1"></div>
-        <p onclick="$(this).hide();$('#formula').show()" id="formula-cap"><a id="edit-formulas" style="border-bottom: 1px dashed"><t9n>[RU]Формулы для вычисления полей[EN]Field calculation formulas</t9n></a></p>
+        <p onclick="$(this).hide();$('#formula').show()" id="formula-cap"><a id="edit-formulas" style="border-bottom: 1px dashed">Формулы для вычисления полей</a></p>
         <div class="input-group mb-3" id="formula" style="display: none;">
             <div class="input-group-prepend">
                 <select class="form-control" onchange="markSelected(this.value)" id="fields">
                 </select>
             </div>
-            <input type="text" placeholder="<t9n>[RU]Ввести формулу для расчета поля[EN]Set the formula to calculate the field value</t9n>" class="form-control" id="set-formula">
+            <input type="text" placeholder="Ввести формулу для расчета поля" class="form-control" id="set-formula">
             <div class="input-group-append">
-            <button class="btn btn-outline-secondary" type="button" onclick="doSaveFormula()" id="set-formula-btn"><t9n>[RU]Сохранить[EN]Save</t9n></button>
+            <button class="btn btn-outline-secondary" type="button" onclick="doSaveFormula()" id="set-formula-btn">Сохранить</button>
             </div>
         </div>
         <div class="pb-1 mr-4 pt-1" id="unique-cap" style="display:none">
-            <label title="<t9n>[RU]Невозможно добавить одинаковые независимые объекты (на реквизиты ограничение не распространяется[EN]Forbid to add non unique objects (not applicable to attributes)</t9n>)">
-                <input id="unique" type="checkbox">&nbsp;<t9n>[RU]Сделать первую колонку в таблице уникальной[EN]Make the first column of this table unique</t9n>
+            <label title="Невозможно добавить одинаковые независимые объекты (на реквизиты ограничение не распространяется)">
+                <input id="unique" type="checkbox">&nbsp;Сделать первую колонку в таблице уникальной
             </label>
         </div>
         <div class="row" id="save-set-form">
             <div class="col-12 col-sm-8 col-md-6 col-lg-5">
                 <div class="input-group mb-3">
-                    <input type="text" class="form-control" value="<t9n>[RU]Новая[EN]New</t9n>" id="save-set">
+                    <input type="text" class="form-control" value="Новая" id="save-set">
                     <div class="input-group-append">
-                    <button class="btn btn-outline-secondary" type="button" onclick="doSaveSet()" id="save-set-btn"><t9n>[RU]Сохранить настройку[EN]Save settings</t9n></button>
+                    <button class="btn btn-outline-secondary" type="button" onclick="doSaveSet()" id="save-set-btn">Сохранить настройку</button>
                     <button class="btn btn-outline-secondary" id="save-set-wait" style="display:none"><img src="/i/ajax.gif"></button>
                     </div>
                 </div>
@@ -120,19 +120,19 @@
     <div id="errors" class="bg-danger text-white p-2 mt-1" style="display:none"></div>
     <div class="pb-3" id="refresh" style="display:none"><button onclick="importParse();" class="btn btn-outline-secondary">Обновить</button></div>
     <div id="upload" style="display:none">
-        <button onclick="$('#do-upload,.confirm').toggle()" class="btn btn-warning" id="do-upload"><t9n>[RU]Загрузить[EN]Upload</t9n></button>
-        <button onclick="$('#do-upload,.confirm').toggle()" class="btn btn-outline-secondary confirm" style="display:none"><t9n>[RU]Отменить[EN]Cancel</t9n></button>
-        <button onclick="$('#do-upload,.confirm').toggle();$('#upload').hide();doImport()" class="btn btn-warning confirm" style="display:none"><t9n>[RU]Да, грузим[EN]Yes, do upload</t9n></button>
-        <button onclick="$('#stats').toggle()" class="btn btn-outline-secondary" id="show-stats"><t9n>[RU]Статистика[EN]Show stats</t9n></button>
+        <button onclick="$('#do-upload,.confirm').toggle()" class="btn btn-warning" id="do-upload">Загрузить</button>
+        <button onclick="$('#do-upload,.confirm').toggle()" class="btn btn-outline-secondary confirm" style="display:none">Отменить</button>
+        <button onclick="$('#do-upload,.confirm').toggle();$('#upload').hide();doImport()" class="btn btn-warning confirm" style="display:none">Да, грузим</button>
+        <button onclick="$('#stats').toggle()" class="btn btn-outline-secondary" id="show-stats">Статистика</button>
     </div>
     <div id="stats" class="pl-1 pr-1 pt-3 pb-1 mt-3 mb-4 shadow" style="display:none"></div>
     <div id="up" class="mt-4" style="display:none">
         <div class="d-inline-block">
-            <t9n>[RU]Выберите родительскую запись для загрузки[EN]Select the parent record to upload its attributes</t9n>
-            <input type="text" id="searchParent" class="form-control" onfocusout="validateParent()" onfocus="searchDb(event)" onkeyup="searchDb(event)" placeholder="<t9n>[RU]Поиск по значению или #ID[EN]Search by value or #ID</t9n>">
+            Выберите родительскую запись для загрузки
+            <input type="text" id="searchParent" class="form-control" onfocusout="validateParent()" onfocus="searchDb(event)" onkeyup="searchDb(event)" placeholder="Поиск по значению или #ID">
             <div class="search-results shadow-lg"></div>
             <p class="mt-2">
-                <t9n>[RU]или укажите колонку исходного файла, откуда взять родителя или его ID[EN]or set the number of the column in the source file to get the parent or its ID</t9n>:
+                или укажите колонку исходного файла, откуда взять родителя или его ID:
                 <input style="display: none;" />
                 <table>
                     <tr>
@@ -153,10 +153,10 @@ var input,sourceMap=[],importMap={},chosenType,chosenTypeName,chosenSet,upType,u
     ,ajax='<img src="/i/ajax.gif">'
     ,typeOption='<option value=":id:" id=":id:">:name:</option>'
     ,counter=1;
-$('#dummy').html(t9n('[RU]Выберите таблицу для загрузки[EN]Select a table to upload'));
-$('#from_file').html(t9n('[RU]*** Создать новую таблицу из файла ***[EN]*** Create new table from file ***'));
-$('#saved_set').html(t9n('[RU]или выберите сохраненную настройку[EN]or select a saved setting'));
-$('title').html(t9n('[RU]Универсальный импорт[EN]Smart import'));
+$('#dummy').html('Выберите таблицу для загрузки');
+$('#from_file').html('*** Создать новую таблицу из файла ***');
+$('#saved_set').html('или выберите сохраненную настройку');
+$('title').html('Универсальный импорт');
 function resetEncoding(){
     if(chosenType===undefined)
         $('#sortable').html('');
@@ -182,13 +182,13 @@ function validateParent(){
 }
 function createType(count){
     intApi('GET','edit_types?JSON','base');
-    $('#chosen').html(t9n('[RU]Новая[EN]New'));
-    $('#order').html(t9n('[RU]Вы можете настроить поля, как они будут сохранены в базе:[EN]Tune the fields settings the way you want them to be uploaded:'));
+    $('#chosen').html('Новая');
+    $('#order').html('Вы можете настроить поля, как они будут сохранены в базе:');
     $('#choice').remove();
     $('#input-area,#unique-cap').show();
     $('#header').prop('checked',true);
     $('#save-set-form').hide();
-    byId('chosen').title=t9n('[RU]Название таблицы задается как первая колонка в таблице настроек ниже[EN]To change this name set it in the first column of the table in Settings');
+    byId('chosen').title='Название таблицы задается как первая колонка в таблице настроек ниже';
 }
 function doCreateType(){
     var i,j,k,req,ok=true,chosenTypeBase;
@@ -199,46 +199,41 @@ function doCreateType(){
             break;
         }
     if(chosenTypeBase===undefined){
-        putMsg('errors',t9n('[RU]Не выбрано ни одной колонки - нечего создавать[EN]No columns chosen - nothing to create',true));
-        return;
-    }
-    for(j in types.val)
-        if(types.val[j].toLowerCase()===chosenTypeName.toLowerCase()&&types.t[j]===chosenTypeBase)
-            if(types.req_id[j]===''){
-                putMsg('log',t9n('[RU]Термин[EN]The term')+' <b>'+chosenTypeName+'</b> ('+bt[chosenTypeBase]+') '+t9n('[RU]найден[EN]already exists')+' ('+newType+')',true);
+        putMsg('errors','Не выбрано ни одной колонки - нечего создавать'{
+                putMsg('log','Термин'+' <b>'+chosenTypeName+'</b> ('+bt[chosenTypeBase]+') '+'найден'+' ('+newType+')',true);
                 newType=types.id[j];
                 for(k in types.req_id)
                     if(types.req_t[k]==newType){
-                        putMsg('errors',t9n('[RU]Термин[EN]The term named')+' <b>'+chosenTypeName+'</b> ('+bt[chosenTypeBase]+') '+t9n('[RU]найден и является колонкой таблицы[EN]already exists and is a column of this table')+' <b>'+types.val[k]
-                                        +'</b>. <a class="du text-white" onclick="$(\'#n0\').focus()">'+t9n('[RU]Переименуйте его![EN]Rename it please!')+'</a>',true);
+                        putMsg('errors','Термин'+' <b>'+chosenTypeName+'</b> ('+bt[chosenTypeBase]+') '+'найден и является колонкой таблицы'+' <b>'+types.val[k]
+                                        +'</b>. <a class="du text-white" onclick="$(\'#n0\').focus()">'+'Переименуйте его!'+'</a>',true);
                         newType=undefined;
                         return;
                     }
                 break;
             }
             else{
-                putMsg('errors',t9n('[RU]Таблица[EN]The table')+' <b>'+chosenTypeName+'</b> ('+bt[chosenTypeBase]+') '
-                        +t9n('[RU]найдена и имеет колонки. Загрузите данные в существующую таблицу или[EN]already exists and has its columns. Please upload the data into that table')
-                        +' <a class="du text-white" onclick="$(\'.ui-state-default input\')[0].focus()">'+t9n('[RU]измените имя[EN]rename it')+'</a>',true);
+                putMsg('errors','Таблица'+' <b>'+chosenTypeName+'</b> ('+bt[chosenTypeBase]+') '
+                        +'найдена и имеет колонки. Загрузите данные в существующую таблицу или'
+                        +' <a class="du text-white" onclick="$(\'.ui-state-default input\')[0].focus()">'+'измените имя'+'</a>',true);
                 return;
             }
     for(i in sourceMap)
         if(sourceMap[i].skip===0)
             for(j in sourceMap)
                 if(i!==j&&sourceMap[i].name===sourceMap[j].name&&sourceMap[j].skip===0){
-                    putMsg('errors',t9n('[RU]Найдены одинаковые имена колонок[EN]Duplicated column names found')+': <b>'+sourceMap[j].name+'</b>'
-                            +', <a class="du text-white" onclick="$(\'#n'+j+'\').focus()">'+t9n('[RU]переименуйте их[EN]rename it')+'</a>.',true);
+                    putMsg('errors','Найдены одинаковые имена колонок'+': <b>'+sourceMap[j].name+'</b>'
+                            +', <a class="du text-white" onclick="$(\'#n'+j+'\').focus()">'+'переименуйте их'+'</a>.',true);
                     return;
                 }
     while(toCreate.length)
         toCreate.shift();
     if(newType===undefined)
         toCreate.push({url:'_d_new/?JSON&t='+chosenTypeBase+($('#unique').prop('checked')?'&unique=1':''),next:'parent',par:'val='+chosenTypeName
-                        ,msg:t9n('[RU]Cоздана таблица[EN]The table has been created')+' <b>'+chosenTypeName+'</b> ('+bt[chosenTypeBase]+')'});
+                        ,msg:'Cоздана таблица'+' <b>'+chosenTypeName+'</b> ('+bt[chosenTypeBase]+')'});
     for(i in sourceMap)
         if(sourceMap[i].skip===0){
             if(sourceMap[i].name===''){
-                putMsg('errors',t9n('[RU]Недопустимо пустое название новой таблицы или колонки[EN]Please set a name for the new table or column'),true);
+                putMsg('errors','Недопустимо пустое название новой таблицы или колонки',true);
                 return;
             }
             i++;
@@ -248,44 +243,44 @@ function doCreateType(){
                         req=ref=undefined;
                         if(sourceMap[j].name===''){
                             ok=false;
-                            putMsg('errors',t9n('[RU]Недопустимо пустое название новой колонки[EN]The column name must be not empty')+' #'+j,true);
+                            putMsg('errors','Недопустимо пустое название новой колонки'+' #'+j,true);
                         }
                         for(k in types.val)
                             if(types.val[k].toLowerCase().trim()===sourceMap[j].name.toLowerCase().trim()&&types.t[k]===sourceMap[j].base){
                                 req=types.id[k];
                                 if(types.req_id[k]!==''&&sourceMap[j].link===0){
-                                    putMsg('errors',t9n('[RU]Уже существует таблица <b>'+sourceMap[j].name+'</b> ('+bt[sourceMap[j].base]+')'
-                                                    +'[EN]Table <b>'+sourceMap[j].name+'</b> ('+bt[sourceMap[j].base]+') already exists')
-                                            +'. <a class="du text-white" onclick="$(\'#n'+j+'\').focus()">'+t9n('[RU]Переименуйте эту колонку[EN]Rename this column')+'</a>.'
+                                    putMsg('errors','Уже существует таблица <b>'+sourceMap[j].name+'</b> ('+bt[sourceMap[j].base]+')'
+                                                    +'' already exists')
+                                            +'. <a class="du text-white" onclick="$(\'#n'+j+'\').focus()">'+'Переименуйте эту колонку'+'</a>.'
                                         ,true);
                                     return;
                                 }
                             }
                         if(req===undefined){
-                            toCreate.push({url:'_d_new/?JSON&t='+sourceMap[j].base,next:'postTypes',par:'val='+sourceMap[j].name,msg:t9n('[RU]Добавлен термин [EN]The term created: ')+sourceMap[j].name});
+                            toCreate.push({url:'_d_new/?JSON&t='+sourceMap[j].base,next:'postTypes',par:'val='+sourceMap[j].name,msg:'Добавлен термин '+sourceMap[j].name});
                             if(sourceMap[j].link>0)
-                                toCreate.push({url:'_d_ref/:obj:?JSON',next:'postTypes',msg:t9n('[RU]Ссылка на [EN]A reference to')+' '+sourceMap[j].name});
+                                toCreate.push({url:'_d_ref/:obj:?JSON',next:'postTypes',msg:'Ссылка на '+' '+sourceMap[j].name});
                             toCreate.push({url:'_d_req/:parent:?JSON&t=:obj:'+(sourceMap[j].link===2?'&multiselect=1':'')
-                                        ,next:'postTypes',msg:t9n('[RU]Добавлена колонка[EN]The column created')+' '+sourceMap[j].name});
+                                        ,next:'postTypes',msg:'Добавлена колонка'+' '+sourceMap[j].name});
                         }
                         else{
-                            putMsg('log',t9n('[RU]Будет использован термин[EN]The term to be used:')+' '+sourceMap[j].name,true);
+                            putMsg('log','Будет использован термин'+' '+sourceMap[j].name,true);
                             if(sourceMap[j].link>0){
                                 for(k in types.ref_val)
                                     if(types.ref_val[k]===req){
                                         ref=types.id[k];
                                         toCreate.push({url:'_d_req/:parent:?JSON&t='+ref+(sourceMap[j].link===2?'&multiselect=1':'')
-                                                    ,next:'postTypes',msg:t9n('[RU]Использована ссылка на[EN]Reused the reference to')+' <b>'+sourceMap[j].name+'</b>'});
+                                                    ,next:'postTypes',msg:'Использована ссылка на'+' <b>'+sourceMap[j].name+'</b>'});
                                         break;
                                     }
                                 if(ref===undefined){
-                                    toCreate.push({url:'_d_ref/'+req+'?JSON',next:'postTypes',msg:t9n('[RU]Ссылка на[EN]A reference to')+' '+sourceMap[j].name});
+                                    toCreate.push({url:'_d_ref/'+req+'?JSON',next:'postTypes',msg:'Ссылка на'+' '+sourceMap[j].name});
                                     toCreate.push({url:'_d_req/:parent:?JSON&t=:obj:'+(sourceMap[j].link===2?'&multiselect=1':'')
-                                                ,next:'postTypes',msg:t9n('[RU]Колонка[EN]The column')+' '+sourceMap[j].name+t9n('[RU] добавлена[EN] was created')});
+                                                ,next:'postTypes',msg:'Колонка'+' '+sourceMap[j].name+' добавлена'});
                                 }
                             }
                             else
-                                toCreate.push({url:'_d_req/:parent:?JSON&t='+req,next:'postTypes',msg:t9n('[RU]Колонка[EN]The column')+' '+sourceMap[j].name+t9n('[RU] добавлена[EN] was created')});
+                                toCreate.push({url:'_d_req/:parent:?JSON&t='+req,next:'postTypes',msg:'Колонка'+' '+sourceMap[j].name+' добавлена'});
                         }
                     }
 								  
@@ -295,7 +290,7 @@ function doCreateType(){
             }
             return;
         }
-    putMsg('errors',t9n('[RU]Нет полей для импорта[EN]No lines to import'));
+    putMsg('errors','Нет полей для импорта');
 }
 function postTypes(q,json){
     if(q===undefined){
@@ -325,7 +320,7 @@ function doImport(count){
         return;
     count=count||1;
     if(count===1)
-        $('#progress').html(t9n('[RU]Отправка по[EN]Send')+' '+chunkSize+t9n('[RU] записей[EN] records in every batch')+ajax).show();
+        $('#progress').html('Отправка по'+' '+chunkSize+' записей'+ajax).show();
     var file='',i,j,k;
     for(i=count;i<count+chunkSize;i++){
         if(toImport[i]===undefined)
@@ -380,7 +375,7 @@ function markSelected(v){
 function addSortableType(id,val,base){
     return '<div onclick="if(event.target===this)toFormula(this)" class="ui-state-default dict p-1  bg-white" id="'+id+'" style="text-align:center; font-size: .85em">'
             +'<i class="pi pi-link" id="l'+id+'" onclick="setLink(this)" style="font-size: 1.1rem; color: #aaa; cursor: pointer;" title="'
-                +t9n('[RU]Включите этот значок, если это поле будет ссылкой на справочник[EN]Check this box to make this a reference to the dictionary')+'"></i>&nbsp;'
+                +'Включите этот значок, если это поле будет ссылкой на справочник'+'"></i>&nbsp;'
             +'<input id="n'+id+'" size="'+(val.length+1)+'" onkeyup="this.size=this.value.length+1" onchange="$(\'#upload\').hide();$(\'#refresh\').show();" style="border:none" type="text" value="'+val+'">'
             +'<hr class="m-2"><span class="base-type">'+base+'</span>'
             +'<br><input id="s'+id+'" type="checkbox" checked class="mt-3" title="Снимите галку, чтобы пропустить это поле" onchange="$(\'#upload\').hide();$(\'#refresh\').show();"></div>';
@@ -388,13 +383,13 @@ function addSortableType(id,val,base){
 function setLink(el){
     if($(el).hasClass('multiselect'))
         $(el).removeClass('pi-list').addClass('pi-link').css('color','#aaa').removeClass('is-link').removeClass('multiselect')
-            .attr('title',t9n('[RU]Включите этот значок, если это поле будет ссылкой на справочник[EN]Click this to make this a reference to the dictionary'));
+            .attr('title','Включите этот значок, если это поле будет ссылкой на справочник');
     else if($(el).hasClass('is-link'))
         $(el).removeClass('pi-link').addClass('pi-list').css('color','#111').addClass('multiselect')
-            .attr('title',t9n('[RU]Кликните, чтобы сделать это поле не справочным[EN]Click this to make the field non-dictionary'));
+            .attr('title','Кликните, чтобы сделать это поле не справочным');
     else
         $(el).css('color','#111').addClass('is-link')
-            .attr('title',t9n('[RU]Кликните ещё раз, чтобы разрешить множественный выбор из справочника[EN]Click this again to enable multiple selection from dictionary'));
+            .attr('title','Кликните ещё раз, чтобы разрешить множественный выбор из справочника');
     $('#upload').hide();
     $('#refresh').show();
     importParse();
@@ -417,7 +412,7 @@ function doSaveSet(){
             intApi('GET','object/269?JSON&F_271=UPLOAD&F_269='+encodeURIComponent($('#save-set').val()),'check-set');
         }
         else
-            alert(t9n('[RU]Недопустимый символ " в имени настройки![EN]Please do not use " in the settings name'));
+            alert('Недопустимый символ " в имени настройки!');
 }
 function applySet(v){
     chosenSet=v;
@@ -554,14 +549,14 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                     $('#delim').val(uploadSets[chosenSet].delimiter);
                     $('#caret').val(uploadSets[chosenSet].newline);
                 }
-                h+='<div class="pl-2 pt-1 h3" title="'+t9n('[RU]Добавить пропуск — пустое поле[EN]Add an empty field to skip this column')+'" onclick="$(addSortable(\'\',\'\',\'--\',\'--\')).insertBefore(this)"><a>+</a></div>';
+                h+='<div class="pl-2 pt-1 h3" title="'+'Добавить пропуск — пустое поле'+'" onclick="$(addSortable(\'\',\'\',\'--\',\'--\')).insertBefore(this)"><a>+</a></div>';
                 $('#sortable').html(h);
                 j=getParent(chosenType);
                 if(j!==''){
                     j+=' > ';
                     upType=getUpType(chosenType);
                     $('#do-upload').attr('disabled',true)
-                        .attr('title',t9n('[RU]Выберите родительскую запись для загрузки[EN]Select the parent record to upload its attributes'));
+                        .attr('title','Выберите родительскую запись для загрузки');
                     $('#up').show();
                 }
                 $('#chosen').html(j+chosenTypeName+(chosenSet===undefined?'':' ('+chosenSet+')'));
@@ -605,7 +600,7 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                         h+='<option value="'+json.object[i].val+'">'+json.object[i].val+'</option>';
                     }
                     catch(e){
-                        h+='<option value="" class="text-danger">'+json.object[i].val+t9n('[RU] (ошибка шаблона)[EN] (template error)')+'</option>';
+                        h+='<option value="" class="text-danger">'+json.object[i].val+' (ошибка шаблона)'+'</option>';
                     }
                 }
                 $('#settings').html($('#settings').html()+h);
@@ -627,7 +622,7 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                 break;
                 
             case 'upload':
-                $('#progress').html(t9n('[RU]Отправка по 1000 записей, обработано[EN]Send records in batches of 1000 lines, processed')+' '+(index-1)+' ('+Math.round(index/toImport.length*100)+'%) '+(index<toImport.length?ajax:''));
+                $('#progress').html('Отправка по 1000 записей, обработано'+' '+(index-1)+' ('+Math.round(index/toImport.length*100)+'%) '+(index<toImport.length?ajax:''));
                 if(json===undefined)
                     $('#errors').html(h).show();
                 else
@@ -703,7 +698,7 @@ function guessBase(str){
     return "SHORT";
 }
 function gatherSet(){
-    var i=0,h='<option class="text-light" value="">-- '+t9n('[RU]выберите[EN]Choose')+' --</option>';
+    var i=0,h='<option class="text-light" value="">-- '+'выберите'+' --</option>';
     $('.ui-state-default').each(function(){
         if(this.id==='')
             sourceMap[i]={};
@@ -792,7 +787,7 @@ function importDoParse(input){
     $('#progress,#errors,#log').html('').hide();
     var val,i,j=0,jMap,reverseMap={}
         ,err=0,skippedInvalid=0,empties=0,sampleHeader='',sampleLine='',expr,l=0,line
-        ,stats='<h5>'+t9n('[RU]Статистика[EN]Totals')+'</h5><table class="table table-sm table-bordered mt-2"><thead><tr><td></td>';
+        ,stats='<h5>'+'Статистика'+'</h5><table class="table table-sm table-bordered mt-2"><thead><tr><td></td>';
     if(chosenType===undefined){
         parseType(input);
         $('#chosen').html('');
@@ -885,7 +880,7 @@ function importDoParse(input){
         stats+='</tr>';
     }
     if(l>chunkSize){
-        line=', '+t9n('[RU]страница[EN]page')+' <select onchange="drawPage(this.value)">';
+        line=', '+'страница'+' <select onchange="drawPage(this.value)">';
         for(i=1;i<=Math.ceil(l/chunkSize);i++)
             line+='<option value="'+i+'">'+i+'</option>'
         line+='</select>';
@@ -893,9 +888,9 @@ function importDoParse(input){
     else
         line='';
     $('#stats').html(stats);
-    $('#resume').html('<h5>'+t9n('[RU]Предварительный просмотр результатов импорта (всего строк[EN]Import preview (total lines')+': <b>'+l+'</b>'+(err>0?'<font color="orange">, '+t9n('[RU]ошибок[EN]errors')+': '+err+'</font>':'')
-                        +(empties>0?'<font color="gray">, '+t9n('[RU]пустых ячеек[EN]empty cells')+': '+empties+'</font>':'')
-                        +(skippedInvalid>0?'<font color="orange">, '+t9n('[RU]пропущено пустых[EN]empty skipped')+': '+skippedInvalid+'</font>':'')+')'+line+'</h5>');
+    $('#resume').html('<h5>'+'Предварительный просмотр результатов импорта (всего строк'+': <b>'+l+'</b>'+(err>0?'<font color="orange">, '+'ошибок'+': '+err+'</font>':'')
+                        +(empties>0?'<font color="gray">, '+'пустых ячеек'+': '+empties+'</font>':'')
+                        +(skippedInvalid>0?'<font color="orange">, '+'пропущено пустых'+': '+skippedInvalid+'</font>':'')+')'+line+'</h5>');
     drawPage(1);
     if((l==0&&chosenType!==undefined)||sourceMap.length==0){
         $('#upload').hide();
@@ -915,9 +910,9 @@ function drawPage(n){
             link='';
             if(chosenType===undefined&&j>0)
                 if(sourceMap[i].link===1)
-                    link='<i class="pi pi-link" style="font-size: 0.8rem; color: #111;" title="'+t9n('[RU]Справочное значение[EN]Select from dictionary')+'"></i>&nbsp;';
+                    link='<i class="pi pi-link" style="font-size: 0.8rem; color: #111;" title="'+'Справочное значение'+'"></i>&nbsp;';
                 else if(sourceMap[i].link===2)
-                    link='<i class="pi pi-list" style="font-size: 0.8rem; color: #111;" title="'+t9n('[RU]Выбор нескольких из справочника[EN]Multiple choice from dictionary')+'"></i>&nbsp;';
+                    link='<i class="pi pi-list" style="font-size: 0.8rem; color: #111;" title="'+'Выбор нескольких из справочника'+'"></i>&nbsp;';
             h+='<td id="'+sourceMap[i].id+'">'+link+sourceMap[i].name
                 +(chosenType===undefined?'<br /><span style="font-size: 75%; color: gray">'+bt[sourceMap[i].base]+'</span>':'')
                 +'</td>';
