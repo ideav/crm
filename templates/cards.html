@@ -383,19 +383,19 @@
 /**
  * CardsView Component
  *
- * Usage (via data attributes on the container div, like integram-table):
+ * Displays records from a table (object) as a card grid.
+ *
+ * Usage (via data attributes on the container div):
  *   data-cards-view
- *   data-api-url="/{db}/report/MyReport?JSON"
- *   data-data-source="report"     // 'report' (default) or 'table'
- *   data-table-type-id="123"      // Required for dataSource='table'
+ *   data-table-type-id="{_global_.id}"   // Required: table type ID (filled by server templating)
  *   data-page-size="20"
- *   data-cookie-prefix="cards-123"
+ *   data-cookie-prefix="cards-{_global_.id}"
  *   data-title=""
  *   data-instance-name="myCards"
  *
  * Or via JS constructor:
  *   var view = new CardsView('cards-container', {
- *       apiUrl: '...', dataSource: 'report', pageSize: 20, ...
+ *       tableTypeId: '123', pageSize: 20, ...
  *   });
  */
 (function(window) {
@@ -498,8 +498,6 @@
 
         options = options || {};
         this.options = {
-            apiUrl:       options.apiUrl       || '',
-            dataSource:   options.dataSource   || 'report',   // 'report' | 'table'
             tableTypeId:  options.tableTypeId  || null,
             pageSize:     parseInt(options.pageSize) || 20,
             cookiePrefix: options.cookiePrefix || 'cards',
@@ -508,16 +506,16 @@
         };
 
         // State
-        this.columns       = [];   // [{id, name, type, format}]
+        this.columns       = [];   // [{id, name, type}]
         this.data          = [];   // array of row-arrays (parallel to this.columns)
-        this.rawObjectData = [];   // raw [{i,r}] for object format
+        this.rawObjectData = [];   // raw [{i,r}] from object API
         this.loadedRecords = 0;
         this.hasMore       = true;
         this.isLoading     = false;
-        this.metadata      = null; // metadata for 'table' source
+        this.metadata      = null;
         this.searchQuery   = '';
         this.fieldFilters  = {};   // {colId: value}
-        this.sortColId     = null; // column id to sort by (passed as ORDER param)
+        this.sortColId     = null;
 
         // Customization settings (saved/loaded)
         this.settings = {
@@ -578,45 +576,39 @@
     // ─── API Base ────────────────────────────────────────────────────────────────
 
     CardsView.prototype._getApiBase = function() {
-        var url = this.options.apiUrl;
-        if (!url) {
-            var parts = window.location.pathname.split('/');
-            if (parts.length >= 2 && parts[1]) {
-                return 'https://' + window.location.hostname + '/' + parts[1];
-            }
-            return '';
+        var parts = window.location.pathname.split('/');
+        if (parts.length >= 2 && parts[1]) {
+            return 'https://' + window.location.hostname + '/' + parts[1];
         }
-        var m = url.match(/^(.*?)\/(report|type|metadata|object)\/\d+/);
-        if (m) return m[1];
-        return url.split('?')[0].replace(/\/[^\/]*$/, '');
+        return '';
     };
 
-    // ─── Initialise: fetch metadata (for table) + first page of data ─────────────
+    // ─── Initialise: fetch metadata + first page of data ─────────────────────────
 
     CardsView.prototype._init = function() {
         var self = this;
-        if (this.options.dataSource === 'table' && this.options.tableTypeId && !this.metadata) {
-            var metaUrl = this._getApiBase() + '/metadata/' + this.options.tableTypeId;
-            fetch(metaUrl)
-                .then(function(r) { return r.json(); })
-                .then(function(m) {
-                    self.metadata = m;
-                    // Auto-set title from metadata
-                    if (!self.options.title && (m.val || m.value || m.name)) {
-                        self.options.title = m.val || m.value || m.name;
-                        var titleEl = document.getElementById(self.options.instanceName + '-title');
-                        if (titleEl) titleEl.textContent = self.options.title;
-                    }
-                    self._buildColumnsFromMetadata(m);
-                    self._loadData(false);
-                })
-                .catch(function(e) { self._showError('Ошибка загрузки метаданных: ' + e.message); });
-        } else {
-            this._loadData(false);
+        if (!this.options.tableTypeId) {
+            this._showError('CardsView: data-table-type-id не задан');
+            return;
         }
+        var metaUrl = this._getApiBase() + '/metadata/' + this.options.tableTypeId;
+        fetch(metaUrl)
+            .then(function(r) { return r.json(); })
+            .then(function(m) {
+                self.metadata = m;
+                // Auto-set title from metadata
+                if (!self.options.title && (m.val || m.value || m.name)) {
+                    self.options.title = m.val || m.value || m.name;
+                    var titleEl = document.getElementById(self.options.instanceName + '-title');
+                    if (titleEl) titleEl.textContent = self.options.title;
+                }
+                self._buildColumnsFromMetadata(m);
+                self._loadData(false);
+            })
+            .catch(function(e) { self._showError('Ошибка загрузки метаданных: ' + e.message); });
     };
 
-    // Build columns array from metadata (same as integram-table.js)
+    // Build columns array from metadata
     CardsView.prototype._buildColumnsFromMetadata = function(m) {
         var cols = [];
         cols.push({ id: String(m.id), name: m.val || m.name || 'Значение', type: String(m.type || '3') });
@@ -657,6 +649,7 @@
         var limit  = this.options.pageSize + 1;  // fetch one extra to detect hasMore
 
         var params = new URLSearchParams();
+        params.set('JSON_OBJ', '');
         params.set('LIMIT', offset + ',' + limit);
 
         // ORDER parameter
@@ -672,19 +665,7 @@
             if (v) params.set('FR_' + colId, '%' + v + '%');
         });
 
-        var apiUrl = this.options.apiUrl || '';
-        var sep = apiUrl.indexOf('?') !== -1 ? '&' : '?';
-        var base = apiUrl;
-
-        if (this.options.dataSource === 'table') {
-            // Use object/{id}/?JSON_OBJ&LIMIT=...
-            var typeId = this.options.tableTypeId;
-            base = this._getApiBase() + '/object/' + typeId + '/';
-            sep  = '?';
-            params.set('JSON_OBJ', '');
-        }
-
-        return base + sep + params.toString();
+        return this._getApiBase() + '/object/' + this.options.tableTypeId + '/?' + params.toString();
     };
 
     // ─── Process API response ────────────────────────────────────────────────────
@@ -692,26 +673,9 @@
     CardsView.prototype._processResponse = function(json, append) {
         var newRows = [];
 
-        if (this.options.dataSource === 'table' && Array.isArray(json)) {
+        if (Array.isArray(json)) {
             // JSON_OBJ format: [{i, u, o, r}, ...]
             newRows = this._parseJsonObjArray(json);
-        } else if (json && json.columns && json.data !== undefined) {
-            // Standard report format: {columns, data, header}
-            this._processReportColumns(json);
-            newRows = this._parseReportData(json);
-            if (!this.options.title && json.header) {
-                this.options.title = json.header;
-                var titleEl = document.getElementById(this.options.instanceName + '-title');
-                if (titleEl) titleEl.textContent = json.header;
-            }
-        } else if (Array.isArray(json)) {
-            // Legacy / simple array format
-            if (json.length > 0 && Array.isArray(json[0])) {
-                newRows = json;
-            } else {
-                // Object-per-row format: convert to rows using current columns
-                newRows = this._parseObjectArray(json);
-            }
         }
 
         // Detect hasMore
@@ -736,37 +700,9 @@
         this._updateCount();
     };
 
-    CardsView.prototype._processReportColumns = function(json) {
-        if (this.columns.length > 0) return; // already set
-        var cols = [];
-        (json.columns || []).forEach(function(c) {
-            cols.push({ id: String(c.id || c.type || c.name), name: c.name || '', type: String(c.type || '3') });
-        });
-        this.columns = cols;
-    };
-
-    CardsView.prototype._parseReportData = function(json) {
-        var columnData = json.data || [];
-        var rows = [];
-        if (columnData.length > 0 && Array.isArray(columnData[0])) {
-            // Column-major format: data[colIndex][rowIndex]
-            var numRows = columnData[0].length;
-            for (var r = 0; r < numRows; r++) {
-                var row = [];
-                for (var c = 0; c < columnData.length; c++) {
-                    row.push(columnData[c][r]);
-                }
-                rows.push(row);
-            }
-        } else {
-            rows = columnData;
-        }
-        return rows;
-    };
-
     CardsView.prototype._parseJsonObjArray = function(arr) {
         var self = this;
-        // Build/update columns from first item if needed
+        // Build/update columns from metadata if needed
         if (this.columns.length === 0 && this.metadata && this.metadata.reqs) {
             this._buildColumnsFromMetadata(this.metadata);
         }
@@ -785,21 +721,6 @@
                 }
             }
             return row;
-        });
-    };
-
-    CardsView.prototype._parseObjectArray = function(arr) {
-        if (!arr || arr.length === 0) return [];
-        // Build columns from first object keys if not yet set
-        if (this.columns.length === 0) {
-            var keys = Object.keys(arr[0]);
-            this.columns = keys.map(function(k) {
-                return { id: k, name: k, type: '3' };
-            });
-        }
-        var cols = this.columns;
-        return arr.map(function(obj) {
-            return cols.map(function(c) { return obj[c.id] !== undefined ? obj[c.id] : obj[c.name]; });
         });
     };
 
@@ -829,37 +750,21 @@
         this._autoNumIdx    = numIdx[0]   !== undefined ? numIdx[0]   : -1;
         this._autoStatusIdx = listIdx[0]  !== undefined ? listIdx[0]  : -1;
 
-        // Record ID column: use rawObjectData if available, else look for column named 'ID' or ending with 'ID'
+        // Record ID column: use rawObjectData (always available for object source)
         this._autoIdIdx = -1;
-        for (var j = 0; j < cols.length; j++) {
-            if (cols[j].name === 'ID' || cols[j].name.endsWith('ID')) {
-                this._autoIdIdx = j;
-                break;
-            }
-        }
     };
 
     // Return record ID for a given row (for edit form)
     CardsView.prototype._getRowId = function(rowIndex) {
-        if (this.options.dataSource === 'table' && this.rawObjectData[rowIndex]) {
+        if (this.rawObjectData[rowIndex]) {
             return this.rawObjectData[rowIndex].i;
         }
-        var row = this.data[rowIndex];
-        // Check _autoIdIdx
-        if (this._autoIdIdx >= 0 && row[this._autoIdIdx] != null) return row[this._autoIdIdx];
-        // Fallback: first column that looks like a number
-        if (row[0] != null && !isNaN(Number(row[0]))) return row[0];
         return null;
     };
 
     // Return typeId for the edit form
     CardsView.prototype._getTypeId = function() {
-        if (this.options.dataSource === 'table' && this.options.tableTypeId) {
-            return this.options.tableTypeId;
-        }
-        // For report: try to determine from columns orig type
-        if (this.columns.length > 0 && this.columns[0].orig) return this.columns[0].orig;
-        return null;
+        return this.options.tableTypeId;
     };
 
     // ─── Render card list ─────────────────────────────────────────────────────────
@@ -1168,7 +1073,6 @@
                 document.body.appendChild(helperEl);
             }
             var helper = new window.IntegramTable(helperId, {
-                apiUrl: this.options.apiUrl,
                 instanceName: '__cardsEditHelper'
             });
             window.__cardsEditHelper = helper;
@@ -1206,7 +1110,7 @@
 
     CardsView.prototype._fetchRemoteSettings = function() {
         var self = this;
-        var srcId = this._getSourceId();
+        var srcId = this.options.tableTypeId;
         if (!srcId) return;
         var apiBase = this._getApiBase();
         fetch(apiBase + '/object/269/?F_269=cards' + srcId + '&F_271=CARDS')
@@ -1232,7 +1136,7 @@
 
     CardsView.prototype._saveSettings = function() {
         var key    = this.options.cookiePrefix + '-settings';
-        var srcId  = this._getSourceId();
+        var srcId  = this.options.tableTypeId;
         var apiBase = this._getApiBase();
         var mode   = this.settings.saveMode || 'local';
 
@@ -1264,13 +1168,6 @@
                 })
                 .catch(function(e) { console.error('CardsView: failed to save settings to table 269:', e); });
         }
-    };
-
-    CardsView.prototype._getSourceId = function() {
-        // Extract numeric source ID from apiUrl or tableTypeId
-        if (this.options.tableTypeId) return this.options.tableTypeId;
-        var m = (this.options.apiUrl || '').match(/\/(\d+)/);
-        return m ? m[1] : null;
     };
 
     // ─── Settings modal ───────────────────────────────────────────────────────────
@@ -1424,8 +1321,6 @@
             if (!el.id) el.id = 'cards-view-' + Math.random().toString(36).slice(2);
             var instanceName = el.dataset.instanceName || ('cardsView_' + el.id);
             var view = new CardsView(el.id, {
-                apiUrl:       el.dataset.apiUrl || '',
-                dataSource:   el.dataset.dataSource || 'report',
                 tableTypeId:  el.dataset.tableTypeId || null,
                 pageSize:     parseInt(el.dataset.pageSize) || 20,
                 cookiePrefix: el.dataset.cookiePrefix || ('cards-' + (el.dataset.tableTypeId || el.id)),
@@ -1440,14 +1335,11 @@
 </script>
 
 <!--
-Usage examples:
-
-1. Via data attributes (embedded in main.html like kanban.html):
+Usage example (embedded in main.html like kanban.html):
 
 <div id="my-cards"
      data-cards-view
-     data-api-url="/{_global_.z}/report/MyReport?JSON"
-     data-data-source="report"
+     data-table-type-id="{_global_.id}"
      data-page-size="20"
      data-cookie-prefix="cards-{_global_.id}"
      data-title=""
@@ -1456,16 +1348,13 @@ Usage examples:
 <script src="/js/integram-table.js"></script>
 <script src="/templates/cards.html"></script>
 
-2. Via JavaScript constructor:
+When requested as https://ideav.ru/ru2/cards/18, the server templating engine will render:
 
-var cards = new CardsView('my-cards', {
-    apiUrl:       '/{db}/object/123/?JSON_OBJ',
-    dataSource:   'table',
-    tableTypeId:  '123',
-    pageSize:     20,
-    cookiePrefix: 'cards-123',
-    title:        '',
-    instanceName: 'myCards'
-});
-window.myCards = cards;
+<div id="my-cards"
+     data-cards-view
+     data-table-type-id="18"
+     data-page-size="20"
+     data-cookie-prefix="cards-18"
+     data-title=""
+     data-instance-name="myCardsView"></div>
 -->
