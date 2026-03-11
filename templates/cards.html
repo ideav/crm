@@ -1,0 +1,1466 @@
+<style>
+    /* Cards Component CSS Variables */
+    :root {
+        --cards-primary: #1976d2;
+        --cards-primary-dark: #1565c0;
+        --cards-primary-light: #42a5f5;
+        --cards-background: #fafafa;
+        --cards-surface: #ffffff;
+        --cards-border: rgba(0, 0, 0, 0.12);
+        --cards-text-primary: rgba(0, 0, 0, 0.87);
+        --cards-text-secondary: rgba(0, 0, 0, 0.54);
+        --cards-shadow-1: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+        --cards-shadow-2: 0 3px 6px rgba(0,0,0,0.16), 0 3px 6px rgba(0,0,0,0.23);
+        --cards-radius: 4px;
+        --cards-transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Container */
+    #cards-container {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background: var(--cards-background);
+    }
+
+    /* Header */
+    .cards-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 16px 8px;
+        flex-shrink: 0;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .cards-title-area {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .cards-title {
+        font-size: 20px;
+        font-weight: 500;
+        color: var(--cards-text-primary);
+        letter-spacing: 0.15px;
+    }
+
+    .cards-controls {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+
+    /* Search bar */
+    .cards-search-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 16px 8px;
+        flex-shrink: 0;
+        flex-wrap: wrap;
+    }
+
+    .cards-search-input {
+        flex: 1;
+        min-width: 180px;
+        max-width: 320px;
+        height: 32px;
+        border: 1px solid var(--cards-border);
+        border-radius: var(--cards-radius);
+        padding: 4px 10px;
+        font-size: 14px;
+        outline: none;
+        transition: var(--cards-transition);
+    }
+
+    .cards-search-input:focus {
+        border-color: var(--cards-primary);
+        box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.15);
+    }
+
+    /* Field filters row */
+    .cards-filters-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 16px 10px;
+        flex-shrink: 0;
+        flex-wrap: wrap;
+    }
+
+    .cards-field-filter {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .cards-field-filter label {
+        font-size: 12px;
+        color: var(--cards-text-secondary);
+        margin: 0;
+        white-space: nowrap;
+    }
+
+    .cards-field-filter input,
+    .cards-field-filter select {
+        height: 28px;
+        border: 1px solid var(--cards-border);
+        border-radius: var(--cards-radius);
+        padding: 2px 8px;
+        font-size: 13px;
+        outline: none;
+        min-width: 100px;
+        max-width: 180px;
+    }
+
+    .cards-field-filter input:focus,
+    .cards-field-filter select:focus {
+        border-color: var(--cards-primary);
+    }
+
+    /* Cards grid */
+    .cards-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 12px;
+        padding: 4px 16px 16px;
+        overflow-y: auto;
+        flex: 1;
+        min-height: 0;
+    }
+
+    /* Card */
+    .cards-card {
+        background: var(--cards-surface);
+        border-radius: var(--cards-radius);
+        box-shadow: var(--cards-shadow-1);
+        padding: 14px 14px 12px;
+        position: relative;
+        transition: var(--cards-transition);
+        cursor: default;
+    }
+
+    .cards-card:hover {
+        box-shadow: var(--cards-shadow-2);
+        transform: translateY(-1px);
+    }
+
+    /* Card title (clickable) */
+    .cards-card-title {
+        font-size: 15px;
+        font-weight: 500;
+        color: var(--cards-primary);
+        cursor: pointer;
+        margin-bottom: 6px;
+        padding-right: 60px;
+        line-height: 1.4;
+        word-break: break-word;
+    }
+
+    .cards-card-title:hover {
+        text-decoration: underline;
+    }
+
+    /* Date — top-right corner */
+    .cards-card-date {
+        position: absolute;
+        top: 8px;
+        right: 10px;
+        font-size: 11px;
+        color: var(--cards-text-secondary);
+        white-space: nowrap;
+    }
+
+    /* Status badge */
+    .cards-card-status {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 500;
+        margin-bottom: 6px;
+        background: #e3f2fd;
+        color: var(--cards-primary);
+    }
+
+    /* Description */
+    .cards-card-description {
+        font-size: 13px;
+        color: var(--cards-text-secondary);
+        margin-bottom: 4px;
+        line-height: 1.4;
+        word-break: break-word;
+    }
+
+    /* Amount */
+    .cards-card-amount {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--cards-primary);
+        margin-top: 6px;
+    }
+
+    /* Extra fields */
+    .cards-card-field {
+        font-size: 13px;
+        color: var(--cards-text-secondary);
+        margin-bottom: 2px;
+        word-break: break-word;
+    }
+
+    /* Loading / empty states */
+    .cards-loading,
+    .cards-empty {
+        text-align: center;
+        padding: 40px;
+        color: var(--cards-text-secondary);
+        font-size: 15px;
+        grid-column: 1 / -1;
+    }
+
+    .cards-error {
+        background: #ffebee;
+        color: #b71c1c;
+        padding: 14px 18px;
+        border-radius: var(--cards-radius);
+        margin: 12px 16px;
+        font-size: 14px;
+    }
+
+    /* Scroll sentinel */
+    .cards-scroll-sentinel {
+        height: 1px;
+        grid-column: 1 / -1;
+    }
+
+    /* Settings modal overlay */
+    .cards-settings-overlay {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.4);
+        z-index: 1050;
+    }
+
+    .cards-settings-modal {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: #fff;
+        border-radius: 6px;
+        box-shadow: 0 24px 38px rgba(0,0,0,0.14);
+        z-index: 1051;
+        padding: 20px 24px;
+        min-width: 320px;
+        max-width: 480px;
+        width: 90vw;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+
+    .cards-settings-modal h4 {
+        margin: 0 0 14px;
+        font-size: 16px;
+        font-weight: 500;
+    }
+
+    .cards-settings-section {
+        margin-bottom: 14px;
+    }
+
+    .cards-settings-section label {
+        display: block;
+        font-size: 13px;
+        color: var(--cards-text-secondary);
+        margin-bottom: 4px;
+    }
+
+    .cards-settings-section input,
+    .cards-settings-section select {
+        width: 100%;
+        border: 1px solid var(--cards-border);
+        border-radius: var(--cards-radius);
+        padding: 5px 8px;
+        font-size: 13px;
+        outline: none;
+    }
+
+    .cards-settings-section .cards-col-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        border: 1px solid var(--cards-border);
+        border-radius: var(--cards-radius);
+        padding: 6px;
+        max-height: 150px;
+        overflow-y: auto;
+    }
+
+    .cards-settings-section .cards-col-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        cursor: pointer;
+        padding: 2px 4px;
+        border-radius: 3px;
+    }
+
+    .cards-settings-section .cards-col-item:hover {
+        background: rgba(25, 118, 210, 0.06);
+    }
+
+    .cards-settings-section .cards-col-item input[type="checkbox"] {
+        width: auto;
+        margin: 0;
+    }
+
+    /* Buttons */
+    .cards-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        border-radius: var(--cards-radius);
+        font-size: 13px;
+        cursor: pointer;
+        border: 1px solid transparent;
+        transition: var(--cards-transition);
+        background: transparent;
+        color: var(--cards-text-primary);
+    }
+
+    .cards-btn:hover {
+        background: var(--cards-hover, rgba(0,0,0,0.04));
+    }
+
+    .cards-btn-link {
+        color: var(--cards-text-primary);
+        border: none;
+    }
+
+    .cards-settings-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        border-radius: var(--cards-radius);
+        cursor: pointer;
+        color: var(--cards-text-secondary);
+        transition: var(--cards-transition);
+        font-size: 16px;
+    }
+
+    .cards-settings-icon:hover {
+        background: rgba(0,0,0,0.06);
+        color: var(--cards-text-primary);
+    }
+
+    /* Record count */
+    .cards-count {
+        font-size: 13px;
+        color: var(--cards-text-secondary);
+        white-space: nowrap;
+    }
+</style>
+
+<div id="cards-container">
+    <div class="cards-loading" id="cards-initial-loading">Загрузка данных...</div>
+</div>
+
+<script>
+/**
+ * CardsView Component
+ *
+ * Usage (via data attributes on the container div, like integram-table):
+ *   data-cards-view
+ *   data-api-url="/{db}/report/MyReport?JSON"
+ *   data-data-source="report"     // 'report' (default) or 'table'
+ *   data-table-type-id="123"      // Required for dataSource='table'
+ *   data-page-size="20"
+ *   data-cookie-prefix="cards-123"
+ *   data-title=""
+ *   data-instance-name="myCards"
+ *
+ * Or via JS constructor:
+ *   var view = new CardsView('cards-container', {
+ *       apiUrl: '...', dataSource: 'report', pageSize: 20, ...
+ *   });
+ */
+(function(window) {
+    'use strict';
+
+    // ─── Helpers ────────────────────────────────────────────────────────────────
+
+    function escHtml(v) {
+        if (v == null) return '';
+        var d = document.createElement('div');
+        d.textContent = String(v);
+        return d.innerHTML;
+    }
+
+    function getCookie(name) {
+        var c = document.cookie.split(';');
+        for (var i = 0; i < c.length; i++) {
+            var p = c[i].trim();
+            if (p.startsWith(name + '=')) {
+                try { return JSON.parse(p.slice(name.length + 1)); } catch(e) { return p.slice(name.length + 1); }
+            }
+        }
+        return null;
+    }
+
+    function setCookie(name, value, days) {
+        var maxAge = days * 86400;
+        document.cookie = name + '=' + JSON.stringify(value) + '; path=/; max-age=' + maxAge;
+    }
+
+    function deleteCookie(name) {
+        document.cookie = name + '=; path=/; max-age=0';
+    }
+
+    // ─── Type helpers (mirrors integram-table.js logic) ──────────────────────
+
+    var TEXT_TYPES  = new Set(['3','8','12','17']);    // SHORT, CHARS, MEMO, PATH
+    var DATE_TYPES  = new Set(['9','4']);              // DATE, DATETIME
+    var NUM_TYPES   = new Set(['13','14']);             // NUMBER, SIGNED
+    var LIST_TYPES  = new Set(['5','16']);              // GRANT, REPORT_COLUMN
+
+    function isTextType(t)  { return TEXT_TYPES.has(String(t)); }
+    function isDateType(t)  { return DATE_TYPES.has(String(t)); }
+    function isNumType(t)   { return NUM_TYPES.has(String(t)); }
+    function isListType(t)  { return LIST_TYPES.has(String(t)); }
+
+    // ─── Date formatting ────────────────────────────────────────────────────────
+
+    function formatDate(v) {
+        if (!v) return '';
+        // Try to parse ISO / timestamp strings, return date-only part
+        var s = String(v);
+        // Already looks like a date
+        var m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+        if (m) return m[1];
+        // Try DD.MM.YYYY (already formatted)
+        var m2 = s.match(/^(\d{2}\.\d{2}\.\d{4})/);
+        if (m2) return m2[1];
+        // Try to parse as number (unix timestamp)
+        var ts = Number(s);
+        if (!isNaN(ts) && ts > 0) {
+            var d = new Date(ts < 1e10 ? ts * 1000 : ts);
+            return d.toLocaleDateString('ru-RU');
+        }
+        return s.split('T')[0] || s;
+    }
+
+    // ─── Number formatting ───────────────────────────────────────────────────────
+
+    function formatNum(v) {
+        if (v == null || v === '') return '';
+        var n = parseFloat(String(v).replace(/\s/g,''));
+        if (isNaN(n)) return String(v);
+        return n.toLocaleString('ru-RU');
+    }
+
+    // ─── Color luminance helper ──────────────────────────────────────────────────
+
+    function makeStatusStyle(color) {
+        if (!color) return '';
+        // Detect hex
+        var hex = color.replace('#','');
+        if (hex.length === 3) hex = hex[0]+hex[0]+hex[1]+hex[1]+hex[2]+hex[2];
+        if (hex.length !== 6) return 'background:' + color + ';color:#fff;';
+        var r = parseInt(hex.slice(0,2),16);
+        var g = parseInt(hex.slice(2,4),16);
+        var b = parseInt(hex.slice(4,6),16);
+        // Perceived luminance
+        var lum = (0.299*r + 0.587*g + 0.114*b) / 255;
+        var fg  = lum > 0.55 ? 'rgba(0,0,0,0.87)' : '#fff';
+        return 'background:' + color + ';color:' + fg + ';';
+    }
+
+    // ─── CardsView Constructor ───────────────────────────────────────────────────
+
+    function CardsView(containerId, options) {
+        this.containerId = containerId;
+        this.container   = document.getElementById(containerId);
+        if (!this.container) throw new Error('CardsView: container not found: ' + containerId);
+
+        options = options || {};
+        this.options = {
+            apiUrl:       options.apiUrl       || '',
+            dataSource:   options.dataSource   || 'report',   // 'report' | 'table'
+            tableTypeId:  options.tableTypeId  || null,
+            pageSize:     parseInt(options.pageSize) || 20,
+            cookiePrefix: options.cookiePrefix || 'cards',
+            title:        options.title        || '',
+            instanceName: options.instanceName || 'cardsView'
+        };
+
+        // State
+        this.columns       = [];   // [{id, name, type, format}]
+        this.data          = [];   // array of row-arrays (parallel to this.columns)
+        this.rawObjectData = [];   // raw [{i,r}] for object format
+        this.loadedRecords = 0;
+        this.hasMore       = true;
+        this.isLoading     = false;
+        this.metadata      = null; // metadata for 'table' source
+        this.searchQuery   = '';
+        this.fieldFilters  = {};   // {colId: value}
+        this.sortColId     = null; // column id to sort by (passed as ORDER param)
+
+        // Customization settings (saved/loaded)
+        this.settings = {
+            cardFields:    null,  // ordered array of column ids to show; null = default (first 5)
+            filterFields:  null,  // column ids shown as top filters; null = default (col0, col1)
+            editFields:    null,  // column ids in edit form; null = all
+            sortField:     null,  // column id for ORDER param
+            saveMode:      'local'  // 'local' | 'global'
+        };
+
+        this._loadSettings();
+
+        // Apply saved sort field
+        if (this.settings.sortField) {
+            this.sortColId = this.settings.sortField;
+        }
+
+        this._renderSkeleton();
+        this._init();
+    }
+
+    // ─── Skeleton / initial layout ───────────────────────────────────────────────
+
+    CardsView.prototype._renderSkeleton = function() {
+        var self = this;
+        var inst = this.options.instanceName;
+        this.container.innerHTML =
+            '<div class="cards-header">' +
+                '<div class="cards-title-area">' +
+                    '<span class="cards-title" id="' + inst + '-title">' + escHtml(this.options.title) + '</span>' +
+                '</div>' +
+                '<div class="cards-controls">' +
+                    '<span class="cards-count" id="' + inst + '-count"></span>' +
+                    '<div class="cards-settings-icon" onclick="window[\'' + inst + '\']._openSettings()" title="Настройка">' +
+                        '<i class="pi pi-cog"></i>' +
+                    '</div>' +
+                '</div>' +
+            '</div>' +
+            '<div class="cards-search-row">' +
+                '<i class="pi pi-search" style="color:var(--cards-text-secondary);font-size:14px;"></i>' +
+                '<input class="cards-search-input" id="' + inst + '-search" type="text" placeholder="Быстрый поиск..." />' +
+            '</div>' +
+            '<div class="cards-filters-row" id="' + inst + '-filters-row"></div>' +
+            '<div class="cards-grid" id="' + inst + '-grid">' +
+                '<div class="cards-loading">Загрузка данных...</div>' +
+            '</div>';
+
+        // Attach search
+        var searchEl = document.getElementById(inst + '-search');
+        if (searchEl) {
+            searchEl.addEventListener('input', function() {
+                self.searchQuery = this.value;
+                self._applyClientFilter();
+            });
+        }
+    };
+
+    // ─── API Base ────────────────────────────────────────────────────────────────
+
+    CardsView.prototype._getApiBase = function() {
+        var url = this.options.apiUrl;
+        if (!url) {
+            var parts = window.location.pathname.split('/');
+            if (parts.length >= 2 && parts[1]) {
+                return 'https://' + window.location.hostname + '/' + parts[1];
+            }
+            return '';
+        }
+        var m = url.match(/^(.*?)\/(report|type|metadata|object)\/\d+/);
+        if (m) return m[1];
+        return url.split('?')[0].replace(/\/[^\/]*$/, '');
+    };
+
+    // ─── Initialise: fetch metadata (for table) + first page of data ─────────────
+
+    CardsView.prototype._init = function() {
+        var self = this;
+        if (this.options.dataSource === 'table' && this.options.tableTypeId && !this.metadata) {
+            var metaUrl = this._getApiBase() + '/metadata/' + this.options.tableTypeId;
+            fetch(metaUrl)
+                .then(function(r) { return r.json(); })
+                .then(function(m) {
+                    self.metadata = m;
+                    // Auto-set title from metadata
+                    if (!self.options.title && (m.val || m.value || m.name)) {
+                        self.options.title = m.val || m.value || m.name;
+                        var titleEl = document.getElementById(self.options.instanceName + '-title');
+                        if (titleEl) titleEl.textContent = self.options.title;
+                    }
+                    self._buildColumnsFromMetadata(m);
+                    self._loadData(false);
+                })
+                .catch(function(e) { self._showError('Ошибка загрузки метаданных: ' + e.message); });
+        } else {
+            this._loadData(false);
+        }
+    };
+
+    // Build columns array from metadata (same as integram-table.js)
+    CardsView.prototype._buildColumnsFromMetadata = function(m) {
+        var cols = [];
+        cols.push({ id: String(m.id), name: m.val || m.name || 'Значение', type: String(m.type || '3') });
+        if (m.reqs && Array.isArray(m.reqs)) {
+            m.reqs.forEach(function(req) {
+                cols.push({ id: String(req.id), name: req.val || req.name || '', type: String(req.type || '3') });
+            });
+        }
+        this.columns = cols;
+    };
+
+    // ─── Load data ───────────────────────────────────────────────────────────────
+
+    CardsView.prototype._loadData = function(append) {
+        if (this.isLoading || (!append && !this.hasMore && this.loadedRecords > 0)) return;
+        this.isLoading = true;
+        var self = this;
+
+        var url = this._buildFetchUrl(append);
+
+        fetch(url)
+            .then(function(r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
+            .then(function(json) {
+                self._processResponse(json, append);
+                self.isLoading = false;
+            })
+            .catch(function(e) {
+                self.isLoading = false;
+                self._showError('Ошибка загрузки данных: ' + e.message);
+            });
+    };
+
+    CardsView.prototype._buildFetchUrl = function(append) {
+        var offset = append ? this.loadedRecords : 0;
+        var limit  = this.options.pageSize + 1;  // fetch one extra to detect hasMore
+
+        var params = new URLSearchParams();
+        params.set('LIMIT', offset + ',' + limit);
+
+        // ORDER parameter
+        var sortCol = this.sortColId || (this.settings.sortField || null);
+        if (sortCol) {
+            params.set('ORDER', sortCol);
+        }
+
+        // Field filters (server-side)
+        var self = this;
+        Object.keys(this.fieldFilters).forEach(function(colId) {
+            var v = self.fieldFilters[colId];
+            if (v) params.set('FR_' + colId, '%' + v + '%');
+        });
+
+        var apiUrl = this.options.apiUrl || '';
+        var sep = apiUrl.indexOf('?') !== -1 ? '&' : '?';
+        var base = apiUrl;
+
+        if (this.options.dataSource === 'table') {
+            // Use object/{id}/?JSON_OBJ&LIMIT=...
+            var typeId = this.options.tableTypeId;
+            base = this._getApiBase() + '/object/' + typeId + '/';
+            sep  = '?';
+            params.set('JSON_OBJ', '');
+        }
+
+        return base + sep + params.toString();
+    };
+
+    // ─── Process API response ────────────────────────────────────────────────────
+
+    CardsView.prototype._processResponse = function(json, append) {
+        var newRows = [];
+
+        if (this.options.dataSource === 'table' && Array.isArray(json)) {
+            // JSON_OBJ format: [{i, u, o, r}, ...]
+            newRows = this._parseJsonObjArray(json);
+        } else if (json && json.columns && json.data !== undefined) {
+            // Standard report format: {columns, data, header}
+            this._processReportColumns(json);
+            newRows = this._parseReportData(json);
+            if (!this.options.title && json.header) {
+                this.options.title = json.header;
+                var titleEl = document.getElementById(this.options.instanceName + '-title');
+                if (titleEl) titleEl.textContent = json.header;
+            }
+        } else if (Array.isArray(json)) {
+            // Legacy / simple array format
+            if (json.length > 0 && Array.isArray(json[0])) {
+                newRows = json;
+            } else {
+                // Object-per-row format: convert to rows using current columns
+                newRows = this._parseObjectArray(json);
+            }
+        }
+
+        // Detect hasMore
+        this.hasMore = newRows.length > this.options.pageSize;
+        if (this.hasMore) newRows = newRows.slice(0, this.options.pageSize);
+
+        if (append) {
+            this.data = this.data.concat(newRows);
+        } else {
+            this.data = newRows;
+            this.loadedRecords = 0;
+        }
+        this.loadedRecords += newRows.length;
+
+        // Detect auto-fields after first load
+        if (!append) {
+            this._detectAutoFields();
+            this._renderFilterBar();
+        }
+
+        this._renderCards(append);
+        this._updateCount();
+    };
+
+    CardsView.prototype._processReportColumns = function(json) {
+        if (this.columns.length > 0) return; // already set
+        var cols = [];
+        (json.columns || []).forEach(function(c) {
+            cols.push({ id: String(c.id || c.type || c.name), name: c.name || '', type: String(c.type || '3') });
+        });
+        this.columns = cols;
+    };
+
+    CardsView.prototype._parseReportData = function(json) {
+        var columnData = json.data || [];
+        var rows = [];
+        if (columnData.length > 0 && Array.isArray(columnData[0])) {
+            // Column-major format: data[colIndex][rowIndex]
+            var numRows = columnData[0].length;
+            for (var r = 0; r < numRows; r++) {
+                var row = [];
+                for (var c = 0; c < columnData.length; c++) {
+                    row.push(columnData[c][r]);
+                }
+                rows.push(row);
+            }
+        } else {
+            rows = columnData;
+        }
+        return rows;
+    };
+
+    CardsView.prototype._parseJsonObjArray = function(arr) {
+        var self = this;
+        // Build/update columns from first item if needed
+        if (this.columns.length === 0 && this.metadata && this.metadata.reqs) {
+            this._buildColumnsFromMetadata(this.metadata);
+        }
+        this.rawObjectData = arr;
+        return arr.map(function(item) {
+            var row = [item.i]; // first cell is the record ID
+            var vals = item.r || [];
+            for (var i = 0; i < vals.length; i++) {
+                var v = vals[i];
+                // Reference values stored as "id:label" — use label
+                if (typeof v === 'string' && v.indexOf(':') !== -1) {
+                    var parts = v.split(':');
+                    row.push(parts.slice(1).join(':'));
+                } else {
+                    row.push(v);
+                }
+            }
+            return row;
+        });
+    };
+
+    CardsView.prototype._parseObjectArray = function(arr) {
+        if (!arr || arr.length === 0) return [];
+        // Build columns from first object keys if not yet set
+        if (this.columns.length === 0) {
+            var keys = Object.keys(arr[0]);
+            this.columns = keys.map(function(k) {
+                return { id: k, name: k, type: '3' };
+            });
+        }
+        var cols = this.columns;
+        return arr.map(function(obj) {
+            return cols.map(function(c) { return obj[c.id] !== undefined ? obj[c.id] : obj[c.name]; });
+        });
+    };
+
+    // ─── Auto-detect semantic fields from column types ────────────────────────────
+
+    CardsView.prototype._detectAutoFields = function() {
+        var cols = this.columns;
+        if (!cols.length) return;
+
+        // text fields: col indices with text type
+        var textIdx  = [];
+        var dateIdx  = [];
+        var numIdx   = [];
+        var listIdx  = [];
+
+        for (var i = 0; i < cols.length; i++) {
+            var t = cols[i].type;
+            if (isTextType(t))  textIdx.push(i);
+            else if (isDateType(t)) dateIdx.push(i);
+            else if (isNumType(t))  numIdx.push(i);
+            else if (isListType(t)) listIdx.push(i);
+        }
+
+        this._autoTitleIdx  = textIdx[0]  !== undefined ? textIdx[0]  : 0;
+        this._autoDescIdx   = textIdx[1]  !== undefined ? textIdx[1]  : -1;
+        this._autoDateIdx   = dateIdx[0]  !== undefined ? dateIdx[0]  : -1;
+        this._autoNumIdx    = numIdx[0]   !== undefined ? numIdx[0]   : -1;
+        this._autoStatusIdx = listIdx[0]  !== undefined ? listIdx[0]  : -1;
+
+        // Record ID column: use rawObjectData if available, else look for column named 'ID' or ending with 'ID'
+        this._autoIdIdx = -1;
+        for (var j = 0; j < cols.length; j++) {
+            if (cols[j].name === 'ID' || cols[j].name.endsWith('ID')) {
+                this._autoIdIdx = j;
+                break;
+            }
+        }
+    };
+
+    // Return record ID for a given row (for edit form)
+    CardsView.prototype._getRowId = function(rowIndex) {
+        if (this.options.dataSource === 'table' && this.rawObjectData[rowIndex]) {
+            return this.rawObjectData[rowIndex].i;
+        }
+        var row = this.data[rowIndex];
+        // Check _autoIdIdx
+        if (this._autoIdIdx >= 0 && row[this._autoIdIdx] != null) return row[this._autoIdIdx];
+        // Fallback: first column that looks like a number
+        if (row[0] != null && !isNaN(Number(row[0]))) return row[0];
+        return null;
+    };
+
+    // Return typeId for the edit form
+    CardsView.prototype._getTypeId = function() {
+        if (this.options.dataSource === 'table' && this.options.tableTypeId) {
+            return this.options.tableTypeId;
+        }
+        // For report: try to determine from columns orig type
+        if (this.columns.length > 0 && this.columns[0].orig) return this.columns[0].orig;
+        return null;
+    };
+
+    // ─── Render card list ─────────────────────────────────────────────────────────
+
+    CardsView.prototype._renderCards = function(append) {
+        var inst = this.options.instanceName;
+        var grid = document.getElementById(inst + '-grid');
+        if (!grid) return;
+
+        if (!append) {
+            grid.innerHTML = '';
+        }
+
+        // Remove existing sentinel
+        var oldSentinel = document.getElementById(inst + '-sentinel');
+        if (oldSentinel) oldSentinel.remove();
+
+        var self = this;
+        var filtered = this._getFilteredData();
+
+        if (!append && filtered.length === 0) {
+            grid.innerHTML = '<div class="cards-empty"><i class="pi pi-inbox" style="font-size:2em;display:block;margin-bottom:8px;"></i>Нет данных</div>';
+        } else {
+            filtered.forEach(function(item) {
+                var card = self._buildCardEl(item.row, item.originalIndex);
+                grid.appendChild(card);
+            });
+        }
+
+        // Infinite scroll sentinel
+        if (this.hasMore) {
+            var sentinel = document.createElement('div');
+            sentinel.className = 'cards-scroll-sentinel';
+            sentinel.id = inst + '-sentinel';
+            grid.appendChild(sentinel);
+            this._attachScrollObserver(sentinel);
+        }
+    };
+
+    CardsView.prototype._getFilteredData = function() {
+        var self = this;
+        var q = (this.searchQuery || '').toLowerCase().trim();
+
+        return this.data.map(function(row, idx) { return { row: row, originalIndex: idx }; })
+            .filter(function(item) {
+                if (!q) return true;
+                // Match against all visible cell values
+                for (var i = 0; i < item.row.length; i++) {
+                    if (item.row[i] != null && String(item.row[i]).toLowerCase().indexOf(q) !== -1) return true;
+                }
+                return false;
+            });
+    };
+
+    CardsView.prototype._buildCardEl = function(row, rowIndex) {
+        var self = this;
+        var inst = this.options.instanceName;
+        var cols = this.columns;
+
+        // Determine which fields to show
+        var cardFieldIds = this.settings.cardFields;
+        var defaultCount = 5;
+
+        var div = document.createElement('div');
+        div.className = 'cards-card';
+
+        // ── Date (top-right) ─────────────────────────────────────────────────────
+        if (this._autoDateIdx >= 0) {
+            var dateVal = row[this._autoDateIdx];
+            if (dateVal) {
+                var dateEl = document.createElement('div');
+                dateEl.className = 'cards-card-date';
+                dateEl.textContent = formatDate(dateVal);
+                div.appendChild(dateEl);
+            }
+        }
+
+        // ── Title (first text field, clickable) ──────────────────────────────────
+        var titleVal = row[this._autoTitleIdx];
+        if (!titleVal && row[0] != null) titleVal = row[0];
+        var titleEl = document.createElement('div');
+        titleEl.className = 'cards-card-title';
+        titleEl.textContent = titleVal != null ? String(titleVal) : '—';
+        titleEl.addEventListener('click', function(e) {
+            e.stopPropagation();
+            self._openEditForm(rowIndex);
+        });
+        div.appendChild(titleEl);
+
+        // ── Status badge ──────────────────────────────────────────────────────────
+        if (this._autoStatusIdx >= 0) {
+            var statusVal = row[this._autoStatusIdx];
+            if (statusVal) {
+                // Look for a companion color column (named 'Цвет', 'color', or '{StatusFieldName}Цвет')
+                var statusColor = null;
+                var statusName  = cols[this._autoStatusIdx] ? cols[this._autoStatusIdx].name : '';
+                for (var c = 0; c < cols.length; c++) {
+                    var cn = (cols[c].name || '').toLowerCase();
+                    if (cn === 'цвет' || cn === 'color' || cn === statusName.toLowerCase() + 'цвет') {
+                        statusColor = row[c] || null;
+                        break;
+                    }
+                }
+                var badge = document.createElement('span');
+                badge.className = 'cards-card-status';
+                if (statusColor) badge.style.cssText = makeStatusStyle(statusColor);
+                badge.textContent = String(statusVal);
+                div.appendChild(badge);
+            }
+        }
+
+        // ── Description (second text field) ──────────────────────────────────────
+        if (this._autoDescIdx >= 0) {
+            var descVal = row[this._autoDescIdx];
+            if (descVal) {
+                var descEl = document.createElement('div');
+                descEl.className = 'cards-card-description';
+                descEl.textContent = String(descVal);
+                div.appendChild(descEl);
+            }
+        }
+
+        // ── Extra card fields (from settings or default first 5) ─────────────────
+        var shownIdx = new Set([this._autoTitleIdx, this._autoDescIdx, this._autoDateIdx, this._autoStatusIdx]);
+
+        if (cardFieldIds && cardFieldIds.length > 0) {
+            // Use configured fields
+            cardFieldIds.forEach(function(colId) {
+                var ci = self._colIndexById(colId);
+                if (ci < 0 || shownIdx.has(ci)) return;
+                var v = row[ci];
+                if (v == null || v === '') return;
+                var el = document.createElement('div');
+                el.className = 'cards-card-field';
+                el.textContent = String(v);
+                div.appendChild(el);
+            });
+        } else {
+            // Default: first 5 columns not already shown
+            var shown = 0;
+            for (var i = 0; i < cols.length && shown < defaultCount; i++) {
+                if (shownIdx.has(i)) continue;
+                if (i === this._autoNumIdx) continue; // handled separately below
+                var val = row[i];
+                if (val == null || val === '') continue;
+                var fieldEl = document.createElement('div');
+                fieldEl.className = 'cards-card-field';
+                fieldEl.textContent = String(val);
+                div.appendChild(fieldEl);
+                shown++;
+            }
+        }
+
+        // ── Amount (first numeric field) ─────────────────────────────────────────
+        if (this._autoNumIdx >= 0) {
+            var numVal = row[this._autoNumIdx];
+            if (numVal != null && numVal !== '') {
+                var numEl = document.createElement('div');
+                numEl.className = 'cards-card-amount';
+                numEl.textContent = formatNum(numVal);
+                div.appendChild(numEl);
+            }
+        }
+
+        return div;
+    };
+
+    CardsView.prototype._colIndexById = function(colId) {
+        for (var i = 0; i < this.columns.length; i++) {
+            if (this.columns[i].id === colId) return i;
+        }
+        return -1;
+    };
+
+    // ─── Filter bar ───────────────────────────────────────────────────────────────
+
+    CardsView.prototype._renderFilterBar = function() {
+        var inst = this.options.instanceName;
+        var row  = document.getElementById(inst + '-filters-row');
+        if (!row) return;
+        row.innerHTML = '';
+
+        var self = this;
+        var filterFieldIds = this.settings.filterFields;
+
+        // Default: show first and second columns as filters
+        var fieldsToShow = [];
+        if (filterFieldIds && filterFieldIds.length > 0) {
+            fieldsToShow = filterFieldIds.map(function(id) {
+                var idx = self._colIndexById(id);
+                return idx >= 0 ? { idx: idx, col: self.columns[idx] } : null;
+            }).filter(Boolean);
+        } else {
+            if (this.columns[0]) fieldsToShow.push({ idx: 0, col: this.columns[0] });
+            if (this.columns[1]) fieldsToShow.push({ idx: 1, col: this.columns[1] });
+        }
+
+        fieldsToShow.forEach(function(f) {
+            var wrapper = document.createElement('div');
+            wrapper.className = 'cards-field-filter';
+
+            var lbl = document.createElement('label');
+            lbl.textContent = f.col.name + ':';
+            wrapper.appendChild(lbl);
+
+            var input = document.createElement('input');
+            input.type = 'text';
+            input.placeholder = 'Фильтр...';
+            input.value = self.fieldFilters[f.col.id] || '';
+            input.addEventListener('input', function() {
+                self.fieldFilters[f.col.id] = this.value;
+                // Server-side reload with filter
+                self.data = [];
+                self.loadedRecords = 0;
+                self.hasMore = true;
+                self._loadData(false);
+            });
+            wrapper.appendChild(input);
+            row.appendChild(wrapper);
+        });
+    };
+
+    // ─── Client-side search re-render ─────────────────────────────────────────────
+
+    CardsView.prototype._applyClientFilter = function() {
+        this._renderCards(false);
+        this._updateCount();
+    };
+
+    // ─── Count display ────────────────────────────────────────────────────────────
+
+    CardsView.prototype._updateCount = function() {
+        var inst = this.options.instanceName;
+        var el = document.getElementById(inst + '-count');
+        if (!el) return;
+        var total = this.loadedRecords;
+        var visible = this._getFilteredData().length;
+        if (this.searchQuery) {
+            el.textContent = visible + ' из ' + total;
+        } else {
+            el.textContent = total + (this.hasMore ? '+' : '') + ' записей';
+        }
+    };
+
+    // ─── Infinite scroll observer ─────────────────────────────────────────────────
+
+    CardsView.prototype._attachScrollObserver = function(sentinel) {
+        var self = this;
+        if (!('IntersectionObserver' in window)) {
+            // Fallback: load on grid scroll
+            var grid = document.getElementById(self.options.instanceName + '-grid');
+            if (grid) {
+                grid.addEventListener('scroll', function() {
+                    if (grid.scrollTop + grid.clientHeight >= grid.scrollHeight - 100) {
+                        self._loadMore();
+                    }
+                });
+            }
+            return;
+        }
+        var obs = new IntersectionObserver(function(entries) {
+            if (entries[0].isIntersecting) {
+                obs.disconnect();
+                self._loadMore();
+            }
+        }, { threshold: 0.1 });
+        obs.observe(sentinel);
+    };
+
+    CardsView.prototype._loadMore = function() {
+        if (!this.hasMore || this.isLoading) return;
+        this._loadData(true);
+    };
+
+    // ─── Edit form (delegates to IntegramTable if available) ─────────────────────
+
+    CardsView.prototype._openEditForm = function(rowIndex) {
+        var recordId = this._getRowId(rowIndex);
+        var typeId   = this._getTypeId();
+
+        if (!recordId || !typeId) {
+            console.warn('CardsView: cannot open edit form — recordId or typeId missing', recordId, typeId);
+            return;
+        }
+
+        // Prefer IntegramTable instance if one is registered with the same data source
+        var tableInst = null;
+        for (var key in window) {
+            if (window[key] instanceof window.IntegramTable) {
+                tableInst = window[key];
+                break;
+            }
+        }
+
+        if (tableInst && typeof tableInst.openEditForm === 'function') {
+            tableInst.openEditForm(recordId, typeId, rowIndex);
+        } else if (typeof window.IntegramTable !== 'undefined') {
+            // Create a transient IntegramTable helper just to open the form.
+            // IntegramTable requires an existing DOM element, so create a hidden one.
+            var helperId = '__cards-edit-helper__';
+            var helperEl = document.getElementById(helperId);
+            if (!helperEl) {
+                helperEl = document.createElement('div');
+                helperEl.id = helperId;
+                helperEl.style.display = 'none';
+                document.body.appendChild(helperEl);
+            }
+            var helper = new window.IntegramTable(helperId, {
+                apiUrl: this.options.apiUrl,
+                instanceName: '__cardsEditHelper'
+            });
+            window.__cardsEditHelper = helper;
+            helper.openEditForm(recordId, typeId, rowIndex);
+        } else {
+            // Fallback: navigate
+            var apiBase = this._getApiBase();
+            window.location.href = apiBase + '/edit/' + recordId;
+        }
+    };
+
+    // ─── Error display ────────────────────────────────────────────────────────────
+
+    CardsView.prototype._showError = function(msg) {
+        var inst = this.options.instanceName;
+        var grid = document.getElementById(inst + '-grid');
+        if (grid) {
+            grid.innerHTML = '<div class="cards-error"><i class="pi pi-exclamation-triangle"></i> ' + escHtml(msg) + '</div>';
+        }
+    };
+
+    // ─── Settings persistence (cookies + table 269) ───────────────────────────────
+
+    CardsView.prototype._loadSettings = function() {
+        var key = this.options.cookiePrefix + '-settings';
+        var saved = getCookie(key);
+        if (saved && typeof saved === 'object') {
+            this.settings = Object.assign(this.settings, saved);
+        }
+        // Also try to fetch from table 269 if no local setting
+        if (!saved) {
+            this._fetchRemoteSettings();
+        }
+    };
+
+    CardsView.prototype._fetchRemoteSettings = function() {
+        var self = this;
+        var srcId = this._getSourceId();
+        if (!srcId) return;
+        var apiBase = this._getApiBase();
+        fetch(apiBase + '/object/269/?F_269=cards' + srcId + '&F_271=CARDS')
+            .then(function(r) { return r.json(); })
+            .then(function(json) {
+                // Expect array of objects: [{i, r: [...]}] or similar
+                if (Array.isArray(json) && json.length > 0) {
+                    var item = json[0];
+                    // r[2] maps to t273 (JSON with settings) — index 2 is 3rd requisite
+                    var settingsJson = item.r && item.r[2] ? item.r[2] : null;
+                    if (settingsJson) {
+                        try {
+                            var parsed = JSON.parse(settingsJson);
+                            self.settings = Object.assign(self.settings, parsed);
+                            self.settings._remoteId = item.i;
+                            if (self.settings.sortField) self.sortColId = self.settings.sortField;
+                        } catch(e) { /* ignore */ }
+                    }
+                }
+            })
+            .catch(function() { /* ignore */ });
+    };
+
+    CardsView.prototype._saveSettings = function() {
+        var key    = this.options.cookiePrefix + '-settings';
+        var srcId  = this._getSourceId();
+        var apiBase = this._getApiBase();
+        var mode   = this.settings.saveMode || 'local';
+
+        // Always save to cookie as local backup
+        var toSave = Object.assign({}, this.settings);
+        delete toSave._remoteId;
+        setCookie(key, toSave, 365);
+
+        // Save to table 269 if mode === 'global'
+        if (mode === 'global' && srcId) {
+            var params = new URLSearchParams();
+            params.set('t269', 'cards' + srcId);
+            params.set('t271', 'CARDS');
+            params.set('t273', JSON.stringify(toSave));
+            if (window.xsrf) params.set('_xsrf', window.xsrf);
+
+            var remoteId = this.settings._remoteId;
+            var url = remoteId
+                ? apiBase + '/_m_save/' + remoteId + '?JSON'
+                : apiBase + '/_m_new/269?JSON';
+
+            var self = this;
+            fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString() })
+                .then(function(r) { return r.json(); })
+                .then(function(resp) {
+                    if (!remoteId && resp && resp.obj && resp.obj.id) {
+                        self.settings._remoteId = resp.obj.id;
+                    }
+                })
+                .catch(function(e) { console.error('CardsView: failed to save settings to table 269:', e); });
+        }
+    };
+
+    CardsView.prototype._getSourceId = function() {
+        // Extract numeric source ID from apiUrl or tableTypeId
+        if (this.options.tableTypeId) return this.options.tableTypeId;
+        var m = (this.options.apiUrl || '').match(/\/(\d+)/);
+        return m ? m[1] : null;
+    };
+
+    // ─── Settings modal ───────────────────────────────────────────────────────────
+
+    CardsView.prototype._openSettings = function() {
+        var self = this;
+        var cols = this.columns;
+
+        var overlay = document.createElement('div');
+        overlay.className = 'cards-settings-overlay';
+
+        var modal = document.createElement('div');
+        modal.className = 'cards-settings-modal';
+
+        // Build column checkboxes helper
+        function colCheckboxes(listId, selectedIds) {
+            var html = '<div class="cards-col-list" id="' + listId + '">';
+            cols.forEach(function(c) {
+                var checked = (!selectedIds || selectedIds.indexOf(c.id) !== -1) ? 'checked' : '';
+                html += '<label class="cards-col-item"><input type="checkbox" value="' + escHtml(c.id) + '" ' + checked + '> ' + escHtml(c.name) + '</label>';
+            });
+            html += '</div>';
+            return html;
+        }
+
+        function colSelect(selectId, selectedId) {
+            var html = '<select id="' + selectId + '">';
+            html += '<option value="">(авто)</option>';
+            cols.forEach(function(c) {
+                var sel = selectedId === c.id ? 'selected' : '';
+                html += '<option value="' + escHtml(c.id) + '" ' + sel + '>' + escHtml(c.name) + '</option>';
+            });
+            html += '</select>';
+            return html;
+        }
+
+        modal.innerHTML =
+            '<h4><i class="pi pi-cog" style="margin-right:6px;"></i>Настройка карточек</h4>' +
+
+            '<div class="cards-settings-section">' +
+                '<label>Поля карточки (порядок отображения):</label>' +
+                colCheckboxes('cards-s-card-fields', self.settings.cardFields) +
+            '</div>' +
+
+            '<div class="cards-settings-section">' +
+                '<label>Поля фильтра (выводятся сверху):</label>' +
+                colCheckboxes('cards-s-filter-fields', self.settings.filterFields) +
+            '</div>' +
+
+            '<div class="cards-settings-section">' +
+                '<label>Поле сортировки:</label>' +
+                colSelect('cards-s-sort-field', self.settings.sortField) +
+            '</div>' +
+
+            '<div class="cards-settings-section">' +
+                '<label>Способ сохранения:</label>' +
+                '<select id="cards-s-save-mode">' +
+                    '<option value="local" ' + (self.settings.saveMode !== 'global' ? 'selected' : '') + '>Локально (в куки)</option>' +
+                    '<option value="global" ' + (self.settings.saveMode === 'global' ? 'selected' : '') + '>Для всех (в таблице)</option>' +
+                '</select>' +
+            '</div>' +
+
+            '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
+                '<button class="btn btn-sm btn-danger" id="cards-s-reset">Сбросить</button>' +
+                '<button class="btn btn-sm btn-secondary" id="cards-s-cancel">Отменить</button>' +
+                '<button class="btn btn-sm btn-primary" id="cards-s-save">Сохранить</button>' +
+            '</div>';
+
+        document.body.appendChild(overlay);
+        document.body.appendChild(modal);
+
+        function close() {
+            overlay.remove();
+            modal.remove();
+        }
+
+        overlay.addEventListener('click', close);
+        modal.querySelector('#cards-s-cancel').addEventListener('click', close);
+
+        modal.querySelector('#cards-s-reset').addEventListener('click', function() {
+            // Reset to defaults
+            var key = self.options.cookiePrefix + '-settings';
+            deleteCookie(key);
+            self.settings = {
+                cardFields: null, filterFields: null, editFields: null,
+                sortField: null, saveMode: 'local'
+            };
+            self.sortColId = null;
+            close();
+            // Reload
+            self.data = [];
+            self.loadedRecords = 0;
+            self.hasMore = true;
+            self._loadData(false);
+            self._renderFilterBar();
+        });
+
+        modal.querySelector('#cards-s-save').addEventListener('click', function() {
+            // Read card fields
+            var cardCbs = modal.querySelectorAll('#cards-s-card-fields input[type="checkbox"]');
+            var cardFields = [];
+            cardCbs.forEach(function(cb) { if (cb.checked) cardFields.push(cb.value); });
+            self.settings.cardFields = cardFields.length > 0 ? cardFields : null;
+
+            // Read filter fields
+            var filterCbs = modal.querySelectorAll('#cards-s-filter-fields input[type="checkbox"]');
+            var filterFields = [];
+            filterCbs.forEach(function(cb) { if (cb.checked) filterFields.push(cb.value); });
+            self.settings.filterFields = filterFields.length > 0 ? filterFields : null;
+
+            // Sort field
+            var sortSel = modal.querySelector('#cards-s-sort-field');
+            self.settings.sortField = sortSel.value || null;
+            self.sortColId = self.settings.sortField;
+
+            // Save mode
+            var modeSel = modal.querySelector('#cards-s-save-mode');
+            self.settings.saveMode = modeSel.value;
+
+            self._saveSettings();
+            close();
+
+            // Re-render
+            self.data = [];
+            self.loadedRecords = 0;
+            self.hasMore = true;
+            self._loadData(false);
+            self._renderFilterBar();
+        });
+    };
+
+    // ─── Public API ───────────────────────────────────────────────────────────────
+
+    CardsView.prototype.reload = function() {
+        this.data = [];
+        this.loadedRecords = 0;
+        this.hasMore = true;
+        this.columns = [];
+        this._loadData(false);
+    };
+
+    // ─── Expose globally ──────────────────────────────────────────────────────────
+
+    window.CardsView = CardsView;
+
+    // ─── Auto-init from data attributes (like integram-table.js) ─────────────────
+
+    document.addEventListener('DOMContentLoaded', function() {
+        var els = document.querySelectorAll('[data-cards-view]');
+        els.forEach(function(el) {
+            if (!el.id) el.id = 'cards-view-' + Math.random().toString(36).slice(2);
+            var instanceName = el.dataset.instanceName || ('cardsView_' + el.id);
+            var view = new CardsView(el.id, {
+                apiUrl:       el.dataset.apiUrl || '',
+                dataSource:   el.dataset.dataSource || 'report',
+                tableTypeId:  el.dataset.tableTypeId || null,
+                pageSize:     parseInt(el.dataset.pageSize) || 20,
+                cookiePrefix: el.dataset.cookiePrefix || ('cards-' + (el.dataset.tableTypeId || el.id)),
+                title:        el.dataset.title || '',
+                instanceName: instanceName
+            });
+            window[instanceName] = view;
+        });
+    });
+
+})(window);
+</script>
+
+<!--
+Usage examples:
+
+1. Via data attributes (embedded in main.html like kanban.html):
+
+<div id="my-cards"
+     data-cards-view
+     data-api-url="/{_global_.z}/report/MyReport?JSON"
+     data-data-source="report"
+     data-page-size="20"
+     data-cookie-prefix="cards-{_global_.id}"
+     data-title=""
+     data-instance-name="myCardsView"></div>
+<link rel="stylesheet" href="/css/integram-table.css" />
+<script src="/js/integram-table.js"></script>
+<script src="/templates/cards.html"></script>
+
+2. Via JavaScript constructor:
+
+var cards = new CardsView('my-cards', {
+    apiUrl:       '/{db}/object/123/?JSON_OBJ',
+    dataSource:   'table',
+    tableTypeId:  '123',
+    pageSize:     20,
+    cookiePrefix: 'cards-123',
+    title:        '',
+    instanceName: 'myCards'
+});
+window.myCards = cards;
+-->
