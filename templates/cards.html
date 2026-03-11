@@ -858,7 +858,7 @@
         if (this._autoStatusIdx >= 0) {
             var statusVal = row[this._autoStatusIdx];
             if (statusVal) {
-                // Look for a companion color column (named 'Цвет', 'color', or '{StatusFieldName}Цвет')
+                // Look for a companion color column (named 'Цвет', 'color', or '{ StatusFieldName }Цвет')
                 var statusColor = null;
                 var statusName  = cols[this._autoStatusIdx] ? cols[this._autoStatusIdx].name : '';
                 for (var c = 0; c < cols.length; c++) {
