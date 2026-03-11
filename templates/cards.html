@@ -674,7 +674,7 @@
         var newRows = [];
 
         if (Array.isArray(json)) {
-            // JSON_OBJ format: [{i, u, o, r}, ...]
+            // JSON_OBJ format: [{ i, u, o, r }, ...]
             newRows = this._parseJsonObjArray(json);
         }
 
@@ -1116,7 +1116,7 @@
         fetch(apiBase + '/object/269/?F_269=cards' + srcId + '&F_271=CARDS')
             .then(function(r) { return r.json(); })
             .then(function(json) {
-                // Expect array of objects: [{i, r: [...]}] or similar
+                // Expect array of objects: [{ i, r: [...] }] or similar
                 if (Array.isArray(json) && json.length > 0) {
                     var item = json[0];
                     // r[2] maps to t273 (JSON with settings) — index 2 is 3rd requisite
