@@ -13280,9 +13280,18 @@ class IntegramCreateFormHelper {
             });
 
             if (hasFiles) {
+                // Add XSRF token for file uploads (issue #839)
+                if (typeof xsrf !== 'undefined') {
+                    formData.append('_xsrf', xsrf);
+                }
                 requestBody = formData;
             } else {
                 const params = new URLSearchParams();
+
+                // Add XSRF token (issue #839)
+                if (typeof xsrf !== 'undefined') {
+                    params.append('_xsrf', xsrf);
+                }
 
                 // Handle checkbox fields
                 form.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
@@ -13310,8 +13319,8 @@ class IntegramCreateFormHelper {
                 headers['Content-Type'] = 'application/x-www-form-urlencoded';
             }
 
-            // Update the record
-            const url = `${this.apiBase}/_m_edit/${recordId}?JSON`;
+            // Update the record using _m_save (issue #839)
+            const url = `${this.apiBase}/_m_save/${recordId}?JSON`;
 
             const response = await fetch(url, {
                 method: 'POST',
