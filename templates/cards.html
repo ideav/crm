@@ -56,6 +56,7 @@
     }
 
     /* Search bar */
+    /* Combined search + filters row */
     .cards-search-row {
         display: flex;
         align-items: center;
@@ -66,7 +67,6 @@
     }
 
     .cards-search-input {
-        flex: 1;
         min-width: 180px;
         max-width: 320px;
         height: 32px;
@@ -83,14 +83,9 @@
         box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.15);
     }
 
-    /* Field filters row */
+    /* Field filters row — inline with search row */
     .cards-filters-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 0 16px 10px;
-        flex-shrink: 0;
-        flex-wrap: wrap;
+        display: contents;
     }
 
     .cards-field-filter {
@@ -108,11 +103,11 @@
 
     .cards-field-filter input,
     .cards-field-filter select {
-        height: 28px;
+        height: 32px;
         border: 1px solid var(--cards-border);
         border-radius: var(--cards-radius);
-        padding: 2px 8px;
-        font-size: 13px;
+        padding: 4px 10px;
+        font-size: 14px;
         outline: none;
         min-width: 100px;
         max-width: 180px;
@@ -671,8 +666,8 @@
             '<div class="cards-search-row">' +
                 '<i class="pi pi-search" style="color:var(--cards-text-secondary);font-size:14px;"></i>' +
                 '<input class="cards-search-input" id="' + inst + '-search" type="text" placeholder="Быстрый поиск..." />' +
+                '<div class="cards-filters-row" id="' + inst + '-filters-row"></div>' +
             '</div>' +
-            '<div class="cards-filters-row" id="' + inst + '-filters-row"></div>' +
             '<div class="cards-grid" id="' + inst + '-grid">' +
                 '<div class="cards-loading">Загрузка данных...</div>' +
             '</div>';
@@ -1498,7 +1493,6 @@
         var inst = this.options.instanceName;
         var row  = document.getElementById(inst + '-filters-row');
         if (!row) return;
-        row.innerHTML = '';
 
         var self = this;
         var filterFieldIds = this.settings.filterFields;
@@ -1515,6 +1509,23 @@
             if (this.columns[1]) fieldsToShow.push({ idx: 1, col: this.columns[1] });
         }
 
+        // Build a key representing the set of filter fields to detect structural changes
+        var newKey = fieldsToShow.map(function(f) { return f.col.id; }).join(',');
+        if (row.dataset.filterKey === newKey) {
+            // Structure unchanged — just update values without recreating DOM (preserves focus)
+            fieldsToShow.forEach(function(f) {
+                var inputEl = row.querySelector('[data-filter-col="' + f.col.id + '"]');
+                if (inputEl && document.activeElement !== inputEl) {
+                    inputEl.value = self.fieldFilters[f.col.id] || '';
+                }
+            });
+            return;
+        }
+
+        // Structure changed — rebuild
+        row.innerHTML = '';
+        row.dataset.filterKey = newKey;
+
         fieldsToShow.forEach(function(f) {
             var wrapper = document.createElement('div');
             wrapper.className = 'cards-field-filter';
@@ -1527,6 +1538,7 @@
             input.type = 'text';
             input.placeholder = 'Фильтр...';
             input.value = self.fieldFilters[f.col.id] || '';
+            input.dataset.filterCol = f.col.id;
             input.addEventListener('input', function() {
                 self.fieldFilters[f.col.id] = this.value;
                 // Server-side reload with filter
