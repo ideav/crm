@@ -368,6 +368,73 @@
         color: var(--cards-text-secondary);
         white-space: nowrap;
     }
+
+    /* Contact icons (phone, email) - positioned bottom-right */
+    .cards-card-contacts {
+        position: absolute;
+        bottom: 8px;
+        right: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .cards-card-contact-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: var(--cards-radius);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        transition: var(--cards-transition);
+    }
+
+    .cards-card-contact-icon.active {
+        background-color: rgba(25, 118, 210, 0.12);
+        color: var(--cards-primary);
+        cursor: pointer;
+    }
+
+    .cards-card-contact-icon.active:hover {
+        background-color: rgba(25, 118, 210, 0.2);
+        transform: scale(1.1);
+    }
+
+    .cards-card-contact-icon.inactive {
+        background-color: rgba(0, 0, 0, 0.04);
+        color: rgba(0, 0, 0, 0.26);
+        cursor: not-allowed;
+    }
+
+    /* Copyable fields */
+    .cards-card-copyable {
+        cursor: pointer;
+        transition: var(--cards-transition);
+        border-radius: 2px;
+        padding: 1px 3px;
+        margin: -1px -3px;
+    }
+
+    .cards-card-copyable:hover {
+        background-color: rgba(25, 118, 210, 0.08);
+    }
+
+    .cards-card-copyable.copied {
+        background-color: rgba(76, 175, 80, 0.15);
+    }
+
+    /* Card with contact icons needs extra padding */
+    .cards-card.has-contacts {
+        padding-right: 44px;
+        padding-bottom: 44px;
+    }
+
+    /* Field with label */
+    .cards-card-field-label {
+        font-weight: 500;
+        color: var(--cards-text-primary);
+    }
 </style>
 
 <div id="my-cards"
@@ -441,6 +508,36 @@
     function isDateType(t)  { return DATE_TYPES.has(String(t)); }
     function isNumType(t)   { return NUM_TYPES.has(String(t)); }
     function isListType(t)  { return LIST_TYPES.has(String(t)); }
+
+    // ─── Card Field Types ──────────────────────────────────────────────────────
+    // Field types as per issue requirements
+    var CARD_FIELD_TYPES = {
+        TITLE:       'title',       // Top field, click opens edit modal
+        DESCRIPTION: 'description', // Text under title
+        DATE:        'date',        // Gray color, fixed top-right
+        AMOUNT:      'amount',      // Number under description
+        STATUS:      'status',      // Badge with color
+        ADDITIONAL:  'additional',  // Generic formatted field
+        PHONE:       'phone',       // Phone icon bottom-right
+        EMAIL:       'email'        // Email icon bottom-right
+    };
+
+    // ─── Field name patterns for auto-detection ─────────────────────────────────
+
+    function isPhoneField(name) {
+        var n = (name || '').toLowerCase();
+        return n === 'телефон' || n === 'phone' || n === 'тел' || n === 'mob' || n === 'mobile';
+    }
+
+    function isEmailField(name) {
+        var n = (name || '').toLowerCase();
+        return n === 'email' || n === 'почта' || n === 'e-mail' || n === 'mail';
+    }
+
+    function isColorField(name) {
+        var n = (name || '').toLowerCase();
+        return n === 'цвет' || n === 'color';
+    }
 
     // ─── Date formatting ────────────────────────────────────────────────────────
 
@@ -518,13 +615,17 @@
         this.sortColId     = null;
 
         // Customization settings (saved/loaded)
+        // cardFieldSettings: array of { colId, visible, showLabel, alias, order, fieldType }
+        // If null, default settings are computed each time from metadata
         this.settings = {
-            cardFields:    null,  // ordered array of column ids to show; null = default (first 5)
-            filterFields:  null,  // column ids shown as top filters; null = default (col0, col1)
-            editFields:    null,  // column ids in edit form; null = all
-            sortField:     null,  // column id for ORDER param
-            saveMode:      'local'  // 'local' | 'global'
+            cardFieldSettings: null,  // Per-field settings (null = auto-compute defaults)
+            filterFields:      null,  // column ids shown as top filters; null = default (col0, col1)
+            sortField:         null,  // column id for ORDER param
+            saveMode:          'local'  // 'local' | 'global'
         };
+
+        // Runtime-computed card settings (always generated from metadata if settings.cardFieldSettings is null)
+        this.cardFieldSettings = [];
 
         this._loadSettings();
 
@@ -725,33 +826,190 @@
     };
 
     // ─── Auto-detect semantic fields from column types ────────────────────────────
+    // Generates cardFieldSettings array with field types according to issue requirements:
+    // - Title: first text field
+    // - Description: second text field
+    // - Date: first date/datetime field
+    // - Amount: first numeric field
+    // - Status: first list field
+    // - Phone: field named Телефон/phone
+    // - Email: field named Email/почта
 
     CardsView.prototype._detectAutoFields = function() {
         var cols = this.columns;
         if (!cols.length) return;
 
-        // text fields: col indices with text type
+        // If user has saved cardFieldSettings, use those
+        if (this.settings.cardFieldSettings && this.settings.cardFieldSettings.length > 0) {
+            this.cardFieldSettings = this.settings.cardFieldSettings;
+            this._buildFieldIndexMaps();
+            return;
+        }
+
+        // Otherwise, compute default settings from metadata
         var textIdx  = [];
         var dateIdx  = [];
         var numIdx   = [];
         var listIdx  = [];
+        var phoneIdx = -1;
+        var emailIdx = -1;
+        var colorIdx = -1;
 
         for (var i = 0; i < cols.length; i++) {
-            var t = cols[i].type;
-            if (isTextType(t))  textIdx.push(i);
-            else if (isDateType(t)) dateIdx.push(i);
-            else if (isNumType(t))  numIdx.push(i);
-            else if (isListType(t)) listIdx.push(i);
+            var col = cols[i];
+            var t = col.type;
+            var name = col.name || '';
+
+            // Detect special fields by name
+            if (isPhoneField(name)) {
+                phoneIdx = i;
+            } else if (isEmailField(name)) {
+                emailIdx = i;
+            } else if (isColorField(name)) {
+                colorIdx = i;
+            } else if (isTextType(t)) {
+                textIdx.push(i);
+            } else if (isDateType(t)) {
+                dateIdx.push(i);
+            } else if (isNumType(t)) {
+                numIdx.push(i);
+            } else if (isListType(t)) {
+                listIdx.push(i);
+            }
         }
 
-        this._autoTitleIdx  = textIdx[0]  !== undefined ? textIdx[0]  : 0;
-        this._autoDescIdx   = textIdx[1]  !== undefined ? textIdx[1]  : -1;
-        this._autoDateIdx   = dateIdx[0]  !== undefined ? dateIdx[0]  : -1;
-        this._autoNumIdx    = numIdx[0]   !== undefined ? numIdx[0]   : -1;
-        this._autoStatusIdx = listIdx[0]  !== undefined ? listIdx[0]  : -1;
+        // Build default card field settings
+        // Order: title, description, date, status, amount, additional fields, phone, email
+        var settings = [];
+        var usedIdx = new Set();
+        var order = 0;
 
-        // Record ID column: use rawObjectData (always available for object source)
-        this._autoIdIdx = -1;
+        // Title: first text field (or first column if no text fields)
+        var titleIdx = textIdx[0] !== undefined ? textIdx[0] : 0;
+        settings.push({
+            colId: cols[titleIdx].id,
+            colIdx: titleIdx,
+            visible: true,
+            showLabel: false,
+            alias: null,
+            order: order++,
+            fieldType: CARD_FIELD_TYPES.TITLE
+        });
+        usedIdx.add(titleIdx);
+
+        // Description: second text field
+        if (textIdx[1] !== undefined) {
+            settings.push({
+                colId: cols[textIdx[1]].id,
+                colIdx: textIdx[1],
+                visible: true,
+                showLabel: false,
+                alias: null,
+                order: order++,
+                fieldType: CARD_FIELD_TYPES.DESCRIPTION
+            });
+            usedIdx.add(textIdx[1]);
+        }
+
+        // Date: first date/datetime field
+        if (dateIdx[0] !== undefined) {
+            settings.push({
+                colId: cols[dateIdx[0]].id,
+                colIdx: dateIdx[0],
+                visible: true,
+                showLabel: false,
+                alias: null,
+                order: order++,
+                fieldType: CARD_FIELD_TYPES.DATE
+            });
+            usedIdx.add(dateIdx[0]);
+        }
+
+        // Status: first list field
+        if (listIdx[0] !== undefined) {
+            settings.push({
+                colId: cols[listIdx[0]].id,
+                colIdx: listIdx[0],
+                visible: true,
+                showLabel: false,
+                alias: null,
+                order: order++,
+                fieldType: CARD_FIELD_TYPES.STATUS
+            });
+            usedIdx.add(listIdx[0]);
+        }
+
+        // Amount: first numeric field
+        if (numIdx[0] !== undefined) {
+            settings.push({
+                colId: cols[numIdx[0]].id,
+                colIdx: numIdx[0],
+                visible: true,
+                showLabel: false,
+                alias: null,
+                order: order++,
+                fieldType: CARD_FIELD_TYPES.AMOUNT
+            });
+            usedIdx.add(numIdx[0]);
+        }
+
+        // Phone field
+        if (phoneIdx >= 0) {
+            settings.push({
+                colId: cols[phoneIdx].id,
+                colIdx: phoneIdx,
+                visible: true,
+                showLabel: false,
+                alias: null,
+                order: order++,
+                fieldType: CARD_FIELD_TYPES.PHONE
+            });
+            usedIdx.add(phoneIdx);
+        }
+
+        // Email field
+        if (emailIdx >= 0) {
+            settings.push({
+                colId: cols[emailIdx].id,
+                colIdx: emailIdx,
+                visible: true,
+                showLabel: false,
+                alias: null,
+                order: order++,
+                fieldType: CARD_FIELD_TYPES.EMAIL
+            });
+            usedIdx.add(emailIdx);
+        }
+
+        // Color field (hidden but used for status styling)
+        if (colorIdx >= 0) {
+            usedIdx.add(colorIdx);
+            this._colorIdx = colorIdx;
+        }
+
+        this.cardFieldSettings = settings;
+        this._buildFieldIndexMaps();
+    };
+
+    // Build quick lookup maps for field indices by type
+    CardsView.prototype._buildFieldIndexMaps = function() {
+        var self = this;
+        this._fieldByType = {};
+
+        this.cardFieldSettings.forEach(function(f) {
+            if (f.visible !== false) {
+                self._fieldByType[f.fieldType] = f;
+            }
+        });
+
+        // Also find color column for status styling
+        var cols = this.columns;
+        for (var i = 0; i < cols.length; i++) {
+            if (isColorField(cols[i].name)) {
+                this._colorIdx = i;
+                break;
+            }
+        }
     };
 
     // Return record ID for a given row (for edit form)
@@ -821,115 +1079,274 @@
 
     CardsView.prototype._buildCardEl = function(row, rowIndex) {
         var self = this;
-        var inst = this.options.instanceName;
         var cols = this.columns;
-
-        // Determine which fields to show
-        var cardFieldIds = this.settings.cardFields;
-        var defaultCount = 5;
+        var fbt = this._fieldByType || {};
 
         var div = document.createElement('div');
         div.className = 'cards-card';
 
-        // ── Date (top-right) ─────────────────────────────────────────────────────
-        if (this._autoDateIdx >= 0) {
-            var dateVal = row[this._autoDateIdx];
+        // Check if we have phone/email to add extra padding
+        var phoneField = fbt[CARD_FIELD_TYPES.PHONE];
+        var emailField = fbt[CARD_FIELD_TYPES.EMAIL];
+        var phoneVal = phoneField ? row[phoneField.colIdx] : null;
+        var emailVal = emailField ? row[emailField.colIdx] : null;
+        var hasContacts = (phoneVal && String(phoneVal).trim()) || (emailVal && String(emailVal).trim());
+        if (hasContacts) {
+            div.classList.add('has-contacts');
+        }
+
+        // ── Date (top-right, gray) ──────────────────────────────────────────────
+        var dateField = fbt[CARD_FIELD_TYPES.DATE];
+        if (dateField && dateField.visible !== false) {
+            var dateVal = row[dateField.colIdx];
             if (dateVal) {
                 var dateEl = document.createElement('div');
-                dateEl.className = 'cards-card-date';
+                dateEl.className = 'cards-card-date cards-card-copyable';
                 dateEl.textContent = formatDate(dateVal);
+                dateEl.title = 'Нажмите для копирования';
+                dateEl.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    self._copyToClipboard(formatDate(dateVal), dateEl);
+                });
                 div.appendChild(dateEl);
             }
         }
 
-        // ── Title (first text field, clickable) ──────────────────────────────────
-        var titleVal = row[this._autoTitleIdx];
+        // ── Title (clickable, opens edit modal) ─────────────────────────────────
+        var titleField = fbt[CARD_FIELD_TYPES.TITLE];
+        var titleIdx = titleField ? titleField.colIdx : 0;
+        var titleVal = row[titleIdx];
         if (!titleVal && row[0] != null) titleVal = row[0];
+
         var titleEl = document.createElement('div');
         titleEl.className = 'cards-card-title';
-        titleEl.textContent = titleVal != null ? String(titleVal) : '—';
+
+        // Add label if showLabel is true
+        if (titleField && titleField.showLabel) {
+            var labelText = titleField.alias || cols[titleIdx].name || '';
+            if (labelText) {
+                var labelSpan = document.createElement('span');
+                labelSpan.className = 'cards-card-field-label';
+                labelSpan.textContent = labelText + ': ';
+                titleEl.appendChild(labelSpan);
+            }
+        }
+        titleEl.appendChild(document.createTextNode(titleVal != null ? String(titleVal) : '—'));
         titleEl.addEventListener('click', function(e) {
             e.stopPropagation();
             self._openEditForm(rowIndex);
         });
         div.appendChild(titleEl);
 
-        // ── Status badge ──────────────────────────────────────────────────────────
-        if (this._autoStatusIdx >= 0) {
-            var statusVal = row[this._autoStatusIdx];
+        // ── Status badge ────────────────────────────────────────────────────────
+        var statusField = fbt[CARD_FIELD_TYPES.STATUS];
+        if (statusField && statusField.visible !== false) {
+            var statusVal = row[statusField.colIdx];
             if (statusVal) {
-                // Look for a companion color column (named 'Цвет', 'color', or '{ StatusFieldName }Цвет')
-                var statusColor = null;
-                var statusName  = cols[this._autoStatusIdx] ? cols[this._autoStatusIdx].name : '';
-                for (var c = 0; c < cols.length; c++) {
-                    var cn = (cols[c].name || '').toLowerCase();
-                    if (cn === 'цвет' || cn === 'color' || cn === statusName.toLowerCase() + 'цвет') {
-                        statusColor = row[c] || null;
-                        break;
-                    }
-                }
+                // Look for color in the color column
+                var statusColor = this._colorIdx >= 0 ? row[this._colorIdx] : null;
+
                 var badge = document.createElement('span');
-                badge.className = 'cards-card-status';
-                if (statusColor) badge.style.cssText = makeStatusStyle(statusColor);
+                badge.className = 'cards-card-status cards-card-copyable';
+                if (statusColor) {
+                    badge.style.cssText = makeStatusStyle(statusColor);
+                }
                 badge.textContent = String(statusVal);
+                badge.title = 'Нажмите для копирования';
+                badge.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    self._copyToClipboard(String(statusVal), badge);
+                });
                 div.appendChild(badge);
             }
         }
 
-        // ── Description (second text field) ──────────────────────────────────────
-        if (this._autoDescIdx >= 0) {
-            var descVal = row[this._autoDescIdx];
+        // ── Description ─────────────────────────────────────────────────────────
+        var descField = fbt[CARD_FIELD_TYPES.DESCRIPTION];
+        if (descField && descField.visible !== false) {
+            var descVal = row[descField.colIdx];
             if (descVal) {
                 var descEl = document.createElement('div');
-                descEl.className = 'cards-card-description';
-                descEl.textContent = String(descVal);
+                descEl.className = 'cards-card-description cards-card-copyable';
+
+                if (descField.showLabel) {
+                    var labelText = descField.alias || cols[descField.colIdx].name || '';
+                    if (labelText) {
+                        var labelSpan = document.createElement('span');
+                        labelSpan.className = 'cards-card-field-label';
+                        labelSpan.textContent = labelText + ': ';
+                        descEl.appendChild(labelSpan);
+                    }
+                }
+                descEl.appendChild(document.createTextNode(String(descVal)));
+                descEl.title = 'Нажмите для копирования';
+                descEl.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    self._copyToClipboard(String(descVal), descEl);
+                });
                 div.appendChild(descEl);
             }
         }
 
-        // ── Extra card fields (from settings or default first 5) ─────────────────
-        var shownIdx = new Set([this._autoTitleIdx, this._autoDescIdx, this._autoDateIdx, this._autoStatusIdx]);
+        // ── Amount ──────────────────────────────────────────────────────────────
+        var amountField = fbt[CARD_FIELD_TYPES.AMOUNT];
+        if (amountField && amountField.visible !== false) {
+            var amountVal = row[amountField.colIdx];
+            if (amountVal != null && amountVal !== '') {
+                var amountEl = document.createElement('div');
+                amountEl.className = 'cards-card-amount cards-card-copyable';
 
-        if (cardFieldIds && cardFieldIds.length > 0) {
-            // Use configured fields
-            cardFieldIds.forEach(function(colId) {
-                var ci = self._colIndexById(colId);
-                if (ci < 0 || shownIdx.has(ci)) return;
-                var v = row[ci];
-                if (v == null || v === '') return;
-                var el = document.createElement('div');
-                el.className = 'cards-card-field';
-                el.textContent = String(v);
-                div.appendChild(el);
-            });
-        } else {
-            // Default: first 5 columns not already shown
-            var shown = 0;
-            for (var i = 0; i < cols.length && shown < defaultCount; i++) {
-                if (shownIdx.has(i)) continue;
-                if (i === this._autoNumIdx) continue; // handled separately below
-                var val = row[i];
-                if (val == null || val === '') continue;
-                var fieldEl = document.createElement('div');
-                fieldEl.className = 'cards-card-field';
-                fieldEl.textContent = String(val);
-                div.appendChild(fieldEl);
-                shown++;
+                if (amountField.showLabel) {
+                    var labelText = amountField.alias || cols[amountField.colIdx].name || '';
+                    if (labelText) {
+                        var labelSpan = document.createElement('span');
+                        labelSpan.className = 'cards-card-field-label';
+                        labelSpan.textContent = labelText + ': ';
+                        amountEl.appendChild(labelSpan);
+                    }
+                }
+                amountEl.appendChild(document.createTextNode(formatNum(amountVal)));
+                amountEl.title = 'Нажмите для копирования';
+                amountEl.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    self._copyToClipboard(String(amountVal), amountEl);
+                });
+                div.appendChild(amountEl);
             }
         }
 
-        // ── Amount (first numeric field) ─────────────────────────────────────────
-        if (this._autoNumIdx >= 0) {
-            var numVal = row[this._autoNumIdx];
-            if (numVal != null && numVal !== '') {
-                var numEl = document.createElement('div');
-                numEl.className = 'cards-card-amount';
-                numEl.textContent = formatNum(numVal);
-                div.appendChild(numEl);
+        // ── Additional fields ───────────────────────────────────────────────────
+        var self2 = this;
+        this.cardFieldSettings.forEach(function(f) {
+            if (f.fieldType !== CARD_FIELD_TYPES.ADDITIONAL) return;
+            if (f.visible === false) return;
+
+            var val = row[f.colIdx];
+            if (val == null || val === '') return;
+
+            var fieldEl = document.createElement('div');
+            fieldEl.className = 'cards-card-field cards-card-copyable';
+
+            if (f.showLabel) {
+                var labelText = f.alias || cols[f.colIdx].name || '';
+                if (labelText) {
+                    var labelSpan = document.createElement('span');
+                    labelSpan.className = 'cards-card-field-label';
+                    labelSpan.textContent = labelText + ': ';
+                    fieldEl.appendChild(labelSpan);
+                }
             }
+
+            // Format based on column type
+            var colType = cols[f.colIdx] ? cols[f.colIdx].type : '3';
+            var formattedVal = val;
+            if (isDateType(colType)) {
+                formattedVal = formatDate(val);
+            } else if (isNumType(colType)) {
+                formattedVal = formatNum(val);
+            } else {
+                formattedVal = String(val);
+            }
+
+            fieldEl.appendChild(document.createTextNode(formattedVal));
+            fieldEl.title = 'Нажмите для копирования';
+            fieldEl.addEventListener('click', function(e) {
+                e.stopPropagation();
+                self2._copyToClipboard(String(val), fieldEl);
+            });
+            div.appendChild(fieldEl);
+        });
+
+        // ── Phone and Email icons (bottom-right) ────────────────────────────────
+        if (phoneField || emailField) {
+            var contactsDiv = document.createElement('div');
+            contactsDiv.className = 'cards-card-contacts';
+
+            // Phone icon
+            if (phoneField) {
+                var phoneIcon = document.createElement('span');
+                phoneIcon.className = 'cards-card-contact-icon';
+
+                if (phoneVal && String(phoneVal).trim()) {
+                    phoneIcon.classList.add('active');
+                    phoneIcon.innerHTML = '<i class="pi pi-phone"></i>';
+                    phoneIcon.title = String(phoneVal);
+                    phoneIcon.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        self._copyToClipboard(String(phoneVal), phoneIcon);
+                    });
+                } else {
+                    phoneIcon.classList.add('inactive');
+                    phoneIcon.innerHTML = '<i class="pi pi-phone"></i>';
+                    phoneIcon.title = 'Телефон недоступен';
+                }
+                contactsDiv.appendChild(phoneIcon);
+            }
+
+            // Email icon
+            if (emailField) {
+                var mailIcon = document.createElement('span');
+                mailIcon.className = 'cards-card-contact-icon';
+
+                if (emailVal && String(emailVal).trim()) {
+                    mailIcon.classList.add('active');
+                    mailIcon.innerHTML = '<i class="pi pi-envelope"></i>';
+                    mailIcon.title = String(emailVal);
+                    mailIcon.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        self._copyToClipboard(String(emailVal), mailIcon);
+                    });
+                } else {
+                    mailIcon.classList.add('inactive');
+                    mailIcon.innerHTML = '<i class="pi pi-envelope"></i>';
+                    mailIcon.title = 'Email недоступен';
+                }
+                contactsDiv.appendChild(mailIcon);
+            }
+
+            div.appendChild(contactsDiv);
         }
 
         return div;
+    };
+
+    // ─── Copy to clipboard helper ──────────────────────────────────────────────
+
+    CardsView.prototype._copyToClipboard = function(text, element) {
+        // Modern clipboard API
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(function() {
+                // Visual feedback
+                element.classList.add('copied');
+                setTimeout(function() {
+                    element.classList.remove('copied');
+                }, 1500);
+            }).catch(function() {
+                // Fallback
+                fallbackCopy(text, element);
+            });
+        } else {
+            fallbackCopy(text, element);
+        }
+
+        function fallbackCopy(text, el) {
+            var temp = document.createElement('input');
+            temp.style.position = 'absolute';
+            temp.style.left = '-9999px';
+            document.body.appendChild(temp);
+            temp.value = text;
+            temp.select();
+            try {
+                document.execCommand('copy');
+                el.classList.add('copied');
+                setTimeout(function() {
+                    el.classList.remove('copied');
+                }, 1500);
+            } catch(e) {
+                console.warn('CardsView: copy failed', e);
+            }
+            document.body.removeChild(temp);
+        }
     };
 
     CardsView.prototype._colIndexById = function(colId) {
@@ -1181,12 +1598,79 @@
 
         var modal = document.createElement('div');
         modal.className = 'cards-settings-modal';
+        modal.style.maxWidth = '600px';
 
-        // Build column checkboxes helper
+        // Field type labels
+        var fieldTypeLabels = {
+            'title': 'Заголовок',
+            'description': 'Описание',
+            'date': 'Дата',
+            'amount': 'Сумма',
+            'status': 'Статус',
+            'additional': 'Дополнительно',
+            'phone': 'Телефон',
+            'email': 'Email'
+        };
+
+        // Build card field settings list (draggable)
+        function buildCardFieldsList() {
+            var html = '<div class="cards-col-list" id="cards-s-field-list" style="max-height:250px;">';
+
+            // Use current cardFieldSettings or columns
+            var fields = self.cardFieldSettings.length > 0 ? self.cardFieldSettings : [];
+            var usedColIds = new Set(fields.map(function(f) { return f.colId; }));
+
+            // First, show configured fields in order
+            fields.forEach(function(f, idx) {
+                var col = cols.find(function(c) { return c.id === f.colId; });
+                if (!col) return;
+                html += buildFieldRow(f, col, idx);
+            });
+
+            // Then, show remaining columns (not yet configured)
+            cols.forEach(function(col, i) {
+                if (usedColIds.has(col.id)) return;
+                var defaultField = {
+                    colId: col.id,
+                    colIdx: i,
+                    visible: false,
+                    showLabel: false,
+                    alias: null,
+                    order: fields.length + i,
+                    fieldType: CARD_FIELD_TYPES.ADDITIONAL
+                };
+                html += buildFieldRow(defaultField, col, fields.length + i);
+            });
+
+            html += '</div>';
+            return html;
+        }
+
+        function buildFieldRow(f, col, idx) {
+            var visChecked = f.visible !== false ? 'checked' : '';
+            var labelChecked = f.showLabel ? 'checked' : '';
+
+            var html = '<div class="cards-col-item" draggable="true" data-col-id="' + escHtml(col.id) + '" data-order="' + idx + '" style="padding:6px 8px;border:1px solid var(--cards-border);border-radius:4px;margin-bottom:4px;background:#fff;">';
+            html += '<i class="pi pi-bars" style="cursor:grab;color:var(--cards-text-secondary);margin-right:6px;"></i>';
+            html += '<input type="checkbox" class="field-visible" ' + visChecked + ' title="Видимость" style="margin-right:6px;">';
+            html += '<span style="flex:1;font-weight:500;">' + escHtml(col.name) + '</span>';
+            html += '<select class="field-type" style="width:100px;font-size:12px;padding:2px 4px;margin-left:6px;">';
+            for (var type in fieldTypeLabels) {
+                var sel = f.fieldType === type ? 'selected' : '';
+                html += '<option value="' + type + '" ' + sel + '>' + fieldTypeLabels[type] + '</option>';
+            }
+            html += '</select>';
+            html += '<label style="font-size:11px;margin-left:8px;display:flex;align-items:center;gap:3px;">';
+            html += '<input type="checkbox" class="field-show-label" ' + labelChecked + '>Имя</label>';
+            html += '</div>';
+            return html;
+        }
+
+        // Build filter fields checkboxes
         function colCheckboxes(listId, selectedIds) {
             var html = '<div class="cards-col-list" id="' + listId + '">';
             cols.forEach(function(c) {
-                var checked = (!selectedIds || selectedIds.indexOf(c.id) !== -1) ? 'checked' : '';
+                var checked = (selectedIds && selectedIds.indexOf(c.id) !== -1) ? 'checked' : '';
                 html += '<label class="cards-col-item"><input type="checkbox" value="' + escHtml(c.id) + '" ' + checked + '> ' + escHtml(c.name) + '</label>';
             });
             html += '</div>';
@@ -1208,8 +1692,8 @@
             '<h4><i class="pi pi-cog" style="margin-right:6px;"></i>Настройка карточек</h4>' +
 
             '<div class="cards-settings-section">' +
-                '<label>Поля карточки (порядок отображения):</label>' +
-                colCheckboxes('cards-s-card-fields', self.settings.cardFields) +
+                '<label>Поля карточки (перетаскивание для изменения порядка):</label>' +
+                buildCardFieldsList() +
             '</div>' +
 
             '<div class="cards-settings-section">' +
@@ -1239,6 +1723,38 @@
         document.body.appendChild(overlay);
         document.body.appendChild(modal);
 
+        // Enable drag-and-drop reordering
+        var fieldList = modal.querySelector('#cards-s-field-list');
+        var draggedItem = null;
+
+        fieldList.addEventListener('dragstart', function(e) {
+            draggedItem = e.target.closest('.cards-col-item');
+            if (draggedItem) {
+                draggedItem.style.opacity = '0.5';
+            }
+        });
+
+        fieldList.addEventListener('dragend', function(e) {
+            if (draggedItem) {
+                draggedItem.style.opacity = '1';
+                draggedItem = null;
+            }
+        });
+
+        fieldList.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            var target = e.target.closest('.cards-col-item');
+            if (target && target !== draggedItem) {
+                var rect = target.getBoundingClientRect();
+                var midY = rect.top + rect.height / 2;
+                if (e.clientY < midY) {
+                    target.parentNode.insertBefore(draggedItem, target);
+                } else {
+                    target.parentNode.insertBefore(draggedItem, target.nextSibling);
+                }
+            }
+        });
+
         function close() {
             overlay.remove();
             modal.remove();
@@ -1252,8 +1768,10 @@
             var key = self.options.cookiePrefix + '-settings';
             deleteCookie(key);
             self.settings = {
-                cardFields: null, filterFields: null, editFields: null,
-                sortField: null, saveMode: 'local'
+                cardFieldSettings: null,
+                filterFields: null,
+                sortField: null,
+                saveMode: 'local'
             };
             self.sortColId = null;
             close();
@@ -1266,11 +1784,27 @@
         });
 
         modal.querySelector('#cards-s-save').addEventListener('click', function() {
-            // Read card fields
-            var cardCbs = modal.querySelectorAll('#cards-s-card-fields input[type="checkbox"]');
-            var cardFields = [];
-            cardCbs.forEach(function(cb) { if (cb.checked) cardFields.push(cb.value); });
-            self.settings.cardFields = cardFields.length > 0 ? cardFields : null;
+            // Read card field settings from the draggable list
+            var items = modal.querySelectorAll('#cards-s-field-list .cards-col-item');
+            var cardFieldSettings = [];
+            items.forEach(function(item, idx) {
+                var colId = item.dataset.colId;
+                var visible = item.querySelector('.field-visible').checked;
+                var showLabel = item.querySelector('.field-show-label').checked;
+                var fieldType = item.querySelector('.field-type').value;
+                var colIdx = self._colIndexById(colId);
+
+                cardFieldSettings.push({
+                    colId: colId,
+                    colIdx: colIdx,
+                    visible: visible,
+                    showLabel: showLabel,
+                    alias: null,
+                    order: idx,
+                    fieldType: fieldType
+                });
+            });
+            self.settings.cardFieldSettings = cardFieldSettings;
 
             // Read filter fields
             var filterCbs = modal.querySelectorAll('#cards-s-filter-fields input[type="checkbox"]');
@@ -1290,11 +1824,10 @@
             self._saveSettings();
             close();
 
-            // Re-render
-            self.data = [];
-            self.loadedRecords = 0;
-            self.hasMore = true;
-            self._loadData(false);
+            // Re-render with new settings
+            self.cardFieldSettings = cardFieldSettings.filter(function(f) { return f.visible; });
+            self._buildFieldIndexMaps();
+            self._renderCards(false);
             self._renderFilterBar();
         });
     };
