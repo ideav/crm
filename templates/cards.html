@@ -1473,10 +1473,12 @@
 
         // Prefer IntegramTable instance if one is registered with the same data source
         var tableInst = null;
-        for (var key in window) {
-            if (window[key] instanceof window.IntegramTable) {
-                tableInst = window[key];
-                break;
+        if (typeof window.IntegramTable === 'function') {
+            for (var key in window) {
+                if (window[key] instanceof window.IntegramTable) {
+                    tableInst = window[key];
+                    break;
+                }
             }
         }
 
