@@ -1422,10 +1422,38 @@ class IntegramTable {
             `;
         }
 
+        // Helper method to parse Unix or JS timestamp (seconds or milliseconds) from a string
+        // Returns a Date object if value looks like a numeric timestamp, otherwise null.
+        // Supports: integer seconds (e.g. "1773313083"), float seconds (e.g. "1773313083.4489"),
+        // and milliseconds (e.g. "1773313083000").
+        parseUnixTimestamp(value) {
+            if (!value && value !== 0) return null;
+            const str = String(value).trim();
+            // Match digits with optional decimal part (no sign — timestamps are positive)
+            if (!/^\d+(\.\d+)?$/.test(str)) return null;
+            const num = parseFloat(str);
+            if (isNaN(num)) return null;
+            // Require at least 1e9 to distinguish from YYYYMMDD (8 digits) and other numbers.
+            // Unix timestamps for years 2001+ are >= 1e9.
+            if (num < 1e9) return null;
+            // Heuristic: if the value is >= 1e12 treat as milliseconds (JS timestamp),
+            // otherwise treat as Unix seconds.
+            const ms = num >= 1e12 ? num : num * 1000;
+            const date = new Date(ms);
+            // Sanity check: year must be reasonable (2001–2100)
+            const year = date.getFullYear();
+            if (year < 2001 || year > 2100) return null;
+            return date;
+        }
+
         // Helper method to parse date format from API (supports both DD.MM.YYYY and YYYYMMDD)
         parseDDMMYYYY(dateStr) {
             if (!dateStr || typeof dateStr !== 'string') return null;
             const trimmed = dateStr.trim();
+
+            // Try numeric timestamp (Unix seconds or JS milliseconds)
+            const tsDate = this.parseUnixTimestamp(trimmed);
+            if (tsDate) return tsDate;
 
             // Try YYYYMMDD format first (exactly 8 digits)
             if (/^\d{8}$/.test(trimmed)) {
@@ -1456,6 +1484,11 @@ class IntegramTable {
         // Helper method to parse DD.MM.YYYY HH:MM:SS datetime format from API
         parseDDMMYYYYHHMMSS(datetimeStr) {
             if (!datetimeStr || typeof datetimeStr !== 'string') return null;
+
+            // Try numeric timestamp first (Unix seconds or JS milliseconds)
+            const tsDate = this.parseUnixTimestamp(datetimeStr.trim());
+            if (tsDate) return tsDate;
+
             const parts = datetimeStr.trim().split(' ');
             if (parts.length !== 2) return this.parseDDMMYYYY(datetimeStr); // Fallback to date-only
 
