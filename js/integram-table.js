@@ -11730,12 +11730,33 @@ class IntegramCreateFormHelper {
     formatDateForHtml5(dateStr, includeTime = false) {
         if (!dateStr) return '';
 
+        // Handle Unix/JS numeric timestamp (e.g. "1773328460.1069" or "1773328460000")
+        const trimmed = String(dateStr).trim();
+        if (/^\d+(\.\d+)?$/.test(trimmed)) {
+            const num = parseFloat(trimmed);
+            if (num >= 1e9) {
+                const ms = num >= 1e12 ? num : num * 1000;
+                const date = new Date(ms);
+                const year = date.getFullYear();
+                if (year >= 2001 && year <= 2100) {
+                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                    const day = String(date.getDate()).padStart(2, '0');
+                    if (includeTime) {
+                        const hours = String(date.getHours()).padStart(2, '0');
+                        const minutes = String(date.getMinutes()).padStart(2, '0');
+                        return `${year}-${month}-${day}T${hours}:${minutes}`;
+                    }
+                    return `${year}-${month}-${day}`;
+                }
+            }
+        }
+
         // Handle DD.MM.YYYY format
-        const dateParts = dateStr.split(' ')[0].split('.');
+        const dateParts = trimmed.split(' ')[0].split('.');
         if (dateParts.length === 3) {
             const [day, month, year] = dateParts;
             if (includeTime) {
-                const timeParts = dateStr.split(' ')[1] || '00:00';
+                const timeParts = trimmed.split(' ')[1] || '00:00';
                 return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}T${timeParts}`;
             }
             return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
