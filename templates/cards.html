@@ -161,6 +161,22 @@
         text-decoration: underline;
     }
 
+    /* Record ID badge (to the right of title) */
+    .cards-card-record-id {
+        font-size: 12px;
+        font-weight: 400;
+        color: #999;
+        cursor: pointer;
+        margin-left: 6px;
+        white-space: nowrap;
+        transition: color 0.2s ease;
+        vertical-align: middle;
+    }
+
+    .cards-card-record-id:hover {
+        color: #666;
+    }
+
     /* Date — top-right corner */
     .cards-card-date {
         position: absolute;
@@ -1263,6 +1279,21 @@
             }
         }
         titleEl.appendChild(document.createTextNode(titleVal != null ? String(titleVal) : '—'));
+
+        // Add record ID badge to the right of title
+        var recordId = this._getRowId(rowIndex);
+        if (recordId) {
+            var idSpan = document.createElement('span');
+            idSpan.className = 'cards-card-record-id';
+            idSpan.textContent = '#' + recordId;
+            idSpan.title = 'Нажмите для копирования';
+            idSpan.addEventListener('click', function(e) {
+                e.stopPropagation();
+                self._copyToClipboard(String(recordId), idSpan);
+            });
+            titleEl.appendChild(idSpan);
+        }
+
         titleEl.addEventListener('click', function(e) {
             e.stopPropagation();
             self._openEditForm(rowIndex);
