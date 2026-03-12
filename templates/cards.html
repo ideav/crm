@@ -593,13 +593,18 @@
         this.container   = document.getElementById(containerId);
         if (!this.container) throw new Error('CardsView: container not found: ' + containerId);
 
+        // Check URL parameters for parentId (issue #829)
+        var urlParams = new URLSearchParams(window.location.search);
+        var urlParentId = urlParams.get('parentId') || urlParams.get('F_U') || urlParams.get('up');
+
         options = options || {};
         this.options = {
             tableTypeId:  options.tableTypeId  || null,
             pageSize:     parseInt(options.pageSize) || 20,
             cookiePrefix: options.cookiePrefix || 'cards',
             title:        options.title        || '',
-            instanceName: options.instanceName || 'cardsView'
+            instanceName: options.instanceName || 'cardsView',
+            parentId:     urlParentId || options.parentId || null  // Parent ID from URL or options (issue #829)
         };
 
         // State
@@ -627,6 +632,9 @@
         // Runtime-computed card settings (always generated from metadata if settings.cardFieldSettings is null)
         this.cardFieldSettings = [];
 
+        // Parent info for breadcrumb title (issue #829)
+        this.parentInfo = null;
+
         this._loadSettings();
 
         // Apply saved sort field
@@ -645,8 +653,11 @@
         var inst = this.options.instanceName;
         this.container.innerHTML =
             '<div class="cards-header">' +
-                '<div class="cards-title-area">' +
+                '<div class="cards-title-area" id="' + inst + '-title-area">' +
                     '<span class="cards-title" id="' + inst + '-title">' + escHtml(this.options.title) + '</span>' +
+                    '<button class="column-add-btn title-create-btn" id="' + inst + '-add-btn" onclick="window[\'' + inst + '\']._openCreateForm()" title="Создать запись" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:4px;border:none;background:transparent;cursor:pointer;color:var(--cards-text-secondary);transition:all 0.2s;">' +
+                        '<i class="pi pi-plus"></i>' +
+                    '</button>' +
                 '</div>' +
                 '<div class="cards-controls">' +
                     '<span class="cards-count" id="' + inst + '-count"></span>' +
@@ -684,6 +695,109 @@
         return '';
     };
 
+    // ─── Load parent info when F_U filter is present (issue #829) ────────────────
+
+    CardsView.prototype._loadParentInfo = function() {
+        var self = this;
+        var parentId = parseInt(this.options.parentId, 10);
+        if (!parentId || parentId <= 1) {
+            return;
+        }
+
+        var apiBase = this._getApiBase();
+        fetch(apiBase + '/edit_obj/' + parentId + '?JSON')
+            .then(function(r) {
+                if (!r.ok) {
+                    console.error('CardsView: Failed to fetch parent info:', r.status);
+                    return null;
+                }
+                return r.json();
+            })
+            .then(function(data) {
+                if (data && data.obj) {
+                    self.parentInfo = {
+                        id: data.obj.id,
+                        val: data.obj.val,
+                        typ: data.obj.typ,
+                        typ_name: data.obj.typ_name
+                    };
+                    self._updateTitleWithParentInfo();
+                }
+            })
+            .catch(function(e) {
+                console.error('CardsView: Error loading parent info:', e);
+            });
+    };
+
+    // ─── Update title area with parent info breadcrumb (issue #829) ──────────────
+
+    CardsView.prototype._updateTitleWithParentInfo = function() {
+        var inst = this.options.instanceName;
+        var titleArea = document.getElementById(inst + '-title-area');
+        if (!titleArea || !this.parentInfo) return;
+
+        var pathParts = window.location.pathname.split('/');
+        var dbName = pathParts.length >= 2 ? pathParts[1] : '';
+
+        var parentTypeName = escHtml(this.parentInfo.typ_name || '');
+        var parentVal = escHtml(this.parentInfo.val || '');
+        var parentTypeId = this.parentInfo.typ || '';
+        var parentRecordId = this.parentInfo.id || '';
+        var currentTitle = escHtml(this.options.title || '');
+
+        var parentTypeLink = '/' + dbName + '/table/' + parentTypeId;
+
+        // Build breadcrumb-style title HTML (matching integram-table.js format)
+        var titleHtml =
+            '<a href="' + parentTypeLink + '" class="integram-title-link" style="color:var(--cards-primary);text-decoration:none;">' + parentTypeName + '</a> ' +
+            '<span class="integram-title-link" style="color:var(--cards-primary);cursor:pointer;" onclick="window[\'' + inst + '\']._openParentEditForm()">' + parentVal + '</span>' +
+            (currentTitle ? ': ' + currentTitle : '');
+
+        // Update title element
+        var titleEl = document.getElementById(inst + '-title');
+        if (titleEl) {
+            titleEl.innerHTML = titleHtml;
+        }
+    };
+
+    // ─── Open parent record edit form (issue #829) ───────────────────────────────
+
+    CardsView.prototype._openParentEditForm = function() {
+        var self = this;
+        if (!this.parentInfo || !this.parentInfo.id) return;
+
+        // Use IntegramTable's openCreateRecordForm with parent info (for edit mode)
+        // Actually we should open edit form, but openCreateRecordForm is designed for create
+        // For now, let's navigate to the record
+        var pathParts = window.location.pathname.split('/');
+        var dbName = pathParts.length >= 2 ? pathParts[1] : '';
+        var recordUrl = '/' + dbName + '/table/' + this.parentInfo.typ + '?F_I=' + this.parentInfo.id;
+        window.open(recordUrl, '_blank');
+    };
+
+    // ─── Open create form for new card (issue #829) ──────────────────────────────
+
+    CardsView.prototype._openCreateForm = function() {
+        var self = this;
+        var typeId = this.options.tableTypeId;
+        if (!typeId) {
+            console.error('CardsView: tableTypeId not set');
+            return;
+        }
+
+        // Determine parent ID: use F_U value if > 1, otherwise default to 1
+        var parentIdForNew = (this.options.parentId && parseInt(this.options.parentId) > 1)
+            ? this.options.parentId
+            : 1;
+
+        // Use the global openCreateRecordForm function from integram-table.js
+        if (typeof openCreateRecordForm === 'function') {
+            openCreateRecordForm(typeId, parentIdForNew);
+        } else {
+            console.error('CardsView: openCreateRecordForm function not available');
+        }
+    };
+
     // ─── Initialise: fetch metadata + first page of data ─────────────────────────
 
     CardsView.prototype._init = function() {
@@ -692,6 +806,10 @@
             this._showError('CardsView: data-table-type-id не задан');
             return;
         }
+
+        // Load parent info for breadcrumb title (issue #829)
+        this._loadParentInfo();
+
         var metaUrl = this._getApiBase() + '/metadata/' + this.options.tableTypeId;
         fetch(metaUrl)
             .then(function(r) { return r.json(); })
@@ -700,8 +818,13 @@
                 // Auto-set title from metadata
                 if (!self.options.title && (m.val || m.value || m.name)) {
                     self.options.title = m.val || m.value || m.name;
+                    // Update title (will be overwritten by parent info if available)
                     var titleEl = document.getElementById(self.options.instanceName + '-title');
                     if (titleEl) titleEl.textContent = self.options.title;
+                    // If parent info was loaded, re-apply breadcrumb format
+                    if (self.parentInfo) {
+                        self._updateTitleWithParentInfo();
+                    }
                 }
                 self._buildColumnsFromMetadata(m);
                 self._loadData(false);
@@ -752,6 +875,11 @@
         var params = new URLSearchParams();
         params.set('JSON_OBJ', '');
         params.set('LIMIT', offset + ',' + limit);
+
+        // Parent ID filter (issue #829)
+        if (this.options.parentId) {
+            params.set('F_U', this.options.parentId);
+        }
 
         // ORDER parameter
         var sortCol = this.sortColId || (this.settings.sortField || null);
