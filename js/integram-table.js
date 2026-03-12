@@ -1824,6 +1824,14 @@ class IntegramTable {
                     }
                 }
 
+                // Issue #854: Hide edit icon for multi-select reference fields (:MULTI: in attrs)
+                if (shouldShowEditIcon && isArrayField) {
+                    shouldShowEditIcon = false;
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log(`  - Multi-select reference field (:MULTI: in attrs) -> shouldShowEditIcon: false`);
+                    }
+                }
+
                 if (window.INTEGRAM_DEBUG) {
                     console.log(`  - colTypeMatchesTableId: ${colTypeMatchesTableId} (paramId: ${column.paramId}, objectTableId: ${this.objectTableId})`);
                 }
