@@ -1549,6 +1549,14 @@
 
     // ─── Count display ────────────────────────────────────────────────────────────
 
+    function pluralizeRecords(n) {
+        var mod10 = n % 10;
+        var mod100 = n % 100;
+        if (mod10 === 1 && mod100 !== 11) return 'запись';
+        if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return 'записи';
+        return 'записей';
+    }
+
     CardsView.prototype._updateCount = function() {
         var inst = this.options.instanceName;
         var el = document.getElementById(inst + '-count');
@@ -1556,9 +1564,9 @@
         var total = this.loadedRecords;
         var visible = this._getFilteredData().length;
         if (this.searchQuery) {
-            el.textContent = visible + ' из ' + total;
+            el.textContent = visible + ' из ' + total + ' ' + pluralizeRecords(total);
         } else {
-            el.textContent = total + (this.hasMore ? '+' : '') + ' записей';
+            el.textContent = total + (this.hasMore ? '+' : '') + ' ' + pluralizeRecords(total);
         }
     };
 
