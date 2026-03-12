@@ -508,6 +508,8 @@
     function isDateType(t)  { return DATE_TYPES.has(String(t)); }
     function isNumType(t)   { return NUM_TYPES.has(String(t)); }
     function isListType(t)  { return LIST_TYPES.has(String(t)); }
+    // Reference fields (справочник) have 'ref' attribute pointing to another table
+    function isRefField(col) { return col && col.ref != null && col.ref !== ''; }
 
     // ─── Card Field Types ──────────────────────────────────────────────────────
     // Field types as per issue requirements
@@ -833,12 +835,13 @@
     };
 
     // Build columns array from metadata
+    // Include 'ref' attribute for reference/link fields (справочник) used for badge display
     CardsView.prototype._buildColumnsFromMetadata = function(m) {
         var cols = [];
-        cols.push({ id: String(m.id), name: m.val || m.name || 'Значение', type: String(m.type || '3') });
+        cols.push({ id: String(m.id), name: m.val || m.name || 'Значение', type: String(m.type || '3'), ref: m.ref || null });
         if (m.reqs && Array.isArray(m.reqs)) {
             m.reqs.forEach(function(req) {
-                cols.push({ id: String(req.id), name: req.val || req.name || '', type: String(req.type || '3') });
+                cols.push({ id: String(req.id), name: req.val || req.name || '', type: String(req.type || '3'), ref: req.ref || null });
             });
         }
         this.columns = cols;
@@ -999,14 +1002,15 @@
                 emailIdx = i;
             } else if (isColorField(name)) {
                 colorIdx = i;
+            } else if (isListType(t) || isRefField(col)) {
+                // Reference fields (справочник) should also be treated as list/status fields for badge display
+                listIdx.push(i);
             } else if (isTextType(t)) {
                 textIdx.push(i);
             } else if (isDateType(t)) {
                 dateIdx.push(i);
             } else if (isNumType(t)) {
                 numIdx.push(i);
-            } else if (isListType(t)) {
-                listIdx.push(i);
             }
         }
 
