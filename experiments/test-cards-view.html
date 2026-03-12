@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cards View Test - Issue #823</title>
+    <link href="https://cdn.jsdelivr.net/npm/primeicons@6.0.1/primeicons.css" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        h1 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+        .test-container {
+            background: #fff;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .test-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #1976d2;
+        }
+        .description {
+            color: #666;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+        /* Card styles from cards.html */
+        :root {
+            --cards-primary: #1976d2;
+            --cards-primary-dark: #1565c0;
+            --cards-primary-light: #42a5f5;
+            --cards-background: #fafafa;
+            --cards-surface: #ffffff;
+            --cards-border: rgba(0, 0, 0, 0.12);
+            --cards-text-primary: rgba(0, 0, 0, 0.87);
+            --cards-text-secondary: rgba(0, 0, 0, 0.54);
+            --cards-shadow-1: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+            --cards-shadow-2: 0 3px 6px rgba(0,0,0,0.16), 0 3px 6px rgba(0,0,0,0.23);
+            --cards-radius: 4px;
+            --cards-transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 12px;
+        }
+        .cards-card {
+            background: var(--cards-surface);
+            border-radius: var(--cards-radius);
+            box-shadow: var(--cards-shadow-1);
+            padding: 14px 14px 12px;
+            position: relative;
+            transition: var(--cards-transition);
+            cursor: default;
+        }
+        .cards-card:hover {
+            box-shadow: var(--cards-shadow-2);
+            transform: translateY(-1px);
+        }
+        .cards-card.has-contacts {
+            padding-right: 44px;
+            padding-bottom: 44px;
+        }
+        .cards-card-title {
+            font-size: 15px;
+            font-weight: 500;
+            color: var(--cards-primary);
+            cursor: pointer;
+            margin-bottom: 6px;
+            padding-right: 60px;
+            line-height: 1.4;
+            word-break: break-word;
+        }
+        .cards-card-title:hover {
+            text-decoration: underline;
+        }
+        .cards-card-date {
+            position: absolute;
+            top: 8px;
+            right: 10px;
+            font-size: 11px;
+            color: var(--cards-text-secondary);
+            white-space: nowrap;
+        }
+        .cards-card-status {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+            margin-bottom: 6px;
+            background: #e3f2fd;
+            color: var(--cards-primary);
+        }
+        .cards-card-description {
+            font-size: 13px;
+            color: var(--cards-text-secondary);
+            margin-bottom: 4px;
+            line-height: 1.4;
+            word-break: break-word;
+        }
+        .cards-card-amount {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--cards-primary);
+            margin-top: 6px;
+        }
+        .cards-card-contacts {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .cards-card-contact-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: var(--cards-radius);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            transition: var(--cards-transition);
+        }
+        .cards-card-contact-icon.active {
+            background-color: rgba(25, 118, 210, 0.12);
+            color: var(--cards-primary);
+            cursor: pointer;
+        }
+        .cards-card-contact-icon.active:hover {
+            background-color: rgba(25, 118, 210, 0.2);
+            transform: scale(1.1);
+        }
+        .cards-card-contact-icon.inactive {
+            background-color: rgba(0, 0, 0, 0.04);
+            color: rgba(0, 0, 0, 0.26);
+            cursor: not-allowed;
+        }
+        .cards-card-copyable {
+            cursor: pointer;
+            transition: var(--cards-transition);
+            border-radius: 2px;
+            padding: 1px 3px;
+            margin: -1px -3px;
+        }
+        .cards-card-copyable:hover {
+            background-color: rgba(25, 118, 210, 0.08);
+        }
+        .cards-card-copyable.copied {
+            background-color: rgba(76, 175, 80, 0.15);
+        }
+        .notification {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #333;
+            color: #fff;
+            padding: 12px 20px;
+            border-radius: 4px;
+            font-size: 14px;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s ease;
+            z-index: 1000;
+        }
+        .notification.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    </style>
+</head>
+<body>
+    <h1>Cards View Test - Issue #823</h1>
+
+    <div class="description">
+        This test demonstrates the new card view functionality as per issue #823 requirements:
+        <ul>
+            <li><strong>Title</strong> - top field, clickable to open edit modal</li>
+            <li><strong>Description</strong> - text under title</li>
+            <li><strong>Date</strong> - gray color, fixed top-right corner</li>
+            <li><strong>Amount</strong> - number under description</li>
+            <li><strong>Status</strong> - badge with color from data source</li>
+            <li><strong>Phone/Email</strong> - icons bottom-right, active if filled</li>
+            <li><strong>Click-to-copy</strong> - click on any field (except title) copies to clipboard</li>
+        </ul>
+    </div>
+
+    <div class="test-container">
+        <div class="test-title">Card Examples</div>
+        <div class="cards-grid">
+            <!-- Card 1: Full data -->
+            <div class="cards-card has-contacts">
+                <div class="cards-card-date cards-card-copyable" onclick="copyText('12.03.2026', this)">12.03.2026</div>
+                <div class="cards-card-title" onclick="openEdit(1)">ООО «Технологии Будущего»</div>
+                <span class="cards-card-status cards-card-copyable" style="background:#4caf50;color:#fff;" onclick="copyText('В работе', this)">В работе</span>
+                <div class="cards-card-description cards-card-copyable" onclick="copyText('Внедрение CRM системы для отдела продаж', this)">Внедрение CRM системы для отдела продаж</div>
+                <div class="cards-card-amount cards-card-copyable" onclick="copyText('1500000', this)">1 500 000</div>
+                <div class="cards-card-contacts">
+                    <span class="cards-card-contact-icon active" title="+7 (999) 123-45-67" onclick="copyText('+7 (999) 123-45-67', this)">
+                        <i class="pi pi-phone"></i>
+                    </span>
+                    <span class="cards-card-contact-icon active" title="info@techfuture.ru" onclick="copyText('info@techfuture.ru', this)">
+                        <i class="pi pi-envelope"></i>
+                    </span>
+                </div>
+            </div>
+
+            <!-- Card 2: Partial data (no phone) -->
+            <div class="cards-card has-contacts">
+                <div class="cards-card-date cards-card-copyable" onclick="copyText('10.03.2026', this)">10.03.2026</div>
+                <div class="cards-card-title" onclick="openEdit(2)">ИП Иванов А.А.</div>
+                <span class="cards-card-status cards-card-copyable" style="background:#ff9800;color:#fff;" onclick="copyText('Ожидание', this)">Ожидание</span>
+                <div class="cards-card-description cards-card-copyable" onclick="copyText('Консультация по автоматизации', this)">Консультация по автоматизации</div>
+                <div class="cards-card-amount cards-card-copyable" onclick="copyText('50000', this)">50 000</div>
+                <div class="cards-card-contacts">
+                    <span class="cards-card-contact-icon inactive" title="Телефон недоступен">
+                        <i class="pi pi-phone"></i>
+                    </span>
+                    <span class="cards-card-contact-icon active" title="ivanov@mail.ru" onclick="copyText('ivanov@mail.ru', this)">
+                        <i class="pi pi-envelope"></i>
+                    </span>
+                </div>
+            </div>
+
+            <!-- Card 3: Minimal data (no contacts) -->
+            <div class="cards-card">
+                <div class="cards-card-date cards-card-copyable" onclick="copyText('08.03.2026', this)">08.03.2026</div>
+                <div class="cards-card-title" onclick="openEdit(3)">АО «Стройинвест»</div>
+                <span class="cards-card-status cards-card-copyable" onclick="copyText('Новый', this)">Новый</span>
+                <div class="cards-card-description cards-card-copyable" onclick="copyText('Первичный контакт', this)">Первичный контакт</div>
+            </div>
+
+            <!-- Card 4: With red status -->
+            <div class="cards-card has-contacts">
+                <div class="cards-card-date cards-card-copyable" onclick="copyText('05.03.2026', this)">05.03.2026</div>
+                <div class="cards-card-title" onclick="openEdit(4)">ООО «Логистика Плюс»</div>
+                <span class="cards-card-status cards-card-copyable" style="background:#f44336;color:#fff;" onclick="copyText('Отклонено', this)">Отклонено</span>
+                <div class="cards-card-description cards-card-copyable" onclick="copyText('Проект не подошел по срокам', this)">Проект не подошел по срокам</div>
+                <div class="cards-card-amount cards-card-copyable" onclick="copyText('250000', this)">250 000</div>
+                <div class="cards-card-contacts">
+                    <span class="cards-card-contact-icon active" title="+7 (495) 555-12-34" onclick="copyText('+7 (495) 555-12-34', this)">
+                        <i class="pi pi-phone"></i>
+                    </span>
+                    <span class="cards-card-contact-icon inactive" title="Email недоступен">
+                        <i class="pi pi-envelope"></i>
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="notification" class="notification"></div>
+
+    <script>
+        function copyText(text, element) {
+            navigator.clipboard.writeText(text).then(function() {
+                element.classList.add('copied');
+                showNotification('Скопировано: ' + text);
+                setTimeout(function() {
+                    element.classList.remove('copied');
+                }, 1500);
+            }).catch(function() {
+                showNotification('Ошибка копирования');
+            });
+        }
+
+        function openEdit(id) {
+            showNotification('Открытие формы редактирования записи #' + id);
+        }
+
+        function showNotification(message) {
+            var notif = document.getElementById('notification');
+            notif.textContent = message;
+            notif.classList.add('show');
+            setTimeout(function() {
+                notif.classList.remove('show');
+            }, 2000);
+        }
+    </script>
+</body>
+</html>
