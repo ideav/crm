@@ -12495,6 +12495,7 @@ class IntegramCreateFormHelper {
     /**
      * Render edit form modal for an existing record (issue #831).
      * Similar to renderCreateFormModal but for editing existing records.
+     * Enhanced with subordinate table tabs and form settings button (issue #837).
      */
     renderEditFormModalStandalone(metadata, recordData, typeId, recordId) {
         // Track modal depth for z-index stacking
@@ -12545,6 +12546,26 @@ class IntegramCreateFormHelper {
         const recordReqs = recordData && recordData.reqs ? recordData.reqs : {};
         const regularFields = reqs.filter(req => !req.arr_id);
 
+        // Separate subordinate tables (issue #837)
+        const subordinateTables = reqs.filter(req => req.arr_id);
+        const hasSubordinateTables = subordinateTables.length > 0 && recordId;
+
+        // Build tabs HTML (issue #837)
+        let tabsHtml = '';
+        if (hasSubordinateTables) {
+            tabsHtml = `<div class="edit-form-tabs">`;
+            tabsHtml += `<div class="edit-form-tab active" data-tab="attributes">Атрибуты</div>`;
+
+            subordinateTables.forEach(req => {
+                const attrs = this.parseAttrs(req.attrs);
+                const fieldName = attrs.alias || req.val;
+                const arrCount = recordReqs[req.id] ? recordReqs[req.id].arr || 0 : 0;
+                tabsHtml += `<div class="edit-form-tab" data-tab="sub-${req.id}" data-arr-id="${req.arr_id}" data-req-id="${req.id}">${fieldName} (${arrCount})</div>`;
+            });
+
+            tabsHtml += `</div>`;
+        }
+
         // Build attributes form HTML with existing values
         let attributesHtml = this.renderAttributesFormForEdit(metadata, recordData, regularFields, recordReqs);
 
@@ -12556,14 +12577,32 @@ class IntegramCreateFormHelper {
                 </div>
                 <button class="edit-form-close" data-close-modal="true"><i class="pi pi-times"></i></button>
             </div>
+            ${tabsHtml}
             <div class="edit-form-body">
                 <div class="edit-form-tab-content active" data-tab-content="attributes">
                     <form id="edit-form" class="edit-form">
                         ${attributesHtml}
                     </form>
                 </div>
+        `;
+
+        // Add placeholder for subordinate table contents (issue #837)
+        if (hasSubordinateTables) {
+            subordinateTables.forEach(req => {
+                formHtml += `
+                    <div class="edit-form-tab-content" data-tab-content="sub-${req.id}">
+                        <div class="subordinate-table-loading">Загрузка...</div>
+                    </div>
+                `;
+            });
+        }
+
+        formHtml += `
             </div>
             <div class="edit-form-footer">
+                <button type="button" class="btn btn-icon form-settings-btn" id="form-settings-btn" title="Настройка видимости полей">
+                    <i class="pi pi-cog"></i>
+                </button>
                 <div class="edit-form-footer-buttons">
                     <button type="button" class="btn btn-primary" id="save-record-btn">Сохранить</button>
                     <button type="button" class="btn btn-secondary" data-close-modal="true">Отменить</button>
@@ -12574,6 +12613,14 @@ class IntegramCreateFormHelper {
         modal.innerHTML = formHtml;
         document.body.appendChild(overlay);
         document.body.appendChild(modal);
+
+        // Store recordId on modal for subordinate table loading (issue #837)
+        modal.dataset.recordId = recordId;
+
+        // Attach tab switching handlers (issue #837)
+        if (hasSubordinateTables) {
+            this.attachTabHandlersStandalone(modal, subordinateTables);
+        }
 
         // Load reference options for dropdowns
         this.loadReferenceOptions(metadata.reqs, modal, {});
@@ -12586,6 +12633,15 @@ class IntegramCreateFormHelper {
 
         // Attach file upload handlers
         this.attachFormFileUploadHandlers(modal);
+
+        // Attach form field settings handler (issue #837)
+        const formSettingsBtn = modal.querySelector('#form-settings-btn');
+        formSettingsBtn.addEventListener('click', () => {
+            this.openFormFieldSettingsStandalone(typeId, metadata);
+        });
+
+        // Apply saved field visibility settings (issue #837)
+        this.applyFormFieldSettingsStandalone(modal, typeId);
 
         // Attach save handler
         const saveBtn = modal.querySelector('#save-record-btn');
@@ -12619,6 +12675,452 @@ class IntegramCreateFormHelper {
             }
         };
         document.addEventListener('keydown', handleEscape);
+    }
+
+    /**
+     * Attach tab handlers for standalone edit form (issue #837).
+     */
+    attachTabHandlersStandalone(modal, subordinateTables) {
+        const tabs = modal.querySelectorAll('.edit-form-tab');
+        const self = this;
+
+        tabs.forEach(tab => {
+            tab.addEventListener('click', async () => {
+                const tabId = tab.dataset.tab;
+
+                // Update active tab
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+
+                // Update active content
+                const contents = modal.querySelectorAll('.edit-form-tab-content');
+                contents.forEach(c => c.classList.remove('active'));
+
+                const targetContent = modal.querySelector(`[data-tab-content="${tabId}"]`);
+                if (targetContent) {
+                    targetContent.classList.add('active');
+                }
+
+                // Load subordinate table if needed
+                const parentRecordId = modal.dataset.recordId;
+                if (tabId.startsWith('sub-') && tab.dataset.arrId && parentRecordId) {
+                    const arrId = tab.dataset.arrId;
+                    const reqId = tab.dataset.reqId;
+
+                    // Check if already loaded
+                    if (!targetContent.dataset.loaded) {
+                        await self.loadSubordinateTableStandalone(targetContent, arrId, parentRecordId, reqId);
+                        targetContent.dataset.loaded = 'true';
+                    }
+                }
+
+                // Show/hide footer buttons based on tab
+                const footer = modal.querySelector('.edit-form-footer');
+                if (tabId === 'attributes') {
+                    footer.style.display = 'flex';
+                    // Collapse modal back to normal size
+                    modal.classList.remove('expanded');
+                } else {
+                    footer.style.display = 'none';
+                    // Expand modal to fit subordinate table
+                    modal.classList.add('expanded');
+                }
+            });
+        });
+    }
+
+    /**
+     * Load subordinate table content (issue #837).
+     */
+    async loadSubordinateTableStandalone(container, arrId, parentRecordId, reqId) {
+        container.innerHTML = '<div class="subordinate-table-loading">Загрузка...</div>';
+
+        try {
+            // Try to use an existing IntegramTable instance for rendering
+            if (window._integramTableInstances && window._integramTableInstances.length > 0) {
+                const tableInstance = window._integramTableInstances[0];
+                if (tableInstance && typeof tableInstance.loadSubordinateTable === 'function') {
+                    await tableInstance.loadSubordinateTable(container, arrId, parentRecordId, reqId);
+                    return;
+                }
+            }
+
+            // Fallback: fetch and render subordinate table data manually
+            const metadata = await this.fetchMetadataStandalone(arrId);
+            const dataUrl = `${this.apiBase}/object/${arrId}/?JSON_OBJ&F_U=${parentRecordId}`;
+            const dataResponse = await fetch(dataUrl);
+            const data = await dataResponse.json();
+
+            this.renderSubordinateTableStandalone(container, metadata, data, arrId, parentRecordId);
+
+        } catch (error) {
+            console.error('Error loading subordinate table:', error);
+            container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${error.message}</div>`;
+        }
+    }
+
+    /**
+     * Fetch metadata for a table type (issue #837).
+     */
+    async fetchMetadataStandalone(typeId) {
+        if (this.metadataCache[typeId]) {
+            return this.metadataCache[typeId];
+        }
+
+        const response = await fetch(`${this.apiBase}/metadata/${typeId}`);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch metadata: ${response.statusText}`);
+        }
+
+        const metadata = await response.json();
+        this.metadataCache[typeId] = metadata;
+        return metadata;
+    }
+
+    /**
+     * Render subordinate table (simplified version for standalone use) (issue #837).
+     * Uses the same CSS classes as the main renderSubordinateTable method.
+     */
+    renderSubordinateTableStandalone(container, metadata, data, arrId, parentRecordId) {
+        const typeName = this.getMetadataName(metadata);
+        const records = Array.isArray(data) ? data : [];
+        const reqs = metadata.reqs || [];
+
+        // Build table URL for subordinate table link
+        const pathParts = window.location.pathname.split('/');
+        const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+        const subordinateTableUrl = `/${dbName}/table/${arrId}?F_U=${parentRecordId}`;
+
+        let html = `
+            <div class="subordinate-table-toolbar">
+                <button type="button" class="btn btn-sm btn-primary subordinate-add-btn" data-arr-id="${arrId}" data-parent-id="${parentRecordId}">
+                    + Добавить
+                </button>
+                <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
+                    <i class="pi pi-table"></i>
+                </a>
+            </div>
+        `;
+
+        if (records.length === 0) {
+            html += `<div class="subordinate-table-empty">Нет записей</div>`;
+        } else {
+            html += `<div class="subordinate-table-wrapper"><table class="subordinate-table"><thead><tr>`;
+
+            // Header: main value column + requisite columns
+            html += `<th>${this.escapeHtml(typeName)}</th>`;
+            reqs.forEach(req => {
+                if (!req.arr_id) {
+                    const attrs = this.parseAttrs(req.attrs);
+                    const fieldName = attrs.alias || req.val;
+                    html += `<th>${this.escapeHtml(fieldName)}</th>`;
+                }
+            });
+            html += `</tr></thead><tbody>`;
+
+            // Data rows
+            records.forEach(record => {
+                const recordId = record.i;
+                const values = record.r || [];
+                html += `<tr data-row-id="${recordId}" style="cursor:pointer;">`;
+
+                // Main value column (clickable)
+                const mainValue = values[0] || '';
+                html += `<td class="subordinate-cell-clickable" data-record-id="${recordId}" data-type-id="${arrId}">${this.escapeHtml(mainValue)}</td>`;
+
+                // Requisite columns
+                let valIdx = 1;
+                reqs.forEach(req => {
+                    if (!req.arr_id) {
+                        const cellValue = values[valIdx] || '';
+                        html += `<td>${this.escapeHtml(cellValue)}</td>`;
+                        valIdx++;
+                    }
+                });
+
+                html += `</tr>`;
+            });
+
+            html += `</tbody></table></div>`;
+        }
+
+        container.innerHTML = html;
+
+        // Attach handlers for add button
+        const addBtn = container.querySelector('.subordinate-add-btn');
+        if (addBtn) {
+            addBtn.addEventListener('click', () => {
+                if (typeof window.openCreateRecordForm === 'function') {
+                    window.openCreateRecordForm(arrId, { parentId: parentRecordId });
+                }
+            });
+        }
+
+        // Attach handlers for clickable cells (open edit form)
+        container.querySelectorAll('.subordinate-cell-clickable').forEach(cell => {
+            cell.addEventListener('click', (e) => {
+                const recordId = cell.dataset.recordId;
+                const typeId = cell.dataset.typeId;
+                if (typeof window.openEditRecordForm === 'function') {
+                    window.openEditRecordForm(recordId, typeId);
+                }
+            });
+        });
+    }
+
+    /**
+     * Open form field settings modal (issue #837).
+     */
+    openFormFieldSettingsStandalone(typeId, metadata) {
+        const overlay = document.createElement('div');
+        overlay.className = 'form-field-settings-overlay';
+
+        const modal = document.createElement('div');
+        modal.className = 'form-field-settings-modal';
+
+        const visibleFields = this.loadFormFieldVisibilityStandalone(typeId);
+        const savedOrder = this.loadFormFieldOrderStandalone(typeId);
+
+        // Sort requisites by saved order
+        const reqs = metadata.reqs || [];
+        const sortedReqs = [...reqs];
+        if (savedOrder.length > 0) {
+            sortedReqs.sort((a, b) => {
+                const idxA = savedOrder.indexOf(String(a.id));
+                const idxB = savedOrder.indexOf(String(b.id));
+                if (idxA === -1 && idxB === -1) return 0;
+                if (idxA === -1) return 1;
+                if (idxB === -1) return -1;
+                return idxA - idxB;
+            });
+        }
+
+        let modalHtml = `
+            <div class="form-field-settings-header">
+                <h3>Настройка полей формы</h3>
+                <button class="form-field-settings-close">&times;</button>
+            </div>
+            <div class="form-field-settings-body">
+                <p class="form-field-settings-info">Перетаскивайте поля для изменения порядка, снимите галку для скрытия:</p>
+                <div class="form-field-settings-list">
+        `;
+
+        sortedReqs.forEach(req => {
+            if (req.arr_id) return; // Skip subordinate tables
+            const attrs = this.parseAttrs(req.attrs);
+            const fieldName = attrs.alias || req.val;
+            const fieldId = req.id;
+            const isChecked = visibleFields[fieldId] !== false;
+
+            modalHtml += `
+                <div class="form-field-settings-item" draggable="true" data-field-id="${fieldId}">
+                    <label>
+                        <span class="drag-handle">☰</span>
+                        <input type="checkbox"
+                               class="form-field-visibility-checkbox"
+                               data-field-id="${fieldId}"
+                               ${isChecked ? 'checked' : ''}>
+                        <span>${this.escapeHtml(fieldName)}</span>
+                    </label>
+                </div>
+            `;
+        });
+
+        modalHtml += `
+                </div>
+            </div>
+            <div class="form-field-settings-footer">
+                <button type="button" class="btn btn-primary form-field-settings-save">Сохранить</button>
+                <button type="button" class="btn btn-secondary form-field-settings-cancel">Отменить</button>
+            </div>
+        `;
+
+        modal.innerHTML = modalHtml;
+        document.body.appendChild(overlay);
+        document.body.appendChild(modal);
+
+        // Drag-and-drop reordering
+        const list = modal.querySelector('.form-field-settings-list');
+        let dragItem = null;
+
+        list.addEventListener('dragstart', (e) => {
+            dragItem = e.target.closest('.form-field-settings-item');
+            if (dragItem) dragItem.classList.add('dragging');
+        });
+
+        list.addEventListener('dragend', () => {
+            if (dragItem) dragItem.classList.remove('dragging');
+            list.querySelectorAll('.form-field-settings-item').forEach(el => el.classList.remove('drag-over'));
+            dragItem = null;
+        });
+
+        list.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            const target = e.target.closest('.form-field-settings-item');
+            if (target && target !== dragItem) {
+                list.querySelectorAll('.form-field-settings-item').forEach(el => el.classList.remove('drag-over'));
+                target.classList.add('drag-over');
+            }
+        });
+
+        list.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const target = e.target.closest('.form-field-settings-item');
+            if (target && target !== dragItem && dragItem) {
+                list.insertBefore(dragItem, target);
+            }
+            list.querySelectorAll('.form-field-settings-item').forEach(el => el.classList.remove('drag-over'));
+        });
+
+        const closeBtn = modal.querySelector('.form-field-settings-close');
+        const cancelBtn = modal.querySelector('.form-field-settings-cancel');
+        const saveBtn = modal.querySelector('.form-field-settings-save');
+
+        const closeModal = () => {
+            modal.remove();
+            overlay.remove();
+        };
+
+        closeBtn.addEventListener('click', closeModal);
+        cancelBtn.addEventListener('click', closeModal);
+        overlay.addEventListener('click', closeModal);
+
+        // Close on Escape key
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                closeModal();
+                document.removeEventListener('keydown', handleEscape);
+            }
+        };
+        document.addEventListener('keydown', handleEscape);
+
+        saveBtn.addEventListener('click', () => {
+            // Save visibility
+            const checkboxes = modal.querySelectorAll('.form-field-visibility-checkbox');
+            const visibility = {};
+            checkboxes.forEach(checkbox => {
+                const fieldId = checkbox.dataset.fieldId;
+                visibility[fieldId] = checkbox.checked;
+            });
+            this.saveFormFieldVisibilityStandalone(typeId, visibility);
+
+            // Save field order
+            const items = modal.querySelectorAll('.form-field-settings-item');
+            const order = Array.from(items).map(item => item.dataset.fieldId);
+            this.saveFormFieldOrderStandalone(typeId, order);
+
+            closeModal();
+
+            // Apply settings to the edit form if it's open
+            const editFormModal = document.querySelector('.edit-form-modal');
+            if (editFormModal) {
+                this.applyFormFieldSettingsStandalone(editFormModal, typeId);
+            }
+        });
+    }
+
+    /**
+     * Save form field visibility settings (issue #837).
+     */
+    saveFormFieldVisibilityStandalone(typeId, visibility) {
+        const cookieName = `integram-table-form-fields-${typeId}`;
+        document.cookie = `${cookieName}=${JSON.stringify(visibility)}; path=/; max-age=31536000`;
+    }
+
+    /**
+     * Load form field visibility settings (issue #837).
+     */
+    loadFormFieldVisibilityStandalone(typeId) {
+        const cookieName = `integram-table-form-fields-${typeId}`;
+        const cookies = document.cookie.split(';');
+        const fieldsCookie = cookies.find(c => c.trim().startsWith(`${cookieName}=`));
+
+        if (fieldsCookie) {
+            try {
+                return JSON.parse(fieldsCookie.split('=')[1]);
+            } catch (error) {
+                console.error('Error parsing form field visibility settings:', error);
+                return {};
+            }
+        }
+
+        return {};
+    }
+
+    /**
+     * Save form field order settings (issue #837).
+     */
+    saveFormFieldOrderStandalone(typeId, order) {
+        const cookieName = `integram-table-form-order-${typeId}`;
+        document.cookie = `${cookieName}=${JSON.stringify(order)}; path=/; max-age=31536000`;
+    }
+
+    /**
+     * Load form field order settings (issue #837).
+     */
+    loadFormFieldOrderStandalone(typeId) {
+        const cookieName = `integram-table-form-order-${typeId}`;
+        const cookies = document.cookie.split(';');
+        const cookie = cookies.find(c => c.trim().startsWith(`${cookieName}=`));
+        if (cookie) {
+            try {
+                return JSON.parse(cookie.split('=')[1]);
+            } catch (e) {
+                return [];
+            }
+        }
+        return [];
+    }
+
+    /**
+     * Apply form field settings (visibility and order) (issue #837).
+     */
+    applyFormFieldSettingsStandalone(modal, typeId) {
+        const visibility = this.loadFormFieldVisibilityStandalone(typeId);
+        const order = this.loadFormFieldOrderStandalone(typeId);
+
+        // Apply visibility
+        Object.entries(visibility).forEach(([fieldId, isVisible]) => {
+            if (!isVisible) {
+                const formGroup = modal.querySelector(`#field-${fieldId}`)?.closest('.form-group');
+                if (formGroup) {
+                    formGroup.style.display = 'none';
+                }
+            } else {
+                const formGroup = modal.querySelector(`#field-${fieldId}`)?.closest('.form-group');
+                if (formGroup) {
+                    formGroup.style.display = '';
+                }
+            }
+        });
+
+        // Apply field order by reordering form-group elements
+        if (order.length > 0) {
+            const form = modal.querySelector('#edit-form');
+            if (form) {
+                const formGroups = Array.from(form.querySelectorAll('.form-group'));
+
+                // Build a map of fieldId -> form-group element
+                const groupMap = {};
+                formGroups.forEach(group => {
+                    const input = group.querySelector('[id^="field-"]');
+                    if (input) {
+                        const match = input.id.match(/^field-(.+?)(-search|-picker)?$/);
+                        if (match) {
+                            groupMap[match[1]] = group;
+                        }
+                    }
+                });
+
+                // Reorder based on saved order
+                order.forEach(fieldId => {
+                    const group = groupMap[fieldId];
+                    if (group && group.parentNode) {
+                        group.parentNode.appendChild(group);
+                    }
+                });
+            }
+        }
     }
 
     /**
