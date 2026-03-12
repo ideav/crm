@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Test Card Field Mapping - Issue #825</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; background: #f9f9f9; }
+        .test-pass { color: green; font-weight: bold; }
+        .test-fail { color: red; font-weight: bold; }
+        .card-preview { margin: 10px 0; padding: 10px; border: 1px solid #ddd; background: white; }
+        pre { background: #eee; padding: 10px; overflow: auto; }
+    </style>
+</head>
+<body>
+    <h1>Test: Card Field Mapping Fix (Issue #825)</h1>
+
+    <div class="test-section">
+        <h2>Test Data (from issue)</h2>
+        <p><strong>Metadata:</strong></p>
+        <pre id="metadata-display"></pre>
+        <p><strong>Object data (record i=287):</strong></p>
+        <pre id="object-display"></pre>
+    </div>
+
+    <div class="test-section">
+        <h2>Expected vs Actual Mapping</h2>
+        <table border="1" cellpadding="8" id="mapping-table">
+            <thead>
+                <tr>
+                    <th>Column Index</th>
+                    <th>Column Name</th>
+                    <th>Column Type</th>
+                    <th>Expected Value</th>
+                    <th>Actual (OLD buggy)</th>
+                    <th>Actual (FIXED)</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <div class="test-section">
+        <h2>Card Field Detection Test</h2>
+        <div id="field-detection"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Expected Card Rendering</h2>
+        <p><strong>Title:</strong> <span id="exp-title"></span></p>
+        <p><strong>Date:</strong> <span id="exp-date"></span></p>
+        <p><strong>Status (Роль):</strong> <span id="exp-status"></span></p>
+        <p><strong>Phone icon should show:</strong> <span id="exp-phone"></span></p>
+        <p><strong>Email icon should show:</strong> <span id="exp-email"></span></p>
+    </div>
+
+    <div class="test-section">
+        <h2>Test Result</h2>
+        <div id="test-result"></div>
+    </div>
+
+    <script>
+        // Test data from issue #825
+        var metadata = {"id":"18","up":"0","type":"3","val":"Пользователь","unique":"1","reqs":[{"num":1,"id":"115","val":"Роль","orig":"42","type":"3","ref":"42","ref_id":"114","attrs":":!NULL:164"},{"num":2,"id":"41","val":"Email","orig":"31","type":"3","attrs":":!NULL:"},{"num":3,"id":"30","val":"Телефон","orig":"21","type":"3"},{"num":4,"id":"156","val":"Дата","orig":"155","type":"9","attrs":"[TODAY]"},{"num":5,"id":"33","val":"Имя","orig":"32","type":"3"},{"num":6,"id":"39","val":"Примечание","orig":"35","type":"12"},{"num":7,"id":"38","val":"Фото","orig":"36","type":"10"},{"num":8,"id":"124","val":"Activity","orig":"123","type":"4"},{"num":9,"id":"130","val":"Secret","orig":"129","type":"3"},{"num":10,"id":"20","val":"Password","orig":"19","type":"6"},{"num":11,"id":"125","val":"Token","orig":"122","type":"6"},{"num":12,"id":"40","val":"xsrf","orig":"37","type":"6"},{"num":13,"id":"468","val":"Тег","orig":"466","type":"3","ref":"466","ref_id":"467","attrs":":MULTI:"}]};
+
+        var objectData = [{"i":287,"u":1,"o":0,"r":["ru2","145:admin","drynny@mail.ru","89955060167","26.02.2026","Мефистоклюс","Администратор системы, ноукодер","","12.03.2026 12:54:54","","","******","******","469,471,473:МО,VIP,ЧС"]}];
+
+        var record = objectData[0];
+
+        // Display data
+        document.getElementById('metadata-display').textContent = JSON.stringify(metadata, null, 2);
+        document.getElementById('object-display').textContent = JSON.stringify(record, null, 2);
+
+        // Build columns from metadata
+        function buildColumns(m) {
+            var cols = [];
+            cols.push({ id: String(m.id), name: m.val || m.name || 'Значение', type: String(m.type || '3') });
+            if (m.reqs && Array.isArray(m.reqs)) {
+                m.reqs.forEach(function(req) {
+                    cols.push({ id: String(req.id), name: req.val || req.name || '', type: String(req.type || '3') });
+                });
+            }
+            return cols;
+        }
+
+        // OLD buggy parsing (prepends record ID)
+        function parseOldBuggy(item) {
+            var row = [item.i]; // BUG: prepends record ID causing shift
+            var vals = item.r || [];
+            for (var i = 0; i < vals.length; i++) {
+                var v = vals[i];
+                if (typeof v === 'string' && v.indexOf(':') !== -1) {
+                    var parts = v.split(':');
+                    row.push(parts.slice(1).join(':'));
+                } else {
+                    row.push(v);
+                }
+            }
+            return row;
+        }
+
+        // NEW fixed parsing (no record ID prepend)
+        function parseFixed(item) {
+            var row = []; // FIXED: no record ID prepend
+            var vals = item.r || [];
+            for (var i = 0; i < vals.length; i++) {
+                var v = vals[i];
+                if (typeof v === 'string' && v.indexOf(':') !== -1) {
+                    var parts = v.split(':');
+                    row.push(parts.slice(1).join(':'));
+                } else {
+                    row.push(v);
+                }
+            }
+            return row;
+        }
+
+        var cols = buildColumns(metadata);
+        var oldRow = parseOldBuggy(record);
+        var fixedRow = parseFixed(record);
+
+        // Expected values (r array with refs parsed)
+        var expectedValues = [
+            "ru2",              // cols[0]: Пользователь (main value)
+            "admin",           // cols[1]: Роль (parsed from "145:admin")
+            "drynny@mail.ru",  // cols[2]: Email
+            "89955060167",     // cols[3]: Телефон
+            "26.02.2026",      // cols[4]: Дата
+            "Мефистоклюс",     // cols[5]: Имя
+            "Администратор системы, ноукодер", // cols[6]: Примечание
+            "",                // cols[7]: Фото
+            "12.03.2026 12:54:54", // cols[8]: Activity
+            "",                // cols[9]: Secret
+            "",                // cols[10]: Password
+            "******",          // cols[11]: Token
+            "******",          // cols[12]: xsrf
+            "МО,VIP,ЧС"        // cols[13]: Тег (parsed from "469,471,473:МО,VIP,ЧС")
+        ];
+
+        // Build mapping table
+        var tbody = document.querySelector('#mapping-table tbody');
+        var allPassed = true;
+
+        for (var i = 0; i < cols.length; i++) {
+            var tr = document.createElement('tr');
+            var expected = expectedValues[i] || '';
+            var oldVal = oldRow[i] !== undefined ? String(oldRow[i]) : '';
+            var fixedVal = fixedRow[i] !== undefined ? String(fixedRow[i]) : '';
+
+            var oldMatch = oldVal === expected;
+            var fixedMatch = fixedVal === expected;
+
+            if (!fixedMatch) allPassed = false;
+
+            tr.innerHTML =
+                '<td>' + i + '</td>' +
+                '<td>' + cols[i].name + '</td>' +
+                '<td>' + cols[i].type + '</td>' +
+                '<td>' + expected + '</td>' +
+                '<td class="' + (oldMatch ? 'test-pass' : 'test-fail') + '">' + oldVal + '</td>' +
+                '<td class="' + (fixedMatch ? 'test-pass' : 'test-fail') + '">' + fixedVal + '</td>' +
+                '<td>' + (fixedMatch ? '<span class="test-pass">✓</span>' : '<span class="test-fail">✗</span>') + '</td>';
+            tbody.appendChild(tr);
+        }
+
+        // Field detection test
+        var isPhoneField = function(name) { return /телефон|phone/i.test(name); };
+        var isEmailField = function(name) { return /email|почта/i.test(name); };
+        var isTextType = function(t) { return ['3','12'].indexOf(String(t)) !== -1; };
+        var isDateType = function(t) { return ['8','9'].indexOf(String(t)) !== -1; };
+
+        var fieldDetection = document.getElementById('field-detection');
+        var textFields = [], dateFields = [], phoneIdx = -1, emailIdx = -1;
+
+        for (var i = 0; i < cols.length; i++) {
+            if (isPhoneField(cols[i].name)) phoneIdx = i;
+            else if (isEmailField(cols[i].name)) emailIdx = i;
+            else if (isTextType(cols[i].type)) textFields.push(i);
+            else if (isDateType(cols[i].type)) dateFields.push(i);
+        }
+
+        fieldDetection.innerHTML =
+            '<p>Text fields (first=Title, second=Description): ' + JSON.stringify(textFields) + '</p>' +
+            '<p>Date fields (first=Date): ' + JSON.stringify(dateFields) + '</p>' +
+            '<p>Phone field index: ' + phoneIdx + ' (' + (phoneIdx >= 0 ? cols[phoneIdx].name : 'N/A') + ')</p>' +
+            '<p>Email field index: ' + emailIdx + ' (' + (emailIdx >= 0 ? cols[emailIdx].name : 'N/A') + ')</p>';
+
+        // Expected card values
+        document.getElementById('exp-title').textContent = fixedRow[textFields[0]] + ' (from cols[' + textFields[0] + ']: ' + cols[textFields[0]].name + ')';
+        document.getElementById('exp-date').textContent = fixedRow[dateFields[0]] + ' (from cols[' + dateFields[0] + ']: ' + cols[dateFields[0]].name + ')';
+        document.getElementById('exp-status').textContent = fixedRow[textFields[1]] + ' (from cols[' + textFields[1] + ']: ' + cols[textFields[1]].name + ') - Note: Роль is detected as text, not list';
+        document.getElementById('exp-phone').textContent = fixedRow[phoneIdx] + ' (from cols[' + phoneIdx + ']: ' + cols[phoneIdx].name + ')';
+        document.getElementById('exp-email').textContent = fixedRow[emailIdx] + ' (from cols[' + emailIdx + ']: ' + cols[emailIdx].name + ')';
+
+        // Overall result
+        document.getElementById('test-result').innerHTML = allPassed
+            ? '<span class="test-pass">✓ ALL TESTS PASSED - Field mapping is correct after fix</span>'
+            : '<span class="test-fail">✗ SOME TESTS FAILED - Check the table above</span>';
+    </script>
+</body>
+</html>
