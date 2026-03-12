@@ -2502,6 +2502,7 @@ class IntegramTable {
             const colType = cell.dataset.colType;
             const format = cell.dataset.colFormat;
             const isRef = cell.dataset.colRef === '1';
+            const isMulti = cell.dataset.array === '1'; // Issue #853: detect multi-select reference fields
             const rowIndex = parseInt(cell.dataset.rowIndex);
 
             if (!colId || !colType) {
@@ -2543,6 +2544,7 @@ class IntegramTable {
                 colType,
                 format,
                 isRef,
+                isMulti, // Issue #853: multi-select reference flag
                 parentInfo,
                 originalValue: currentValue
             };
@@ -2553,7 +2555,10 @@ class IntegramTable {
             }
 
             // Create inline editor based on format or reference type
-            if (isRef) {
+            if (isRef && isMulti) {
+                // Issue #853: multi-select reference fields need a tags-based editor
+                this.renderMultiReferenceEditor(cell, currentValue);
+            } else if (isRef) {
                 this.renderReferenceEditor(cell, currentValue);
             } else {
                 this.renderInlineEditor(cell, currentValue, format);
@@ -3273,6 +3278,243 @@ class IntegramTable {
                 console.error('Error rendering reference editor:', error);
                 this.showToast(`Ошибка загрузки справочника: ${error.message}`, 'error');
                 this.cancelInlineEdit(originalContent);
+            }
+        }
+
+        /**
+         * Issue #853: Render multi-select reference editor for cells with :MULTI: in attrs.
+         * Shows currently selected values as removable tags and a search input to add more.
+         */
+        async renderMultiReferenceEditor(cell, currentValue) {
+            const originalContent = cell.innerHTML;
+            const { colId, colType, parentInfo } = this.currentEditingCell;
+
+            cell.innerHTML = '<div class="inline-editor-loading">Загрузка...</div>';
+
+            try {
+                const options = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId);
+                this.currentEditingCell.referenceOptions = options;
+                this.currentEditingCell.allOptionsFetched = options.length < 50;
+
+                // Parse currently selected values from cell text (comma-separated display names)
+                // Match against fetched options to get IDs
+                const currentTexts = currentValue
+                    ? currentValue.split(',').map(v => v.trim()).filter(v => v.length > 0)
+                    : [];
+                // selectedItems: array of {id, text}
+                const selectedItems = [];
+                for (const text of currentTexts) {
+                    const match = options.find(([id, t]) => t === text);
+                    if (match) {
+                        selectedItems.push({ id: match[0], text: match[1] });
+                    } else if (text) {
+                        // Unknown text – keep it with empty id so user can see it
+                        selectedItems.push({ id: '', text });
+                    }
+                }
+                this.currentEditingCell.selectedItems = selectedItems;
+
+                const renderEditor = () => {
+                    const selected = this.currentEditingCell.selectedItems;
+                    const selectedIds = new Set(selected.map(s => s.id).filter(id => id));
+
+                    const tagsHtml = selected.map(({ id, text }) => `
+                        <span class="multi-ref-tag" data-id="${this.escapeHtml(id)}" data-text="${this.escapeHtml(text)}">
+                            ${this.escapeHtml(text)}
+                            <button class="multi-ref-tag-remove" type="button" title="Удалить" aria-label="Удалить ${this.escapeHtml(text)}"><i class="pi pi-times"></i></button>
+                        </span>
+                    `).join('');
+
+                    const availableOptions = (this.currentEditingCell.referenceOptions || [])
+                        .filter(([id]) => !selectedIds.has(id));
+                    const optionsHtml = availableOptions.length > 0
+                        ? availableOptions.map(([id, text]) => {
+                            const escapedText = this.escapeHtml(text);
+                            return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${escapedText}" tabindex="0">${escapedText}</div>`;
+                        }).join('')
+                        : '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
+
+                    cell.innerHTML = `
+                        <div class="inline-editor-reference inline-editor-multi-reference">
+                            <div class="multi-ref-tags-container">${tagsHtml || '<span class="multi-ref-tags-placeholder">Нет выбранных значений</span>'}</div>
+                            <div class="inline-editor-reference-header">
+                                <input type="text"
+                                       class="inline-editor-reference-search"
+                                       placeholder="Добавить..."
+                                       autocomplete="off">
+                            </div>
+                            <div class="inline-editor-reference-dropdown" style="display:none;">
+                                ${optionsHtml}
+                            </div>
+                        </div>
+                    `;
+
+                    const searchInput = cell.querySelector('.inline-editor-reference-search');
+                    const dropdown = cell.querySelector('.inline-editor-reference-dropdown');
+                    const tagsContainer = cell.querySelector('.multi-ref-tags-container');
+
+                    // Show dropdown on focus
+                    searchInput.addEventListener('focus', () => {
+                        dropdown.style.display = '';
+                    });
+
+                    // Filter dropdown on input
+                    let searchTimeout;
+                    searchInput.addEventListener('input', async (e) => {
+                        const searchText = e.target.value.trim();
+                        clearTimeout(searchTimeout);
+                        searchTimeout = setTimeout(async () => {
+                            const currentSelected = new Set(this.currentEditingCell.selectedItems.map(s => s.id));
+                            let filtered = (this.currentEditingCell.referenceOptions || [])
+                                .filter(([id, text]) => !currentSelected.has(id) && text.toLowerCase().includes(searchText.toLowerCase()));
+
+                            if (!this.currentEditingCell.allOptionsFetched && searchText) {
+                                try {
+                                    const serverOptions = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, searchText);
+                                    const serverFiltered = serverOptions.filter(([id]) => !currentSelected.has(id));
+                                    dropdown.innerHTML = serverFiltered.length > 0
+                                        ? serverFiltered.map(([id, text]) => {
+                                            const et = this.escapeHtml(text);
+                                            return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
+                                        }).join('')
+                                        : '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
+                                } catch (err) {
+                                    console.error('Error re-querying options:', err);
+                                }
+                            } else {
+                                dropdown.innerHTML = filtered.length > 0
+                                    ? filtered.map(([id, text]) => {
+                                        const et = this.escapeHtml(text);
+                                        return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
+                                    }).join('')
+                                    : '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
+                            }
+                            dropdown.style.display = '';
+                        }, 300);
+                    });
+
+                    // Handle option selection from dropdown
+                    dropdown.addEventListener('click', async (e) => {
+                        const option = e.target.closest('.inline-editor-reference-option');
+                        if (!option) return;
+                        const id = option.dataset.id;
+                        const text = option.dataset.text;
+                        if (!this.currentEditingCell.selectedItems.find(s => s.id === id)) {
+                            this.currentEditingCell.selectedItems.push({ id, text });
+                            await this.saveMultiReferenceEdit();
+                        }
+                        searchInput.value = '';
+                        renderEditor();
+                        cell.querySelector('.inline-editor-reference-search')?.focus();
+                    });
+
+                    // Handle tag removal
+                    tagsContainer.addEventListener('click', async (e) => {
+                        const removeBtn = e.target.closest('.multi-ref-tag-remove');
+                        if (!removeBtn) return;
+                        const tag = removeBtn.closest('.multi-ref-tag');
+                        if (!tag) return;
+                        const id = tag.dataset.id;
+                        const text = tag.dataset.text;
+                        this.currentEditingCell.selectedItems = this.currentEditingCell.selectedItems.filter(s => !(s.id === id && s.text === text));
+                        await this.saveMultiReferenceEdit();
+                        renderEditor();
+                        cell.querySelector('.inline-editor-reference-search')?.focus();
+                    });
+
+                    // Keyboard navigation in search input
+                    searchInput.addEventListener('keydown', (e) => {
+                        if (e.key === 'Escape') {
+                            e.preventDefault();
+                            this.cancelInlineEdit(originalContent);
+                        } else if (e.key === 'ArrowDown') {
+                            e.preventDefault();
+                            const firstOption = dropdown.querySelector('.inline-editor-reference-option');
+                            if (firstOption) firstOption.focus();
+                        } else if (e.key === 'Enter') {
+                            e.preventDefault();
+                            const firstOption = dropdown.querySelector('.inline-editor-reference-option');
+                            if (firstOption) firstOption.click();
+                        }
+                    });
+
+                    searchInput.focus();
+                };
+
+                renderEditor();
+
+                // Click outside to close
+                const editingCellRef = this.currentEditingCell;
+                setTimeout(() => {
+                    const outsideClickHandler = (e) => {
+                        if (!cell.contains(e.target)) {
+                            document.removeEventListener('click', outsideClickHandler);
+                            this.cancelInlineEdit(originalContent);
+                        }
+                    };
+                    document.addEventListener('click', outsideClickHandler);
+                    if (this.currentEditingCell === editingCellRef && this.currentEditingCell !== null) {
+                        this.currentEditingCell.outsideClickHandler = outsideClickHandler;
+                    } else {
+                        document.removeEventListener('click', outsideClickHandler);
+                    }
+                }, 100);
+
+            } catch (error) {
+                console.error('Error rendering multi-reference editor:', error);
+                this.showToast(`Ошибка загрузки справочника: ${error.message}`, 'error');
+                this.cancelInlineEdit(originalContent);
+            }
+        }
+
+        /**
+         * Issue #853: Save the current state of a multi-select reference field.
+         * Sends all selected IDs as a comma-separated list to _m_set.
+         */
+        async saveMultiReferenceEdit() {
+            if (!this.currentEditingCell) return;
+
+            const { cell, colType, parentInfo, selectedItems } = this.currentEditingCell;
+            const ids = (selectedItems || []).map(s => s.id).filter(id => id);
+
+            try {
+                const apiBase = this.getApiBase();
+                const params = new URLSearchParams();
+                if (typeof xsrf !== 'undefined') {
+                    params.append('_xsrf', xsrf);
+                }
+                // Send comma-separated IDs (or empty string to clear)
+                params.append(`t${colType}`, ids.join(','));
+
+                const url = parentInfo.isFirstColumn
+                    ? `${apiBase}/_m_save/${parentInfo.parentRecordId}?JSON`
+                    : `${apiBase}/_m_set/${parentInfo.parentRecordId}?JSON`;
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+
+                const responseText = await response.text();
+                let result;
+                try {
+                    result = JSON.parse(responseText);
+                } catch (jsonError) {
+                    throw new Error(`Невалидный JSON ответ: ${responseText}`);
+                }
+
+                if (result.error) {
+                    throw new Error(result.error);
+                }
+
+                // Update cell display with comma-separated text of selected items
+                const displayText = (selectedItems || []).map(s => s.text).join(', ');
+                this.updateCellDisplay(cell, displayText, this.currentEditingCell.format);
+
+            } catch (error) {
+                console.error('Error saving multi-reference edit:', error);
+                this.showToast(`Ошибка сохранения: ${error.message}`, 'error');
             }
         }
 
@@ -7710,12 +7952,42 @@ class IntegramTable {
                 const baseTypeId = recordReqs[req.id] ? recordReqs[req.id].base : req.type;
                 const baseFormat = this.normalizeFormat(baseTypeId);
                 const isRequired = attrs.required;
+                const isMulti = attrs.multi; // Issue #853
 
                 html += `<div class="form-group">`;
                 html += `<label for="field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
 
-                // Reference field (searchable dropdown with clear/add buttons - same as inline table editor)
-                if (req.ref_id) {
+                // Multi-select reference field (issue #853)
+                if (req.ref_id && isMulti) {
+                    const currentValue = reqValue || '';
+                    html += `
+                        <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-multi="1" data-current-value="${ this.escapeHtml(currentValue) }">
+                            <div class="inline-editor-reference form-ref-editor-box inline-editor-multi-reference">
+                                <div class="multi-ref-tags-container form-multi-ref-tags-container">
+                                    <span class="multi-ref-tags-placeholder">Загрузка...</span>
+                                </div>
+                                <div class="inline-editor-reference-header">
+                                    <input type="text"
+                                           class="inline-editor-reference-search form-ref-search"
+                                           id="field-${ req.id }-search"
+                                           placeholder="Добавить..."
+                                           autocomplete="off">
+                                </div>
+                                <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${ req.id }-dropdown" style="display:none;">
+                                    <div class="inline-editor-reference-empty">Загрузка...</div>
+                                </div>
+                            </div>
+                            <input type="hidden"
+                                   class="form-ref-value form-multi-ref-value"
+                                   id="field-${ req.id }"
+                                   name="t${ req.id }"
+                                   value=""
+                                   data-ref-id="${ req.id }">
+                        </div>
+                    `;
+                }
+                // Single-select reference field (searchable dropdown with clear/add buttons)
+                else if (req.ref_id) {
                     const currentValue = reqValue || '';
                     html += `
                         <div class="form-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }">
@@ -8919,6 +9191,12 @@ class IntegramTable {
 
                 if (!searchInput || !dropdown || !hiddenInput) continue;
 
+                // Issue #853: Handle multi-select reference editors separately
+                if (wrapper.dataset.multi === '1') {
+                    this.initFormMultiReferenceEditor(wrapper, refReqId, recordId);
+                    continue;
+                }
+
                 try {
                     const options = await this.fetchReferenceOptions(refReqId, recordId);
 
@@ -9103,6 +9381,170 @@ class IntegramTable {
                     // Also apply immediately on form open based on current watched field value
                     applyHook();
                 }
+            }
+        }
+
+        /**
+         * Issue #853: Initialize a multi-select form reference editor.
+         * Shows selected values as removable tags and a search input to add more.
+         * Updates the hidden input with comma-separated selected IDs.
+         */
+        async initFormMultiReferenceEditor(wrapper, refReqId, recordId) {
+            const searchInput = wrapper.querySelector('.form-ref-search');
+            const dropdown = wrapper.querySelector('.form-ref-dropdown');
+            const hiddenInput = wrapper.querySelector('.form-multi-ref-value');
+            const tagsContainer = wrapper.querySelector('.form-multi-ref-tags-container');
+
+            if (!searchInput || !dropdown || !hiddenInput || !tagsContainer) return;
+
+            try {
+                const options = await this.fetchReferenceOptions(refReqId, recordId);
+                wrapper._referenceOptions = options;
+                wrapper._allOptionsFetched = options.length < 50;
+
+                // Parse current value: may be comma-separated display names or IDs
+                const currentRawValue = wrapper.dataset.currentValue || '';
+                const currentTexts = currentRawValue
+                    ? currentRawValue.split(',').map(v => v.trim()).filter(v => v.length > 0)
+                    : [];
+                // selectedItems: array of {id, text}
+                const selectedItems = [];
+                for (const text of currentTexts) {
+                    const match = options.find(([id, t]) => t === text);
+                    if (match) {
+                        selectedItems.push({ id: match[0], text: match[1] });
+                    } else if (text) {
+                        selectedItems.push({ id: '', text });
+                    }
+                }
+                wrapper._selectedItems = selectedItems;
+
+                const updateHiddenInput = () => {
+                    const ids = (wrapper._selectedItems || []).map(s => s.id).filter(id => id);
+                    hiddenInput.value = ids.join(',');
+                };
+
+                const renderTags = () => {
+                    const selected = wrapper._selectedItems || [];
+                    if (selected.length === 0) {
+                        tagsContainer.innerHTML = '<span class="multi-ref-tags-placeholder">Нет выбранных значений</span>';
+                    } else {
+                        tagsContainer.innerHTML = selected.map(({ id, text }) => `
+                            <span class="multi-ref-tag" data-id="${this.escapeHtml(id)}" data-text="${this.escapeHtml(text)}">
+                                ${this.escapeHtml(text)}
+                                <button class="multi-ref-tag-remove" type="button" title="Удалить" aria-label="Удалить ${this.escapeHtml(text)}"><i class="pi pi-times"></i></button>
+                            </span>
+                        `).join('');
+                    }
+                };
+
+                const renderDropdown = (searchText = '') => {
+                    const selectedIds = new Set((wrapper._selectedItems || []).map(s => s.id));
+                    const filtered = (wrapper._referenceOptions || []).filter(([id, text]) =>
+                        !selectedIds.has(id) && text.toLowerCase().includes(searchText.toLowerCase())
+                    );
+                    if (filtered.length === 0) {
+                        dropdown.innerHTML = '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
+                    } else {
+                        dropdown.innerHTML = filtered.map(([id, text]) => {
+                            const et = this.escapeHtml(text);
+                            return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
+                        }).join('');
+                    }
+                };
+
+                // Initial render
+                renderTags();
+                updateHiddenInput();
+
+                // Show dropdown on focus
+                searchInput.addEventListener('focus', () => {
+                    renderDropdown(searchInput.value.trim());
+                    dropdown.style.display = '';
+                });
+
+                // Filter on input
+                let searchTimeout;
+                searchInput.addEventListener('input', (e) => {
+                    clearTimeout(searchTimeout);
+                    searchTimeout = setTimeout(() => {
+                        renderDropdown(e.target.value.trim());
+                        dropdown.style.display = '';
+                    }, 200);
+                });
+
+                // Handle option selection
+                dropdown.addEventListener('click', (e) => {
+                    const option = e.target.closest('.inline-editor-reference-option');
+                    if (!option) return;
+                    const id = option.dataset.id;
+                    const text = option.dataset.text;
+                    if (!(wrapper._selectedItems || []).find(s => s.id === id)) {
+                        wrapper._selectedItems = [...(wrapper._selectedItems || []), { id, text }];
+                        renderTags();
+                        updateHiddenInput();
+                    }
+                    searchInput.value = '';
+                    dropdown.style.display = 'none';
+                });
+
+                // Handle tag removal
+                tagsContainer.addEventListener('click', (e) => {
+                    const removeBtn = e.target.closest('.multi-ref-tag-remove');
+                    if (!removeBtn) return;
+                    const tag = removeBtn.closest('.multi-ref-tag');
+                    if (!tag) return;
+                    const id = tag.dataset.id;
+                    const text = tag.dataset.text;
+                    wrapper._selectedItems = (wrapper._selectedItems || []).filter(s => !(s.id === id && s.text === text));
+                    renderTags();
+                    updateHiddenInput();
+                });
+
+                // Keyboard navigation
+                searchInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        const firstOption = dropdown.querySelector('.inline-editor-reference-option');
+                        if (firstOption) firstOption.focus();
+                    } else if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const firstOption = dropdown.querySelector('.inline-editor-reference-option');
+                        if (firstOption) firstOption.click();
+                    }
+                });
+
+                dropdown.addEventListener('keydown', (e) => {
+                    const currentOption = document.activeElement;
+                    if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        const nextOption = currentOption.nextElementSibling;
+                        if (nextOption && nextOption.classList.contains('inline-editor-reference-option')) nextOption.focus();
+                    } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        const prevOption = currentOption.previousElementSibling;
+                        if (prevOption && prevOption.classList.contains('inline-editor-reference-option')) {
+                            prevOption.focus();
+                        } else {
+                            searchInput.focus();
+                        }
+                    } else if (e.key === 'Enter') {
+                        e.preventDefault();
+                        currentOption.click();
+                    }
+                });
+
+                // Hide dropdown when clicking outside
+                document.addEventListener('click', (e) => {
+                    if (!wrapper.contains(e.target)) {
+                        dropdown.style.display = 'none';
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error initializing multi-reference editor:', error);
+                tagsContainer.innerHTML = '<span class="multi-ref-tags-placeholder">Ошибка загрузки</span>';
+                dropdown.innerHTML = '<div class="inline-editor-reference-empty">Ошибка загрузки</div>';
             }
         }
 

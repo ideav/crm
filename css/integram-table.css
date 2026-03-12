@@ -2274,6 +2274,64 @@ td:has(.inline-editor-reference) {
 }
 
 /* ========================================
+   Multi-Select Reference Field Styles (issue #853)
+   Tags-based editor for fields with :MULTI: in attrs
+   ======================================== */
+
+.inline-editor-multi-reference .multi-ref-tags-container,
+.form-multi-ref-tags-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 6px 8px;
+    min-height: 36px;
+    border-bottom: 1px solid var(--md-divider);
+}
+
+.multi-ref-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px 2px 10px;
+    background-color: rgba(25, 118, 210, 0.12);
+    color: var(--md-primary);
+    border-radius: 14px;
+    font-size: 13px;
+    font-family: 'Roboto', sans-serif;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.multi-ref-tag-remove {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--md-primary);
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    opacity: 0.7;
+    transition: opacity 0.15s;
+    font-size: 11px;
+}
+
+.multi-ref-tag-remove:hover {
+    opacity: 1;
+    color: #f44336;
+}
+
+.multi-ref-tags-placeholder {
+    font-size: 13px;
+    color: var(--md-text-hint);
+    font-style: italic;
+    line-height: 24px;
+}
+
+/* ========================================
 <<<<<<< issue-360-9f1a1d78c81c
    File Upload Styles (Inline and Form)
    ======================================== */
