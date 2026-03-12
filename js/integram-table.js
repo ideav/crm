@@ -12458,11 +12458,462 @@ class IntegramCreateFormHelper {
             this.showToast(`Ошибка: ${error.message}`, 'error');
         }
     }
+
+    /**
+     * Render edit form modal for an existing record (issue #831).
+     * Similar to renderCreateFormModal but for editing existing records.
+     */
+    renderEditFormModalStandalone(metadata, recordData, typeId, recordId) {
+        // Track modal depth for z-index stacking
+        if (!window._integramModalDepth) {
+            window._integramModalDepth = 0;
+        }
+        window._integramModalDepth++;
+        const modalDepth = window._integramModalDepth;
+        const baseZIndex = 1000 + (modalDepth * 10);
+
+        const overlay = document.createElement('div');
+        overlay.className = 'edit-form-overlay';
+        overlay.style.zIndex = baseZIndex;
+        overlay.dataset.modalDepth = modalDepth;
+
+        const modal = document.createElement('div');
+        modal.className = 'edit-form-modal';
+        modal.style.zIndex = baseZIndex + 1;
+        modal.dataset.modalDepth = modalDepth;
+        modal.dataset.overlayRef = 'true';
+
+        // Add cascade offset for nested modals (6px per level)
+        const cascadeOffset = (modalDepth - 1) * 6;
+        modal.style.transform = `translate(calc(-50% + ${cascadeOffset}px), calc(-50% + ${cascadeOffset}px))`;
+
+        // Store reference to overlay on modal for proper cleanup
+        modal._overlayElement = overlay;
+
+        const typeName = this.getMetadataName(metadata);
+        const recordVal = recordData && recordData.obj ? recordData.obj.val : '';
+        const title = `Редактирование: ${recordVal || typeName}`;
+        const parentId = recordData && recordData.obj ? recordData.obj.parent : 1;
+
+        // Build record ID link HTML
+        const pathParts = window.location.pathname.split('/');
+        const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+        const tableUrl = `/${dbName}/table/${typeId}?F_U=${parentId || 1}&F_I=${recordId}`;
+
+        const recordIdHtml = `
+            <span class="edit-form-record-id" onclick="navigator.clipboard.writeText('${recordId}').then(() => { this.style.color='#28a745'; setTimeout(() => this.style.color='', 1000); })" title="Скопировать ID" style="cursor:pointer;margin-left:8px;font-size:12px;color:var(--cards-text-secondary);">#${recordId}</span>
+            <a href="${tableUrl}" class="edit-form-table-link" title="Открыть в таблице" target="_blank" style="margin-left:4px;">
+                <i class="pi pi-table"></i>
+            </a>
+        `;
+
+        // Render the form
+        const reqs = metadata.reqs || [];
+        const recordReqs = recordData && recordData.reqs ? recordData.reqs : {};
+        const regularFields = reqs.filter(req => !req.arr_id);
+
+        // Build attributes form HTML with existing values
+        let attributesHtml = this.renderAttributesFormForEdit(metadata, recordData, regularFields, recordReqs);
+
+        let formHtml = `
+            <div class="edit-form-header">
+                <div class="edit-form-header-title-row">
+                    <h3>${title}</h3>
+                    ${recordIdHtml}
+                </div>
+                <button class="edit-form-close" data-close-modal="true"><i class="pi pi-times"></i></button>
+            </div>
+            <div class="edit-form-body">
+                <div class="edit-form-tab-content active" data-tab-content="attributes">
+                    <form id="edit-form" class="edit-form">
+                        ${attributesHtml}
+                    </form>
+                </div>
+            </div>
+            <div class="edit-form-footer">
+                <div class="edit-form-footer-buttons">
+                    <button type="button" class="btn btn-primary" id="save-record-btn">Сохранить</button>
+                    <button type="button" class="btn btn-secondary" data-close-modal="true">Отменить</button>
+                </div>
+            </div>
+        `;
+
+        modal.innerHTML = formHtml;
+        document.body.appendChild(overlay);
+        document.body.appendChild(modal);
+
+        // Load reference options for dropdowns
+        this.loadReferenceOptions(metadata.reqs, modal, {});
+
+        // Load GRANT and REPORT_COLUMN dropdown options
+        this.loadGrantAndReportColumnOptions(modal);
+
+        // Attach date/datetime picker handlers
+        this.attachDatePickerHandlers(modal);
+
+        // Attach file upload handlers
+        this.attachFormFileUploadHandlers(modal);
+
+        // Attach save handler
+        const saveBtn = modal.querySelector('#save-record-btn');
+        saveBtn.addEventListener('click', () => {
+            this.saveEditedRecord(modal, metadata, recordId);
+        });
+
+        // Close modal helper function
+        const closeModal = () => {
+            modal.remove();
+            overlay.remove();
+            window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+        };
+
+        // Attach close handlers to buttons with data-close-modal attribute
+        modal.querySelectorAll('[data-close-modal="true"]').forEach(btn => {
+            btn.addEventListener('click', closeModal);
+        });
+
+        overlay.addEventListener('click', closeModal);
+
+        // Close on Escape key
+        const handleEscape = (e) => {
+            if (e.key === 'Escape') {
+                const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
+                const maxDepth = window._integramModalDepth || 0;
+                if (currentDepth === maxDepth) {
+                    closeModal();
+                    document.removeEventListener('keydown', handleEscape);
+                }
+            }
+        };
+        document.addEventListener('keydown', handleEscape);
+    }
+
+    /**
+     * Render attributes form for editing (similar to renderAttributesForm but pre-fills existing values)
+     */
+    renderAttributesFormForEdit(metadata, recordData, regularFields, recordReqs) {
+        let html = '';
+
+        // Main value field
+        const typeName = this.getMetadataName(metadata);
+        const mainValue = recordData && recordData.obj ? recordData.obj.val || '' : '';
+        const mainTermValue = recordData && recordData.obj && recordData.obj.term !== undefined ? recordData.obj.term : '';
+        const mainFieldType = this.normalizeFormat(metadata.type);
+
+        // Build main field HTML based on its type
+        let mainFieldHtml = '';
+        if (mainFieldType === 'BOOLEAN') {
+            const isChecked = mainValue ? 'checked' : '';
+            mainFieldHtml = `<input type="checkbox" id="field-main" name="main" value="1" ${isChecked}>`;
+        } else if (mainFieldType === 'DATE') {
+            const dateValueHtml5 = mainValue ? this.formatDateForHtml5(mainValue, false) : '';
+            mainFieldHtml = `<input type="date" class="form-control date-picker" id="field-main-picker" data-target="field-main" value="${this.escapeHtml(dateValueHtml5)}">`;
+            mainFieldHtml += `<input type="hidden" id="field-main" name="main" value="${this.escapeHtml(mainValue)}">`;
+        } else if (mainFieldType === 'DATETIME') {
+            const dateTimeValueHtml5 = mainValue ? this.formatDateForHtml5(mainValue, true) : '';
+            mainFieldHtml = `<input type="datetime-local" class="form-control datetime-picker" id="field-main-picker" data-target="field-main" value="${this.escapeHtml(dateTimeValueHtml5)}">`;
+            mainFieldHtml += `<input type="hidden" id="field-main" name="main" value="${this.escapeHtml(mainValue)}">`;
+        } else if (mainFieldType === 'MEMO' || mainFieldType === 'HTML') {
+            mainFieldHtml = `<textarea class="form-control" id="field-main" name="main" rows="4">${this.escapeHtml(mainValue)}</textarea>`;
+        } else if (mainFieldType === 'GRANT') {
+            mainFieldHtml = `<select class="form-control grant-dropdown" id="field-main" name="main" data-current-value="${this.escapeHtml(mainTermValue)}">
+                <option value="">Загрузка...</option>
+            </select>`;
+        } else if (mainFieldType === 'REPORT_COLUMN') {
+            mainFieldHtml = `<select class="form-control report-column-dropdown" id="field-main" name="main" data-current-value="${this.escapeHtml(mainTermValue)}">
+                <option value="">Загрузка...</option>
+            </select>`;
+        } else {
+            mainFieldHtml = `<input type="text" class="form-control" id="field-main" name="main" value="${this.escapeHtml(mainValue)}">`;
+        }
+
+        html += `
+            <div class="form-field">
+                <label for="field-main">${this.escapeHtml(typeName)}</label>
+                ${mainFieldHtml}
+            </div>
+        `;
+
+        // Render regular fields (requisites)
+        for (const req of regularFields) {
+            const fieldId = req.id;
+            const attrs = this.parseAttrs(req.attrs);
+            const fieldName = attrs.alias || req.val;
+            const isRequired = attrs.required;
+            const isMulti = attrs.multi;
+            const fieldType = this.normalizeFormat(req.type);
+            const reqData = recordReqs[fieldId] || {};
+            const fieldValue = reqData.value !== undefined ? reqData.value : (reqData.val || '');
+            const fieldTermValue = reqData.term !== undefined ? reqData.term : '';
+
+            let fieldHtml = '';
+
+            if (req.ref_id) {
+                // Reference field - dropdown
+                const selectedText = fieldValue ? this.escapeHtml(fieldValue) : '';
+                const selectedTerm = fieldTermValue || '';
+                fieldHtml = `<select class="form-control ref-dropdown" id="field-${fieldId}" name="r${fieldId}"
+                    data-ref-id="${req.ref_id}" data-field-id="${fieldId}"
+                    data-current-value="${this.escapeHtml(selectedTerm)}"
+                    ${isRequired ? 'required' : ''} ${isMulti ? 'multiple' : ''}>
+                    ${selectedText ? `<option value="${this.escapeHtml(selectedTerm)}" selected>${selectedText}</option>` : '<option value="">Загрузка...</option>'}
+                </select>`;
+            } else if (fieldType === 'BOOLEAN') {
+                const isChecked = fieldValue ? 'checked' : '';
+                fieldHtml = `<input type="checkbox" id="field-${fieldId}" name="t${fieldId}" value="1" ${isChecked}>`;
+            } else if (fieldType === 'DATE') {
+                const dateValueHtml5 = fieldValue ? this.formatDateForHtml5(fieldValue, false) : '';
+                fieldHtml = `<input type="date" class="form-control date-picker" id="field-${fieldId}-picker"
+                    data-target="field-${fieldId}" value="${this.escapeHtml(dateValueHtml5)}">`;
+                fieldHtml += `<input type="hidden" id="field-${fieldId}" name="t${fieldId}" value="${this.escapeHtml(fieldValue)}">`;
+            } else if (fieldType === 'DATETIME') {
+                const dateTimeValueHtml5 = fieldValue ? this.formatDateForHtml5(fieldValue, true) : '';
+                fieldHtml = `<input type="datetime-local" class="form-control datetime-picker" id="field-${fieldId}-picker"
+                    data-target="field-${fieldId}" value="${this.escapeHtml(dateTimeValueHtml5)}">`;
+                fieldHtml += `<input type="hidden" id="field-${fieldId}" name="t${fieldId}" value="${this.escapeHtml(fieldValue)}">`;
+            } else if (fieldType === 'MEMO' || fieldType === 'HTML') {
+                fieldHtml = `<textarea class="form-control" id="field-${fieldId}" name="t${fieldId}" rows="3"
+                    ${isRequired ? 'required' : ''}>${this.escapeHtml(fieldValue)}</textarea>`;
+            } else if (fieldType === 'FILE') {
+                const hasFile = fieldValue && fieldValue !== '';
+                fieldHtml = `
+                    <div class="form-file-upload" data-field-id="${fieldId}">
+                        <input type="file" class="file-input" id="file-${fieldId}" style="display:none;">
+                        <input type="hidden" id="field-${fieldId}" name="t${fieldId}" value="${this.escapeHtml(fieldValue)}">
+                        <div class="file-dropzone" style="border:2px dashed #ccc;padding:20px;text-align:center;cursor:pointer;border-radius:4px;">
+                            <i class="pi pi-upload" style="font-size:24px;color:#666;"></i>
+                            <p style="margin:8px 0 0;color:#666;">Перетащите файл или нажмите для выбора</p>
+                        </div>
+                        <div class="file-preview" style="display:${hasFile ? 'flex' : 'none'};align-items:center;gap:8px;margin-top:8px;">
+                            <span class="file-name">${this.escapeHtml(fieldValue)}</span>
+                            <button type="button" class="file-remove-btn btn btn-sm btn-outline-danger"><i class="pi pi-times"></i></button>
+                        </div>
+                    </div>
+                `;
+            } else if (fieldType === 'NUMBER' || fieldType === 'SIGNED') {
+                fieldHtml = `<input type="number" class="form-control" id="field-${fieldId}" name="t${fieldId}"
+                    value="${this.escapeHtml(fieldValue)}" ${isRequired ? 'required' : ''}
+                    ${fieldType === 'SIGNED' ? 'step="0.01"' : ''}>`;
+            } else if (fieldType === 'GRANT') {
+                fieldHtml = `<select class="form-control grant-dropdown" id="field-${fieldId}" name="t${fieldId}"
+                    data-current-value="${this.escapeHtml(fieldTermValue)}">
+                    <option value="">Загрузка...</option>
+                </select>`;
+            } else if (fieldType === 'REPORT_COLUMN') {
+                fieldHtml = `<select class="form-control report-column-dropdown" id="field-${fieldId}" name="t${fieldId}"
+                    data-current-value="${this.escapeHtml(fieldTermValue)}">
+                    <option value="">Загрузка...</option>
+                </select>`;
+            } else {
+                fieldHtml = `<input type="text" class="form-control" id="field-${fieldId}" name="t${fieldId}"
+                    value="${this.escapeHtml(fieldValue)}" ${isRequired ? 'required' : ''}>`;
+            }
+
+            const requiredMark = isRequired ? '<span style="color:red;">*</span>' : '';
+
+            html += `
+                <div class="form-field">
+                    <label for="field-${fieldId}">${this.escapeHtml(fieldName)} ${requiredMark}</label>
+                    ${fieldHtml}
+                </div>
+            `;
+        }
+
+        return html;
+    }
+
+    /**
+     * Save an edited record (similar to saveRecord but for updates)
+     */
+    async saveEditedRecord(modal, metadata, recordId) {
+        try {
+            const form = modal.querySelector('#edit-form');
+            const formData = new FormData(form);
+
+            let requestBody;
+            const headers = {};
+
+            // Check for file inputs
+            const fileInputs = form.querySelectorAll('input[type="file"]');
+            let hasFiles = false;
+
+            fileInputs.forEach(input => {
+                if (input.files && input.files.length > 0) {
+                    hasFiles = true;
+                    formData.append(input.name || input.id, input.files[0]);
+                }
+            });
+
+            if (hasFiles) {
+                requestBody = formData;
+            } else {
+                const params = new URLSearchParams();
+
+                // Handle checkbox fields
+                form.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+                    if (checkbox.name) {
+                        params.append(checkbox.name, checkbox.checked ? '1' : '0');
+                    }
+                });
+
+                // Get main value
+                const mainValue = formData.get('main');
+
+                // Add all form fields
+                for (const [key, value] of formData.entries()) {
+                    if (key === 'main') continue;
+                    if (value !== '' && value !== null && value !== undefined) {
+                        params.append(key, value);
+                    }
+                }
+
+                if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
+                    params.append(`t${this.tableTypeId}`, mainValue);
+                }
+
+                requestBody = params.toString();
+                headers['Content-Type'] = 'application/x-www-form-urlencoded';
+            }
+
+            // Update the record
+            const url = `${this.apiBase}/_m_edit/${recordId}?JSON`;
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: headers,
+                body: requestBody
+            });
+
+            const text = await response.text();
+            let result;
+
+            try {
+                result = JSON.parse(text);
+            } catch (e) {
+                throw new Error(`Invalid response: ${text}`);
+            }
+
+            if (result.error) {
+                throw new Error(result.error);
+            }
+
+            // Success - close modal
+            this.showToast('Изменения сохранены', 'success');
+
+            // Close modal
+            modal._overlayElement?.remove();
+            modal.remove();
+            window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+
+            // Reload any IntegramTable instances on the page
+            if (typeof reloadAllIntegramTables === 'function') {
+                reloadAllIntegramTables();
+            }
+
+            // Also reload CardsView instances
+            if (window.myCardsView && typeof window.myCardsView._loadData === 'function') {
+                window.myCardsView._loadData(false);
+            }
+
+        } catch (error) {
+            console.error('Error saving record:', error);
+            this.showToast(`Ошибка: ${error.message}`, 'error');
+        }
+    }
+}
+
+/**
+ * Open an edit form modal for an existing record (issue #831).
+ * Global function similar to openCreateRecordForm that works without an IntegramTable instance.
+ *
+ * @param {number|string} recordId - The ID of the record to edit
+ * @param {number|string} typeId - The table type ID
+ * @example
+ * // Open edit form for record 12345 of type 3596
+ * openEditRecordForm(12345, 3596);
+ */
+async function openEditRecordForm(recordId, typeId) {
+    if (!recordId) {
+        console.error('openEditRecordForm: recordId is required');
+        return;
+    }
+    if (!typeId) {
+        console.error('openEditRecordForm: typeId is required');
+        return;
+    }
+
+    try {
+        // Determine API base from current page URL
+        const pathParts = window.location.pathname.split('/');
+        let apiBase = '';
+        if (pathParts.length >= 2 && pathParts[1]) {
+            apiBase = window.location.origin + '/' + pathParts[1];
+        }
+
+        if (!apiBase) {
+            console.error('openEditRecordForm: Could not determine API base URL');
+            return;
+        }
+
+        // Fetch metadata for the table type
+        let metadata = null;
+        if (window._integramTableInstances && window._integramTableInstances.length > 0) {
+            for (const inst of window._integramTableInstances) {
+                if (inst && inst.globalMetadata) {
+                    const cached = inst.globalMetadata.find(item => item.id === typeId || item.id === Number(typeId));
+                    if (cached) {
+                        metadata = cached;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!metadata) {
+            const metadataUrl = `${apiBase}/metadata/${typeId}`;
+            const metadataResponse = await fetch(metadataUrl);
+
+            if (!metadataResponse.ok) {
+                throw new Error(`Failed to fetch metadata: ${metadataResponse.statusText}`);
+            }
+
+            metadata = await metadataResponse.json();
+        }
+
+        // Fetch existing record data
+        const recordUrl = `${apiBase}/edit_obj/${recordId}?JSON`;
+        const recordResponse = await fetch(recordUrl);
+
+        if (!recordResponse.ok) {
+            throw new Error(`Failed to fetch record data: ${recordResponse.statusText}`);
+        }
+
+        const recordData = await recordResponse.json();
+
+        // Check for error in response
+        if (recordData.error) {
+            throw new Error(recordData.error);
+        }
+
+        // Create the modal using a helper instance
+        const helper = new IntegramCreateFormHelper(apiBase, typeId, recordData.obj?.parent || 1);
+        helper.renderEditFormModalStandalone(metadata, recordData, typeId, recordId);
+
+    } catch (error) {
+        console.error('openEditRecordForm: Error opening form:', error);
+        // Show error toast if available
+        if (typeof window.showToast === 'function') {
+            window.showToast(`Ошибка: ${error.message}`, 'error');
+        } else {
+            alert(`Ошибка: ${error.message}`);
+        }
+    }
 }
 
 // Make openCreateRecordForm globally accessible
 if (typeof window !== 'undefined') {
     window.openCreateRecordForm = openCreateRecordForm;
+    window.openEditRecordForm = openEditRecordForm;
     window.IntegramCreateFormHelper = IntegramCreateFormHelper;
 }
 

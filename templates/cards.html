@@ -1588,7 +1588,7 @@
         this._loadData(true);
     };
 
-    // ─── Edit form (delegates to IntegramTable if available) ─────────────────────
+    // ─── Edit form (uses global openEditRecordForm function) ──────────────────────
 
     CardsView.prototype._openEditForm = function(rowIndex) {
         var recordId = this._getRowId(rowIndex);
@@ -1599,39 +1599,12 @@
             return;
         }
 
-        // Prefer IntegramTable instance if one is registered with the same data source
-        var tableInst = null;
-        if (typeof window.IntegramTable === 'function') {
-            for (var key in window) {
-                if (window[key] instanceof window.IntegramTable) {
-                    tableInst = window[key];
-                    break;
-                }
-            }
-        }
-
-        if (tableInst && typeof tableInst.openEditForm === 'function') {
-            tableInst.openEditForm(recordId, typeId, rowIndex);
-        } else if (typeof window.IntegramTable !== 'undefined') {
-            // Create a transient IntegramTable helper just to open the form.
-            // IntegramTable requires an existing DOM element, so create a hidden one.
-            var helperId = '__cards-edit-helper__';
-            var helperEl = document.getElementById(helperId);
-            if (!helperEl) {
-                helperEl = document.createElement('div');
-                helperEl.id = helperId;
-                helperEl.style.display = 'none';
-                document.body.appendChild(helperEl);
-            }
-            var helper = new window.IntegramTable(helperId, {
-                instanceName: '__cardsEditHelper'
-            });
-            window.__cardsEditHelper = helper;
-            helper.openEditForm(recordId, typeId, rowIndex);
+        // Use global openEditRecordForm function (issue #831)
+        // This opens a modal edit form without requiring an IntegramTable instance
+        if (typeof openEditRecordForm === 'function') {
+            openEditRecordForm(recordId, typeId);
         } else {
-            // Fallback: navigate
-            var apiBase = this._getApiBase();
-            window.location.href = apiBase + '/edit/' + recordId;
+            console.error('CardsView: openEditRecordForm function not available');
         }
     };
 
