@@ -809,7 +809,11 @@
         }
         this.rawObjectData = arr;
         return arr.map(function(item) {
-            var row = [item.i]; // first cell is the record ID
+            // Note: row indices must match columns indices:
+            // - cols[0] = main object (metadata.id), row[0] = r[0] (main object value)
+            // - cols[1] = first req, row[1] = r[1] (first req value)
+            // Record ID (item.i) is stored in rawObjectData and accessed via _getRowId()
+            var row = [];
             var vals = item.r || [];
             for (var i = 0; i < vals.length; i++) {
                 var v = vals[i];
