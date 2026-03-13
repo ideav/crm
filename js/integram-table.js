@@ -9275,6 +9275,11 @@ class IntegramTable {
 
                     // Set current value if exists
                     if (hiddenInput.value) {
+                        // Issue #869: value may arrive as "id:text" — strip text part, keep only id
+                        const colonIdx = hiddenInput.value.indexOf(':');
+                        if (colonIdx > 0) {
+                            hiddenInput.value = hiddenInput.value.substring(0, colonIdx);
+                        }
                         const currentOption = options.find(([id]) => id === hiddenInput.value);
                         if (currentOption) {
                             searchInput.value = currentOption[1];
