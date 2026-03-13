@@ -196,6 +196,10 @@
     transition: opacity 0.2s ease;
 }
 
+.folder-actions-spacer {
+    width: calc(2 * 1.75rem + 0.25rem);
+}
+
 .folder-header:hover .folder-actions {
     opacity: 1;
 }
