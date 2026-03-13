@@ -9467,19 +9467,35 @@ class IntegramTable {
                 wrapper._referenceOptions = options;
                 wrapper._allOptionsFetched = options.length < 50;
 
-                // Parse current value: may be comma-separated display names or IDs
+                // Parse current value: "id1,id2,...:val1,val2,..." (issue #863) or plain display names
                 const currentRawValue = wrapper.dataset.currentValue || '';
-                const currentTexts = currentRawValue
-                    ? currentRawValue.split(',').map(v => v.trim()).filter(v => v.length > 0)
-                    : [];
                 // selectedItems: array of {id, text}
                 const selectedItems = [];
-                for (const text of currentTexts) {
-                    const match = options.find(([id, t]) => t === text);
-                    if (match) {
-                        selectedItems.push({ id: match[0], text: match[1] });
-                    } else if (text) {
-                        selectedItems.push({ id: '', text });
+                const rawColonIndex = currentRawValue.indexOf(':');
+                if (currentRawValue && rawColonIndex > 0) {
+                    // ids:values format — resolve each ID against fetched options
+                    const ids = currentRawValue.substring(0, rawColonIndex).split(',').map(v => v.trim()).filter(v => v.length > 0);
+                    for (const id of ids) {
+                        const match = options.find(([optId]) => String(optId) === id);
+                        if (match) {
+                            selectedItems.push({ id: match[0], text: match[1] });
+                        } else {
+                            // ID not in options – show id as fallback text
+                            selectedItems.push({ id, text: id });
+                        }
+                    }
+                } else {
+                    // Fallback: parse display names and match by text
+                    const currentTexts = currentRawValue
+                        ? currentRawValue.split(',').map(v => v.trim()).filter(v => v.length > 0)
+                        : [];
+                    for (const text of currentTexts) {
+                        const match = options.find(([id, t]) => t === text);
+                        if (match) {
+                            selectedItems.push({ id: match[0], text: match[1] });
+                        } else if (text) {
+                            selectedItems.push({ id: '', text });
+                        }
                     }
                 }
                 wrapper._selectedItems = selectedItems;
