@@ -3517,7 +3517,11 @@ class IntegramTable {
                     const outsideClickHandler = (e) => {
                         if (!cell.contains(e.target)) {
                             document.removeEventListener('click', outsideClickHandler);
-                            this.cancelInlineEdit(originalContent);
+                            // Issue #879: Use saved content if any saves occurred, otherwise restore original
+                            const contentToRestore = (this.currentEditingCell && this.currentEditingCell.savedContent !== undefined)
+                                ? this.currentEditingCell.savedContent
+                                : originalContent;
+                            this.cancelInlineEdit(contentToRestore);
                         }
                     };
                     document.addEventListener('click', outsideClickHandler);
@@ -3579,6 +3583,13 @@ class IntegramTable {
                 // Update cell display with comma-separated text of selected items
                 const displayText = (selectedItems || []).map(s => s.text).join(', ');
                 this.updateCellDisplay(cell, displayText, this.currentEditingCell.format);
+
+                // Issue #879: Update data-raw-value so re-opening editor uses correct selections
+                const rawValue = ids.join(',') + ':' + (selectedItems || []).map(s => s.text).join(',');
+                cell.dataset.rawValue = rawValue;
+
+                // Issue #879: Track saved cell content so closing the editor shows saved state
+                this.currentEditingCell.savedContent = cell.innerHTML;
 
             } catch (error) {
                 console.error('Error saving multi-reference edit:', error);
