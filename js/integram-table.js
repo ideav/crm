@@ -6258,6 +6258,24 @@ class IntegramTable {
                 }
             }
 
+            // Display F_I as a visible filter on the first column for table data source (issue #861)
+            // When F_I is present in URL and dataSource is 'table', show it as @{value} with '=' filter type
+            // on the first column so the user can see and modify the active ID filter.
+            if (this.options.recordId && this.getDataSourceType() === 'table' && this.columns.length > 0) {
+                const firstColId = this.columns[0].id;
+                // Only set if not already overridden by another URL filter for the same column
+                if (!urlFilters[firstColId]) {
+                    const recordIdValue = `@${this.options.recordId}`;
+                    urlFilters[firstColId] = {
+                        type: '=',
+                        value: recordIdValue,
+                        paramKey: 'F_I',
+                        isRefId: true,
+                        refId: this.options.recordId
+                    };
+                }
+            }
+
             this.urlFilters = urlFilters;
 
             // If we have URL filters, populate this.filters and enable filter row
