@@ -9642,6 +9642,7 @@ class IntegramTable {
                 });
 
                 // Handle tag click: remove button removes tag, clicking tag itself opens edit form (issue #871)
+                // Clicking empty area in tags container focuses the search input (issue #881)
                 tagsContainer.addEventListener('click', (e) => {
                     const removeBtn = e.target.closest('.multi-ref-tag-remove');
                     if (removeBtn) {
@@ -9655,7 +9656,11 @@ class IntegramTable {
                         return;
                     }
                     const tag = e.target.closest('.multi-ref-tag');
-                    if (!tag) return;
+                    if (!tag) {
+                        // Clicked on empty area — focus the search input so cursor appears (issue #881)
+                        searchInput.focus();
+                        return;
+                    }
                     const id = tag.dataset.id;
                     if (!id) return;
                     const refTypeId = wrapper.dataset.refTypeId;
