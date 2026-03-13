@@ -1582,7 +1582,7 @@ class IntegramTable {
             // For multi-select fields, value is "id1,id2,...:val1,val2,..." (issue #863)
             // Parse to extract the id(s) and display only the Value part
             let multiRawValue = null;  // Original raw value for multi-select editor (issue #863)
-            if (column.ref_id != null && value && typeof value === 'string') {
+            if (isRefField && value && typeof value === 'string') {
                 const colonIndex = value.indexOf(':');
                 if (colonIndex > 0) {
                     refValueId = value.substring(0, colonIndex);
