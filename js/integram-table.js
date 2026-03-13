@@ -1178,11 +1178,9 @@ class IntegramTable {
                     <div class="integram-table-header">
                         ${ this.renderTitleHtml() }
                         <div class="integram-table-controls">
-                            ${ this.hasActiveFiltersOrGroups() ? `
                             <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.copyConfigUrl()" title="Скопировать ссылку с текущими фильтрами и группами">
                                 <i class="pi pi-copy" style="vertical-align: middle;"></i>
                             </button>
-                            ` : '' }
                             ${ this.groupingEnabled ? `
                             <button class="btn btn-sm btn-outline-secondary me-1" onclick="window.${ instanceName }.clearGrouping()" title="Очистить группировку">
                                 <i class="pi pi-undo" style="vertical-align: middle;"></i>
