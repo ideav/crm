@@ -463,9 +463,10 @@ function syncSingleFile($repository, $branch, $sourcePath, $targetPath, $token =
 
     // Skip if local file is newer or same
     if ($remoteModTime !== false && $localModTime >= $remoteModTime) {
+        $modDateTime = date('Y-m-d H:i', $localModTime);
         return [
             'status' => 'skipped',
-            'message' => "Skipped (up to date): {$sourcePath} -> {$targetPath}"
+            'message' => "Skipped ({$modDateTime}): {$sourcePath} -> {$targetPath}"
         ];
     }
 
@@ -568,7 +569,7 @@ function outputResults($results) {
     // Skipped
     if (!empty($results['skipped'])) {
         echo "    <div class='section skipped'>\n";
-        echo "      <h2>Skipped Files (Up to Date)</h2>\n";
+        echo "      <h2>Skipped Files (Already up to date)</h2>\n";
         echo "      <ul>\n";
         foreach ($results['skipped'] as $msg) {
             echo "        <li>" . htmlspecialchars($msg) . "</li>\n";
