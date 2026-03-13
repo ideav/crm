@@ -6742,7 +6742,7 @@ class IntegramTable {
 
                 let recordData = null;
                 if (!isCreate) {
-                    recordData = await this.fetchRecordData(recordId);
+                    recordData = await this.fetchRecordData(recordId, typeId, metadata);
                 }
 
                 this.renderEditFormModal(metadata, recordData, isCreate, typeId);
@@ -6994,9 +6994,11 @@ class IntegramTable {
             }
         }
 
-        async fetchRecordData(recordId) {
+        async fetchRecordData(recordId, typeId, metadata) {
             const apiBase = this.getApiBase();
-            const response = await fetch(`${ apiBase }/edit_obj/${ recordId }?JSON`);
+            // Issue #857: Use object/{typeId}/?JSON_OBJ&FR_{typeId}=@{recordId} to fetch record data,
+            // taking field types from metadata (same as inline table editing)
+            const response = await fetch(`${ apiBase }/object/${ typeId }/?JSON_OBJ&FR_${ typeId }=@${ recordId }`);
 
             if (!response.ok) {
                 throw new Error(`Failed to fetch record data: ${ response.statusText }`);
@@ -7004,21 +7006,41 @@ class IntegramTable {
 
             const text = await response.text();
 
+            let dataArray;
             try {
-                const data = JSON.parse(text);
-
-                // Check for error in response
-                if (data.error) {
-                    throw new Error(data.error);
-                }
-
-                return data;
+                dataArray = JSON.parse(text);
             } catch (e) {
-                if (e.message && e.message.includes('error')) {
-                    throw e;
-                }
                 throw new Error(`Invalid JSON response: ${ text }`);
             }
+
+            if (!Array.isArray(dataArray) || dataArray.length === 0) {
+                throw new Error(`Record ${ recordId } not found`);
+            }
+
+            const item = dataArray[0];
+            const rowValues = item.r || [];
+
+            // Convert JSON_OBJ format to {obj, reqs} format expected by renderEditFormModal.
+            // Column order: [0] = main value, [1..N] = requisites in metadata.reqs order.
+            // Field types are taken from metadata (issue #857).
+            const reqs = metadata.reqs || [];
+            const recordReqs = {};
+            reqs.forEach((req, idx) => {
+                recordReqs[req.id] = {
+                    value: rowValues[idx + 1] !== undefined ? rowValues[idx + 1] : '',
+                    base: req.type,
+                    order: idx
+                };
+            });
+
+            return {
+                obj: {
+                    id: item.i,
+                    val: rowValues[0] !== undefined ? rowValues[0] : '',
+                    parent: item.u || 1
+                },
+                reqs: recordReqs
+            };
         }
 
         async fetchReferenceOptions(requisiteId, recordId = 0, searchQuery = '', extraParams = {}) {
