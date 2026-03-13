@@ -2302,6 +2302,12 @@ td:has(.inline-editor-reference) {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.15s;
+}
+
+.multi-ref-tag:hover {
+    background-color: rgba(25, 118, 210, 0.22);
 }
 
 .multi-ref-tag-remove {
