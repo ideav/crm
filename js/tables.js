@@ -181,7 +181,11 @@ class TablesController {
         header.appendChild(count);
 
         // Folder actions (not for virtual folders)
-        if (!isVirtual) {
+        if (isVirtual) {
+            const actionsSpacer = document.createElement('div');
+            actionsSpacer.className = 'folder-actions-spacer';
+            header.appendChild(actionsSpacer);
+        } else {
             const actions = document.createElement('div');
             actions.className = 'folder-actions';
 
