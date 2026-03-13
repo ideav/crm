@@ -1579,12 +1579,18 @@ class IntegramTable {
             const dataTypeAttrs = ` data-type="${format}"${isRefField ? ' data-ref="1"' : ''}${isArrayField ? ' data-array="1"' : ''}`;
 
             // In object format, reference fields return values as "id:Value"
-            // Parse to extract the id and display only the Value part
+            // For multi-select fields, value is "id1,id2,...:val1,val2,..." (issue #863)
+            // Parse to extract the id(s) and display only the Value part
+            let multiRawValue = null;  // Original raw value for multi-select editor (issue #863)
             if (column.ref_id != null && value && typeof value === 'string') {
                 const colonIndex = value.indexOf(':');
                 if (colonIndex > 0) {
                     refValueId = value.substring(0, colonIndex);
                     displayValue = value.substring(colonIndex + 1);
+                    // For multi-select fields, store raw value so editor can resolve IDs directly
+                    if (isArrayField) {
+                        multiRawValue = value;
+                    }
                 }
             }
 
@@ -1938,11 +1944,13 @@ class IntegramTable {
                     const refValueIdAttr = refValueId ? ` data-ref-value-id="${ refValueId }"` : '';
                     // Store full value for editing (escape for HTML attribute)
                     const fullValueAttr = fullValueForEditing ? ` data-full-value="${ fullValueForEditing.replace(/"/g, '&quot;') }"` : '';
+                    // Issue #863: For multi-select fields, store raw "ids:values" string so editor can resolve IDs directly
+                    const rawValueAttr = multiRawValue ? ` data-raw-value="${ multiRawValue.replace(/"/g, '&quot;') }"` : '';
                     // Use 'dynamic' as placeholder for recordId if it's empty (will be determined at edit time)
                     const recordIdAttr = recordId && recordId !== '' && recordId !== '0' ? recordId : 'dynamic';
                     // Use paramId for object format (metadata ID), otherwise fall back to type (data type)
                     const colTypeForParam = column.paramId || column.type;
-                    editableAttrs = ` data-editable="true" data-record-id="${ recordIdAttr }" data-col-id="${ column.id }" data-col-type="${ colTypeForParam }" data-col-format="${ format }" data-row-index="${ rowIndex }"${ refAttr }${ refValueIdAttr }${ fullValueAttr }`;
+                    editableAttrs = ` data-editable="true" data-record-id="${ recordIdAttr }" data-col-id="${ column.id }" data-col-type="${ colTypeForParam }" data-col-format="${ format }" data-row-index="${ rowIndex }"${ refAttr }${ refValueIdAttr }${ fullValueAttr }${ rawValueAttr }`;
                     cellClass += ' inline-editable';
                     if (window.INTEGRAM_DEBUG) {
                         console.log(`  ✓ Cell will be editable with recordId=${recordIdAttr}`);
@@ -3296,20 +3304,37 @@ class IntegramTable {
                 this.currentEditingCell.referenceOptions = options;
                 this.currentEditingCell.allOptionsFetched = options.length < 50;
 
-                // Parse currently selected values from cell text (comma-separated display names)
-                // Match against fetched options to get IDs
-                const currentTexts = currentValue
-                    ? currentValue.split(',').map(v => v.trim()).filter(v => v.length > 0)
-                    : [];
-                // selectedItems: array of {id, text}
+                // Issue #863: For multi-select fields, raw value is "id1,id2,...:val1,val2,..."
+                // Prefer resolving selected items by ID directly from raw value attribute,
+                // falling back to text-based lookup for backward compatibility.
+                const rawValue = cell.dataset.rawValue || '';
                 const selectedItems = [];
-                for (const text of currentTexts) {
-                    const match = options.find(([id, t]) => t === text);
-                    if (match) {
-                        selectedItems.push({ id: match[0], text: match[1] });
-                    } else if (text) {
-                        // Unknown text – keep it with empty id so user can see it
-                        selectedItems.push({ id: '', text });
+                const rawColonIndex = rawValue.indexOf(':');
+                if (rawValue && rawColonIndex > 0) {
+                    // Parse IDs from the left side of ':'
+                    const ids = rawValue.substring(0, rawColonIndex).split(',').map(v => v.trim()).filter(v => v.length > 0);
+                    for (const id of ids) {
+                        const match = options.find(([optId]) => String(optId) === id);
+                        if (match) {
+                            selectedItems.push({ id: match[0], text: match[1] });
+                        } else {
+                            // ID not found in options – keep with empty text
+                            selectedItems.push({ id, text: id });
+                        }
+                    }
+                } else {
+                    // Fallback: parse display names from currentValue and match against options by text
+                    const currentTexts = currentValue
+                        ? currentValue.split(',').map(v => v.trim()).filter(v => v.length > 0)
+                        : [];
+                    for (const text of currentTexts) {
+                        const match = options.find(([id, t]) => t === text);
+                        if (match) {
+                            selectedItems.push({ id: match[0], text: match[1] });
+                        } else if (text) {
+                            // Unknown text – keep it with empty id so user can see it
+                            selectedItems.push({ id: '', text });
+                        }
                     }
                 }
                 this.currentEditingCell.selectedItems = selectedItems;
