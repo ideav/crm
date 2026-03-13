@@ -3451,7 +3451,9 @@ class IntegramTable {
                         if (!tag) return;
                         const id = tag.dataset.id;
                         if (!id) return;
-                        const refTypeId = this.currentEditingCell.colType;
+                        // Issue #873: use the referenced table's orig/ref ID, not the requisite field ID (colType)
+                        const col = this.columns.find(c => c.id === this.currentEditingCell.colId);
+                        const refTypeId = (col && (col.orig || col.ref)) || this.currentEditingCell.colType;
                         if (refTypeId) {
                             this.openEditForm(id, refTypeId, 0);
                         }
