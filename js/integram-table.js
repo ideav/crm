@@ -3297,6 +3297,17 @@ class IntegramTable {
             const originalContent = cell.innerHTML;
             const { colId, colType, parentInfo } = this.currentEditingCell;
 
+            // Check if add button should be shown (same condition as single reference, issue #875)
+            const column = this.columns.find(c => c.id === colId);
+            const hasGranted = column && column.granted === 1;
+            const origType = column && column.orig ? column.orig : null;
+            const showAddButton = hasGranted && origType !== null;
+
+            // Store origType on currentEditingCell for use in add button handler
+            this.currentEditingCell.origType = origType;
+            // Flag this as multi-reference so saveRecordForReference adds to selection instead of replacing
+            this.currentEditingCell.isMultiReference = true;
+
             cell.innerHTML = '<div class="inline-editor-loading">Загрузка...</div>';
 
             try {
@@ -3339,7 +3350,7 @@ class IntegramTable {
                 }
                 this.currentEditingCell.selectedItems = selectedItems;
 
-                const renderEditor = () => {
+                const renderEditor = this.currentEditingCell.renderEditor = () => {
                     const selected = this.currentEditingCell.selectedItems;
                     const selectedIds = new Set(selected.map(s => s.id).filter(id => id));
 
@@ -3359,6 +3370,10 @@ class IntegramTable {
                         }).join('')
                         : '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
 
+                    const addButtonHtml = showAddButton
+                        ? `<button class="inline-editor-reference-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>`
+                        : '';
+
                     cell.innerHTML = `
                         <div class="inline-editor-reference inline-editor-multi-reference">
                             <div class="multi-ref-tags-container">${tagsHtml || '<span class="multi-ref-tags-placeholder">Нет выбранных значений</span>'}</div>
@@ -3367,6 +3382,7 @@ class IntegramTable {
                                        class="inline-editor-reference-search"
                                        placeholder="Добавить..."
                                        autocomplete="off">
+                                ${addButtonHtml}
                             </div>
                             <div class="inline-editor-reference-dropdown" style="display:none;">
                                 ${optionsHtml}
@@ -3377,6 +3393,17 @@ class IntegramTable {
                     const searchInput = cell.querySelector('.inline-editor-reference-search');
                     const dropdown = cell.querySelector('.inline-editor-reference-dropdown');
                     const tagsContainer = cell.querySelector('.multi-ref-tags-container');
+                    const addButton = cell.querySelector('.inline-editor-reference-add');
+
+                    // Handle add button click: open create form (issue #875)
+                    if (addButton && origType) {
+                        addButton.addEventListener('click', async (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const inputValue = searchInput.value.trim();
+                            await this.openCreateFormForReference(origType, inputValue, parentInfo.parentRecordId);
+                        });
+                    }
 
                     // Show dropdown on focus
                     searchInput.addEventListener('focus', () => {
@@ -3387,6 +3414,12 @@ class IntegramTable {
                     let searchTimeout;
                     searchInput.addEventListener('input', async (e) => {
                         const searchText = e.target.value.trim();
+
+                        // Toggle add button visibility based on search input (issue #875)
+                        if (addButton) {
+                            addButton.style.display = searchText.length > 0 ? '' : 'none';
+                        }
+
                         clearTimeout(searchTimeout);
                         searchTimeout = setTimeout(async () => {
                             const currentSelected = new Set(this.currentEditingCell.selectedItems.map(s => s.id));
@@ -3949,7 +3982,20 @@ class IntegramTable {
 
                 // Now set the created record in the reference field that's still open
                 if (this.currentEditingCell && createdId) {
-                    await this.saveReferenceEdit(createdId, createdValue);
+                    if (this.currentEditingCell.isMultiReference) {
+                        // Issue #875: For multi-reference, add the new item to selected items
+                        if (!this.currentEditingCell.selectedItems.find(s => s.id === String(createdId))) {
+                            this.currentEditingCell.selectedItems.push({ id: String(createdId), text: createdValue });
+                        }
+                        await this.saveMultiReferenceEdit();
+                        // Re-render the editor to show the newly added tag
+                        if (this.currentEditingCell.renderEditor) {
+                            this.currentEditingCell.renderEditor();
+                            this.currentEditingCell.cell.querySelector('.inline-editor-reference-search')?.focus();
+                        }
+                    } else {
+                        await this.saveReferenceEdit(createdId, createdValue);
+                    }
                 } else {
                     // Fallback: just close the inline editor
                     if (this.currentEditingCell) {
