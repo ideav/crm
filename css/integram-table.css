@@ -2909,19 +2909,19 @@ tr.row-selected {
 }
 
 /* ========================================
-   Mobile Responsive Styles (issue #695)
+   Mobile Responsive Styles (issue #695, #859)
    Edit form modal doesn't fit on mobile devices
    ======================================== */
 
-@media (max-width: 640px) {
+@media (max-width: 768px) {
     /* Edit form modal - remove min-width and use full width on mobile */
     .edit-form-modal {
         min-width: auto;
         width: calc(100% - 16px);
         max-width: none;
-        left: 8px;
+        left: 8px !important;
         right: 8px;
-        transform: translateY(-50%);
+        transform: translateY(-50%) !important;
         max-height: 90vh;
     }
 
