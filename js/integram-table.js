@@ -3433,18 +3433,28 @@ class IntegramTable {
                         cell.querySelector('.inline-editor-reference-search')?.focus();
                     });
 
-                    // Handle tag removal
+                    // Handle tag click: remove button removes tag, clicking tag itself opens edit form (issue #871)
                     tagsContainer.addEventListener('click', async (e) => {
                         const removeBtn = e.target.closest('.multi-ref-tag-remove');
-                        if (!removeBtn) return;
-                        const tag = removeBtn.closest('.multi-ref-tag');
+                        if (removeBtn) {
+                            const tag = removeBtn.closest('.multi-ref-tag');
+                            if (!tag) return;
+                            const id = tag.dataset.id;
+                            const text = tag.dataset.text;
+                            this.currentEditingCell.selectedItems = this.currentEditingCell.selectedItems.filter(s => !(s.id === id && s.text === text));
+                            await this.saveMultiReferenceEdit();
+                            renderEditor();
+                            cell.querySelector('.inline-editor-reference-search')?.focus();
+                            return;
+                        }
+                        const tag = e.target.closest('.multi-ref-tag');
                         if (!tag) return;
                         const id = tag.dataset.id;
-                        const text = tag.dataset.text;
-                        this.currentEditingCell.selectedItems = this.currentEditingCell.selectedItems.filter(s => !(s.id === id && s.text === text));
-                        await this.saveMultiReferenceEdit();
-                        renderEditor();
-                        cell.querySelector('.inline-editor-reference-search')?.focus();
+                        if (!id) return;
+                        const refTypeId = this.currentEditingCell.colType;
+                        if (refTypeId) {
+                            this.openEditForm(id, refTypeId, 0);
+                        }
                     });
 
                     // Keyboard navigation in search input
@@ -9574,17 +9584,27 @@ class IntegramTable {
                     dropdown.style.display = 'none';
                 });
 
-                // Handle tag removal
+                // Handle tag click: remove button removes tag, clicking tag itself opens edit form (issue #871)
                 tagsContainer.addEventListener('click', (e) => {
                     const removeBtn = e.target.closest('.multi-ref-tag-remove');
-                    if (!removeBtn) return;
-                    const tag = removeBtn.closest('.multi-ref-tag');
+                    if (removeBtn) {
+                        const tag = removeBtn.closest('.multi-ref-tag');
+                        if (!tag) return;
+                        const id = tag.dataset.id;
+                        const text = tag.dataset.text;
+                        wrapper._selectedItems = (wrapper._selectedItems || []).filter(s => !(s.id === id && s.text === text));
+                        renderTags();
+                        updateHiddenInput();
+                        return;
+                    }
+                    const tag = e.target.closest('.multi-ref-tag');
                     if (!tag) return;
                     const id = tag.dataset.id;
-                    const text = tag.dataset.text;
-                    wrapper._selectedItems = (wrapper._selectedItems || []).filter(s => !(s.id === id && s.text === text));
-                    renderTags();
-                    updateHiddenInput();
+                    if (!id) return;
+                    const refTypeId = wrapper.dataset.refTypeId;
+                    if (refTypeId) {
+                        this.openEditForm(id, refTypeId, 0);
+                    }
                 });
 
                 // Keyboard navigation
