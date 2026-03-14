@@ -696,7 +696,7 @@
     border-radius: 4px;
     box-shadow: var(--md-elevation-2);
     color: var(--md-text-secondary);
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
     font-family: 'Roboto', sans-serif;
     z-index: 100;
@@ -804,7 +804,7 @@
     display: flex;
     align-items: center;
     width: 100%;
-    font-size: 14px;
+    font-size: 13px;
     color: var(--md-text-primary);
     letter-spacing: 0.25px;
 }
@@ -873,7 +873,7 @@
     /* justify-content: space-between; */
     align-items: center;
     transition: background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-    font-size: 14px;
+    font-size: 13px;
     color: var(--md-text-primary);
 }
 
