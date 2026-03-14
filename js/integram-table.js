@@ -3003,7 +3003,7 @@ class IntegramTable {
             // changed (e.g. arrow key navigation completed) before the 100ms fires (issue #525)
             const editingCellRef = this.currentEditingCell;
             setTimeout(() => {
-                const outsideClickHandler = (e) => {
+                const outsideClickHandler = async (e) => {
                     if (!cell.contains(e.target)) {
                         document.removeEventListener('click', outsideClickHandler);
 
@@ -3014,7 +3014,20 @@ class IntegramTable {
                             this.pendingCellClick = clickedCell;
                         }
 
-                        saveEdit();
+                        // Issue #913: capture editing state before save attempt.
+                        // If saveEdit() fails validation (e.g. first column empty) the editor stays
+                        // open, so we must re-register this handler so the user can still save by
+                        // clicking outside after correcting the value.
+                        const editingCellBeforeSave = this.currentEditingCell;
+                        await saveEdit();
+                        // If currentEditingCell is unchanged after saveEdit(), it means the edit was
+                        // not completed (validation rejected the value) — re-register the handler.
+                        if (this.currentEditingCell === editingCellBeforeSave && this.currentEditingCell !== null) {
+                            // Clear any pending cell navigation since we didn't actually save
+                            this.pendingCellClick = null;
+                            document.addEventListener('click', outsideClickHandler);
+                            this.currentEditingCell.outsideClickHandler = outsideClickHandler;
+                        }
                     }
                 };
                 document.addEventListener('click', outsideClickHandler);
