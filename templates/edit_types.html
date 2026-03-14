@@ -1,11 +1,12 @@
 <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z" crossorigin="anonymous">
+<link rel="stylesheet" href="/css/edit-types.css">
 <style>
 .topm-20 { padding-top: 20px; }
 .table td {
     border-top: none;
     vertical-align: middle;
     padding: 0;
-    border-bottom: 1px solid #dee2e6;
+    border-bottom: 1px solid var(--border-color, #dee2e6);
 }
 .panel { font-size: 14px; }
 .space {
@@ -25,7 +26,7 @@
     z-index: 100;
 }
 .controls-left a:hover {
-    background-color:#f7f7f7;
+    background-color: var(--bg-secondary, #f7f7f7);
     border-radius:5px;
     text-decoration: none;
 }
@@ -42,7 +43,7 @@
 <script type="text/javascript">
 document.title='Редактор структуры таблиц';
 var editable=ext=false,curid=0,isRef=false,prefix=0
-    ,ajax='<img style="margin:1px" width="25px" src="/i/ajax.gif">'
+    ,ajax='<img width="25px" src="/i/ajax.gif">'
 	,nullmask=/:!NULL:/i
 	,multimask=/:MULTI:/i
 	,aliasmask=/:ALIAS=(.+):/i;
@@ -60,7 +61,7 @@ var str='';
 </script>
 <div id="messages" class="msgs" onclick="this.innerHTML=''"></div>
 <!-- Begin:&Editables -->{OK}
-<FORM id="addForm" style="position:fixed; background-color: white; z-index: 1; margin:5px; width:100%; max-width: 1050px;" method="post" action="/{_global_.Z}/_d_new/" onsubmit="if(byId('val').value==''){alert('Введите название таблицы');event.returnValue=false;event.preventDefault();}else addbtn.disabled=true;">
+<FORM id="addForm" class="edit-types-form" method="post" action="/{_global_.Z}/_d_new/" onsubmit="if(byId('val').value==''){alert('Введите название таблицы');event.returnValue=false;event.preventDefault();}else addbtn.disabled=true;">
     <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
     <div class="row t9n p-0 m-0">
         <div class="col-6 col-sm-4 col-md-3 pl-0 pr-1">
@@ -103,11 +104,11 @@ function filterTypes(){
                 $(this).hide();
         });
     $('#addbtn').prop('disabled',false);
-    $('.card-header').css('background-color','');
+    $('.card-header').removeClass('card-header-match');
     for(var i in t)
         if(t[i].v.toLowerCase()===$('#val').val().toLowerCase().trim()&&t[i].t==$('#baseTypes').val()){
             $('#addbtn').prop('disabled',true);
-            $('#id'+i).closest('.card-header').css('background-color','lightblue')
+            $('#id'+i).closest('.card-header').addClass('card-header-match');
             break;
         }
 }
@@ -140,7 +141,7 @@ str+='<option value="0">------------</option></select>';bt[0]='Tab delimiter';
 byId('baseTypes').innerHTML=str;
 </script>
 <!-- End:&Editables -->
-<div class="col-12" style="padding-left:33px;">
+<div class="col-12 edit-types-controls">
 <table id="basehelp" class="table table-striped hidden t9n">
 <tr><th>Базовый тип</th><th>Описание</th><th>Пример</th></tr>
 <tr><td>SHORT</td><td>Короткая строка (до 127 символов)</td><td>Интеграл</td></tr>
@@ -162,7 +163,7 @@ byId('baseTypes').innerHTML=str;
 <tr><td>------------</td><td>Разделитель закладок для формы редактирования</td><td></td></tr>
 </table>
 
-    <div style="padding: 10px 0 0 0" class="controls-left">
+    <div class="controls-left controls-left-area">
         <a onclick="document.location.reload()" title="Обновить страницу и свернуть все объекты"><svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M25 5.99763V11.9976M25 11.9976H19M25 11.9976L20.36 7.63763C19.2853 6.56235 17.9556 5.77684 16.4952 5.35441C15.0348 4.93198 13.4911 4.88639 12.0083 5.22189C10.5255 5.5574 9.1518 6.26307 8.01547 7.27305C6.87913 8.28304 6.01717 9.56442 5.51 10.9976M3 21.9976V15.9976M3 15.9976H9M3 15.9976L7.64 20.3576C8.71475 21.4329 10.0444 22.2184 11.5048 22.6409C12.9652 23.0633 14.5089 23.1089 15.9917 22.7734C17.4745 22.4379 18.8482 21.7322 19.9845 20.7222C21.1209 19.7122 21.9828 18.4308 22.49 16.9976" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"></path>
         </svg> Обновить</a>
@@ -203,7 +204,7 @@ function hideMenu(i){
         $('#'+i).find('.close-btn').hide();
 	drawReqs(i,false,true);
 	if(r[i]==undefined)
-		$('#req'+i).hide();
+		$('#req'+i).addClass('hidden');
 	$('#m'+i).html('').hide();
 	$('#id'+i).show();
 }
@@ -264,7 +265,7 @@ function toggleMenu(i){
 			menu+='</tr></table>'
 		}
 		else{
-			menu+=diclink+t[i].v+'<br /><div style="padding:6px;"><input type="checkbox" title="'+'Невозможно добавить одинаковые независимые записи'+'" DISABLED '+t[i].u+' />'+'Уникальный'+'</div>';
+			menu+=diclink+t[i].v+'<br /><div class="p-1"><input type="checkbox" title="'+'Невозможно добавить одинаковые независимые записи'+'" DISABLED '+t[i].u+' />'+'Уникальный'+'</div>';
 			menu+='<div width="100%" align="right"><A onclick="toggleMenu('+i+');">'+'Скрыть'+'</a></div>';
 		}
 		byId('m'+i).innerHTML=menu;
@@ -275,7 +276,7 @@ function toggleMenu(i){
 		if(t[i].t!=0)
 			drawReqs(i,true,true);
 		if(byId('req'+i))
-    		byId('req'+i).style.display='block';
+    		byId('req'+i).classList.remove('hidden');
 		byId('m'+i).style.display='inline';
 		byId('id'+i).style.display='none';
 	}
@@ -319,9 +320,9 @@ function wrapObj(i){
     if(t[i].t==0)
 		obj+='</div>';
     else if(r[i]===undefined)
-		obj+='</div><div class="card-body" style="padding-bottom:5px; padding-top:5px; display:none;" id="req'+i+'">:req'+i+':</div></div></div>';
+		obj+='</div><div class="card-body card-body-compact hidden" id="req'+i+'">:req'+i+':</div></div></div>';
 	else
-		obj+='</div><div class="card-body" style="padding-bottom:5px; padding-top:5px; " id="req'+i+'">:req'+i+':</div></div></div>';
+		obj+='</div><div class="card-body card-body-compact" id="req'+i+'">:req'+i+':</div></div></div>';
 	return obj;
 }
 function closeDef(i){
@@ -425,7 +426,7 @@ function drawReqs(i,ext,force){
 				    +'" onclick="byId(\'edit-alias'+aid+'\').classList.add(\'hidden\')"><i class="pi pi-pencil" style="font-size: 1.25rem;"></i></a>&nbsp;</div>'
 				    +'<div id="edit-alias'+aid+'" style="display:inline-block;">&nbsp;&nbsp;<a onclick="setMulti('+aid+')" title="'
 				        +(multiple?'Разрешить выбор нескольких значений':'Запретить выбор нескольких значений')
-				    +'" onclick="byId(\'edit-alias'+aid+'\').classList.add(\'hidden\')"><i class="pi pi-list" style="font-size: 1.25rem; color: '+(multiple?'#aaa':'#333')+';"></i></a>&nbsp;</div>';
+				    +'" onclick="byId(\'edit-alias'+aid+'\').classList.add(\'hidden\')"><i class="pi pi-list '+(multiple?'icon-multi-enabled':'icon-multi-disabled')+'" style="font-size: 1.25rem;"></i></a>&nbsp;</div>';
 			def_ref_dd='<ul id="dd'+id+'" class="dropdown-menu">'+ajax+'</ul>';
 			def_ref_class=' class="dropdown-toggle" data-toggle="dropdown" autocomplete="off" onkeyup="refreshDD('+r[i][req].i+','+id+')"';
 		}
@@ -440,7 +441,7 @@ function drawReqs(i,ext,force){
 					reqs+='&nbsp;<A onclick="myApi(\'POST\',\'_d_null/'+r[i][req].i+'?JSON&up='+i+'\',\'d\');setAjax(this)" TITLE="'
 					        +(nullable?'Нажмите, чтобы сделать поле необязательным'
 					               :'Нажмите, чтобы сделать поле обязательным')
-					    +'"><i class="pi pi-exclamation-circle" style="font-size: 1.25rem; color: '+(nullable?'#e00':'#999')+';"></i></A>';
+					    +'"><i class="pi pi-exclamation-circle '+(nullable?'icon-required':'icon-optional')+'" style="font-size: 1.25rem;"></i></A>';
 					reqs+='&nbsp;<nobr></td><td valign="top"><FORM method="post" id="frm'+r[i][req].i+'" action="/{_global_.Z}/_d_attrs/'+r[i][req].i+'/?up='+i+'"><input type="hidden" name="_xsrf" value="{_global_.xsrf}">';
 					reqs+=nullable?'<input type="hidden" name="set_null" value="1">':'';
 					reqs+=multiple?'':'<input type="hidden" name="multi" value="1">';
@@ -453,10 +454,10 @@ function drawReqs(i,ext,force){
 			}
 			else{
 				if(nullable)
-					reqs+='&nbsp;<A TITLE="'+'Обязательное поле'+'""><i class="pi pi-exclamation-triangle" style="font-size: 1.25rem; color: #e00;"></i></A>&nbsp;';
+					reqs+='&nbsp;<A TITLE="'+'Обязательное поле'+'""><i class="pi pi-exclamation-triangle icon-required" style="font-size: 1.25rem;"></i></A>&nbsp;';
 				else
-					reqs+='&nbsp;<A TITLE="'+'Необязательное поле'+'""><i class="pi pi-exclamation-triangle" style="font-size: 1.25rem; color: #999;"></i></A>';
-				reqs+='</td><td><input type="text" name="val" value="'+def_val+'" style="background-color:lightgray;">';
+					reqs+='&nbsp;<A TITLE="'+'Необязательное поле'+'""><i class="pi pi-exclamation-triangle icon-optional" style="font-size: 1.25rem;"></i></A>';
+				reqs+='</td><td><input type="text" name="val" value="'+def_val+'" class="input-disabled">';
 			}
 			reqs+='</td></tr>';
 		}
@@ -473,7 +474,7 @@ function drawReqs(i,ext,force){
 		reqs+='</table>';
 		if(editable){ // Draw the Add req DDList and button
 			reqs+='<FORM id="add'+i+'" method="post" action="/{_global_.Z}/_d_req/'+i+'" onsubmit="addReq('+i+')"><input type="hidden" name="_xsrf" value="{_global_.xsrf}">';
-			reqs+='<div class="input-group input-group-sm"><select style="max-width:300px; " name="t" id="sel'+i+'" class="form-control" onchange="check('+i+',this.value)"><option value=""> </option>';
+			reqs+='<div class="input-group input-group-sm"><select name="t" id="sel'+i+'" class="form-control add-col-select" onchange="check('+i+',this.value)"><option value=""> </option>';
 			var my=new Array();
 			my[i]=i;
 			for(j in r[i]) // Get the already used Reqs
@@ -494,7 +495,7 @@ function drawReqs(i,ext,force){
 			reqs+='</select><span class="input-group-btn"><input type="submit" class="btn btn-outline-secondary btn-sm" name="addreqbtn'+i+'" id="addreqbtn'+i+'" value="'+'Добавить колонку'+'" ></span></div></FORM>'
 			    +'<FORM id="new'+i+'" class="hidden" method="post" action="/{_global_.Z}/_d_req/" onsubmit="event.returnValue=false;event.preventDefault();validateNewType('+i+');">'
 			    +'<div class="input-group input-group-sm"><input type="hidden" name="_xsrf" value="{_global_.xsrf}">'
-			    +'<table><tr><td colspan="3"><input id="input'+i+'" type="text" class="form-control" style="margin-bottom:5px;"></td>'
+			    +'<table><tr><td colspan="3"><input id="input'+i+'" type="text" class="form-control new-type-input"></td>'
 			    +'<tr><td><div><SELECT id="t'+i+'" class="form-control form-control-sm">'+str+'</SELECT></div></td>'
 			    +'<TD align="center" title="'+'Поставьте галку, если это будет справочное значение: Тип, Категория и т.п.'+'">'
     			    +'&nbsp;'+'Ссылка'+'&nbsp;<br /><input id="ref'+i+'" type="checkbox" value="1" /></TD>'
