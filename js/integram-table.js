@@ -7198,11 +7198,18 @@ class IntegramTable {
             const reqs = metadata.reqs || [];
             const recordReqs = {};
             reqs.forEach((req, idx) => {
+                const rawValue = rowValues[idx + 1] !== undefined ? rowValues[idx + 1] : '';
                 recordReqs[req.id] = {
-                    value: rowValues[idx + 1] !== undefined ? rowValues[idx + 1] : '',
+                    value: rawValue,
                     base: req.type,
                     order: idx
                 };
+                // For subordinate table requisites (arr_id present), the value is the count of
+                // subordinate records. Store it as `arr` so the tab label reads it correctly
+                // (issue #923).
+                if (req.arr_id) {
+                    recordReqs[req.id].arr = typeof rawValue === 'number' ? rawValue : (parseInt(rawValue, 10) || 0);
+                }
             });
 
             return {
