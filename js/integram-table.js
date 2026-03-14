@@ -3703,6 +3703,11 @@ class IntegramTable {
                     throw new Error(result.error);
                 }
 
+                // Issue #921: Update data-ref-value-id so the edit icon uses the correct
+                // reference record ID (not the parent row's record ID) when the cell was
+                // previously empty and gets its first value via a reference selection
+                cell.dataset.refValueId = selectedId;
+
                 // Update the cell display with the selected text
                 this.updateCellDisplay(cell, selectedText, this.currentEditingCell.format);
 
@@ -4434,7 +4439,10 @@ class IntegramTable {
                 // Issue #915: If the cell was empty (no edit icon) and now has a value,
                 // add the edit icon using the stored data-edit-type-id attribute
                 const editTypeId = cell.dataset.editTypeId;
-                const editRecordId = cell.dataset.recordId;
+                // Issue #921: For reference fields, use data-ref-value-id as the record ID
+                // (the reference's own ID, e.g. role ID 520), not data-record-id (the parent
+                // row's ID, e.g. user ID 557). data-ref-value-id is updated by saveReferenceEdit.
+                const editRecordId = cell.dataset.refValueId || cell.dataset.recordId;
                 const editRowIndex = cell.dataset.rowIndex;
                 const hasNewValue = newValue !== null && newValue !== undefined && newValue !== '';
                 if (hasNewValue && editTypeId && editRecordId && editRecordId !== '' && editRecordId !== '0' && editRecordId !== 'dynamic') {
