@@ -2118,7 +2118,7 @@ class IntegramTable {
             // Show add row button only for object-source tables (issue #807)
             const isObjectSource = this.objectTableId || this.getDataSourceType() === 'table';
             const addRowBtnHtml = isObjectSource
-                ? `<button class="add-row-btn" onclick="window.${ instanceName }.addNewRow()" title="Добавить запись"><i class="pi pi-plus"></i></button>`
+                ? `<button class="add-row-btn" onclick="window.${ instanceName }.addNewRow()" title="Добавить строку в таблицу"><i class="pi pi-plus"></i></button>`
                 : '';
 
             return `
