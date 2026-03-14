@@ -946,7 +946,7 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                 
             case 'submitForm':
                 if(json.id){
-                    showMsg('submitResult','Данные успешно отправлены, Спасибо!','success',0);
+                    showMsg('submitResult',quiz.success.replace(/:id:/gmu,json.id)||'Данные успешно отправлены, Спасибо!','success',0);
                     $('#runFormSubmit').remove();
                 }
                 else{
