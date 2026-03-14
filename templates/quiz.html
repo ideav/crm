@@ -951,7 +951,7 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                 
             case 'submitForm':
                 if(json.id){
-                    showMsg('submitResult',quiz.success.replace(/:id:/gmu,json.id)||'Данные успешно отправлены, Спасибо!','success',0);
+                    showMsg('submitResult',(quiz.success||'Данные успешно отправлены, Спасибо!').replace(/:id:/gmu,json.id),'success',0);
                     $('#runFormSubmit').remove();
                     var redirectTimeout=parseInt(quiz['redirect-timeout'])||0;
                     if(redirectTimeout>0)
