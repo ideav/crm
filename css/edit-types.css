@@ -10,6 +10,9 @@
     max-width: 1050px;
 }
 
+#obj {
+    margin-left: -14px;
+}
 /* Controls area below form */
 .edit-types-controls {
     margin-top: 44px;
