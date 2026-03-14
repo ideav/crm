@@ -126,7 +126,7 @@ function gjsSeekSplit(tmpClass){
             gjsSplit(this);
     });
 }
-function gjsSplit(el){
+function gjsSplit(el) {
     var i,tmpClass=getTmpClass()
         ,html,src=$(el).attr('src-data')
         ,items=$(el).attr('src-data').split($(el).attr('src-split'));
@@ -140,7 +140,7 @@ function gjsSplit(el){
             $(el).replaceWith($(html).attr('gjs-order',i));
     }
 }
-function postForm(url){
+function postForm(url) {
 	const form = document.createElement('form');
 	form.method = 'post';
 	form.action = '/'+db+'/'+url;
