@@ -1640,15 +1640,15 @@ class IntegramTable {
             switch (format) {
                 case 'NUMBER':
                 case 'SIGNED':
-                    cellClass = 'number-cell';
+                    cellClass += ' number-cell';
                     break;
                 case 'BOOLEAN':
-                    cellClass = 'boolean-cell';
+                    cellClass += ' boolean-cell';
                     // Display as checkbox icon: any non-empty value = YES, empty = NO
                     // Don't return early - let code continue to editable logic
                     break;
                 case 'DATE':
-                    cellClass = 'date-cell';
+                    cellClass += ' date-cell';
                     if (value) {
                         const dateObj = this.parseDDMMYYYY(value);
                         if (dateObj && !isNaN(dateObj.getTime())) {
@@ -1660,7 +1660,7 @@ class IntegramTable {
                     }
                     break;
                 case 'DATETIME':
-                    cellClass = 'datetime-cell';
+                    cellClass += ' datetime-cell';
                     if (value) {
                         const datetimeObj = this.parseDDMMYYYYHHMMSS(value);
                         if (datetimeObj && !isNaN(datetimeObj.getTime())) {
@@ -1672,15 +1672,15 @@ class IntegramTable {
                     }
                     break;
                 case 'MEMO':
-                    cellClass = 'memo-cell';
+                    cellClass += ' memo-cell';
                     break;
                 case 'PWD':
-                    cellClass = 'pwd-cell';
+                    cellClass += ' pwd-cell';
                     // Only mask with asterisks if there's a value, show empty if empty
                     displayValue = (value !== null && value !== undefined && value !== '') ? '******' : '';
                     break;
                 case 'FILE':
-                    cellClass = 'file-cell';
+                    cellClass += ' file-cell';
                     if (value && value !== '') {
                         // Check if value is already an HTML anchor tag (from object/ endpoint)
                         if (typeof value === 'string' && value.trim().startsWith('<a')) {
