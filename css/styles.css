@@ -13,6 +13,28 @@
     --button-primary-hover: #2563eb;
     --link-color: #3b82f6;
     --card-bg: #ffffff;
+
+    /* Border radius scale */
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 12px;
+    --radius-full: 50%;
+
+    /* Sidebar component sizes */
+    --sidebar-toggle-size: 2.5rem;
+    --menu-icon-size: 1.25rem;
+
+    /* Status / semantic colors */
+    --color-success: #16a34a;
+    --color-success-bg: #d1fae5;
+    --color-success-border: #6ee7b7;
+    --color-warning: #d97706;
+    --color-warning-bg: #fef3c7;
+    --color-error: #dc2626;
+    --color-error-bg: #fee2e2;
+    --color-danger: #dc3545;
+    --color-danger-hover: #c82333;
+    --color-danger-dark-hover: #bb2d3b;
 }
 
 [data-theme="dark"] {
@@ -29,6 +51,15 @@
     --button-primary-hover: #2563eb;
     --link-color: #60a5fa;
     --card-bg: #2d2d2d;
+
+    /* Status / semantic colors for dark theme */
+    --color-success: #34d399;
+    --color-success-bg: #064e3b;
+    --color-success-border: #059669;
+    --color-warning: #fbbf24;
+    --color-warning-bg: #78350f;
+    --color-error: #f87171;
+    --color-error-bg: #7f1d1d;
 }
 
 /* Reset and base styles */
@@ -202,7 +233,7 @@ body {
     background-color: var(--button-primary);
     color: white;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     font-size: 0.9rem;
     font-weight: 500;
     cursor: pointer;
@@ -225,7 +256,7 @@ body {
     background-color: var(--bg-secondary);
     color: var(--text-primary);
     border: 1px solid var(--border-color);
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     font-size: 0.9rem;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -240,10 +271,10 @@ body {
     align-items: center;
     gap: 0.375rem;
     padding: 0.625rem 1.25rem;
-    background-color: #dc3545;
+    background-color: var(--color-danger);
     color: white;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     font-size: 0.9rem;
     font-weight: 500;
     cursor: pointer;
@@ -251,7 +282,7 @@ body {
 }
 
 .btn-danger:hover {
-    background-color: #c82333;
+    background-color: var(--color-danger-hover);
 }
 
 .btn-small {
@@ -285,17 +316,15 @@ body {
 
 /* Success message */
 .success-message {
-    background-color: #d1fae5;
-    border: 1px solid #6ee7b7;
+    background-color: var(--color-success-bg);
+    border: 1px solid var(--color-success-border);
     color: #065f46;
     padding: 1rem;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     margin-bottom: 1.5rem;
 }
 
 [data-theme="dark"] .success-message {
-    background-color: #064e3b;
-    border-color: #059669;
     color: #d1fae5;
 }
 

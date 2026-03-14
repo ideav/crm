@@ -89,7 +89,7 @@
 }
 
 .user-menu-item-danger {
-    color: #dc3545;
+    color: var(--color-danger, #dc3545);
 }
 
 .user-menu-item-danger:hover {
@@ -123,12 +123,12 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 2rem;
-    height: 2rem;
+    width: var(--sidebar-toggle-size, 2.5rem);
+    height: var(--sidebar-toggle-size, 2.5rem);
     margin: 0 0.75rem 0.75rem auto;
     background: none;
     border: 1px solid var(--border-color);
-    border-radius: 6px;
+    border-radius: var(--radius-md, 6px);
     cursor: pointer;
     color: var(--text-secondary);
     font-size: 1rem;
@@ -195,7 +195,7 @@
 }
 
 .menu-icon {
-    font-size: 1.25rem;
+    font-size: var(--menu-icon-size, 1.25rem);
     width: 1.5rem;
     text-align: center;
 }

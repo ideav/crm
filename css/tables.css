@@ -160,7 +160,7 @@
 
 /* Inline error tooltip */
 .inline-error-tooltip {
-    background-color: #dc3545;
+    background-color: var(--color-danger, #dc3545);
     color: white;
     padding: 0.5rem 0.75rem;
     border-radius: 6px;
@@ -225,7 +225,7 @@
 }
 
 .folder-action-btn.delete:hover {
-    color: #dc3545;
+    color: var(--color-danger, #dc3545);
 }
 
 .folder-content {
