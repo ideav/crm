@@ -109,7 +109,7 @@
 .integram-table-controls {
     display: flex;
     align-items: center;
-    /* gap: 10px; */
+    gap: 8px;
 }
 
 .integram-table-settings {
