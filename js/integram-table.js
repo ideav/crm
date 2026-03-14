@@ -3795,9 +3795,12 @@ class IntegramTable {
                 mainFieldHtml = `<input type="text" class="form-control" id="field-main-ref-create" name="main" value="${this.escapeHtml(initialValue)}" required>`;
             }
 
+            // For DATE/DATETIME, the visible/interactive element is the picker input (id="field-main-ref-create-picker"),
+            // not the hidden input (id="field-main-ref-create"), so the label must point to the picker (issue #889)
+            const mainLabelTarget = (mainFieldType === 'DATE' || mainFieldType === 'DATETIME') ? 'field-main-ref-create-picker' : 'field-main-ref-create';
             let attributesHtml = `
                 <div class="form-group">
-                    <label for="field-main-ref-create">${typeName} <span class="required">*</span></label>
+                    <label for="${mainLabelTarget}">${typeName} <span class="required">*</span></label>
                     ${ mainFieldHtml }
                 </div>
             `;
@@ -3809,7 +3812,10 @@ class IntegramTable {
                 const isRequired = attrs.required;
 
                 attributesHtml += `<div class="form-group">`;
-                attributesHtml += `<label for="field-ref-${req.id}">${fieldName}${isRequired ? ' <span class="required">*</span>' : ''}</label>`;
+                // For reference fields, the visible/interactive element is the search input (id="field-ref-${req.id}-search"),
+                // not the hidden input (id="field-ref-${req.id}"), so the label must point to the search input (issue #889)
+                const labelTarget = req.ref_id ? `field-ref-${req.id}-search` : `field-ref-${req.id}`;
+                attributesHtml += `<label for="${labelTarget}">${fieldName}${isRequired ? ' <span class="required">*</span>' : ''}</label>`;
 
                 // Check if this is a reference field
                 if (req.ref_id) {
