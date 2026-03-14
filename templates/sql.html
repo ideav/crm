@@ -10,14 +10,14 @@ label {
 }
 .list-open {
     z-index: 10000;
-    background-color: #fafafa;
-    border: 1px solid #eeeeee;
+    background-color: var(--card-bg, #fafafa);
+    border: 1px solid var(--border-color, #eeeeee);
 }
 .rth {
     vertical-align: bottom;
 }
 .saving {
-    border-color: green;
+    border-color: var(--button-success, #28a745);
     border-width: 2px;
 }
 .btns, .inline {
@@ -28,19 +28,21 @@ label {
     margin: 3px;
     cursor: pointer;
     font-size: 18px;
-    color: #666;
+    color: var(--text-secondary, #666);
     transition: color 0.2s ease, transform 0.2s ease;
     vertical-align: middle;
 }
 .icon8:hover {
-    color: #333;
+    color: var(--text-primary, #333);
     transform: scale(1.1);
 }
 .icon8.text-muted {
-    color: #aaa;
+    color: var(--text-secondary, #aaa);
+    opacity: 0.6;
 }
 .icon8.text-muted:hover {
-    color: #666;
+    color: var(--text-secondary, #666);
+    opacity: 1;
 }
 .icon8.text-danger {
     color: #dc3545;
@@ -63,7 +65,7 @@ label {
     font-size: 11px;
     font-weight: 600;
     color: #fff;
-    background-color: #007bff;
+    background-color: var(--button-primary, #3b82f6);
     border-radius: 50%;
     margin: 2px;
     vertical-align: middle;
@@ -73,15 +75,15 @@ label {
     transition: background-color 0.2s ease, transform 0.2s ease;
 }
 .order-badge-clickable:hover {
-    background-color: #0056b3;
+    background-color: var(--button-primary-hover, #2563eb);
     transform: scale(1.1);
 }
 .loading-spinner {
     display: inline-block;
     width: 16px;
     height: 16px;
-    border: 2px solid #f3f3f3;
-    border-top: 2px solid #007bff;
+    border: 2px solid var(--bg-secondary, #f3f3f3);
+    border-top: 2px solid var(--button-primary, #3b82f6);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
 }
@@ -123,16 +125,16 @@ label {
     padding: 0;
 }
 .btn-textarea-save {
-    background-color: #007bffbb;
+    background-color: var(--button-primary-muted, rgba(59, 130, 246, 0.73));
 }
 .btn-textarea-save:hover {
-    background-color: #007bff;
+    background-color: var(--button-primary, #3b82f6);
 }
 .btn-textarea-cancel {
-    background-color: #6c757d88;
+    background-color: var(--text-secondary-muted, rgba(108, 117, 125, 0.53));
 }
 .btn-textarea-cancel:hover {
-    background-color: #6c757d;
+    background-color: var(--text-secondary, #6c757d);
 }
 td[id*="td101"],td[id*="td102"],td[id*="td105"],td[id*="td132"] {
     position: relative;
@@ -142,7 +144,7 @@ td[id*="td101"],td[id*="td102"],td[id*="td105"],td[id*="td132"] {
     position: absolute;
     right: 5px;
     cursor: pointer;
-    background-color: white;
+    background-color: var(--card-bg, white);
     padding: 0 0 0 4px;
 }
 .control-label:last-of-type {
@@ -163,12 +165,12 @@ center .add-id-for-col {
     right: 0px;
     z-index: 0;
     cursor: pointer;
-    background-color: white;
-    border: 1px solid #007bff;
+    background-color: var(--card-bg, white);
+    border: 1px solid var(--button-primary, #3b82f6);
     font-size: 12px;
     padding: 0 3px;
     border-radius: 5px;
-    color: #007bff;
+    color: var(--button-primary, #3b82f6);
 }
 center:hover .add-id-for-col {
     display: inline-block;
@@ -180,9 +182,9 @@ center:hover .add-id-for-col {
     margin-left: auto;
     margin-right: auto;
     margin-top: 20%;
-    border: 1px solid gray;
+    border: 1px solid var(--border-color, #dee2e6);
     border-radius: 3px;
-    background-color: #fbfbfb;
+    background-color: var(--card-bg, #fbfbfb);
 }
 .middle-modal{
     display: table-cell;
@@ -241,8 +243,8 @@ center:hover .add-id-for-col {
 <br/>
 <div id="list">
     <p><a target="_rep{_global_.id}" href="/{_global_.z}/report/:id:">:val:</a> 
-     <a target="_rep{_global_.id}"  href="/{_global_.z}/smartq/:id:"><i class="pi pi-pencil icon8 ml-2" style="color: #666;"></i></a>
-     <a  href="/{_global_.z}/sql/:id:"><i class="pi pi-cog icon8 ml-2" style="color: #666;"></i></a>
+     <a target="_rep{_global_.id}"  href="/{_global_.z}/smartq/:id:"><i class="pi pi-pencil icon8 ml-2"></i></a>
+     <a  href="/{_global_.z}/sql/:id:"><i class="pi pi-cog icon8 ml-2"></i></a>
 </p>
 </div>
 </div>
@@ -754,7 +756,7 @@ function myApi(m,u,b,vars,index){ // Параметры: метод, адрес,
                     // The template for the data line
                     rbody='<tr>'+l+'</tr>';
                     // Table: Header (h) + Control lines (c) + Data (rbody as a template)
-                    byId('ShowReport').innerHTML='<table class="table table-bordered table-sm"><thead><tr>'+h+c.join('')+'</thead><tbody id="rbody" style="display:none;">'+rbody+'</body></table>';
+                    byId('ShowReport').innerHTML='<table class="table table-bordered table-sm integram-table"><thead><tr>'+h+c.join('')+'</thead><tbody id="rbody" style="display:none;">'+rbody+'</body></table>';
                     // A list of columns available to add to the report
                     h=colListTemplate.replace(/:id:/g,'')
                                     .replace(':val:','выберите таблицу');
@@ -1054,7 +1056,7 @@ function removeTextarea(textareaSelector) {
     $(textareaSelector).parent().remove();
     // Get back to normal
     $('[id="' + inputId + '"]').removeClass('active-input');
-    $('[id="' + inputId + '"]').css('background-color', 'white');
+    $('[id="' + inputId + '"]').css('background-color', '');
     // $('[id="' + inputId + '"]').css('box-shadow', 'none');
 }
 function insertValueToTextarea(newTextarea, value) {

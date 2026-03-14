@@ -1,0 +1,88 @@
+/* Edit Types Screen Styles */
+
+/* Top panel (fixed form) */
+.edit-types-form {
+    position: fixed;
+    background-color: var(--bg-primary);
+    z-index: 1;
+    margin: 5px;
+    width: 100%;
+    max-width: 1050px;
+}
+
+/* Controls area below form */
+.edit-types-controls {
+    padding-left: 33px;
+}
+
+/* Controls left links */
+.controls-left-area {
+    padding: 10px 0 0 0;
+}
+
+/* Schema card containers */
+.schema-card-wrap {
+    margin-top: 20px;
+}
+
+/* Card body with minimal padding */
+.card-body-compact {
+    padding-bottom: 5px;
+    padding-top: 5px;
+}
+
+/* Inline element container */
+.inline-block {
+    display: inline;
+}
+
+/* Double indent spacer */
+.indent-2 {
+    display: inline-block;
+    width: 14px;
+}
+
+/* Icon: multi-select enabled */
+.icon-multi-enabled {
+    color: var(--text-secondary);
+}
+
+/* Icon: multi-select disabled (active) */
+.icon-multi-disabled {
+    color: var(--text-primary);
+}
+
+/* Required field indicator */
+.icon-required {
+    color: #dc3545;
+}
+
+/* Optional field indicator */
+.icon-optional {
+    color: var(--text-secondary);
+}
+
+/* Disabled input field */
+.input-disabled {
+    background-color: var(--bg-secondary);
+    color: var(--text-secondary);
+}
+
+/* Dropdown select — add column */
+.add-col-select {
+    max-width: 300px;
+}
+
+/* New type input row */
+.new-type-input {
+    margin-bottom: 5px;
+}
+
+/* Highlighted matching card header */
+.card-header-match {
+    background-color: #cfe2ff;
+}
+
+[data-theme="dark"] .card-header-match {
+    background-color: #1e3a5f;
+}
