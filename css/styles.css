@@ -13,6 +13,20 @@
     --button-primary-hover: #2563eb;
     --link-color: #3b82f6;
     --card-bg: #ffffff;
+    --icon-type-3: #3b82f6;
+    --icon-type-3-bg: rgba(59, 130, 246, 0.15);
+    --icon-type-4: #10b981;
+    --icon-type-4-bg: rgba(16, 185, 129, 0.15);
+    --icon-type-5: #f59e0b;
+    --icon-type-5-bg: rgba(245, 158, 11, 0.15);
+    --icon-type-6: #8b5cf6;
+    --icon-type-6-bg: rgba(139, 92, 246, 0.15);
+    --icon-type-7: #ec4899;
+    --icon-type-7-bg: rgba(236, 72, 153, 0.15);
+    --icon-type-8: #6b7280;
+    --icon-type-8-bg: rgba(107, 114, 128, 0.15);
+    --icon-type-9: #06b6d4;
+    --icon-type-9-bg: rgba(6, 182, 212, 0.15);
 }
 
 [data-theme="dark"] {
@@ -29,6 +43,20 @@
     --button-primary-hover: #2563eb;
     --link-color: #60a5fa;
     --card-bg: #2d2d2d;
+    --icon-type-3: #60a5fa;
+    --icon-type-3-bg: rgba(96, 165, 250, 0.2);
+    --icon-type-4: #34d399;
+    --icon-type-4-bg: rgba(52, 211, 153, 0.2);
+    --icon-type-5: #fbbf24;
+    --icon-type-5-bg: rgba(251, 191, 36, 0.2);
+    --icon-type-6: #a78bfa;
+    --icon-type-6-bg: rgba(167, 139, 250, 0.2);
+    --icon-type-7: #f472b6;
+    --icon-type-7-bg: rgba(244, 114, 182, 0.2);
+    --icon-type-8: #9ca3af;
+    --icon-type-8-bg: rgba(156, 163, 175, 0.2);
+    --icon-type-9: #22d3ee;
+    --icon-type-9-bg: rgba(34, 211, 238, 0.2);
 }
 
 /* Reset and base styles */

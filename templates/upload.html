@@ -1,17 +1,17 @@
 <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z" crossorigin="anonymous">
-<center><h3 class="mt-2">Универсальная загрузка файлов</h3></center>
+<h3 class="mt-2">Универсальная загрузка файлов</h3>
 <style>
 .dict {
     display: inline-block;
     padding: 5px 5px;
-    background-color: #fff;
-    border: 1px solid #666;
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-color);
     margin-bottom: 5px;
     margin-right: -1px;
     font-size: small;
 }
 .base-type {
-    color: lightgray;
+    color: var(--text-secondary);
 }
 .has-formula {
     border-bottom: 5px solid green;
@@ -21,10 +21,10 @@
     text-decoration: none;
 }
 .search-results{
-    border: 1px solid #efefef;
+    border: 1px solid var(--border-color);
     position: absolute;
     padding: .5rem 0;
-    background-color: #fff;
+    background-color: var(--bg-primary);
     display: none;
     z-index: 2;
 }
@@ -37,6 +37,23 @@
 .auto-parent::-webkit-outer-spin-button,
 .auto-parent::-webkit-inner-spin-button {
     -webkit-appearance: none;
+}
+input[type="checkbox"] {
+    accent-color: var(--button-primary);
+}
+.upload-file-label {
+    display: inline-block;
+    padding: .375rem .75rem;
+    cursor: pointer;
+}
+.cell-error {
+    background-color: var(--cell-error-bg, #ffc107);
+}
+.cell-success {
+    background-color: var(--cell-success-bg, #d4edda);
+}
+.cell-empty {
+    background-color: var(--bg-secondary);
 }
 </style>
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
@@ -53,13 +70,13 @@
 </div>
 <div id="input-area" class="m-1 t9n" style="display:none">
     <table>
-        <tr><td class="pr-2"><a href="/{_global_.z}/{_global_.action}" title="Вернуться к выбору таблицы"><i class="pi pi-arrow-left" style="font-size: 1.25rem; color: #555;"></i></a></td><td class="pt-2"><h4 id="chosen"></h4></td></tr>
+        <tr><td class="pr-2"><a href="/{_global_.z}/{_global_.action}" title="Вернуться к выбору таблицы"><i class="pi pi-arrow-left" style="font-size: 1.25rem; color: var(--text-secondary);"></i></a></td><td class="pt-2"><h4 id="chosen"></h4></td></tr>
     </table>
     <div class="mb-5 p-1 p-sm-2 shadow">
         Вставьте текст из файла в это поле или выберите файл для загрузки:
         <textarea rows="5" class="form-control mb-2 mt-1" id="input"></textarea>
         JSON или любой текстовый файл: CSV, TXT и т.п. Форматы XLS и XLSX пока не поддерживаются (просто скопируйте кусок вашего экселя в поле выше).
-        <input class="form-control mb-2" type="file" id="selectFiles" value="Import" />
+        <label class="btn btn-outline-secondary upload-file-label mb-2"><i class="pi pi-upload"></i> Выберите файл<input type="file" id="selectFiles" style="display:none" /></label>
         <!--
         можно загрузить этот файл по ссылке:
         <input class="form-control" type="text" id="selectLink" /><br />
@@ -67,7 +84,7 @@
         <div class="d-inline-block pb-3" id="try"><button onclick="importParse()" class="btn btn-primary">Проверить</button></div>
         <div class="d-inline-block pb-3"><button onclick="$('#tune').toggle()" id="tune-btn" class="btn btn-outline-secondary">Настроить</button></div>
     </div>
-    <div id="tune" class="bg-light mb-5 pl-1 pl-sm-2 pr-1 pr-sm-2 pb-2 pt-3 shadow" style="display:none; border-top: 1px solid #efefef;">
+    <div id="tune" class="bg-light mb-5 pl-1 pl-sm-2 pr-1 pr-sm-2 pb-2 pt-3 shadow" style="display:none; border-top: 1px solid var(--border-color);">
         <h5>Настройки импорта</h5>
         <div class="d-inline-block pb-1 mr-4 pt-1">
             <label><input id="header" type="checkbox">&nbsp;Первая строка содержит заголовок</label><br />
@@ -83,7 +100,7 @@
         </div>
         <div id="sample" style="/*overflow-x: auto;*/ display:none" class="mt-1">
             Первые две строки файла:
-            <table class="table-sm table-bordered mb-3 bg-white"><tbody id="1st2"></tbody></table>
+            <table class="table-sm table-bordered mb-3"><tbody id="1st2"></tbody></table>
         </div>
         <br /><span id="order">Вы можете настроить последовательность полей, как они идут в вашем файле:</span><br />
         <div id="sortable" style="white-space: nowrap; display: flex; /*overflow-x: auto*/" class="mt-1"></div>
@@ -372,34 +389,34 @@ function doSaveFormula(){
     }
 }
 function markSelected(v){
-    $('.ui-state-default,.ui-state-default>input,.ui-state-default>span>select').css('background-color','transparent');
-    $('.ui-state-default[id="'+v+'"],.ui-state-default[id="'+v+'"]>input,.ui-state-default[id="'+v+'"]>span>select').css('background-color','lightblue');
+    $('.ui-state-default,.ui-state-default>input,.ui-state-default>span>select').css('background-color','');
+    $('.ui-state-default[id="'+v+'"],.ui-state-default[id="'+v+'"]>input,.ui-state-default[id="'+v+'"]>span>select').css('background-color','var(--button-primary)');
     $('#set-formula').val(formulas[v]||'');
 }
 function addSortableType(id,val,base){
-    return '<div onclick="if(event.target===this)toFormula(this)" class="ui-state-default dict p-1  bg-white" id="'+id+'" style="text-align:center; font-size: .85em">'
-            +'<i class="pi pi-link" id="l'+id+'" onclick="setLink(this)" style="font-size: 1.1rem; color: #aaa; cursor: pointer;" title="'
+    return '<div onclick="if(event.target===this)toFormula(this)" class="ui-state-default dict p-1" id="'+id+'" style="text-align:center; font-size: .85em">'
+            +'<i class="pi pi-link" id="l'+id+'" onclick="setLink(this)" style="font-size: 1.1rem; color: var(--text-secondary); cursor: pointer;" title="'
                 +'Включите этот значок, если это поле будет ссылкой на справочник'+'"></i>&nbsp;'
-            +'<input id="n'+id+'" size="'+(val.length+1)+'" onkeyup="this.size=this.value.length+1" onchange="$(\'#upload\').hide();$(\'#refresh\').show();" style="border:none" type="text" value="'+val+'">'
+            +'<input id="n'+id+'" size="'+(val.length+1)+'" onkeyup="this.size=this.value.length+1" onchange="$(\'#upload\').hide();$(\'#refresh\').show();" style="border:none; background:transparent; color:inherit" type="text" value="'+val+'">'
             +'<hr class="m-2"><span class="base-type">'+base+'</span>'
             +'<br><input id="s'+id+'" type="checkbox" checked class="mt-3" title="Снимите галку, чтобы пропустить это поле" onchange="$(\'#upload\').hide();$(\'#refresh\').show();"></div>';
 }
 function setLink(el){
     if($(el).hasClass('multiselect'))
-        $(el).removeClass('pi-list').addClass('pi-link').css('color','#aaa').removeClass('is-link').removeClass('multiselect')
+        $(el).removeClass('pi-list').addClass('pi-link').css('color','var(--text-secondary)').removeClass('is-link').removeClass('multiselect')
             .attr('title','Включите этот значок, если это поле будет ссылкой на справочник');
     else if($(el).hasClass('is-link'))
-        $(el).removeClass('pi-link').addClass('pi-list').css('color','#111').addClass('multiselect')
+        $(el).removeClass('pi-link').addClass('pi-list').css('color','var(--text-primary)').addClass('multiselect')
             .attr('title','Кликните, чтобы сделать это поле не справочным');
     else
-        $(el).css('color','#111').addClass('is-link')
+        $(el).css('color','var(--text-primary)').addClass('is-link')
             .attr('title','Кликните ещё раз, чтобы разрешить множественный выбор из справочника');
     $('#upload').hide();
     $('#refresh').show();
     importParse();
 }
 function addSortable(id,val,base,baseId){
-    return '<div onclick="toFormula(this)" class="ui-state-default dict p-1  bg-white" id="'+id+'" name="'+val+'">'+addBr(val)+'<br />'
+    return '<div onclick="toFormula(this)" class="ui-state-default dict p-1" id="'+id+'" name="'+val+'">'+addBr(val)+'<br />'
         +'<input hidden id="t'+id+'" value="'+baseId+'"><input hidden id="n'+id+'" value="'+val+'">'
         +'<span class="base-type">'+base.toLowerCase()+'</span></div>';
 }
@@ -875,7 +892,7 @@ function importDoParse(input){
     for(i in statArr[j]){
         stats+='<tr><td>'+i+'</td>';
         for(j in sourceMap){
-            stats+='<td'+(i==='invalid'&&statArr[j][i]>0?' style="background-color:orange;"':'')
+            stats+='<td'+(i==='invalid'&&statArr[j][i]>0?' class="cell-error"':'')
                         +(sourceMap[j].base==='14'/*SIGNED*/||sourceMap[j].base==='13'/*NUMBER*/||i==='empty'||i==='invalid'?' align="right"':'')+'>';
             if((i!=='avg'&&i!=='sum')||(sourceMap[j].base==='14'/*SIGNED*/||sourceMap[j].base==='13'/*NUMBER*/))
                 stats+=((i==='empty'||i==='invalid')&&statArr[j][i]===0)?'':statArr[j][i];
@@ -892,9 +909,9 @@ function importDoParse(input){
     else
         line='';
     $('#stats').html(stats);
-    $('#resume').html('<h5>'+'Предварительный просмотр результатов импорта (всего строк'+': <b>'+l+'</b>'+(err>0?'<font color="orange">, '+'ошибок'+': '+err+'</font>':'')
-                        +(empties>0?'<font color="gray">, '+'пустых ячеек'+': '+empties+'</font>':'')
-                        +(skippedInvalid>0?'<font color="orange">, '+'пропущено пустых'+': '+skippedInvalid+'</font>':'')+')'+line+'</h5>');
+    $('#resume').html('<h5>'+'Предварительный просмотр результатов импорта (всего строк'+': <b>'+l+'</b>'+(err>0?'<span style="color:var(--bs-warning,orange)">, '+'ошибок'+': '+err+'</span>':'')
+                        +(empties>0?'<span style="color:var(--text-secondary)">, '+'пустых ячеек'+': '+empties+'</span>':'')
+                        +(skippedInvalid>0?'<span style="color:var(--bs-warning,orange)">, '+'пропущено пустых'+': '+skippedInvalid+'</span>':'')+')'+line+'</h5>');
     drawPage(1);
     if((l==0&&chosenType!==undefined)||sourceMap.length==0){
         $('#upload').hide();
@@ -914,11 +931,11 @@ function drawPage(n){
             link='';
             if(chosenType===undefined&&j>0)
                 if(sourceMap[i].link===1)
-                    link='<i class="pi pi-link" style="font-size: 0.8rem; color: #111;" title="'+'Справочное значение'+'"></i>&nbsp;';
+                    link='<i class="pi pi-link" style="font-size: 0.8rem; color: var(--text-primary);" title="'+'Справочное значение'+'"></i>&nbsp;';
                 else if(sourceMap[i].link===2)
-                    link='<i class="pi pi-list" style="font-size: 0.8rem; color: #111;" title="'+'Выбор нескольких из справочника'+'"></i>&nbsp;';
+                    link='<i class="pi pi-list" style="font-size: 0.8rem; color: var(--text-primary);" title="'+'Выбор нескольких из справочника'+'"></i>&nbsp;';
             h+='<td id="'+sourceMap[i].id+'">'+link+sourceMap[i].name
-                +(chosenType===undefined?'<br /><span style="font-size: 75%; color: gray">'+bt[sourceMap[i].base]+'</span>':'')
+                +(chosenType===undefined?'<br /><span style="font-size: 75%; color: var(--text-secondary)">'+bt[sourceMap[i].base]+'</span>':'')
                 +'</td>';
             if($('#chosen').html()==='')
                 $('#chosen').html(sourceMap[i].name);
@@ -941,12 +958,12 @@ function drawPage(n){
                         jMap=parseInt(jMap)+1;
                 }
                 if(evalErrs[i+'-'+jMap])
-                    line+='<td style="background-color:orange;" title="'+evalErrs[i+'-'+jMap].title+'">'+evalErrs[i+'-'+jMap].err+'</td>';
+                    line+='<td class="cell-error" title="'+evalErrs[i+'-'+jMap].title+'">'+evalErrs[i+'-'+jMap].err+'</td>';
                 else if(toImport[i][jMap])
-                    line+='<td'+(evalExpr[i+'-'+jMap]?' title="'+evalExpr[i+'-'+jMap]+'"  style="background-color:palegreen;"':'')+'>'
+                    line+='<td'+(evalExpr[i+'-'+jMap]?' title="'+evalExpr[i+'-'+jMap]+'" class="cell-success"':'')+'>'
                             +toImport[i][jMap].toString().replace('<','&lt').replace('>','&gt')+'</td>';
                 else
-                    line+='<td style="background-color:#eeeeee;"></td>';
+                    line+='<td class="cell-empty"></td>';
             }
         h+='<tr>'+line+'</tr>';
     }

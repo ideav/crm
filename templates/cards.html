@@ -1,16 +1,6 @@
 <style>
-    /* Cards Component CSS Variables */
+    /* Cards Component — uses global CSS variables from styles.css */
     :root {
-        --cards-primary: #1976d2;
-        --cards-primary-dark: #1565c0;
-        --cards-primary-light: #42a5f5;
-        --cards-background: #fafafa;
-        --cards-surface: #ffffff;
-        --cards-border: rgba(0, 0, 0, 0.12);
-        --cards-text-primary: rgba(0, 0, 0, 0.87);
-        --cards-text-secondary: rgba(0, 0, 0, 0.54);
-        --cards-shadow-1: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
-        --cards-shadow-2: 0 3px 6px rgba(0,0,0,0.16), 0 3px 6px rgba(0,0,0,0.23);
         --cards-radius: 4px;
         --cards-transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
@@ -21,7 +11,7 @@
         flex-direction: column;
         height: 100%;
         font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-        background: var(--cards-background);
+        background: var(--bg-secondary);
     }
 
     /* Header */
@@ -44,7 +34,7 @@
     .cards-title {
         font-size: 20px;
         font-weight: 500;
-        color: var(--cards-text-primary);
+        color: var(--text-primary);
         letter-spacing: 0.15px;
     }
 
@@ -70,17 +60,19 @@
         min-width: 180px;
         max-width: 320px;
         height: 32px;
-        border: 1px solid var(--cards-border);
+        border: 1px solid var(--input-border);
         border-radius: var(--cards-radius);
         padding: 4px 10px;
         font-size: 14px;
         outline: none;
-        transition: var(--cards-transition);
+        background-color: var(--input-bg);
+        color: var(--text-primary);
+        transition: all 0.2s ease;
     }
 
     .cards-search-input:focus {
-        border-color: var(--cards-primary);
-        box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.15);
+        border-color: var(--button-primary);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
     }
 
     /* Field filters row — inline with search row */
@@ -96,7 +88,7 @@
 
     .cards-field-filter label {
         font-size: 12px;
-        color: var(--cards-text-secondary);
+        color: var(--text-secondary);
         margin: 0;
         white-space: nowrap;
     }
@@ -104,18 +96,22 @@
     .cards-field-filter input,
     .cards-field-filter select {
         height: 32px;
-        border: 1px solid var(--cards-border);
+        border: 1px solid var(--input-border);
         border-radius: var(--cards-radius);
         padding: 4px 10px;
         font-size: 14px;
         outline: none;
         min-width: 100px;
         max-width: 180px;
+        background-color: var(--input-bg);
+        color: var(--text-primary);
+        transition: all 0.2s ease;
     }
 
     .cards-field-filter input:focus,
     .cards-field-filter select:focus {
-        border-color: var(--cards-primary);
+        border-color: var(--button-primary);
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
     }
 
     /* Cards grid */
@@ -131,25 +127,26 @@
 
     /* Card */
     .cards-card {
-        background: var(--cards-surface);
+        background: var(--bg-primary);
+        border: 1px solid var(--border-color);
         border-radius: var(--cards-radius);
-        box-shadow: var(--cards-shadow-1);
+        box-shadow: 0 1px 3px var(--nav-shadow);
         padding: 14px 14px 12px;
         position: relative;
-        transition: var(--cards-transition);
+        transition: all 0.2s ease;
         cursor: default;
     }
 
     .cards-card:hover {
-        box-shadow: var(--cards-shadow-2);
         transform: translateY(-1px);
+        box-shadow: 0 2px 8px var(--nav-shadow);
     }
 
     /* Card title (clickable) */
     .cards-card-title {
         font-size: 15px;
         font-weight: 500;
-        color: var(--cards-primary);
+        color: var(--button-primary);
         cursor: pointer;
         margin-bottom: 6px;
         padding-right: 60px;
@@ -183,7 +180,7 @@
         top: 8px;
         right: 10px;
         font-size: 11px;
-        color: var(--cards-text-secondary);
+        color: var(--text-secondary);
         white-space: nowrap;
     }
 
@@ -195,14 +192,14 @@
         font-size: 12px;
         font-weight: 500;
         margin-bottom: 3px !important;
-        background: #e3f2fd;
-        color: var(--cards-primary);
+        background: rgba(59, 130, 246, 0.12);
+        color: var(--button-primary);
     }
 
     /* Description */
     .cards-card-description {
         font-size: 13px;
-        color: var(--cards-text-secondary);
+        color: var(--text-secondary);
         margin-bottom: 4px;
         line-height: 1.4;
         word-break: break-word;
@@ -212,14 +209,14 @@
     .cards-card-amount {
         font-size: 15px;
         font-weight: 600;
-        color: var(--cards-primary);
+        color: var(--button-primary);
         margin-top: 6px;
     }
 
     /* Extra fields */
     .cards-card-field {
         font-size: 13px;
-        color: var(--cards-text-secondary);
+        color: var(--text-secondary);
         margin-bottom: 2px;
         word-break: break-word;
     }
@@ -229,7 +226,7 @@
     .cards-empty {
         text-align: center;
         padding: 40px;
-        color: var(--cards-text-secondary);
+        color: var(--text-secondary);
         font-size: 15px;
         grid-column: 1 / -1;
     }
@@ -262,7 +259,8 @@
         top: 50%;
         left: 50%;
         transform: translate(-50%, -50%);
-        background: #fff;
+        background: var(--bg-primary);
+        color: var(--text-primary);
         border-radius: 6px;
         box-shadow: 0 24px 38px rgba(0,0,0,0.14);
         z-index: 1051;
@@ -287,16 +285,18 @@
     .cards-settings-section label {
         display: block;
         font-size: 13px;
-        color: var(--cards-text-secondary);
+        color: var(--text-secondary);
         margin-bottom: 4px;
     }
 
     .cards-settings-section input,
     .cards-settings-section select {
         width: 100%;
-        border: 1px solid var(--cards-border);
+        border: 1px solid var(--input-border);
         border-radius: var(--cards-radius);
         padding: 5px 8px;
+        background-color: var(--input-bg);
+        color: var(--text-primary);
         font-size: 13px;
         outline: none;
     }
@@ -305,11 +305,15 @@
         display: flex;
         flex-direction: column;
         gap: 4px;
-        border: 1px solid var(--cards-border);
+        border: 1px solid var(--border-color);
         border-radius: var(--cards-radius);
         padding: 6px;
         max-height: 150px;
         overflow-y: auto;
+    }
+
+    .cards-settings-section .cards-col-list.cards-col-list-tall {
+        max-height: 250px;
     }
 
     .cards-settings-section .cards-col-item {
@@ -323,7 +327,7 @@
     }
 
     .cards-settings-section .cards-col-item:hover {
-        background: rgba(25, 118, 210, 0.06);
+        background: rgba(59, 130, 246, 0.06);
     }
 
     .cards-settings-section .cards-col-item input[type="checkbox"] {
@@ -341,17 +345,21 @@
         font-size: 13px;
         cursor: pointer;
         border: 1px solid transparent;
-        transition: var(--cards-transition);
+        transition: all 0.2s ease;
         background: transparent;
-        color: var(--cards-text-primary);
+        color: var(--text-primary);
     }
 
     .cards-btn:hover {
-        background: var(--cards-hover, rgba(0,0,0,0.04));
+        background: rgba(0,0,0,0.04);
+    }
+
+    [data-theme="dark"] .cards-btn:hover {
+        background: rgba(255,255,255,0.08);
     }
 
     .cards-btn-link {
-        color: var(--cards-text-primary);
+        color: var(--text-primary);
         border: none;
     }
 
@@ -363,20 +371,24 @@
         height: 32px;
         border-radius: var(--cards-radius);
         cursor: pointer;
-        color: var(--cards-text-secondary);
-        transition: var(--cards-transition);
+        color: var(--text-secondary);
+        transition: all 0.2s ease;
         font-size: 16px;
     }
 
     .cards-settings-icon:hover {
         background: rgba(0,0,0,0.06);
-        color: var(--cards-text-primary);
+        color: var(--text-primary);
+    }
+
+    [data-theme="dark"] .cards-settings-icon:hover {
+        background: rgba(255,255,255,0.1);
     }
 
     /* Record count */
     .cards-count {
         font-size: 13px;
-        color: var(--cards-text-secondary);
+        color: var(--text-secondary);
         white-space: nowrap;
     }
 
@@ -402,13 +414,13 @@
     }
 
     .cards-card-contact-icon.active {
-        background-color: rgba(25, 118, 210, 0.12);
-        color: var(--cards-primary);
+        background-color: rgba(59, 130, 246, 0.12);
+        color: var(--button-primary);
         cursor: pointer;
     }
 
     .cards-card-contact-icon.active:hover {
-        background-color: rgba(25, 118, 210, 0.2);
+        background-color: rgba(59, 130, 246, 0.2);
         transform: scale(1.1);
     }
 
@@ -428,7 +440,7 @@
     }
 
     .cards-card-copyable:hover {
-        background-color: rgba(25, 118, 210, 0.08);
+        background-color: rgba(59, 130, 246, 0.08);
     }
 
     .cards-card-copyable.copied {
@@ -444,7 +456,85 @@
     /* Field with label */
     .cards-card-field-label {
         font-weight: 500;
-        color: var(--cards-text-primary);
+        color: var(--text-primary);
+    }
+
+    /* Breadcrumb links in title */
+    .cards-breadcrumb-link {
+        color: var(--button-primary);
+        text-decoration: none;
+        cursor: pointer;
+    }
+
+    /* Cards search icon */
+    .cards-search-icon {
+        color: var(--text-secondary);
+        font-size: 14px;
+        flex-shrink: 0;
+    }
+
+    /* Cards settings modal field row */
+    .cards-col-item-row {
+        padding: 6px 8px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        margin-bottom: 4px;
+        background: var(--bg-primary);
+    }
+
+    .cards-col-item-drag {
+        cursor: grab;
+        color: var(--text-secondary);
+        margin-right: 6px;
+    }
+
+    .cards-col-item-checkbox {
+        margin-right: 6px;
+    }
+
+    .cards-col-item-name {
+        flex: 1;
+        font-weight: 500;
+        color: var(--text-primary);
+    }
+
+    .cards-field-type-select {
+        width: 100px;
+        font-size: 12px;
+        padding: 2px 4px;
+        margin-left: 6px;
+        border: 1px solid var(--input-border);
+        border-radius: var(--cards-radius);
+        background-color: var(--input-bg);
+        color: var(--text-primary);
+    }
+
+    .cards-col-item-label {
+        font-size: 11px;
+        margin-left: 8px;
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        color: var(--text-secondary);
+    }
+
+    .cards-settings-footer {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        margin-top: 16px;
+    }
+
+    /* Settings modal icon */
+    .cards-settings-header-icon {
+        margin-right: 6px;
+    }
+
+    /* Empty state icon */
+    .cards-empty-icon {
+        font-size: 2em;
+        display: block;
+        margin-bottom: 8px;
     }
 </style>
 
@@ -680,7 +770,7 @@
                 '</div>' +
             '</div>' +
             '<div class="cards-search-row">' +
-                '<i class="pi pi-search" style="color:var(--cards-text-secondary);font-size:14px;"></i>' +
+                '<i class="pi pi-search cards-search-icon"></i>' +
                 '<input class="cards-search-input" id="' + inst + '-search" type="text" placeholder="Быстрый поиск..." />' +
                 '<div class="cards-filters-row" id="' + inst + '-filters-row"></div>' +
             '</div>' +
@@ -762,8 +852,8 @@
 
         // Build breadcrumb-style title HTML (matching integram-table.js format)
         var titleHtml =
-            '<a href="' + parentTypeLink + '" class="integram-title-link" style="color:var(--cards-primary);text-decoration:none;">' + parentTypeName + '</a> ' +
-            '<span class="integram-title-link" style="color:var(--cards-primary);cursor:pointer;" onclick="window[\'' + inst + '\']._openParentEditForm()">' + parentVal + '</span>' +
+            '<a href="' + parentTypeLink + '" class="integram-title-link cards-breadcrumb-link">' + parentTypeName + '</a> ' +
+            '<span class="integram-title-link cards-breadcrumb-link" onclick="window[\'' + inst + '\']._openParentEditForm()">' + parentVal + '</span>' +
             (currentTitle ? ': ' + currentTitle : '');
 
         // Update title element
@@ -1191,7 +1281,7 @@
         var filtered = this._getFilteredData();
 
         if (!append && filtered.length === 0) {
-            grid.innerHTML = '<div class="cards-empty"><i class="pi pi-inbox" style="font-size:2em;display:block;margin-bottom:8px;"></i>Нет данных</div>';
+            grid.innerHTML = '<div class="cards-empty"><i class="pi pi-inbox cards-empty-icon"></i>Нет данных</div>';
         } else {
             filtered.forEach(function(item) {
                 var card = self._buildCardEl(item.row, item.originalIndex);
@@ -1776,7 +1866,7 @@
 
         // Build card field settings list (draggable)
         function buildCardFieldsList() {
-            var html = '<div class="cards-col-list" id="cards-s-field-list" style="max-height:250px;">';
+            var html = '<div class="cards-col-list cards-col-list-tall" id="cards-s-field-list">';
 
             // Use current cardFieldSettings or columns
             var fields = self.cardFieldSettings.length > 0 ? self.cardFieldSettings : [];
@@ -1812,17 +1902,17 @@
             var visChecked = f.visible !== false ? 'checked' : '';
             var labelChecked = f.showLabel ? 'checked' : '';
 
-            var html = '<div class="cards-col-item" draggable="true" data-col-id="' + escHtml(col.id) + '" data-order="' + idx + '" style="padding:6px 8px;border:1px solid var(--cards-border);border-radius:4px;margin-bottom:4px;background:#fff;">';
-            html += '<i class="pi pi-bars" style="cursor:grab;color:var(--cards-text-secondary);margin-right:6px;"></i>';
-            html += '<input type="checkbox" class="field-visible" ' + visChecked + ' title="Видимость" style="margin-right:6px;">';
-            html += '<span style="flex:1;font-weight:500;">' + escHtml(col.name) + '</span>';
-            html += '<select class="field-type" style="width:100px;font-size:12px;padding:2px 4px;margin-left:6px;">';
+            var html = '<div class="cards-col-item cards-col-item-row" draggable="true" data-col-id="' + escHtml(col.id) + '" data-order="' + idx + '">';
+            html += '<i class="pi pi-bars cards-col-item-drag"></i>';
+            html += '<input type="checkbox" class="field-visible cards-col-item-checkbox" ' + visChecked + ' title="Видимость">';
+            html += '<span class="cards-col-item-name">' + escHtml(col.name) + '</span>';
+            html += '<select class="field-type cards-field-type-select">';
             for (var type in fieldTypeLabels) {
                 var sel = f.fieldType === type ? 'selected' : '';
                 html += '<option value="' + type + '" ' + sel + '>' + fieldTypeLabels[type] + '</option>';
             }
             html += '</select>';
-            html += '<label style="font-size:11px;margin-left:8px;display:flex;align-items:center;gap:3px;">';
+            html += '<label class="cards-col-item-label">';
             html += '<input type="checkbox" class="field-show-label" ' + labelChecked + '>Имя</label>';
             html += '</div>';
             return html;
@@ -1851,7 +1941,7 @@
         }
 
         modal.innerHTML =
-            '<h4><i class="pi pi-cog" style="margin-right:6px;"></i>Настройка карточек</h4>' +
+            '<h4><i class="pi pi-cog cards-settings-header-icon"></i>Настройка карточек</h4>' +
 
             '<div class="cards-settings-section">' +
                 '<label>Поля карточки (перетаскивание для изменения порядка):</label>' +
@@ -1876,7 +1966,7 @@
                 '</select>' +
             '</div>' +
 
-            '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
+            '<div class="cards-settings-footer">' +
                 '<button class="btn btn-sm btn-danger" id="cards-s-reset">Сбросить</button>' +
                 '<button class="btn btn-sm btn-secondary" id="cards-s-cancel">Отменить</button>' +
                 '<button class="btn btn-sm btn-primary" id="cards-s-save">Сохранить</button>' +
