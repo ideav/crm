@@ -1736,6 +1736,10 @@ class IntegramTable {
                 escapedValue = `${ truncated }<a href="#" class="show-full-value" onclick="window.${ instanceName }.showFullValue(event, '${ fullValueEscaped }'); return false;">...</a>`;
             }
 
+            // Track typeId computed in the edit icon block for use in editableAttrs
+            // (needed so updateCellDisplay can add edit icon when an empty cell gets its first value)
+            let editIconTypeId = '';
+
             // Add edit icon for editable cells (only when recordId exists - no create new)
             if (isEditable) {
                 const idColId = this.editableColumns.get(column.id);
@@ -1866,6 +1870,12 @@ class IntegramTable {
                     console.log(`  - Final shouldShowEditIcon: ${shouldShowEditIcon}`);
                 }
 
+                // Store typeId so updateCellDisplay can add the edit icon
+                // when an empty cell gets its first value (issue #915)
+                if (recordId && recordId !== '' && recordId !== '0' && typeId) {
+                    editIconTypeId = typeId;
+                }
+
                 if (shouldShowEditIcon) {
                     const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 14px;"></i></span>`;
                     escapedValue = `<div class="cell-content-wrapper">${ escapedValue }${ editIcon }</div>`;
@@ -1952,7 +1962,10 @@ class IntegramTable {
                     const recordIdAttr = recordId && recordId !== '' && recordId !== '0' ? recordId : 'dynamic';
                     // Use paramId for object format (metadata ID), otherwise fall back to type (data type)
                     const colTypeForParam = column.paramId || column.type;
-                    editableAttrs = ` data-editable="true" data-record-id="${ recordIdAttr }" data-col-id="${ column.id }" data-col-type="${ colTypeForParam }" data-col-format="${ format }" data-row-index="${ rowIndex }"${ refAttr }${ refValueIdAttr }${ fullValueAttr }${ rawValueAttr }`;
+                    // Issue #915: Store typeId for edit icon so updateCellDisplay can add it
+                    // when an empty cell gets its first value filled in
+                    const editTypeIdAttr = editIconTypeId ? ` data-edit-type-id="${ editIconTypeId }"` : '';
+                    editableAttrs = ` data-editable="true" data-record-id="${ recordIdAttr }" data-col-id="${ column.id }" data-col-type="${ colTypeForParam }" data-col-format="${ format }" data-row-index="${ rowIndex }"${ refAttr }${ refValueIdAttr }${ fullValueAttr }${ rawValueAttr }${ editTypeIdAttr }`;
                     cellClass += ' inline-editable';
                     if (window.INTEGRAM_DEBUG) {
                         console.log(`  ✓ Cell will be editable with recordId=${recordIdAttr}`);
@@ -4412,13 +4425,25 @@ class IntegramTable {
                 }
             }
 
-            // Restore edit icon if present
+            // Restore edit icon if present, or add it if the cell just got its first value (issue #915)
             const hasEditIcon = cell.querySelector('.edit-icon');
             if (hasEditIcon) {
                 const editIconHtml = hasEditIcon.outerHTML;
                 cell.innerHTML = `<div class="cell-content-wrapper">${ escapedValue }${ editIconHtml }</div>`;
             } else {
-                cell.innerHTML = escapedValue;
+                // Issue #915: If the cell was empty (no edit icon) and now has a value,
+                // add the edit icon using the stored data-edit-type-id attribute
+                const editTypeId = cell.dataset.editTypeId;
+                const editRecordId = cell.dataset.recordId;
+                const editRowIndex = cell.dataset.rowIndex;
+                const hasNewValue = newValue !== null && newValue !== undefined && newValue !== '';
+                if (hasNewValue && editTypeId && editRecordId && editRecordId !== '' && editRecordId !== '0' && editRecordId !== 'dynamic') {
+                    const instanceName = this.options.instanceName;
+                    const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ editRecordId }', '${ editTypeId }', ${ editRowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 14px;"></i></span>`;
+                    cell.innerHTML = `<div class="cell-content-wrapper">${ escapedValue }${ editIcon }</div>`;
+                } else {
+                    cell.innerHTML = escapedValue;
+                }
             }
 
             // Update the data array as well
