@@ -3407,9 +3407,15 @@ class IntegramTable {
                         });
                     }
 
-                    // Show dropdown on focus
-                    searchInput.addEventListener('focus', () => {
-                        dropdown.style.display = '';
+                    // Show dropdown immediately (issue #891: focus event fires before listener is attached on re-render)
+                    dropdown.style.display = '';
+
+                    // Hide dropdown on blur (when user clicks outside search input and dropdown)
+                    searchInput.addEventListener('blur', (e) => {
+                        // Only hide if focus is not moving to an option inside the dropdown
+                        if (!dropdown.contains(e.relatedTarget)) {
+                            dropdown.style.display = 'none';
+                        }
                     });
 
                     // Filter dropdown on input
