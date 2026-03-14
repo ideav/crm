@@ -140,6 +140,17 @@ function gjsSplit(el){
             $(el).replaceWith($(html).attr('gjs-order',i));
     }
 }
+function postForm(url){
+	const form = document.querySelector('form');
+	form.method = 'post';
+	form.action = '/'+db+'/'+url;
+	const xsrfInput = document.createElement('input');
+	xsrfInput.type = 'hidden';
+	xsrfInput.name = '_xsrf';
+	xsrfInput.value = xsrf;
+	form.appendChild(xsrfInput);
+	form.submit();
+}
 function getObjReq(json,i,j){
     var k;
     if(json.reqs&&json.reqs[i])
