@@ -149,7 +149,10 @@ function postForm(url){
 	xsrfInput.name = '_xsrf';
 	xsrfInput.value = xsrf;
 	form.appendChild(xsrfInput);
-	requestAnimationFrame(() => { form.submit(); });
+	Promise.resolve().then(() => {
+		form.submit();
+		resolve();
+    });
 }
 function getObjReq(json,i,j){
     var k;
