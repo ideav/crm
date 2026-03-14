@@ -466,7 +466,7 @@ function syncSingleFile($repository, $branch, $sourcePath, $targetPath, $token =
         $modDateTime = date('Y-m-d H:i', $localModTime);
         return [
             'status' => 'skipped',
-            'message' => "Skipped ({$modDateTime}): {$sourcePath} -> {$targetPath}"
+            'message' => "{$modDateTime}: {$sourcePath} -> {$targetPath}"
         ];
     }
 
