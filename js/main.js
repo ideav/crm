@@ -140,7 +140,7 @@ function gjsSplit(el){
             $(el).replaceWith($(html).attr('gjs-order',i));
     }
 }
-function postForm(url){
+function postForm(url){ 
 	const form = document.createElement('form');
 	form.method = 'post';
 	form.action = '/'+db+'/'+url;
