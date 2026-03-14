@@ -36,7 +36,7 @@
     width: 280px;
     padding: 0.625rem 1rem 0.625rem 2.5rem;
     border: 1px solid var(--input-border);
-    border-radius: 8px;
+    border-radius: 6px;
     font-size: 0.9rem;
     background-color: var(--input-bg);
     color: var(--text-primary);
@@ -240,12 +240,12 @@
 }
 
 /* Collapsed folder styling */
-.folder.collapsed {
-    opacity: 0.75;
-}
-
 .folder.collapsed .folder-header {
     background-color: var(--bg-secondary);
+}
+
+.folder.collapsed .folder-name {
+    color: var(--text-secondary);
 }
 
 /* Table Card Styles */
@@ -288,38 +288,38 @@
 
 /* Icon colors by type */
 .table-card-icon.type-3 {
-    background-color: rgba(59, 130, 246, 0.15);
-    color: #3b82f6;
+    background-color: var(--icon-type-3-bg);
+    color: var(--icon-type-3);
 }
 
 .table-card-icon.type-4 {
-    background-color: rgba(16, 185, 129, 0.15);
-    color: #10b981;
+    background-color: var(--icon-type-4-bg);
+    color: var(--icon-type-4);
 }
 
 .table-card-icon.type-5 {
-    background-color: rgba(245, 158, 11, 0.15);
-    color: #f59e0b;
+    background-color: var(--icon-type-5-bg);
+    color: var(--icon-type-5);
 }
 
 .table-card-icon.type-6 {
-    background-color: rgba(139, 92, 246, 0.15);
-    color: #8b5cf6;
+    background-color: var(--icon-type-6-bg);
+    color: var(--icon-type-6);
 }
 
 .table-card-icon.type-7 {
-    background-color: rgba(236, 72, 153, 0.15);
-    color: #ec4899;
+    background-color: var(--icon-type-7-bg);
+    color: var(--icon-type-7);
 }
 
 .table-card-icon.type-8 {
-    background-color: rgba(107, 114, 128, 0.15);
-    color: #6b7280;
+    background-color: var(--icon-type-8-bg);
+    color: var(--icon-type-8);
 }
 
 .table-card-icon.type-9 {
-    background-color: rgba(6, 182, 212, 0.15);
-    color: #06b6d4;
+    background-color: var(--icon-type-9-bg);
+    color: var(--icon-type-9);
 }
 
 .table-card-name {
