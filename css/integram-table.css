@@ -109,7 +109,7 @@
 .integram-table-controls {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
 }
 
 .integram-table-settings {
@@ -2592,7 +2592,7 @@ td:has(.inline-editor-file) {
 /* Checkbox selection mode */
 .integram-table-checkbox-toggle {
     cursor: pointer;
-    padding: 11px 8px 13px;
+    padding: 8px;
     border-radius: 4px;
     font-size: 16px;
     user-select: none;
