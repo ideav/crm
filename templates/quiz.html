@@ -1129,10 +1129,27 @@ function deleteFld(el){
     intApi('POST','_d_del_req/'+quiz.form[i].id+'?JSON','delFld','',i);
 }
 var timer;
-function showMsg(i,err,mode,timeout){
-    byId(i).innerHTML='<div class="alert alert-'+(mode||'danger')+'" role="alert">'+err+'</div>';
-    if(timeout!==0)
-        timer=setTimeout(function(){byId(i).innerHTML=''},timeout||7000);
+function showMsg(i, err, mode, timeout) {
+    const element = byId(i);
+    
+	element.innerHTML = '';
+    element.insertAdjacentHTML('beforeend', 
+        '<div class="alert alert-' + (mode || 'danger') + '" role="alert">' + err + '</div>'
+    );
+    
+    // Извлекаем и выполняем скрипты
+    const scripts = element.querySelectorAll('script');
+    scripts.forEach(oldScript => {
+        const newScript = document.createElement('script');
+        newScript.textContent = oldScript.textContent;
+        oldScript.parentNode.replaceChild(newScript, oldScript);
+    });
+    
+    if (timeout !== 0) {
+        timer = setTimeout(function() {
+            element.innerHTML = '';
+        }, timeout || 7000);
+    }
 }
 function resultText(t,mode,href){
     return '&nbsp;&mdash; <a class="text-'+mode+'" target="grants" href="/{_global_.z}/'+href+'">'+t+'</a>';
