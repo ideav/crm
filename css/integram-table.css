@@ -3112,10 +3112,9 @@ tr.row-selected {
     background-color: rgba(25, 118, 210, 0.04);
 }
 
-/* Required fields in new row (red border) */
+/* Required fields in new row (pale background) */
 .required-field-new-row {
-    outline: 2px solid #d32f2f !important;
-    outline-offset: -2px;
+    background-color: rgba(211, 47, 47, 0.08) !important;
 }
 
 /* Disabled cells in new row (non-first columns before save) */
