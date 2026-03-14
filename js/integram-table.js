@@ -9664,10 +9664,10 @@ class IntegramTable {
                 renderTags();
                 updateHiddenInput();
 
-                // Show dropdown on focus
+                // Show dropdown on focus (issue #917: use 'block' not '' to override CSS display:none on .form-ref-editor-box)
                 searchInput.addEventListener('focus', () => {
                     renderDropdown(searchInput.value.trim());
-                    dropdown.style.display = '';
+                    dropdown.style.display = 'block';
                 });
 
                 // Filter on input
@@ -9676,7 +9676,7 @@ class IntegramTable {
                     clearTimeout(searchTimeout);
                     searchTimeout = setTimeout(() => {
                         renderDropdown(e.target.value.trim());
-                        dropdown.style.display = '';
+                        dropdown.style.display = 'block';
                     }, 200);
                 });
 
