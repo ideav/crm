@@ -1580,11 +1580,12 @@ class IntegramTable {
             const isArrayField = column.attrs && column.attrs.includes(':MULTI:');
             const dataTypeAttrs = ` data-type="${format}"${isRefField ? ' data-ref="1"' : ''}${isArrayField ? ' data-array="1"' : ''}`;
 
-            // In object format, reference fields return values as "id:Value"
+            // In object format, reference fields and GRANT/REPORT_COLUMN fields return values as "id:Value"
             // For multi-select fields, value is "id1,id2,...:val1,val2,..." (issue #863)
-            // Parse to extract the id(s) and display only the Value part
+            // Parse to extract the id(s) and display only the Value part (issue #925)
             let multiRawValue = null;  // Original raw value for multi-select editor (issue #863)
-            if (isRefField && value && typeof value === 'string') {
+            const isGrantOrReportColumn = format === 'GRANT' || format === 'REPORT_COLUMN';
+            if ((isRefField || isGrantOrReportColumn) && value && typeof value === 'string') {
                 const colonIndex = value.indexOf(':');
                 if (colonIndex > 0) {
                     refValueId = value.substring(0, colonIndex);
@@ -1720,7 +1721,8 @@ class IntegramTable {
                 // Fix for issue #684: Store RAW value, not escaped value
                 // Browser's setAttribute() handles encoding automatically, and dataset.fullValue decodes it
                 // Storing escaped value causes double-encoding when read back
-                fullValueForEditing = String(displayValue);
+                // For GRANT/REPORT_COLUMN fields, store the parsed ID so inline editor can pre-select correctly (issue #925)
+                fullValueForEditing = (isGrantOrReportColumn && refValueId) ? refValueId : String(displayValue);
             }
 
             // Truncate long values if setting is enabled
@@ -7073,14 +7075,16 @@ class IntegramTable {
                     const rawValue = rowInfo.data[dataIndex];
                     if (rawValue === undefined || rawValue === null || rawValue === '') continue;
 
-                    // For reference fields, extract the ID part from "id:Value" format
+                    // For reference fields and GRANT/REPORT_COLUMN, extract the ID part from "id:Value" format (issue #925)
                     const isRefField = column.ref_id != null || (column.ref && column.ref !== 0);
+                    const colFormat = column.format ? String(column.format).toUpperCase() : '';
+                    const isGrantOrRepCol = colFormat === 'GRANT' || colFormat === 'REPORT_COLUMN';
                     let valueToUse = rawValue;
 
-                    if (isRefField && typeof rawValue === 'string') {
+                    if ((isRefField || isGrantOrRepCol) && typeof rawValue === 'string') {
                         const colonIndex = rawValue.indexOf(':');
                         if (colonIndex > 0) {
-                            // Use only the ID part for prefilling reference fields
+                            // Use only the ID part for prefilling reference/grant/report_column fields
                             valueToUse = rawValue.substring(0, colonIndex);
                         }
                     }
@@ -7199,11 +7203,25 @@ class IntegramTable {
             const recordReqs = {};
             reqs.forEach((req, idx) => {
                 const rawValue = rowValues[idx + 1] !== undefined ? rowValues[idx + 1] : '';
+                // For GRANT/REPORT_COLUMN requisites, parse "id:value" format (issue #925)
+                const reqFormat = this.normalizeFormat(req.type);
+                let reqValue = rawValue;
+                let reqTerm = undefined;
+                if ((reqFormat === 'GRANT' || reqFormat === 'REPORT_COLUMN') && typeof rawValue === 'string') {
+                    const colonIdx = rawValue.indexOf(':');
+                    if (colonIdx > 0) {
+                        reqTerm = rawValue.substring(0, colonIdx);
+                        reqValue = rawValue.substring(colonIdx + 1);
+                    }
+                }
                 recordReqs[req.id] = {
-                    value: rawValue,
+                    value: reqValue,
                     base: req.type,
                     order: idx
                 };
+                if (reqTerm !== undefined) {
+                    recordReqs[req.id].term = reqTerm;
+                }
                 // For subordinate table requisites (arr_id present), the value is the count of
                 // subordinate records. Store it as `arr` so the tab label reads it correctly
                 // (issue #923).
@@ -7212,14 +7230,30 @@ class IntegramTable {
                 }
             });
 
-            return {
+            // Parse main value for GRANT/REPORT_COLUMN types (issue #925)
+            const mainFormat = this.normalizeFormat(metadata.type);
+            let mainVal = rowValues[0] !== undefined ? rowValues[0] : '';
+            let mainTerm = undefined;
+            if ((mainFormat === 'GRANT' || mainFormat === 'REPORT_COLUMN') && typeof mainVal === 'string') {
+                const colonIdx = mainVal.indexOf(':');
+                if (colonIdx > 0) {
+                    mainTerm = mainVal.substring(0, colonIdx);
+                    mainVal = mainVal.substring(colonIdx + 1);
+                }
+            }
+
+            const result = {
                 obj: {
                     id: item.i,
-                    val: rowValues[0] !== undefined ? rowValues[0] : '',
+                    val: mainVal,
                     parent: item.u || 1
                 },
                 reqs: recordReqs
             };
+            if (mainTerm !== undefined) {
+                result.obj.term = mainTerm;
+            }
+            return result;
         }
 
         async fetchReferenceOptions(requisiteId, recordId = 0, searchQuery = '', extraParams = {}) {
@@ -8288,8 +8322,9 @@ class IntegramTable {
                             <option value="">Загрузка...</option>
                         </select>
                     `;
-                    // Store current value for later selection after options load
-                    html += `<input type="hidden" id="field-${ req.id }-current-value" value="${ this.escapeHtml(reqValue) }">`;
+                    // Store current value (ID) for later selection after options load (issue #925)
+                    const grantTermValue = recordReqs[req.id] && recordReqs[req.id].term !== undefined ? recordReqs[req.id].term : reqValue;
+                    html += `<input type="hidden" id="field-${ req.id }-current-value" value="${ this.escapeHtml(grantTermValue) }">`;
                 }
                 // REPORT_COLUMN field (dropdown with options from GET rep_cols API - issue #577)
                 else if (baseFormat === 'REPORT_COLUMN') {
@@ -8298,8 +8333,9 @@ class IntegramTable {
                             <option value="">Загрузка...</option>
                         </select>
                     `;
-                    // Store current value for later selection after options load
-                    html += `<input type="hidden" id="field-${ req.id }-current-value" value="${ this.escapeHtml(reqValue) }">`;
+                    // Store current value (ID) for later selection after options load (issue #925)
+                    const repColTermValue = recordReqs[req.id] && recordReqs[req.id].term !== undefined ? recordReqs[req.id].term : reqValue;
+                    html += `<input type="hidden" id="field-${ req.id }-current-value" value="${ this.escapeHtml(repColTermValue) }">`;
                 }
                 // Regular text field
                 else {
@@ -11313,9 +11349,12 @@ class IntegramTable {
             const strValue = String(value);
 
             // Check if this is a reference field (has ref_id or non-zero ref)
+            // or a GRANT/REPORT_COLUMN field which also uses "id:Value" format (issue #925)
             const isRefField = column && (column.ref_id != null || (column.ref && column.ref !== 0));
+            const columnFormat = column && column.format ? String(column.format).toUpperCase() : '';
+            const isGrantOrReportColumn = columnFormat === 'GRANT' || columnFormat === 'REPORT_COLUMN';
 
-            if (isRefField && strValue) {
+            if ((isRefField || isGrantOrReportColumn) && strValue) {
                 const colonIndex = strValue.indexOf(':');
                 if (colonIndex > 0) {
                     // Return only the display value part (after the colon)
@@ -11957,9 +11996,11 @@ class IntegramTable {
                     const format = col.format || 'SHORT';
                     let value = cellValue || '';
 
-                    // Issue #378: For reference fields, remove "id:" prefix from "id:Value" format
+                    // Issue #378, #925: For reference fields and GRANT/REPORT_COLUMN, remove "id:" prefix from "id:Value" format
                     const isRefField = col.ref_id != null || (col.ref && col.ref !== 0);
-                    if (isRefField && value && typeof value === 'string') {
+                    const upperFormat = String(format).toUpperCase();
+                    const isGrantOrReportColumn = upperFormat === 'GRANT' || upperFormat === 'REPORT_COLUMN';
+                    if ((isRefField || isGrantOrReportColumn) && value && typeof value === 'string') {
                         const colonIndex = value.indexOf(':');
                         if (colonIndex > 0) {
                             value = value.substring(colonIndex + 1);
@@ -12005,9 +12046,11 @@ class IntegramTable {
                     const format = col.format || 'SHORT';
                     let value = cellValue || '';
 
-                    // Issue #378: For reference fields, remove "id:" prefix from "id:Value" format
+                    // Issue #378, #925: For reference fields and GRANT/REPORT_COLUMN, remove "id:" prefix from "id:Value" format
                     const isRefField = col.ref_id != null || (col.ref && col.ref !== 0);
-                    if (isRefField && value && typeof value === 'string') {
+                    const upperFmt = String(format).toUpperCase();
+                    const isGrantOrReportColumn = upperFmt === 'GRANT' || upperFmt === 'REPORT_COLUMN';
+                    if ((isRefField || isGrantOrReportColumn) && value && typeof value === 'string') {
                         const colonIndex = value.indexOf(':');
                         if (colonIndex > 0) {
                             value = value.substring(colonIndex + 1);
