@@ -141,7 +141,7 @@ function gjsSplit(el){
     }
 }
 function postForm(url){
-	const form = document.querySelector('form');
+	const form = document.createElement('form');
 	form.method = 'post';
 	form.action = '/'+db+'/'+url;
 	const xsrfInput = document.createElement('input');
