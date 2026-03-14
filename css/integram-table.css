@@ -2029,8 +2029,7 @@
 
 /* Highlight required fields (attrs contains :!NULL:) when row is in edit mode (issue #779) */
 .required-field-editing {
-    outline: 2px solid #d32f2f !important;
-    outline-offset: -2px;
+    background-color: rgba(211, 47, 47, 0.08) !important;
 }
 
 /* Make cells with inline editing capability visually distinct on hover */
@@ -3119,7 +3118,7 @@ tr.row-selected {
 
 /* Disabled cells in new row (non-first columns before save) */
 .new-row-cell-disabled {
-    background-color: rgba(0, 0, 0, 0.04);
+    background-color: rgba(0, 0, 0, 0.02);
     color: var(--md-text-hint);
     cursor: not-allowed;
 }
