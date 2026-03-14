@@ -209,6 +209,10 @@ class IntegramTable {
         }
 
         init() {
+            // Remove padding from the parent container so the table fills full width (issue #887)
+            if (this.container && this.container.parentElement) {
+                this.container.parentElement.style.padding = '0';
+            }
             this.loadColumnState();
             this.loadSettings();
             this.loadConfigFromUrl();  // Load filters, groups, sorting from URL (issue #510)

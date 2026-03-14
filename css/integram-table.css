@@ -68,7 +68,7 @@
     justify-content: space-between;
     align-items: center;
     margin-bottom: 16px;
-    padding: 0 4px;
+    padding: 12px 12px 0;
 }
 
 /* Title area wrapper with create button (issue #693) */
