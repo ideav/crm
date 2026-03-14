@@ -3,23 +3,20 @@
  * Standalone CSS module for table component with Material Design styling
  */
 
-/* Import Roboto font for Material Design */
-@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
-
 /* Material Design Variables */
 :root {
-    --md-primary: #1976d2;
-    --md-primary-dark: #1565c0;
-    --md-primary-light: #42a5f5;
+    --md-primary: var(--button-primary, #3b82f6);
+    --md-primary-dark: var(--button-primary-hover, #2563eb);
+    --md-primary-light: #60a5fa;
     --md-accent: #ff4081;
-    --md-text-primary: rgba(0, 0, 0, 0.87);
-    --md-text-secondary: rgba(0, 0, 0, 0.54);
+    --md-text-primary: var(--text-primary, rgba(0, 0, 0, 0.87));
+    --md-text-secondary: var(--text-secondary, #6c757d);
     --md-text-hint: rgba(0, 0, 0, 0.38);
-    --md-divider: rgba(0, 0, 0, 0.12);
-    --md-background: #fafafa;
-    --md-surface: #ffffff;
+    --md-divider: var(--border-color, rgba(0, 0, 0, 0.12));
+    --md-background: var(--bg-secondary, #f8f9fa);
+    --md-surface: var(--card-bg, #ffffff);
     --md-hover: rgba(0, 0, 0, 0.04);
-    --md-selected: rgba(25, 118, 210, 0.08);
+    --md-selected: rgba(59, 130, 246, 0.08);
     --md-elevation-1: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
     --md-elevation-2: 0 3px 6px rgba(0, 0, 0, 0.16), 0 3px 6px rgba(0, 0, 0, 0.23);
     --md-elevation-3: 0 10px 20px rgba(0, 0, 0, 0.19), 0 6px 6px rgba(0, 0, 0, 0.23);
@@ -31,7 +28,7 @@
 .integram-table-wrapper {
     position: relative;
     /* margin: 20px 0; */
-    font-family: 'Roboto', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
 #form-settings-btn {
@@ -117,22 +114,24 @@
 
 .integram-table-settings {
     cursor: pointer;
-    padding: 8px 8px;
-    border-radius: 4px;
-    transition: var(--md-transition);
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
     font-weight: 500;
     font-size: 16px;
-    color: #6c757d;
+    color: var(--text-secondary, #6c757d);
     background: transparent;
-    border: none;
+    border: 1px solid var(--border-color, #dee2e6);
 }
 
 .integram-table-settings:hover {
-    background-color: var(--md-hover);
+    background-color: var(--bg-secondary, #f8f9fa);
+    border-color: var(--text-secondary, #6c757d);
+    color: var(--text-primary, #212529);
 }
 
 .integram-table-settings:active {
-    background-color: rgba(25, 118, 210, 0.12);
+    background-color: var(--bg-secondary, #f8f9fa);
 }
 
 .integram-table {
@@ -197,24 +196,26 @@
 
 /* Combined btn-link text-dark for table controls (issue #660) */
 .integram-table-controls .btn-link.text-dark {
-    color: #6c757d;
+    color: var(--text-secondary, #6c757d);
     background-color: transparent;
-    border: none;
-    padding: 8px 8px;
-    border-radius: 4px;
-    transition: var(--md-transition);
+    border: 1px solid var(--border-color, #dee2e6);
+    padding: 4px 10px;
+    border-radius: 6px;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
     font-weight: 500;
     font-size: 13px;
     cursor: pointer;
 }
 
 .integram-table-controls .btn-link.text-dark:hover {
-    background-color: var(--md-hover);
+    background-color: var(--bg-secondary, #f8f9fa);
+    border-color: var(--text-secondary, #6c757d);
+    color: var(--text-primary, #212529);
     text-decoration: none;
 }
 
 .integram-table-controls .btn-link.text-dark:active {
-    background-color: rgba(25, 118, 210, 0.12);
+    background-color: var(--bg-secondary, #f8f9fa);
 }
 
 .integram-table th {
@@ -456,7 +457,7 @@
     border: 1px solid var(--md-divider);
     border-radius: 4px;
     font-size: 14px;
-    font-family: 'Roboto', sans-serif;
+    font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
     transition: var(--md-transition);
@@ -512,7 +513,7 @@
     border: none; /* 1px solid var(--md-divider); */
     /* border-radius: 4px; */
     font-size: 14px;
-    font-family: 'Roboto', sans-serif;
+    font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
     width: 100%;
@@ -540,7 +541,7 @@
     padding: 4px 8px 4px 23px;  /* Extra left padding for icon */
     border: none;
     font-size: 13px;
-    font-family: 'Roboto', sans-serif;
+    font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
     width: 100%;
@@ -586,7 +587,7 @@
     box-shadow: var(--md-elevation-3);
     display: flex;
     flex-direction: column;
-    font-family: 'Roboto', sans-serif;
+    font-family: inherit;
     overflow: hidden;
     min-width: 200px;
     max-width: 350px;
@@ -606,7 +607,7 @@
     border: 1px solid var(--md-divider);
     border-radius: 4px;
     font-size: 14px;
-    font-family: 'Roboto', sans-serif;
+    font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
     outline: none;
@@ -698,7 +699,7 @@
     color: var(--md-text-secondary);
     font-size: 13px;
     font-weight: 500;
-    font-family: 'Roboto', sans-serif;
+    font-family: inherit;
     z-index: 100;
     letter-spacing: 0.25px;
 }
@@ -765,7 +766,7 @@
     z-index: 1000;
     max-width: 800px;
     width: 90%;
-    font-family: 'Roboto', sans-serif;
+    font-family: inherit;
 }
 
 .column-settings-overlay {
@@ -862,7 +863,7 @@
     box-shadow: var(--md-elevation-3);
     z-index: 100;
     min-width: 220px;
-    font-family: 'Roboto', sans-serif;
+    font-family: inherit;
     overflow: hidden;
 }
 
@@ -970,7 +971,7 @@
     max-height: 85vh;
     display: flex;
     flex-direction: column;
-    font-family: 'Roboto', sans-serif;
+    font-family: inherit;
     transition: max-width 0.3s ease, max-height 0.3s ease;
 }
 
@@ -1105,7 +1106,7 @@
     border: 1px solid var(--md-divider);
     border-radius: 4px;
     font-size: 14px;
-    font-family: 'Roboto', sans-serif;
+    font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
     transition: var(--md-transition);
@@ -1167,6 +1168,7 @@
     font-weight: 500;
     cursor: pointer;
     transition: var(--md-transition);
+    font-family: inherit;
     min-height: 40px;
     line-height: 1.4;
     display: inline-flex;
@@ -1243,7 +1245,7 @@
     min-width: 300px;
     max-width: 500px;
     font-size: 14px;
-    font-family: 'Roboto', sans-serif;
+    font-family: inherit;
     letter-spacing: 0.25px;
     animation: slideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -1302,7 +1304,7 @@
     border: 1px solid var(--md-divider);
     border-radius: 4px;
     font-size: 14px;
-    font-family: 'Roboto', sans-serif;
+    font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
     cursor: pointer;
@@ -1437,7 +1439,7 @@
     max-height: 80vh;
     display: flex;
     flex-direction: column;
-    font-family: 'Roboto', sans-serif;
+    font-family: inherit;
 }
 
 .form-field-settings-header {
@@ -1543,6 +1545,7 @@
     font-weight: 500;
     cursor: pointer;
     transition: var(--md-transition);
+    font-family: inherit;
     min-height: 40px;
     line-height: 1.4;
     display: inline-flex;
@@ -1904,7 +1907,7 @@
     border: 1px solid var(--md-divider);
     border-radius: 4px;
     font-size: 13px;
-    font-family: 'Roboto', sans-serif;
+    font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
     transition: var(--md-transition);
@@ -1983,7 +1986,7 @@
     border: 2px solid var(--md-primary);
     border-radius: 4px;
     font-size: 14px;
-    font-family: 'Roboto', sans-serif;
+    font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
     box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.15);
@@ -2020,7 +2023,7 @@
 .inline-editor-memo {
     min-height: 60px;
     resize: vertical;
-    font-family: 'Roboto', sans-serif;
+    font-family: inherit;
 }
 
 /* Style for calendar icon in inline date/datetime inputs */
@@ -2096,7 +2099,7 @@ td:has(.inline-editor) {
     padding-right: 36px;
     border: none;
     font-size: 14px;
-    font-family: 'Roboto', sans-serif;
+    font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
     outline: none;
@@ -2282,7 +2285,7 @@ td:has(.inline-editor-reference) {
     color: var(--md-primary);
     border-radius: 14px;
     font-size: 13px;
-    font-family: 'Roboto', sans-serif;
+    font-family: inherit;
     max-width: 200px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2621,7 +2624,7 @@ tr.row-selected {
     box-shadow: var(--md-elevation-4, 0 14px 28px rgba(0, 0, 0, 0.25), 0 10px 10px rgba(0, 0, 0, 0.22));
     max-width: 500px;
     width: 90%;
-    font-family: 'Roboto', sans-serif;
+    font-family: inherit;
 }
 
 .integram-modal-header {
@@ -2992,28 +2995,28 @@ tr.row-selected {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
+    gap: 4px;
     height: 28px;
     margin-right: 12px;
-    padding: 0;
+    padding: 0 10px;
     border: none;
-    border-radius: 50%;
-    background: var(--md-primary);
+    border-radius: 6px;
+    background: var(--button-primary, #3b82f6);
     color: white;
     cursor: pointer;
-    transition: var(--md-transition);
-    box-shadow: var(--md-elevation-1);
+    font-size: 13px;
+    font-weight: 500;
+    transition: background-color 0.2s ease;
     vertical-align: middle;
 }
 
 .add-row-btn:hover {
-    background: var(--md-primary-dark);
-    box-shadow: var(--md-elevation-2);
-    transform: scale(1.05);
+    background: var(--button-primary-hover, #2563eb);
 }
 
 .add-row-btn:active {
-    transform: scale(0.95);
+    background: var(--button-primary-hover, #2563eb);
+    transform: scale(0.98);
 }
 
 .add-row-btn i {
