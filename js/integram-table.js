@@ -1726,6 +1726,10 @@ class IntegramTable {
                 // Storing escaped value causes double-encoding when read back
                 // For GRANT/REPORT_COLUMN fields, store the parsed ID so inline editor can pre-select correctly (issue #925)
                 fullValueForEditing = (isGrantOrReportColumn && refValueId) ? refValueId : String(displayValue);
+                // Issue #947: Convert URLs in text cells to clickable hyperlinks
+                if (format === 'SHORT' || format === 'CHARS' || format === 'MEMO') {
+                    escapedValue = this.linkifyText(escapedValue);
+                }
             }
 
             // Truncate long values if setting is enabled
@@ -11753,6 +11757,26 @@ class IntegramTable {
                               .replace(/>/g, '&gt;')
                               .replace(/"/g, '&quot;')
                               .replace(/'/g, '&#039;');
+        }
+
+        /**
+         * Convert URLs in already-HTML-escaped text to clickable hyperlinks (issue #947)
+         * Input text must already be HTML-escaped; this method only wraps URL patterns
+         * with anchor tags, preserving all other escaped content intact.
+         *
+         * @param {string} escapedText - HTML-escaped text that may contain URLs
+         * @returns {string} - Text with URLs wrapped in <a> tags
+         */
+        linkifyText(escapedText) {
+            if (!escapedText) return escapedText;
+            // Match http/https URLs; stop at whitespace or common trailing punctuation
+            return escapedText.replace(/(https?:\/\/[^\s<>"']+)/g, (url) => {
+                // Strip trailing punctuation that is unlikely to be part of the URL
+                const trailingPunct = url.match(/[.,;:!?)]+$/);
+                const cleanUrl = trailingPunct ? url.slice(0, -trailingPunct[0].length) : url;
+                const suffix = trailingPunct ? trailingPunct[0] : '';
+                return `<a href="${cleanUrl}" target="_blank" rel="noopener noreferrer" class="cell-hyperlink" onclick="event.stopPropagation();">${cleanUrl}</a>${suffix}`;
+            });
         }
 
         /**
