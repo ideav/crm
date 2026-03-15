@@ -920,6 +920,57 @@
     flex-wrap: wrap;
 }
 
+.col-edit-go-dict-link {
+    font-size: 13px;
+    color: var(--md-primary, #1976d2);
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.col-edit-go-dict-link:hover {
+    text-decoration: underline;
+    color: var(--md-primary-dark, #1565c0);
+}
+
+/* Shared modal action buttons for column edit modal (mirrors main-app.css .menu-modal-btn) */
+.col-edit-modal .menu-modal-btn {
+    padding: 0.625rem 1.25rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: none;
+}
+
+.col-edit-modal .menu-modal-btn.cancel {
+    background: none;
+    border: 1px solid var(--border-color, #dee2e6);
+    color: var(--text-primary, #212529);
+}
+
+.col-edit-modal .menu-modal-btn.cancel:hover {
+    background-color: var(--bg-secondary, #f8f9fa);
+}
+
+.col-edit-modal .menu-modal-btn.save {
+    background-color: var(--button-primary, #1976d2);
+    color: white;
+}
+
+.col-edit-modal .menu-modal-btn.save:hover {
+    background-color: var(--button-primary-hover, #1565c0);
+}
+
+.col-edit-modal .menu-modal-btn.delete {
+    background-color: var(--color-danger, #dc3545);
+    color: white;
+    margin-right: auto;
+}
+
+.col-edit-modal .menu-modal-btn.delete:hover {
+    background-color: var(--color-danger-dark-hover, #bb2d3b);
+}
+
 .col-edit-del-confirm {
     display: flex;
     align-items: center;
