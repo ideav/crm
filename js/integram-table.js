@@ -5959,6 +5959,11 @@ class IntegramTable {
                         };
                         this.columns.push(newCol);
 
+                        // Add new column to columnOrder so drag-and-drop reordering works immediately (issue #976)
+                        if (!this.columnOrder.includes(String(result.columnId))) {
+                            this.columnOrder.push(String(result.columnId));
+                        }
+
                         // Add new column to the column settings list in the parent modal (issue #949)
                         const columnList = parentModal.querySelector(`#column-settings-list-${instanceName}`);
                         if (columnList) {
