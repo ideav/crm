@@ -5017,13 +5017,12 @@ class IntegramTable {
 
             this.saveColumnState();
 
-            // Persist the new column order to the backend (issue #951)
-            // The first visible column is fixed; remaining columns are numbered starting from 1
-            const visibleOrder = this.columnOrder.filter(id => this.visibleColumns.includes(id));
-            const newOrderIndex = visibleOrder.indexOf(draggedId);
-            // newOrderIndex 0 would be the first (fixed) column; draggable columns start at index 1
-            if (newOrderIndex > 0) {
-                const newOrder = newOrderIndex; // 1-based position among movable columns
+            // Persist the new column order to the backend (issue #951, #956)
+            // Use the full columnOrder (not filtered by visibility) so that hidden columns
+            // can also be reordered from the settings panel. The order is 1-based.
+            const newOrderIndex = this.columnOrder.indexOf(draggedId);
+            if (newOrderIndex >= 0) {
+                const newOrder = newOrderIndex + 1; // 1-based position
                 this.saveColumnOrderToServer(draggedId, newOrder);
             }
 
