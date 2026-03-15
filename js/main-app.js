@@ -963,7 +963,7 @@ class MainAppController {
             const finalIcon = emoji || selectedIcon;
 
             if (!name) {
-                alert('Введите название пункта меню');
+                this.showErrorModal('Введите название пункта меню');
                 return;
             }
 
@@ -1077,15 +1077,15 @@ class MainAppController {
                     }
                 } else {
                     console.error('Failed to create menu item: no obj in response', data);
-                    alert('Ошибка создания пункта меню: сервер не вернул ID');
+                    this.showErrorModal('Ошибка создания пункта меню: сервер не вернул ID');
                 }
             } else {
                 console.error('Failed to create menu item:', response.status);
-                alert('Ошибка создания пункта меню: ' + response.status);
+                this.showErrorModal('Ошибка создания пункта меню: ' + response.status);
             }
         } catch (err) {
             console.error('Error creating menu item:', err);
-            alert('Ошибка создания пункта меню: ' + err.message);
+            this.showErrorModal('Ошибка создания пункта меню: ' + err.message);
         }
     }
 
@@ -1156,11 +1156,11 @@ class MainAppController {
                 console.log('Updated menu item:', { menuId, name, href, icon });
             } else {
                 console.error('Failed to update menu item:', response.status);
-                alert('Ошибка обновления пункта меню: ' + response.status);
+                this.showErrorModal('Ошибка обновления пункта меню: ' + response.status);
             }
         } catch (err) {
             console.error('Error updating menu item:', err);
-            alert('Ошибка обновления пункта меню: ' + err.message);
+            this.showErrorModal('Ошибка обновления пункта меню: ' + err.message);
         }
     }
 

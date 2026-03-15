@@ -5166,7 +5166,7 @@ class IntegramTable {
             if (helpBtn) {
                 helpBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    alert('Здесь вы можете определить как колонки будут храниться в базе данных. Первая колонка всегда фиксирована, а остальным можно задать порядок. Вы можете настроить представление в таблицах по-своему, перетаскивая колонки таблицы, а при сбросе тех настроек - таблицы будут возвращаться к виду, который настроен здесь.');
+                    this.showToast('Здесь вы можете определить как колонки будут храниться в базе данных. Первая колонка всегда фиксирована, а остальным можно задать порядок. Вы можете настроить представление в таблицах по-своему, перетаскивая колонки таблицы, а при сбросе тех настроек - таблицы будут возвращаться к виду, который настроен здесь.', 'info');
                 });
             }
 
@@ -13024,7 +13024,7 @@ async function openCreateRecordForm(tableTypeId, parentId, fieldValues = {}) {
         if (typeof showToast === 'function') {
             showToast(`Ошибка: ${error.message}`, 'error');
         } else {
-            alert(`Ошибка: ${error.message}`);
+            console.error(`Ошибка: ${error.message}`);
         }
     }
 }
@@ -14852,7 +14852,7 @@ async function openEditRecordForm(recordId, typeId) {
         if (typeof window.showToast === 'function') {
             window.showToast(`Ошибка: ${error.message}`, 'error');
         } else {
-            alert(`Ошибка: ${error.message}`);
+            console.error(`Ошибка: ${error.message}`);
         }
     }
 }

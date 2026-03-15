@@ -166,6 +166,19 @@ input[type="checkbox"] {
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.1/papaparse.min.js" integrity="sha512-EbdJQSugx0nVWrtyK3JdQQ/03mS3Q1UiAhRtErbwl1YL/+e2hZdlIcSURxxh7WXHTzn83sjlh2rysACoJGfb6g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script>
+function showNotification(message, type) {
+    type = type || 'info';
+    var existing = document.querySelectorAll('.integram-toast');
+    for (var i = 0; i < existing.length; i++) existing[i].remove();
+    var toast = document.createElement('div');
+    toast.className = 'integram-toast integram-toast-' + type;
+    toast.textContent = message;
+    toast.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 24px;border-radius:4px;color:white;z-index:10000;font-family:sans-serif;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.2);cursor:pointer;background-color:' + (type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#17a2b8') + ';';
+    document.body.appendChild(toast);
+    var remove = function() { if (toast.parentNode) toast.remove(); };
+    setTimeout(remove, 5000);
+    toast.addEventListener('click', remove);
+}
 var input,sourceMap=[],importMap={},chosenType,chosenTypeName,chosenSet,upType,uploadSets={},toImport=[],saveSet,formulas={},statArr={},origMap={}
     ,types={},bt={},revBt={},toCreate=[],newType,chunkSize=1000,autoParent
     ,ajax='<img src="/i/ajax.gif">'
@@ -434,7 +447,7 @@ function doSaveSet(){
             intApi('GET','object/269?JSON&F_271=UPLOAD&F_269='+encodeURIComponent($('#save-set').val()),'check-set');
         }
         else
-            alert('Недопустимый символ " в имени настройки!');
+            showNotification('Недопустимый символ " в имени настройки!', 'error');
 }
 function applySet(v){
     chosenSet=v;

@@ -393,10 +393,10 @@ class CabinetController {
         try {
             // TODO: Implement profile save API call
             // For now, show a message
-            alert(this.i18n.t('cabinet.profile.saveSuccess') || 'Профиль сохранен');
+            showToast(this.i18n.t('cabinet.profile.saveSuccess') || 'Профиль сохранен', 'success');
         } catch (err) {
             console.error('[cabinet] Error saving profile:', err);
-            alert(this.i18n.t('cabinet.profile.saveError') || 'Ошибка сохранения профиля');
+            showToast(this.i18n.t('cabinet.profile.saveError') || 'Ошибка сохранения профиля', 'error');
         }
     }
 
@@ -422,28 +422,28 @@ class CabinetController {
         const selectedPlan = planSelect?.value || 'free';
 
         // TODO: Implement plan change API call
-        alert(this.i18n.t('cabinet.profile.planChangeInfo') || 'Для смены плана обратитесь в поддержку');
+        showToast(this.i18n.t('cabinet.profile.planChangeInfo') || 'Для смены плана обратитесь в поддержку', 'info');
     }
 
     addFunds() {
         // TODO: Implement add funds functionality
-        alert(this.i18n.t('cabinet.balance.addFundsInfo') || 'Функция пополнения счета будет доступна позже');
+        showToast(this.i18n.t('cabinet.balance.addFundsInfo') || 'Функция пополнения счета будет доступна позже', 'info');
     }
 
     convertBonuses() {
         const bonusAmount = parseInt(this.userData?.Bonus || '0', 10);
         if (bonusAmount <= 0) {
-            alert(this.i18n.t('cabinet.bonuses.noBonuses') || 'У вас нет бонусов для конвертации');
+            showToast(this.i18n.t('cabinet.bonuses.noBonuses') || 'У вас нет бонусов для конвертации', 'info');
             return;
         }
 
         // TODO: Implement bonus conversion API call
-        alert(this.i18n.t('cabinet.bonuses.convertInfo') || 'Функция конвертации бонусов будет доступна позже');
+        showToast(this.i18n.t('cabinet.bonuses.convertInfo') || 'Функция конвертации бонусов будет доступна позже', 'info');
     }
 
     withdrawReferrals() {
         // TODO: Implement referral withdrawal functionality
-        alert(this.i18n.t('cabinet.referrals.withdrawInfo') || 'Функция вывода средств будет доступна позже');
+        showToast(this.i18n.t('cabinet.referrals.withdrawInfo') || 'Функция вывода средств будет доступна позже', 'info');
     }
 
     setupCopyButtons() {

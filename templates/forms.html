@@ -915,6 +915,48 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ============================================================
+// Notification Utilities
+// ============================================================
+function showNotification(message, type) {
+    type = type || 'info';
+    var existing = document.querySelectorAll('.integram-toast');
+    existing.forEach(function(t) { t.remove(); });
+
+    var toast = document.createElement('div');
+    toast.className = 'integram-toast integram-toast-' + type;
+    toast.textContent = message;
+    toast.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 24px;border-radius:4px;color:white;z-index:10000;font-family:sans-serif;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.2);cursor:pointer;background-color:' + (type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#17a2b8') + ';';
+    document.body.appendChild(toast);
+
+    var remove = function() { if (toast.parentNode) toast.remove(); };
+    setTimeout(remove, 5000);
+    toast.addEventListener('click', remove);
+}
+
+function showConfirmModal(message, onConfirm) {
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10001;display:flex;align-items:center;justify-content:center;';
+
+    var modal = document.createElement('div');
+    modal.style.cssText = 'background:var(--bg-card,#fff);border-radius:8px;padding:24px;max-width:400px;width:90%;box-shadow:0 4px 16px rgba(0,0,0,0.2);';
+    modal.innerHTML = '<p style="margin:0 0 20px 0;">' + message + '</p><div style="display:flex;gap:8px;justify-content:flex-end;"><button class="btn-cancel" style="padding:8px 16px;border:1px solid #ccc;border-radius:4px;background:transparent;cursor:pointer;">Отмена</button><button class="btn-confirm" style="padding:8px 16px;border:none;border-radius:4px;background:#dc3545;color:white;cursor:pointer;">Удалить</button></div>';
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    var cleanup = function() { overlay.remove(); };
+
+    modal.querySelector('.btn-cancel').addEventListener('click', cleanup);
+    modal.querySelector('.btn-confirm').addEventListener('click', function() {
+        cleanup();
+        onConfirm();
+    });
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) cleanup();
+    });
+}
+
+// ============================================================
 // API Functions
 // ============================================================
 function apiRequest(method, endpoint, data, callback) {
@@ -1590,7 +1632,7 @@ function savePivotConfig(panelId, pivotId) {
     const config = Object.assign({}, originalConfig, pivotOptions);
 
     apiRequest('POST', '_m_set/' + panelId + '?JSON', { 't225': JSON.stringify(config) }, function(json) {
-        alert('Настройки сохранены');
+        showNotification('Настройки сохранены', 'success');
     });
 }
 
@@ -1962,10 +2004,10 @@ function submitDataEntryForm(event, panelId, tableType) {
 
     apiRequest('POST', '_m_new/' + tableType + '?up=1&JSON', data, function(json) {
         if (json && json.obj) {
-            alert('Запись создана');
+            showNotification('Запись создана', 'success');
             form.reset();
         } else {
-            alert('Ошибка сохранения');
+            showNotification('Ошибка сохранения', 'error');
         }
     });
 
@@ -2093,7 +2135,7 @@ function createNewForm(event) {
 
     const name = document.getElementById('newFormName').value.trim();
     if (!name) {
-        alert('Введите имя формы');
+        showNotification('Введите имя формы', 'error');
         return false;
     }
 
@@ -2101,7 +2143,7 @@ function createNewForm(event) {
         if (json && json.obj) {
             window.location.href = '/' + FormConstructor.db + '/forms/' + json.obj + '?EDIT';
         } else {
-            alert('Ошибка создания формы');
+            showNotification('Ошибка создания формы', 'error');
         }
     });
 
@@ -2110,7 +2152,7 @@ function createNewForm(event) {
 
 function addPanel() {
     if (!selectedPanelType) {
-        alert('Выберите тип панели');
+        showNotification('Выберите тип панели', 'error');
         return;
     }
 
@@ -2148,7 +2190,7 @@ function addPanel() {
             hideAddPanelModal();
             loadFormPanels(FormConstructor.currentFormId);
         } else {
-            alert('Ошибка добавления панели');
+            showNotification('Ошибка добавления панели', 'error');
         }
     });
 }
@@ -2182,13 +2224,11 @@ function savePanel() {
 function deletePanel() {
     const panelId = document.getElementById('editPanelId').value;
 
-    if (!confirm('Удалить эту панель?')) {
-        return;
-    }
-
-    apiRequest('POST', '_m_del/' + panelId + '?JSON', {}, function(json) {
-        hideEditPanelModal();
-        loadFormPanels(FormConstructor.currentFormId);
+    showConfirmModal('Удалить эту панель?', function() {
+        apiRequest('POST', '_m_del/' + panelId + '?JSON', {}, function(json) {
+            hideEditPanelModal();
+            loadFormPanels(FormConstructor.currentFormId);
+        });
     });
 }
 
@@ -2208,7 +2248,7 @@ function addButtonToPanel() {
     const btnClass = document.getElementById('buttonClass').value;
 
     if (!text) {
-        alert('Введите текст кнопки');
+        showNotification('Введите текст кнопки', 'error');
         return;
     }
 
@@ -2226,7 +2266,7 @@ function addButtonToPanel() {
             hideAddButtonModal();
             loadFormPanels(FormConstructor.currentFormId);
         } else {
-            alert('Ошибка добавления кнопки');
+            showNotification('Ошибка добавления кнопки', 'error');
         }
     });
 }
@@ -2311,7 +2351,7 @@ function updatePanelTitle(panelId, sourceName) {
 function showColumnConfigModal(panelId) {
     const columnData = FormConstructor.reportColumns && FormConstructor.reportColumns[panelId];
     if (!columnData) {
-        alert('Данные колонок не найдены');
+        showNotification('Данные колонок не найдены', 'error');
         return;
     }
 

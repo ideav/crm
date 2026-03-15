@@ -995,6 +995,20 @@
 <script src="/js/integram-table.js?2"></script>
 
 <script>
+function showNotification(message, type) {
+    type = type || 'info';
+    var existing = document.querySelectorAll('.integram-toast');
+    for (var i = 0; i < existing.length; i++) existing[i].remove();
+    var toast = document.createElement('div');
+    toast.className = 'integram-toast integram-toast-' + type;
+    toast.textContent = message;
+    toast.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 24px;border-radius:4px;color:white;z-index:10000;font-family:sans-serif;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.2);cursor:pointer;background-color:' + (type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#17a2b8') + ';';
+    document.body.appendChild(toast);
+    var remove = function() { if (toast.parentNode) toast.remove(); };
+    setTimeout(remove, 5000);
+    toast.addEventListener('click', remove);
+}
+
 // Kanban functionality
 var kanbanData = [];
 var statusesData = [];
@@ -1852,7 +1866,7 @@ async function openAddRecordModal(statusId, statusName){
         }
     } catch(e) {
         console.error('Error opening add record form:', e);
-        alert('Ошибка при подготовке формы: ' + e.message);
+        showNotification('Ошибка при подготовке формы: ' + e.message, 'error');
     }
 }
 
@@ -1912,7 +1926,7 @@ function submitAddRecord(){
     }
 
     if(hasError){
-        alert('Пожалуйста, заполните все обязательные поля:\n- Название\n- Источник\n- Телефон или Email');
+        showNotification('Пожалуйста, заполните все обязательные поля: Название, Источник, Телефон или Email', 'error');
         return;
     }
 
@@ -1976,19 +1990,19 @@ function submitAddRecord(){
                 loadKanbanData();
             } catch(e){
                 console.error('Error parsing response:', e);
-                alert('Запись создана, но возникла ошибка при обработке ответа');
+                showNotification('Запись создана, но возникла ошибка при обработке ответа', 'error');
                 closeAddRecordModal();
                 loadKanbanData();
             }
         } else {
             console.error('Error creating record:', xhr.status, xhr.responseText);
-            alert('Ошибка при создании записи: ' + xhr.status);
+            showNotification('Ошибка при создании записи: ' + xhr.status, 'error');
         }
     };
     xhr.onerror = function(){
         $('#submitButton').prop('disabled', false).text('Сохранить');
         console.error('Network error creating record');
-        alert('Ошибка сети при создании записи');
+        showNotification('Ошибка сети при создании записи', 'error');
     };
     xhr.send(postData);
 }
@@ -2101,7 +2115,7 @@ async function openClientEditForm(clientId){
         await table.openEditForm(clientId, clientTypeId, 0);
     } catch(e) {
         console.error('Error opening edit form:', e);
-        alert('Ошибка при подготовке формы: ' + e.message);
+        showNotification('Ошибка при подготовке формы: ' + e.message, 'error');
     }
 }
 
@@ -2213,14 +2227,14 @@ function submitCreateTask(){
     var taskName = $('#taskName').val().trim();
     if(!taskName){
         $('#taskName').addClass('error');
-        alert('Название задачи обязательно для заполнения');
+        showNotification('Название задачи обязательно для заполнения', 'error');
         return;
     }
 
     var dueDate = $('#taskDueDateHidden').val();
     if(!dueDate){
         $('#taskDueDate').addClass('error');
-        alert('Срок выполнения обязателен для заполнения');
+        showNotification('Срок выполнения обязателен для заполнения', 'error');
         return;
     }
 
@@ -2273,13 +2287,13 @@ function submitCreateTask(){
             }
         } else {
             console.error('Error creating task:', xhr.status, xhr.responseText);
-            alert('Ошибка при создании задачи: ' + xhr.status);
+            showNotification('Ошибка при создании задачи: ' + xhr.status, 'error');
         }
     };
     xhr.onerror = function(){
         $('#createTaskSubmitButton').prop('disabled', false).text('Создать');
         console.error('Network error creating task');
-        alert('Ошибка сети при создании задачи');
+        showNotification('Ошибка сети при создании задачи', 'error');
     };
     xhr.send(postData);
 }
@@ -2373,7 +2387,7 @@ function submitCreateDeal(){
     var productId = $('#dealProduct').val();
     if(!productId){
         $('#dealProduct').addClass('error');
-        alert('Продукт обязателен для заполнения');
+        showNotification('Продукт обязателен для заполнения', 'error');
         return;
     }
 
@@ -2429,13 +2443,13 @@ function submitCreateDeal(){
             }
         } else {
             console.error('Error creating deal:', xhr.status, xhr.responseText);
-            alert('Ошибка при создании сделки: ' + xhr.status);
+            showNotification('Ошибка при создании сделки: ' + xhr.status, 'error');
         }
     };
     xhr.onerror = function(){
         $('#createDealSubmitButton').prop('disabled', false).text('Создать');
         console.error('Network error creating deal');
-        alert('Ошибка сети при создании сделки');
+        showNotification('Ошибка сети при создании сделки', 'error');
     };
     xhr.send(postData);
 }
