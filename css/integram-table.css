@@ -852,6 +852,28 @@
     opacity: 1;
 }
 
+/* Drag-and-drop for column settings list (issue #953) */
+.col-settings-drag-handle {
+    margin-right: 8px;
+    color: var(--md-text-secondary, #666);
+    cursor: grab;
+    font-size: 14px;
+    user-select: none;
+    opacity: 0.5;
+}
+
+.column-settings-item:hover .col-settings-drag-handle {
+    opacity: 1;
+}
+
+.column-settings-item.dragging {
+    opacity: 0.4;
+}
+
+.column-settings-item.drag-over {
+    border-top: 2px solid var(--md-primary, #1976d2);
+}
+
 /* Required / multi badges in column settings list (issue #937) */
 .col-required-badge {
     color: #d32f2f;
