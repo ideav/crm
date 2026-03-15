@@ -5099,6 +5099,7 @@ class IntegramTable {
             const isRef = col.ref_id != null || (col.ref && col.ref !== 0);
             const isMulti = parsedAttrs.multi;
             const isRequired = parsedAttrs.required;
+            const isFirstColumn = col.id === String(this.objectTableId || this.options.tableTypeId);
 
             // Base types available for selection (same list as showAddColumnForm)
             const baseTypes = [
@@ -5135,7 +5136,7 @@ class IntegramTable {
                     </div>
                     <div class="col-edit-row">
                         <label class="col-edit-label col-edit-check-label">
-                            <input type="checkbox" id="col-edit-required-${instanceName}" ${ isRequired ? 'checked' : '' }>
+                            <input type="checkbox" id="col-edit-required-${instanceName}" ${ (isRequired || isFirstColumn) ? 'checked' : '' } ${ isFirstColumn ? 'disabled' : '' }>
                             Обязательно к заполнению
                         </label>
                     </div>
@@ -5153,18 +5154,18 @@ class IntegramTable {
                     ` : '' }
                 </div>
                 <div class="col-edit-actions">
-                    ${ isRef ? `<button class="btn btn-sm btn-outline-secondary col-edit-go-dict-btn" id="col-edit-go-dict-${instanceName}">
+                    ${ isRef ? `<a class="col-edit-go-dict-link" id="col-edit-go-dict-${instanceName}" href="#" role="button">
                         Перейти в справочник
-                    </button>` : '' }
+                    </a>` : '' }
                     <div style="flex: 1;"></div>
-                    <button class="btn btn-sm btn-danger col-edit-del-btn" id="col-edit-del-${instanceName}">Удалить колонку</button>
-                    <button class="btn btn-sm btn-outline-secondary" id="col-edit-cancel-${instanceName}">Отмена</button>
-                    <button class="btn btn-sm btn-primary" id="col-edit-save-${instanceName}">Сохранить</button>
+                    <button class="menu-modal-btn delete col-edit-del-btn" id="col-edit-del-${instanceName}">Удалить колонку</button>
+                    <button class="menu-modal-btn save" id="col-edit-save-${instanceName}">Сохранить</button>
+                    <button class="menu-modal-btn cancel" id="col-edit-cancel-${instanceName}">Отменить</button>
                 </div>
                 <div id="col-edit-del-confirm-${instanceName}" class="col-edit-del-confirm" style="display:none;">
                     <span class="col-edit-del-warn">Удалить колонку вместе с данными?</span>
-                    <button class="btn btn-sm btn-danger" id="col-edit-del-forced-${instanceName}">Удалить с данными</button>
-                    <button class="btn btn-sm btn-outline-secondary" id="col-edit-del-cancel-${instanceName}">Отмена</button>
+                    <button class="menu-modal-btn delete" id="col-edit-del-forced-${instanceName}">Удалить с данными</button>
+                    <button class="menu-modal-btn cancel" id="col-edit-del-cancel-${instanceName}">Отменить</button>
                 </div>
                 <div id="col-edit-status-${instanceName}" class="col-edit-status" style="display:none;"></div>
             `;
@@ -5274,7 +5275,8 @@ class IntegramTable {
 
             // Go to dictionary (ref only) - opens in new tab
             if (isRef) {
-                colEditModal.querySelector(`#col-edit-go-dict-${instanceName}`).addEventListener('click', () => {
+                colEditModal.querySelector(`#col-edit-go-dict-${instanceName}`).addEventListener('click', (e) => {
+                    e.preventDefault();
                     const refTypeId = col.orig || col.ref_id;
                     if (refTypeId) {
                         const dbName = window.location.pathname.split('/')[1];
