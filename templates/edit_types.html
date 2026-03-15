@@ -41,6 +41,28 @@
 <script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
 <script src="/js/js.js"></script>
 <script type="text/javascript">
+function showNotification(message, type) {
+    type = type || 'info';
+    var existing = document.querySelectorAll('.integram-toast');
+    for (var i = 0; i < existing.length; i++) existing[i].remove();
+    var toast = document.createElement('div');
+    toast.className = 'integram-toast integram-toast-' + type;
+    toast.textContent = message;
+    toast.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 24px;border-radius:4px;color:white;z-index:10000;font-family:sans-serif;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.2);cursor:pointer;background-color:' + (type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#17a2b8') + ';';
+    document.body.appendChild(toast);
+    var remove = function() { if (toast.parentNode) toast.remove(); };
+    setTimeout(remove, 5000);
+    toast.addEventListener('click', remove);
+}
+function validateAddForm(e) {
+    if (byId('val').value === '') {
+        showNotification('Введите название таблицы', 'error');
+        e.returnValue = false;
+        e.preventDefault();
+    } else {
+        addbtn.disabled = true;
+    }
+}
 document.title='Редактор структуры таблиц';
 var editable=ext=false,curid=0,isRef=false,prefix=0
     ,ajax='<img width="25px" src="/i/ajax.gif">'
@@ -61,7 +83,7 @@ var str='';
 </script>
 <div id="messages" class="msgs" onclick="this.innerHTML=''"></div>
 <!-- Begin:&Editables -->{OK}
-<FORM id="addForm" class="edit-types-form" method="post" action="/{_global_.Z}/_d_new/" onsubmit="if(byId('val').value==''){alert('Введите название таблицы');event.returnValue=false;event.preventDefault();}else addbtn.disabled=true;">
+<FORM id="addForm" class="edit-types-form" method="post" action="/{_global_.Z}/_d_new/" onsubmit="validateAddForm(event);">
     <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
     <div class="row t9n p-0 m-0">
         <div class="col-6 col-sm-4 col-md-3 pl-0 pr-1">
@@ -546,7 +568,7 @@ function setAjax(el){
 }
 function validateNewType(id){
     if(byId('input'+id).value==''){
-        alert('Введите название таблицы!');
+        showNotification('Введите название таблицы!', 'error');
         return;
     }
     var val=byId('input'+id).value,

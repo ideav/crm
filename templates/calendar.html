@@ -595,6 +595,20 @@
 <script src="/download/{_global_.z}/js/integram-table.js"></script>
 
 <script>
+function showNotification(message, type) {
+    type = type || 'info';
+    const existing = document.querySelectorAll('.integram-toast');
+    existing.forEach(t => t.remove());
+    const toast = document.createElement('div');
+    toast.className = `integram-toast integram-toast-${type}`;
+    toast.textContent = message;
+    toast.style.cssText = `position:fixed;top:20px;right:20px;padding:12px 24px;border-radius:4px;color:white;z-index:10000;font-family:sans-serif;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.2);cursor:pointer;background-color:${type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#17a2b8'};`;
+    document.body.appendChild(toast);
+    const remove = () => { if (toast.parentNode) toast.remove(); };
+    setTimeout(remove, 5000);
+    toast.addEventListener('click', remove);
+}
+
 // Calendar functionality
 let calendar;
 let allTasks = [];
@@ -1095,7 +1109,7 @@ async function handleEventDrop(info) {
         const result = await response.json();
 
         if (result.error) {
-            alert('Ошибка обновления: ' + result.error);
+            showNotification('Ошибка обновления: ' + result.error, 'error');
             info.revert();
         } else {
             // Update local task data
@@ -1106,7 +1120,7 @@ async function handleEventDrop(info) {
         }
     } catch (error) {
         console.error('Error updating task:', error);
-        alert('Ошибка обновления задачи');
+        showNotification('Ошибка обновления задачи', 'error');
         info.revert();
     }
 }
@@ -1157,7 +1171,7 @@ async function openTaskDetail(taskId) {
         }, 100);
     } catch (error) {
         console.error('Error opening task edit form:', error);
-        alert('Ошибка при открытии формы редактирования задачи');
+        showNotification('Ошибка при открытии формы редактирования задачи', 'error');
         // Clean up on error
         if (tempContainer.parentNode) {
             document.body.removeChild(tempContainer);
@@ -1192,7 +1206,7 @@ async function createNewTask() {
         }, 100);
     } catch (error) {
         console.error('Error opening task create form:', error);
-        alert('Ошибка при открытии формы создания задачи');
+        showNotification('Ошибка при открытии формы создания задачи', 'error');
         // Clean up on error
         if (tempContainer.parentNode) {
             document.body.removeChild(tempContainer);

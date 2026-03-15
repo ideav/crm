@@ -414,6 +414,37 @@ async function validateToken(host, dbName) {
 }
 
 // ============================================================
+// Notification utility
+// ============================================================
+function showToast(message, type = 'info') {
+    const existing = document.querySelectorAll('.integram-toast');
+    existing.forEach(t => t.remove());
+
+    const toast = document.createElement('div');
+    toast.className = `integram-toast integram-toast-${type}`;
+    toast.textContent = message;
+    toast.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 12px 24px;
+        border-radius: 4px;
+        color: white;
+        z-index: 10000;
+        font-family: sans-serif;
+        font-size: 14px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        background-color: ${type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#17a2b8'};
+        cursor: pointer;
+    `;
+    document.body.appendChild(toast);
+
+    const remove = () => { if (toast.parentNode) toast.remove(); };
+    setTimeout(remove, 5000);
+    toast.addEventListener('click', remove);
+}
+
+// ============================================================
 // Yandex OAuth
 // ============================================================
 class YandexAuthManager {
@@ -429,7 +460,7 @@ class YandexAuthManager {
 
     initiateLogin() {
         if (!this.isEnabled()) {
-            alert('Yandex OAuth не настроен. Укажите Client ID в настройках.');
+            showToast('Yandex OAuth не настроен. Укажите Client ID в настройках.', 'error');
             return;
         }
         const params = new URLSearchParams({
@@ -747,7 +778,7 @@ class App {
                     this.hideAuthPanel();
                     this.auth.init();
                 } else {
-                    alert(result.message);
+                    showToast(result.message, 'error');
                 }
             });
         }
@@ -762,16 +793,16 @@ class App {
                 const confirmPassword = document.getElementById('reg-confirm-password').value;
 
                 if (password !== confirmPassword) {
-                    alert(this.i18n.t('msg.passwordMismatch'));
+                    showToast(this.i18n.t('msg.passwordMismatch'), 'error');
                     return;
                 }
                 if (password.length < 6) {
-                    alert(this.i18n.t('msg.passwordShort'));
+                    showToast(this.i18n.t('msg.passwordShort'), 'error');
                     return;
                 }
 
                 const result = await this.auth.register(email, password);
-                alert(result.message);
+                showToast(result.message, result.success ? 'success' : 'error');
                 if (result.success) {
                     this.hideAuthPanel();
                 }
