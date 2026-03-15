@@ -2312,8 +2312,19 @@ class IntegramTable {
         }
 
         attachEventListeners() {
+            // Determine the first visible column ID — it cannot be moved (issue #951)
+            const firstVisibleColumnId = this.columnOrder.find(id => this.visibleColumns.includes(id));
+
             const headers = this.container.querySelectorAll('th[draggable]');
             headers.forEach(th => {
+                const columnId = th.dataset.columnId;
+
+                // The first column is not draggable and cannot be a drop target (issue #951)
+                if (columnId === firstVisibleColumnId) {
+                    th.removeAttribute('draggable');
+                    return;
+                }
+
                 th.addEventListener('dragstart', (e) => {
                     e.dataTransfer.effectAllowed = 'move';
                     e.dataTransfer.setData('text/plain', th.dataset.columnId);
@@ -2340,7 +2351,8 @@ class IntegramTable {
                     const draggedId = e.dataTransfer.getData('text/plain');
                     const targetId = th.dataset.columnId;
 
-                    if (draggedId !== targetId) {
+                    // Prevent dropping onto the first column (issue #951)
+                    if (draggedId !== targetId && draggedId !== firstVisibleColumnId) {
                         this.reorderColumns(draggedId, targetId);
                     }
 
@@ -5004,7 +5016,43 @@ class IntegramTable {
             this.columnOrder.splice(targetIndex, 0, draggedId);
 
             this.saveColumnState();
+
+            // Persist the new column order to the backend (issue #951)
+            // The first visible column is fixed; remaining columns are numbered starting from 1
+            const visibleOrder = this.columnOrder.filter(id => this.visibleColumns.includes(id));
+            const newOrderIndex = visibleOrder.indexOf(draggedId);
+            // newOrderIndex 0 would be the first (fixed) column; draggable columns start at index 1
+            if (newOrderIndex > 0) {
+                const newOrder = newOrderIndex; // 1-based position among movable columns
+                this.saveColumnOrderToServer(draggedId, newOrder);
+            }
+
             this.render();
+        }
+
+        /**
+         * Save the new order of a column to the server (issue #951).
+         * POST _d_ord/{columnId}?JSON with order={1-based position} and _xsrf token.
+         */
+        async saveColumnOrderToServer(columnId, order) {
+            try {
+                const apiBase = this.getApiBase();
+                const params = new URLSearchParams();
+                params.append('order', order);
+                if (typeof xsrf !== 'undefined') {
+                    params.append('_xsrf', xsrf);
+                }
+                await fetch(`${apiBase}/_d_ord/${columnId}?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+            } catch (e) {
+                // Silently ignore errors — the local order is already updated
+                if (this.options.debug) {
+                    console.warn('[IntegramTable] saveColumnOrderToServer error:', e);
+                }
+            }
         }
 
         openColumnSettings() {
