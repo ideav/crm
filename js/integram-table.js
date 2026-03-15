@@ -5952,8 +5952,13 @@ class IntegramTable {
                         if (columnList) {
                             const newItem = document.createElement('div');
                             newItem.className = 'column-settings-item';
+                            newItem.setAttribute('draggable', 'true');
                             newItem.dataset.columnId = String(result.columnId);
+                            // Determine 1-based position number among non-fixed columns (issue #970)
+                            const nonFixedCount = columnList.querySelectorAll('.column-settings-item:not(.column-settings-item--fixed)').length;
+                            const orderNum = nonFixedCount + 1;
                             newItem.innerHTML = `
+                                <span class="col-settings-drag-handle" title="Перетащите для изменения порядка">&#9776;</span><span class="col-settings-order-num">${orderNum}</span>
                                 ${this.getColTypeIcon(newCol)}
                                 <label style="flex: 1; margin: 0;">
                                     <input type="checkbox" data-column-id="${result.columnId}" checked>
