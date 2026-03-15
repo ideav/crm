@@ -754,6 +754,44 @@
     color: var(--md-text-hint);
 }
 
+/* Column settings modal header with help icon (issue #968) */
+.column-settings-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.column-settings-header h3 {
+    margin: 0;
+    flex: 1;
+}
+
+.btn-col-settings-help {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 1.5px solid var(--md-text-secondary, #888);
+    background: none;
+    color: var(--md-text-secondary, #888);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0;
+    flex-shrink: 0;
+    transition: border-color 0.15s, color 0.15s, background-color 0.15s;
+}
+
+.btn-col-settings-help:hover {
+    border-color: var(--md-primary, #1976d2);
+    color: var(--md-primary, #1976d2);
+    background-color: rgba(25, 118, 210, 0.08);
+}
+
 .column-settings-modal {
     position: fixed;
     top: 50%;

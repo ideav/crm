@@ -5113,7 +5113,10 @@ class IntegramTable {
             const firstColId = this.columnOrder[0];
 
             modal.innerHTML = `
-                <h3>Настройки колонок таблицы</h3>
+                <div class="column-settings-header">
+                    <h3>Настройки колонок таблицы</h3>
+                    <button class="btn-col-settings-help" title="Помощь" aria-label="Помощь">?</button>
+                </div>
                 <div class="column-settings-list" id="column-settings-list-${instanceName}">
                     ${ orderedSettingsCols.map((col, idx) => {
                         const isFirst = col.id === firstColId;
@@ -5157,6 +5160,15 @@ class IntegramTable {
 
             document.body.appendChild(overlay);
             document.body.appendChild(modal);
+
+            // Attach help button handler (issue #968)
+            const helpBtn = modal.querySelector('.btn-col-settings-help');
+            if (helpBtn) {
+                helpBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    alert('Здесь вы можете определить как колонки будут храниться в базе данных. Первая колонка всегда фиксирована, а остальным можно задать порядок. Вы можете настроить представление в таблицах по-своему, перетаскивая колонки таблицы, а при сбросе тех настроек - таблицы будут возвращаться к виду, который настроен здесь.');
+                });
+            }
 
             // Attach add column button handler
             const addColumnBtn = modal.querySelector(`#add-column-btn-${instanceName}`);
