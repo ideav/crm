@@ -5153,11 +5153,12 @@ class IntegramTable {
                     </div>
                     ` : '' }
                 </div>
-                <div class="col-edit-actions">
-                    ${ isRef ? `<a class="col-edit-go-dict-link" id="col-edit-go-dict-${instanceName}" href="#" role="button">
+                ${ isRef ? `<div class="col-edit-go-dict-row">
+                    <a class="col-edit-go-dict-link" id="col-edit-go-dict-${instanceName}" href="#" role="button">
                         Перейти в справочник
-                    </a>` : '' }
-                    <div style="flex: 1;"></div>
+                    </a>
+                </div>` : '' }
+                <div class="col-edit-actions">
                     <button class="menu-modal-btn delete col-edit-del-btn" id="col-edit-del-${instanceName}">Удалить колонку</button>
                     <button class="menu-modal-btn save" id="col-edit-save-${instanceName}">Сохранить</button>
                     <button class="menu-modal-btn cancel" id="col-edit-cancel-${instanceName}">Отменить</button>

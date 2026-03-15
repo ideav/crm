@@ -912,6 +912,10 @@
     font-style: italic;
 }
 
+.col-edit-go-dict-row {
+    margin-top: 12px;
+}
+
 .col-edit-actions {
     display: flex;
     align-items: center;
