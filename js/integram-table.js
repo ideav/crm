@@ -2351,8 +2351,8 @@ class IntegramTable {
                     const draggedId = e.dataTransfer.getData('text/plain');
                     const targetId = th.dataset.columnId;
 
-                    // Prevent dropping onto the first column (issue #951)
-                    if (draggedId !== targetId && draggedId !== firstVisibleColumnId) {
+                    // Prevent dropping onto the first column or dropping a column onto itself (issue #951, #966)
+                    if (draggedId !== targetId && draggedId !== firstVisibleColumnId && targetId !== firstVisibleColumnId) {
                         this.reorderColumns(draggedId, targetId);
                     }
 
@@ -5015,9 +5015,13 @@ class IntegramTable {
             // The first column (index 0) cannot be moved and cannot be a drop target (issue #958)
             if (draggedIndex === 0 || targetIndex === 0) return;
 
-            this.columnOrder.splice(draggedIndex, 1);
             // Adjust targetIndex: removing draggedId shifts all elements after it left by one (issue #962)
             const adjustedTargetIndex = targetIndex > draggedIndex ? targetIndex - 1 : targetIndex;
+
+            // If the column would end up in the same position, skip all side effects (issue #966)
+            if (adjustedTargetIndex === draggedIndex) return;
+
+            this.columnOrder.splice(draggedIndex, 1);
             this.columnOrder.splice(adjustedTargetIndex, 0, draggedId);
 
             this.saveColumnState();
@@ -5248,7 +5252,8 @@ class IntegramTable {
                         } else {
                             // Move to the last position: splice to end
                             const draggedIdx = this.columnOrder.indexOf(draggedId);
-                            if (draggedIdx > 0) {
+                            // Skip if already at the last position (issue #966)
+                            if (draggedIdx > 0 && draggedIdx < this.columnOrder.length - 1) {
                                 this._columnSettingsChanged = true;
                                 this.columnOrder.splice(draggedIdx, 1);
                                 this.columnOrder.push(draggedId);
