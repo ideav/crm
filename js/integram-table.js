@@ -634,6 +634,7 @@ class IntegramTable {
                             // Use 'REF' format for reference fields to enable dropdown filter (issue #795)
                             format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
                             name: attrs.alias || req.val,
+                            val: req.val, // Store original name for alias display (issue #945)
                             granted: 1,  // In object format, allow editing all cells
                             ref: isReference ? req.orig : 0,
                             ref_id: req.ref_id || null,
@@ -773,6 +774,7 @@ class IntegramTable {
                         // Use 'REF' format for reference fields to enable dropdown filter (issue #795)
                         format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
                         name: attrs.alias || req.val,
+                        val: req.val, // Store original name for alias display (issue #945)
                         granted: 1,  // In object format, allow editing all cells
                         ref: isReference ? req.orig : 0,
                         ref_id: req.ref_id || null,
@@ -956,6 +958,7 @@ class IntegramTable {
                             // Use 'REF' format for reference fields to enable dropdown filter (issue #795)
                             format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
                             name: attrs.alias || req.val,
+                            val: req.val, // Store original name for alias display (issue #945)
                             granted: 1,  // In object format, allow editing all cells
                             ref: isReference ? req.orig : 0,
                             ref_id: req.ref_id || null,
@@ -5008,21 +5011,56 @@ class IntegramTable {
             modal.className = 'column-settings-modal';
             const instanceName = this.options.instanceName;
 
+            // Helper: returns SVG icon and tooltip for a column type (issue #945)
+            const getColTypeIcon = (col) => {
+                const isRef = col.ref_id != null || (col.ref && col.ref !== 0);
+                const isTable = !!col.arr_id;
+                if (isTable) {
+                    return `<span class="col-type-icon" title="Табличный реквизит"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="14" height="14" rx="1" stroke="currentColor" stroke-width="1.5"/><line x1="1" y1="5" x2="15" y2="5" stroke="currentColor" stroke-width="1.5"/><line x1="1" y1="9" x2="15" y2="9" stroke="currentColor" stroke-width="1.5"/><line x1="5" y1="5" x2="5" y2="15" stroke="currentColor" stroke-width="1.5"/></svg></span>`;
+                }
+                if (isRef) {
+                    return `<span class="col-type-icon" title="Ссылочный реквизит (справочник)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.5 3.5H3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M9.5 2H14v4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="14" y1="2" x2="7" y2="9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>`;
+                }
+                const format = col.format || this.mapTypeIdToFormat(col.type || '3');
+                const typeIconMap = {
+                    'SHORT':    { icon: 'Aa', title: 'Короткая строка (до 127 символов)' },
+                    'CHARS':    { icon: 'Aa', title: 'Строка без ограничения длины' },
+                    'MEMO':     { icon: '¶',  title: 'Многострочный текст' },
+                    'DATE':     { icon: '📅', title: 'Дата' },
+                    'DATETIME': { icon: '📅', title: 'Дата и время' },
+                    'NUMBER':   { icon: '#',  title: 'Целое число' },
+                    'SIGNED':   { icon: '#',  title: 'Число с десятичной частью' },
+                    'BOOLEAN':  { icon: '✓',  title: 'Логическое значение (Да / Нет)' },
+                    'FILE':     { icon: '📎', title: 'Файл' },
+                    'HTML':     { icon: '<>', title: 'HTML' },
+                    'PWD':      { icon: '🔒', title: 'Пароль' },
+                    'GRANT':    { icon: '▾',  title: 'Список значений' },
+                    'REPORT_COLUMN': { icon: '▾', title: 'Колонка отчёта' },
+                };
+                const info = typeIconMap[format] || { icon: '?', title: format };
+                return `<span class="col-type-icon" title="${info.title}" style="font-size:11px;font-weight:600;opacity:0.65;min-width:16px;text-align:center;">${info.icon}</span>`;
+            };
+
             modal.innerHTML = `
                 <h3>Настройки колонок таблицы</h3>
                 <div class="column-settings-list" id="column-settings-list-${instanceName}">
                     ${ this.columns.map(col => {
                         const parsedAttrs = this.parseAttrs(col.attrs);
-                        const isRef = col.ref_id != null || (col.ref && col.ref !== 0);
                         const isMulti = parsedAttrs.multi;
                         const isRequired = parsedAttrs.required;
+                        const alias = parsedAttrs.alias;
+                        const originalName = col.val || col.name;
+                        const displayName = alias
+                            ? `${ this.escapeHtml(alias) } <span class="col-original-name">(${this.escapeHtml(originalName)})</span>`
+                            : this.escapeHtml(col.name);
                         return `
                         <div class="column-settings-item" data-column-id="${ col.id }">
+                            ${ getColTypeIcon(col) }
                             <label style="flex: 1; margin: 0;">
                                 <input type="checkbox"
                                        data-column-id="${ col.id }"
                                        ${ this.visibleColumns.includes(col.id) ? 'checked' : '' }>
-                                ${ col.name }
+                                ${ displayName }
                                 ${ isRequired ? '<span class="col-required-badge" title="Обязательно к заполнению">*</span>' : '' }
                                 ${ isMulti ? '<span class="col-multi-badge" title="Выбор нескольких значений">&#9641;</span>' : '' }
                             </label>
@@ -5159,7 +5197,7 @@ class IntegramTable {
                     </a>
                 </div>` : '' }
                 <div class="col-edit-actions">
-                    <button class="menu-modal-btn delete col-edit-del-btn" id="col-edit-del-${instanceName}">Удалить колонку</button>
+                    <button class="menu-modal-btn delete col-edit-del-btn" id="col-edit-del-${instanceName}">${ isFirstColumn ? 'Удалить таблицу' : 'Удалить колонку' }</button>
                     <button class="menu-modal-btn save" id="col-edit-save-${instanceName}">Сохранить</button>
                     <button class="menu-modal-btn cancel" id="col-edit-cancel-${instanceName}">Отменить</button>
                 </div>
