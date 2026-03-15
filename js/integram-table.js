@@ -5092,6 +5092,7 @@ class IntegramTable {
         }
 
         openColumnSettings() {
+            this._columnSettingsChanged = false;
             const overlay = document.createElement('div');
             overlay.className = 'column-settings-overlay';
 
@@ -5154,6 +5155,7 @@ class IntegramTable {
                     } else {
                         this.visibleColumns = this.visibleColumns.filter(id => id !== colId);
                     }
+                    this._columnSettingsChanged = true;
                     this.saveColumnState();
                     this.render();
                 });
@@ -5220,11 +5222,13 @@ class IntegramTable {
                         // If there's nothing after, append to end — reorderColumns handles index-based placement
                         const nextSibling = target.nextSibling === dragItem ? target.nextSibling && target.nextSibling.nextSibling : target.nextSibling;
                         if (nextSibling && nextSibling.dataset && nextSibling.dataset.columnId) {
+                            this._columnSettingsChanged = true;
                             this.reorderColumns(draggedId, nextSibling.dataset.columnId);
                         } else {
                             // Move to the last position: splice to end
                             const draggedIdx = this.columnOrder.indexOf(draggedId);
                             if (draggedIdx > 0) {
+                                this._columnSettingsChanged = true;
                                 this.columnOrder.splice(draggedIdx, 1);
                                 this.columnOrder.push(draggedId);
                                 this.saveColumnState();
@@ -5238,6 +5242,7 @@ class IntegramTable {
                     } else {
                         // Insert before target
                         columnList.insertBefore(dragItem, target);
+                        this._columnSettingsChanged = true;
                         this.reorderColumns(draggedId, targetId);
                     }
                 }
@@ -5613,6 +5618,10 @@ class IntegramTable {
 
         closeColumnSettings() {
             document.querySelectorAll('.column-settings-overlay, .column-settings-modal').forEach(el => el.remove());
+            if (this._columnSettingsChanged) {
+                this._columnSettingsChanged = false;
+                this.loadData(false);
+            }
         }
 
         /**
@@ -5951,6 +5960,7 @@ class IntegramTable {
                         }
 
                         // Save state and re-render
+                        this._columnSettingsChanged = true;
                         this.saveColumnState();
                         this.render();
 
