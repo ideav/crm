@@ -882,7 +882,14 @@
 
 .col-settings-drag-handle.col-settings-fixed {
     cursor: default;
-    opacity: 0.4;
+    opacity: 0.5;
+    filter: grayscale(1);
+}
+
+/* Keep lock icon grey on hover to indicate it's inactive (issue #964) */
+.column-settings-item:hover .col-settings-drag-handle.col-settings-fixed {
+    opacity: 0.5;
+    filter: grayscale(1);
 }
 
 /* Order number badge for draggable columns in settings list (issue #962) */
