@@ -5107,7 +5107,8 @@ class IntegramTable {
                             ? `${ this.escapeHtml(alias) } <span class="col-original-name">(${this.escapeHtml(originalName)})</span>`
                             : this.escapeHtml(col.name);
                         return `
-                        <div class="column-settings-item" data-column-id="${ col.id }">
+                        <div class="column-settings-item" draggable="true" data-column-id="${ col.id }">
+                            <span class="col-settings-drag-handle">&#9776;</span>
                             ${ this.getColTypeIcon(col) }
                             <label style="flex: 1; margin: 0;">
                                 <input type="checkbox"
@@ -5166,6 +5167,42 @@ class IntegramTable {
             });
 
             overlay.addEventListener('click', () => this.closeColumnSettings());
+
+            // Drag-and-drop reordering of columns in the settings list (issue #953)
+            const columnList = modal.querySelector(`#column-settings-list-${instanceName}`);
+            let dragItem = null;
+
+            columnList.addEventListener('dragstart', (e) => {
+                dragItem = e.target.closest('.column-settings-item');
+                if (dragItem) dragItem.classList.add('dragging');
+            });
+
+            columnList.addEventListener('dragend', () => {
+                if (dragItem) dragItem.classList.remove('dragging');
+                columnList.querySelectorAll('.column-settings-item').forEach(el => el.classList.remove('drag-over'));
+                dragItem = null;
+            });
+
+            columnList.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                const target = e.target.closest('.column-settings-item');
+                if (target && target !== dragItem) {
+                    columnList.querySelectorAll('.column-settings-item').forEach(el => el.classList.remove('drag-over'));
+                    target.classList.add('drag-over');
+                }
+            });
+
+            columnList.addEventListener('drop', (e) => {
+                e.preventDefault();
+                const target = e.target.closest('.column-settings-item');
+                if (target && target !== dragItem && dragItem) {
+                    const draggedId = dragItem.dataset.columnId;
+                    const targetId = target.dataset.columnId;
+                    columnList.insertBefore(dragItem, target);
+                    this.reorderColumns(draggedId, targetId);
+                }
+                columnList.querySelectorAll('.column-settings-item').forEach(el => el.classList.remove('drag-over'));
+            });
 
             // Close on Escape key (issue #595)
             const handleEscape = (e) => {
