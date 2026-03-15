@@ -5012,17 +5012,23 @@ class IntegramTable {
 
             if (draggedIndex === -1 || targetIndex === -1) return;
 
+            // The first column (index 0) cannot be moved and cannot be a drop target (issue #958)
+            if (draggedIndex === 0 || targetIndex === 0) return;
+
             this.columnOrder.splice(draggedIndex, 1);
             this.columnOrder.splice(targetIndex, 0, draggedId);
 
             this.saveColumnState();
 
-            // Persist the new column order to the backend (issue #951, #956)
+            // Persist the new column order to the backend (issue #951, #956, #958)
             // Use the full columnOrder (not filtered by visibility) so that hidden columns
-            // can also be reordered from the settings panel. The order is 1-based.
+            // can also be reordered from the settings panel.
+            // The first column occupies index 0 and is excluded from counting.
+            // The server expects a 1-based position among requisites only (not counting the first column),
+            // so a column at index N in columnOrder should be sent as order=N (index equals 1-based req position).
             const newOrderIndex = this.columnOrder.indexOf(draggedId);
             if (newOrderIndex >= 0) {
-                const newOrder = newOrderIndex + 1; // 1-based position
+                const newOrder = newOrderIndex; // 1-based position among requisites (first column at index 0 is not counted)
                 this.saveColumnOrderToServer(draggedId, newOrder);
             }
 
@@ -5197,8 +5203,43 @@ class IntegramTable {
                 if (target && target !== dragItem && dragItem) {
                     const draggedId = dragItem.dataset.columnId;
                     const targetId = target.dataset.columnId;
-                    columnList.insertBefore(dragItem, target);
-                    this.reorderColumns(draggedId, targetId);
+                    // Prevent moving the first column or dropping onto the first column (issue #958)
+                    const firstColumnId = this.columnOrder[0];
+                    if (draggedId === firstColumnId || targetId === firstColumnId) {
+                        columnList.querySelectorAll('.column-settings-item').forEach(el => el.classList.remove('drag-over'));
+                        return;
+                    }
+                    // Determine insert position based on mouse Y relative to target midpoint (issue #958)
+                    // This allows moving a column to the last position (insert after target)
+                    const targetRect = target.getBoundingClientRect();
+                    const midY = targetRect.top + targetRect.height / 2;
+                    if (e.clientY > midY) {
+                        // Insert after target
+                        columnList.insertBefore(dragItem, target.nextSibling);
+                        // For reorderColumns, use the element after the dragged item as the target
+                        // If there's nothing after, append to end — reorderColumns handles index-based placement
+                        const nextSibling = target.nextSibling === dragItem ? target.nextSibling && target.nextSibling.nextSibling : target.nextSibling;
+                        if (nextSibling && nextSibling.dataset && nextSibling.dataset.columnId) {
+                            this.reorderColumns(draggedId, nextSibling.dataset.columnId);
+                        } else {
+                            // Move to the last position: splice to end
+                            const draggedIdx = this.columnOrder.indexOf(draggedId);
+                            if (draggedIdx > 0) {
+                                this.columnOrder.splice(draggedIdx, 1);
+                                this.columnOrder.push(draggedId);
+                                this.saveColumnState();
+                                const newOrderIndex = this.columnOrder.indexOf(draggedId);
+                                if (newOrderIndex >= 0) {
+                                    this.saveColumnOrderToServer(draggedId, newOrderIndex);
+                                }
+                                this.render();
+                            }
+                        }
+                    } else {
+                        // Insert before target
+                        columnList.insertBefore(dragItem, target);
+                        this.reorderColumns(draggedId, targetId);
+                    }
                 }
                 columnList.querySelectorAll('.column-settings-item').forEach(el => el.classList.remove('drag-over'));
             });
