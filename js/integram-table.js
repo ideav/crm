@@ -5053,6 +5053,7 @@ class IntegramTable {
                     console.warn('[IntegramTable] saveColumnOrderToServer error:', e);
                 }
             }
+        }
         /*
          * Returns SVG icon and tooltip for a column type (issue #945, #949)
          */
