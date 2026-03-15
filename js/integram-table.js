@@ -7303,6 +7303,11 @@ class IntegramTable {
         }
 
         shouldShowAddButton(column) {
+            // Do not show add button for tabular (subordinate table) requisites — they require a parent (up parameter)
+            if (column.arr_id) {
+                return false;
+            }
+
             // Check if column has granted: 1
             if (column.granted !== 1) {
                 return false;
