@@ -5016,7 +5016,9 @@ class IntegramTable {
             if (draggedIndex === 0 || targetIndex === 0) return;
 
             this.columnOrder.splice(draggedIndex, 1);
-            this.columnOrder.splice(targetIndex, 0, draggedId);
+            // Adjust targetIndex: removing draggedId shifts all elements after it left by one (issue #962)
+            const adjustedTargetIndex = targetIndex > draggedIndex ? targetIndex - 1 : targetIndex;
+            this.columnOrder.splice(adjustedTargetIndex, 0, draggedId);
 
             this.saveColumnState();
 
@@ -5100,10 +5102,17 @@ class IntegramTable {
             modal.className = 'column-settings-modal';
             const instanceName = this.options.instanceName;
 
+            // Build column list in columnOrder sequence so the DOM reflects the current order (issue #962)
+            const orderedSettingsCols = this.columnOrder
+                .map(id => this.columns.find(c => c.id === id))
+                .filter(c => !!c);
+            const firstColId = this.columnOrder[0];
+
             modal.innerHTML = `
                 <h3>Настройки колонок таблицы</h3>
                 <div class="column-settings-list" id="column-settings-list-${instanceName}">
-                    ${ this.columns.map(col => {
+                    ${ orderedSettingsCols.map((col, idx) => {
+                        const isFirst = col.id === firstColId;
                         const parsedAttrs = this.parseAttrs(col.attrs);
                         const isMulti = parsedAttrs.multi;
                         const isRequired = parsedAttrs.required;
@@ -5112,9 +5121,15 @@ class IntegramTable {
                         const displayName = alias
                             ? `${ this.escapeHtml(alias) } <span class="col-original-name">(${this.escapeHtml(originalName)})</span>`
                             : this.escapeHtml(col.name);
+                        // First column: not draggable, no drag handle, shows lock icon (issue #962)
+                        // Other columns: draggable, show 1-based position number among requisites (issue #962)
+                        const draggableAttr = isFirst ? 'draggable="false"' : 'draggable="true"';
+                        const handleOrLock = isFirst
+                            ? `<span class="col-settings-drag-handle col-settings-fixed" title="Первая колонка зафиксирована">&#128274;</span>`
+                            : `<span class="col-settings-drag-handle" title="Перетащите для изменения порядка">&#9776;</span><span class="col-settings-order-num">${ idx }</span>`;
                         return `
-                        <div class="column-settings-item" draggable="true" data-column-id="${ col.id }">
-                            <span class="col-settings-drag-handle">&#9776;</span>
+                        <div class="column-settings-item ${ isFirst ? 'column-settings-item--fixed' : '' }" ${ draggableAttr } data-column-id="${ col.id }">
+                            ${ handleOrLock }
                             ${ this.getColTypeIcon(col) }
                             <label style="flex: 1; margin: 0;">
                                 <input type="checkbox"
@@ -5180,7 +5195,13 @@ class IntegramTable {
             let dragItem = null;
 
             columnList.addEventListener('dragstart', (e) => {
-                dragItem = e.target.closest('.column-settings-item');
+                const item = e.target.closest('.column-settings-item');
+                // Prevent dragging the first (fixed) column (issue #962)
+                if (item && item.dataset.columnId === firstColId) {
+                    e.preventDefault();
+                    return;
+                }
+                dragItem = item;
                 if (dragItem) dragItem.classList.add('dragging');
             });
 
@@ -5247,7 +5268,18 @@ class IntegramTable {
                     }
                 }
                 columnList.querySelectorAll('.column-settings-item').forEach(el => el.classList.remove('drag-over'));
+                // Refresh order number badges after drop (issue #962)
+                refreshOrderBadges();
             });
+
+            // Update the 1-based order number badges to reflect current DOM order (issue #962)
+            const refreshOrderBadges = () => {
+                const items = columnList.querySelectorAll('.column-settings-item:not(.column-settings-item--fixed)');
+                items.forEach((item, idx) => {
+                    const badge = item.querySelector('.col-settings-order-num');
+                    if (badge) badge.textContent = String(idx + 1);
+                });
+            };
 
             // Close on Escape key (issue #595)
             const handleEscape = (e) => {
