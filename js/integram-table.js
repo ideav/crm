@@ -5011,16 +5011,26 @@ class IntegramTable {
             modal.innerHTML = `
                 <h3>Настройки колонок таблицы</h3>
                 <div class="column-settings-list" id="column-settings-list-${instanceName}">
-                    ${ this.columns.map(col => `
-                        <div class="column-settings-item">
-                            <label>
+                    ${ this.columns.map(col => {
+                        const parsedAttrs = this.parseAttrs(col.attrs);
+                        const isRef = col.ref_id != null || (col.ref && col.ref !== 0);
+                        const isMulti = parsedAttrs.multi;
+                        const isRequired = parsedAttrs.required;
+                        return `
+                        <div class="column-settings-item" data-column-id="${ col.id }">
+                            <label style="flex: 1; margin: 0;">
                                 <input type="checkbox"
                                        data-column-id="${ col.id }"
                                        ${ this.visibleColumns.includes(col.id) ? 'checked' : '' }>
                                 ${ col.name }
+                                ${ isRequired ? '<span class="col-required-badge" title="Обязательно к заполнению">*</span>' : '' }
+                                ${ isMulti ? '<span class="col-multi-badge" title="Выбор нескольких значений">&#9641;</span>' : '' }
                             </label>
-                        </div>
-                    `).join('') }
+                            <button class="btn-col-edit" data-col-id="${ col.id }" title="Редактировать колонку">
+                                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12.146 0.146009C12.2408 0.0522494 12.3679 0 12.5005 0C12.6331 0 12.7602 0.0522494 12.854 0.146009L15.854 3.14601C15.9006 3.19245 15.9375 3.24763 15.9627 3.30838C15.9879 3.36912 16.0009 3.43424 16.0009 3.50001C16.0009 3.56578 15.9879 3.6309 15.9627 3.69164C15.9375 3.75239 15.9006 3.80756 15.854 3.85401L5.85399 13.854C5.806 13.9017 5.74885 13.9391 5.68599 13.964L0.685989 15.964C0.595125 16.0004 0.495585 16.0093 0.399709 15.9896C0.303832 15.9699 0.215836 15.9226 0.14663 15.8534C0.0774234 15.7842 0.0300499 15.6962 0.0103825 15.6003C-0.00928499 15.5044 -0.000381488 15.4049 0.0359892 15.314L2.03599 10.314C2.06092 10.2511 2.09834 10.194 2.14599 10.146L12.146 0.146009ZM11.207 2.50001L13.5 4.79301L14.793 3.50001L12.5 1.20701L11.207 2.50001ZM12.793 5.50001L10.5 3.20701L3.99999 9.70701V10H4.49999C4.6326 10 4.75977 10.0527 4.85354 10.1465C4.94731 10.2402 4.99999 10.3674 4.99999 10.5V11H5.49999C5.6326 11 5.75977 11.0527 5.85354 11.1465C5.94731 11.2402 5.99999 11.3674 5.99999 11.5V12H6.29299L12.793 5.50001ZM3.03199 10.675L2.92599 10.781L1.39799 14.602L5.21899 13.074L5.32499 12.968C5.22961 12.9324 5.14738 12.8685 5.0893 12.7848C5.03123 12.7012 5.00007 12.6018 4.99999 12.5V12H4.49999C4.36738 12 4.2402 11.9473 4.14644 11.8536C4.05267 11.7598 3.99999 11.6326 3.99999 11.5V11H3.49999C3.39817 10.9999 3.2988 10.9688 3.21517 10.9107C3.13153 10.8526 3.06763 10.7704 3.03199 10.675Z" fill="currentColor"/></svg>
+                            </button>
+                        </div>`;
+                    }).join('') }
                 </div>
                 <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: 15px; gap: 10px;">
                     <button class="btn btn-primary" id="add-column-btn-${instanceName}">Добавить колонку</button>
@@ -5052,6 +5062,18 @@ class IntegramTable {
                 });
             });
 
+            // Attach edit button handlers (issue #937)
+            modal.querySelectorAll('.btn-col-edit').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const colId = btn.dataset.colId;
+                    const col = this.columns.find(c => c.id === colId);
+                    if (col) {
+                        this.showColumnEditForm(col);
+                    }
+                });
+            });
+
             overlay.addEventListener('click', () => this.closeColumnSettings());
 
             // Close on Escape key (issue #595)
@@ -5062,6 +5084,360 @@ class IntegramTable {
                 }
             };
             document.addEventListener('keydown', handleEscape);
+        }
+
+        /**
+         * Show a column edit form modal for an existing column (issue #937).
+         * Provides: change base type, required, alias (ref only), delete, delete with data,
+         * multiselect toggle (ref only), go to dictionary in new tab (ref only).
+         * Logic taken from templates/object.html.
+         */
+        showColumnEditForm(col) {
+            const instanceName = this.options.instanceName;
+            const apiBase = this.getApiBase();
+            const parsedAttrs = this.parseAttrs(col.attrs);
+            const isRef = col.ref_id != null || (col.ref && col.ref !== 0);
+            const isMulti = parsedAttrs.multi;
+            const isRequired = parsedAttrs.required;
+
+            // Base types available for selection (same list as showAddColumnForm)
+            const baseTypes = [
+                { id: 3, name: 'Короткая строка (до 127 символов)' },
+                { id: 8, name: 'Строка без ограничения длины' },
+                { id: 9, name: 'Дата' },
+                { id: 13, name: 'Целое число' },
+                { id: 14, name: 'Число с десятичной частью' },
+                { id: 11, name: 'Логическое значение (Да / Нет)' },
+                { id: 12, name: 'Многострочный текст' },
+                { id: 4, name: 'Дата и время' },
+                { id: 10, name: 'Файл' }
+            ];
+
+            const colEditOverlay = document.createElement('div');
+            colEditOverlay.className = 'column-settings-overlay';
+            colEditOverlay.style.zIndex = '1001';
+
+            const colEditModal = document.createElement('div');
+            colEditModal.className = 'column-settings-modal col-edit-modal';
+            colEditModal.style.zIndex = '1002';
+
+            // Build the alias display value (either alias or original name)
+            const currentAlias = parsedAttrs.alias || '';
+
+            colEditModal.innerHTML = `
+                <h3 style="margin: 0 0 16px 0; font-weight: 500; font-size: 18px;">Редактирование колонки: <em style="font-style: normal; color: var(--md-primary, #1976d2);">${ this.escapeHtml(col.name) }</em></h3>
+                <div class="col-edit-section">
+                    <div class="col-edit-row">
+                        <label class="col-edit-label">Базовый тип:</label>
+                        ${ !isRef ? `<select id="col-edit-type-${instanceName}" class="form-control form-control-sm col-edit-select">
+                            ${ baseTypes.map(t => `<option value="${t.id}" ${ String(col.type) === String(t.id) ? 'selected' : '' }>${t.name}</option>`).join('') }
+                        </select>` : `<span class="col-edit-value">Ссылочный тип (справочник)</span>` }
+                    </div>
+                    <div class="col-edit-row">
+                        <label class="col-edit-label col-edit-check-label">
+                            <input type="checkbox" id="col-edit-required-${instanceName}" ${ isRequired ? 'checked' : '' }>
+                            Обязательно к заполнению
+                        </label>
+                    </div>
+                    ${ isRef ? `
+                    <div class="col-edit-row">
+                        <label class="col-edit-label">Псевдоним:</label>
+                        <input type="text" id="col-edit-alias-${instanceName}" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(currentAlias) }" placeholder="Введите псевдоним колонки">
+                    </div>
+                    <div class="col-edit-row">
+                        <label class="col-edit-check-label">
+                            <input type="checkbox" id="col-edit-multi-${instanceName}" ${ isMulti ? 'checked' : '' }>
+                            Выбор нескольких значений
+                        </label>
+                    </div>
+                    ` : '' }
+                </div>
+                <div class="col-edit-actions">
+                    ${ isRef ? `<button class="btn btn-sm btn-outline-secondary col-edit-go-dict-btn" id="col-edit-go-dict-${instanceName}">
+                        Перейти в справочник
+                    </button>` : '' }
+                    <div style="flex: 1;"></div>
+                    <button class="btn btn-sm btn-danger col-edit-del-btn" id="col-edit-del-${instanceName}">Удалить колонку</button>
+                    <button class="btn btn-sm btn-outline-secondary" id="col-edit-cancel-${instanceName}">Отмена</button>
+                    <button class="btn btn-sm btn-primary" id="col-edit-save-${instanceName}">Сохранить</button>
+                </div>
+                <div id="col-edit-del-confirm-${instanceName}" class="col-edit-del-confirm" style="display:none;">
+                    <span class="col-edit-del-warn">Удалить колонку вместе с данными?</span>
+                    <button class="btn btn-sm btn-danger" id="col-edit-del-forced-${instanceName}">Удалить с данными</button>
+                    <button class="btn btn-sm btn-outline-secondary" id="col-edit-del-cancel-${instanceName}">Отмена</button>
+                </div>
+                <div id="col-edit-status-${instanceName}" class="col-edit-status" style="display:none;"></div>
+            `;
+
+            document.body.appendChild(colEditOverlay);
+            document.body.appendChild(colEditModal);
+
+            const showStatus = (msg, isError) => {
+                const el = colEditModal.querySelector(`#col-edit-status-${instanceName}`);
+                el.textContent = msg;
+                el.className = 'col-edit-status' + (isError ? ' col-edit-status-error' : ' col-edit-status-ok');
+                el.style.display = 'block';
+            };
+
+            const closeColEdit = () => {
+                colEditOverlay.remove();
+                colEditModal.remove();
+            };
+
+            colEditOverlay.addEventListener('click', closeColEdit);
+            colEditModal.querySelector(`#col-edit-cancel-${instanceName}`).addEventListener('click', closeColEdit);
+
+            // Save button: save type (non-ref) + required + alias (ref)
+            colEditModal.querySelector(`#col-edit-save-${instanceName}`).addEventListener('click', async () => {
+                const saveBtn = colEditModal.querySelector(`#col-edit-save-${instanceName}`);
+                saveBtn.disabled = true;
+
+                try {
+                    // 1. Change base type (non-ref only)
+                    if (!isRef) {
+                        const newTypeId = colEditModal.querySelector(`#col-edit-type-${instanceName}`).value;
+                        if (String(newTypeId) !== String(col.type)) {
+                            const result = await this.saveColumnType(col.orig || col.id, newTypeId, col.name);
+                            if (!result.success) {
+                                showStatus('Ошибка изменения типа: ' + result.error, true);
+                                saveBtn.disabled = false;
+                                return;
+                            }
+                            col.type = newTypeId;
+                        }
+                    }
+
+                    // 2. Required flag
+                    const newRequired = colEditModal.querySelector(`#col-edit-required-${instanceName}`).checked;
+                    if (newRequired !== isRequired) {
+                        const result = await this.setColumnRequired(col.id);
+                        if (!result.success) {
+                            showStatus('Ошибка изменения обязательности: ' + result.error, true);
+                            saveBtn.disabled = false;
+                            return;
+                        }
+                        // Update attrs
+                        if (newRequired) {
+                            col.attrs = (col.attrs || '') + ':!NULL:';
+                        } else {
+                            col.attrs = (col.attrs || '').replace(/:!NULL:/g, '');
+                        }
+                    }
+
+                    // 3. Alias (ref only)
+                    if (isRef) {
+                        const newAlias = colEditModal.querySelector(`#col-edit-alias-${instanceName}`).value.trim();
+                        if (newAlias !== currentAlias) {
+                            const result = await this.setColumnAlias(col.id, newAlias);
+                            if (!result.success) {
+                                showStatus('Ошибка установки псевдонима: ' + result.error, true);
+                                saveBtn.disabled = false;
+                                return;
+                            }
+                            // Update attrs alias
+                            col.attrs = (col.attrs || '').replace(/:ALIAS=.*?:/g, '');
+                            if (newAlias) {
+                                col.attrs = (col.attrs || '') + `:ALIAS=${newAlias}:`;
+                            }
+                            col.name = newAlias || (this.parseAttrs(col.attrs).alias) || col.name;
+                        }
+
+                        // 4. Multiselect toggle (ref only)
+                        const newMulti = colEditModal.querySelector(`#col-edit-multi-${instanceName}`).checked;
+                        if (newMulti !== isMulti) {
+                            const result = await this.toggleColumnMulti(col.id);
+                            if (!result.success) {
+                                showStatus('Ошибка изменения мультивыбора: ' + result.error, true);
+                                saveBtn.disabled = false;
+                                return;
+                            }
+                            if (newMulti) {
+                                col.attrs = (col.attrs || '') + ':MULTI:';
+                            } else {
+                                col.attrs = (col.attrs || '').replace(/:MULTI:/g, '');
+                            }
+                        }
+                    }
+
+                    showStatus('Изменения сохранены', false);
+                    // Reload column state in the settings list
+                    setTimeout(() => {
+                        closeColEdit();
+                        this.closeColumnSettings();
+                        this.loadData(0);
+                    }, 800);
+                } catch (err) {
+                    showStatus('Ошибка: ' + err.message, true);
+                    saveBtn.disabled = false;
+                }
+            });
+
+            // Go to dictionary (ref only) - opens in new tab
+            if (isRef) {
+                colEditModal.querySelector(`#col-edit-go-dict-${instanceName}`).addEventListener('click', () => {
+                    const refTypeId = col.orig || col.ref_id;
+                    if (refTypeId) {
+                        const dbName = window.location.pathname.split('/')[1];
+                        window.open(`/${dbName}/object/${refTypeId}`, '_blank');
+                    }
+                });
+            }
+
+            // Delete column button
+            colEditModal.querySelector(`#col-edit-del-${instanceName}`).addEventListener('click', async () => {
+                const delBtn = colEditModal.querySelector(`#col-edit-del-${instanceName}`);
+                delBtn.disabled = true;
+                const result = await this.deleteColumn(col.id, false);
+                if (result.success) {
+                    closeColEdit();
+                    this.closeColumnSettings();
+                    this.loadData(0);
+                } else if (result.hasData) {
+                    // Show forced delete option
+                    delBtn.style.display = 'none';
+                    const confirmEl = colEditModal.querySelector(`#col-edit-del-confirm-${instanceName}`);
+                    confirmEl.style.display = 'flex';
+                    colEditModal.querySelector(`#col-edit-del-forced-${instanceName}`).addEventListener('click', async () => {
+                        const result2 = await this.deleteColumn(col.id, true);
+                        if (result2.success) {
+                            closeColEdit();
+                            this.closeColumnSettings();
+                            this.loadData(0);
+                        } else {
+                            showStatus('Ошибка удаления: ' + result2.error, true);
+                        }
+                    });
+                    colEditModal.querySelector(`#col-edit-del-cancel-${instanceName}`).addEventListener('click', () => {
+                        confirmEl.style.display = 'none';
+                        delBtn.style.display = '';
+                        delBtn.disabled = false;
+                    });
+                } else {
+                    showStatus('Ошибка удаления: ' + result.error, true);
+                    delBtn.disabled = false;
+                }
+            });
+        }
+
+        /**
+         * Save column base type via API (issue #937).
+         * Uses _d_save/{origId}?JSON as in object.html saveType().
+         */
+        async saveColumnType(origId, newTypeId, colName) {
+            const apiBase = this.getApiBase();
+            try {
+                const params = new URLSearchParams();
+                params.append('val', colName);
+                params.append('t', newTypeId);
+                if (typeof xsrf !== 'undefined') params.append('_xsrf', xsrf);
+
+                const resp = await fetch(`${apiBase}/_d_save/${origId}?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+                if (!resp.ok) return { success: false, error: `HTTP ${resp.status}` };
+                return { success: true };
+            } catch (err) {
+                return { success: false, error: err.message };
+            }
+        }
+
+        /**
+         * Toggle required flag for a column via API (issue #937).
+         * Uses _d_null/{colId}?JSON as in object.html.
+         */
+        async setColumnRequired(colId) {
+            const apiBase = this.getApiBase();
+            try {
+                const params = new URLSearchParams();
+                if (typeof xsrf !== 'undefined') params.append('_xsrf', xsrf);
+
+                const resp = await fetch(`${apiBase}/_d_null/${colId}?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+                if (!resp.ok) return { success: false, error: `HTTP ${resp.status}` };
+                return { success: true };
+            } catch (err) {
+                return { success: false, error: err.message };
+            }
+        }
+
+        /**
+         * Set column alias via API (issue #937).
+         * Uses _d_alias/{colId}?JSON as in object.html setAlias().
+         */
+        async setColumnAlias(colId, alias) {
+            const apiBase = this.getApiBase();
+            try {
+                const params = new URLSearchParams();
+                params.append('val', alias);
+                if (typeof xsrf !== 'undefined') params.append('_xsrf', xsrf);
+
+                const resp = await fetch(`${apiBase}/_d_alias/${colId}?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+                if (!resp.ok) return { success: false, error: `HTTP ${resp.status}` };
+                return { success: true };
+            } catch (err) {
+                return { success: false, error: err.message };
+            }
+        }
+
+        /**
+         * Toggle multiselect flag for a reference column via API (issue #937).
+         * Uses _d_multi/{colId}?JSON as in object.html.
+         */
+        async toggleColumnMulti(colId) {
+            const apiBase = this.getApiBase();
+            try {
+                const params = new URLSearchParams();
+                if (typeof xsrf !== 'undefined') params.append('_xsrf', xsrf);
+
+                const resp = await fetch(`${apiBase}/_d_multi/${colId}?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+                if (!resp.ok) return { success: false, error: `HTTP ${resp.status}` };
+                return { success: true };
+            } catch (err) {
+                return { success: false, error: err.message };
+            }
+        }
+
+        /**
+         * Delete a column via API (issue #937).
+         * Uses _d_del_req/{colId}?JSON as in object.html.
+         * @param {boolean} forced - whether to force delete with data
+         * @returns {Promise<{success: boolean, hasData?: boolean, error?: string}>}
+         */
+        async deleteColumn(colId, forced) {
+            const apiBase = this.getApiBase();
+            try {
+                const params = new URLSearchParams();
+                if (forced) params.append('forced', '1');
+                if (typeof xsrf !== 'undefined') params.append('_xsrf', xsrf);
+
+                const resp = await fetch(`${apiBase}/_d_del_req/${colId}?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+                if (!resp.ok) return { success: false, error: `HTTP ${resp.status}` };
+                const result = await resp.json();
+                // When column has data, API returns an error; treat it as hasData=true
+                if (Array.isArray(result) && result[0]?.error) {
+                    return { success: false, hasData: true, error: result[0].error };
+                }
+                return { success: true };
+            } catch (err) {
+                return { success: false, error: err.message };
+            }
         }
 
         closeColumnSettings() {

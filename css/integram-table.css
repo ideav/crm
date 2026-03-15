@@ -457,11 +457,7 @@
     border: 1px solid var(--md-divider);
     border-radius: 4px;
     font-size: 14px;
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
     color: var(--md-text-primary);
     background: var(--md-surface);
     transition: var(--md-transition);
@@ -517,11 +513,7 @@
     border: none; /* 1px solid var(--md-divider); */
     /* border-radius: 4px; */
     font-size: 14px;
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
     color: var(--md-text-primary);
     background: var(--md-surface);
     width: 100%;
@@ -549,11 +541,7 @@
     padding: 4px 8px 4px 23px;  /* Extra left padding for icon */
     border: none;
     font-size: 13px;
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
     color: var(--md-text-primary);
     background: var(--md-surface);
     width: 100%;
@@ -599,11 +587,7 @@
     box-shadow: var(--md-elevation-3);
     display: flex;
     flex-direction: column;
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
     overflow: hidden;
     min-width: 200px;
     max-width: 350px;
@@ -623,11 +607,7 @@
     border: 1px solid var(--md-divider);
     border-radius: 4px;
     font-size: 14px;
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
     color: var(--md-text-primary);
     background: var(--md-surface);
     outline: none;
@@ -719,11 +699,7 @@
     color: var(--md-text-secondary);
     font-size: 13px;
     font-weight: 500;
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
     z-index: 100;
     letter-spacing: 0.25px;
 }
@@ -790,11 +766,7 @@
     z-index: 1000;
     max-width: 800px;
     width: 90%;
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
 }
 
 .column-settings-overlay {
@@ -857,6 +829,131 @@
     width: auto;
 }
 
+/* Column edit button in column settings list (issue #937) */
+.btn-col-edit {
+    background: none;
+    border: none;
+    padding: 4px 6px;
+    cursor: pointer;
+    color: var(--md-text-secondary, #666);
+    border-radius: 4px;
+    flex: 0 0 auto;
+    line-height: 1;
+    opacity: 0.5;
+    transition: opacity 0.15s, background-color 0.15s;
+}
+
+.column-settings-item:hover .btn-col-edit {
+    opacity: 1;
+}
+
+.btn-col-edit:hover {
+    background-color: var(--md-hover, rgba(0,0,0,0.08));
+    opacity: 1;
+}
+
+/* Required / multi badges in column settings list (issue #937) */
+.col-required-badge {
+    color: #d32f2f;
+    font-weight: bold;
+    margin-left: 4px;
+    font-size: 14px;
+}
+
+.col-multi-badge {
+    color: var(--md-primary, #1976d2);
+    margin-left: 4px;
+    font-size: 12px;
+}
+
+/* Column edit modal (issue #937) */
+.col-edit-modal {
+    max-width: 480px;
+}
+
+.col-edit-section {
+    margin-bottom: 16px;
+}
+
+.col-edit-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.col-edit-label {
+    min-width: 130px;
+    font-size: 13px;
+    font-weight: 500;
+    margin: 0;
+    color: var(--md-text-secondary, #555);
+}
+
+.col-edit-check-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 400;
+    margin: 0;
+    cursor: pointer;
+}
+
+.col-edit-select,
+.col-edit-input {
+    flex: 1;
+    font-size: 13px;
+}
+
+.col-edit-value {
+    font-size: 13px;
+    color: var(--md-text-secondary, #666);
+    font-style: italic;
+}
+
+.col-edit-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+}
+
+.col-edit-del-confirm {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    background: #fff3f3;
+    border-radius: 4px;
+    padding: 8px 12px;
+    flex-wrap: wrap;
+}
+
+.col-edit-del-warn {
+    font-size: 13px;
+    color: #b71c1c;
+    flex: 1;
+}
+
+.col-edit-status {
+    margin-top: 10px;
+    font-size: 13px;
+    padding: 6px 10px;
+    border-radius: 4px;
+}
+
+.col-edit-status-ok {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.col-edit-status-error {
+    background: #ffebee;
+    color: #b71c1c;
+}
+
 .table-settings-item {
     padding: 12px 12px 12px 8px;
     border-bottom: 1px solid #f0f0f0;
@@ -891,11 +988,7 @@
     box-shadow: var(--md-elevation-3);
     z-index: 100;
     min-width: 220px;
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
     overflow: hidden;
 }
 
@@ -1003,11 +1096,7 @@
     max-height: 85vh;
     display: flex;
     flex-direction: column;
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
     transition: max-width 0.3s ease, max-height 0.3s ease;
 }
 
@@ -1142,11 +1231,7 @@
     border: 1px solid var(--md-divider);
     border-radius: 4px;
     font-size: 14px;
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
     color: var(--md-text-primary);
     background: var(--md-surface);
     transition: var(--md-transition);
@@ -1208,11 +1293,7 @@
     font-weight: 500;
     cursor: pointer;
     transition: var(--md-transition);
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
     min-height: 40px;
     line-height: 1.4;
     display: inline-flex;
@@ -1289,11 +1370,7 @@
     min-width: 300px;
     max-width: 500px;
     font-size: 14px;
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
     letter-spacing: 0.25px;
     animation: slideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -1352,11 +1429,7 @@
     border: 1px solid var(--md-divider);
     border-radius: 4px;
     font-size: 14px;
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
     color: var(--md-text-primary);
     background: var(--md-surface);
     cursor: pointer;
@@ -1491,11 +1564,7 @@
     max-height: 80vh;
     display: flex;
     flex-direction: column;
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
 }
 
 .form-field-settings-header {
@@ -1601,11 +1670,7 @@
     font-weight: 500;
     cursor: pointer;
     transition: var(--md-transition);
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
     min-height: 40px;
     line-height: 1.4;
     display: inline-flex;
@@ -1967,11 +2032,7 @@
     border: 1px solid var(--md-divider);
     border-radius: 4px;
     font-size: 13px;
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
     color: var(--md-text-primary);
     background: var(--md-surface);
     transition: var(--md-transition);
@@ -2049,11 +2110,7 @@
     border: 2px solid var(--md-primary);
     border-radius: 4px;
     font-size: 14px;
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
     color: var(--md-text-primary);
     background: var(--md-surface);
     box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.15);
@@ -2090,11 +2147,7 @@
 .inline-editor-memo {
     min-height: 60px;
     resize: vertical;
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
 }
 
 /* Style for calendar icon in inline date/datetime inputs */
@@ -2170,11 +2223,7 @@ td:has(.inline-editor) {
     padding-right: 36px;
     border: none;
     font-size: 14px;
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
     color: var(--md-text-primary);
     background: var(--md-surface);
     outline: none;
@@ -2360,11 +2409,7 @@ td:has(.inline-editor-reference) {
     color: var(--md-primary);
     border-radius: 14px;
     font-size: 13px;
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
     max-width: 200px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2703,11 +2748,7 @@ tr.row-selected {
     box-shadow: var(--md-elevation-4, 0 14px 28px rgba(0, 0, 0, 0.25), 0 10px 10px rgba(0, 0, 0, 0.22));
     max-width: 500px;
     width: 90%;
-<<<<<<< HEAD
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-=======
     font-family: inherit;
->>>>>>> origin/main
 }
 
 .integram-modal-header {
