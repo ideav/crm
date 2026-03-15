@@ -447,9 +447,11 @@ class IntegramTable {
                 const newColumnIds = this.columns
                     .filter(c => !savedColumnIdsSet.has(c.id) && !this.idColumns.has(c.id))
                     .map(c => c.id);
+                // Issue #978: Always remove stale IDs (deleted columns) from columnOrder, regardless of
+                // whether new columns were added. Without this, deleted columns' IDs remain in columnOrder
+                // and cause wrong order values when sending _d_ord requests.
+                this.columnOrder = [...this.columnOrder.filter(id => currentColumnIds.has(id)), ...newColumnIds];
                 if (newColumnIds.length > 0) {
-                    // Add new columns to the end of columnOrder
-                    this.columnOrder = [...this.columnOrder.filter(id => currentColumnIds.has(id)), ...newColumnIds];
                     // Make new columns visible
                     this.visibleColumns = [...this.visibleColumns, ...newColumnIds.filter(id => !this.visibleColumns.includes(id))];
                 }
