@@ -874,6 +874,35 @@
     border-top: 2px solid var(--md-primary, #1976d2);
 }
 
+/* Fixed (first) column in settings list — not draggable, locked icon (issue #962) */
+.column-settings-item--fixed {
+    cursor: default;
+    background-color: var(--md-surface-variant, rgba(0,0,0,0.03));
+}
+
+.col-settings-drag-handle.col-settings-fixed {
+    cursor: default;
+    opacity: 0.4;
+}
+
+/* Order number badge for draggable columns in settings list (issue #962) */
+.col-settings-order-num {
+    display: inline-block;
+    min-width: 18px;
+    height: 18px;
+    line-height: 18px;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--md-text-secondary, #666);
+    background-color: var(--md-surface-variant, rgba(0,0,0,0.07));
+    border-radius: 9px;
+    margin-right: 6px;
+    padding: 0 4px;
+    user-select: none;
+    opacity: 0.7;
+}
+
 /* Required / multi badges in column settings list (issue #937) */
 .col-required-badge {
     color: #d32f2f;
