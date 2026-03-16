@@ -275,7 +275,7 @@
 <div class="dictionary">
     <div class='dict-title-box'>
 		<div class="dict-title">
-			<t9n>[RU]Таблицы[EN]Tables</t9n>
+			Таблицы
 		</div>
         &nbsp; 
 		<a class="dict-new-href" id="createBtn" onclick="toggleCreateTable()" style="display:none">
@@ -291,10 +291,10 @@
 			<input id="dictionary__search" type="text" autocomplete="off">
 		</div>
 	</div>
-	<FORM class="form t9n pl-2 pr-2" id="addForm" style="display:none">
+	<FORM class="form pl-2 pr-2" id="addForm" style="display:none">
 		<div class="row p-0 m-0">
 			<div class="col-sm-6 col-md-7 pl-0 pr-0">
-				<input type="text" id="val" name="val" placeholder="<t9n>[RU]Введите имя таблицы[EN]Enter the name of the table</t9n>" MAXLENGTH="127" onkeyup="filterTypes()" class="form-control">
+				<input type="text" id="val" name="val" placeholder="Введите имя таблицы" MAXLENGTH="127" onkeyup="filterTypes()" class="form-control">
 			</div>
 			<div class="col-sm-6 col-md-5 p-0 mt-1 mt-sm-0">
 				<div class="input-group mb-2">
@@ -304,13 +304,13 @@
 		</div>
 		 <div class=" pt-3 pb-3">
 			<div class="form-check">
-				<input class="form-check-input" type="checkbox" name="unique" value="1" id="flexCheckDefault" title="<t9n>[RU]Невозможно добавить одинаковые независимые объекты (на свойства ограничение не распространяется)[EN]It is impossible to add identical independent objects (the restriction does not apply to attributes)</t9n>">
-				<label class="form-check-label" for="flexCheckDefault"><t9n>[RU]Сделать первую колонку уникальной[EN]Make the first column unique</t9n></label>
+				<input class="form-check-input" type="checkbox" name="unique" value="1" id="flexCheckDefault" title="Невозможно добавить одинаковые независимые объекты (на свойства ограничение не распространяется)">
+				<label class="form-check-label" for="flexCheckDefault">Сделать первую колонку уникальной</label>
 			</div>
 		</div>
 		<div class="btn-group">
-			<button type="submit" class="btn btn-primary mb-2 pl-5 pr-5 mr-3" name="addbtn" id="addbtn" disabled="disabled"><t9n>[RU]Создать[EN]Create</t9n></button>
-			<button type="button" class="btn btn-outline-secondary mb-2 pl-5 pr-5" name="cancelbtn" id="cancelbtn" onclick="toggleCreateTable()"><t9n>[RU]Отменить[EN]Cancel</t9n></button>
+			<button type="submit" class="btn btn-primary mb-2 pl-5 pr-5 mr-3" name="addbtn" id="addbtn" disabled="disabled">Создать</button>
+			<button type="button" class="btn btn-outline-secondary mb-2 pl-5 pr-5" name="cancelbtn" id="cancelbtn" onclick="toggleCreateTable()">Отменить</button>
 		</div>
 	</FORM>
 	
@@ -341,17 +341,17 @@
 
 	
 	<div class="dict-category-new" onClick='showNewCategoryInput(this);' style="display:none">
-		<t9n>[RU]Новая категория + [EN]New category +	</t9n>
+		Новая категория +
 	</div>
 
 	<div class='dict-category-new-input'>
 		<input type=text id='new-category-input'>
 		<div class="btn-group">
 				<button type="button" class="btn btn-primary mb-2 pl-5 pr-5 mr-3" name="addbtn" onClick='newCategory()'>
-					<t9n>[RU]Создать[EN]Create</t9n>
+					Создать
 				</button>
 				<button type="button" class="btn btn-outline-secondary mb-2 pl-5 pr-5" onclick='hideNewCategoryInput();'>
-					<t9n>[RU]Отменить[EN]Cancel</t9n>
+					Отменить
 				</button>
 		</div>
 	</div>
@@ -441,15 +441,15 @@ for(i in tables)
 $('[tabs-id=0]').append($(tabList));
 $('.dict-category-new,.dict-category-list').show();
 if('{_global_.role}'==='admin'){
-    let str='<option value="" class="text-muted" selected>'+t9n('[RU]Выберите тип первой колонки[EN]Select first column\'s type')+'</option>';
-    str+='<option value="3">'+t9n('[RU]Короткая строка (до 127 символов)[EN]Short text (up to 127 chars)')+'</option>';
-    str+='<option value="8">'+t9n('[RU]Строка без ограничения длины[EN]Text of unlimiited length')+'</option>';
-    str+='<option value="9">'+t9n('[RU]Дата[EN]Date')+'</option>';
-    str+='<option value="13">'+t9n('[RU]Целое число[EN]Integer')+'</option>';
-    str+='<option value="14">'+t9n('[RU]Число с десятичной частью[EN]Amount with decimals')+'</option>';
-    str+='<option value="11">'+t9n('[RU]Логическое значение (Да / Нет)[EN]Boolean: True/False')+'</option>';
-    str+='<option value="12">'+t9n('[RU]Многострочный текст[EN]Multiline text')+'</option>';
-    str+='<option value="4">'+t9n('[RU]Дата и время[EN]Date and time')+'</option>';
+    let str='<option value="" class="text-muted" selected>'+'Выберите тип первой колонки'+'</option>';
+    str+='<option value="3">'+'Короткая строка (до 127 символов)'+'</option>';
+    str+='<option value="8">'+'Строка без ограничения длины'+'</option>';
+    str+='<option value="9">'+'Дата'+'</option>';
+    str+='<option value="13">'+'Целое число'+'</option>';
+    str+='<option value="14">'+'Число с десятичной частью'+'</option>';
+    str+='<option value="11">'+'Логическое значение (Да / Нет)'+'</option>';
+    str+='<option value="12">'+'Многострочный текст'+'</option>';
+    str+='<option value="4">'+'Дата и время'+'</option>';
     byId('baseTypes').innerHTML=str;
     $('#createBtn').show();
 }
@@ -725,8 +725,8 @@ $(document).ready(function () {
 });
 
 
-var ph=t9n('[RU]Быстрый поиск...[EN]Quick search...');
-document.title=t9n('[RU]Таблицы[EN]Tables'),role='{_global_.role}',roleId='{_global_.role_id}';
+var ph='Быстрый поиск...';
+document.title='Таблицы',role='{_global_.role}',roleId='{_global_.role_id}';
 let input = document.querySelector('.dictionary__search input');
 input.setAttribute('placeholder', ph);
 
