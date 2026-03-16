@@ -1,0 +1,593 @@
+<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z" crossorigin="anonymous">
+<link rel="stylesheet" href="/css/css.css" />
+<style>
+label {
+    font-size: 90%;
+    color: gray;
+}
+.dict-title{
+    padding: 20px 0 10px 0;
+    font-size: 24px;
+    line-height: 24px;
+    color: #172D4E;
+    display: block;
+}
+.comp-control {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+}
+.hidden {
+    display:none;
+}
+.btn-xs {
+    padding: 1px 5px;
+    line-height: 1.5;
+    border-radius: 3px;
+}
+.breadcrumb {
+    padding: 2px;
+    margin: 0;
+}
+.select2-selection__rendered {
+    line-height: 38px !important;
+}
+.select2-container .select2-selection--single {
+    height: 38px !important;
+}
+.select2-selection__arrow {
+    height: 38px !important;
+}
+.select2-selection__clear {
+    height: 38px !important;
+    padding-right: 5px !important;
+}
+a[disabled]{
+    display: none;
+}
+</style>
+<link href="/css/select2.min.css" rel="stylesheet" />
+<script src="/js/select2.min.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment.min.js"></script>
+<script src="/js/js.js"></script>
+<!-- Begin:&Object -->
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb pl-2">
+    <li class="breadcrumb-item"><a href="/{_global_.z}">{_global_.z}</a></li>
+    <li class="breadcrumb-item"><a href="/{_global_.z}/dict/"><t9n>[RU]Таблицы[EN]Tables</t9n></a></li>
+    <li class="breadcrumb-item parent-table"><a href="/{_global_.z}/object/{typ}/?F_U={UP}">{typ_name}</a></li>
+    <li class="breadcrumb-item active" aria-current="page">{val}</li>
+  </ol>
+</nav>
+<div class="container">
+<!-- Begin:&Warnings --><div class="alert alert-danger" role="alert">{WARNING}</div>
+<!-- End:&Warnings -->
+<!-- Begin:_Msg --><div class="alert alert-{_request_.LEVEL}" role="alert">{_request_.TEXT}</div>
+<!-- End:_Msg -->
+<script>
+    var enable_save,type={TYP},typeName='{TYP_NAME}',up={UP};
+    $('.breadcrumb-item a')[0].innerHTML=db.substr(0,1).toUpperCase()+db.substr(1);
+</script>
+<div id="messages" class="msgs" onclick="this.innerHTML=''"></div>
+<div class="row p-1">
+<div class="col-12 col-lg-10 col-xl-8" style="min-width: 348px;">
+<FORM id="form" method="post" action="/{_global_.z}/_m_save/{ID}" ENCTYPE="multipart/form-data" ONSUBMIT="savebtn.disabled = true; return true;">
+<input type="hidden" name="_xsrf" value="{_global_.xsrf}">
+    <div class="dict-title">
+        {TYP_NAME} <font color="lightgray" onclick="copyId({ID})">#{ID} <span id="copied" style="display:none;" class="text-nowrap">(cкопировано в буфер)</span></font>
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" class="float-right" onclick="gridMode(true)">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M4.5 5C4.5 4.72386 4.72386 4.5 5 4.5H12C12.2761 4.5 12.5 4.72386 12.5 5V12C12.5 12.2761 12.2761 12.5 12 12.5H5C4.72386 12.5 4.5 12.2761 4.5 12V5ZM5.5 5.5V11.5H11.5V5.5H5.5ZM15.5 5C15.5 4.72386 15.7239 4.5 16 4.5H23C23.2761 4.5 23.5 4.72386 23.5 5V12C23.5 12.2761 23.2761 12.5 23 12.5H16C15.7239 12.5 15.5 12.2761 15.5 12V5ZM16.5 5.5V11.5H22.5V5.5H16.5ZM4.5 16C4.5 15.7239 4.72386 15.5 5 15.5H12C12.2761 15.5 12.5 15.7239 12.5 16V23C12.5 23.2761 12.2761 23.5 12 23.5H5C4.72386 23.5 4.5 23.2761 4.5 23V16ZM5.5 16.5V22.5H11.5V16.5H5.5ZM15.5 16C15.5 15.7239 15.7239 15.5 16 15.5H23C23.2761 15.5 23.5 15.7239 23.5 16V23C23.5 23.2761 23.2761 23.5 23 23.5H16C15.7239 23.5 15.5 23.2761 15.5 23V16ZM16.5 16.5V22.5H22.5V16.5H16.5Z" fill="#1A1A1A"></path>
+        </svg>
+    </div>
+	<!-- Begin:_Tab --><input type="hidden" name="tab" value="{_request_.tab}">
+	<!-- End:_Tab -->
+	<!-- Begin:_Next --><input id="next_act" type="hidden" name="next_act" value="{_request_.next_act}">
+	<!-- End:_Next -->
+
+
+
+    <!-- Begin:&Edit_Req --><div class="row"><div class="pb-3 col-12"><input type="{TYPE}" id="t{TYP}" name="t{TYP}" value="{_parent_.VAL}" {_parent_.DISABLED} class="form-control"></div></div>
+	<!-- End:&Edit_Req -->
+	<!-- Begin:&EditReq_REPORT_COLUMN -->
+		<select id="t{TYP}" name="t{TYP}" {_parent_.DISABLED} class="form-control">
+			<!-- Begin:&Rep_Col_List --><option value="{ID}" {SELECTED}>{VAL}</option>
+			<!-- End:&Rep_Col_List -->
+		</select>
+		<script>
+		    $(document).ready(function(){
+		        $("input[name='t100']").each(function(){
+                   if($(this).val()=="")
+                      $(this).val($( "#t{TYP} option:selected" ).text())
+                 });
+		    });
+		</script>
+	<!-- End:&EditReq_REPORT_COLUMN -->
+	<!-- Begin:&EditReq_GRANT -->
+		<select id="t{TYP}" name="t{TYP}" {_parent_.DISABLED} class="form-control">
+			<!-- Begin:&Grant_List --><option value="{ID}" {SELECTED}>{VAL}</option>
+			<!-- End:&Grant_List -->
+		</select>
+	<!-- End:&EditReq_GRANT -->
+	<div style="height:5px; "></div>
+
+    <div id="tabs">
+	<ul class="nav tab-tabs" >
+		<!-- Begin:&Tabs --><li class="tab-item"><a {CLASS} href="/{_global_.z}/edit_obj/{_parent_.id}/?tab={TAB}">{VAL}</a></li>
+		<!-- End:&Tabs -->
+	</ul>
+	</div>
+
+		<div class="form-row no-gutters">
+		<!-- Begin:&Object_Reqs -->
+			<label class="t9n" for="t{TYP}">
+				<!-- Begin:&Nullable_Req --><A TITLE="<t9n>[RU]Обязательный реквизит![EN]Mandatory attribute!</t9n>" NAME="{NOT_NULL}"><FONT COLOR="RED"><b>
+				<!-- End:&Nullable_Req -->
+				{TYP_NAME}
+				<!-- Begin:&Nullable_Req_close --><!--{NOT_NULL}--></b></FONT></A>
+				<!-- End:&Nullable_Req_close -->
+        		{ENABLE_SAVE}
+			</label>
+			<!-- Begin:&EditReq_REFERENCE -->
+			<div class="comp-control pb-3 col-12 col-sm-8 col-md-6 t9n">
+			    <div id="mst{TYP}">
+			    <!-- Begin:&Multiselect -->
+			    <span id="{ID}" ref="{VAL}" ord="{ORD}" class="badge badge-pill badge-secondary text-dark p-2 ml-0 mt-0 mb-2 mr-1"><font>{NAME}</font>
+			        <a onclick="newApi('POST','_m_del/{ID}?JSON','dropMS','',{ID})" {_parent_.disabled}>
+			            <svg width="12" height="12" viewBox="0 0 12 12" class="flex-none ml-1" style="shape-rendering: geometricprecision;">
+			            <path fill-rule="evenodd" fill="currentColor" d="M7.41421356,6 L9.88226406,3.5319495 C10.0816659,3.33254771 10.0828664,3.01179862 9.88577489,2.81470708 L9.18529292,2.11422511 C8.97977275,1.90870494 8.66708101,1.91870543 8.4680505,2.11773594 L6,4.58578644 L3.5319495,2.11773594 C3.33254771,1.91833414 3.01179862,1.91713357 2.81470708,2.11422511 L2.11422511,2.81470708 C1.90870494,3.02022725 1.91870543,3.33291899 2.11773594,3.5319495 L4.58578644,6 L2.11773594,8.4680505 C1.91833414,8.66745229 1.91713357,8.98820138 2.11422511,9.18529292 L2.81470708,9.88577489 C3.02022725,10.0912951 3.33291899,10.0812946 3.5319495,9.88226406 L6,7.41421356 L8.4680505,9.88226406 C8.66745229,10.0816659 8.98820138,10.0828664 9.18529292,9.88577489 L9.88577489,9.18529292 C10.0912951,8.97977275 10.0812946,8.66708101 9.88226406,8.4680505 L7.41421356,6 L7.41421356,6 Z">
+			            </path>
+			            </svg>
+			        </a>
+			    </span>
+			    <!-- End:&Multiselect -->
+			    </div>
+			    <select id="t{TYP}" name="t{TYP}" {DISABLED} multi="{_parent_.MULTI}" class="form-control select2" i-orig="{_parent_.REF}" i-restrict="{RESTRICT}"
+			            <!-- Begin:&Ref_Create_Granted --> granted="{TYP}"<!-- End:&Ref_Create_Granted -->>
+    			    <option value=""></option>
+    				<!-- Begin:&Add_Obj_Ref_Reqs --><option value="{ID}" {SELECTED} r="{R}">{VAL}</option>
+    				<!-- End:&Add_Obj_Ref_Reqs -->
+                </select>
+    		    <!-- Begin:&Seek_Refs --><script>$('#t{_parent_.TYP}').attr('i-more','{MORE}')</script><!-- End:&Seek_Refs -->
+		    </div>
+			<!-- End:&EditReq_REFERENCE -->
+			<!-- Begin:&EditReq_ARRAY -->
+			<div class="comp-control pb-3 col-6 col-sm-4 col-md-3">
+			    <A id="t{TYP}" href="/{_global_.z}/object/{TYP}/?F_U={_parent_.ID}"><B>({_parent_.ARR_NUM})</B></A>
+				<!-- Begin:&ARRAY_val --> <input class="form-control" type="text" name="t{_parent_.TYP}" value="{VAL}"><!-- End:&ARRAY_val -->
+		    </div>
+			<!-- End:&EditReq_ARRAY -->
+			<!-- Begin:&EditReq_SHORT -->
+			<div class="comp-control pb-3 col-12 col-sm-4 col-md-3">
+                <input class="form-control" type="text" id="t{TYP}" name="t{TYP}" value="{VAL}" {DISABLED}>
+		    </div>
+			<!-- End:&EditReq_SHORT -->
+			<!-- Begin:&EditReq_MEMO -->
+			<div class="comp-control pb-3 col-12">
+			    <TEXTAREA class="form-control" id="t{TYP}" name="t{TYP}" {DISABLED}>{VAL}</TEXTAREA>
+		    </div>
+			<!-- End:&EditReq_MEMO -->
+			<!-- Begin:&EditReq_HTML -->
+			<div class="pb-3 col-12">
+    			<TEXTAREA class="form-control" id="t{TYP}" name="t{TYP}" {DISABLED}>{VAL}</TEXTAREA>
+		    </div>
+			<!-- End:&EditReq_HTML -->
+			<!-- Begin:&EditReq_CHARS -->
+			<div class="pb-3 col-12">
+    			<input class="form-control" type="text" id="t{TYP}" name="t{TYP}" value="{VAL}" {DISABLED}>
+		    </div>
+			<!-- End:&EditReq_CHARS -->
+			<!-- Begin:&EditReq_FILE -->
+			<div class="pb-3 col-12 col-sm-9 col-md-6 pt-1">
+    			<span class="file-{REQID}">{VAL}</span><a class="ml-3 del-file-{REQID} hidden{REQID}" onclick="$('.del-file-{REQID}').toggle()"><svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M5 8H23M10 8V6C10 5.46957 10.2107 4.96086 10.5858 4.58579C10.9609 4.21071 11.4696 4 12 4H16C16.5304 4 17.0391 4.21071 17.4142 4.58579C17.7893 4.96086 18 5.46957 18 6V8M21 8V22C21 22.5304 20.7893 23.0391 20.4142 23.4142C20.0391 23.7893 19.5304 24 19 24H9C8.46957 24 7.96086 23.7893 7.58579 23.4142C7.21071 23.0391 7 22.5304 7 22V8H21Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+                    <span class="del-file-{REQID} del-file-wait-{REQID}" style="display:none;"><a class="ml-3 btn btn-xs btn-outline-secondary" onclick="$('.del-file-{REQID}').toggle();">Отменить</a>
+                        <a class="ml-3 pl-3 pr-3 btn btn-xs btn-outline-secondary text-dark btn-warning" onclick="newApi('POST','_m_set/{_parent_.ID}?JSON&t{TYP}=','delFile','','{REQID}');$('.del-file-wait-{REQID}').toggle()">Удалить</a>
+                    </span>
+                    <img class="del-file-wait-{REQID}" style="display:none;" src="/i/ajax.gif">
+    			<input class="form-control-file mt-2" type="file" id="t{TYP}" name="t{TYP}" value="" {DISABLED}>
+		    </div>
+			<!-- End:&EditReq_FILE -->
+			<!-- Begin:&EditReq_DATE -->
+			<div class="comp-control pb-3 col-6 col-sm-4 col-md-3">
+    			<input class="form-control datepicker" type="date" id="t{TYP}" name="t{TYP}" value="{VAL}" {DISABLED}>
+		    </div>
+			<!-- End:&EditReq_DATE -->
+			<!-- Begin:&EditReq_DATETIME -->
+			<div class="comp-control pb-3 col-6 col-sm-6 col-md-4">
+    			<input class="form-control" type="datetime-local" id="t{TYP}" step="1" name="t{TYP}" data="DATETIME" value="{VAL}" {DISABLED}>
+		    </div>
+			<!-- End:&EditReq_DATETIME -->
+			<!-- Begin:&EditReq_SIGNED -->
+			<div class="comp-control pb-3 col-6 col-sm-4 col-md-3">
+    			<input class="form-control" type="text" id="t{TYP}" name="t{TYP}" value="{VAL}" {DISABLED}>
+		    </div>
+			<!-- End:&EditReq_SIGNED -->
+			<!-- Begin:&EditReq_BOOLEAN -->
+			<div class="comp-control pb-3 col-6 col-sm-4 col-md-3">
+    			<input class="form-control" type="checkbox" id="t{TYP}" name="t{TYP}" value="1" {CHECKED} {DISABLED}/><input type="hidden" name="b{TYP}" value="1">
+		    </div>
+			<!-- End:&EditReq_BOOLEAN -->
+			<!-- Begin:&EditReq_NUMBER -->
+			<div class="comp-control pb-3 col-6 col-sm-4 col-md-3">
+    			<input class="form-control" type="text" id="t{TYP}" name="t{TYP}" value="{VAL}" {DISABLED}>
+		    </div>
+			<!-- End:&EditReq_NUMBER -->
+			<!-- Begin:&EditReq_CALCULATABLE -->
+			<div class="comp-control pb-3 col-12 col-sm-9 col-md-10">
+    			{VAL}
+		    </div>
+			<!-- End:&EditReq_CALCULATABLE -->
+			<!-- Begin:&EditReq_PWD -->
+			<div class="comp-control pb-3 col-6 col-sm-4 col-md-3">
+    			<input type="password" class="form-control" id="t{TYP}" name="t{TYP}" value="{VAL}" {DISABLED}/>
+		    </div>
+			<!-- End:&EditReq_PWD -->
+		<!-- End:&Object_Reqs -->
+		</div>
+
+    <div id="extras"></div>
+
+    <div id="buttons" class="pt-3 pb-2">
+		<!-- Begin:&Buttons --><A HREF="/{_global_.z}/{ATTRS}"><button type="button" class="btn btn-secondary btn-sm mb-1 mr-1">{VAL}</button></A>
+		<!-- End:&Buttons -->
+	</div>
+
+    <div class="row t9n" style="padding: 0 5px 5px 15px;">
+		<div class="col-6 col-sm-4 col-md-3 col-xl-3 p-0 pr-2 copy-dub">
+		    <input {DISABLED} id="savebtn" type="submit" name="savebtn" class="btn btn-primary btn-block mb-2" value="<t9n>[RU]Сохранить[EN]Save</t9n>">
+		</div>
+		<div class="col-6 col-sm-4 col-md-3 col-xl-3 p-0 pr-2 copy-dub">
+		    <input {DISABLED} type="submit" name="copybtn" class="btn btn-outline-secondary btn-block mb-2" value="<t9n>[RU]Дублировать[EN]Duplicate</t9n>">
+		</div>
+		<div class="col-6 col-sm-4 col-md-3 col-xl-3 p-0 pr-2 undo-btn">
+		    <A id="cancel" HREF="/{_global_.z}/object/{TYP}/?canc1=1&F_U={UP}&F_I={ID}"><button type="button" class="btn btn-outline-secondary btn-block mb-2"><t9n>[RU]Отменить[EN]Cancel</t9n></button></A>
+		</div>
+		<div class="col-6 col-sm-4 col-md-3 col-xl-3 p-0 pr-2 del-btn">
+		    <button {DISABLED} type="button" class="btn btn-warning btn-block mb-2" onclick="$('.copy-dub').hide(); $('.undo-btn, .del-btn').hide(); $('.confirm-del').show();"><t9n>[RU]Удалить[EN]Delete</t9n></button>
+		</div>
+	</div>
+	<div class="confirm-del" style="display:none; border:2px #f0ad4e solid; -moz-border-radius: 10px; -webkit-border-radius:10px; -khtml-border-radius:10px; border-radius:10px; padding:6px; ">
+	    <p><b><t9n>[RU]Подтвердите удаление записи[EN]Confirm to delete</t9n> {VAL}</b></p>
+	    <div class="row" style="padding: 0 5px 5px 15px;">
+			<div class="col-6 col-sm-4 col-md-3 col-xl-3 p-0 pr-2">
+			    <button type="button" class="btn btn-warning btn-block mb-2" onclick="post('_m_del/{ID}')"><t9n>[RU]Да, удалить[EN]Yes, delete</t9n></button>
+			</div>
+			<div class="col-6 col-sm-4 col-md-3 col-xl-3 p-0 pr-2">
+			    <button type="button" class="btn btn-outline-secondary btn-block  mb-2" onclick="$('.copy-dub').show(); $('.undo-btn, .del-btn').show(); $('.confirm-del').hide();">&nbsp;<t9n>[RU]Отмена[EN]Cancel</t9n>&nbsp;</button>
+			</div>
+		</div>
+	</div>
+</FORM>
+<div id="external"></div>
+</div>
+<div id="external_row"></div>
+</div>
+<script>
+$(document).ready(function() {
+    $('.select2').each(function(){
+        var curEl=this.id;
+        $(this).select2({
+            tags: $(this).attr('granted')!==undefined,
+            createTag: function (params) {
+                let term = $.trim(params.term);
+                if (term === '') return null;
+                return {
+                  id: '-1',
+                  text: term,
+                  newTag: true
+                }
+            },
+            placeholder: t9n('[RU]Выберите[EN]Select'),
+            allowClear: true,
+            sorter: data => data.sort((a, b) => a.text.localeCompare(b.text)),
+            ajax: $(this).attr('i-more') || true ? {
+                url: function(params){
+                    const restrict=$('select[i-orig='+($(this).attr('i-restrict')||-1)+']').val();
+                    return requestURL='/'+db+'/_ref_reqs/'+$(this).attr('id').substr(1)+'?JSON&id='+id+(restrict?'&r='+restrict:'');
+                },
+                processResults: function(data){
+                    let formattedData=[];
+                    if(data)
+                        for(var i in data)
+                            if($('#ms'+curEl).find('span[ref='+i+']').length===0)
+                                formattedData.push({"id":i, "text":data[i]})
+                    return {results:formattedData};
+                },
+                dataType: 'json',
+                cache: true,
+                delay: 330
+            } : undefined
+        });
+    });
+    $(".select2").on('select2:select', function (e) {
+        if(e.params.data.newTag){
+            var vars=new FormData();
+            vars.append('t'+$(e.target).attr('i-orig'),e.params.data.text);
+            newApi('POST','_m_new/'+$(e.target).attr('i-orig')+'?JSON&up=1','createDicObj',vars,e.target);
+        } else if($(this).attr('multi')==='1') {
+            setRef(this);
+            updateDependentSelects(e, true);
+        } else {
+            updateDependentSelects(e);
+        } 
+    });
+    $(".select2").on("select2:unselecting",function(e){
+        if($(this).attr('multi')==='1') {
+            newApi('POST','_m_set/'+id+'?JSON&'+e.target.id+'=','clearRef','',e.target);
+        } else
+            $(e.target).val('');
+    });
+    $('select[multi="1"]').each(function(){
+        updateDependentSelects($(this).attr('i-orig'), true);
+    });
+});
+function updateDependentSelects(e, multi){
+    // получили id изменяемого родителя
+    let objectId;
+    if (typeof e === 'number' || typeof e === 'string') {
+        // при удалении мультиселекта
+        objectId = e;
+    } else {
+        objectId = $(e.target).attr('i-orig');
+    }
+    // получили objectId выбранного значения в родительской таблице
+    let selectedIds;
+    if (typeof e === 'number' || typeof e === 'string') {
+        // для удаления мультиселекта, получаем оставшиеся id
+        selectedIds = $('select[i-orig="' + objectId + '"]').prev().children().toArray().map(v => $(v).attr('ref'));
+    } else {
+        if (multi) {
+            selectedIds = $(e.target).prev().find('span').toArray().map(v => $(v).attr('ref'));
+            selectedIds.push(e.params.data.id);
+            selectedIds = selectedIds.join(',');
+        } else {
+            selectedIds = e.params.data.id;
+        }
+    }
+    // получили селекты всех зависимых от него детей
+    const dependentSelects = $('.select2.form-control[i-restrict="' + objectId + '"]');
+    // для каждого ребенка пробегаемся 
+    $(dependentSelects).each((i, val) => {
+        // получаем id зависимого ребёнка (для запроса)
+        const childId = $(val).attr('id').substr(1);
+        // буквально - обратись в дочернюю таблицу childId, запроси по колонке ... те значения, которые равны selectedId
+        $.get('/'+db+'/_ref_reqs/'+ childId +'?JSON&id='+id+'&r='+ selectedIds + '&type=query' )
+            .done(res => {
+                var response = JSON.parse(res);
+                var newOptions = Object.keys(response).map(key => ({id: key, text: response[key]}));
+                if (newOptions[0]?.id !== $('.select2#t' + childId).select2('data')[0]?.id) {
+                    // если выбранной опции нет во вновь приехавших
+                    newOptions.unshift($('.select2#t' + childId).select2('data')[0]);
+                }
+                $('.select2#t' + childId).empty().select2('destroy');//.append('<option>')
+                $('.select2#t' + childId).select2({
+                    data: newOptions,//JSON.parse(res).object.map(v => ({id: v.id, text: v.val}))
+                    placeholder: t9n('[RU]Выберите[EN]Select'),
+                    allowClear: true,
+                    sorter: data => data.sort((a, b) => a.text.localeCompare(b.text)),
+                })
+            })
+            .fail(err => console.log(err));
+    });
+}
+function createDicObj(json,el){
+    if(json.id){
+        $('option[value="-1"]').attr('value',json.id);
+        if($(el).attr('multi')==='1')
+            setRef(el);
+    }
+    else
+        showError(t9n('[RU]Ошибка создания справочного значения[EN]Failed to create the dictionary value'));
+}
+function setRef(el){
+    if($(el).attr('multi')==='1')
+        newApi('POST','_m_set/'+id+'?JSON&'+el.id+'='+el.value,'addMS','',el);
+    else
+        newApi('POST','_m_set/'+id+'?JSON&'+el.id+'='+el.value,'checkSetRef','',el);
+}
+function addMS(json,el){
+    if(json.id){
+        $('#ms'+el.id).append(templateMS.replace(/:id:/gm,json.id)
+                                        .replace(':color:',msColors[el.value%24])
+                                        .replace(':val:',el.value)
+                                        .replace(':name:',$('option[value="'+el.value+'"]').html()));
+        $('option[value="'+el.value+'"]').remove();
+    }
+    else
+        showError(t9n('[RU]Ошибка сохранения справочного значения[EN]Failed to save the dictionary value'));
+}
+function checkSetRef(json,el){
+    if(json.id)
+        return;
+    showError(t9n('[RU]Ошибка сохранения справочного значения[EN]Failed to save the dictionary value'));
+}
+function showError(err,alert){
+    $('#messages').html('<div class="alert alert-'+(alert||'danger')+'" role="alert">'+err+'</div>');
+    setTimeout(function(){$('#messages').html('')},7000);
+}
+function dropMS(json,index){
+    const objectId = $('#'+index).closest('div').next().attr('i-orig');
+    i=$('#'+index).closest('div').attr('id');
+    j=$('#'+index).attr('ref');
+    h=$('#'+index).find('font').html();
+    $('#'+i.substr(2)).append(templateDDL.replace(':id:',j)
+                                        .replace(':val:',i.substr(3))
+                                        .replace(':name:',h));
+    $('#'+index).remove();
+    updateDependentSelects(objectId, true);
+}
+var msColors=['78AAD2','78AAFF','78D2AA','78D2FF','78FFAA','78FFD2','AA78D2','AA78FF','AAD278','AAD2FF','AAFF78','AAFFD2','D278AA','D278FF','D2AA78','D2AAFF','D2FF78','D2FFAA','FF78AA','FF78D2','FFAA78','FFAAD2','FFD278','FFD2AA'];
+$('.badge').each(function(){$(this).css('background-color','#'+msColors[$(this).attr('ref')%24])});
+var templateMS='<span id=":id:" ref=":val:" class="badge badge-pill badge-secondary text-dark p-2 ml-0 mt-0 mb-2 mr-1" style="background-color:#:color:"><font>:name:</font>'
+		         +'<a onclick="newApi(\'POST\',\'_m_del/:id:?JSON\',\'dropMS\',\'\',:id:)">'
+			     +'    <svg width="12" height="12" viewBox="0 0 12 12" class="flex-none ml-1" style="shape-rendering: geometricprecision;">'
+			     +'        <path fill-rule="evenodd" fill="currentColor" d="M7.41421356,6 L9.88226406,3.5319495 C10.0816659,3.33254771 10.0828664,3.01179862 9.88577489,2.81470708 L9.18529292,2.11422511 C8.97977275,1.90870494 8.66708101,1.91870543 8.4680505,2.11773594 L6,4.58578644 L3.5319495,2.11773594 C3.33254771,1.91833414 3.01179862,1.91713357 2.81470708,2.11422511 L2.11422511,2.81470708 C1.90870494,3.02022725 1.91870543,3.33291899 2.11773594,3.5319495 L4.58578644,6 L2.11773594,8.4680505 C1.91833414,8.66745229 1.91713357,8.98820138 2.11422511,9.18529292 L2.81470708,9.88577489 C3.02022725,10.0912951 3.33291899,10.0812946 3.5319495,9.88226406 L6,7.41421356 L8.4680505,9.88226406 C8.66745229,10.0816659 8.98820138,10.0828664 9.18529292,9.88577489 L9.88577489,9.18529292 C10.0912951,8.97977275 10.0812946,8.66708101 9.88226406,8.4680505 L7.41421356,6 L7.41421356,6 Z"></path>'
+		         +'    </svg>'
+		         +'</a></span>'
+	,templateDDL='<option value=":id:" r=":val:">:name:</option>';
+if(enable_save!==undefined)
+    byId('savebtn').disabled=false;
+function gridMode(m){
+    if(getCookie('gridMode'+type)&&m){
+        document.cookie='gridMode'+type+'=1; path=/'+db+'; max-age=-1';
+        document.querySelectorAll(".comp-control").forEach(child => {
+            $(child).attr('class',$(child).attr('comp-class'));
+        });
+    }
+    else{
+        document.cookie='gridMode'+type+'=1; path=/'+db+'; max-age=31622400';
+        document.querySelectorAll(".comp-control").forEach(child => {
+            $(child).attr('comp-class',$(child).attr('class')).attr('class','comp-control pb-3 col-12')
+        });
+    }
+}
+function copyId(i){
+    var $temp = $("<input>");
+    $("body").append($temp);
+    $temp.val(i).select();
+    document.execCommand("copy");
+    $temp.remove();
+    $('#copied').show().delay(2500).slideUp(400);
+}
+$(document).ready(function(){
+    $('#t{TYP}').focus();
+});
+let style = document.createElement('style')
+style.innerHTML = `
+   label {
+        display: inline;
+        margin-top: .5rem;
+        margin-bottom: 0;
+    }
+    input[type=checkbox] {
+        width: 38px;
+    }
+    div[class^="col-"] {
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+    }
+`
+document.getElementsByTagName('head')[0].appendChild(style)
+let labels = [], formGroups = [];
+var dateModeText=getCookie('dateModeText')===1
+    ,dateModeBtn=`<svg onclick="setDateMode()" width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M4.28571 17.1429H16.4286M12.8571 2.85718L15.7143 5.71432L7.85714 13.5715H5V10.7143L12.8571 2.85718Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>`
+    ,resetPwdBtn=`&nbsp;<a onclick="resetPwd()" title="${t9n('[RU]Задать пароль и скопировать его в буфер[EN]Set a password and copy it to clipboard')}">
+                <svg width="20" height="20" viewBox="0 1 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style="cursor:pointer">
+                <path d="M6.42858 9.28572V6.42858C6.42858 5.48137 6.80486 4.57297 7.47463 3.90319C8.1444 3.23342 9.05281 2.85715 10 2.85715C10.9472 2.85715 11.8556 3.23342 12.5254 3.90319C13.1952 4.57297 13.5714 5.48137 13.5714 6.42858V9.28572M5.00001 9.28572H15C15.789 9.28572 16.4286 9.92531 16.4286 10.7143V15.7143C16.4286 16.5033 15.789 17.1429 15 17.1429H5.00001C4.21103 17.1429 3.57144 16.5033 3.57144 15.7143V10.7143C3.57144 9.92531 4.21103 9.28572 5.00001 9.28572Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"></path>
+                </svg></a>&nbsp;
+                <a onclick="resetPwdMail()" title="${t9n('[RU]Задать пароль и скопировать в буфер приглашение пользователю[EN]Set a password and copy the user prompt to clipboard')}">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M17.1429 5.71434C17.1429 4.92862 16.5 4.28577 15.7143 4.28577H4.28571C3.5 4.28577 2.85714 4.92862 2.85714 5.71434M17.1429 5.71434V14.2858C17.1429 15.0715 16.5 15.7143 15.7143 15.7143H4.28571C3.5 15.7143 2.85714 15.0715 2.85714 14.2858V5.71434M17.1429 5.71434L10 10.7143L2.85714 5.71434" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                </a><span id="t20copied" style="display:none">Ok</span>`;
+document.addEventListener('DOMContentLoaded', function() {
+    if(getCookie('gridMode'+type)==1)
+        gridMode(false);
+    if(byId('t'+type).type=='date')
+        byId('t'+type).valueAsDate = moment.utc(byId('t'+type).getAttribute('value'), 'DD.MM.YYYY').toDate();
+    let formContainer = document.querySelector('.no-gutters');
+    formContainer.childNodes.forEach(child => {
+        if (!(child instanceof Text)) {
+            if(child.nodeName === 'LABEL')
+                labels.push(child);
+            else
+                formGroups.push(child);
+        }
+    })
+    formGroups.forEach((group, i) => {
+        if (group.childNodes[1] && group.childNodes[1].type === 'date')
+            group.childNodes[1].valueAsDate = moment.utc(group.childNodes[1].getAttribute('value'), 'DD.MM.YYYY').toDate();
+
+        if (group.childNodes[1] && group.childNodes[1].type === 'datetime-local' && group.childNodes[1].getAttribute('data'))
+            group.childNodes[1].valueAsNumber = moment.utc(group.childNodes[1].getAttribute('value'), 'DD.MM.YYYY hh:mm:ss').valueOf();
+        
+        if (group.childNodes[1] && group.childNodes[1].type !== 'checkbox1')
+            group.insertBefore(labels[i], group.childNodes[1]);
+        else{
+            group.appendChild(labels[i]);
+            group.style.display = 'block';
+        }
+    })
+    if(/Android|webOS|iPhone|iPad|iPod|BlackBerry|BB|PlayBook|IEMobile|Windows Phone|Kindle|Silk|Opera Mini/i.test(navigator.userAgent))
+        $('.datepicker').parent().find('label').append(dateModeBtn);
+    $('#t20').parent().find('label').append(resetPwdBtn);
+}, false);
+function resetPwd(){
+    let pwd=(Math.random().toString(36)+Math.random().toString(36)).replace(/\./g,'').substr(1,8);
+    $('#t20').val(pwd);
+    copy2Buffer(pwd);
+    $('#t20copied').show().delay(2500).slideUp(400);
+}
+function resetPwdMail(){
+    resetPwd();
+    copy2Buffer(t9n('[RU]Ссылка для входа[EN]Login link')+': https://'+location.host+'/'+db+'/login?u='+$('#t18').val()+'\n '+t9n('[RU]пароль: [EN]password: ')+$('#t20').val());
+    showError(t9n('[RU]Ссылка для входа скопирована в буфер. <b>Сохраните изменения</b>, чтобы они вступили в силу![EN]Login link copied to clipboard. <b>Save changes</b> to apply!'),'warning');
+}
+$('#t18').on('keyup',warnUserName);
+let warnDone,userName=$('#t18').val();
+function warnUserName(){
+    if(warnDone||userName===$('#t18').val())
+        return;
+    warnDone=true;
+    showError(t9n('[RU]После смены имени пользователя необходимо задать ему пароль[EN]After changing the username, you need to set a password for him'),'warning');
+}
+function copy2Buffer(text){
+    var $temp = $("<textarea />");
+    $("body").append($temp);
+    $temp.val(text).select();
+    document.execCommand("copy");
+    $temp.remove();
+}
+function setDateMode(){
+    var el=$(event.target).closest('.comp-control').find('input');
+    var date=$(el).val();
+    if($(el).hasClass('datepicker')){
+        $(el).removeClass('datepicker').attr('type','text').attr('maxlength','10');
+        if(date.length)
+            $(el).val(date.substr(8,2)+'.'+date.substr(5,2)+'.'+date.substr(0,4)).select();
+        $(el).keyup(function(e){
+            if(e.keyCode<47||e.keyCode>57)
+                e.preventDefault();
+            var len = this.value.length;
+            if(e.keyCode !== 8){
+                if(len>1)
+                    if(this.value.substr(1,1)==='.')
+                        this.value = '0'+this.value;
+                    else if(this.value.substr(2,1)!=='.')
+                        this.value = this.value.substr(0,2)+'.'+this.value.substr(2,7);
+                if(len>4)
+                    if(this.value.substr(4,1)==='.')
+                        this.value = this.value.substr(0,3)+'0'+this.value.substr(3);
+                    else if(this.value.substr(5,1)!=='.')
+                        this.value = this.value.substr(0,5)+'.'+this.value.substr(5,4);
+                if(this.value.substr(3,1)==='.')
+                    this.value = this.value.substr(0,3)+this.value.substr(4);
+                if(this.value.substr(6,1)==='.')
+                    this.value = this.value.substr(0,6)+this.value.substr(7);
+            }
+        });
+    }
+}
+function delFile(json,index){
+    if(json&&json.id)
+        $('.file-'+index+',.del-file-wait-'+index+',.del-file-'+index).remove();
+    else{
+        if(json.error)
+            byId('messages').innerHTML='<div class="alert alert-danger" role="alert">Ошибка: '+(json.error||'')+'</div>';
+        else
+            byId('messages').innerHTML='<div class="alert alert-danger" role="alert">Ошибка '+json+'</div>';
+        setTimeout(function(){byId('messages').innerHTML=''},7000);
+        $('.del-file-wait-'+index).toggle();
+        $('.del-file-'+index).toggle();
+    }
+}
+</script>
+<!-- End:&Object -->
+</div>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js" integrity="sha384-B4gt1jrGC7Jh4AgTPSdUtOBvfO8shuf57BaghqFfPlYxofvL8/KUEfYiJOMMV+rV" crossorigin="anonymous"></script>
+<script src="/js/main.js"></script>
