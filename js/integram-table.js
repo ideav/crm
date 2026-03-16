@@ -312,11 +312,21 @@ class IntegramTable{
                 const parentTypeLink = `/${ dbName }/table/${ parentTypeId }`;
                 // Parent record link is now a clickable span that opens modal edit form (issue #575)
 
-                return `<div class="integram-table-title-area"><div class="integram-table-title"><a href="${ parentTypeLink }" class="integram-title-link">${ parentTypeName }</a> <span class="integram-title-link integram-parent-record-link" data-parent-record-id="${ parentRecordId }" data-parent-type-id="${ parentTypeId }" style="cursor: pointer;">${ parentVal }</span>${ currentTitle ? ': ' + currentTitle : '' }</div>${ createBtnHtml }</div>`;
+                return `<div class="integram-table-title-area">${ this.renderCheckboxToggleHtml() }<div class="integram-table-title"><a href="${ parentTypeLink }" class="integram-title-link">${ parentTypeName }</a> <span class="integram-title-link integram-parent-record-link" data-parent-record-id="${ parentRecordId }" data-parent-type-id="${ parentTypeId }" style="cursor: pointer;">${ parentVal }</span>${ currentTitle ? ': ' + currentTitle : '' }</div>${ createBtnHtml }</div>`;
             }
 
             // No parent info, just show the title
-            return `<div class="integram-table-title-area"><div class="integram-table-title">${ this.escapeHtml(this.options.title) }</div>${ createBtnHtml }</div>`;
+            return `<div class="integram-table-title-area">${ this.renderCheckboxToggleHtml() }<div class="integram-table-title">${ this.escapeHtml(this.options.title) }</div>${ createBtnHtml }</div>`;
+        }
+
+        /**
+         * Render checkbox toggle button for the title area (issue #1006)
+         */
+        renderCheckboxToggleHtml() {
+            const instanceName = this.options.instanceName;
+            return `<div class="integram-table-checkbox-toggle${ this.checkboxMode ? ' active' : '' }" onclick="window.${ instanceName }.toggleCheckboxMode()" title="Выбор строк в таблице">
+                <i class="pi pi-check-square"></i>
+            </div>`;
         }
 
         /**
@@ -1187,29 +1197,26 @@ class IntegramTable{
                     <div class="integram-table-header">
                         ${ this.renderTitleHtml() }
                         <div class="integram-table-controls">
-                            <button class="btn btn-sm btn-outline-secondary me-2" onclick="window.${ instanceName }.copyConfigUrl()" title="Скопировать ссылку с текущими фильтрами и группами">
-                                <i class="pi pi-copy" style="vertical-align: middle;"></i>
-                            </button>
                             ${ this.groupingEnabled ? `
-                            <button class="btn btn-sm btn-outline-secondary me-1" onclick="window.${ instanceName }.clearGrouping()" title="Очистить группировку">
-                                <i class="pi pi-undo" style="vertical-align: middle;"></i>
-                            </button>
+                            <div class="integram-table-settings" onclick="window.${ instanceName }.clearGrouping()" title="Очистить группировку">
+                                <i class="pi pi-undo"></i>
+                            </div>
                             ` : '' }
-                            <button class="btn btn-sm btn-link text-dark me-2" onclick="window.${ instanceName }.openGroupingSettings()">
-                                ${ this.groupingEnabled ? '<i class="pi pi-check"></i>' : '' } Группы
-                            </button>
+                            <div class="integram-table-settings${ this.groupingEnabled ? ' active' : '' }" onclick="window.${ instanceName }.openGroupingSettings()" title="Группы">
+                                <i class="pi pi-objects-column"></i>
+                            </div>
                             ${ this.hasActiveFilters() ? `
-                            <button class="btn btn-sm btn-outline-secondary me-1" onclick="window.${ instanceName }.clearAllFilters()" title="Очистить фильтры">
-                                <i class="pi pi-filter-slash" style="vertical-align: middle;"></i>
-                            </button>
+                            <div class="integram-table-settings" onclick="window.${ instanceName }.clearAllFilters()" title="Очистить фильтры">
+                                <i class="pi pi-filter-slash"></i>
+                            </div>
                             ` : '' }
-                            <button class="btn btn-sm btn-link text-dark me-2" onclick="window.${ instanceName }.toggleFilters()">
-                                ${ this.filtersEnabled ? '<i class="pi pi-check"></i>' : '' } Фильтры
-                            </button>
+                            <div class="integram-table-settings${ this.filtersEnabled ? ' active' : '' }" onclick="window.${ instanceName }.toggleFilters()" title="Фильтры">
+                                <i class="pi pi-filter"></i>
+                            </div>
                             <div class="integram-table-export-container">
-                                <button class="btn btn-sm btn-link text-dark me-2" onclick="window.${ instanceName }.toggleExportMenu(event)" title="Экспорт таблицы">
-                                    Экспорт
-                                </button>
+                                <div class="integram-table-settings" onclick="window.${ instanceName }.toggleExportMenu(event)" title="Экспорт">
+                                    <i class="pi pi-download"></i>
+                                </div>
                                 <div class="integram-export-menu" id="${ instanceName }-export-menu" style="display: none;">
                                     <div class="export-menu-item" onclick="window.${ instanceName }.exportTable('xlsx')">
                                         <span class="export-icon"><i class="pi pi-file-excel"></i></span> XLSX (Excel)
@@ -1222,14 +1229,14 @@ class IntegramTable{
                                     </div>
                                 </div>
                             </div>
-                            <div class="integram-table-checkbox-toggle${ this.checkboxMode ? ' active' : '' }" onclick="window.${ instanceName }.toggleCheckboxMode()" title="Выбор строк в таблице">
-                                <i class="pi pi-check-square"></i>
-                            </div>
                             ${ this.checkboxMode && this.selectedRows.size > 0 ? `
                             <button class="btn btn-sm btn-danger integram-bulk-delete-btn" id="${ instanceName }-bulk-delete-btn" onclick="window.${ instanceName }.showBulkDeleteConfirm(event)">
                                 Удалить (${ this.selectedRows.size })
                             </button>
                             ` : '' }
+                            <div class="integram-table-settings" onclick="window.${ instanceName }.copyConfigUrl()" title="Скопировать ссылку с текущими фильтрами и группами">
+                                <i class="pi pi-copy"></i>
+                            </div>
                             <div class="integram-table-settings" onclick="window.${ instanceName }.openTableSettings()" title="Настройка таблицы">
                                 <i class="pi pi-cog"></i>
                             </div>
