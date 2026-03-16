@@ -12,7 +12,7 @@
     <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
 </head>
 <body style="font-family:Verdana,Tahoma,sans-serif;line-height:normal;padding:2px">
-<div class="t9n">
+<div>
     <a href="/{_global_.z}"><i class="pi pi-home" style="font-size: 1.25rem; color: #333;"></i></a>
     &nbsp; 
     <div style="display: inline; margin-top: 7px"><a href="/{_global_.z}">Вернуться в&nbsp;основное меню</a>
@@ -70,7 +70,7 @@
     </div>
     <table class="table table-striped table-condensed table-bordered">
       <tr>
-        <td class="t9n"><a href="javascript:sel_all()" title="Инвертировать выделение"><b><font size="3">*</font></b></a></td>
+        <td><a href="javascript:sel_all()" title="Инвертировать выделение"><b><font size="3">*</font></b></a></td>
         <td colspan="4" >&nbsp;<a href="/{_global_.z}/dir_admin/?{FOLDER}=1"> .. </a>
     <!-- Begin:&Pattern -->/<a href="/{_global_.z}/dir_admin/?{_parent_.FOLDER}=1&add_path={PATH}">{NAME}</a><!-- End:&Pattern -->
     	</td>
@@ -87,7 +87,7 @@
       <tr>
         <td><input type="checkbox"  id="cheks" name="del[]" value="{NAME}"></td>
         <td style="vertical-align:middle;">&nbsp;<a href="/{_global_.z}/dir_admin/?{_parent_.FOLDER}=1&add_path={_parent_.ADD_PATH}&gf={NAME}">{NAME}</a>&nbsp;</td>
-        <td class="t9n" style="padding:2px;">&nbsp;
+        <td style="padding:2px;">&nbsp;
             <a href="/ace/editor.html?src=/{_global_.z}/dir_admin/&{_parent_.FOLDER}=1&add_path={_parent_.ADD_PATH}&gf={NAME}" target="_blank" title="Редактировать (в новом окне)"><svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M22 16.66V22C22 22.5304 21.7893 23.0391 21.4142 23.4142C21.0391 23.7893 20.5304 24 20 24H6C5.46957 24 4.96086 23.7893 4.58579 23.4142C4.21071 23.0391 4 22.5304 4 22V8C4 7.46957 4.21071 6.96086 4.58579 6.58579C4.96086 6.21071 5.46957 6 6 6H11.34M20 4L24 8L14 18H10V14L20 4Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg></a>&nbsp;&nbsp;
@@ -110,7 +110,7 @@
       </tr>
     <!-- End:&File_list -->
     <tr>
-    <td colspan="5" class="t9n"><input class="btn btn-default" type="submit" name="delete" value="Удалить выбранные" ></td>
+    <td colspan="5"><input class="btn btn-default" type="submit" name="delete" value="Удалить выбранные" ></td>
     </tr>
     </table>
     <p>Файлов: {FILES}, каталогов: {FOLDERS}</p>
@@ -119,7 +119,7 @@
 <form action="/{_global_.z}/dir_admin/?{FOLDER}=1" method="POST" style="max-width:400px">
     <input name="add_path" type="hidden" value="{ADD_PATH}">
     <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
-    <div class="input-group t9n">
+    <div class="input-group">
        <input name="dir_name" class="form-control" type="text" placeholder="Новый каталог">
        <span class="input-group-btn">
             <input class="btn btn-default" type="submit" name="mkdir" value="Создать" >
@@ -130,7 +130,7 @@
 <form action="/{_global_.z}/dir_admin/?{FOLDER}=1" method="POST" style="max-width:400px">
     <input name="add_path" type="hidden" value="{ADD_PATH}">
     <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
-    <div class="input-group t9n">
+    <div class="input-group">
        <input name="dir_name" class="form-control" type="text" placeholder="Новый файл">
        <span class="input-group-btn">
             <input class="btn btn-default" type="submit" name="touch" value="Создать" >
@@ -145,7 +145,7 @@
                 <input name="add_path" type="hidden" value="{ADD_PATH}">
                 <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
                 <p>Загрузить файл: <input name="userfile" type="file"></p>
-                <p class="t9n"><label><input type="checkbox" name="rewrite"> Перезаписать </label>&nbsp; &nbsp; &nbsp; 
+                <p><label><input type="checkbox" name="rewrite"> Перезаписать </label>&nbsp; &nbsp; &nbsp; 
                 <input class="btn btn-default" type="submit" name="upload" value="Загрузить" ></p>
             </form>
         </td>

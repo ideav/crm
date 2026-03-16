@@ -217,7 +217,7 @@ center:hover .add-id-for-col {
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
 <script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
 <script src="/js/js.js"></script>
-<div class="t9n">
+<div>
 <div id="show" class="list" style="z-index: 1;">
 <a id="showanchor" onclick="if(json['list']){byId('queries').classList.remove('hidden');byId('show').classList.add('hidden')}else myApi('GET','object/22/?JSON','list')"><i class="pi pi-list icon8" title="Список запросов"></i></a>
 </div>
@@ -251,7 +251,7 @@ center:hover .add-id-for-col {
 </div>
 <div class="add-from outer-modal" style="display:none;">
     <div class="middle-modal">
-        <div class="inner-modal w-75 pt-4 pb-3 shadow t9n">
+        <div class="inner-modal w-75 pt-4 pb-3 shadow">
             <center>
             <b>Присоединить таблицу по условию в существующей колонке</b>
             <div class="form-inline justify-content-center align-items-center mt-3">
@@ -281,7 +281,7 @@ center:hover .add-id-for-col {
 </div>
 <div id="one" class="hidden mt-3" onclick="hideList()">
     <center>
-        <h4 class="ml-5 t9n">
+        <h4 class="ml-5">
             <a target=":id:" href="/{_global_.z}/report/{_global_.id}">:val:</a>&nbsp;
 			<a target="2122" href="/{_global_.z}/query/{_global_.id}" title="Кастомизируемая таблица"><i class="pi pi-bolt icon8"></i></a>&nbsp;
             <a target=":id:" href="/{_global_.z}/smartq/{_global_.id}" title="Редактируемый отчет"><i class="pi pi-pencil icon8"></i></a>&nbsp;
@@ -321,7 +321,7 @@ center:hover .add-id-for-col {
             		<select id="table" class="form-control table-column" onchange="if(this.value.length)selectTable(this.value)">
             			<option id=":id:" value=":id:">:val:</option>
             		</select>
-            		<div class="input-group-append t9n">
+            		<div class="input-group-append">
             		    <img id="addColWait" style="display:none;" src="/i/ajax.gif">
             		    <a onclick="$('.table-column').toggle()" class="table-column" title="Выбрать другую таблицу" style="display:none;"><i class="pi pi-times icon8"></i></a>
                     </div>
@@ -334,7 +334,7 @@ center:hover .add-id-for-col {
     <div id="warning" class="alert alert-warning hidden" role="alert"></div>
     <div id="ShowReport"></div>
 </div>
-<div class="hidden t9n" id="controls">
+<div class="hidden" id="controls">
     <div id="template102">
         <label class="control-label" for="t102_:id:">
             <i class="pi pi-pencil" style="font-size: 14px; color: #212529;"></i>
