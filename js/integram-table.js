@@ -13,7 +13,7 @@
  * - Clickable "?" to fetch total record count
  */
 
-class IntegramTable{
+class IntegramTable {
         constructor(containerId, options = {}) {
             this.container = document.getElementById(containerId);
 
