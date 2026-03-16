@@ -4831,6 +4831,7 @@ class IntegramTable{
         /**
          * Position scroll counter relative to the table wrapper (issue #656)
          * This ensures the counter stays within the table area and doesn't overlap with sidebar menu.
+         * Uses .app-content left edge to remain stable during horizontal table scroll (issue #1010).
          */
         attachScrollCounterPositioning() {
             const tableWrapper = this.container.querySelector('.integram-table-wrapper');
@@ -4839,8 +4840,11 @@ class IntegramTable{
             if (!tableWrapper || !scrollCounter) return;
 
             const updateScrollCounterPosition = () => {
-                const rect = tableWrapper.getBoundingClientRect();
-                // Position counter 20px from the left edge of the table wrapper
+                // Use .app-content left edge instead of tableWrapper, so the counter stays
+                // at a fixed viewport position when the table scrolls horizontally (issue #1010).
+                const appContent = document.querySelector('.app-content');
+                const anchorEl = appContent || tableWrapper;
+                const rect = anchorEl.getBoundingClientRect();
                 scrollCounter.style.left = (rect.left + 20) + 'px';
             };
 
