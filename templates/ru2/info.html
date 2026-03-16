@@ -1,1 +1,406 @@
+<style>
+/* Welcome Page Styles */
+.welcome-container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 20px;
+}
 
+.welcome-header {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.welcome-header h1 {
+    font-size: 1.6rem;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.welcome-header p {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+}
+
+.welcome-topics {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.welcome-topic {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.welcome-topic summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    list-style: none;
+    user-select: none;
+    transition: background 0.15s;
+}
+
+.welcome-topic summary::-webkit-details-marker {
+    display: none;
+}
+
+.welcome-topic summary::before {
+    content: '';
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    min-width: 18px;
+    border: 2px solid var(--text-secondary);
+    border-top: none;
+    border-left: none;
+    transform: rotate(-45deg);
+    transition: transform 0.2s;
+    margin-top: -4px;
+}
+
+.welcome-topic[open] summary::before {
+    transform: rotate(45deg);
+    margin-top: 2px;
+}
+
+.welcome-topic summary:hover {
+    background: var(--bg-secondary);
+}
+
+.welcome-topic summary .topic-icon {
+    font-size: 1.1rem;
+    color: var(--button-primary);
+    min-width: 20px;
+    text-align: center;
+}
+
+.welcome-topic-content {
+    padding: 0 16px 16px 48px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    line-height: 1.6;
+}
+
+.welcome-topic-content p {
+    margin-bottom: 8px;
+}
+
+.welcome-topic-content ol,
+.welcome-topic-content ul {
+    padding-left: 20px;
+    margin-bottom: 8px;
+}
+
+.welcome-topic-content li {
+    margin-bottom: 4px;
+}
+
+.welcome-topic-content strong {
+    color: var(--text-primary);
+}
+
+.welcome-topic-content code {
+    background: var(--bg-secondary);
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+}
+
+.welcome-topic-content .tip {
+    background: var(--bg-secondary);
+    border-left: 3px solid var(--button-primary);
+    padding: 8px 12px;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    margin: 8px 0;
+    font-size: 0.85rem;
+}
+
+.welcome-links {
+    margin-top: 24px;
+    padding: 16px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    text-align: center;
+}
+
+.welcome-links h3 {
+    font-size: 0.95rem;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+}
+
+.welcome-links a {
+    color: var(--link-color);
+    text-decoration: none;
+    margin: 0 12px;
+    font-size: 0.9rem;
+}
+
+.welcome-links a:hover {
+    text-decoration: underline;
+}
+
+@media (max-width: 600px) {
+    .welcome-container {
+        padding: 12px;
+    }
+    .welcome-topic-content {
+        padding-left: 16px;
+    }
+}
+</style>
+
+<div class="welcome-container">
+    <div class="welcome-header">
+        <h1>Добро пожаловать в Интеграм</h1>
+        <p>Руководство по решению типовых задач. Нажмите на тему, чтобы раскрыть инструкцию.</p>
+    </div>
+
+    <div class="welcome-topics">
+
+        <!-- 1. Начало работы -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-user topic-icon"></i>
+                Регистрация и начало работы
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Как создать аккаунт и начать работу с Интеграмом:</p>
+                <ol>
+                    <li>Перейдите на страницу регистрации и создайте аккаунт (через Google или Email).</li>
+                    <li>После регистрации будет создана ваша база данных.</li>
+                    <li>Войдите в личный кабинет — там вы можете управлять настройками аккаунта и паролем.</li>
+                    <li>На главной странице базы вы увидите навигатор данных — меню слева с разделами вашей базы.</li>
+                </ol>
+                <div class="tip">Для восстановления пароля используйте функцию «Забыли пароль?» на странице входа.</div>
+            </div>
+        </details>
+
+        <!-- 2. Модель данных -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-database topic-icon"></i>
+                Создание структуры данных (таблицы и поля)
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Модель данных в Интеграме состоит из связанных между собой таблиц. Чтобы создать структуру:</p>
+                <ol>
+                    <li>Откройте <strong>Редактор структуры</strong> (меню «Структура»).</li>
+                    <li>Создайте новую таблицу (термин) — задайте название и описание.</li>
+                    <li>Добавьте поля нужных типов: <code>SHORT</code> (короткий текст), <code>CHARS</code> (строка), <code>MEMO</code> (длинный текст), <code>DATE</code> (дата), <code>NUMBER</code> (число).</li>
+                    <li>Для выпадающих списков создайте <strong>справочные поля</strong> — они ссылаются на другую таблицу.</li>
+                    <li>Для вложенных данных (например, позиции заказа) создайте <strong>подчинённые таблицы</strong>.</li>
+                </ol>
+                <div class="tip">Справочник — это отдельная таблица для выбора значений. Подчинённая таблица — это таблица, записи которой привязаны к конкретной записи родительской таблицы.</div>
+            </div>
+        </details>
+
+        <!-- 3. Работа с таблицами -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-table topic-icon"></i>
+                Работа с таблицами и записями
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Основные операции с данными:</p>
+                <ul>
+                    <li><strong>Добавление записи:</strong> откройте таблицу и нажмите кнопку добавления новой записи.</li>
+                    <li><strong>Редактирование:</strong> нажмите на запись, чтобы открыть форму редактирования.</li>
+                    <li><strong>Удаление:</strong> выберите запись и нажмите «Удалить». Система проверит, нет ли связанных данных.</li>
+                    <li><strong>Фильтрация:</strong> используйте маски и диапазоны для поиска нужных записей. Поддерживаются операторы <code>&gt;</code>, <code>&lt;</code>, <code>&gt;=</code>, <code>&lt;=</code> для чисел и дат.</li>
+                    <li><strong>Поиск в списках:</strong> в выпадающих списках работает поиск по введённым символам.</li>
+                </ul>
+                <div class="tip">Используйте служебные слова: <code>[TODAY]</code> — текущая дата, <code>[USER]</code> — текущий пользователь.</div>
+            </div>
+        </details>
+
+        <!-- 4. Отчёты и запросы -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-chart-bar topic-icon"></i>
+                Создание отчётов и запросов
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Конструктор запросов позволяет строить отчёты без знания SQL:</p>
+                <ol>
+                    <li>Перейдите в <strong>Конструктор запросов</strong>.</li>
+                    <li>Выберите таблицу-источник и нужные поля для отчёта.</li>
+                    <li>Добавьте условия фильтрации, сортировку и группировку.</li>
+                    <li>Используйте функции агрегации: <code>COUNT</code> (количество), <code>SUM</code> (сумма), <code>AVG</code> (среднее), <code>MIN</code>, <code>MAX</code>.</li>
+                    <li>Готовый отчёт можно экспортировать в Excel.</li>
+                </ol>
+                <p>Расширенные возможности:</p>
+                <ul>
+                    <li><strong>Интерактивные отчёты</strong> — с гиперссылками для перехода к записям.</li>
+                    <li><strong>Вложенные запросы</strong> — для сложной аналитики.</li>
+                    <li><strong>Параметры</strong> — передача параметров в отчёт через URL.</li>
+                    <li><strong>JSON-экспорт</strong> — для интеграции с внешними системами.</li>
+                </ul>
+            </div>
+        </details>
+
+        <!-- 5. Формы -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-file-edit topic-icon"></i>
+                Конструктор форм и шаблоны
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Интеграм использует систему пяти универсальных форм и HTML-шаблоны:</p>
+                <ol>
+                    <li>Формы создаются в папке <code>templates</code> вашей базы.</li>
+                    <li>В шаблонах используйте блоки данных с фигурными скобками: <code>{ИмяПоля}</code> для вставки значений.</li>
+                    <li>Для доступа к родительским данным: <code>{_parent_.ИмяПоля}</code>.</li>
+                    <li>Для параметров запроса: <code>{_request_.ИмяПоля}</code>.</li>
+                    <li>Для глобальных констант: <code>{_global_.ИмяКонстанты}</code>.</li>
+                </ol>
+                <div class="tip">Шаблоны можно редактировать локально и загружать через меню «Файлы».</div>
+            </div>
+        </details>
+
+        <!-- 6. Импорт и экспорт данных -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-upload topic-icon"></i>
+                Импорт и экспорт данных
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Как загружать и выгружать данные:</p>
+                <ul>
+                    <li><strong>Импорт из Excel:</strong> подготовьте таблицу с заголовками, соответствующими полям в Интеграме, и загрузите через меню импорта.</li>
+                    <li><strong>Формат BKI:</strong> специальный формат для обмена данными между базами Интеграма, поддерживает иерархическую структуру.</li>
+                    <li><strong>Нормализация данных:</strong> при загрузке плоских таблиц из Excel данные автоматически распределяются по связанным таблицам.</li>
+                    <li><strong>Экспорт:</strong> любой отчёт можно выгрузить в Excel или JSON.</li>
+                </ul>
+                <div class="tip">При импорте данных из Excel рекомендуется сначала создать справочники, а затем загружать основные таблицы.</div>
+            </div>
+        </details>
+
+        <!-- 7. Права доступа -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-lock topic-icon"></i>
+                Настройка прав доступа
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Система ролей позволяет гибко управлять доступом:</p>
+                <ol>
+                    <li>Создайте <strong>роли</strong> для разных групп пользователей.</li>
+                    <li>Назначьте права на уровне таблиц — какие таблицы видны каждой роли.</li>
+                    <li>Настройте права на уровне полей — какие поля доступны для просмотра и редактирования.</li>
+                    <li>Используйте маски для ограничения по значениям — например, менеджер видит только свои записи.</li>
+                    <li>При необходимости настройте гостевой (анонимный) доступ.</li>
+                </ol>
+                <div class="tip">Можно ограничить отдельные операции для ролей: экспорт, удаление, изменение определённых полей.</div>
+            </div>
+        </details>
+
+        <!-- 8. API и интеграции -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-link topic-icon"></i>
+                API и интеграция с внешними сервисами
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Интеграм предоставляет API для взаимодействия с внешними системами:</p>
+                <ul>
+                    <li><strong>Серверный API:</strong> вызовы с префиксом <code>api/</code> для серверных операций.</li>
+                    <li><strong>JSON-запросы:</strong> получайте данные отчётов в формате JSON для использования в других приложениях.</li>
+                    <li><strong>Авторизация:</strong> используйте HTTP Basic Authentication с API-пользователем.</li>
+                    <li><strong>Внешние источники:</strong> подключайте данные из внешних HTTP-сервисов с помощью шаблонов запросов.</li>
+                    <li><strong>Power BI:</strong> подключайте отчёты Интеграма как источник данных в Power BI через JSON-экспорт.</li>
+                </ul>
+                <div class="tip">Для работы с API создайте отдельного пользователя с паролем и назначьте ему роль с нужными правами.</div>
+            </div>
+        </details>
+
+        <!-- 9. Массовые операции -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-sync topic-icon"></i>
+                Массовые операции с данными
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Запросы модификации данных позволяют выполнять массовые операции:</p>
+                <ul>
+                    <li><strong>Массовое обновление:</strong> изменение значений в нескольких записях одновременно с помощью запросов <code>UPDATE</code>.</li>
+                    <li><strong>Создание записей:</strong> автоматическое создание записей по условию с помощью <code>CREATE</code>.</li>
+                    <li><strong>Удаление:</strong> массовое удаление записей по фильтру с помощью <code>DELETE</code>.</li>
+                    <li><strong>Интеллектуальные отчёты:</strong> редактирование данных нескольких таблиц прямо в отчёте (как в Excel).</li>
+                </ul>
+                <div class="tip">Перед массовыми операциями рекомендуется сначала проверить выборку через обычный отчёт.</div>
+            </div>
+        </details>
+
+        <!-- 10. Служебные функции -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-cog topic-icon"></i>
+                Служебные функции и формулы
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Встроенные функции для работы с данными:</p>
+                <ul>
+                    <li><code>abn_DATE2STR</code> — преобразование даты в строку.</li>
+                    <li><code>abn_NUM2STR</code> — число прописью.</li>
+                    <li><code>abn_ID</code> — получение идентификатора текущей записи.</li>
+                    <li>Стандартные MySQL-функции: <code>CONCAT</code>, <code>SUBSTRING</code>, <code>IF</code>, <code>CASE</code> и другие.</li>
+                    <li><strong>Кнопки (тип BUTTON):</strong> создание кнопок, которые выполняют действия с контекстом текущей записи. Поддерживают подстановку <code>ID</code> и <code>VAL</code>.</li>
+                </ul>
+                <div class="tip">Полный список функций доступен в документации: <a href="https://help.integram.io/" target="_blank">help.integram.io</a>.</div>
+            </div>
+        </details>
+
+        <!-- 11. Телеграм-интеграция -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-send topic-icon"></i>
+                Формы с оповещением в Телеграм
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Как создать форму заявок с уведомлениями в Телеграм:</p>
+                <ol>
+                    <li>Создайте таблицу для хранения заявок с нужными полями.</li>
+                    <li>Настройте HTML-форму с помощью конструктора форм.</li>
+                    <li>Подключите Телеграм-бота для отправки уведомлений о новых заявках.</li>
+                    <li>Настройте триггер — при создании новой записи бот отправит сообщение в указанный чат.</li>
+                </ol>
+                <div class="tip">Это позволяет создать единую систему: форма на сайте, данные в реляционной базе и мгновенные уведомления в Телеграм.</div>
+            </div>
+        </details>
+
+        <!-- 12. Работа с файлами -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-folder topic-icon"></i>
+                Управление файлами
+            </summary>
+            <div class="welcome-topic-content">
+                <p>В Интеграме есть встроенная система управления файлами:</p>
+                <ul>
+                    <li><strong>Загрузка файлов:</strong> используйте меню «Файлы» для загрузки файлов в базу.</li>
+                    <li><strong>Шаблоны:</strong> HTML-шаблоны хранятся в папке <code>templates</code> и редактируются через встроенный редактор или локально.</li>
+                    <li><strong>CSS и JS:</strong> стили и скрипты загружаются в соответствующие папки и подключаются к шаблонам.</li>
+                    <li><strong>Подключение файлов:</strong> используйте конструкцию <code>&lt;!-- File: имя_файла --&gt;</code> для включения одного шаблона в другой.</li>
+                </ul>
+            </div>
+        </details>
+
+    </div>
+
+    <div class="welcome-links">
+        <h3>Полезные ресурсы</h3>
+        <a href="https://help.integram.io/" target="_blank"><i class="pi pi-book"></i> Документация</a>
+        <a href="https://vc.ru/id568649" target="_blank"><i class="pi pi-external-link"></i> Статьи и примеры</a>
+    </div>
+</div>
