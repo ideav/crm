@@ -6209,7 +6209,7 @@ class IntegramTable{
                 <div class="column-settings-list">
                     <div class="table-settings-item">
                         <button class="btn btn-sm btn-danger" id="reset-settings-btn">Сбросить настройки</button>
-                        ${ this.options.dataSource === 'table' && this.options.tableTypeId ? `<a href="object/${ this.options.tableTypeId }" style="margin-left: 10px;">Перейти в старый интерфейс</a>` : '' }
+                        ${ this.getDataSourceType() === 'table' && (this.objectTableId || this.options.tableTypeId) ? `<a href="object/${ this.objectTableId || this.options.tableTypeId }" style="margin-left: 10px;">Перейти в старый интерфейс</a>` : '' }
                     </div>
 
                     <div class="table-settings-item">
