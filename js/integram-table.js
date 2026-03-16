@@ -1,4 +1,4 @@
-/**
+/** 
  * IntegramTable Component
  * Standalone JS module for displaying Integram API data tables with infinite scroll
  *
@@ -13,7 +13,7 @@
  * - Clickable "?" to fetch total record count
  */
 
-class IntegramTable {
+class IntegramTable{
         constructor(containerId, options = {}) {
             this.container = document.getElementById(containerId);
 
