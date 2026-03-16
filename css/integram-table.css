@@ -134,6 +134,12 @@
     background-color: var(--bg-secondary, #f8f9fa);
 }
 
+.integram-table-settings.active {
+    background-color: var(--md-selected, #e3f2fd);
+    color: var(--md-primary, #1976d2);
+    border-color: var(--md-primary, #1976d2);
+}
+
 .integram-table {
     width: 100%;
     border-collapse: collapse;
