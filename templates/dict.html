@@ -450,7 +450,7 @@ if('{_global_.role}'==='admin'){
     str+='<option value="11">'+'Логическое значение (Да / Нет)'+'</option>';
     str+='<option value="12">'+'Многострочный текст'+'</option>';
     str+='<option value="4">'+'Дата и время'+'</option>';
-    byId('baseTypes').innerHTML=str;
+    document.getElementById('baseTypes').innerHTML=str;
     $('#createBtn').show();
 }
 const form = document.querySelector('#addForm');
