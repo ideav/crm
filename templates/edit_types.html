@@ -85,7 +85,7 @@ var str='';
 <!-- Begin:&Editables -->{OK}
 <FORM id="addForm" class="edit-types-form" method="post" action="/{_global_.Z}/_d_new/" onsubmit="validateAddForm(event);">
     <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
-    <div class="row t9n p-0 m-0">
+    <div class="row p-0 m-0">
         <div class="col-6 col-sm-4 col-md-3 pl-0 pr-1">
             <input type="text" id="val" name="val" placeholder="Поиск / Новая таблица" MAXLENGTH="127" onkeyup="filterTypes()" class="form-control">
         </div>
@@ -164,7 +164,7 @@ byId('baseTypes').innerHTML=str;
 </script>
 <!-- End:&Editables -->
 <div class="col-12 edit-types-controls">
-<table id="basehelp" class="table table-striped hidden t9n">
+<table id="basehelp" class="table table-striped hidden">
 <tr><th>Базовый тип</th><th>Описание</th><th>Пример</th></tr>
 <tr><td>SHORT</td><td>Короткая строка (до 127 символов)</td><td>Интеграл</td></tr>
 <tr><td>CHARS</td><td>Строка без ограничения длины</td><td></td></tr>

@@ -32,7 +32,7 @@
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
 <script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
 <script src="/js/js.js"></script>
-<div class="t9n">
+<div>
 <div id="show" class="list hidden">
 <a id="showanchor" onclick="byId('FormsList').classList.remove('hidden');byId('show').classList.add('hidden')"><img class="icon8" title="Список форм" src="https://img.icons8.com/ios/25/222222/list.png"></a>
 </div>
@@ -835,7 +835,7 @@ bt[1]="_array";bt[3]="_short";bt[12]="_memo";bt[2]="_html";bt[8]="_chars";bt[10]
     <input type="hidden" id="up_:id:" name="up" value="1">
     <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
     <input type="hidden" id="next_act_:id:" name="next_act" value="{_global_.action}/{_global_.id}?new=:typ:">
-    <table class="w-100 t9n">
+    <table class="w-100">
     <tr>
     <td>
         <!-- Begin:_PanelType --><!--{_request_.edit}-->
@@ -895,7 +895,7 @@ bt[1]="_array";bt[3]="_short";bt[12]="_memo";bt[2]="_html";bt[8]="_chars";bt[10]
     </table>
 </form>
 <!-- Begin:_AddField --><!--{_request_.edit}-->
-<form method="post" action="/{_global_.z}/_m_new/144?up=:id:" onsubmit="addbtn.disabled = true; return true;" class="t9n mt-3 :addFieldClass:">
+<form method="post" action="/{_global_.z}/_m_new/144?up=:id:" onsubmit="addbtn.disabled = true; return true;" class="mt-3 :addFieldClass:">
     <input type="hidden" name="next_act" value="{_global_.action}/{_global_.id}?edit&">			
     <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
     Добавить поле:&nbsp;
@@ -917,7 +917,7 @@ bt[1]="_array";bt[3]="_short";bt[12]="_memo";bt[2]="_html";bt[8]="_chars";bt[10]
 </div> <!--/OneForm-->
 </div> <!--/Frame-->
 <!-- Begin:_Editor --><!--{_request_.edit}-->
-<div id="AddPanel" class="alert alert-default t9n hidden">
+<div id="AddPanel" class="alert alert-default hidden">
 <form method="post" action="/{_global_.z}/_m_new/138?up={_global_.id}" onsubmit="if(validatePanel())paneladd.disabled=true;else{event.returnValue=false;event.preventDefault()}">
 <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
 <input type="hidden" name="next_act" value="{_global_.action}/{_global_.id}?edit&">

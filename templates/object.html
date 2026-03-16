@@ -253,7 +253,7 @@ if(getCookie('tips_off')==='1')
 </script>
 <div class="alert alert-warning hidden" id="warn" role="alert" onclick="$(this).addClass('hidden')"></div>
 <!-- Begin:&Uni_obj -->
-<div id="controls" style="z-index: 99; position: relative;" class="controls t9n">
+<div id="controls" style="z-index: 99; position: relative;" class="controls">
 	<div class="controls-left">
 		<a btn="plus.png" class="create-btn display-{CREATE_GRANTED}" onclick="addRec()" title="Добавить запись в таблицу">
 			<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -549,7 +549,7 @@ if(getCookie('tips_off')==='1')
 <FORM method="post" action="/{_global_.z}/_m_new/{ID}" ONSUBMIT="addbtn.disabled = true; return true;">
 <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
 <input type="hidden" name="up" value="{UP}">
-<div class="input-group controls t9n" style="max-width:640px">
+<div class="input-group controls" style="max-width:640px">
 	<!-- Begin:&New_Req -->{NEW_REQ}
 		<input type="text" id="t{_parent_.TYP}" name="t{_parent_.TYP}" placeholder="{_parent_.VAL}" class="form-control">
 	<!-- End:&New_Req -->
@@ -576,7 +576,7 @@ if(getCookie('tips_off')==='1')
 </div>
 <!-- Begin:&Warnings --><br/><div class="alert alert-danger" role="alert">{WARNING}</div>
 <!-- End:&Warnings -->
-<div class="new-col t9n modal-form shadow hidden mt-1 mr-1">
+<div class="new-col modal-form shadow hidden mt-1 mr-1">
 	<table>
 		<tr>
 			<td colspan="2">
@@ -663,7 +663,7 @@ if(getCookie('tips_off')==='1')
 		<!-- Begin:&Ord -->
 		<th style="text-align:right">{ORD}</th>
 		<!-- End:&Ord -->
-		<th ALIGN="{ALIGN}" class="t9n" style="border-left: 1px solid #dee2e6;">
+		<th ALIGN="{ALIGN}" style="border-left: 1px solid #dee2e6;">
 			<A style="display:block" HREF="/{_global_.z}/edit_obj/{ID}" TITLE="Редактировать">
 				<div class="i-edit">
 					<svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -682,7 +682,7 @@ if(getCookie('tips_off')==='1')
 		</TD>
 		<!-- End:&Uni_Object_View_Reqs_Links -->
 		<!-- Begin:&Move_N_Delete -->
-		<TD ALIGN="CENTER" class="t9n pl-1 pr-1 pb-1" style="white-space:nowrap;"><!-- Begin:&Move --><A HREF="#" onclick="post('_m_up/{ID}')" TITLE="Переместить выше"><svg width="26" height="26" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14 21V7M14 7L7 14M14 7L21 14" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"></path></svg></A>&nbsp;<!-- End:&Move --><A href="#" onclick="post('_m_del/{ID}/?up={_parent_.TYP}&f_u={_parent_.F_U}')" TITLE="Удалить"><svg width="25" height="25" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 8H23M10 8V6C10 5.46957 10.2107 4.96086 10.5858 4.58579C10.9609 4.21071 11.4696 4 12 4H16C16.5304 4 17.0391 4.21071 17.4142 4.58579C17.7893 4.96086 18 5.46957 18 6V8M21 8V22C21 22.5304 20.7893 23.0391 20.4142 23.4142C20.0391 23.7893 19.5304 24 19 24H9C8.46957 24 7.96086 23.7893 7.58579 23.4142C7.21071 23.0391 7 22.5304 7 22V8H21Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"></path></svg></A>
+		<TD ALIGN="CENTER" class="pl-1 pr-1 pb-1" style="white-space:nowrap;"><!-- Begin:&Move --><A HREF="#" onclick="post('_m_up/{ID}')" TITLE="Переместить выше"><svg width="26" height="26" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14 21V7M14 7L7 14M14 7L21 14" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"></path></svg></A>&nbsp;<!-- End:&Move --><A href="#" onclick="post('_m_del/{ID}/?up={_parent_.TYP}&f_u={_parent_.F_U}')" TITLE="Удалить"><svg width="25" height="25" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 8H23M10 8V6C10 5.46957 10.2107 4.96086 10.5858 4.58579C10.9609 4.21071 11.4696 4 12 4H16C16.5304 4 17.0391 4.21071 17.4142 4.58579C17.7893 4.96086 18 5.46957 18 6V8M21 8V22C21 22.5304 20.7893 23.0391 20.4142 23.4142C20.0391 23.7893 19.5304 24 19 24H9C8.46957 24 7.96086 23.7893 7.58579 23.4142C7.21071 23.0391 7 22.5304 7 22V8H21Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"></path></svg></A>
 		</TD>
 		<!-- End:&Move_N_Delete -->
 	</tr>
