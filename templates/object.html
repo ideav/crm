@@ -173,8 +173,7 @@ td.fixed-td div,td.fixed-tr div{
     width: 100%;
     z-index: 100;
 }
-</style>
-<style>
+
 .inline-edit{
     border: 0 !important;
     outline: 1px solid #dee2e6;
@@ -218,6 +217,7 @@ td.fixed-td div,td.fixed-tr div{
 <script src="/js/freeze-table.js"></script>
 <script src="/js/js.js"></script>
 <script>
+document.querySelector('.app-content').style.padding = '0';
 function showEdit(){
 	$(event.target).closest('tr').find('.i-edit').show();
 }
