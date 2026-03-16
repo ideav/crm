@@ -1325,8 +1325,9 @@ class IntegramTable{
                 const newInput = this.container.querySelector(`.filter-input-with-icon[data-column-id="${focusState.columnId}"]`);
                 if (newInput) {
                     newInput.focus();
-                    // Restore cursor position
-                    if (focusState.selectionStart !== null && focusState.selectionEnd !== null) {
+                    // Restore cursor position (only for text inputs, not date pickers)
+                    if (focusState.selectionStart !== null && focusState.selectionEnd !== null &&
+                        newInput.type === 'text') {
                         newInput.setSelectionRange(focusState.selectionStart, focusState.selectionEnd);
                     }
                 }
@@ -1415,6 +1416,31 @@ class IntegramTable{
                                 <span class="filter-ref-trigger-text">${ escapedDisplayText || 'Выбрать...' }</span>
                                 <span class="filter-ref-trigger-arrow">▼</span>
                             </button>
+                        </div>
+                    </td>
+                `;
+            }
+
+            // For DATE/DATETIME formats with value-based filter types, render a date/datetime picker (issue #1008)
+            // Filter types that need a date picker: =, ≥, ≤, >, < (not %, !%, or ...)
+            const dateFormats = ['DATE', 'DATETIME'];
+            const datePickerFilterTypes = new Set(['=', '≥', '≤', '>', '<']);
+            if (dateFormats.includes(format) && datePickerFilterTypes.has(currentFilter.type)) {
+                const isDateTime = format === 'DATETIME';
+                const inputType = isDateTime ? 'datetime-local' : 'date';
+                // Convert stored display value (DD.MM.YYYY or DD.MM.YYYY HH:MM:SS) to HTML5 format
+                const html5Value = displayValue ? this.formatDateForHtml5(displayValue, isDateTime) : '';
+                return `
+                    <td>
+                        <div class="filter-cell-wrapper">
+                            <span class="filter-icon-inside" data-column-id="${ column.id }">
+                                ${ currentFilter.type }
+                            </span>
+                            <input type="${ inputType }"
+                                   class="filter-input-with-icon filter-date-picker"
+                                   data-column-id="${ column.id }"
+                                   data-is-datetime="${ isDateTime ? '1' : '0' }"
+                                   value="${ html5Value }">
                         </div>
                     </td>
                 `;
@@ -2407,6 +2433,8 @@ class IntegramTable{
 
             const filterInputs = this.container.querySelectorAll('.filter-input-with-icon');
             filterInputs.forEach(input => {
+                // Skip date pickers — they are handled separately via 'change' event (issue #1008)
+                if (input.classList.contains('filter-date-picker')) return;
                 // Use 'input' event to apply filter on text change
                 input.addEventListener('input', (e) => {
                     const colId = input.dataset.columnId;
@@ -2432,6 +2460,35 @@ class IntegramTable{
                         this.totalRows = null;  // Reset total, user can click to fetch again
                         this.loadData(false);
                     }, 500);  // Wait 500ms after user stops typing
+                });
+            });
+
+            // Add change listeners for date/datetime filter pickers (issue #1008)
+            const filterDatePickers = this.container.querySelectorAll('.filter-date-picker');
+            filterDatePickers.forEach(picker => {
+                picker.addEventListener('change', (e) => {
+                    const colId = picker.dataset.columnId;
+                    const isDateTime = picker.dataset.isDatetime === '1';
+                    if (!this.filters[colId]) {
+                        const col = this.columns.find(c => c.id === colId);
+                        const fmt = col ? (col.format || 'SHORT') : 'SHORT';
+                        this.filters[colId] = { type: this.getDefaultFilterType(fmt), value: '' };
+                    }
+                    // Convert HTML5 date format to display format (DD.MM.YYYY or DD.MM.YYYY HH:MM:SS)
+                    const displayValue = picker.value ? this.convertHtml5DateToDisplay(picker.value, isDateTime) : '';
+                    this.filters[colId].value = displayValue;
+                    delete this.filters[colId].displayValue;
+
+                    this.handleFilterOverride(colId, displayValue);
+
+                    clearTimeout(this.filterTimeout);
+                    this.filterTimeout = setTimeout(() => {
+                        this.data = [];
+                        this.loadedRecords = 0;
+                        this.hasMore = true;
+                        this.totalRows = null;
+                        this.loadData(false);
+                    }, 500);
                 });
             });
 
@@ -4970,6 +5027,19 @@ class IntegramTable{
                                 this.closeRefFilterDropdown();
                             }
                             // Re-render to switch between text input and dropdown
+                            this.render();
+                            return;
+                        }
+                    }
+
+                    // For DATE/DATETIME columns, re-render when switching between date-picker types
+                    // and non-picker types (e.g. switching from '=' to '...' changes input from date to text) (issue #1008)
+                    if (format === 'DATE' || format === 'DATETIME') {
+                        const datePickerTypes = new Set(['=', '≥', '≤', '>', '<']);
+                        const wasDatePicker = datePickerTypes.has(oldType);
+                        const isDatePicker = datePickerTypes.has(symbol);
+                        if (wasDatePicker !== isDatePicker) {
+                            this.filters[columnId].value = '';
                             this.render();
                             return;
                         }
