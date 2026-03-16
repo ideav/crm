@@ -174,6 +174,80 @@
     text-decoration: underline;
 }
 
+.welcome-search {
+    margin-bottom: 16px;
+    position: relative;
+}
+
+.welcome-search input {
+    width: 100%;
+    padding: 10px 16px 10px 40px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--card-bg);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color 0.15s;
+}
+
+.welcome-search input:focus {
+    border-color: var(--button-primary);
+}
+
+.welcome-search input::placeholder {
+    color: var(--text-secondary);
+}
+
+.welcome-search-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-secondary);
+    pointer-events: none;
+    font-size: 1rem;
+}
+
+.welcome-search-clear {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 1rem;
+    padding: 2px 6px;
+    display: none;
+    line-height: 1;
+}
+
+.welcome-search-clear:hover {
+    color: var(--text-primary);
+}
+
+.welcome-topic.search-hidden {
+    display: none;
+}
+
+mark.search-highlight {
+    background: var(--button-primary);
+    color: #fff;
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
+.welcome-search-empty {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 24px 0;
+    font-size: 0.95rem;
+    display: none;
+}
+
 @media (max-width: 600px) {
     .welcome-container {
         padding: 12px;
@@ -189,6 +263,14 @@
         <h1>Добро пожаловать в Интеграм</h1>
         <p>Руководство по решению типовых задач. Нажмите на тему, чтобы раскрыть инструкцию.</p>
     </div>
+
+    <div class="welcome-search">
+        <i class="pi pi-search welcome-search-icon"></i>
+        <input type="text" id="welcomeSearch" placeholder="Поиск по темам..." autocomplete="off" />
+        <button class="welcome-search-clear" id="welcomeSearchClear" aria-label="Очистить поиск">&#x2715;</button>
+    </div>
+
+    <div class="welcome-search-empty" id="welcomeSearchEmpty">Ничего не найдено</div>
 
     <div class="welcome-topics">
 
@@ -433,6 +515,103 @@
         </details>
 
     </div>
+
+    <script>
+    (function() {
+        var searchInput = document.getElementById('welcomeSearch');
+        var clearBtn = document.getElementById('welcomeSearchClear');
+        var emptyMsg = document.getElementById('welcomeSearchEmpty');
+        var topics = document.querySelectorAll('.welcome-topic');
+
+        // Store original HTML of each topic to restore highlights
+        var origSummaries = [];
+        var origContents = [];
+        topics.forEach(function(topic, i) {
+            var summary = topic.querySelector('summary');
+            var content = topic.querySelector('.welcome-topic-content');
+            origSummaries[i] = summary ? summary.innerHTML : '';
+            origContents[i] = content ? content.innerHTML : '';
+        });
+
+        function escapeRegex(str) {
+            return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
+        function highlight(html, query) {
+            if (!query) return html;
+            // Work on text nodes only by using a temporary div
+            var tmp = document.createElement('div');
+            tmp.innerHTML = html;
+            highlightNode(tmp, query);
+            return tmp.innerHTML;
+        }
+
+        function highlightNode(node, query) {
+            if (node.nodeType === 3) {
+                var re = new RegExp('(' + escapeRegex(query) + ')', 'gi');
+                if (re.test(node.nodeValue)) {
+                    var span = document.createElement('span');
+                    span.innerHTML = node.nodeValue.replace(re, '<mark class="search-highlight">$1</mark>');
+                    node.parentNode.replaceChild(span, node);
+                }
+            } else if (node.nodeType === 1 && node.nodeName !== 'SCRIPT' && node.nodeName !== 'STYLE') {
+                Array.from(node.childNodes).forEach(function(child) {
+                    highlightNode(child, query);
+                });
+            }
+        }
+
+        function doSearch(query) {
+            var q = query.trim().toLowerCase();
+            var visibleCount = 0;
+
+            topics.forEach(function(topic, i) {
+                var summary = topic.querySelector('summary');
+                var content = topic.querySelector('.welcome-topic-content');
+
+                // Restore original HTML first
+                if (summary) summary.innerHTML = origSummaries[i];
+                if (content) content.innerHTML = origContents[i];
+
+                if (!q) {
+                    topic.classList.remove('search-hidden');
+                    topic.removeAttribute('open');
+                    visibleCount++;
+                    return;
+                }
+
+                var summaryText = summary ? summary.textContent.toLowerCase() : '';
+                var contentText = content ? content.textContent.toLowerCase() : '';
+                var matches = summaryText.indexOf(q) !== -1 || contentText.indexOf(q) !== -1;
+
+                if (matches) {
+                    topic.classList.remove('search-hidden');
+                    topic.setAttribute('open', '');
+                    // Highlight
+                    if (summary) summary.innerHTML = highlight(origSummaries[i], query.trim());
+                    if (content) content.innerHTML = highlight(origContents[i], query.trim());
+                    visibleCount++;
+                } else {
+                    topic.classList.add('search-hidden');
+                    topic.removeAttribute('open');
+                }
+            });
+
+            clearBtn.style.display = q ? 'block' : 'none';
+            emptyMsg.style.display = (q && visibleCount === 0) ? 'block' : 'none';
+        }
+
+        searchInput.addEventListener('input', function() {
+            doSearch(this.value);
+        });
+
+        clearBtn.addEventListener('click', function() {
+            searchInput.value = '';
+            doSearch('');
+            searchInput.focus();
+        });
+    })();
+    </script>
 
     <div class="welcome-links">
         <h3>Полезные ресурсы</h3>
