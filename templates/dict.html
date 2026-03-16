@@ -1,0 +1,810 @@
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://code.jquery.com/ui/1.12.1/jquery-ui.min.js"></script>
+<style>
+.dict-title{
+    max-width: 900px;
+    font-size: 45px;
+    color: #1283da;
+	font-weight:100;
+}
+#addForm{
+    max-width: 900px;
+}
+.dict-list{
+    max-width: 900px;
+    padding: 3px;
+    display: flex;
+    flex-wrap: wrap;
+	padding-bottom: 35px;
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+}
+.dict-item {
+    font: 400 14px;
+    margin: 0 5px 0 5px;
+    padding: 10px;
+    margin: 7px;
+    border-radius: 5px;
+    /*transition: all 0.25s;*/
+    cursor: pointer;
+    text-align: center;
+    border: 1px solid #CCDFFF;
+}
+.dict-exist {
+    color: #4675AC;
+}
+.dict-new {
+    color: rgb(102 188 254);
+    width: 40px;
+    height: 40px;
+    border: 1px solid #a2ceef;
+    font-size: 35px;
+    font-weight: lighter;
+    border-radius: 3px;
+    line-height: 0.6;
+    text-align: center;
+    display: flex;
+    margin-left: 10px;
+	padding: 8px 7px 7px 7px
+}
+
+.dict-new:hover{
+  background: linear-gradient(92.58deg, rgb(65, 156, 225) 4.59%, rgb(18, 131, 218) 90.68%);
+}
+
+.dict-new svg{
+	fill:#a2ceef;
+}
+
+.dict-new:hover svg{
+	fill:#fff;
+}
+
+.dict-href{
+    flex-grow: 1;
+}
+.dict-href:hover{
+    text-decoration: none;
+}
+.dict-item:hover{
+    background: linear-gradient(92.58deg, #419CE1 4.59%, #1283DA 90.68%);
+    box-shadow: 0px 5px 7px rgba(0, 97, 254, 0.21);
+    color: #fff;
+}
+.dict-item:active{
+    border: 1px solid #1283da;
+    background: linear-gradient(to right, #0E69AE, #0E69AE);
+}
+.dictionary__search{
+     padding-left: 10px;
+    align-self: center;
+    margin-left: auto;
+    width: 300px;
+}
+
+@media (max-width: 560px) { 
+	.dictionary__search{
+     padding-left: 10px;
+     align-self: center;
+     margin-left: 0px;
+	 margin-botom:10px;
+     width: 300px;
+	}	
+}
+
+.dictionary__search input{
+    border: 0;
+    padding-left: 25px;
+    border-bottom: 1px solid #CCDFFF;
+    background: url("data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTciIGhlaWdodD0iMTciIHZpZXdCb3g9IjAgMCAxNyAxNyIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTcuMDY4MTQgMC42MjVMNy4wNjgyMSAwLjEyNUg3LjA2ODE0VjAuNjI1Wk0wLjYyNSA3LjA2ODE0SDAuMTI1SDAuNjI1Wk03LjA2ODE0IDEzLjUxMTNWMTQuMDExM1YxMy41MTEzWk0xMi4yMjg3IDExLjUyMTZDMTIuMDMzNCAxMS4zMjY0IDExLjcxNjkgMTEuMzI2NCAxMS41MjE2IDExLjUyMTZDMTEuMzI2MyAxMS43MTY5IDExLjMyNjMgMTIuMDMzNSAxMS41MjE2IDEyLjIyODdMMTIuMjI4NyAxMS41MjE2Wk0xNi4wMjE0IDE2LjcyODZDMTYuMjE2NyAxNi45MjM4IDE2LjUzMzMgMTYuOTIzOCAxNi43Mjg1IDE2LjcyODZDMTYuOTIzOCAxNi41MzMzIDE2LjkyMzggMTYuMjE2NyAxNi43Mjg1IDE2LjAyMTVMMTYuMDIxNCAxNi43Mjg2Wk03LjA2ODE0IDAuMTI1QzMuMjMzNTUgMC4xMjUgMC4xMjUgMy4yMzM1NSAwLjEyNSA3LjA2ODE0SDEuMTI1QzEuMTI1IDMuNzg1ODQgMy43ODU4NCAxLjEyNSA3LjA2ODE0IDEuMTI1VjAuMTI1Wk0wLjEyNSA3LjA2ODE0QzAuMTI1IDEwLjkwMjcgMy4yMzM1NSAxNC4wMTEzIDcuMDY4MTQgMTQuMDExM1YxMy4wMTEzQzMuNzg1ODQgMTMuMDExMyAxLjEyNSAxMC4zNTA1IDEuMTI1IDcuMDY4MTRIMC4xMjVaTTcuMDY4MTQgMTQuMDExM0MxMC45MDI3IDE0LjAxMTMgMTQuMDExMyAxMC45MDI3IDE0LjAxMTMgNy4wNjgxNEgxMy4wMTEzQzEzLjAxMTMgMTAuMzUwNSAxMC4zNTA1IDEzLjAxMTMgNy4wNjgxNCAxMy4wMTEzVjE0LjAxMTNaTTE0LjAxMTMgNy4wNjgxNEMxNC4wMTEzIDMuMjMzNTkgMTAuOTAyNiAwLjEyNTQ4NiA3LjA2ODIxIDAuMTI1TDcuMDY4MDggMS4xMjVDMTAuMzUwNCAxLjEyNTQyIDEzLjAxMTMgMy43ODU5OSAxMy4wMTEzIDcuMDY4MTRIMTQuMDExM1pNMTEuNTIxNiAxMi4yMjg3TDE2LjAyMTQgMTYuNzI4NkwxNi43Mjg1IDE2LjAyMTVMMTIuMjI4NyAxMS41MjE2TDExLjUyMTYgMTIuMjI4N1oiIGZpbGw9IiNDQ0RGRkYiLz4KPC9zdmc+Cg==") no-repeat 95%;
+    line-height: 34px;
+    background-position: left;
+    font-size: 14px;
+    width: 100%;
+    max-width: 350px;
+    transition: all 0.3s;
+}
+.dictionary__search > .dictionary__search--active{
+    border-bottom: 1px solid #1283da;
+	
+    background-position: right;
+    padding-left: 0;
+    padding-right: 25px;
+    outline: none;
+}
+
+.dict-category-edit input{
+	border-bottom: 1px solid #a2ceef;
+	border-top: 0px;
+	border-left: 0px;
+    border-right: 0px;
+	color: #1283da;
+    font-size: 1.2rem;
+	font-weight:lighter;
+    outline: none;
+	margin-left:8px;
+}
+
+.dict-category-new-input input {
+   	border-bottom: 1px solid #a2ceef;
+	border-top: 0px;
+	border-left: 0px;
+    border-right: 0px;
+	color: #1283da;
+    font-size: 1.2rem;
+	font-weight:lighter;
+    outline: none;
+	margin-left:8px;
+	width:300px;
+	margin-bottom: 10px;
+}
+
+
+.create-btn {
+    margin-left: 10px;
+}
+.hidden {
+    display: none;
+}
+
+.dict-title-box{
+    display: flex;
+    align-items: baseline;
+    margin-top: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+	max-width: 890px;
+}
+
+.dict-category{
+	color: #1283da;
+    font-size: 1.2rem;
+    font-weight: lighter;
+    padding-left: 9px;
+}
+
+.dict-category-new{
+	color: grey;
+    font-size: 1.2rem;
+    font-weight: lighter;
+    padding-left: 9px;
+	cursor:pointer;
+	margin-bottom: 40px;
+
+}
+
+
+.dict-category-new-input{
+	display:none;
+	margin-bottom: 40px;
+}
+
+.chevron {
+	transition: transform 0.3s ease-in-out;
+	stroke:#1283da;
+}
+
+.dict-category .edit {
+    display: none;
+	cursor: pointer;
+}
+
+.dict-category:hover .edit {
+   display: inline;
+}
+
+.dict-category .move {
+	cursor: move;
+	display: none;
+}
+
+.dict-category:hover .move {
+   display: inline;
+}
+
+.rotate{
+  transform: rotate(-90deg);
+  stroke:#CCCCCC!important;
+}
+
+.inactive{
+  color:#CCCCCC!important;
+}
+
+.dict-category-name{
+	cursor:pointer;
+}
+
+.dict-category-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.dict-category-list li{
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+ .placeholder{
+		border: 1px #1283da;
+		border-style: dotted;
+		height:40px;
+ }	
+
+.highlight{
+	 background-color: #ebf7ff!important;
+}	
+
+.dict-item-move{
+	cursor:move;
+}
+
+.dict-category-sortable{
+    border: 1px solid #e4e4e6;
+    box-shadow: 0px 5px 7px rgba(0, 97, 254, 0.21);
+	background:white;
+}
+
+.draggable-helper div{
+		box-shadow: 10px 5px 5px grey;
+		z-index:1000;
+}
+
+.draggable-helper:hover div{
+		box-shadow: 10px 5px 5px grey;
+		z-index:1000;
+}
+
+.dict-category-point svg{
+	z-index:1;
+}
+
+.chevron{
+  cursor:pointer;
+}
+
+}
+
+</style>
+
+
+<div class="dictionary">
+    <div class='dict-title-box'>
+		<div class="dict-title">
+			<t9n>[RU]Таблицы[EN]Tables</t9n>
+		</div>
+        &nbsp; 
+		<a class="dict-new-href" id="createBtn" onclick="toggleCreateTable()" style="display:none">
+			<div class="dict-new">
+				<svg width="24" height="24" xmlns="http://www.w3.org/2000/svg" fill-rule="evenodd" clip-rule="evenodd">
+					<path d="M11 11v-11h1v11h11v1h-11v11h-1v-11h-11v-1h11z"/>
+				</svg>
+			</div>
+
+		</a>
+
+		<div class="dictionary__search">
+			<input id="dictionary__search" type="text" autocomplete="off">
+		</div>
+	</div>
+	<FORM class="form t9n pl-2 pr-2" id="addForm" style="display:none">
+		<div class="row p-0 m-0">
+			<div class="col-sm-6 col-md-7 pl-0 pr-0">
+				<input type="text" id="val" name="val" placeholder="<t9n>[RU]Введите имя таблицы[EN]Enter the name of the table</t9n>" MAXLENGTH="127" onkeyup="filterTypes()" class="form-control">
+			</div>
+			<div class="col-sm-6 col-md-5 p-0 mt-1 mt-sm-0">
+				<div class="input-group mb-2">
+					<SELECT name="t" id="baseTypes" onchange="filterTypes()" class="form-control"></SELECT>
+				</div>
+			</div>
+		</div>
+		 <div class=" pt-3 pb-3">
+			<div class="form-check">
+				<input class="form-check-input" type="checkbox" name="unique" value="1" id="flexCheckDefault" title="<t9n>[RU]Невозможно добавить одинаковые независимые объекты (на свойства ограничение не распространяется)[EN]It is impossible to add identical independent objects (the restriction does not apply to attributes)</t9n>">
+				<label class="form-check-label" for="flexCheckDefault"><t9n>[RU]Сделать первую колонку уникальной[EN]Make the first column unique</t9n></label>
+			</div>
+		</div>
+		<div class="btn-group">
+			<button type="submit" class="btn btn-primary mb-2 pl-5 pr-5 mr-3" name="addbtn" id="addbtn" disabled="disabled"><t9n>[RU]Создать[EN]Create</t9n></button>
+			<button type="button" class="btn btn-outline-secondary mb-2 pl-5 pr-5" name="cancelbtn" id="cancelbtn" onclick="toggleCreateTable()"><t9n>[RU]Отменить[EN]Cancel</t9n></button>
+		</div>
+	</FORM>
+	
+	<ul class='dict-category-list' style="display:none">
+    	<li class='dict-category-point'>
+    		<div class='dict-category inactive' data-id=':cat-id:'>
+    			<span class='dict-category-name'>:cat:</span>
+    
+    			<svg class='chevron' width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+    			<path d="M8 11L14 17L20 11" stroke-linecap="round" stroke-linejoin="round"/>
+    			</svg>
+    
+    			<svg class='edit' onclick="editCategory(this)" width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+    			<path d="M14 1L19 6L6 19H1V14L14 1Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+    			</svg>
+    
+    			<svg class='move' width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+    			<path d="M4 8L1 11M1 11L4 14M1 11H21M8 4L11 1M11 1L14 4M11 1V21M14 18L11 21M11 21L8 18M18 8L21 11M21 11L18 14" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+    			</svg>
+    		</div>
+    		<div class="dict-list" tabs-id=':cat-id:'>
+    			<a class="dict-href dict-table" href="/{_global_.z}/object/:id:" data-table-id=":id:">
+    				<div class="dict-item dict-exist" type=":type:">:val:</div>
+    			</a>
+    		</div>
+    	</li>
+	</ul>
+
+	
+	<div class="dict-category-new" onClick='showNewCategoryInput(this);' style="display:none">
+		<t9n>[RU]Новая категория + [EN]New category +	</t9n>
+	</div>
+
+	<div class='dict-category-new-input'>
+		<input type=text id='new-category-input'>
+		<div class="btn-group">
+				<button type="button" class="btn btn-primary mb-2 pl-5 pr-5 mr-3" name="addbtn" onClick='newCategory()'>
+					<t9n>[RU]Создать[EN]Create</t9n>
+				</button>
+				<button type="button" class="btn btn-outline-secondary mb-2 pl-5 pr-5" onclick='hideNewCategoryInput();'>
+					<t9n>[RU]Отменить[EN]Cancel</t9n>
+				</button>
+		</div>
+	</div>
+
+</div>
+<script>
+function saveCatsConfig(){
+    var conf={};
+    $('.dict-category').each(function(){
+        var i=$(this).find('.dict-category-name').html();
+        conf[i]={"open":!$(this).hasClass('inactive'),"tabs":[]};
+        $('[tabs-id='+$(this).attr('data-id')+']').find('a.dict-table').each(function(){
+            conf[i].tabs.push($(this).attr('data-table-id'));
+        });
+    });
+    console.log(JSON.stringify(conf));
+    const vars = new FormData();
+    vars.append('t273',JSON.stringify(conf));
+    if(settingsID)
+        newApi('POST','_m_save/'+settingsID+'?JSON','saveSet',vars,JSON.stringify(conf));
+    else{
+        vars.append('t269','{_global_.user}');
+        vars.append('t271','UI');
+        newApi('POST','_m_new/269?JSON&up=1','saveSet',vars,JSON.stringify(conf));
+    }
+}
+function saveSet(json,vars){
+    try{
+        settingsID=json.obj;
+    }
+    catch(e){
+        console.log(vars);
+        localStorage.setItem('settingsID',vars);
+    }
+}
+var defaultTablesSet='{"Избранное":{"open":true,"tabs":["18","42"]},"Справочники":{"open":false,"tabs":[]},"Служебные":{"open":false,"tabs":["22","269"]},"Скрытые":{"open":false,"tabs":["47","65","137","29","63"]}}'
+    ,settingsID,i,tablesSet,myTablesSet={},j,tables={},tableTemplate=$('.dict-list').html();
+$('.dict-table').remove();
+var catTemplate=$('.dict-category-list').html();
+$('.dict-category-point').remove();
+<!-- Begin: &Settings -->
+myTablesSet['{ID}']={'{TYPE}':'{SETTINGS}'.replace(/&quot;/g,'"')};
+<!-- End: &Settings -->
+for(i in myTablesSet){
+    if(myTablesSet[i]['UI']){
+        settingsID=i;
+        try{
+            tablesSet=JSON.parse(myTablesSet[i]['UI']);
+            break;
+        }
+        catch(e){
+            console.log(e);
+        }
+    }
+}
+if(tablesSet===undefined&&localStorage.getItem('settingsID'))
+    try{
+        tablesSet=tablesSet||JSON.parse(localStorage.getItem('settingsID'));
+    }
+    catch(e){
+        console.log(e);
+    }
+tablesSet=tablesSet||JSON.parse(defaultTablesSet);
+
+<!-- Begin:&Uni_obj_List -->tables[{ID}]={type:{TYPE},val:'{VAL}'};
+<!-- End:&Uni_Obj_List -->
+var n=0,tabList;
+for(i in tablesSet){
+    tabList='';
+    $('.dict-category-list').append($(catTemplate.replace(':cat:',i)
+                                                .replace(/:cat-id:/g,n)
+                                                .replace('inactive',tablesSet[i].open?'':'inactive')));
+    for(j in tablesSet[i].tabs)
+        if(tables[tablesSet[i].tabs[j]])
+            tabList+=tableTemplate.replace(':val:',tables[tablesSet[i].tabs[j]].val)
+                                .replace(':type:',tables[tablesSet[i].tabs[j]].type)
+                                .replace(/:id:/g,tablesSet[i].tabs[j]);
+    $('[tabs-id="'+n+'"]').html($(tabList));
+    n++;
+}
+tabList='';
+for(i in tables)
+    if($('a[data-table-id='+i+']').length===0)
+        tabList+=tableTemplate.replace(':val:',tables[i].val)
+                            .replace(':type:',tables[i].type)
+                            .replace(/:id:/g,i);
+$('[tabs-id=0]').append($(tabList));
+$('.dict-category-new,.dict-category-list').show();
+if('{_global_.role}'==='admin'){
+    let str='<option value="" class="text-muted" selected>'+t9n('[RU]Выберите тип первой колонки[EN]Select first column\'s type')+'</option>';
+    str+='<option value="3">'+t9n('[RU]Короткая строка (до 127 символов)[EN]Short text (up to 127 chars)')+'</option>';
+    str+='<option value="8">'+t9n('[RU]Строка без ограничения длины[EN]Text of unlimiited length')+'</option>';
+    str+='<option value="9">'+t9n('[RU]Дата[EN]Date')+'</option>';
+    str+='<option value="13">'+t9n('[RU]Целое число[EN]Integer')+'</option>';
+    str+='<option value="14">'+t9n('[RU]Число с десятичной частью[EN]Amount with decimals')+'</option>';
+    str+='<option value="11">'+t9n('[RU]Логическое значение (Да / Нет)[EN]Boolean: True/False')+'</option>';
+    str+='<option value="12">'+t9n('[RU]Многострочный текст[EN]Multiline text')+'</option>';
+    str+='<option value="4">'+t9n('[RU]Дата и время[EN]Date and time')+'</option>';
+    byId('baseTypes').innerHTML=str;
+    $('#createBtn').show();
+}
+const form = document.querySelector('#addForm');
+$('#addForm').submit((e) => {
+    e.preventDefault();
+    const formData = new FormData(form);
+    newApi('POST','_d_new?JSON','createNewTable',formData);
+});
+function createNewTable(json){
+    if (json.id !== undefined) {
+        document.location.href = "/{_global_.z}/object/" + json.obj
+    } else {
+        alert('Не удалось создать таблицу')
+    }
+}
+
+//ajax
+function changeCategoryOrderAjax(){
+	let order = [];
+	$('.dict-category-point').each(function(){
+	   order.push($(this).find('.dict-category').data('id'));
+	});
+    saveCatsConfig();
+}
+// end ajax
+
+function showNewCategoryInput(el){
+	$(".dict-category-new-input").show();
+	$(el).hide();
+	$(".dict-category-new-input").find('input').focus();
+}
+
+function  hideNewCategoryInput(){
+	$(".dict-category-new-input").hide();
+	$(".dict-category-new").show();
+	$(".dict-category-new-input").find('input').val("");
+}
+
+function newCategory(){
+  if($('#new-category-input').val().trim()!== ''){
+	
+	let t=$(".dict-category-list li").last().clone();
+	$(".dict-category-list").append(t); 
+	
+	t.find('.dict-category-name').html($('#new-category-input').val().trim());
+	t.find('.dict-list').html("");
+	
+	t.find('.dict-category-name').on('click', function () {
+        clickOnCategory(this)
+     });
+
+	 t.find('.chevron').on('click', function () {
+        clickOnCategory(this)
+     });
+
+	t.droppable(dict_cat_drop);
+
+	t.find('.move').on('mousedown', function() {
+		if(!$(this).parent().hasClass('inactive')){
+			$(this).parent().next('.dict-list').toggle();
+		}
+		$(this).parent().addClass('dict-category-sortable');
+		$(document).on('mouseup.my-element', function(event) {
+			  let el = $(".dict-category-sortable");
+			  if(!el.hasClass('inactive')){
+ 					el.next('.dict-list').toggle();
+			  }
+			  el.removeClass("dict-category-sortable");
+			  $(document).off('mouseup.my-element');
+		});
+	 
+	 });
+    
+    let newCatId=$(".dict-category-list li").length-1;
+	t.find('.dict-category').attr('data-id', newCatId);
+	t.find('.dict-list').attr('tabs-id', newCatId);
+	saveCatsConfig();
+   
+    $(".dict-category-new-input").find('input').val("");
+	$(".dict-category-new-input").hide();
+	$(".dict-category-new").show();
+  }
+}
+
+function editCategory(category) {
+  let categoryName = $(category).parent().text().trim();
+  let id = $(category).parent().data('id');
+  $(category).parent().after("<div class='dict-category-edit' id='edit" + id + "'><input id='eddd' type='text' value='" + categoryName + "'></div>");
+  $(category).parent().hide();
+  
+  let input = $('#edit' + id).find('input');
+  input.focus();
+  input[0].setSelectionRange(input[0].value.length,input[0].value.length);
+  input[0].selectionEnd = input[0].value.length;
+  	
+  input[0].scrollLeft = input[0].scrollWidth;
+
+  input.keydown(function(event) {
+	if (event.keyCode === 13) { 
+      saveCategory(id);
+    } else if (event.keyCode === 27) { 
+      cancelEdit(id);
+    }
+  });
+  input.blur(function() {
+    saveCategory(id);
+  });
+}
+
+function saveCategory(id) {
+  const element = $('[data-id="' + id + '"]').children('.dict-category-name');
+  let categoryName = $('#edit' + id).find('input').val().trim();
+  if (categoryName) {
+    element.html(categoryName);
+	saveCatsConfig();
+  } else {
+    cancelEdit(id); 
+  }
+  $('#edit' + id).remove();
+  $('[data-id="' + id + '"]').show();
+}
+
+function cancelEdit(id) {
+
+  $('#edit' + id).remove();
+  $('[data-id="' + id + '"]').show();
+}
+
+
+function showCategoryInput() {
+  $(".dict-category-input").show();
+  $(".dict-category-new").hide();
+}
+
+function toggleCreateTable() {
+    $('#addForm,.dictionary__search,#createBtn').toggle();
+    $('.dict-table').show();
+    $('#val').focus();
+}
+function filterTypes(){
+    let value = document.querySelector('#val').value.toLowerCase()
+    let type = document.querySelector('#baseTypes').value;
+    if(value !== '' && type !== '')
+        document.querySelector('#addbtn').removeAttribute('disabled');
+    const dictItems = document.querySelectorAll('.dict-item');
+    dictItems.forEach((item) => {
+        if(item.textContent.toLowerCase().includes(value))
+            $(item.parentElement).show();
+        else
+            $(item.parentElement).hide();
+        if(item.textContent.toLowerCase()===value&&item.getAttribute('type')===type)
+            document.querySelector('#addbtn').setAttribute('disabled','disabled');
+    });
+};
+
+function clickOnCategory(el){
+	$(el).parent().next('.dict-list').toggle('fast');
+	$(el).parent().find('.chevron').toggleClass('rotate');
+	$(el).parent().toggleClass('inactive');
+	saveCatsConfig();
+}
+
+var dict_item_drag = {
+                revert: true,
+			    helper: 'clone',
+                revert: 'invalid',
+                start: function (event, ui) {
+                   	let w = $(this).width();
+					$(this).css({'opacity':0});
+					$(ui.helper).css({'width':w})
+					$(ui.helper).addClass("draggable-helper");
+					//$(ui.item).addClass("draggable-helper");
+				},
+
+				stop:function (event, ui) {
+					$(this).css({'opacity':1});
+					$(ui.helper).removeClass("draggable-helper");
+				}		
+
+       };
+
+var dict_cat_drop = {
+ accept: '.dict-href',
+	drop: function(event, ui) {
+		var tag = ui.draggable;
+        var oldCategory = tag.closest('.dict-list');
+	    var newCategory = $(this).find('.dict-list');
+		console.log(newCategory);
+		console.log(oldCategory);
+		if (oldCategory[0] !== newCategory[0]) {
+	    // Remove tag from old category and prepend it to new category
+			tag.detach().appendTo(newCategory);
+			tag.find('div').animate({'background-color':'#6387b0'},333);
+			tag.find('div').animate({'background-color':'transparent'},333);
+			setTimeout(saveCatsConfig, 400);
+		}
+		$(this).removeClass('highlight');
+	},
+	over: function(event, ui) {
+	    $(this).addClass('highlight');
+	},
+    out: function(event, ui) {
+		$(this).removeClass('highlight');
+    },
+};
+
+$(document).ready(function () {
+	
+	$(".dict-category.inactive").each(function () {
+			$(this).next('.dict-list').hide();
+			$(this).find('.chevron').addClass('rotate');
+	});
+	
+	$('.dict-category-name').on('click', function () {
+        clickOnCategory(this)
+     });
+
+	 $('.chevron').on('click', function () {
+        clickOnCategory(this)
+     });
+
+	//сортировка
+	$('.dict-category-list').sortable({
+		revert: true,
+		handle: '.move',
+		axis:"y",
+		placeholder: "placeholder",
+		update: function( event, ui ) { 
+		 changeCategoryOrderAjax();
+		},
+		activate: function( event, ui ) { 
+		 ui.helper.find('.dict-list').css({"background-color":"white"})
+		 ui.helper.find('.dict-category').css({"background-color":"white"})
+		},
+		deactivate: function( event, ui ) { 
+		 ui.item.find('.dict-list').css({"background-color":"transparent"})
+		 ui.item.find('.dict-category').css({"background-color":"transparent"})
+		}
+
+
+	 });
+
+	 $('.move').on('mousedown', function() {
+		if(!$(this).parent().hasClass('inactive')){
+			$(this).parent().next('.dict-list').toggle();
+		}
+		$(this).parent().addClass('dict-category-sortable');
+		$(document).on('mouseup.my-element', function(event) {
+			  let el = $(".dict-category-sortable");
+			  if(!el.hasClass('inactive')){
+ 					el.next('.dict-list').toggle();
+			  }
+			  el.removeClass("dict-category-sortable");
+			  $(document).off('mouseup.my-element');
+		});
+	 
+	 });
+
+
+
+   //конец сортировки
+
+   //тащим
+
+   $('.dict-href').draggable(dict_item_drag);
+   $('.dict-category-point').droppable(dict_cat_drop);
+ 
+
+		//не тащим
+
+
+});
+
+
+var ph=t9n('[RU]Быстрый поиск...[EN]Quick search...');
+document.title=t9n('[RU]Таблицы[EN]Tables'),role='{_global_.role}',roleId='{_global_.role_id}';
+let input = document.querySelector('.dictionary__search input');
+input.setAttribute('placeholder', ph);
+
+
+function layoutSwitcher(text) {
+    const layoutMap = {
+        'q': 'й', 'w': 'ц', 'e': 'у', 'r': 'к', 't': 'е', 'y': 'н', 'u': 'г', 'i': 'ш',
+        'o': 'щ', 'p': 'з', '[': 'х', ']': 'ъ', 'a': 'ф', 's': 'ы', 'd': 'в', 'f': 'а',
+        'g': 'п', 'h': 'р', 'j': 'о', 'k': 'л', 'l': 'д', ';': 'ж', "'": 'э', 'z': 'я',
+        'x': 'ч', 'c': 'с', 'v': 'м', 'b': 'и', 'n': 'т', 'm': 'ь', ',': 'б', '.': 'ю',
+        '/': '.', 'й': 'q', 'ц': 'w', 'у': 'e', 'к': 'r', 'е': 't', 'н': 'y', 'г': 'u',
+        'ш': 'i', 'щ': 'o', 'з': 'p', 'х': '[', 'ъ': ']', 'ф': 'a', 'ы': 's', 'в': 'd',
+        'а': 'f', 'п': 'g', 'р': 'h', 'о': 'j', 'л': 'k', 'д': 'l', 'ж': ';', 'э': "'",
+        'я': 'z', 'ч': 'x', 'с': 'c', 'м': 'v', 'и': 'b', 'т': 'n', 'ь': 'm', 'б': ',',
+        'ю': '.', '.': '/'
+    };
+    return text.split('').map(char => layoutMap[char] || char).join('');
+}
+
+function isSubstring(str, substr) {
+    
+	const lowerStr = str.toLowerCase();
+    const lowerSubStr = substr.toLowerCase();
+
+	let k = lowerStr.indexOf(lowerSubStr);
+	if(k !== -1 ) return k;
+    
+	const alternativeSubstr = layoutSwitcher(lowerSubStr);
+    k = lowerStr.indexOf(alternativeSubstr);
+	if(k !== -1 ) return k;
+	
+	return -1;	
+}
+
+
+$('#dictionary__search').on('keyup', function() {
+	let searchValue = $(this).val();
+  
+	$('.dict-item').each(function() {
+	    let elementText = $(this).data('originaltext') || $(this).text();
+		elementText = elementText.toString();
+		let index = isSubstring(elementText, searchValue)
+    
+		if (index === -1) {
+			$(this).parent().hide();
+		} else {
+			$(this).parent().show();
+			if ($(this).parent().parent(".dict-list").prev('.dict-category').hasClass('inactive') && searchValue !== '') {
+		        $(this).parent().parent().toggle();
+			    $(this).parent().parent(".dict-list").prev('.dict-category').find('.chevron').toggleClass('rotate');
+				$(this).parent().parent(".dict-list").prev('.dict-category').toggleClass('inactive');
+			}
+      
+			let html ="";
+			if(!$(this).data('originaltext')){
+				html = $(this).html();
+				$(this).attr('data-originaltext', html);
+			}else{
+				html = $(this).data('originaltext').toString();	
+			}	
+			html = html.substring(0, index) + '<b>' + html.substring(index, index + searchValue.length) + '</b>' + html.substring(index + searchValue.length);
+			$(this).html(html);
+		}
+  });
+});
+
+
+input.onfocus = function (){
+    input.classList.add('dictionary__search--active');
+    input.setAttribute('placeholder', '');
+}
+input.onblur = function (){
+    if($('#dictionary__search').val().toUpperCase()===''){
+        input.classList.remove('dictionary__search--active');
+        input.setAttribute('placeholder', ph);
+    }
+}
+if($(window).width()>480)
+    $('.dictionary').css('padding','20px');
+</script>
+
