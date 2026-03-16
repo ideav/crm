@@ -131,10 +131,11 @@ a[disabled]{
 			</label>
 			<!-- Begin:&EditReq_REFERENCE -->
 			<div class="comp-control pb-3 col-12 col-sm-8 col-md-6">
+			    <input type="hidden" id="h{TYP}">
 			    <div id="mst{TYP}">
 			    <!-- Begin:&Multiselect -->
 			    <span id="{ID}" ref="{VAL}" ord="{ORD}" class="badge badge-pill badge-secondary text-dark p-2 ml-0 mt-0 mb-2 mr-1"><font>{NAME}</font>
-			        <a onclick="newApi('POST','_m_del/{ID}?JSON','dropMS','',{ID})" {_parent_.disabled}>
+			        <a onclick="dropMSLocal({ID})" {_parent_.disabled}>
 			            <svg width="12" height="12" viewBox="0 0 12 12" class="flex-none ml-1" style="shape-rendering: geometricprecision;">
 			            <path fill-rule="evenodd" fill="currentColor" d="M7.41421356,6 L9.88226406,3.5319495 C10.0816659,3.33254771 10.0828664,3.01179862 9.88577489,2.81470708 L9.18529292,2.11422511 C8.97977275,1.90870494 8.66708101,1.91870543 8.4680505,2.11773594 L6,4.58578644 L3.5319495,2.11773594 C3.33254771,1.91833414 3.01179862,1.91713357 2.81470708,2.11422511 L2.11422511,2.81470708 C1.90870494,3.02022725 1.91870543,3.33291899 2.11773594,3.5319495 L4.58578644,6 L2.11773594,8.4680505 C1.91833414,8.66745229 1.91713357,8.98820138 2.11422511,9.18529292 L2.81470708,9.88577489 C3.02022725,10.0912951 3.33291899,10.0812946 3.5319495,9.88226406 L6,7.41421356 L8.4680505,9.88226406 C8.66745229,10.0816659 8.98820138,10.0828664 9.18529292,9.88577489 L9.88577489,9.18529292 C10.0912951,8.97977275 10.0812946,8.66708101 9.88226406,8.4680505 L7.41421356,6 L7.41421356,6 Z">
 			            </path>
@@ -315,11 +316,20 @@ $(document).ready(function() {
     });
     $(".select2").on("select2:unselecting",function(e){
         if($(this).attr('multi')==='1') {
-            newApi('POST','_m_set/'+id+'?JSON&'+e.target.id+'=','clearRef','',e.target);
+            // handled locally in dropMSLocal via badge click; this event fires when select2 clears
+            $(e.target).val('');
         } else
             $(e.target).val('');
     });
     $('select[multi="1"]').each(function(){
+        // Remove name from multiselect to prevent double submission
+        var selId = $(this).attr('id');
+        var hidId = 'h' + selId.substr(1);
+        $(this).removeAttr('name');
+        $('#' + hidId).attr('name', selId);
+        // Initialize hidden field from existing badges
+        var refs = $('#ms' + selId).find('span.badge').toArray().map(function(s){ return $(s).attr('ref'); });
+        $('#' + hidId).val(refs.join(','));
         updateDependentSelects($(this).attr('i-orig'), true);
     });
 });
@@ -383,20 +393,18 @@ function createDicObj(json,el){
 }
 function setRef(el){
     if($(el).attr('multi')==='1')
-        newApi('POST','_m_set/'+id+'?JSON&'+el.id+'='+el.value,'addMS','',el);
+        addMSLocal(el);
     else
         newApi('POST','_m_set/'+id+'?JSON&'+el.id+'='+el.value,'checkSetRef','',el);
 }
-function addMS(json,el){
-    if(json.id){
-        $('#ms'+el.id).append(templateMS.replace(/:id:/gm,json.id)
-                                        .replace(':color:',msColors[el.value%24])
-                                        .replace(':val:',el.value)
-                                        .replace(':name:',$('option[value="'+el.value+'"]').html()));
-        $('option[value="'+el.value+'"]').remove();
-    }
-    else
-        showError('Ошибка сохранения справочного значения');
+function addMSLocal(el){
+    var val = el.value;
+    var name = $('option[value="'+val+'"]', el).html();
+    $('#ms'+el.id).append(templateMS.replace(/:id:/gm,val)
+                                    .replace(':color:',msColors[val%24])
+                                    .replace(':name:',name));
+    $('option[value="'+val+'"]', el).remove();
+    updateMSHidden(el.id);
 }
 function checkSetRef(json,el){
     if(json.id)
@@ -406,6 +414,24 @@ function checkSetRef(json,el){
 function showError(err,alert){
     $('#messages').html('<div class="alert alert-'+(alert||'danger')+'" role="alert">'+err+'</div>');
     setTimeout(function(){$('#messages').html('')},7000);
+}
+function updateMSHidden(selId){
+    var refs = $('#ms'+selId).find('span.badge').toArray().map(function(s){ return $(s).attr('ref'); });
+    $('#h'+selId.substr(1)).val(refs.join(','));
+}
+function dropMSLocal(index){
+    var badgeDiv = $('#'+index).closest('div');
+    var sel = badgeDiv.next();
+    var objectId = sel.attr('i-orig');
+    var selId = sel.attr('id');
+    var ref = $('#'+index).attr('ref');
+    var name = $('#'+index).find('font').html();
+    sel.append(templateDDL.replace(':id:',ref)
+                          .replace(':val:',ref)
+                          .replace(':name:',name));
+    $('#'+index).remove();
+    updateMSHidden(selId);
+    updateDependentSelects(objectId, true);
 }
 function dropMS(json,index){
     const objectId = $('#'+index).closest('div').next().attr('i-orig');
@@ -420,8 +446,8 @@ function dropMS(json,index){
 }
 var msColors=['78AAD2','78AAFF','78D2AA','78D2FF','78FFAA','78FFD2','AA78D2','AA78FF','AAD278','AAD2FF','AAFF78','AAFFD2','D278AA','D278FF','D2AA78','D2AAFF','D2FF78','D2FFAA','FF78AA','FF78D2','FFAA78','FFAAD2','FFD278','FFD2AA'];
 $('.badge').each(function(){$(this).css('background-color','#'+msColors[$(this).attr('ref')%24])});
-var templateMS='<span id=":id:" ref=":val:" class="badge badge-pill badge-secondary text-dark p-2 ml-0 mt-0 mb-2 mr-1" style="background-color:#:color:"><font>:name:</font>'
-		         +'<a onclick="newApi(\'POST\',\'_m_del/:id:?JSON\',\'dropMS\',\'\',:id:)">'
+var templateMS='<span id="ms_val_:id:" ref=":id:" class="badge badge-pill badge-secondary text-dark p-2 ml-0 mt-0 mb-2 mr-1" style="background-color:#:color:"><font>:name:</font>'
+		         +'<a onclick="dropMSLocal(\'ms_val_:id:\')">'
 			     +'    <svg width="12" height="12" viewBox="0 0 12 12" class="flex-none ml-1" style="shape-rendering: geometricprecision;">'
 			     +'        <path fill-rule="evenodd" fill="currentColor" d="M7.41421356,6 L9.88226406,3.5319495 C10.0816659,3.33254771 10.0828664,3.01179862 9.88577489,2.81470708 L9.18529292,2.11422511 C8.97977275,1.90870494 8.66708101,1.91870543 8.4680505,2.11773594 L6,4.58578644 L3.5319495,2.11773594 C3.33254771,1.91833414 3.01179862,1.91713357 2.81470708,2.11422511 L2.11422511,2.81470708 C1.90870494,3.02022725 1.91870543,3.33291899 2.11773594,3.5319495 L4.58578644,6 L2.11773594,8.4680505 C1.91833414,8.66745229 1.91713357,8.98820138 2.11422511,9.18529292 L2.81470708,9.88577489 C3.02022725,10.0912951 3.33291899,10.0812946 3.5319495,9.88226406 L6,7.41421356 L8.4680505,9.88226406 C8.66745229,10.0816659 8.98820138,10.0828664 9.18529292,9.88577489 L9.88577489,9.18529292 C10.0912951,8.97977275 10.0812946,8.66708101 9.88226406,8.4680505 L7.41421356,6 L7.41421356,6 Z"></path>'
 		         +'    </svg>'
