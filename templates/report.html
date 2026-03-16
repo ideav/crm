@@ -8,6 +8,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <title>{VAL}</title>
 <link rel="stylesheet" href="/css/bootstrap.3.3.7.min.css">
+<link rel="stylesheet" href="https://unpkg.com/primeicons/primeicons.css">
 <script>
     var db='{_global_.z}';
 </script>
@@ -19,7 +20,7 @@
 <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
     <TABLE>
 	<TR>
-		<TD>&nbsp;<a href="/{_global_.z}"><span class="glyphicon glyphicon-home"></span></a>&nbsp;
+		<TD>&nbsp;<a href="/{_global_.z}"><i class="pi pi-home" style="font-size: 1.25rem;"></i></a>&nbsp;
 		<script type="text/javascript">
 		var tableToExcel = (function() {
 		  var uri = 'data:application/vnd.ms-excel;base64,'
@@ -40,10 +41,10 @@
 		</td>
 		<TD ALIGN="center" style="padding-left:13px;padding-right:13px"><H4>{VAL}</H4></TD>
 		<TD align="right" class="t9n" style="padding-right:10px">
-			<a href="#" title="<t9n>[RU]Управление компактностью представления отчета[EN]Switch between compact and loose view</t9n>" onclick="toggle_compact(); return false;"><span class="glyphicon glyphicon-text-width"></span></a>&nbsp;
-			&nbsp;<a href="#" title="<t9n>[RU]Для отображения фильтра кликните здесь или на шапке таблицы[EN]To display the filter, click here or on the heading of the table</t9n>" onclick="toggle_filter(); return false;"><span class="glyphicon glyphicon-filter"></span></a>
-			&nbsp;<button id="refresh" type="submit" class="btn btn-default btn-xs" title="<t9n>[RU]Перестроить отчет по заданному фильтру[EN]Apply filter</t9n>" style="border:none;"><a href="#"><span class="glyphicon glyphicon-refresh"></span></a></button>
-			&nbsp;<a href="/{_global_.z}/report/{_global_.id}" title="<t9n>[RU]Очистить фильтр и перезапустить отчет[EN]Reset the filter and run the report</t9n>"><span class="glyphicon glyphicon-remove-circle"></span></a>&nbsp;
+			<a href="#" title="<t9n>[RU]Управление компактностью представления отчета[EN]Switch between compact and loose view</t9n>" onclick="toggle_compact(); return false;"><i class="pi pi-align-left" style="font-size: 1.25rem;"></i></a>&nbsp;
+			&nbsp;<a href="#" title="<t9n>[RU]Для отображения фильтра кликните здесь или на шапке таблицы[EN]To display the filter, click here or on the heading of the table</t9n>" onclick="toggle_filter(); return false;"><i class="pi pi-filter" style="font-size: 1.25rem;"></i></a>
+			&nbsp;<button id="refresh" type="submit" class="btn btn-default btn-xs" title="<t9n>[RU]Перестроить отчет по заданному фильтру[EN]Apply filter</t9n>" style="border:none;"><a href="#"><i class="pi pi-refresh" style="font-size: 1.25rem;"></i></a></button>
+			&nbsp;<a href="/{_global_.z}/report/{_global_.id}" title="<t9n>[RU]Очистить фильтр и перезапустить отчет[EN]Reset the filter and run the report</t9n>"><i class="pi pi-times-circle" style="font-size: 1.25rem;"></i></a>&nbsp;
 		</TD>
 	</TR>
 	<TR>
