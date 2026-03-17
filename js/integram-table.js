@@ -5401,8 +5401,8 @@ class IntegramTable{
         }
 
         /**
-         * Show a column edit form modal for an existing column (issue #937).
-         * Provides: change base type, required, alias (ref only), delete, delete with data,
+         * Show a column edit form modal for an existing column (issue #937, #1018).
+         * Provides: rename column, change base type, required, alias (ref only), delete, delete with data,
          * multiselect toggle (ref only), go to dictionary in new tab (ref only).
          * Logic taken from templates/object.html.
          */
@@ -5438,10 +5438,17 @@ class IntegramTable{
 
             // Build the alias display value (either alias or original name)
             const currentAlias = parsedAttrs.alias || '';
+            // Original (base) column name for renaming (issue #1018)
+            const currentName = col.val || col.name;
 
             colEditModal.innerHTML = `
                 <h3 style="margin: 0 0 16px 0; font-weight: 500; font-size: 18px;">Редактирование колонки: <em style="font-style: normal; color: var(--md-primary, #1976d2);">${ this.escapeHtml(col.name) }</em></h3>
                 <div class="col-edit-section">
+                    ${ !isFirstColumn ? `
+                    <div class="col-edit-row">
+                        <label class="col-edit-label">Название:</label>
+                        <input type="text" id="col-edit-name-${instanceName}" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(currentName) }" placeholder="Введите название колонки">
+                    </div>` : '' }
                     <div class="col-edit-row">
                         <label class="col-edit-label">Базовый тип:</label>
                         ${ !isRef ? `<select id="col-edit-type-${instanceName}" class="form-control form-control-sm col-edit-select">
@@ -5509,11 +5516,27 @@ class IntegramTable{
                 saveBtn.disabled = true;
 
                 try {
+                    // 0. Rename column (non-first columns only, issue #1018)
+                    if (!isFirstColumn) {
+                        const newName = colEditModal.querySelector(`#col-edit-name-${instanceName}`).value.trim();
+                        if (newName && newName !== currentName) {
+                            const result = await this.renameColumn(col.orig || col.id, newName, col.type);
+                            if (!result.success) {
+                                showStatus('Ошибка переименования: ' + result.error, true);
+                                saveBtn.disabled = false;
+                                return;
+                            }
+                            col.name = newName;
+                            col.val = newName;
+                        }
+                    }
+
                     // 1. Change base type (non-ref only)
                     if (!isRef) {
                         const newTypeId = colEditModal.querySelector(`#col-edit-type-${instanceName}`).value;
+                        const currentColName = (!isFirstColumn && colEditModal.querySelector(`#col-edit-name-${instanceName}`).value.trim()) || col.name;
                         if (String(newTypeId) !== String(col.type)) {
-                            const result = await this.saveColumnType(col.orig || col.id, newTypeId, col.name);
+                            const result = await this.saveColumnType(col.orig || col.id, newTypeId, currentColName);
                             if (!result.success) {
                                 showStatus('Ошибка изменения типа: ' + result.error, true);
                                 saveBtn.disabled = false;
@@ -5646,6 +5669,30 @@ class IntegramTable{
                 const params = new URLSearchParams();
                 params.append('val', colName);
                 params.append('t', newTypeId);
+                if (typeof xsrf !== 'undefined') params.append('_xsrf', xsrf);
+
+                const resp = await fetch(`${apiBase}/_d_save/${origId}?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+                if (!resp.ok) return { success: false, error: `HTTP ${resp.status}` };
+                return { success: true };
+            } catch (err) {
+                return { success: false, error: err.message };
+            }
+        }
+
+        /**
+         * Rename a column via API (issue #1018).
+         * Uses _d_save/{origId}?JSON with new name and existing type.
+         */
+        async renameColumn(origId, newName, typeId) {
+            const apiBase = this.getApiBase();
+            try {
+                const params = new URLSearchParams();
+                params.append('val', newName);
+                params.append('t', typeId);
                 if (typeof xsrf !== 'undefined') params.append('_xsrf', xsrf);
 
                 const resp = await fetch(`${apiBase}/_d_save/${origId}?JSON`, {
