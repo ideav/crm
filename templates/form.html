@@ -28,9 +28,9 @@
     border-bottom: 1px dashed;
 }
 </style>
-<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z" crossorigin="anonymous">
-<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
-<script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.12.1/jquery-ui.min.js"></script>
+<link rel="stylesheet" href="/css/bootstrap4.5.2.min.css">
+<script src="/js/jquery3.1.1.min.js"></script>
+<script src="/js/jquery-ui1.12.1.min.js"></script>
 <script src="/js/js.js"></script>
 <div>
 <div id="show" class="list hidden">
@@ -173,7 +173,7 @@ function setDefValue(i,h){
 function myApi(m,u,b,prefix,vars){
     prefix=prefix||''; // prefix is blank by default
     var json,i,j,k,l,h='',req,obj=new XMLHttpRequest(); 
-    obj.open(m,'/api/{_global_.z}/'+u,true); // Открываем асинхронное соединение заданным методом по нужному адресу
+    obj.open(m,'/{_global_.z}/'+u,true); // Открываем асинхронное соединение заданным методом по нужному адресу
     obj.setRequestHeader('X-Authorization','{_global_.token}');
     if(m=='POST'){ // Если это POST запрос, то передаем заданные параметры
         obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
@@ -499,10 +499,10 @@ function myApi(m,u,b,prefix,vars){
                             }
                 }
                 if(id!=0) // In case we have an object requested, fetch its details
-                    myApi('GET','edit_obj/'+id,'FillPanel',PanelID); // and fill in its fields
+                    myApi('GET','edit_obj/'+id+'?JSON','FillPanel',PanelID); // and fill in its fields
                 rep=json.reqs[PanelID]["ref_161"]===undefined?'':json.reqs[PanelID]["ref_161"].split(':').pop();
                 if((rep!='')&&edit)
-        		    myApi('GET','object/28?F_U='+rep+'&F_107=!%&PanelID='+PanelID,'RepCols', PanelID);
+        		    myApi('GET','object/28?JSON&F_U='+rep+'&F_107=!%&PanelID='+PanelID,'RepCols', PanelID);
                 h+=l.replace(/:id:/g,PanelID)
                     .replace(':src:',typ)
                     .replace(':val:',json['&main.a.&uni_obj.&uni_obj_all'].val[i])
@@ -512,7 +512,7 @@ function myApi(m,u,b,prefix,vars){
                     .replace(':reportID:',rep==''?'--':json.reqs[PanelID]['ref_161'].substring(3)) // Report ID
                     .replace(':report:',rep==''?'--':json.reqs[PanelID][161]); // Report name
 				if(json['&object_reqs'][PanelID][3].indexOf('(0)')==-1)
-        		    myApi('GET','object/150?F_U='+PanelID,'Buttons',PanelID);
+        		    myApi('GET','object/150?JSON&F_U='+PanelID,'Buttons',PanelID);
 				// Check if we're a requisite (we should have a parent record then)
 				origtype=0;
                 for(j in r)
@@ -537,9 +537,9 @@ function myApi(m,u,b,prefix,vars){
                 if(origtype){ // We need a parent
                     byId('Button_'+PanelID).disabled=true; // Disable the controls until we check the parent
                     if(params['up']) // We have a parent set in UP
-                        myApi('GET','object/'+typ+'/?F_U='+params['up'],'Parent',PanelID);
+                        myApi('GET','object/'+typ+'/?JSON&F_U='+params['up'],'Parent',PanelID);
                     else if(params['F_'+j]) // or by the type code filter
-                        myApi('GET','object/'+typ+'/?F_U='+params['F_'+j],'Parent',PanelID);
+                        myApi('GET','object/'+typ+'/?JSON&F_U='+params['F_'+j],'Parent',PanelID);
                 }
                 // Fill in the Panel's fields
                 h=fields=ctrl='';
@@ -603,7 +603,7 @@ function myApi(m,u,b,prefix,vars){
                         }
                         else if(r[typ][k].r){ // This is a reference
 							if(id==0){
-								myApi('GET','object/'+t[r[typ][k].t].t,'FillDDL',f[j].i);
+								myApi('GET','object/'+t[r[typ][k].t].t+'?JSON','FillDDL',f[j].i);
 								def[f[j].i]=defaults(r[typ][k].a,f[j].i); // Fetch and save the default value
 							}
                             fields+=field.replace(':Type:',f[j].Field)
@@ -629,7 +629,7 @@ function myApi(m,u,b,prefix,vars){
 				if(json['&object_reqs'][PanelID][6]!='')
 				    byId('next_act_'+PanelID).value=json['&object_reqs'][PanelID][6];
 				// Get the filter
-				filter=json['&object_reqs'][PanelID][7]==''?'':'?'+unEscapeHtml(json['&object_reqs'][PanelID][7])
+				filter='?JSON'+(json['&object_reqs'][PanelID][7]==''?'':'&'+unEscapeHtml(json['&object_reqs'][PanelID][7]))
 				filter+=window.location.search.replace('?',filter==''?'?':'&');
 				// Display the panel
 				if(chart){
@@ -769,7 +769,7 @@ function savePivot(i){
     //delete some values which will not serialize to JSON
     delete config["aggregators"];
     delete config["renderers"];
-    myApi('POST','_m_set/'+i+'?t225='+JSON.stringify(config),'savePivot',i);
+    myApi('POST','_m_set/'+i+'?JSON&t225='+JSON.stringify(config),'savePivot',i);
 }
 (function($,window){
     var adjustAnchor=function(){
@@ -789,9 +789,9 @@ edit=true;
 if('{_global_.id}'==='')
     edit=true;
 else
-    myApi('GET','object/138?F_U={_global_.id}','FormPanels');
+    myApi('GET','object/138?JSON&F_U={_global_.id}','FormPanels');
 if(edit)
-    myApi('GET','object/137','FormsList');
+    myApi('GET','object/137?JSON','FormsList');
 var f=[];
 <!-- Begin:intFormFields -->
 f.push({i:{FieldID},p:{PanelID},Field:{Field},FieldAlias:"{FieldAlias}",ReportField:"{ReportField}",ReportFieldAlias:"{ReportFieldAlias}",FieldValue:"{default}"});
