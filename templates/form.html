@@ -27,6 +27,9 @@
 .f-styles-toggle{
     border-bottom: 1px dashed;
 }
+.pi{
+	font-size: 14px;
+}
 </style>
 <link rel="stylesheet" href="/css/bootstrap4.5.2.min.css">
 <script src="/js/jquery3.1.1.min.js"></script>
@@ -318,8 +321,8 @@ function myApi(m,u,b,prefix,vars){
                 if(edit&&report[prefix][i].chosen){
                     h+='<br />';
                     if(i>0)
-                        h+='<a onclick="post(\'_m_up/'+report[prefix][i].chosen+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Переместить колонку левее'+'"><i class="pi pi-chevron-left p-2"></i></a>';
-                    h+='<a onclick="post(\'_m_del/'+report[prefix][i].chosen+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Удалить колонку'+'"><i class="pi pi-trash p-2"></i></a>';
+                        h+='<a onclick="postForm(\'_m_up/'+report[prefix][i].chosen+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Переместить колонку левее'+'"><i class="pi pi-chevron-left p-2"></i></a>';
+                    h+='<a onclick="postForm(\'_m_del/'+report[prefix][i].chosen+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Удалить колонку'+'"><i class="pi pi-trash p-2"></i></a>';
                 }
                 h+='</B></TD>';
             }
@@ -577,9 +580,9 @@ function myApi(m,u,b,prefix,vars){
                                 break;
                             }
                         if(edit){
-                            ctrl='<a onclick="post(\'_m_del/'+f[j].i+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Удалить поле'+'"><i class="pi pi-trash p-2"></i></a>';
+                            ctrl='<a onclick="postForm(\'_m_del/'+f[j].i+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Удалить поле'+'"><i class="pi pi-trash p-2"></i></a>';
                             if(fields!='')
-                                ctrl='<a onclick="post(\'_m_up/'+f[j].i+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Переместить поле выше'+'"><i class="pi pi-chevron-up p-2"></i></a>'
+                                ctrl='<a onclick="postForm(\'_m_up/'+f[j].i+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Переместить поле выше'+'"><i class="pi pi-chevron-up p-2"></i></a>'
                                         +ctrl;
                         }
                         if(base==0){ // This is a report field
@@ -845,8 +848,8 @@ bt[1]="_array";bt[3]="_short";bt[12]="_memo";bt[2]="_html";bt[8]="_chars";bt[10]
         <!-- End:_PanelType -->
         <h4 id="PanelHead">:val:
         <!-- Begin:_PanelHead --><!--{_request_.edit}-->
-        <a onclick="post('_m_up/:id:?next_act={_global_.action}/{_global_.id}%3Fedit%26')" title="Переместить панель выше"><i class="pi pi-chevron-up p-2"></i></a>
-        <a class="del-panel" onclick="post('_m_del/:id:?next_act={_global_.action}/{_global_.id}%3Fedit%26')" title="Удалить панель"><i class="pi pi-trash p-2"></i></a>
+        <a onclick="postForm('_m_up/:id:?next_act={_global_.action}/{_global_.id}%3Fedit%26')" title="Переместить панель выше"><i class="pi pi-chevron-up p-2"></i></a>
+        <a class="del-panel" onclick="postForm('_m_del/:id:?next_act={_global_.action}/{_global_.id}%3Fedit%26')" title="Удалить панель"><i class="pi pi-trash p-2"></i></a>
         <!-- End:_PanelHead -->
         </h4>
         :ObjectEdit:
@@ -886,7 +889,7 @@ bt[1]="_array";bt[3]="_short";bt[12]="_memo";bt[2]="_html";bt[8]="_chars";bt[10]
     	</div>
         <div id="confirm_:id:" style="display:none; border:2px #f0ad4e solid; -moz-border-radius: 10px; -webkit-border-radius:10px; -khtml-border-radius:10px; border-radius:10px; padding:6px; ">
     	<p><b>Подтвердите удаление записи</b></p>
-    	<A onclick="post('_m_del/:obj:?next_act={_global_.action}/{_global_.id}%3Fdeleted=:typ:%26up=:parent:')"><button type="button" class="btn btn-warning btn-sm m-3">Да, удалить</button></A>
+    	<A onclick="postForm('_m_del/:obj:?next_act={_global_.action}/{_global_.id}%3Fdeleted=:typ:%26up=:parent:')"><button type="button" class="btn btn-warning btn-sm m-3">Да, удалить</button></A>
     	<button type="button" class="btn btn-outline-secondary btn-sm m-3" onclick="byId('controls_:id:').style.display='block';byId('confirm_:id:').style.display='none';">&nbsp;Отменить&nbsp;</button>
     	</div>
     </div>	
