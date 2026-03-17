@@ -508,7 +508,7 @@ function myApi(m,u,b,prefix,vars){
                     .replace(':val:',json['&main.a.&uni_obj.&uni_obj_all'].val[i])
                     .replace(/:type:/g,typ)
                     .replace(/:addFieldClass:/g,chart?'hidden':'')
-                    .replace(':object:',(typ&&t[typ])?t[typ].v:chart?charts[chart].descr:'--')
+                    .replace(':object:',(typ&&t[typ])?t[typ].v:chart?charts[chart]&&charts[chart].descr:'--')
                     .replace(':reportID:',rep==''?'--':json.reqs[PanelID]['ref_161'].substring(3)) // Report ID
                     .replace(':report:',rep==''?'--':json.reqs[PanelID][161]); // Report name
 				if(json['&object_reqs'][PanelID][3].indexOf('(0)')==-1)
