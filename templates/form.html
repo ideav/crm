@@ -34,13 +34,13 @@
 <script src="/js/js.js"></script>
 <div>
 <div id="show" class="list hidden">
-<a id="showanchor" onclick="byId('FormsList').classList.remove('hidden');byId('show').classList.add('hidden')"><img class="icon8" title="Список форм" src="https://img.icons8.com/ios/25/222222/list.png"></a>
+<a id="showanchor" onclick="byId('FormsList').classList.remove('hidden');byId('show').classList.add('hidden')"><i class="pi pi-list" title="Список форм" style="padding:8px;"></i></a>
 </div>
 <div id="FormsList" class="list list-open p-3 shadow hidden" onclick="event.stopPropagation?event.stopPropagation():(event.cancelBubble=true);">
 <p>
     Выберите форму или добавьте новую
     <a id="closeList" onclick="byId('FormsList').classList.add('hidden');byId('show').classList.remove('hidden')">
-        &nbsp;&nbsp;&nbsp;&nbsp;<img class="icon8" title="Скрыть список" src="https://img.icons8.com/ios/25/222222/close-window.png">
+        &nbsp;&nbsp;&nbsp;&nbsp;<i class="pi pi-times" title="Скрыть список" style="padding:8px;"></i>
     </a>
 </p>
 <div>
@@ -318,8 +318,8 @@ function myApi(m,u,b,prefix,vars){
                 if(edit&&report[prefix][i].chosen){
                     h+='<br />';
                     if(i>0)
-                        h+='<a onclick="post(\'_m_up/'+report[prefix][i].chosen+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Переместить колонку левее'+'"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/chevron-left.png"/></a>';
-                    h+='<a onclick="post(\'_m_del/'+report[prefix][i].chosen+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Удалить колонку'+'"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/delete-sign.png"/></a>';
+                        h+='<a onclick="post(\'_m_up/'+report[prefix][i].chosen+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Переместить колонку левее'+'"><i class="pi pi-chevron-left p-2"></i></a>';
+                    h+='<a onclick="post(\'_m_del/'+report[prefix][i].chosen+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Удалить колонку'+'"><i class="pi pi-trash p-2"></i></a>';
                 }
                 h+='</B></TD>';
             }
@@ -508,7 +508,7 @@ function myApi(m,u,b,prefix,vars){
                     .replace(':val:',json['&main.a.&uni_obj.&uni_obj_all'].val[i])
                     .replace(/:type:/g,typ)
                     .replace(/:addFieldClass:/g,chart?'hidden':'')
-                    .replace(':object:',(typ&&t[typ])?t[typ].v:chart?charts[chart]&&charts[chart].descr:'--')
+                    .replace(':object:',(typ&&t[typ])?t[typ].v:chart?(charts[chart]?charts[chart].descr:'--'):'--')
                     .replace(':reportID:',rep==''?'--':json.reqs[PanelID]['ref_161'].substring(3)) // Report ID
                     .replace(':report:',rep==''?'--':json.reqs[PanelID][161]); // Report name
 				if(json['&object_reqs'][PanelID][3].indexOf('(0)')==-1)
@@ -577,9 +577,9 @@ function myApi(m,u,b,prefix,vars){
                                 break;
                             }
                         if(edit){
-                            ctrl='<a onclick="post(\'_m_del/'+f[j].i+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Удалить поле'+'"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/delete-sign.png"/></a>';
+                            ctrl='<a onclick="post(\'_m_del/'+f[j].i+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Удалить поле'+'"><i class="pi pi-trash p-2"></i></a>';
                             if(fields!='')
-                                ctrl='<a onclick="post(\'_m_up/'+f[j].i+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Переместить поле выше'+'"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/up.png"/></a>'
+                                ctrl='<a onclick="post(\'_m_up/'+f[j].i+'?next_act={_global_.action}/{_global_.id}%3Fedit%26\')" title="'+'Переместить поле выше'+'"><i class="pi pi-chevron-up p-2"></i></a>'
                                         +ctrl;
                         }
                         if(base==0){ // This is a report field
@@ -675,7 +675,7 @@ function myApi(m,u,b,prefix,vars){
                     l=json['&object_reqs'][json['&main.a.&uni_obj.&uni_obj_all'].id[i]][0]+' ('+json['&main.a.&uni_obj.&uni_obj_all'].val[i]+')</option>';
                     h+='<option value="'+json['&main.a.&uni_obj.&uni_obj_all'].id[i]+'">'+l;
                 }
-                byId('field'+prefix).innerHTML+=h;
+                if(byId('field'+prefix)) byId('field'+prefix).innerHTML+=h;
             }
             break;
         }
@@ -821,7 +821,7 @@ bt[1]="_array";bt[3]="_short";bt[12]="_memo";bt[2]="_html";bt[8]="_chars";bt[10]
     <h4 class="ml-5 mr-5" id="Title">
         :val:
         <!-- Begin:_Run --><!--{_request_.edit}-->
-        <a target=":val:" href="/{_global_.z}/form/{_global_.id}" id="runForm"><img class="icon8 ml-2 p-2" title="Запустить в новом окне" src="https://img.icons8.com/ios/25/aaaaaa/play.png"></a>
+        <a target=":val:" href="/{_global_.z}/form/{_global_.id}" id="runForm"><i class="pi pi-play ml-2 p-2" title="Запустить в новом окне"></i></a>
         <!-- End:_Run -->
     </h4>
 </center>
@@ -845,8 +845,8 @@ bt[1]="_array";bt[3]="_short";bt[12]="_memo";bt[2]="_html";bt[8]="_chars";bt[10]
         <!-- End:_PanelType -->
         <h4 id="PanelHead">:val:
         <!-- Begin:_PanelHead --><!--{_request_.edit}-->
-        <a onclick="post('_m_up/:id:?next_act={_global_.action}/{_global_.id}%3Fedit%26')" title="Переместить панель выше"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/up.png"/></a>
-        <a class="del-panel" onclick="post('_m_del/:id:?next_act={_global_.action}/{_global_.id}%3Fedit%26')" title="Удалить панель"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/6c757d/delete-sign.png"/></a>
+        <a onclick="post('_m_up/:id:?next_act={_global_.action}/{_global_.id}%3Fedit%26')" title="Переместить панель выше"><i class="pi pi-chevron-up p-2"></i></a>
+        <a class="del-panel" onclick="post('_m_del/:id:?next_act={_global_.action}/{_global_.id}%3Fedit%26')" title="Удалить панель"><i class="pi pi-trash p-2"></i></a>
         <!-- End:_PanelHead -->
         </h4>
         :ObjectEdit:
@@ -923,7 +923,7 @@ bt[1]="_array";bt[3]="_short";bt[12]="_memo";bt[2]="_html";bt[8]="_chars";bt[10]
 <input type="hidden" name="next_act" value="{_global_.action}/{_global_.id}?edit&">
 <input placeholder="Введите имя для новой панели" type="text" id="PanelName" name="t138" class="form-control">
     <b><br />Источник данных</b>
-    <a onclick="byId('add_panel').innerHTML=byId('add_panel').innerHTML==''?byId('panel').innerHTML:''"><img class="icon8 p-2" src="https://img.icons8.com/ios/25/333333/help.png"/></a>
+    <a onclick="byId('add_panel').innerHTML=byId('add_panel').innerHTML==''?byId('panel').innerHTML:''"><i class="pi pi-question-circle p-2"></i></a>
 <div id="add_panel"></div>
 	Тип:
 	<select id="PanelType" name="t184" class="form-control">
