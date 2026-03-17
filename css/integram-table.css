@@ -2108,6 +2108,7 @@
 /* Subordinate table link in main table cells */
 .subordinate-link-cell {
     text-align: center;
+    white-space: nowrap;
 }
 
 .subordinate-table-link {
