@@ -100,7 +100,8 @@ class IntegramTable{
                 compact: false,  // false = spacious (default), true = compact
                 compactForAll: true,  // true = apply compact setting to all tables without explicit setting (default)
                 pageSize: this.options.pageSize,  // Current page size
-                truncateLongValues: true  // true = truncate to 127 chars (default)
+                truncateLongValues: true,  // true = truncate to 127 chars (default)
+                hideMenuButtonLabels: false  // false = show labels below toolbar buttons (default)
             };
 
             this.filterTypes = {
@@ -1200,22 +1201,27 @@ class IntegramTable{
                             ${ this.groupingEnabled ? `
                             <div class="integram-table-settings" onclick="window.${ instanceName }.clearGrouping()" title="Очистить группировку">
                                 <i class="pi pi-undo"></i>
+                                ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">очистить</span>' : '' }
                             </div>
                             ` : '' }
                             <div class="integram-table-settings${ this.groupingEnabled ? ' active' : '' }" onclick="window.${ instanceName }.openGroupingSettings()" title="Группы">
                                 <i class="pi pi-objects-column"></i>
+                                ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">группы</span>' : '' }
                             </div>
                             ${ this.hasActiveFilters() ? `
                             <div class="integram-table-settings" onclick="window.${ instanceName }.clearAllFilters()" title="Очистить фильтры">
                                 <i class="pi pi-filter-slash"></i>
+                                ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">очистить</span>' : '' }
                             </div>
                             ` : '' }
                             <div class="integram-table-settings${ this.filtersEnabled ? ' active' : '' }" onclick="window.${ instanceName }.toggleFilters()" title="Фильтры">
                                 <i class="pi pi-filter"></i>
+                                ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">фильтры</span>' : '' }
                             </div>
                             <div class="integram-table-export-container">
                                 <div class="integram-table-settings" onclick="window.${ instanceName }.toggleExportMenu(event)" title="Экспорт">
                                     <i class="pi pi-download"></i>
+                                    ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">экспорт</span>' : '' }
                                 </div>
                                 <div class="integram-export-menu" id="${ instanceName }-export-menu" style="display: none;">
                                     <div class="export-menu-item" onclick="window.${ instanceName }.exportTable('xlsx')">
@@ -1236,12 +1242,15 @@ class IntegramTable{
                             ` : '' }
                             <div class="integram-table-settings" onclick="window.${ instanceName }.copyConfigUrl()" title="Скопировать ссылку с текущими фильтрами и группами">
                                 <i class="pi pi-copy"></i>
+                                ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">ссылка</span>' : '' }
                             </div>
                             <div class="integram-table-settings" onclick="window.${ instanceName }.openTableSettings()" title="Настройка таблицы">
                                 <i class="pi pi-cog"></i>
+                                ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">вид</span>' : '' }
                             </div>
                             <div class="integram-table-settings" onclick="window.${ instanceName }.openColumnSettings()" title="Настройка колонок">
                                 <i class="pi pi-th-large"></i>
+                                ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">колонки</span>' : '' }
                             </div>
                         </div>
                     </div>
@@ -6337,6 +6346,13 @@ class IntegramTable{
                             </label>
                         </div>
                     </div>
+
+                    <div class="table-settings-item">
+                        <label>
+                            <input type="checkbox" id="hide-menu-button-labels" ${ this.settings.hideMenuButtonLabels ? 'checked' : '' }>
+                            Скрыть подписи к кнопкам меню
+                        </label>
+                    </div>
                 </div>
                 <div style="text-align: right; margin-top: 15px;">
                     <button class="btn btn-secondary" id="close-settings-btn">Закрыть</button>
@@ -6419,6 +6435,14 @@ class IntegramTable{
                 });
             });
 
+            // Handle hide menu button labels change
+            const hideMenuButtonLabelsCheckbox = modal.querySelector('#hide-menu-button-labels');
+            hideMenuButtonLabelsCheckbox.addEventListener('change', (e) => {
+                this.settings.hideMenuButtonLabels = e.target.checked;
+                this.saveSettings();
+                this.render();
+            });
+
             overlay.addEventListener('click', () => this.closeTableSettings());
 
             // Close on Escape key (issue #595)
@@ -6447,7 +6471,8 @@ class IntegramTable{
                 compact: false,
                 compactForAll: true,
                 pageSize: 20,
-                truncateLongValues: true
+                truncateLongValues: true,
+                hideMenuButtonLabels: false
             };
             this.options.pageSize = 20;
 
@@ -7561,7 +7586,8 @@ class IntegramTable{
                 compact: this.settings.compact,
                 compactForAll: this.settings.compactForAll,
                 pageSize: this.settings.pageSize,
-                truncateLongValues: this.settings.truncateLongValues
+                truncateLongValues: this.settings.truncateLongValues,
+                hideMenuButtonLabels: this.settings.hideMenuButtonLabels
             };
             document.cookie = `${ this.options.cookiePrefix }-settings=${ JSON.stringify(settings) }; path=/; max-age=31536000`;
 
@@ -7583,6 +7609,7 @@ class IntegramTable{
                     this.settings.compactForAll = settings.compactForAll !== undefined ? settings.compactForAll : true;
                     this.settings.pageSize = settings.pageSize || 20;
                     this.settings.truncateLongValues = settings.truncateLongValues !== undefined ? settings.truncateLongValues : true;
+                    this.settings.hideMenuButtonLabels = settings.hideMenuButtonLabels !== undefined ? settings.hideMenuButtonLabels : false;
 
                     // Update options.pageSize to match loaded settings
                     this.options.pageSize = this.settings.pageSize;
