@@ -701,24 +701,6 @@ class App {
             });
         }
 
-        // Lang toggle — only bind on index.html (no lang-value span present)
-        // Cabinet page (main.html) binds its own handler in cabinet.js setupUserMenuDropdown()
-        const langToggle = document.getElementById('lang-toggle');
-        if (langToggle && !document.getElementById('lang-value')) {
-            langToggle.addEventListener('click', () => {
-                this.i18n.toggleLang();
-                // Update login button text if visible
-                const loginBtn = document.getElementById('login-btn');
-                if (loginBtn && loginBtn.style.display !== 'none') {
-                    loginBtn.textContent = this.i18n.t('nav.login');
-                }
-                // Re-render db button labels
-                if (this.auth.selectedDb) {
-                    this.auth.showDbButton();
-                }
-            });
-        }
-
         // Show/hide Yandex OAuth buttons
         if (this.yandexAuth.isEnabled()) {
             const yandexLoginBtn = document.getElementById('yandex-login-btn');
