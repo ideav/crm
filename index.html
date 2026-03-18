@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title data-i18n="page.title">Главная</title>
+    <title>Главная</title>
     <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
@@ -13,16 +13,16 @@
             <img src="images/logo.png" alt="Логотип" class="logo">
         </div>
         <div class="navbar-right">
-            <button id="theme-toggle" class="theme-toggle">🌙 <span data-i18n="nav.dark">Темная</span></button>
+            <button id="theme-toggle" class="theme-toggle">🌙 <span>Темная</span></button>
 
             <!-- Shown when no valid idb_* cookies found -->
-            <button id="login-btn" class="btn-primary-nav" style="display:none;" data-i18n="nav.login">Войти</button>
+            <button id="login-btn" class="btn-primary-nav" style="display:none;">Войти</button>
 
             <!-- Shown when authenticated: single db or idb_my -->
             <div id="db-btn-wrapper" style="display:none;" class="db-btn-wrapper">
                 <button id="db-btn" class="btn-primary-nav" onclick="window._app && window._app.navigateToDb()"></button>
                 <!-- Dropdown arrow, shown only when multiple dbs exist -->
-                <button id="db-dropdown-toggle" class="db-dropdown-toggle" style="display:none;" aria-label="Select database">&#9660;</button>
+                <button id="db-dropdown-toggle" class="db-dropdown-toggle" style="display:none;" aria-label="Выбрать базу данных">&#9660;</button>
                 <div id="db-dropdown" class="db-dropdown" style="display:none;"></div>
             </div>
         </div>
@@ -30,84 +30,702 @@
 
     <!-- Welcome section: shown by default -->
     <main class="main-content" id="welcome-section">
-        <div class="dashboard">
-            <h1 data-i18n="welcome.title">Добро пожаловать!</h1>
-            <p data-i18n="welcome.subtitle">Сервис для работы с вашими данными.</p>
-        </div>
+        <style>
+/* Welcome Page Styles */
+.welcome-container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.welcome-header {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.welcome-header h1 {
+    font-size: 1.6rem;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.welcome-header p {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+}
+
+.welcome-topics {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.welcome-topic {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.welcome-topic summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    list-style: none;
+    user-select: none;
+    transition: background 0.15s;
+}
+
+.welcome-topic summary::-webkit-details-marker {
+    display: none;
+}
+
+.welcome-topic summary::after {
+    content: '';
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    min-width: 10px;
+    border: 2px solid var(--text-secondary);
+    border-top: none;
+    border-left: none;
+    transform: rotate(-45deg);
+    transition: transform 0.2s;
+    margin-left: auto;
+    margin-top: -2px;
+}
+
+.welcome-topic[open] summary::after {
+    transform: rotate(45deg);
+    margin-top: 2px;
+}
+
+.welcome-topic summary:hover {
+    background: var(--bg-secondary);
+}
+
+.welcome-topic summary .topic-icon {
+    font-size: 1.1rem;
+    color: var(--button-primary);
+    min-width: 20px;
+    text-align: center;
+}
+
+.welcome-topic-content {
+    padding: 0 16px 16px 48px;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    line-height: 1.6;
+}
+
+.welcome-topic-content p {
+    margin-bottom: 8px;
+}
+
+.welcome-topic-content ol,
+.welcome-topic-content ul {
+    padding-left: 20px;
+    margin-bottom: 8px;
+}
+
+.welcome-topic-content li {
+    margin-bottom: 4px;
+}
+
+.welcome-topic-content strong {
+    color: var(--text-primary);
+}
+
+.welcome-topic-content code {
+    background: var(--bg-secondary);
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+}
+
+.welcome-topic-content .tip {
+    background: var(--bg-secondary);
+    border-left: 3px solid var(--button-primary);
+    padding: 8px 12px;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    margin: 8px 0;
+    font-size: 0.85rem;
+}
+
+.topic-links {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-color);
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.topic-links span {
+    font-weight: 600;
+    margin-right: 6px;
+}
+
+.topic-links a {
+    color: var(--link-color);
+    text-decoration: none;
+    margin-right: 12px;
+    white-space: nowrap;
+}
+
+.topic-links a:hover {
+    text-decoration: underline;
+}
+
+.welcome-links {
+    margin-top: 24px;
+    padding: 16px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    text-align: center;
+}
+
+.welcome-links h3 {
+    font-size: 0.95rem;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+}
+
+.welcome-links a {
+    color: var(--link-color);
+    text-decoration: none;
+    margin: 0 12px;
+    font-size: 0.9rem;
+}
+
+.welcome-links a:hover {
+    text-decoration: underline;
+}
+
+.welcome-search {
+    margin-bottom: 16px;
+    position: relative;
+}
+
+.welcome-search input {
+    width: 100%;
+    padding: 10px 16px 10px 40px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--card-bg);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color 0.15s;
+}
+
+.welcome-search input:focus {
+    border-color: var(--button-primary);
+}
+
+.welcome-search input::placeholder {
+    color: var(--text-secondary);
+}
+
+.welcome-search-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-secondary);
+    pointer-events: none;
+    font-size: 1rem;
+}
+
+.welcome-search-clear {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 1rem;
+    padding: 2px 6px;
+    display: none;
+    line-height: 1;
+}
+
+.welcome-search-clear:hover {
+    color: var(--text-primary);
+}
+
+.welcome-topic.search-hidden {
+    display: none;
+}
+
+mark.search-highlight {
+    background: var(--button-primary);
+    color: #fff;
+    border-radius: 2px;
+    padding: 0 1px;
+}
+
+.welcome-search-empty {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 24px 0;
+    font-size: 0.95rem;
+    display: none;
+}
+
+@media (max-width: 600px) {
+    .welcome-container {
+        padding: 12px;
+    }
+    .welcome-topic-content {
+        padding-left: 16px;
+    }
+}
+</style>
+
+<div class="welcome-container">
+    <div class="welcome-header">
+        <h1>Добро пожаловать в Интеграм</h1>
+        <p>Руководство по решению типовых задач. Нажмите на тему, чтобы раскрыть инструкцию.</p>
+    </div>
+
+    <div class="welcome-search">
+        <i class="pi pi-search welcome-search-icon"></i>
+        <input type="text" id="welcomeSearch" placeholder="Поиск по темам..." autocomplete="off" />
+        <button class="welcome-search-clear" id="welcomeSearchClear" aria-label="Очистить поиск">&#x2715;</button>
+    </div>
+
+    <div class="welcome-search-empty" id="welcomeSearchEmpty">Ничего не найдено</div>
+
+    <div class="welcome-topics">
+
+        <!-- 1. Начало работы -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-user topic-icon"></i>
+                Регистрация и начало работы
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Как создать аккаунт и начать работу с Интеграмом:</p>
+                <ol>
+                    <li>Перейдите на страницу регистрации и создайте аккаунт (через Google или Email).</li>
+                    <li>После регистрации будет создана ваша база данных.</li>
+                    <li>Войдите в личный кабинет — там вы можете управлять настройками аккаунта и паролем.</li>
+                    <li>На главной странице базы вы увидите навигатор данных — меню слева с разделами вашей базы.</li>
+                </ol>
+                <div class="tip">Для восстановления пароля используйте функцию «Забыли пароль?» на странице входа.</div>
+                <div class="topic-links"><span>Видео:</span><a href="https://rutube.ru/video/a9ed397b13bb7a1791499996f89463de/" target="_blank"><i class="pi pi-youtube"></i> Вводный урок — что может Интеграм</a><a href="https://rutube.ru/video/c85b3e7e11dc9f96f0f091d308968126/" target="_blank"><i class="pi pi-youtube"></i> Создаём приложение за 15 минут</a><span>Документация:</span><a href="https://help.integram.io/#rec217909544" target="_blank"><i class="pi pi-book"></i> Регистрация и установка</a></div>
+            </div>
+        </details>
+
+        <!-- 2. Модель данных -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-database topic-icon"></i>
+                Создание структуры данных (таблицы и поля)
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Модель данных в Интеграме состоит из связанных между собой таблиц. Чтобы создать структуру:</p>
+                <ol>
+                    <li>Откройте <strong>Редактор структуры</strong> (меню «Структура»).</li>
+                    <li>Создайте новую таблицу (термин) — задайте название и описание.</li>
+                    <li>Добавьте поля нужных типов: <code>SHORT</code> (короткий текст), <code>CHARS</code> (строка), <code>MEMO</code> (длинный текст), <code>DATE</code> (дата), <code>NUMBER</code> (число).</li>
+                    <li>Для выпадающих списков создайте <strong>справочные поля</strong> — они ссылаются на другую таблицу.</li>
+                    <li>Для вложенных данных (например, позиции заказа) создайте <strong>подчинённые таблицы</strong>.</li>
+                </ol>
+                <div class="tip">Справочник — это отдельная таблица для выбора значений. Подчинённая таблица — это таблица, записи которой привязаны к конкретной записи родительской таблицы.</div>
+                <div class="topic-links"><span>Видео:</span><a href="https://rutube.ru/video/c85b3e7e11dc9f96f0f091d308968126/" target="_blank"><i class="pi pi-youtube"></i> Создаём приложение за 15 минут</a><span>Документация:</span><a href="https://help.integram.io/#rec218265352" target="_blank"><i class="pi pi-book"></i> Модель данных</a><a href="https://help.integram.io/#rec218266831" target="_blank"><i class="pi pi-book"></i> Редактор структуры</a><span>Статья:</span><a href="https://vc.ru/dev/1269215-integram-kak-otlichit-podchinennuyu-tablicu-ot-spravochnika" target="_blank"><i class="pi pi-external-link"></i> Подчинённая таблица vs справочник</a></div>
+            </div>
+        </details>
+
+        <!-- 3. Работа с таблицами -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-table topic-icon"></i>
+                Работа с таблицами и записями
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Основные операции с данными:</p>
+                <ul>
+                    <li><strong>Добавление записи:</strong> откройте таблицу и нажмите кнопку добавления новой записи.</li>
+                    <li><strong>Редактирование:</strong> нажмите на запись, чтобы открыть форму редактирования.</li>
+                    <li><strong>Удаление:</strong> выберите запись и нажмите «Удалить». Система проверит, нет ли связанных данных.</li>
+                    <li><strong>Фильтрация:</strong> используйте маски и диапазоны для поиска нужных записей. Поддерживаются операторы <code>&gt;</code>, <code>&lt;</code>, <code>&gt;=</code>, <code>&lt;=</code> для чисел и дат.</li>
+                    <li><strong>Поиск в списках:</strong> в выпадающих списках работает поиск по введённым символам.</li>
+                </ul>
+                <div class="tip">Используйте служебные слова: <code>[TODAY]</code> — текущая дата, <code>[USER]</code> — текущий пользователь.</div>
+                <div class="topic-links"><span>Видео:</span><a href="https://rutube.ru/video/8b21501218c81b9afdf6c2021cd04f4d/" target="_blank"><i class="pi pi-youtube"></i> Умный отчёт для редактирования данных</a><span>Документация:</span><a href="https://help.integram.io/#rec219525382" target="_blank"><i class="pi pi-book"></i> Поиск в таблицах</a><a href="https://help.integram.io/#rec218333212" target="_blank"><i class="pi pi-book"></i> Таблицы-справочники</a></div>
+            </div>
+        </details>
+
+        <!-- 4. Отчёты и запросы -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-chart-bar topic-icon"></i>
+                Создание отчётов и запросов
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Конструктор запросов позволяет строить отчёты без знания SQL:</p>
+                <ol>
+                    <li>Перейдите в <strong>Конструктор запросов</strong>.</li>
+                    <li>Выберите таблицу-источник и нужные поля для отчёта.</li>
+                    <li>Добавьте условия фильтрации, сортировку и группировку.</li>
+                    <li>Используйте функции агрегации: <code>COUNT</code> (количество), <code>SUM</code> (сумма), <code>AVG</code> (среднее), <code>MIN</code>, <code>MAX</code>.</li>
+                    <li>Готовый отчёт можно экспортировать в Excel.</li>
+                </ol>
+                <p>Расширенные возможности:</p>
+                <ul>
+                    <li><strong>Интерактивные отчёты</strong> — с гиперссылками для перехода к записям.</li>
+                    <li><strong>Вложенные запросы</strong> — для сложной аналитики.</li>
+                    <li><strong>Параметры</strong> — передача параметров в отчёт через URL.</li>
+                    <li><strong>JSON-экспорт</strong> — для интеграции с внешними системами.</li>
+                </ul>
+                <div class="topic-links"><span>Видео:</span><a href="https://rutube.ru/video/8b21501218c81b9afdf6c2021cd04f4d/" target="_blank"><i class="pi pi-youtube"></i> Умный отчёт для редактирования данных</a><a href="https://rutube.ru/video/272216e94592d3afd90fc233396c0e9f/" target="_blank"><i class="pi pi-youtube"></i> Базовые возможности BI</a><span>Документация:</span><a href="https://help.integram.io/#rec219546651" target="_blank"><i class="pi pi-book"></i> Запросы (отчёты)</a><a href="https://help.integram.io/#rec220512147" target="_blank"><i class="pi pi-book"></i> Агрегация в отчётах</a><a href="https://help.integram.io/#rec220513366" target="_blank"><i class="pi pi-book"></i> Интерактивные отчёты</a><span>Статья:</span><a href="https://vc.ru/dev/1238972-intellektualnyi-otchet-dlya-redaktirovaniya-dannyh-v-tablicah" target="_blank"><i class="pi pi-external-link"></i> Умный отчёт для редактирования данных</a></div>
+            </div>
+        </details>
+
+        <!-- 5. Формы -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-file-edit topic-icon"></i>
+                Конструктор форм и шаблоны
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Интеграм использует систему пяти универсальных форм и HTML-шаблоны:</p>
+                <ol>
+                    <li>Формы создаются в папке <code>templates</code> вашей базы.</li>
+                    <li>В шаблонах используйте блоки данных с фигурными скобками: <code>&#123;ИмяПоля}</code> для вставки значений.</li>
+                    <li>Для доступа к родительским данным: <code>&#123;_parent_.ИмяПоля}</code>.</li>
+                    <li>Для параметров запроса: <code>&#123;_request_.ИмяПоля}</code>.</li>
+                    <li>Для глобальных констант: <code>&#123;_global_.ИмяКонстанты}</code>.</li>
+                </ol>
+                <div class="tip">Шаблоны можно редактировать локально и загружать через меню «Файлы».</div>
+                <div class="topic-links"><span>Видео:</span><a href="https://rutube.ru/video/db1ca2d9f407d9d1c286129217f55706/" target="_blank"><i class="pi pi-youtube"></i> Печатные формы — создание из Excel</a><a href="https://rutube.ru/video/549098cbb63fb386a1cf1958eaa6bf40/" target="_blank"><i class="pi pi-youtube"></i> Бесплатная форма заявок для сайта</a><span>Документация:</span><a href="https://help.integram.io/#rec220711628" target="_blank"><i class="pi pi-book"></i> Пользовательские HTML-формы</a><a href="https://help.integram.io/#rec220711265" target="_blank"><i class="pi pi-book"></i> Генерация веб-страниц</a><span>Статья:</span><a href="https://vc.ru/id568649/1810140-kak-redaktirovat-shablon-integrama-lokalno" target="_blank"><i class="pi pi-external-link"></i> Редактирование шаблона локально</a></div>
+            </div>
+        </details>
+
+        <!-- 6. Импорт и экспорт данных -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-upload topic-icon"></i>
+                Импорт и экспорт данных
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Как загружать и выгружать данные:</p>
+                <ul>
+                    <li><strong>Импорт из Excel:</strong> подготовьте таблицу с заголовками, соответствующими полям в Интеграме, и загрузите через меню импорта.</li>
+                    <li><strong>Формат BKI:</strong> специальный формат для обмена данными между базами Интеграма, поддерживает иерархическую структуру.</li>
+                    <li><strong>Нормализация данных:</strong> при загрузке плоских таблиц из Excel данные автоматически распределяются по связанным таблицам.</li>
+                    <li><strong>Экспорт:</strong> любой отчёт можно выгрузить в Excel или JSON.</li>
+                </ul>
+                <div class="tip">При импорте данных из Excel рекомендуется сначала создать справочники, а затем загружать основные таблицы.</div>
+                <div class="topic-links"><span>Видео:</span><a href="https://rutube.ru/video/27a33314960dd37c713fe0773e664a67/" target="_blank"><i class="pi pi-youtube"></i> Загрузка подчинённых таблиц из файла</a><span>Документация:</span><a href="https://help.integram.io/#rec219528044" target="_blank"><i class="pi pi-book"></i> Экспорт и импорт данных</a><span>Статья:</span><a href="https://vc.ru/dev/1046757-normalizaciya-dannyh-iz-tablic-excel-v-integrale" target="_blank"><i class="pi pi-external-link"></i> Нормализация данных из Excel</a></div>
+            </div>
+        </details>
+
+        <!-- 7. Права доступа -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-lock topic-icon"></i>
+                Настройка прав доступа
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Система ролей позволяет гибко управлять доступом:</p>
+                <ol>
+                    <li>Создайте <strong>роли</strong> для разных групп пользователей.</li>
+                    <li>Назначьте права на уровне таблиц — какие таблицы видны каждой роли.</li>
+                    <li>Настройте права на уровне полей — какие поля доступны для просмотра и редактирования.</li>
+                    <li>Используйте маски для ограничения по значениям — например, менеджер видит только свои записи.</li>
+                    <li>При необходимости настройте гостевой (анонимный) доступ.</li>
+                </ol>
+                <div class="tip">Можно ограничить отдельные операции для ролей: экспорт, удаление, изменение определённых полей.</div>
+                <div class="topic-links"><span>Документация:</span><a href="https://help.integram.io/#rec220708794" target="_blank"><i class="pi pi-book"></i> Управление доступом пользователей</a></div>
+            </div>
+        </details>
+
+        <!-- 8. API и интеграции -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-link topic-icon"></i>
+                API и интеграция с внешними сервисами
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Интеграм предоставляет API для взаимодействия с внешними системами:</p>
+                <ul>
+                    <li><strong>Серверный API:</strong> вызовы с префиксом <code>api/</code> для серверных операций.</li>
+                    <li><strong>JSON-запросы:</strong> получайте данные отчётов в формате JSON для использования в других приложениях.</li>
+                    <li><strong>Авторизация:</strong> используйте HTTP Basic Authentication с API-пользователем.</li>
+                    <li><strong>Внешние источники:</strong> подключайте данные из внешних HTTP-сервисов с помощью шаблонов запросов.</li>
+                    <li><strong>Power BI:</strong> подключайте отчёты Интеграма как источник данных в Power BI через JSON-экспорт.</li>
+                </ul>
+                <div class="tip">Для работы с API создайте отдельного пользователя с паролем и назначьте ему роль с нужными правами.</div>
+                <div class="topic-links"><span>Документация:</span><a href="https://help.integram.io/#rec220713947" target="_blank"><i class="pi pi-book"></i> API Интеграма</a><a href="https://help.integram.io/#rec220707188" target="_blank"><i class="pi pi-book"></i> Внешние источники данных</a><a href="https://help.integram.io/#rec220706787" target="_blank"><i class="pi pi-book"></i> JSON-экспорт</a><span>Статья:</span><a href="https://vc.ru/id568649/1928389-integratsiya-power-bi-s-integram" target="_blank"><i class="pi pi-external-link"></i> Интеграция Power BI с Интеграм</a></div>
+            </div>
+        </details>
+
+        <!-- 9. Массовые операции -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-sync topic-icon"></i>
+                Массовые операции с данными
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Запросы модификации данных позволяют выполнять массовые операции:</p>
+                <ul>
+                    <li><strong>Массовое обновление:</strong> изменение значений в нескольких записях одновременно с помощью запросов <code>UPDATE</code>.</li>
+                    <li><strong>Создание записей:</strong> автоматическое создание записей по условию с помощью <code>CREATE</code>.</li>
+                    <li><strong>Удаление:</strong> массовое удаление записей по фильтру с помощью <code>DELETE</code>.</li>
+                    <li><strong>Интеллектуальные отчёты:</strong> редактирование данных нескольких таблиц прямо в отчёте (как в Excel).</li>
+                </ul>
+                <div class="tip">Перед массовыми операциями рекомендуется сначала проверить выборку через обычный отчёт.</div>
+                <div class="topic-links"><span>Видео:</span><a href="https://rutube.ru/video/8b21501218c81b9afdf6c2021cd04f4d/" target="_blank"><i class="pi pi-youtube"></i> Умный отчёт для редактирования данных</a><span>Документация:</span><a href="https://help.integram.io/#rec220520254" target="_blank"><i class="pi pi-book"></i> Запросы модификации данных</a><span>Статья:</span><a href="https://vc.ru/dev/1238972-intellektualnyi-otchet-dlya-redaktirovaniya-dannyh-v-tablicah" target="_blank"><i class="pi pi-external-link"></i> Умный отчёт для редактирования данных</a></div>
+            </div>
+        </details>
+
+        <!-- 10. Служебные функции -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-cog topic-icon"></i>
+                Служебные функции и формулы
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Встроенные функции для работы с данными:</p>
+                <ul>
+                    <li><code>abn_DATE2STR</code> — преобразование даты в строку.</li>
+                    <li><code>abn_NUM2STR</code> — число прописью.</li>
+                    <li><code>abn_ID</code> — получение идентификатора текущей записи.</li>
+                    <li>Стандартные MySQL-функции: <code>CONCAT</code>, <code>SUBSTRING</code>, <code>IF</code>, <code>CASE</code> и другие.</li>
+                    <li><strong>Кнопки (тип BUTTON):</strong> создание кнопок, которые выполняют действия с контекстом текущей записи. Поддерживают подстановку <code>ID</code> и <code>VAL</code>.</li>
+                </ul>
+                <div class="tip">Полный список функций доступен в документации: <a href="https://help.integram.io/" target="_blank">help.integram.io</a>.</div>
+                <div class="topic-links"><span>Документация:</span><a href="https://help.integram.io/#rec220713443" target="_blank"><i class="pi pi-book"></i> Служебные слова и функции</a><a href="https://help.integram.io/#rec220708044" target="_blank"><i class="pi pi-book"></i> Кнопки (тип BUTTON)</a></div>
+            </div>
+        </details>
+
+        <!-- 11. Телеграм-интеграция -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-send topic-icon"></i>
+                Формы с оповещением в Телеграм
+            </summary>
+            <div class="welcome-topic-content">
+                <p>Как создать форму заявок с уведомлениями в Телеграм:</p>
+                <ol>
+                    <li>Создайте таблицу для хранения заявок с нужными полями.</li>
+                    <li>Настройте HTML-форму с помощью конструктора форм.</li>
+                    <li>Подключите Телеграм-бота для отправки уведомлений о новых заявках.</li>
+                    <li>Настройте триггер — при создании новой записи бот отправит сообщение в указанный чат.</li>
+                </ol>
+                <div class="tip">Это позволяет создать единую систему: форма на сайте, данные в реляционной базе и мгновенные уведомления в Телеграм.</div>
+                <div class="topic-links"><span>Видео:</span><a href="https://rutube.ru/video/549098cbb63fb386a1cf1958eaa6bf40/" target="_blank"><i class="pi pi-youtube"></i> Бесплатная форма заявок для сайта за 5 минут</a><span>Статья:</span><a href="https://vc.ru/id568649/1651720-forma-zayavok-na-sait-s-opovesheniem-v-telegram-za-10-minut-no-code" target="_blank"><i class="pi pi-external-link"></i> Форма заявок с оповещением в Телеграм за 10 минут</a></div>
+            </div>
+        </details>
+
+        <!-- 12. Работа с файлами -->
+        <details class="welcome-topic">
+            <summary>
+                <i class="pi pi-folder topic-icon"></i>
+                Управление файлами
+            </summary>
+            <div class="welcome-topic-content">
+                <p>В Интеграме есть встроенная система управления файлами:</p>
+                <ul>
+                    <li><strong>Загрузка файлов:</strong> используйте меню «Файлы» для загрузки файлов в базу.</li>
+                    <li><strong>Шаблоны:</strong> HTML-шаблоны хранятся в папке <code>templates</code> и редактируются через встроенный редактор или локально.</li>
+                    <li><strong>CSS и JS:</strong> стили и скрипты загружаются в соответствующие папки и подключаются к шаблонам.</li>
+                    <li><strong>Подключение файлов:</strong> используйте конструкцию <code>&lt;!-- File: имя_файла --&gt;</code> для включения одного шаблона в другой.</li>
+                </ul>
+                <div class="topic-links"><span>Документация:</span><a href="https://help.integram.io/#rec220710557" target="_blank"><i class="pi pi-book"></i> Пользовательские файлы</a><span>Статья:</span><a href="https://vc.ru/id568649/1810140-kak-redaktirovat-shablon-integrama-lokalno" target="_blank"><i class="pi pi-external-link"></i> Редактирование шаблона Интеграма локально</a></div>
+            </div>
+        </details>
+
+    </div>
+
+    <script>
+    (function() {
+        var searchInput = document.getElementById('welcomeSearch');
+        var clearBtn = document.getElementById('welcomeSearchClear');
+        var emptyMsg = document.getElementById('welcomeSearchEmpty');
+        var topics = document.querySelectorAll('.welcome-topic');
+
+        // Store original HTML of each topic to restore highlights
+        var origSummaries = [];
+        var origContents = [];
+        topics.forEach(function(topic, i) {
+            var summary = topic.querySelector('summary');
+            var content = topic.querySelector('.welcome-topic-content');
+            origSummaries[i] = summary ? summary.innerHTML : '';
+            origContents[i] = content ? content.innerHTML : '';
+        });
+
+        function escapeRegex(str) {
+            return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
+        function highlight(html, query) {
+            if (!query) return html;
+            // Work on text nodes only by using a temporary div
+            var tmp = document.createElement('div');
+            tmp.innerHTML = html;
+            highlightNode(tmp, query);
+            return tmp.innerHTML;
+        }
+
+        function highlightNode(node, query) {
+            if (node.nodeType === 3) {
+                var re = new RegExp('(' + escapeRegex(query) + ')', 'gi');
+                if (re.test(node.nodeValue)) {
+                    var span = document.createElement('span');
+                    span.innerHTML = node.nodeValue.replace(re, '<mark class="search-highlight">$1</mark>');
+                    node.parentNode.replaceChild(span, node);
+                }
+            } else if (node.nodeType === 1 && node.nodeName !== 'SCRIPT' && node.nodeName !== 'STYLE') {
+                Array.from(node.childNodes).forEach(function(child) {
+                    highlightNode(child, query);
+                });
+            }
+        }
+
+        function doSearch(query) {
+            var q = query.trim().toLowerCase();
+            var visibleCount = 0;
+
+            topics.forEach(function(topic, i) {
+                var summary = topic.querySelector('summary');
+                var content = topic.querySelector('.welcome-topic-content');
+
+                // Restore original HTML first
+                if (summary) summary.innerHTML = origSummaries[i];
+                if (content) content.innerHTML = origContents[i];
+
+                if (!q) {
+                    topic.classList.remove('search-hidden');
+                    topic.removeAttribute('open');
+                    visibleCount++;
+                    return;
+                }
+
+                var summaryText = summary ? summary.textContent.toLowerCase() : '';
+                var contentText = content ? content.textContent.toLowerCase() : '';
+                var matches = summaryText.indexOf(q) !== -1 || contentText.indexOf(q) !== -1;
+
+                if (matches) {
+                    topic.classList.remove('search-hidden');
+                    topic.setAttribute('open', '');
+                    // Highlight
+                    if (summary) summary.innerHTML = highlight(origSummaries[i], query.trim());
+                    if (content) content.innerHTML = highlight(origContents[i], query.trim());
+                    visibleCount++;
+                } else {
+                    topic.classList.add('search-hidden');
+                    topic.removeAttribute('open');
+                }
+            });
+
+            clearBtn.style.display = q ? 'block' : 'none';
+            emptyMsg.style.display = (q && visibleCount === 0) ? 'block' : 'none';
+        }
+
+        searchInput.addEventListener('input', function() {
+            doSearch(this.value);
+        });
+
+        clearBtn.addEventListener('click', function() {
+            searchInput.value = '';
+            doSearch('');
+            searchInput.focus();
+        });
+    })();
+    </script>
+
+    <div class="welcome-links">
+        <h3>Полезные ресурсы</h3>
+        <a href="https://rutube.ru/channel/41204904/videos/" target="_blank"><i class="pi pi-youtube"></i> RUTUBE-канал</a>
+        <a href="https://help.integram.io/" target="_blank"><i class="pi pi-book"></i> Документация</a>
+        <a href="https://vc.ru/id568649" target="_blank"><i class="pi pi-external-link"></i> Статьи и примеры</a>
+    </div>
+</div>
     </main>
 
-    <!-- Auth panel: shown when "Войти" is clicked -->
+    <!-- Auth panel: shown when "Войти" is clicked or when navigating to ЛК without token -->
     <div id="auth-panel" class="auth-container" style="display:none;">
-        <div class="auth-card">
+        <div class="auth-card" style="position:relative;">
+            <!-- Close button as icon in top-right corner -->
+            <button id="close-auth" class="auth-close-btn" aria-label="Закрыть">&#10005;</button>
+
             <!-- Tab switcher -->
             <div class="auth-tabs">
-                <button id="tab-login" class="auth-tab auth-tab-active" data-i18n="auth.loginTab">Вход</button>
-                <button id="tab-register" class="auth-tab" data-i18n="auth.registerTab">Регистрация</button>
+                <button id="tab-login" class="auth-tab auth-tab-active">Вход</button>
+                <button id="tab-register" class="auth-tab">Регистрация</button>
             </div>
 
             <!-- Login form -->
             <div id="login-section">
-                <h1 data-i18n="auth.loginTitle">Вход</h1>
-                <p data-i18n="auth.loginSubtitle">Войдите в свой аккаунт</p>
-
                 <form id="login-form">
+                    <!-- DB selector -->
+                    <div class="form-group" id="auth-db-group">
+                        <label for="auth-db-select">База данных</label>
+                        <select id="auth-db-select" class="auth-db-select">
+                            <option value="my">Личный кабинет</option>
+                        </select>
+                    </div>
                     <div class="form-group">
-                        <label for="login-email" data-i18n="auth.email">Email адрес</label>
+                        <label for="login-email">Email адрес</label>
                         <input type="email" id="login-email" name="email" required placeholder="your@email.com">
                     </div>
                     <div class="form-group">
-                        <label for="login-password" data-i18n="auth.password">Пароль</label>
+                        <label for="login-password">Пароль</label>
                         <input type="password" id="login-password" name="password" required>
                     </div>
-                    <button type="submit" class="btn-primary" data-i18n="auth.loginBtn">Войти</button>
+                    <button type="submit" class="btn-primary">Войти</button>
                 </form>
 
-                <div id="yandex-divider" class="auth-divider" style="display:none;" data-i18n="auth.or">или</div>
+                <div id="yandex-divider" class="auth-divider" style="display:none;">или</div>
                 <div class="oauth-buttons-container">
                     <button type="button" id="yandex-login-btn" class="btn-yandex btn-oauth-compact" style="display:none;">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M12.002 0C5.375 0 0 5.375 0 12s5.375 12 12.002 12C18.626 24 24 18.625 24 12S18.626 0 12.002 0zM15.24 16.2h-1.68V8.04h-1.2c-1.637 0-2.52.818-2.52 2.045 0 1.39.597 2.047 1.843 2.87l1.017.676-2.903 4.57H7.92l2.676-3.913C9.08 13.18 8.16 12.11 8.16 10.016c0-2.24 1.554-3.696 4.306-3.696h2.774v9.88z"/>
                         </svg>
-                        <span class="btn-text" data-i18n="auth.yandex">Яндекс</span>
+                        <span class="btn-text">Войти через Яндекс</span>
                     </button>
                 </div>
             </div>
 
             <!-- Register form -->
             <div id="register-section" style="display:none;">
-                <h1 data-i18n="auth.registerTitle">Регистрация</h1>
-                <p data-i18n="auth.registerSubtitle">Создайте новый аккаунт</p>
-
                 <form id="register-form">
                     <div class="form-group">
-                        <label for="reg-email" data-i18n="auth.email">Email адрес</label>
+                        <label for="reg-email">Email адрес</label>
                         <input type="email" id="reg-email" name="email" required placeholder="your@email.com">
                     </div>
                     <div class="form-group">
-                        <label for="reg-password" data-i18n="auth.password">Пароль</label>
+                        <label for="reg-password">Пароль</label>
                         <input type="password" id="reg-password" name="password" required minlength="6">
                     </div>
                     <div class="form-group">
-                        <label for="reg-confirm-password" data-i18n="auth.confirmPassword">Подтвердите пароль</label>
+                        <label for="reg-confirm-password">Подтвердите пароль</label>
                         <input type="password" id="reg-confirm-password" name="confirm-password" required>
                     </div>
-                    <button type="submit" class="btn-primary" data-i18n="auth.registerBtn">Зарегистрироваться</button>
+                    <button type="submit" class="btn-primary">Зарегистрироваться</button>
                 </form>
 
-                <div id="yandex-reg-divider" class="auth-divider" style="display:none;" data-i18n="auth.or">или</div>
+                <div id="yandex-reg-divider" class="auth-divider" style="display:none;">или</div>
                 <div class="oauth-buttons-container">
                     <button type="button" id="yandex-register-btn" class="btn-yandex btn-oauth-compact" style="display:none;">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M12.002 0C5.375 0 0 5.375 0 12s5.375 12 12.002 12C18.626 24 24 18.625 24 12S18.626 0 12.002 0zM15.24 16.2h-1.68V8.04h-1.2c-1.637 0-2.52.818-2.52 2.045 0 1.39.597 2.047 1.843 2.87l1.017.676-2.903 4.57H7.92l2.676-3.913C9.08 13.18 8.16 12.11 8.16 10.016c0-2.24 1.554-3.696 4.306-3.696h2.774v9.88z"/>
                         </svg>
-                        <span class="btn-text" data-i18n="auth.yandex">Яндекс</span>
+                        <span class="btn-text">Войти через Яндекс</span>
                     </button>
                 </div>
-            </div>
-
-            <!-- Close auth panel -->
-            <div class="auth-links">
-                <a href="#" id="close-auth" data-i18n="auth.close">&#10005; Закрыть</a>
             </div>
         </div>
     </div>

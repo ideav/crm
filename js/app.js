@@ -1,5 +1,6 @@
 // ============================================================
-// Internationalization (i18n)
+// Minimal I18nManager stub (used by cabinet.js)
+// Only Russian language is supported
 // ============================================================
 const I18N = {
     ru: {
@@ -10,26 +11,6 @@ const I18N = {
         'nav.cabinet': 'Личный кабинет',
         'welcome.title': 'Добро пожаловать!',
         'welcome.subtitle': 'Сервис для работы с вашими данными.',
-        'auth.loginTab': 'Вход',
-        'auth.registerTab': 'Регистрация',
-        'auth.loginTitle': 'Вход',
-        'auth.loginSubtitle': 'Войдите в свой аккаунт',
-        'auth.registerTitle': 'Регистрация',
-        'auth.registerSubtitle': 'Создайте новый аккаунт',
-        'auth.email': 'Email адрес',
-        'auth.password': 'Пароль',
-        'auth.confirmPassword': 'Подтвердите пароль',
-        'auth.loginBtn': 'Войти',
-        'auth.registerBtn': 'Зарегистрироваться',
-        'auth.or': 'или',
-        'auth.yandex': 'Яндекс',
-        'auth.close': '✕ Закрыть',
-        'msg.passwordMismatch': 'Пароли не совпадают',
-        'msg.passwordShort': 'Пароль должен содержать минимум 6 символов',
-        'msg.loginSuccess': 'Вход выполнен успешно!',
-        'msg.registerSuccess': 'Регистрация прошла успешно. Проверьте вашу почту для подтверждения.',
-        'msg.loginError': 'Ошибка входа: ',
-        'msg.registerError': 'Ошибка регистрации: ',
         // Cabinet translations
         'cabinet.title': 'Личный кабинет',
         'cabinet.logout': 'Выйти',
@@ -125,154 +106,24 @@ const I18N = {
         'cabinet.referrals.maturedNote': '* Прошло не менее месяца с момента совершения платежа',
         'cabinet.referrals.withdraw': 'Вывести средства',
         'cabinet.referrals.withdrawInfo': 'Функция вывода средств будет доступна позже'
-    },
-    en: {
-        'page.title': 'Home',
-        'nav.dark': 'Dark',
-        'nav.light': 'Light',
-        'nav.login': 'Sign In',
-        'nav.cabinet': 'Personal Cabinet',
-        'welcome.title': 'Welcome!',
-        'welcome.subtitle': 'Service for working with your data.',
-        'auth.loginTab': 'Sign In',
-        'auth.registerTab': 'Register',
-        'auth.loginTitle': 'Sign In',
-        'auth.loginSubtitle': 'Sign in to your account',
-        'auth.registerTitle': 'Register',
-        'auth.registerSubtitle': 'Create a new account',
-        'auth.email': 'Email address',
-        'auth.password': 'Password',
-        'auth.confirmPassword': 'Confirm password',
-        'auth.loginBtn': 'Sign In',
-        'auth.registerBtn': 'Register',
-        'auth.or': 'or',
-        'auth.yandex': 'Yandex',
-        'auth.close': '✕ Close',
-        'msg.passwordMismatch': 'Passwords do not match',
-        'msg.passwordShort': 'Password must be at least 6 characters',
-        'msg.loginSuccess': 'Signed in successfully!',
-        'msg.registerSuccess': 'Registration successful. Please check your email for confirmation.',
-        'msg.loginError': 'Login error: ',
-        'msg.registerError': 'Registration error: ',
-        // Cabinet translations
-        'cabinet.title': 'Personal Cabinet',
-        'cabinet.logout': 'Sign Out',
-        'cabinet.userMenu.language': 'Language',
-        'cabinet.userMenu.theme': 'Theme',
-        'cabinet.loading': 'Loading data...',
-        'cabinet.menu.profile': 'Profile',
-        'cabinet.menu.balance': 'Balance',
-        'cabinet.menu.databases': 'Databases',
-        'cabinet.menu.access': 'Access',
-        'cabinet.menu.bonuses': 'Bonuses',
-        'cabinet.menu.referrals': 'Referral Program',
-        'cabinet.profile.title': 'Profile',
-        'cabinet.profile.name': 'Name',
-        'cabinet.profile.phone': 'Phone',
-        'cabinet.profile.email': 'Email',
-        'cabinet.profile.emailHint': 'Email cannot be changed',
-        'cabinet.profile.about': 'About me',
-        'cabinet.profile.photo': 'Photo',
-        'cabinet.profile.uploadPhoto': 'Upload photo',
-        'cabinet.profile.save': 'Save changes',
-        'cabinet.profile.saveSuccess': 'Profile saved',
-        'cabinet.profile.saveError': 'Error saving profile',
-        'cabinet.profile.tariffTitle': 'Tariff Information',
-        'cabinet.profile.yourTariff': 'Your tariff',
-        'cabinet.profile.nextCharge': 'Next charge',
-        'cabinet.profile.chargeDescription': 'Billing is done once a month, resetting resource counters for all your databases. If resource usage exceeds the plan limit, you need to upgrade your plan to continue working. Learn more about plans.',
-        'cabinet.profile.usageNow': 'Currently you have used',
-        'cabinet.profile.resourceUnits': 'resource units or',
-        'cabinet.profile.fromLimit': 'of the free plan limit of',
-        'cabinet.profile.units': 'units.',
-        'cabinet.profile.changePlanText': 'To change your plan, you need sufficient funds in your account. You can top up your account here by selecting the desired plan:',
-        'cabinet.profile.changePlan': 'Change plan',
-        'cabinet.profile.planChangeInfo': 'Please contact support to change your plan',
-        'cabinet.balance.title': 'Balance',
-        'cabinet.balance.description': 'Your account funds are used to pay for the tariff plan. You can top up your account with a bank card or transfer, as well as convert bonuses and referral earnings.',
-        'cabinet.balance.current': 'Current balance:',
-        'cabinet.balance.currency': 'RUB',
-        'cabinet.balance.usageToday': 'Today you have used approximately',
-        'cabinet.balance.resourceUnits': 'resource units or',
-        'cabinet.balance.fromLimit': 'of the free plan limit of',
-        'cabinet.balance.units': 'units.',
-        'cabinet.balance.historyNote': 'Your complete transaction history is stored here.',
-        'cabinet.balance.historyTitle': 'Transaction History',
-        'cabinet.balance.date': 'Date',
-        'cabinet.balance.amount': 'Amount',
-        'cabinet.balance.note': 'Note',
-        'cabinet.balance.noHistory': 'No transactions',
-        'cabinet.balance.addFunds': 'Add funds',
-        'cabinet.balance.addFundsInfo': 'Add funds feature will be available soon',
-        'cabinet.databases.title': 'Databases',
-        'cabinet.databases.description': 'List of my databases',
-        'cabinet.databases.noData': 'No databases',
-        'cabinet.databases.template': 'Template:',
-        'cabinet.databases.records': 'Records:',
-        'cabinet.databases.planDate': 'Paid until:',
-        'cabinet.databases.open': 'Open',
-        'cabinet.access.title': 'Access',
-        'cabinet.access.description': 'List of databases with assigned users',
-        'cabinet.access.noData': 'No access data',
-        'cabinet.bonuses.title': 'Bonuses',
-        'cabinet.bonuses.description': 'You receive bonuses upon registration and for certain actions: completing lessons, social media activity, and participating in Integral promotions. Current offers will be sent to your email.',
-        'cabinet.bonuses.current': 'Current bonuses:',
-        'cabinet.bonuses.convertDescription': 'Bonuses can be converted to your deposit currency and used to top up your account balance: 1 bonus = 1 ruble.',
-        'cabinet.bonuses.historyNote': 'Your bonus transaction history is stored in the Balance section.',
-        'cabinet.bonuses.convert': 'Convert bonuses',
-        'cabinet.bonuses.noBonuses': 'You have no bonuses to convert',
-        'cabinet.bonuses.convertInfo': 'Bonus conversion feature will be available soon',
-        'cabinet.referrals.title': 'Referral Program',
-        'cabinet.referrals.aboutTitle': 'About the Program',
-        'cabinet.referrals.aboutDescription': 'You receive a 15% reward for every Ideav service payment made by a client who was referred through your referral link or promo code. The program also applies to service renewal payments.',
-        'cabinet.referrals.withdrawDescription': 'This reward can be withdrawn to your bank card or transferred to a bank account in Russia. Withdrawal is available one month after the client\'s payment.',
-        'cabinet.referrals.convertDescription': 'You can also convert your referral reward to your balance to pay for Ideav services.',
-        'cabinet.referrals.yourLinks': 'Your referral links:',
-        'cabinet.referrals.registration': 'Registration:',
-        'cabinet.referrals.site': 'Integral website:',
-        'cabinet.referrals.rulesTitle': 'Rules',
-        'cabinet.referrals.rule1': 'Rewards are paid via SBP (Fast Payment System) or bank transfer one month after each payment from the referred client. Payment system fees are deducted from the partner\'s reward.',
-        'cabinet.referrals.rule2': 'Do not try to get a discount by purchasing services for yourself. We monitor this.',
-        'cabinet.referrals.rule3': 'Minimum withdrawal amount: 360 rubles.',
-        'cabinet.referrals.rule4': 'Client acquisition through email campaigns is prohibited.',
-        'cabinet.referrals.rule5': 'Client acquisition through contextual advertising using the Integral brand is prohibited.',
-        'cabinet.referrals.rule6': 'Setting referral cookies without the user\'s direct click on the referral link is prohibited.',
-        'cabinet.referrals.agreement': 'Partner Agreement',
-        'cabinet.referrals.statsTitle': 'Statistics',
-        'cabinet.referrals.statsDescription': 'Statistics on client referrals, payments, and your rewards will be displayed here.',
-        'cabinet.referrals.clients': 'Clients',
-        'cabinet.referrals.payments': 'Payments',
-        'cabinet.referrals.matured': 'Matured*',
-        'cabinet.referrals.commission': 'Commission',
-        'cabinet.referrals.paid': 'Paid',
-        'cabinet.referrals.toPay': 'To pay',
-        'cabinet.referrals.maturedNote': '* At least one month has passed since the payment',
-        'cabinet.referrals.withdraw': 'Withdraw funds',
-        'cabinet.referrals.withdrawInfo': 'Withdrawal feature will be available soon'
     }
 };
 
 class I18nManager {
     constructor() {
-        this.lang = localStorage.getItem('lang') || 'ru';
+        this.lang = 'ru';
     }
 
     t(key) {
-        return (I18N[this.lang] && I18N[this.lang][key]) || (I18N['ru'][key]) || key;
+        return (I18N.ru && I18N.ru[key]) || key;
     }
 
     setLang(lang) {
-        if (I18N[lang]) {
-            this.lang = lang;
-            localStorage.setItem('lang', lang);
-            this.applyAll();
-        }
+        // Only Russian supported
     }
 
     toggleLang() {
-        const langs = Object.keys(I18N);
-        const idx = langs.indexOf(this.lang);
-        this.setLang(langs[(idx + 1) % langs.length]);
+        // Only Russian supported
     }
 
     applyAll() {
@@ -281,16 +132,9 @@ class I18nManager {
             el.textContent = this.t(key);
         });
         document.title = this.t('page.title');
-        // Update lang value span if present (cabinet user menu structure)
         const langValue = document.getElementById('lang-value');
         if (langValue) {
-            langValue.textContent = this.lang.toUpperCase();
-        } else {
-            // Fallback for index.html simple lang toggle button
-            const langToggle = document.getElementById('lang-toggle');
-            if (langToggle && !langToggle.querySelector('[data-i18n]')) {
-                langToggle.textContent = this.lang.toUpperCase();
-            }
+            langValue.textContent = 'RU';
         }
     }
 }
@@ -299,8 +143,7 @@ class I18nManager {
 // Theme management
 // ============================================================
 class ThemeManager {
-    constructor(i18n) {
-        this.i18n = i18n;
+    constructor() {
         this.theme = localStorage.getItem('theme') || 'light';
         this.applyTheme();
     }
@@ -325,16 +168,13 @@ class ThemeManager {
             themeIcon.textContent = isDark ? '☀️' : '🌙';
         }
         if (themeValue) {
-            const key = isDark ? 'nav.light' : 'nav.dark';
-            themeValue.textContent = this.i18n.t(key);
-            themeValue.setAttribute('data-i18n', key);
+            themeValue.textContent = isDark ? 'Светлая' : 'Темная';
         }
         // Fallback for index.html simple theme toggle button (no structured spans)
         if (!themeIcon && !themeValue) {
             const themeToggle = document.getElementById('theme-toggle');
             if (themeToggle) {
-                const labelKey = isDark ? 'nav.light' : 'nav.dark';
-                themeToggle.innerHTML = (isDark ? '☀️ ' : '🌙 ') + '<span data-i18n="' + labelKey + '">' + this.i18n.t(labelKey) + '</span>';
+                themeToggle.innerHTML = (isDark ? '☀️ ' : '🌙 ') + '<span>' + (isDark ? 'Светлая' : 'Темная') + '</span>';
             }
         }
     }
@@ -347,6 +187,15 @@ const CookieUtil = {
     get(name) {
         const match = document.cookie.match(new RegExp('(?:^|; )' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
         return match ? decodeURIComponent(match[1]) : null;
+    },
+    set(name, value, days) {
+        let expires = '';
+        if (days) {
+            const d = new Date();
+            d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
+            expires = '; expires=' + d.toUTCString();
+        }
+        document.cookie = name + '=' + encodeURIComponent(value) + expires + '; path=/';
     },
     delete(name) {
         document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
@@ -476,44 +325,51 @@ class YandexAuthManager {
 // Authentication & UI controller
 // ============================================================
 class AuthManager {
-    constructor(apiConfig, i18n) {
+    constructor(apiConfig) {
         this.apiConfig = apiConfig;
-        this.i18n = i18n;
-        this.validDbs = []; // list of db names from idb_* cookies, ordered (idb_my first)
+        this.validDbs = []; // list of db names from idb_* cookies with valid tokens (excluding 'my')
+        this.allIdbDbs = []; // all db names from idb_* cookies (including 'my')
         this.selectedDb = null;
     }
 
     init() {
         const dbNames = CookieUtil.getAllIdb();
+        this.allIdbDbs = dbNames;
+
         if (dbNames.length === 0) {
             this.showLoginButton();
             return;
         }
 
-        // Sort: idb_my first, then others
-        dbNames.sort((a, b) => {
-            if (a === 'my') return -1;
-            if (b === 'my') return 1;
-            return a.localeCompare(b);
-        });
+        // Filter out 'my' for regular db list, sort alphabetically
+        const otherDbs = dbNames.filter(d => d !== 'my').sort((a, b) => a.localeCompare(b));
 
-        // Use cookie presence as proxy for db availability; token validation
-        // happens only when user selects a db (see navigateToDb / renderDropdown).
-        this.validDbs = dbNames;
+        // Use cookie presence as proxy for db availability
+        this.validDbs = otherDbs;
 
-        this.selectedDb = this.validDbs[0];
+        // Always show db-btn-wrapper when any idb_* tokens exist (ЛК always shown)
+        // Set selectedDb: prefer last used (from cookie), else first non-my db, else 'my'
+        const lastUsed = CookieUtil.get('last_db');
+        if (lastUsed && (lastUsed === 'my' || this.validDbs.includes(lastUsed))) {
+            this.selectedDb = lastUsed;
+        } else if (this.validDbs.length > 0) {
+            this.selectedDb = this.validDbs[0];
+        } else {
+            this.selectedDb = 'my';
+        }
+
         this.showDbButton();
     }
 
     getDbLabel(dbName) {
-        if (dbName === 'my') return this.i18n.t('nav.cabinet');
+        if (dbName === 'my') return 'Личный кабинет';
         return dbName;
     }
 
     showLoginButton() {
         const loginBtn = document.getElementById('login-btn');
         if (loginBtn) {
-            loginBtn.textContent = this.i18n.t('nav.login');
+            loginBtn.textContent = 'Войти';
             loginBtn.style.display = '';
         }
         const dbWrapper = document.getElementById('db-btn-wrapper');
@@ -534,47 +390,35 @@ class AuthManager {
         dbBtn.textContent = this.getDbLabel(this.selectedDb);
         dbWrapper.style.display = '';
 
-        if (this.validDbs.length > 1) {
+        // Build full list for dropdown: ЛК always first, then other valid dbs
+        const dropdownDbs = ['my', ...this.validDbs];
+
+        if (dropdownDbs.length > 1) {
             dropdownToggle.style.display = '';
-            this.renderDropdown(dropdown);
+            this.renderDropdown(dropdown, dropdownDbs);
         } else {
             dropdownToggle.style.display = 'none';
             dropdown.style.display = 'none';
         }
     }
 
-    renderDropdown(dropdown) {
+    renderDropdown(dropdown, dropdownDbs) {
         dropdown.innerHTML = '';
-        this.validDbs.forEach(db => {
-            // Use anchor element to open db in new tab with target="{db name}"
+        dropdownDbs.forEach(db => {
             const item = document.createElement('a');
             item.className = 'db-dropdown-item';
             item.textContent = this.getDbLabel(db);
             item.href = '#';
-            item.target = db; // Open in tab named after the database
+            item.target = db;
             if (db === this.selectedDb) item.classList.add('db-dropdown-item-active');
             item.addEventListener('click', async (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 dropdown.style.display = 'none';
-                // Validate token only upon db selection
-                const host = this.apiConfig.host;
-                const data = await validateToken(host, db);
-                if (!data) {
-                    // Token invalid – remove from list and refresh UI
-                    this.validDbs = this.validDbs.filter(d => d !== db);
-                    if (this.validDbs.length === 0) {
-                        this.showLoginButton();
-                    } else {
-                        if (this.selectedDb === db) this.selectedDb = this.validDbs[0];
-                        this.showDbButton();
-                    }
-                    return;
-                }
-                // Navigate to the selected db in a named tab
-                window.open('https://' + host + '/' + db, db);
                 this.selectedDb = db;
+                CookieUtil.set('last_db', db, 365);
                 this.showDbButton();
+                await this.navigateToDb();
             });
             dropdown.appendChild(item);
         });
@@ -586,28 +430,33 @@ class AuthManager {
         const db = this.selectedDb;
         const data = await validateToken(host, db);
         if (!data) {
-            // Token invalid – remove from list and refresh UI
-            this.validDbs = this.validDbs.filter(d => d !== db);
-            if (this.validDbs.length === 0) {
-                this.showLoginButton();
+            if (db === 'my') {
+                // No valid ЛК token — show auth panel with 'my' pre-selected
+                window._app && window._app.showAuthPanel('my');
             } else {
-                this.selectedDb = this.validDbs[0];
-                this.showDbButton();
+                // Token invalid for a regular db — remove from list and refresh UI
+                this.validDbs = this.validDbs.filter(d => d !== db);
+                if (this.validDbs.length === 0 && !this.allIdbDbs.includes('my')) {
+                    this.showLoginButton();
+                } else {
+                    // ЛК is always available, so still show db button
+                    this.selectedDb = this.validDbs.length > 0 ? this.validDbs[0] : 'my';
+                    this.showDbButton();
+                }
             }
             return;
         }
+        CookieUtil.set('last_db', db, 365);
         window.location.href = 'https://' + host + '/' + db;
     }
 
-    async login(email, password) {
+    async login(email, password, db) {
         const host = this.apiConfig.host;
-        // Try each known db or the default 'my'
-        // We use the /auth?JSON endpoint as implemented before
-        const db = 'my';
-        const url = 'https://' + host + '/' + db + '/auth?JSON';
+        const targetDb = db || 'my';
+        const url = 'https://' + host + '/' + targetDb + '/auth?JSON';
         try {
             const formData = new URLSearchParams();
-            formData.append('db', db);
+            formData.append('db', targetDb);
             formData.append('login', email);
             formData.append('pwd', password);
 
@@ -626,10 +475,10 @@ class AuthManager {
             if (data.msg && data.msg !== '') {
                 return { success: false, message: data.msg };
             }
-            return { success: true, message: this.i18n.t('msg.loginSuccess') };
+            return { success: true, message: 'Вход выполнен успешно!' };
         } catch (err) {
             console.error('[auth] login error:', err);
-            return { success: false, message: this.i18n.t('msg.loginError') + err.message };
+            return { success: false, message: 'Ошибка входа: ' + err.message };
         }
     }
 
@@ -662,11 +511,47 @@ class AuthManager {
             if (data.error) {
                 return { success: false, message: data.error };
             }
-            return { success: true, message: data.msg || this.i18n.t('msg.registerSuccess') };
+            return { success: true, message: data.msg || 'Регистрация прошла успешно. Проверьте вашу почту для подтверждения.' };
         } catch (err) {
             console.error('[auth] register error:', err);
-            return { success: false, message: this.i18n.t('msg.registerError') + err.message };
+            return { success: false, message: 'Ошибка регистрации: ' + err.message };
         }
+    }
+
+    // Build options for the DB selector in the auth form
+    // Always includes ЛК ('my'), plus all DBs with idb_* cookies (valid tokens)
+    buildAuthDbOptions(preselect) {
+        const select = document.getElementById('auth-db-select');
+        if (!select) return;
+
+        select.innerHTML = '';
+
+        // ЛК always first
+        const myOpt = document.createElement('option');
+        myOpt.value = 'my';
+        myOpt.textContent = 'Личный кабинет';
+        select.appendChild(myOpt);
+
+        // Add other valid dbs
+        this.validDbs.forEach(db => {
+            const opt = document.createElement('option');
+            opt.value = db;
+            opt.textContent = db;
+            select.appendChild(opt);
+        });
+
+        // Determine default: preselect param > last_db cookie > 'my'
+        const lastUsed = preselect || CookieUtil.get('last_db') || 'my';
+        // Select matching option if it exists
+        let found = false;
+        for (let i = 0; i < select.options.length; i++) {
+            if (select.options[i].value === lastUsed) {
+                select.selectedIndex = i;
+                found = true;
+                break;
+            }
+        }
+        if (!found) select.selectedIndex = 0;
     }
 }
 
@@ -675,10 +560,10 @@ class AuthManager {
 // ============================================================
 class App {
     constructor() {
-        this.i18n = new I18nManager();
-        this.theme = new ThemeManager(this.i18n);
+        this.i18n = new I18nManager(); // kept for cabinet.js compatibility
+        this.theme = new ThemeManager();
         this.apiConfig = new ApiConfig();
-        this.auth = new AuthManager(this.apiConfig, this.i18n);
+        this.auth = new AuthManager(this.apiConfig);
         this.yandexAuth = new YandexAuthManager(this.apiConfig);
         window._app = this;
     }
@@ -688,16 +573,12 @@ class App {
     }
 
     async init() {
-        // Apply i18n
-        this.i18n.applyAll();
-
         // Theme toggle — only bind on index.html (no theme-icon span present)
         // Cabinet page (main.html) binds its own handler in cabinet.js setupUserMenuDropdown()
         const themeToggle = document.getElementById('theme-toggle');
         if (themeToggle && !document.getElementById('theme-icon')) {
             themeToggle.addEventListener('click', () => {
                 this.theme.toggleTheme();
-                this.i18n.applyAll(); // refresh i18n keys after theme label update
             });
         }
 
@@ -755,8 +636,11 @@ class App {
                 e.preventDefault();
                 const email = document.getElementById('login-email').value;
                 const password = document.getElementById('login-password').value;
-                const result = await this.auth.login(email, password);
+                const dbSelect = document.getElementById('auth-db-select');
+                const selectedDb = dbSelect ? dbSelect.value : 'my';
+                const result = await this.auth.login(email, password, selectedDb);
                 if (result.success) {
+                    CookieUtil.set('last_db', selectedDb, 365);
                     this.hideAuthPanel();
                     this.auth.init();
                 } else {
@@ -775,11 +659,11 @@ class App {
                 const confirmPassword = document.getElementById('reg-confirm-password').value;
 
                 if (password !== confirmPassword) {
-                    showToast(this.i18n.t('msg.passwordMismatch'), 'error');
+                    showToast('Пароли не совпадают', 'error');
                     return;
                 }
                 if (password.length < 6) {
-                    showToast(this.i18n.t('msg.passwordShort'), 'error');
+                    showToast('Пароль должен содержать минимум 6 символов', 'error');
                     return;
                 }
 
@@ -812,12 +696,14 @@ class App {
         this.auth.init();
     }
 
-    showAuthPanel() {
+    showAuthPanel(preselect) {
         const authPanel = document.getElementById('auth-panel');
         if (authPanel) authPanel.style.display = '';
         const welcomeSection = document.getElementById('welcome-section');
         if (welcomeSection) welcomeSection.style.display = 'none';
         this.switchTab('login');
+        // Build DB options with the preselected db
+        this.auth.buildAuthDbOptions(preselect);
     }
 
     hideAuthPanel() {
