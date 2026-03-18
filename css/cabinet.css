@@ -115,7 +115,10 @@
     flex-shrink: 0;
     transition: width 0.25s ease, background-color 0.3s ease;
     overflow: hidden;
-    position: relative;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    align-self: flex-start;
 }
 
 /* Sidebar toggle button */
@@ -685,6 +688,41 @@
     font-size: 0.8rem;
     color: var(--text-secondary) !important;
     margin-top: 0.5rem;
+}
+
+/* Referrals Tabs */
+.referrals-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid var(--border-color);
+    margin-bottom: 1.5rem;
+}
+
+.referrals-tab {
+    padding: 0.75rem 1.5rem;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    font-family: inherit;
+    transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.referrals-tab:hover {
+    color: var(--text-primary);
+}
+
+.referrals-tab.active {
+    color: var(--button-primary);
+    border-bottom-color: var(--button-primary);
+    font-weight: 600;
+}
+
+.referrals-tab-content {
+    display: block;
 }
 
 /* Button styles are in /css/styles.css */

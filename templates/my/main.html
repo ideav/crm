@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <!-- Begin: noAdmin1 --><!--{Role}-->
     <title data-i18n="cabinet.title">Личный кабинет</title>
+    <link rel="stylesheet" href="https://unpkg.com/primeicons/primeicons.css">
     <link rel="stylesheet" href="/css/styles.css">
     <link rel="stylesheet" href="/css/cabinet.css">
 <!-- End: noAdmin1 -->
@@ -44,13 +45,13 @@
                 </button>
                 <div id="user-menu-dropdown" class="user-menu-dropdown" style="display: none;">
                     <button id="theme-toggle" class="user-menu-item" type="button">
-                        <span class="user-menu-icon" id="theme-icon">🌙</span>
+                        <span class="user-menu-icon" id="theme-icon"><i class="pi pi-moon"></i></span>
                         <span data-i18n="cabinet.userMenu.theme">Тема</span>
                         <span class="user-menu-value" id="theme-value" data-i18n="nav.dark">Темная</span>
                     </button>
                     <div class="user-menu-divider"></div>
                     <button id="logout-btn" class="user-menu-item user-menu-item-danger" type="button">
-                        <span class="user-menu-icon">🚪</span>
+                        <span class="user-menu-icon"><i class="pi pi-sign-out"></i></span>
                         <span data-i18n="cabinet.logout">Выйти</span>
                     </button>
                 </div>
@@ -65,27 +66,31 @@
             <button id="sidebar-toggle" class="sidebar-toggle" type="button" title="Свернуть меню" aria-label="Toggle sidebar">&#9776;</button>
             <nav class="cabinet-menu">
                 <button class="cabinet-menu-item active" data-section="databases">
-                    <span class="menu-icon">🗄️</span>
+                    <span class="menu-icon"><i class="pi pi-database"></i></span>
                     <span data-i18n="cabinet.menu.databases">Базы данных</span>
                 </button>
                 <button class="cabinet-menu-item" data-section="profile">
-                    <span class="menu-icon">👤</span>
+                    <span class="menu-icon"><i class="pi pi-user"></i></span>
                     <span data-i18n="cabinet.menu.profile">Профиль</span>
                 </button>
+                <button class="cabinet-menu-item" data-section="tariff">
+                    <span class="menu-icon"><i class="pi pi-tag"></i></span>
+                    <span data-i18n="cabinet.menu.tariff">Тариф</span>
+                </button>
                 <button class="cabinet-menu-item" data-section="balance">
-                    <span class="menu-icon">💰</span>
+                    <span class="menu-icon"><i class="pi pi-wallet"></i></span>
                     <span data-i18n="cabinet.menu.balance">Баланс</span>
                 </button>
                 <button class="cabinet-menu-item" data-section="access">
-                    <span class="menu-icon">🔑</span>
+                    <span class="menu-icon"><i class="pi pi-key"></i></span>
                     <span data-i18n="cabinet.menu.access">Доступы</span>
                 </button>
                 <button class="cabinet-menu-item" data-section="bonuses">
-                    <span class="menu-icon">🎁</span>
+                    <span class="menu-icon"><i class="pi pi-gift"></i></span>
                     <span data-i18n="cabinet.menu.bonuses">Бонусы</span>
                 </button>
                 <button class="cabinet-menu-item" data-section="referrals">
-                    <span class="menu-icon">👥</span>
+                    <span class="menu-icon"><i class="pi pi-users"></i></span>
                     <span data-i18n="cabinet.menu.referrals">Партнерская программа</span>
                 </button>
             </nav>
@@ -125,7 +130,7 @@
                         <label data-i18n="cabinet.profile.photo">Фото</label>
                         <div class="photo-upload">
                             <div id="profile-photo-preview" class="photo-preview">
-                                <span class="photo-placeholder">📷</span>
+                                <span class="photo-placeholder"><i class="pi pi-camera"></i></span>
                             </div>
                             <input type="file" id="profile-photo" name="photo" accept="image/*" style="display: none;">
                             <button type="button" id="upload-photo-btn" class="btn-secondary" data-i18n="cabinet.profile.uploadPhoto">Загрузить фото</button>
@@ -133,10 +138,13 @@
                     </div>
                     <button type="button" id="save-profile-btn" class="btn-primary" data-i18n="cabinet.profile.save">Сохранить изменения</button>
                 </div>
+            </section>
 
-                <!-- Tariff Info -->
+            <!-- Tariff Section -->
+            <section id="section-tariff" class="cabinet-section" style="display: none;">
+                <h1 data-i18n="cabinet.tariff.title">Тариф</h1>
+
                 <div class="tariff-section">
-                    <h2 data-i18n="cabinet.profile.tariffTitle">Информация о тарифе</h2>
                     <div class="tariff-info">
                         <p class="tariff-current">
                             <span data-i18n="cabinet.profile.yourTariff">Ваш тариф</span> —
@@ -286,85 +294,94 @@
             <section id="section-referrals" class="cabinet-section" style="display: none;">
                 <h1 data-i18n="cabinet.referrals.title">Партнерская программа</h1>
 
-                <!-- About subsection -->
-                <div class="referrals-subsection">
-                    <h2 data-i18n="cabinet.referrals.aboutTitle">О программе</h2>
-                    <p data-i18n="cabinet.referrals.aboutDescription">
-                        Вы получаете вознаграждение 15% за каждую оплату услуги Ideav, которую сделал клиент, привлеченный по вашей реферальной ссылке или промокоду. Программа распространяется также на оплату продления услуг.
-                    </p>
-                    <p data-i18n="cabinet.referrals.withdrawDescription">
-                        Это вознаграждение можно вывести на вашу банковскую карту или переводом на счет в РФ. Вывод доступен через один месяц после оплаты клиента.
-                    </p>
-                    <p data-i18n="cabinet.referrals.convertDescription">
-                        Вы также можете сконвертировать ваше партнерское вознаграждение на ваш баланс для оплаты услуг Ideav.
-                    </p>
-
-                    <div class="referral-links">
-                        <h3 data-i18n="cabinet.referrals.yourLinks">Ваши партнерские ссылки:</h3>
-                        <div class="referral-link-item">
-                            <span data-i18n="cabinet.referrals.registration">Регистрация:</span>
-                            <a id="referral-link-register" href="#" target="_blank">https://ideav.ru?aff=...</a>
-                            <button type="button" class="copy-btn" data-copy="referral-link-register" title="Копировать">📋</button>
-                        </div>
-                        <div class="referral-link-item">
-                            <span data-i18n="cabinet.referrals.site">Сайт Интеграма:</span>
-                            <a id="referral-link-site" href="#" target="_blank">https://ideav.ru/ru?aff=...</a>
-                            <button type="button" class="copy-btn" data-copy="referral-link-site" title="Копировать">📋</button>
-                        </div>
-                    </div>
+                <!-- Tabs navigation -->
+                <div class="referrals-tabs">
+                    <button class="referrals-tab active" data-tab="about" data-i18n="cabinet.referrals.aboutTitle">О программе</button>
+                    <button class="referrals-tab" data-tab="rules" data-i18n="cabinet.referrals.rulesTitle">Правила</button>
+                    <button class="referrals-tab" data-tab="stats" data-i18n="cabinet.referrals.statsTitle">Статистика</button>
                 </div>
 
-                <!-- Rules subsection -->
-                <div class="referrals-subsection">
-                    <h2 data-i18n="cabinet.referrals.rulesTitle">Правила</h2>
-                    <div class="rules-list">
-                        <ul>
-                            <li data-i18n="cabinet.referrals.rule1">Вознаграждение выплачивается через СБП (Система быстрых платежей) или банковским переводом через месяц после каждого платежа приведенного клиента. Комиссия платежной системы оплачивается из вознаграждения партнера.</li>
-                            <li data-i18n="cabinet.referrals.rule2">Не пытайтесь получить скидку, покупая услуги для себя. Мы следим за этим.</li>
-                            <li data-i18n="cabinet.referrals.rule3">Минимальная сумма вывода: 360 рублей.</li>
-                            <li data-i18n="cabinet.referrals.rule4">Запрещено привлечение клиентов с помощью почтовых рассылок.</li>
-                            <li data-i18n="cabinet.referrals.rule5">Запрещено привлечение клиентов с контекстной рекламы с использованием бренда Интеграм.</li>
-                            <li data-i18n="cabinet.referrals.rule6">Запрещена установка партнерской cookie пользователю без его прямого перехода по реферальной ссылке.</li>
-                        </ul>
-                        <p>
-                            <a href="https://ideav.ru/download/AffiliateAgreement.pdf" target="_blank" data-i18n="cabinet.referrals.agreement">Партнерский договор</a>
+                <!-- About tab -->
+                <div class="referrals-tab-content active" id="referrals-tab-about">
+                    <div class="referrals-subsection">
+                        <p data-i18n="cabinet.referrals.aboutDescription">
+                            Вы получаете вознаграждение 15% за каждую оплату услуги Ideav, которую сделал клиент, привлеченный по вашей реферальной ссылке или промокоду. Программа распространяется также на оплату продления услуг.
                         </p>
+                        <p data-i18n="cabinet.referrals.withdrawDescription">
+                            Это вознаграждение можно вывести на вашу банковскую карту или переводом на счет в РФ. Вывод доступен через один месяц после оплаты клиента.
+                        </p>
+                        <p data-i18n="cabinet.referrals.convertDescription">
+                            Вы также можете сконвертировать ваше партнерское вознаграждение на ваш баланс для оплаты услуг Ideav.
+                        </p>
+
+                        <div class="referral-links">
+                            <h3 data-i18n="cabinet.referrals.yourLinks">Ваши партнерские ссылки:</h3>
+                            <div class="referral-link-item">
+                                <span data-i18n="cabinet.referrals.registration">Регистрация:</span>
+                                <a id="referral-link-register" href="#" target="_blank">https://ideav.ru?aff=...</a>
+                                <button type="button" class="copy-btn" data-copy="referral-link-register" title="Копировать"><i class="pi pi-copy"></i></button>
+                            </div>
+                            <div class="referral-link-item">
+                                <span data-i18n="cabinet.referrals.site">Сайт Интеграма:</span>
+                                <a id="referral-link-site" href="#" target="_blank">https://ideav.ru/ru?aff=...</a>
+                                <button type="button" class="copy-btn" data-copy="referral-link-site" title="Копировать"><i class="pi pi-copy"></i></button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Statistics subsection -->
-                <div class="referrals-subsection">
-                    <h2 data-i18n="cabinet.referrals.statsTitle">Статистика</h2>
-                    <p class="stats-description" data-i18n="cabinet.referrals.statsDescription">
-                        Здесь будет статистика привлечений клиентов, оплат и вашего вознаграждения.
-                    </p>
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th data-i18n="cabinet.referrals.clients">Клиенты</th>
-                                <th data-i18n="cabinet.referrals.payments">Платежи</th>
-                                <th data-i18n="cabinet.referrals.matured">Созрело*</th>
-                                <th data-i18n="cabinet.referrals.commission">Комиссия</th>
-                                <th data-i18n="cabinet.referrals.paid">Выплачено</th>
-                                <th data-i18n="cabinet.referrals.toPay">К выплате</th>
-                            </tr>
-                        </thead>
-                        <tbody id="referrals-stats-body">
-                            <tr>
-                                <td id="stats-clients">0</td>
-                                <td id="stats-payments">-</td>
-                                <td id="stats-matured">-</td>
-                                <td id="stats-commission">-</td>
-                                <td id="stats-paid">-</td>
-                                <td id="stats-to-pay">-</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                    <p class="stats-note" data-i18n="cabinet.referrals.maturedNote">* Прошло не менее месяца с момента совершения платежа</p>
+                <!-- Rules tab -->
+                <div class="referrals-tab-content" id="referrals-tab-rules" style="display: none;">
+                    <div class="referrals-subsection">
+                        <div class="rules-list">
+                            <ul>
+                                <li data-i18n="cabinet.referrals.rule1">Вознаграждение выплачивается через СБП (Система быстрых платежей) или банковским переводом через месяц после каждого платежа приведенного клиента. Комиссия платежной системы оплачивается из вознаграждения партнера.</li>
+                                <li data-i18n="cabinet.referrals.rule2">Не пытайтесь получить скидку, покупая услуги для себя. Мы следим за этим.</li>
+                                <li data-i18n="cabinet.referrals.rule3">Минимальная сумма вывода: 360 рублей.</li>
+                                <li data-i18n="cabinet.referrals.rule4">Запрещено привлечение клиентов с помощью почтовых рассылок.</li>
+                                <li data-i18n="cabinet.referrals.rule5">Запрещено привлечение клиентов с контекстной рекламы с использованием бренда Интеграм.</li>
+                                <li data-i18n="cabinet.referrals.rule6">Запрещена установка партнерской cookie пользователю без его прямого перехода по реферальной ссылке.</li>
+                            </ul>
+                            <p>
+                                <a href="https://ideav.ru/download/AffiliateAgreement.pdf" target="_blank" data-i18n="cabinet.referrals.agreement">Партнерский договор</a>
+                            </p>
+                        </div>
+                    </div>
                 </div>
 
-                <div class="referrals-actions">
-                    <button type="button" id="withdraw-referrals-btn" class="btn-primary" data-i18n="cabinet.referrals.withdraw">Вывести средства</button>
+                <!-- Statistics tab -->
+                <div class="referrals-tab-content" id="referrals-tab-stats" style="display: none;">
+                    <div class="referrals-subsection">
+                        <p class="stats-description" data-i18n="cabinet.referrals.statsDescription">
+                            Здесь будет статистика привлечений клиентов, оплат и вашего вознаграждения.
+                        </p>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th data-i18n="cabinet.referrals.clients">Клиенты</th>
+                                    <th data-i18n="cabinet.referrals.payments">Платежи</th>
+                                    <th data-i18n="cabinet.referrals.matured">Созрело*</th>
+                                    <th data-i18n="cabinet.referrals.commission">Комиссия</th>
+                                    <th data-i18n="cabinet.referrals.paid">Выплачено</th>
+                                    <th data-i18n="cabinet.referrals.toPay">К выплате</th>
+                                </tr>
+                            </thead>
+                            <tbody id="referrals-stats-body">
+                                <tr>
+                                    <td id="stats-clients">0</td>
+                                    <td id="stats-payments">-</td>
+                                    <td id="stats-matured">-</td>
+                                    <td id="stats-commission">-</td>
+                                    <td id="stats-paid">-</td>
+                                    <td id="stats-to-pay">-</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <p class="stats-note" data-i18n="cabinet.referrals.maturedNote">* Прошло не менее месяца с момента совершения платежа</p>
+                        <div class="referrals-actions">
+                            <button type="button" id="withdraw-referrals-btn" class="btn-primary" data-i18n="cabinet.referrals.withdraw">Вывести средства</button>
+                        </div>
+                    </div>
                 </div>
             </section>
         </main>

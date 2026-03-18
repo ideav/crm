@@ -31,6 +31,9 @@ class CabinetController {
         // Setup copy buttons
         this.setupCopyButtons();
 
+        // Setup referrals tabs
+        this.setupReferralsTabs();
+
         // Setup user menu dropdown
         this.setupUserMenuDropdown();
 
@@ -41,7 +44,7 @@ class CabinetController {
         await this.loadUserData();
 
         // Show default section
-        this.showSection('profile');
+        this.showSection('databases');
     }
 
     async checkAuth() {
@@ -106,6 +109,16 @@ class CabinetController {
         if (section) {
             section.style.display = '';
         }
+
+        // Sync active menu item
+        const menuItems = document.querySelectorAll('.cabinet-menu-item');
+        menuItems.forEach(mi => {
+            if (mi.dataset.section === sectionName) {
+                mi.classList.add('active');
+            } else {
+                mi.classList.remove('active');
+            }
+        });
     }
 
     async loadUserData() {
@@ -446,6 +459,25 @@ class CabinetController {
         showToast(this.i18n.t('cabinet.referrals.withdrawInfo') || 'Функция вывода средств будет доступна позже', 'info');
     }
 
+    setupReferralsTabs() {
+        const tabs = document.querySelectorAll('.referrals-tab');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabName = tab.dataset.tab;
+
+                // Update active tab
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+
+                // Show corresponding content
+                const contents = document.querySelectorAll('.referrals-tab-content');
+                contents.forEach(c => c.style.display = 'none');
+                const content = document.getElementById('referrals-tab-' + tabName);
+                if (content) content.style.display = '';
+            });
+        });
+    }
+
     setupCopyButtons() {
         const copyBtns = document.querySelectorAll('.copy-btn');
         copyBtns.forEach(btn => {
@@ -455,10 +487,10 @@ class CabinetController {
                 if (targetEl) {
                     const text = targetEl.href || targetEl.textContent;
                     navigator.clipboard.writeText(text).then(() => {
-                        const originalText = btn.textContent;
-                        btn.textContent = '✓';
+                        const originalHTML = btn.innerHTML;
+                        btn.innerHTML = '<i class="pi pi-check"></i>';
                         setTimeout(() => {
-                            btn.textContent = originalText;
+                            btn.innerHTML = originalHTML;
                         }, 2000);
                     }).catch(err => {
                         console.error('[cabinet] Copy failed:', err);
@@ -524,7 +556,7 @@ class CabinetController {
         const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
 
         if (themeIcon) {
-            themeIcon.textContent = isDark ? '☀️' : '🌙';
+            themeIcon.innerHTML = isDark ? '<i class="pi pi-sun"></i>' : '<i class="pi pi-moon"></i>';
         }
         if (themeValue) {
             const key = isDark ? 'nav.light' : 'nav.dark';
