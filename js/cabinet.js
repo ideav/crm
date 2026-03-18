@@ -6,7 +6,7 @@ class CabinetController {
     constructor() {
         this.userData = null;
         this.databases = [];
-        this.currentSection = 'profile';
+        this.currentSection = 'databases';
         this.apiConfig = new ApiConfig();
         this.i18n = window._app ? window._app.i18n : new I18nManager();
     }
