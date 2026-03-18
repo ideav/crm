@@ -8,6 +8,7 @@ class CabinetController {
         this.databases = [];
         this.currentSection = 'databases';
         this.apiConfig = new ApiConfig();
+        this.i18n = window._app ? window._app.i18n : new I18nManager();
     }
 
     async init() {
@@ -270,7 +271,7 @@ class CabinetController {
         container.innerHTML = '';
 
         if (this.databases.length === 0) {
-            container.innerHTML = '<p class="empty-message">Нет баз данных</p>';
+            container.innerHTML = '<p class="empty-message" data-i18n="cabinet.databases.noData">Нет баз данных</p>';
             return;
         }
 
@@ -289,19 +290,23 @@ class CabinetController {
                     <div class="database-id">ID: ${db.DBID}</div>
                     ${description ? '<div class="database-description">' + this.escapeHtml(description) + '</div>' : ''}
                     <div class="database-stats">
-                        <span class="database-stat"><span>Шаблон:</span> <strong>${this.escapeHtml(templateLabel)}</strong></span>
-                        <span class="database-stat"><span>Записей:</span> <strong>${recordCount}</strong></span>
-                        <span class="database-stat"><span>Оплачено до:</span> <strong>${planDate}</strong></span>
+                        <span class="database-stat"><span data-i18n="cabinet.databases.template">Шаблон:</span> <strong>${this.escapeHtml(templateLabel)}</strong></span>
+                        <span class="database-stat"><span data-i18n="cabinet.databases.records">Записей:</span> <strong>${recordCount}</strong></span>
+                        <span class="database-stat"><span data-i18n="cabinet.databases.planDate">Оплачено до:</span> <strong>${planDate}</strong></span>
                     </div>
                 </div>
                 <div class="database-actions">
-                    <button type="button" class="btn-secondary btn-small" onclick="window.open('https://${this.apiConfig.host}/${db.DB}', '_blank')">Открыть</button>
+                    <button type="button" class="btn-secondary btn-small" onclick="window.open('https://${this.apiConfig.host}/${db.DB}', '_blank')" data-i18n="cabinet.databases.open">Открыть</button>
                 </div>
             `;
 
             container.appendChild(card);
         });
 
+        // Re-apply i18n
+        if (this.i18n) {
+            this.i18n.applyAll();
+        }
     }
 
     populateBonuses() {
@@ -388,10 +393,10 @@ class CabinetController {
         try {
             // TODO: Implement profile save API call
             // For now, show a message
-            showToast('Профиль сохранен', 'success');
+            showToast(this.i18n.t('cabinet.profile.saveSuccess') || 'Профиль сохранен', 'success');
         } catch (err) {
             console.error('[cabinet] Error saving profile:', err);
-            showToast('Ошибка сохранения профиля', 'error');
+            showToast(this.i18n.t('cabinet.profile.saveError') || 'Ошибка сохранения профиля', 'error');
         }
     }
 
@@ -417,28 +422,28 @@ class CabinetController {
         const selectedPlan = planSelect?.value || 'free';
 
         // TODO: Implement plan change API call
-        showToast('Для смены плана обратитесь в поддержку', 'info');
+        showToast(this.i18n.t('cabinet.profile.planChangeInfo') || 'Для смены плана обратитесь в поддержку', 'info');
     }
 
     addFunds() {
         // TODO: Implement add funds functionality
-        showToast('Функция пополнения счета будет доступна позже', 'info');
+        showToast(this.i18n.t('cabinet.balance.addFundsInfo') || 'Функция пополнения счета будет доступна позже', 'info');
     }
 
     convertBonuses() {
         const bonusAmount = parseInt(this.userData?.Bonus || '0', 10);
         if (bonusAmount <= 0) {
-            showToast('У вас нет бонусов для конвертации', 'info');
+            showToast(this.i18n.t('cabinet.bonuses.noBonuses') || 'У вас нет бонусов для конвертации', 'info');
             return;
         }
 
         // TODO: Implement bonus conversion API call
-        showToast('Функция конвертации бонусов будет доступна позже', 'info');
+        showToast(this.i18n.t('cabinet.bonuses.convertInfo') || 'Функция конвертации бонусов будет доступна позже', 'info');
     }
 
     withdrawReferrals() {
         // TODO: Implement referral withdrawal functionality
-        showToast('Функция вывода средств будет доступна позже', 'info');
+        showToast(this.i18n.t('cabinet.referrals.withdrawInfo') || 'Функция вывода средств будет доступна позже', 'info');
     }
 
     setupCopyButtons() {
@@ -522,7 +527,9 @@ class CabinetController {
             themeIcon.textContent = isDark ? '☀️' : '🌙';
         }
         if (themeValue) {
-            themeValue.textContent = isDark ? 'Светлая' : 'Темная';
+            const key = isDark ? 'nav.light' : 'nav.dark';
+            themeValue.textContent = this.i18n.t(key);
+            themeValue.setAttribute('data-i18n', key);
         }
     }
 
