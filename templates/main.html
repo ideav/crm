@@ -70,8 +70,7 @@
                         <span>ЛК / Счет</span>
                     </div>
                 </a>
-                <a class="dropdown-item" onclick="toggleLocale()">EN/RU</a>
-                <a class="dropdown-item" onclick="$('.cp-form').css('display','table');$('.ch-toggle').show();$('.wait-toggle').hide();">Сменить пароль</a>
+<a class="dropdown-item" onclick="$('.cp-form').css('display','table');$('.ch-toggle').show();$('.wait-toggle').hide();">Сменить пароль</a>
                 <a class="dropdown-item" onclick="exitLogin()">Выйти</a>
                 <a class="dropdown-item" href="/{_global_.z}/exit">Выйти везде</a>
             </div>
@@ -155,10 +154,6 @@ function changeMsg(cl,msg){
 function exitLogin(){
     document.cookie='{_global_.z}=;Path=/';
     document.location.href='/{_global_.z}'; 
-}
-function toggleLocale(){
-    document.cookie='{_global_.z}_locale='+(locale==='[EN]'?'RU':'EN')+';Path=/';
-    location.reload();
 }
 </script>
 </body>
