@@ -101,42 +101,42 @@
             <!-- Loading State -->
             <div id="loading-state" class="loading-state">
                 <div class="loading-spinner"></div>
-                <p data-i18n="cabinet.loading">Загрузка данных...</p>
+                <p>Загрузка данных...</p>
             </div>
 
             <!-- Profile Section -->
             <section id="section-profile" class="cabinet-section" style="display: none;">
-                <h1 data-i18n="cabinet.profile.title">Профиль</h1>
+                <h1>Профиль</h1>
 
                 <div class="profile-form">
                     <div class="form-group">
-                        <label for="profile-name" data-i18n="cabinet.profile.name">Имя</label>
+                        <label for="profile-name">Имя</label>
                         <input type="text" id="profile-name" name="name" placeholder="Введите ваше имя">
                     </div>
                     <div class="form-group">
-                        <label for="profile-phone" data-i18n="cabinet.profile.phone">Телефон</label>
+                        <label for="profile-phone">Телефон</label>
                         <input type="tel" id="profile-phone" name="phone" placeholder="+7 (xxx) xxx-xx-xx">
                     </div>
                     <div class="form-group">
-                        <label for="profile-email" data-i18n="cabinet.profile.email">Email</label>
+                        <label for="profile-email">Email</label>
                         <input type="email" id="profile-email" name="email" readonly disabled>
-                        <span class="field-hint" data-i18n="cabinet.profile.emailHint">Email нельзя изменить</span>
+                        <span class="field-hint">Email нельзя изменить</span>
                     </div>
                     <div class="form-group">
-                        <label for="profile-about" data-i18n="cabinet.profile.about">Обо мне</label>
+                        <label for="profile-about">Обо мне</label>
                         <textarea id="profile-about" name="notes" rows="4" placeholder="Расскажите о себе"></textarea>
                     </div>
                     <div class="form-group">
-                        <label data-i18n="cabinet.profile.photo">Фото</label>
+                        <label>Фото</label>
                         <div class="photo-upload">
                             <div id="profile-photo-preview" class="photo-preview">
                                 <span class="photo-placeholder"><i class="pi pi-camera"></i></span>
                             </div>
                             <input type="file" id="profile-photo" name="photo" accept="image/*" style="display: none;">
-                            <button type="button" id="upload-photo-btn" class="btn-secondary" data-i18n="cabinet.profile.uploadPhoto">Загрузить фото</button>
+                            <button type="button" id="upload-photo-btn" class="btn-secondary">Загрузить фото</button>
                         </div>
                     </div>
-                    <button type="button" id="save-profile-btn" class="btn-primary" data-i18n="cabinet.profile.save">Сохранить изменения</button>
+                    <button type="button" id="save-profile-btn" class="btn-primary">Сохранить изменения</button>
                 </div>
             </section>
 
@@ -147,38 +147,38 @@
                 <div class="tariff-section">
                     <div class="tariff-info">
                         <p class="tariff-current">
-                            <span data-i18n="cabinet.profile.yourTariff">Ваш тариф</span> —
+                            <span>Ваш тариф</span> —
                             <strong id="current-plan">Free</strong>
                         </p>
                         <p class="tariff-next-charge">
-                            <span data-i18n="cabinet.profile.nextCharge">Следующее списание</span>
+                            <span>Следующее списание</span>
                             <strong id="next-charge-date">26 марта 2026</strong>
                         </p>
-                        <p class="tariff-description" data-i18n="cabinet.profile.chargeDescription">
+                        <p class="tariff-description">
                             Списание по тарифному плану производится один раз в месяц, при этом сбрасываются счетчики ресурсов всех ваших баз. Если расход ресурсов не укладывается в лимит плана, то для продолжения работы вам необходимо повысить план. Подробнее о планах.
                         </p>
                         <div class="usage-info">
                             <p>
-                                <span data-i18n="cabinet.profile.usageNow">Сейчас вы использовали</span>
+                                <span>Сейчас вы использовали</span>
                                 <strong id="usage-units">0.00</strong>
-                                <span data-i18n="cabinet.profile.resourceUnits">ед. ресурсов или</span>
+                                <span>ед. ресурсов или</span>
                                 <strong id="usage-percent">0.00%</strong>
-                                <span data-i18n="cabinet.profile.fromLimit">от лимита бесплатного тарифного плана в</span>
+                                <span>от лимита бесплатного тарифного плана в</span>
                                 <strong id="usage-limit">20000</strong>
-                                <span data-i18n="cabinet.profile.units">ед.</span>
+                                <span>ед.</span>
                             </p>
                             <div class="usage-bar">
                                 <div id="usage-bar-fill" class="usage-bar-fill" style="width: 0%;"></div>
                             </div>
                         </div>
                         <div class="plan-change">
-                            <p data-i18n="cabinet.profile.changePlanText">Для смены плана требуется иметь достаточное количество средств на счете. Пополнить счет вы можете здесь, выбрав нужный план:</p>
+                            <p>Для смены плана требуется иметь достаточное количество средств на счете. Пополнить счет вы можете здесь, выбрав нужный план:</p>
                             <select id="plan-select" class="plan-select">
                                 <option value="free">Free</option>
                                 <option value="startup">Startup</option>
                                 <option value="scalable">Scalable</option>
                             </select>
-                            <button type="button" id="change-plan-btn" class="btn-secondary" data-i18n="cabinet.profile.changePlan">Сменить план</button>
+                            <button type="button" id="change-plan-btn" class="btn-secondary">Сменить план</button>
                         </div>
                     </div>
                 </div>
@@ -186,64 +186,64 @@
 
             <!-- Balance Section -->
             <section id="section-balance" class="cabinet-section" style="display: none;">
-                <h1 data-i18n="cabinet.balance.title">Баланс</h1>
+                <h1>Баланс</h1>
 
                 <div class="balance-info">
-                    <p data-i18n="cabinet.balance.description">
+                    <p>
                         Средства вашего счета расходуются на оплату тарифного плана. Вы можете пополнить счет банковской картой или переводом, а также конвертировать бонусы и партнерские отчисления.
                     </p>
 
                     <div class="balance-current">
-                        <span data-i18n="cabinet.balance.current">Текущий баланс:</span>
+                        <span>Текущий баланс:</span>
                         <strong id="balance-amount">0</strong>
-                        <span data-i18n="cabinet.balance.currency">руб.</span>
+                        <span>руб.</span>
                     </div>
 
                     <div class="usage-today">
                         <p>
-                            <span data-i18n="cabinet.balance.usageToday">На сегодня вы использовали около</span>
+                            <span>На сегодня вы использовали около</span>
                             <strong id="balance-usage-units">0.00</strong>
-                            <span data-i18n="cabinet.balance.resourceUnits">ед. ресурсов или</span>
+                            <span>ед. ресурсов или</span>
                             <strong id="balance-usage-percent">0.00%</strong>
-                            <span data-i18n="cabinet.balance.fromLimit">от лимита бесплатного тарифного плана в</span>
+                            <span>от лимита бесплатного тарифного плана в</span>
                             <strong id="balance-usage-limit">20000</strong>
-                            <span data-i18n="cabinet.balance.units">ед.</span>
+                            <span>ед.</span>
                         </p>
                     </div>
 
-                    <p class="history-link" data-i18n="cabinet.balance.historyNote">
+                    <p class="history-link">
                         Вся история операций хранится здесь.
                     </p>
                 </div>
 
                 <div class="balance-history">
-                    <h2 data-i18n="cabinet.balance.historyTitle">История операций</h2>
+                    <h2>История операций</h2>
                     <table class="data-table">
                         <thead>
                             <tr>
-                                <th data-i18n="cabinet.balance.date">Дата</th>
-                                <th data-i18n="cabinet.balance.amount">Сумма</th>
-                                <th data-i18n="cabinet.balance.note">Примечание</th>
+                                <th>Дата</th>
+                                <th>Сумма</th>
+                                <th>Примечание</th>
                             </tr>
                         </thead>
                         <tbody id="balance-history-body">
                             <tr>
-                                <td colspan="3" class="empty-message" data-i18n="cabinet.balance.noHistory">Нет операций</td>
+                                <td colspan="3" class="empty-message">Нет операций</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
 
                 <div class="balance-actions">
-                    <button type="button" id="add-funds-btn" class="btn-primary" data-i18n="cabinet.balance.addFunds">Пополнить счет</button>
+                    <button type="button" id="add-funds-btn" class="btn-primary">Пополнить счет</button>
                 </div>
             </section>
 
             <!-- Databases Section -->
             <section id="section-databases" class="cabinet-section" style="display: none;">
-                <h1 data-i18n="cabinet.databases.title">Базы данных</h1>
+                <h1>Базы данных</h1>
 
-                <p class="section-description" data-i18n="cabinet.databases.description">Список моих баз данных</p>
+                <p class="section-description">Список моих баз данных</p>
 
                 <div class="databases-list" id="databases-list">
                     <!-- Databases will be rendered here -->
@@ -252,47 +252,47 @@
 
             <!-- Access Section -->
             <section id="section-access" class="cabinet-section" style="display: none;">
-                <h1 data-i18n="cabinet.access.title">Доступы</h1>
+                <h1>Доступы</h1>
 
-                <p class="section-description" data-i18n="cabinet.access.description">Список Баз данных с назначенными на них пользователями</p>
+                <p class="section-description">Список Баз данных с назначенными на них пользователями</p>
 
                 <div class="access-list" id="access-list">
                     <!-- Access items will be rendered here -->
-                    <p class="empty-message" data-i18n="cabinet.access.noData">Нет данных о доступах</p>
+                    <p class="empty-message">Нет данных о доступах</p>
                 </div>
             </section>
 
             <!-- Bonuses Section -->
             <section id="section-bonuses" class="cabinet-section" style="display: none;">
-                <h1 data-i18n="cabinet.bonuses.title">Бонусы</h1>
+                <h1>Бонусы</h1>
 
                 <div class="bonuses-info">
-                    <p data-i18n="cabinet.bonuses.description">
+                    <p>
                         Вы получаете бонусы при регистрации и при совершении некоторых действий: прохождение уроков, активность в социальных сетях и участие в промо-акциях Интеграма. Актуальные предложения будут приходить вам на почту.
                     </p>
 
                     <div class="bonuses-current">
-                        <span data-i18n="cabinet.bonuses.current">Текущие бонусы:</span>
+                        <span>Текущие бонусы:</span>
                         <strong id="bonuses-amount">0</strong>
                     </div>
 
-                    <p data-i18n="cabinet.bonuses.convertDescription">
+                    <p>
                         Бонусы можно конвертировать в валюту вашего депозита и пополнять таким образом баланс вашего счета: 1 бонус = 1 рубль.
                     </p>
 
-                    <p data-i18n="cabinet.bonuses.historyNote">
+                    <p>
                         Ваша история операций с бонусами хранится в разделе Баланс.
                     </p>
                 </div>
 
                 <div class="bonuses-actions">
-                    <button type="button" id="convert-bonuses-btn" class="btn-primary" data-i18n="cabinet.bonuses.convert">Конвертировать бонусы</button>
+                    <button type="button" id="convert-bonuses-btn" class="btn-primary">Конвертировать бонусы</button>
                 </div>
             </section>
 
             <!-- Referrals Section -->
             <section id="section-referrals" class="cabinet-section" style="display: none;">
-                <h1 data-i18n="cabinet.referrals.title">Партнерская программа</h1>
+                <h1>Партнерская программа</h1>
 
                 <!-- Tabs navigation -->
                 <div class="referrals-tabs">
@@ -432,7 +432,6 @@
                 </a>
                 <div class="dropdown-menu dropdown-menu-right" aria-labelledby="navbarDropdown">
                     <a class="dropdown-item" target="_help" href="https://help.ideav.online">Помощь</a>
-                    <a class="dropdown-item" onclick="toggleLocale()">EN/RU</a>
                     <a class="dropdown-item" onclick="changePwd()">Сменить пароль</a>
                     <a class="dropdown-item" onclick="exitLogin()">Выход</a>
                 </div>
@@ -455,11 +454,7 @@
         document.cookie='{_global_.z}=;Path=/';
         document.location.href='/'; 
     }
-    function toggleLocale(){
-        document.cookie='{_global_.z}_locale='+(locale==='[EN]'?'RU':'EN')+';Path=/';
-        location.reload();
-    }
-    </script>
+</script>
 <!-- End: isAdmin -->
 
 </body>
