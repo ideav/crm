@@ -633,6 +633,7 @@ class IntegramTable{
                     granted: 1,
                     ref: 0,
                     orig: metadata.id,
+                    unique: metadata.unique, // Store unique flag for column edit form (issue #1026)
                     paramId: metadata.id // For cell editing: use t{metadata.id} for first column
                 });
 
@@ -653,6 +654,7 @@ class IntegramTable{
                             ref_id: req.ref_id || null,
                             orig: req.orig || null,
                             attrs: req.attrs || '',
+                            unique: req.unique, // Store unique flag for column edit form (issue #1026)
                             paramId: req.id, // For cell editing: use t{req.id} for requisite columns
                             arr_id: req.arr_id || null // For table requisites (subordinate tables) (issue #710)
                         });
@@ -772,6 +774,7 @@ class IntegramTable{
                 granted: 1,
                 ref: 0,
                 orig: metadata.id, // Store the original table id
+                unique: metadata.unique, // Store unique flag for column edit form (issue #1026)
                 paramId: metadata.id // For cell editing: use t{metadata.id} for first column
             });
 
@@ -793,6 +796,7 @@ class IntegramTable{
                         ref_id: req.ref_id || null,
                         orig: req.orig || null,
                         attrs: req.attrs || '',
+                        unique: req.unique, // Store unique flag for column edit form (issue #1026)
                         paramId: req.id, // For cell editing: use t{req.id} for requisite columns
                         arr_id: req.arr_id || null // For table requisites (subordinate tables)
                     });
@@ -956,6 +960,7 @@ class IntegramTable{
                     granted: 1,
                     ref: 0,
                     orig: metadata.id,
+                    unique: metadata.unique, // Store unique flag for column edit form (issue #1026)
                     paramId: metadata.id // For cell editing: use t{metadata.id} for first column
                 });
 
@@ -977,6 +982,7 @@ class IntegramTable{
                             ref_id: req.ref_id || null,
                             orig: req.orig || null,
                             attrs: req.attrs || '',
+                            unique: req.unique, // Store unique flag for column edit form (issue #1026)
                             paramId: req.id, // For cell editing: use t{req.id} for requisite columns
                             arr_id: req.arr_id || null // For table requisites (subordinate tables)
                         });
@@ -5414,8 +5420,23 @@ class IntegramTable{
             const isMulti = parsedAttrs.multi;
             const isRequired = parsedAttrs.required;
             const isFirstColumn = col.id === String(this.objectTableId || this.options.tableTypeId);
+            const isUnique = col.unique === '1' || col.unique === 1 || col.unique === true;
 
-            // Base types available for selection (same list as showAddColumnForm)
+            // Base types for first column (issue #1026): SHORT, CHARS, DATE, NUMBER, SIGNED, MEMO, DATETIME, HTML, GRANT, REPORT_COLUMN
+            const firstColumnTypes = [
+                { id: 3, name: 'Короткая строка (до 127 символов)' },
+                { id: 8, name: 'Строка без ограничения длины' },
+                { id: 9, name: 'Дата' },
+                { id: 13, name: 'Целое число' },
+                { id: 14, name: 'Число с десятичной частью' },
+                { id: 12, name: 'Многострочный текст' },
+                { id: 4, name: 'Дата и время' },
+                { id: 2, name: 'HTML' },
+                { id: 5, name: 'Права доступа (GRANT)' },
+                { id: 16, name: 'Колонка отчета (REPORT_COLUMN)' }
+            ];
+
+            // Base types for regular (non-first) columns
             const baseTypes = [
                 { id: 3, name: 'Короткая строка (до 127 символов)' },
                 { id: 8, name: 'Строка без ограничения длины' },
@@ -5427,6 +5448,8 @@ class IntegramTable{
                 { id: 4, name: 'Дата и время' },
                 { id: 10, name: 'Файл' }
             ];
+
+            const availableTypes = isFirstColumn ? firstColumnTypes : baseTypes;
 
             const colEditOverlay = document.createElement('div');
             colEditOverlay.className = 'column-settings-overlay';
@@ -5444,16 +5467,21 @@ class IntegramTable{
             colEditModal.innerHTML = `
                 <h3 style="margin: 0 0 16px 0; font-weight: 500; font-size: 18px;">Редактирование колонки: <em style="font-style: normal; color: var(--md-primary, #1976d2);">${ this.escapeHtml(col.name) }</em></h3>
                 <div class="col-edit-section">
-                    ${ !isFirstColumn ? `
                     <div class="col-edit-row">
                         <label class="col-edit-label">Название:</label>
                         <input type="text" id="col-edit-name-${instanceName}" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(currentName) }" placeholder="Введите название колонки">
-                    </div>` : '' }
+                    </div>
                     <div class="col-edit-row">
                         <label class="col-edit-label">Базовый тип:</label>
                         ${ !isRef ? `<select id="col-edit-type-${instanceName}" class="form-control form-control-sm col-edit-select">
-                            ${ baseTypes.map(t => `<option value="${t.id}" ${ String(col.type) === String(t.id) ? 'selected' : '' }>${t.name}</option>`).join('') }
+                            ${ availableTypes.map(t => `<option value="${t.id}" ${ String(col.type) === String(t.id) ? 'selected' : '' }>${t.name}</option>`).join('') }
                         </select>` : `<span class="col-edit-value">Ссылочный тип (справочник)</span>` }
+                    </div>
+                    <div class="col-edit-row">
+                        <label class="col-edit-label col-edit-check-label">
+                            <input type="checkbox" id="col-edit-unique-${instanceName}" ${ isUnique ? 'checked' : '' }>
+                            Уникальные значения
+                        </label>
                     </div>
                     <div class="col-edit-row">
                         <label class="col-edit-label col-edit-check-label">
@@ -5516,33 +5544,33 @@ class IntegramTable{
                 saveBtn.disabled = true;
 
                 try {
-                    // 0. Rename column (non-first columns only, issue #1018)
-                    if (!isFirstColumn) {
-                        const newName = colEditModal.querySelector(`#col-edit-name-${instanceName}`).value.trim();
-                        if (newName && newName !== currentName) {
-                            const result = await this.renameColumn(col.orig || col.id, newName, col.type);
-                            if (!result.success) {
-                                showStatus('Ошибка переименования: ' + result.error, true);
-                                saveBtn.disabled = false;
-                                return;
-                            }
-                            col.name = newName;
-                            col.val = newName;
+                    // 0. Rename column (issue #1018, extended to first column in issue #1026)
+                    const newName = colEditModal.querySelector(`#col-edit-name-${instanceName}`).value.trim();
+                    if (newName && newName !== currentName) {
+                        const result = await this.renameColumn(col.orig || col.id, newName, col.type);
+                        if (!result.success) {
+                            showStatus('Ошибка переименования: ' + result.error, true);
+                            saveBtn.disabled = false;
+                            return;
                         }
+                        col.name = newName;
+                        col.val = newName;
                     }
 
                     // 1. Change base type (non-ref only)
                     if (!isRef) {
                         const newTypeId = colEditModal.querySelector(`#col-edit-type-${instanceName}`).value;
-                        const currentColName = (!isFirstColumn && colEditModal.querySelector(`#col-edit-name-${instanceName}`).value.trim()) || col.name;
-                        if (String(newTypeId) !== String(col.type)) {
-                            const result = await this.saveColumnType(col.orig || col.id, newTypeId, currentColName);
+                        const currentColName = colEditModal.querySelector(`#col-edit-name-${instanceName}`).value.trim() || col.name;
+                        const newUnique = colEditModal.querySelector(`#col-edit-unique-${instanceName}`).checked;
+                        if (String(newTypeId) !== String(col.type) || newUnique !== isUnique) {
+                            const result = await this.saveColumnType(col.orig || col.id, newTypeId, currentColName, newUnique);
                             if (!result.success) {
                                 showStatus('Ошибка изменения типа: ' + result.error, true);
                                 saveBtn.disabled = false;
                                 return;
                             }
                             col.type = newTypeId;
+                            col.unique = newUnique ? '1' : '0';
                         }
                     }
 
@@ -5662,13 +5690,15 @@ class IntegramTable{
         /**
          * Save column base type via API (issue #937).
          * Uses _d_save/{origId}?JSON as in object.html saveType().
+         * @param {boolean} [isUnique] - Whether to set unique=1 flag (issue #1026)
          */
-        async saveColumnType(origId, newTypeId, colName) {
+        async saveColumnType(origId, newTypeId, colName, isUnique) {
             const apiBase = this.getApiBase();
             try {
                 const params = new URLSearchParams();
                 params.append('val', colName);
                 params.append('t', newTypeId);
+                if (isUnique) params.append('unique', '1');
                 if (typeof xsrf !== 'undefined') params.append('_xsrf', xsrf);
 
                 const resp = await fetch(`${apiBase}/_d_save/${origId}?JSON`, {
