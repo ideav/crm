@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n="page.title">Главная</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+        <div class="navbar-left">
+            <img src="images/logo.png" alt="Логотип" class="logo">
+        </div>
+        <div class="navbar-right">
+            <button id="lang-toggle" class="theme-toggle" title="Switch language">RU</button>
+            <button id="theme-toggle" class="theme-toggle">🌙 <span data-i18n="nav.dark">Темная</span></button>
+
+            <!-- Shown when no valid idb_* cookies found -->
+            <button id="login-btn" class="btn-primary-nav" style="display:none;" data-i18n="nav.login">Войти</button>
+
+            <!-- Shown when authenticated: single db or idb_my -->
+            <div id="db-btn-wrapper" style="display:none;" class="db-btn-wrapper">
+                <button id="db-btn" class="btn-primary-nav" onclick="window._app && window._app.navigateToDb()"></button>
+                <!-- Dropdown arrow, shown only when multiple dbs exist -->
+                <button id="db-dropdown-toggle" class="db-dropdown-toggle" style="display:none;" aria-label="Select database">&#9660;</button>
+                <div id="db-dropdown" class="db-dropdown" style="display:none;"></div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Welcome section: shown by default -->
+    <main class="main-content" id="welcome-section">
+        <div class="dashboard">
+            <h1 data-i18n="welcome.title">Добро пожаловать!</h1>
+            <p data-i18n="welcome.subtitle">Сервис для работы с вашими данными.</p>
+        </div>
+    </main>
+
+    <!-- Auth panel: shown when "Войти" is clicked -->
+    <div id="auth-panel" class="auth-container" style="display:none;">
+        <div class="auth-card">
+            <!-- Tab switcher -->
+            <div class="auth-tabs">
+                <button id="tab-login" class="auth-tab auth-tab-active" data-i18n="auth.loginTab">Вход</button>
+                <button id="tab-register" class="auth-tab" data-i18n="auth.registerTab">Регистрация</button>
+            </div>
+
+            <!-- Login form -->
+            <div id="login-section">
+                <h1 data-i18n="auth.loginTitle">Вход</h1>
+                <p data-i18n="auth.loginSubtitle">Войдите в свой аккаунт</p>
+
+                <form id="login-form">
+                    <div class="form-group">
+                        <label for="login-email" data-i18n="auth.email">Email адрес</label>
+                        <input type="email" id="login-email" name="email" required placeholder="your@email.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="login-password" data-i18n="auth.password">Пароль</label>
+                        <input type="password" id="login-password" name="password" required>
+                    </div>
+                    <button type="submit" class="btn-primary" data-i18n="auth.loginBtn">Войти</button>
+                </form>
+
+                <div id="yandex-divider" class="auth-divider" style="display:none;" data-i18n="auth.or">или</div>
+                <div class="oauth-buttons-container">
+                    <button type="button" id="yandex-login-btn" class="btn-yandex btn-oauth-compact" style="display:none;">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12.002 0C5.375 0 0 5.375 0 12s5.375 12 12.002 12C18.626 24 24 18.625 24 12S18.626 0 12.002 0zM15.24 16.2h-1.68V8.04h-1.2c-1.637 0-2.52.818-2.52 2.045 0 1.39.597 2.047 1.843 2.87l1.017.676-2.903 4.57H7.92l2.676-3.913C9.08 13.18 8.16 12.11 8.16 10.016c0-2.24 1.554-3.696 4.306-3.696h2.774v9.88z"/>
+                        </svg>
+                        <span class="btn-text" data-i18n="auth.yandex">Яндекс</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Register form -->
+            <div id="register-section" style="display:none;">
+                <h1 data-i18n="auth.registerTitle">Регистрация</h1>
+                <p data-i18n="auth.registerSubtitle">Создайте новый аккаунт</p>
+
+                <form id="register-form">
+                    <div class="form-group">
+                        <label for="reg-email" data-i18n="auth.email">Email адрес</label>
+                        <input type="email" id="reg-email" name="email" required placeholder="your@email.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="reg-password" data-i18n="auth.password">Пароль</label>
+                        <input type="password" id="reg-password" name="password" required minlength="6">
+                    </div>
+                    <div class="form-group">
+                        <label for="reg-confirm-password" data-i18n="auth.confirmPassword">Подтвердите пароль</label>
+                        <input type="password" id="reg-confirm-password" name="confirm-password" required>
+                    </div>
+                    <button type="submit" class="btn-primary" data-i18n="auth.registerBtn">Зарегистрироваться</button>
+                </form>
+
+                <div id="yandex-reg-divider" class="auth-divider" style="display:none;" data-i18n="auth.or">или</div>
+                <div class="oauth-buttons-container">
+                    <button type="button" id="yandex-register-btn" class="btn-yandex btn-oauth-compact" style="display:none;">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12.002 0C5.375 0 0 5.375 0 12s5.375 12 12.002 12C18.626 24 24 18.625 24 12S18.626 0 12.002 0zM15.24 16.2h-1.68V8.04h-1.2c-1.637 0-2.52.818-2.52 2.045 0 1.39.597 2.047 1.843 2.87l1.017.676-2.903 4.57H7.92l2.676-3.913C9.08 13.18 8.16 12.11 8.16 10.016c0-2.24 1.554-3.696 4.306-3.696h2.774v9.88z"/>
+                        </svg>
+                        <span class="btn-text" data-i18n="auth.yandex">Яндекс</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Close auth panel -->
+            <div class="auth-links">
+                <a href="#" id="close-auth" data-i18n="auth.close">&#10005; Закрыть</a>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
