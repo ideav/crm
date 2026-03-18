@@ -35,7 +35,6 @@ const PRIMEVUE_ICONS = [
 
 class MainAppController {
     constructor() {
-        this.i18n = window._app ? window._app.i18n : null;
         this.theme = window._app ? window._app.theme : null;
         this.editMode = false;
         this.draggedItem = null;
