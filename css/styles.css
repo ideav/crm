@@ -36,20 +36,26 @@
     --color-danger-hover: #c82333;
     --color-danger-dark-hover: #bb2d3b;
 
+    --icon-type-2: #e11d48;
+    --icon-type-2-bg: rgba(225, 29, 72, 0.15);
     --icon-type-3: #3b82f6;
     --icon-type-3-bg: rgba(59, 130, 246, 0.15);
-    --icon-type-4: #10b981;
-    --icon-type-4-bg: rgba(16, 185, 129, 0.15);
+    --icon-type-4: #8b5cf6;
+    --icon-type-4-bg: rgba(139, 92, 246, 0.15);
     --icon-type-5: #f59e0b;
     --icon-type-5-bg: rgba(245, 158, 11, 0.15);
-    --icon-type-6: #8b5cf6;
-    --icon-type-6-bg: rgba(139, 92, 246, 0.15);
-    --icon-type-7: #ec4899;
-    --icon-type-7-bg: rgba(236, 72, 153, 0.15);
     --icon-type-8: #6b7280;
     --icon-type-8-bg: rgba(107, 114, 128, 0.15);
     --icon-type-9: #06b6d4;
     --icon-type-9-bg: rgba(6, 182, 212, 0.15);
+    --icon-type-12: #10b981;
+    --icon-type-12-bg: rgba(16, 185, 129, 0.15);
+    --icon-type-13: #0ea5e9;
+    --icon-type-13-bg: rgba(14, 165, 233, 0.15);
+    --icon-type-14: #ec4899;
+    --icon-type-14-bg: rgba(236, 72, 153, 0.15);
+    --icon-type-16: #7c3aed;
+    --icon-type-16-bg: rgba(124, 58, 237, 0.15);
 }
 
 [data-theme="dark"] {
@@ -76,20 +82,26 @@
     --color-error: #f87171;
     --color-error-bg: #7f1d1d;
 
+    --icon-type-2: #fb7185;
+    --icon-type-2-bg: rgba(251, 113, 133, 0.2);
     --icon-type-3: #60a5fa;
     --icon-type-3-bg: rgba(96, 165, 250, 0.2);
-    --icon-type-4: #34d399;
-    --icon-type-4-bg: rgba(52, 211, 153, 0.2);
+    --icon-type-4: #a78bfa;
+    --icon-type-4-bg: rgba(167, 139, 250, 0.2);
     --icon-type-5: #fbbf24;
     --icon-type-5-bg: rgba(251, 191, 36, 0.2);
-    --icon-type-6: #a78bfa;
-    --icon-type-6-bg: rgba(167, 139, 250, 0.2);
-    --icon-type-7: #f472b6;
-    --icon-type-7-bg: rgba(244, 114, 182, 0.2);
     --icon-type-8: #9ca3af;
     --icon-type-8-bg: rgba(156, 163, 175, 0.2);
     --icon-type-9: #22d3ee;
     --icon-type-9-bg: rgba(34, 211, 238, 0.2);
+    --icon-type-12: #34d399;
+    --icon-type-12-bg: rgba(52, 211, 153, 0.2);
+    --icon-type-13: #38bdf8;
+    --icon-type-13-bg: rgba(56, 189, 248, 0.2);
+    --icon-type-14: #f472b6;
+    --icon-type-14-bg: rgba(244, 114, 182, 0.2);
+    --icon-type-16: #a78bfa;
+    --icon-type-16-bg: rgba(167, 139, 250, 0.2);
 }
 
 /* Reset and base styles */
