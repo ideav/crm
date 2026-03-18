@@ -2303,6 +2303,7 @@ function parseReferenceValue(value) {
 // ============================================================
 // Get Display Value for Reference Field
 // Shows only the name part for reference fields (id:name -> name)
+// Also handles multi-select format: "id1,id2,...:name1,name2,..." -> "name1,name2,..."
 // Returns empty string for null, undefined, or empty values
 // ============================================================
 function getDisplayValue(value) {
@@ -2311,7 +2312,17 @@ function getDisplayValue(value) {
         return '';
     }
     const ref = parseReferenceValue(value);
-    return ref ? ref.name : value;
+    if (ref) return ref.name;
+    // Handle multi-select format: "469,471,473:МО,VIP,ЧС"
+    // The id part is comma-separated digits, followed by colon, then comma-separated names
+    const colonIndex = value.indexOf(':');
+    if (colonIndex > 0) {
+        const idPart = value.substring(0, colonIndex);
+        if (/^[\d,]+$/.test(idPart)) {
+            return value.substring(colonIndex + 1);
+        }
+    }
+    return value;
 }
 
 // ============================================================
