@@ -153,7 +153,7 @@
 /* Panel Card - Adaptive sizing based on content */
 .panel-card {
     background: #fff;
-    border: 1px solid #e0e0e0;
+    border: none;
     border-radius: 8px;
     padding: 15px;
     min-width: 200px;
@@ -163,6 +163,7 @@
     position: relative;
     overflow: hidden;
     width: fit-content;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
 /* When panel is inside a group, take full width of group */
@@ -191,8 +192,7 @@
 }
 
 .panel-card.editing {
-    border-color: #007bff;
-    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 2px 4px rgba(0, 0, 0, 0.12);
 }
 
 .panel-header {
@@ -467,7 +467,7 @@
     color: var(--text-color, #333);
     margin-bottom: 15px;
     padding-bottom: 10px;
-    border-bottom: 2px solid #007bff;
+    border-bottom: 1px solid #e0e0e0;
 }
 
 /* Column Config UI */
@@ -1704,8 +1704,9 @@ function renderReportTable(panelId, reportId, filter, config, container) {
 
         let html = '';
 
-        // Update panel title with report header (source name) instead of displaying it inside
-        if (json.header) {
+        // Update panel title with report header (source name) only if no custom panel name is configured
+        const panelForReportTitle = FormConstructor.panels && FormConstructor.panels.find(function(p) { return p.id == panelId; });
+        if (json.header && (!panelForReportTitle || !getDisplayValue(panelForReportTitle.val))) {
             updatePanelTitle(panelId, json.header);
         }
 
@@ -1856,8 +1857,9 @@ function renderTableAsReport(panelId, tableId, filter, config, container) {
 
             let html = '';
 
-            // Update panel title with table name (source name) instead of displaying it inside
-            if (metadata.val) {
+            // Update panel title with table name (source name) only if no custom panel name is configured
+            const panelForTitle = FormConstructor.panels && FormConstructor.panels.find(function(p) { return p.id == panelId; });
+            if (metadata.val && (!panelForTitle || !getDisplayValue(panelForTitle.val))) {
                 updatePanelTitle(panelId, getDisplayValue(metadata.val));
             }
 
