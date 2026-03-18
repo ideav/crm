@@ -495,20 +495,6 @@ class CabinetController {
             }
         });
 
-        // Language toggle
-        const langToggle = document.getElementById('lang-toggle');
-        const langValue = document.getElementById('lang-value');
-        if (langToggle) {
-            langToggle.addEventListener('click', (e) => {
-                e.stopPropagation();
-                this.i18n.toggleLang();
-                if (langValue) {
-                    langValue.textContent = this.i18n.lang.toUpperCase();
-                }
-                this.updateThemeMenuLabels();
-            });
-        }
-
         // Theme toggle
         const themeToggle = document.getElementById('theme-toggle');
         if (themeToggle) {
@@ -530,9 +516,6 @@ class CabinetController {
 
         // Initialize labels
         this.updateThemeMenuLabels();
-        if (langValue) {
-            langValue.textContent = this.i18n.lang.toUpperCase();
-        }
     }
 
     updateThemeMenuLabels() {
