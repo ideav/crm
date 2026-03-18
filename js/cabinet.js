@@ -429,7 +429,7 @@ class CabinetController {
     async saveProfile() {
         if (!this.me) {
             console.error('[cabinet] Cannot save profile: user identifier (me) is not set');
-            showToast(this.i18n.t('cabinet.profile.saveError') || 'Ошибка сохранения профиля', 'error');
+            showToast('Ошибка сохранения профиля', 'error');
             return;
         }
 
@@ -462,10 +462,10 @@ class CabinetController {
             this.originalProfileValues['profile-about'] = document.getElementById('profile-about')?.value || '';
 
             if (saveBtn) saveBtn.style.display = 'none';
-            showToast(this.i18n.t('cabinet.profile.saveSuccess') || 'Профиль сохранен', 'success');
+            showToast('Профиль сохранен', 'success');
         } catch (err) {
             console.error('[cabinet] Error saving profile:', err);
-            showToast(this.i18n.t('cabinet.profile.saveError') || 'Ошибка сохранения профиля', 'error');
+            showToast('Ошибка сохранения профиля', 'error');
         } finally {
             if (saveBtn) saveBtn.disabled = false;
         }
