@@ -9,6 +9,8 @@ class CabinetController {
         this.currentSection = 'databases';
         this.apiConfig = new ApiConfig();
         this.i18n = window._app ? window._app.i18n : new I18nManager();
+        this.me = null; // user identifier for save API
+        this.originalProfileValues = {}; // tracks original values to detect changes
     }
 
     async init() {
@@ -145,6 +147,7 @@ class CabinetController {
             // Parse the response - it's an array of database records
             if (Array.isArray(data) && data.length > 0) {
                 this.userData = data[0]; // First record contains user info
+                this.me = this.userData.User || null;
                 this.databases = data;
                 this.populateUserData();
             } else {
@@ -215,6 +218,23 @@ class CabinetController {
         // About (Notes)
         const aboutInput = document.getElementById('profile-about');
         if (aboutInput) aboutInput.value = this.userData.Notes || '';
+
+        // Store original values for change detection
+        this.originalProfileValues = {
+            'profile-name': this.userData.Name || '',
+            'profile-phone': this.userData.Phone || '',
+            'profile-about': this.userData.Notes || ''
+        };
+
+        // Hide save button initially
+        const saveBtn = document.getElementById('save-profile-btn');
+        if (saveBtn) saveBtn.style.display = 'none';
+
+        // Set up change detection on editable profile fields
+        ['profile-name', 'profile-phone', 'profile-about'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('input', () => this.onProfileChange());
+        });
 
         // Photo preview
         if (this.userData.Picture) {
@@ -398,18 +418,59 @@ class CabinetController {
         }
     }
 
+    onProfileChange() {
+        const saveBtn = document.getElementById('save-profile-btn');
+        if (!saveBtn) return;
+
+        const hasChanges = ['profile-name', 'profile-phone', 'profile-about'].some(id => {
+            const el = document.getElementById(id);
+            return el && el.value !== this.originalProfileValues[id];
+        });
+
+        saveBtn.style.display = hasChanges ? '' : 'none';
+    }
+
     async saveProfile() {
-        const name = document.getElementById('profile-name')?.value || '';
-        const phone = document.getElementById('profile-phone')?.value || '';
-        const about = document.getElementById('profile-about')?.value || '';
+        if (!this.me) {
+            console.error('[cabinet] Cannot save profile: user identifier (me) is not set');
+            showToast(this.i18n.t('cabinet.profile.saveError') || 'Ошибка сохранения профиля', 'error');
+            return;
+        }
+
+        const saveBtn = document.getElementById('save-profile-btn');
+        if (saveBtn) saveBtn.disabled = true;
 
         try {
-            // TODO: Implement profile save API call
-            // For now, show a message
+            const host = this.apiConfig.host;
+            const url = 'https://' + host + '/my/_m_save/' + this.me + '?JSON';
+
+            const fd = new FormData();
+            fd.append('t33', document.getElementById('profile-name')?.value || '');
+            fd.append('t30', document.getElementById('profile-phone')?.value || '');
+            fd.append('t39', document.getElementById('profile-about')?.value || '');
+
+            const response = await fetch(url, {
+                method: 'POST',
+                credentials: 'include',
+                body: fd
+            });
+
+            if (!response.ok) {
+                throw new Error('HTTP ' + response.status);
+            }
+
+            // Update original values after successful save
+            this.originalProfileValues['profile-name'] = document.getElementById('profile-name')?.value || '';
+            this.originalProfileValues['profile-phone'] = document.getElementById('profile-phone')?.value || '';
+            this.originalProfileValues['profile-about'] = document.getElementById('profile-about')?.value || '';
+
+            if (saveBtn) saveBtn.style.display = 'none';
             showToast(this.i18n.t('cabinet.profile.saveSuccess') || 'Профиль сохранен', 'success');
         } catch (err) {
             console.error('[cabinet] Error saving profile:', err);
             showToast(this.i18n.t('cabinet.profile.saveError') || 'Ошибка сохранения профиля', 'error');
+        } finally {
+            if (saveBtn) saveBtn.disabled = false;
         }
     }
 
