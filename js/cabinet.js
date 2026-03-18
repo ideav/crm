@@ -146,7 +146,7 @@ class CabinetController {
 
             // Parse the response - it's an array of database records
             if (Array.isArray(data) && data.length > 0) {
-                this.userData = data[0]; // First record contains user info
+                this.userData = data[0].User; // First record contains user info
                 this.me = this.userData.User || null;
                 this.databases = data;
                 this.populateUserData();
