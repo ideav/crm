@@ -21,13 +21,16 @@ class TablesController {
 
         // Type icons mapping (PrimeVue icons)
         this.typeIcons = {
-            3: 'pi pi-file',         // CHARS - document
-            4: 'pi pi-hashtag',      // NUMBER - 1234
-            5: 'pi pi-calendar',     // DATE - calendar
-            6: 'pi pi-clock',        // DATETIME - clock
-            7: 'pi pi-check-square', // BOOLEAN - checkbox
-            8: 'pi pi-cog',          // FUNCTION - gear
-            9: 'pi pi-file-edit'     // MEMO - memo
+            2: 'pi pi-code',              // HTML
+            3: 'pi pi-file',              // SHORT
+            4: 'pi pi-clock',             // DATETIME
+            5: 'pi pi-lock',              // GRANT
+            8: 'pi pi-align-left',        // CHARS
+            9: 'pi pi-calendar',          // DATE
+            12: 'pi pi-file-edit',        // MEMO
+            13: 'pi pi-hashtag',          // NUMBER
+            14: 'pi pi-sort-numeric-down',// SIGNED
+            16: 'pi pi-table'             // REPORT_COLUMN
         };
 
         // Drag and drop state

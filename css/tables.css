@@ -287,6 +287,11 @@
 }
 
 /* Icon colors by type */
+.table-card-icon.type-2 {
+    background-color: var(--icon-type-2-bg);
+    color: var(--icon-type-2);
+}
+
 .table-card-icon.type-3 {
     background-color: var(--icon-type-3-bg);
     color: var(--icon-type-3);
@@ -302,16 +307,6 @@
     color: var(--icon-type-5);
 }
 
-.table-card-icon.type-6 {
-    background-color: var(--icon-type-6-bg);
-    color: var(--icon-type-6);
-}
-
-.table-card-icon.type-7 {
-    background-color: var(--icon-type-7-bg);
-    color: var(--icon-type-7);
-}
-
 .table-card-icon.type-8 {
     background-color: var(--icon-type-8-bg);
     color: var(--icon-type-8);
@@ -320,6 +315,26 @@
 .table-card-icon.type-9 {
     background-color: var(--icon-type-9-bg);
     color: var(--icon-type-9);
+}
+
+.table-card-icon.type-12 {
+    background-color: var(--icon-type-12-bg);
+    color: var(--icon-type-12);
+}
+
+.table-card-icon.type-13 {
+    background-color: var(--icon-type-13-bg);
+    color: var(--icon-type-13);
+}
+
+.table-card-icon.type-14 {
+    background-color: var(--icon-type-14-bg);
+    color: var(--icon-type-14);
+}
+
+.table-card-icon.type-16 {
+    background-color: var(--icon-type-16-bg);
+    color: var(--icon-type-16);
 }
 
 .table-card-name {
