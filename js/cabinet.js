@@ -444,6 +444,7 @@ class CabinetController {
             fd.append('t33', document.getElementById('profile-name')?.value || '');
             fd.append('t30', document.getElementById('profile-phone')?.value || '');
             fd.append('t39', document.getElementById('profile-about')?.value || '');
+            fd.append('_xsrf', xsrf);
 
             const response = await fetch(url, {
                 method: 'POST',
