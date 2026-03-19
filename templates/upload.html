@@ -73,10 +73,13 @@ input[type="checkbox"] {
         <tr><td class="pr-2"><a href="/{_global_.z}/{_global_.action}" title="Вернуться к выбору таблицы"><i class="pi pi-arrow-left" style="font-size: 1.25rem; color: var(--text-secondary);"></i></a></td><td class="pt-2"><h4 id="chosen"></h4></td></tr>
     </table>
     <div class="mb-5 p-1 p-sm-2 shadow">
-        Вставьте текст из файла в это поле или выберите файл для загрузки:
+        <div>Вставьте текст из файла в это поле или выберите файл для загрузки:
         <textarea rows="5" class="form-control mb-2 mt-1" id="input"></textarea>
         JSON или любой текстовый файл: CSV, TXT и т.п. Форматы XLS и XLSX пока не поддерживаются (просто скопируйте кусок вашего экселя в поле выше).
+		</div>
+		<div>
         <label class="btn btn-outline-secondary upload-file-label mb-2"><i class="pi pi-upload"></i> Выберите файл<input type="file" id="selectFiles" style="display:none" /></label>
+		</div>
         <!--
         можно загрузить этот файл по ссылке:
         <input class="form-control" type="text" id="selectLink" /><br />
