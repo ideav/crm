@@ -137,7 +137,7 @@
     transition: width 0.25s ease, background-color 0.3s ease;
     overflow: hidden;
     position: sticky;
-    top: 0;
+    top: 70px;
     height: calc(100vh - 70px);
     display: flex;
     flex-direction: column;

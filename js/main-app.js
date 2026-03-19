@@ -155,10 +155,13 @@ class MainAppController {
         const sidebar = document.getElementById('app-sidebar');
         if (!sidebar) return;
 
-        // Create resize handle
-        const resizeHandle = document.createElement('div');
-        resizeHandle.className = 'sidebar-resize-handle';
-        sidebar.appendChild(resizeHandle);
+        // Use existing resize handle from HTML, or create one if missing
+        let resizeHandle = sidebar.querySelector('.sidebar-resize-handle');
+        if (!resizeHandle) {
+            resizeHandle = document.createElement('div');
+            resizeHandle.className = 'sidebar-resize-handle';
+            sidebar.appendChild(resizeHandle);
+        }
 
         // Restore width from cookie
         const cookieName = 'sidebarWidth_' + (typeof db !== 'undefined' ? db : 'default');
