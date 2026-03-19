@@ -1,25 +1,22 @@
-<!-- Quick Links Section -->
-<div class="quick-links-container">
-    <div id="quick-links" class="quick-links">
-        <div class="loading">
-            <div class="loading-spinner"></div>
-            <div style="margin-top: 10px;">Загрузка...</div>
-        </div>
-    </div>
-</div>
-
-<!-- Tasks Section -->
-<div class="tasks-container">
-    <div id="tasks-table"
-         data-integram-table
-         data-api-url="/{_global_.z}/report/4283?JSON"
-         data-page-size="20"
-         data-cookie-prefix="tasks-table"
-         data-title="Задачи"
-         data-instance-name="tasksTable"></div>
-</div>
-
-<link rel="stylesheet" href="/download/{_global_.z}/css/info.css?5" />
-<link rel="stylesheet" href="/download/{_global_.z}/css/integram-table.css?3" />
-<script src="/download/{_global_.z}/js/integram-table.js?3"></script>
-<script src="/download/{_global_.z}/js/info.js?1"></script>
+<h3>Пользовательские отчеты</h3>
+<table class="table table-bordered">
+<tr style="background-color:#f9f9f9;">
+<th>Отчет</th><th>Описание</th>
+</tr>
+<!-- Begin:Пользовательские -->
+<tr>
+<td><a href="/{_global_.z}/query/{ЗапросID}">{Запрос}</a></td><td>{Описание}</td>
+</tr>
+<!-- End:Пользовательские -->
+</table>
+<h3>Формы</h3>
+<table class="table table-bordered">
+<tr style="background-color:#f9f9f9;">
+<th>Наименование</th><th>Описание</th>
+</tr>
+<!-- Begin:Формы -->
+<tr>
+<td>{Вычисляемое}</td><td>{Описание}</td>
+</tr>
+<!-- End:Формы -->
+</table>
