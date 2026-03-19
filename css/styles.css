@@ -776,3 +776,22 @@ body {
 .auth-db-back-link:hover {
     text-decoration: underline;
 }
+#cookie-consent {
+    display: flex;
+    position: fixed;
+    bottom: 0px;
+    left: 0px;
+    right: 0px;
+    z-index: 9999;
+    background: rgb(30, 41, 59);
+    color: rgb(241, 245, 249);
+    padding: 1.75rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    box-shadow: rgba(0, 0, 0, 0.2) 0px -2px 8px;
+    border-radius: 8px;
+    margin: 0.75rem;
+    opacity: 90%;
+}
