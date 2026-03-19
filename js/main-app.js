@@ -1453,6 +1453,7 @@ class MainAppController {
         // Get current action from URL or global variable
         const currentAction = typeof action !== 'undefined' ? action : '';
         const currentPath = window.location.pathname;
+        const currentSearch = window.location.search; // e.g. "?EDIT"
 
         const menuItems = document.querySelectorAll('.app-menu-item');
         menuItems.forEach(item => {
@@ -1463,11 +1464,26 @@ class MainAppController {
                 return; // Skip items with empty href
             }
 
+            // Split dataHref into path part and query part (e.g. "forms?EDIT" -> "forms", "?EDIT")
+            const queryIndex = dataHref.indexOf('?');
+            const dataHrefPath = queryIndex >= 0 ? dataHref.substring(0, queryIndex) : dataHref;
+            const dataHrefQuery = queryIndex >= 0 ? dataHref.substring(queryIndex) : '';
+
             // Check if this menu item matches current action or path
-            const hrefParts = dataHref.split('/').filter(p => p);
+            const hrefParts = dataHrefPath.split('/').filter(p => p);
             const lastPart = hrefParts[hrefParts.length - 1];
 
-            if (currentAction && lastPart === currentAction) {
+            // When dataHref contains a query string (e.g. "forms?EDIT"), match against both
+            // the current path action and the current URL query string
+            if (dataHrefQuery) {
+                if (currentAction && lastPart === currentAction && currentSearch === dataHrefQuery) {
+                    item.classList.add('active');
+                    this.expandParentMenus(item);
+                } else if (currentPath.includes(dataHrefPath) && currentSearch === dataHrefQuery) {
+                    item.classList.add('active');
+                    this.expandParentMenus(item);
+                }
+            } else if (currentAction && lastPart === currentAction) {
                 item.classList.add('active');
                 this.expandParentMenus(item);
             } else if (currentPath.includes(dataHref)) {
