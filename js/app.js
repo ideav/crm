@@ -399,6 +399,12 @@ class AuthManager {
             select.appendChild(opt);
         });
 
+        // Add "Другая" option at the end
+        const otherOpt = document.createElement('option');
+        otherOpt.value = '__other__';
+        otherOpt.textContent = 'Другая';
+        select.appendChild(otherOpt);
+
         // Determine default: preselect param > last_db cookie > 'my'
         const lastUsed = preselect || CookieUtil.get('last_db') || 'my';
         // Select matching option if it exists
@@ -411,6 +417,14 @@ class AuthManager {
             }
         }
         if (!found) select.selectedIndex = 0;
+
+        // Reset custom input visibility on each rebuild
+        const customGroup = document.getElementById('auth-db-custom-group');
+        const customInput = document.getElementById('auth-db-custom');
+        if (customGroup && customInput) {
+            customGroup.style.display = 'none';
+            customInput.value = '';
+        }
     }
 }
 
@@ -487,6 +501,31 @@ class App {
             tabRegister.addEventListener('click', () => this.switchTab('register'));
         }
 
+        // "Другая" DB option: show/hide custom input on select change
+        const authDbSelect = document.getElementById('auth-db-select');
+        const authDbCustomGroup = document.getElementById('auth-db-custom-group');
+        const authDbCustom = document.getElementById('auth-db-custom');
+        const authDbBack = document.getElementById('auth-db-back');
+        if (authDbSelect && authDbCustomGroup && authDbCustom) {
+            authDbSelect.addEventListener('change', () => {
+                if (authDbSelect.value === '__other__') {
+                    authDbCustomGroup.style.display = '';
+                    authDbCustom.focus();
+                } else {
+                    authDbCustomGroup.style.display = 'none';
+                    authDbCustom.value = '';
+                }
+            });
+        }
+        if (authDbBack && authDbSelect && authDbCustomGroup && authDbCustom) {
+            authDbBack.addEventListener('click', (e) => {
+                e.preventDefault();
+                authDbSelect.value = authDbSelect.options[0].value;
+                authDbCustomGroup.style.display = 'none';
+                authDbCustom.value = '';
+            });
+        }
+
         // Login form
         const loginForm = document.getElementById('login-form');
         if (loginForm) {
@@ -495,7 +534,15 @@ class App {
                 const email = document.getElementById('login-email').value;
                 const password = document.getElementById('login-password').value;
                 const dbSelect = document.getElementById('auth-db-select');
-                const selectedDb = dbSelect ? dbSelect.value : 'my';
+                const customInput = document.getElementById('auth-db-custom');
+                let selectedDb = dbSelect ? dbSelect.value : 'my';
+                if (selectedDb === '__other__') {
+                    selectedDb = customInput ? customInput.value.trim() : '';
+                    if (!selectedDb) {
+                        showToast('Введите имя базы данных', 'error');
+                        return;
+                    }
+                }
                 const result = await this.auth.login(email, password, selectedDb);
                 if (result.success) {
                     CookieUtil.set('last_db', selectedDb, 365);

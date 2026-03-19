@@ -746,3 +746,33 @@ body {
     border-color: var(--button-primary);
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
+
+.auth-db-custom-input {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    font-size: 1rem;
+    background-color: var(--input-bg);
+    color: var(--text-primary);
+    transition: all 0.3s ease;
+    box-sizing: border-box;
+}
+
+.auth-db-custom-input:focus {
+    outline: none;
+    border-color: var(--button-primary);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.auth-db-back-link {
+    display: inline-block;
+    margin-top: 0.4rem;
+    font-size: 0.875rem;
+    color: var(--button-primary);
+    text-decoration: none;
+}
+
+.auth-db-back-link:hover {
+    text-decoration: underline;
+}
