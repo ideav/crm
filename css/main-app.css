@@ -332,6 +332,14 @@
     background-color: rgba(255, 255, 255, 0.12);
 }
 
+.app-menu-item.link-hover {
+    background-color: rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="dark"] .app-menu-item.link-hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
 .menu-icon {
     font-size: var(--menu-icon-size, 1.25rem);
     width: 1.5rem;

@@ -37,52 +37,32 @@
 
     // ── Tab switching ────────────────────────────────────────────────────────
 
-    var TAB_ORDER_DEFAULT = ['intro', 'quicklinks', 'forms'];
+    var TAB_ORDER = ['intro', 'quicklinks', 'forms'];
 
-    function getTabOrder() {
+    function getActiveTab() {
         var saved = getCookie(COOKIE_ACTIVE_TAB);
-        if (!saved) return TAB_ORDER_DEFAULT.slice();
-        // Saved value is the last-active tab name; move it to front
-        var order = TAB_ORDER_DEFAULT.slice();
-        var idx = order.indexOf(saved);
-        if (idx > 0) {
-            order.splice(idx, 1);
-            order.unshift(saved);
-        }
-        return order;
+        return (saved && TAB_ORDER.indexOf(saved) >= 0) ? saved : TAB_ORDER[0];
     }
 
     function renderTabs(activeTab) {
         var tabsEl = document.getElementById('info-tabs');
         if (!tabsEl) return;
 
-        var order = getTabOrder();
-        // If caller specifies activeTab, move it to front
-        if (activeTab) {
-            var idx = order.indexOf(activeTab);
-            if (idx > 0) {
-                order.splice(idx, 1);
-                order.unshift(activeTab);
-            }
-        }
+        var active = activeTab || getActiveTab();
 
-        var labels = { intro: 'Вводная', quicklinks: 'Быстрые ссылки', forms: 'Формы и отчеты' };
-
-        tabsEl.innerHTML = '';
-        order.forEach(function(tabId, i) {
-            var btn = document.createElement('button');
-            btn.className = 'info-tab' + (i === 0 ? ' active' : '');
-            btn.id = 'tab-' + tabId;
-            btn.dataset.tab = tabId;
-            btn.textContent = labels[tabId] || tabId;
-            btn.addEventListener('click', function() {
-                infoSwitchTab(tabId);
-            });
-            tabsEl.appendChild(btn);
+        // Update active class on existing buttons (tabs stay in their fixed positions)
+        tabsEl.querySelectorAll('.info-tab').forEach(function(btn) {
+            var tabId = btn.dataset.tab;
+            btn.classList.toggle('active', tabId === active);
         });
 
-        // Show first tab content
-        showContent(order[0]);
+        showContent(active);
+
+        // Reveal the container once the correct tab is already shown (eliminates flicker)
+        var container = tabsEl.closest('.info-tabs-container');
+        if (container) {
+            container.style.visibility = 'visible';
+        }
     }
 
     function showContent(tabId) {
@@ -102,6 +82,38 @@
         setCookie(COOKIE_ACTIVE_TAB, tabId, 365);
         renderTabs(tabId);
     };
+
+    // ── Menu item hover highlight from action links ───────────────────────────
+
+    function initActionLinkHover() {
+        var links = document.querySelectorAll('.info-action-link[href]');
+        links.forEach(function(link) {
+            link.addEventListener('mouseenter', function() {
+                highlightMenuItemForLink(link.getAttribute('href'), true);
+            });
+            link.addEventListener('mouseleave', function() {
+                highlightMenuItemForLink(link.getAttribute('href'), false);
+            });
+        });
+    }
+
+    function highlightMenuItemForLink(href, on) {
+        if (!href || href === '#') return;
+        // Strip leading slash and db prefix (e.g. "/mydb/tables" -> "tables")
+        // Menu item data-href stores the path after the db prefix
+        var parts = href.replace(/^\//, '').split('/');
+        // Remove the db segment (first part) to get the menu href
+        var menuHref = parts.slice(1).join('/');
+        if (!menuHref) return;
+
+        var menuItems = document.querySelectorAll('.app-menu-item[data-href]');
+        menuItems.forEach(function(item) {
+            var itemHref = item.getAttribute('data-href') || '';
+            if (itemHref === menuHref) {
+                item.classList.toggle('link-hover', on);
+            }
+        });
+    }
 
     // ── Expandable action items ──────────────────────────────────────────────
 
@@ -190,10 +202,23 @@
 
     // ── Init ─────────────────────────────────────────────────────────────────
 
+    function initTabClickHandlers() {
+        var tabsEl = document.getElementById('info-tabs');
+        if (!tabsEl) return;
+        tabsEl.querySelectorAll('.info-tab').forEach(function(btn) {
+            var tabId = btn.dataset.tab;
+            btn.addEventListener('click', function() {
+                infoSwitchTab(tabId);
+            });
+        });
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
+        initTabClickHandlers();
         renderTabs();
         initActionItems();
         updateHintButtons();
+        initActionLinkHover();
     });
 
 })();
