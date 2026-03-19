@@ -777,7 +777,7 @@ body {
     text-decoration: underline;
 }
 #cookie-consent {
-    display: flex;
+    display: none;
     position: fixed;
     bottom: 0px;
     left: 0px;
