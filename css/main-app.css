@@ -526,7 +526,7 @@
     }
 
     .app-sidebar.collapsed {
-        width: 280px;
+        width: 56px;
         transform: translateX(-100%);
     }
 
