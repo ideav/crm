@@ -1,165 +1,104 @@
 <!DOCTYPE html>
+<html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="/css/bootstrap.min.css">
+    <title>{_global_.action} - {_global_.z}</title>
+    <link rel="stylesheet" href="/css/styles.css">
     <link rel="stylesheet" href="https://unpkg.com/primeicons/primeicons.css">
-    <link rel="stylesheet" href="/css/css.css?{_global_.version}" />
-    <link rel="stylesheet" href="/css/styles.css?{_global_.version}" />
-    <title>Integram</title>
-    <script src="/js/jquery.min.js"></script>
-    <script src="/js/jquery-ui.min.js"></script>
-    <script>
-        var db='{_global_.z}',xsrf='{_global_.xsrf}',id='{_global_.id}',token='{_global_.token}',uid='{_global_.user_id}',action='{_global_.action}',menu=[];
-    </script>
-    <script src="/js/js.js?{_global_.version}"></script>
-    <script>
-        <!-- Begin:MyRoleMenu -->menu.push({href:'{HREF}'.replace(/\[USER_ID\]/g,uid),name:'{Name}'});
-        <!-- End:MyRoleMenu -->
-    </script>
-    <script src="/js/moment.min.js"></script>
+    <link rel="stylesheet" href="/css/main-app.css">
     <style>
-        .nav-link:hover {
-            transform: translateY(-1px);
-            background-color: rgba(255, 255, 255, 0.1);
-            text-decoration: none;
-        }
-
-        .nav-link-active {
-            background-color: rgba(255, 255, 255, 0.1);
-            text-decoration: none;
+        html {
+            font-size: .82rem;
         }
     </style>
+    <script>
+        var db = '{_global_.z}',
+            xsrf = '{_global_.xsrf}',
+            id = '{_global_.id}',
+            token = '{_global_.token}',
+            uid = '{_global_.user_id}',
+            user = '{_global_.user}',
+            role = '{_global_.role}',
+            roleId = '{_global_.role_id}',
+            action = '{_global_.action}';
+    </script>
 </head>
 <body>
-<nav id="nav" class="navbar shadow-sm navbar-expand-562 fixed-top dark navbar-fixed-top">
-    <a id="brand" class="navbar-brand" href="/{_global_.z}/">
-        <img src="/i/lamp.png" width="30" loading="lazy"/>
-    </a>
-    <button onclick="burgerClick(this)" class="navbar-toggler expand-menu" type="button"  data-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
-        <span class="navbar-toggler-icon">
-            <i class="pi pi-bars" style="font-size: 28px;"></i>
-        </span>
-    </button>
-    <div class="collapse navbar-collapse" id="navbarSupportedContent">
-        <ul id="navbar-list" class="navbar-nav">
-            <div id="navlist" class="hidden">
-                <li class="nav-item"><a class="nav-link" id="list:id:" href="/{_global_.z}/:href:">:name:</a></li>
-            </div>
-            <div id="extralist" class="hidden">
-                <li id="dropdown-link" class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle expand-menu" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                      Еще
-                    </a>
-                    <div class="dropdown-menu" id="dropdown-list" aria-labelledby="navbarDropdown">
-                        <a class="dropdown-item" href="/{_global_.z}/:href:">:name:</a>
-                    </div>
-                </li>
-            </div>
-        </ul>
-    </div>
-    <div class="right-block" id="right_block">
-        <div class="nav-item dropdown">
-            <a class="user-link dropdown-toggle user-margin" href="#" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                <i class="pi pi-user" style="font-size: 24px; color: white;"></i>
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+        <div class="navbar-left">
+            <button id="mobile-sidebar-toggle" class="mobile-sidebar-toggle" type="button" aria-label="Открыть меню" title="Открыть меню"><i class="pi pi-bars"></i></button>
+            <a href="/{_global_.z}/" class="navbar-brand">
+                <img src="/images/logo.png" alt="Logo" class="logo">
+                <span class="brand-name">{_global_.z}</span>
             </a>
-            <div class="dropdown-menu dropdown-menu-right shadow" aria-labelledby="navbarDropdown">
-                <a class="dropdown-item" target="_blank" href="https://help.integram.io/">Помощь</a>
-                <a target="_blank" href="/my?login={_global_.z}">
-                    <div class="dropdown-item box">
-                        <span>ЛК / Счет</span>
-                    </div>
-                </a>
-                <a class="dropdown-item" onclick="toggleLocale()">EN/RU</a>
-                <a class="dropdown-item" onclick="$('.cp-form').css('display','table');$('.ch-toggle').show();$('.wait-toggle').hide();">Сменить пароль</a>
-                <a class="dropdown-item" onclick="exitLogin()">Выйти</a>
-                <a class="dropdown-item" href="/{_global_.z}/exit">Выйти везде</a>
+        </div>
+        <div class="navbar-right">
+            <div class="user-menu-wrapper">
+                <button id="user-menu-toggle" class="account-info" type="button" title="User menu">
+                    <div id="account-avatar" class="account-avatar">{_global_.user}</div>
+                    <span id="account-email" class="account-email">{_global_.user}</span>
+                    <i class="user-menu-arrow pi pi-chevron-down"></i>
+                </button>
+                <div id="user-menu-dropdown" class="user-menu-dropdown" style="display: none;">
+                    <!-- Begin: showCabinet --><!--{_global_.z}-->
+                    <a href="/my" class="user-menu-item">
+                        <i class="user-menu-icon pi pi-user"></i>
+                        <span>Личный кабинет</span>
+                    </a>
+                    <div class="user-menu-divider"></div>
+                    <!-- End: showCabinet -->
+                    <button id="theme-toggle" class="user-menu-item" type="button">
+                        <i class="user-menu-icon pi pi-moon" id="theme-icon"></i>
+                        <span>Тема</span>
+                        <span class="user-menu-value" id="theme-value">Темная</span>
+                    </button>
+                    <div class="user-menu-divider"></div>
+                    <button id="logout-btn" class="user-menu-item user-menu-item-danger" type="button">
+                        <i class="user-menu-icon pi pi-sign-out"></i>
+                        <span>Выйти</span>
+                    </button>
+                </div>
             </div>
         </div>
+    </nav>
+
+    <!-- Mobile sidebar backdrop overlay -->
+    <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
+
+    <!-- Main Application Layout -->
+    <div class="app-layout">
+        <!-- Left Sidebar Menu -->
+        <aside class="app-sidebar" id="app-sidebar">
+            <div class="sidebar-header">
+                <button id="sidebar-toggle" class="sidebar-toggle" type="button" title="Свернуть/развернуть меню" aria-label="Toggle sidebar"><i class="pi pi-bars"></i></button>
+                <div class="menu-search-wrapper">
+                    <i class="pi pi-search menu-search-icon"></i>
+                    <input type="text" id="menu-search" class="menu-search-input" placeholder="Поиск..." aria-label="Поиск по меню">
+                    <button type="button" id="menu-search-clear" class="menu-search-clear" style="display: none;" aria-label="Очистить поиск"><i class="pi pi-times"></i></button>
+                </div>
+            </div>
+            <nav class="app-menu" id="app-menu">
+                <!-- Menu will be built from menuData by JavaScript -->
+            </nav>
+            <button id="sidebar-settings" class="sidebar-settings" type="button" title="Редактировать меню" aria-label="Edit menu"><i class="pi pi-cog"></i></button>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="app-content">
+            <!-- File: a -->
+        </main>
     </div>
-</nav>
-<div class="cp-form" style="display: none; position: absolute; top: 0; left: 0; height: 100%; width: 100%; z-index: 9999; background: rgba(255,255,255,.5);" onclick="$(this).hide();">
-  <div class="middle" style="display: table-cell; vertical-align: middle;" onkeyup="if(event.keyCode===13)changePwd()">
-    <div class="inner p-4 shadow" style="margin-left: auto; margin-right: auto; border: 1px solid gray; border-radius: 3px; background-color: #fbfbfb; max-width: 348px;" onclick="event.stopPropagation();">
-        <div class="w-100 text-center mb-3">
-            <h5>Смена пароля</h5>
-        </div>
-        <div id="pwdchangemsg" class="alert w-100" style="display: none;"></div>
-        <label for="old-pwd" class="mb-0">Действующий пароль</label>
-        <input type="password" id="old-pwd" class="form-control pe-1 ps-1 mb-2" style="border: 1px solid lightgray !important;">
-        <label for="new-pwd" class="mb-0">Новый пароль</label>
-        <input type="password" id="new-pwd" class="form-control pe-1 ps-1 mb-2" style="border: 1px solid lightgray !important;">
-        <label for="new-again" class="mb-0">Повторите пароль</label>
-        <input type="password" id="new-again" class="form-control pe-1 ps-1 mb-2" style="border: 1px solid lightgray !important;">
-        <div class="row pt-3">
-            <div class="col-12 text-center">
-                <span><img class="wait-toggle" style="display:none;" src="/i/ajax.gif"></span>
-            </div>
-            <div class="col-6 pe-2 ch-toggle">
-                <button class="btn btn-primary btn-block me-3" type="button" onclick="changePwd()">Сменить</button>
-            </div>
-            <div class="col-6 ps-2 ch-toggle">
-                <button class="btn btn-outline-secondary btn-block me-3" type="button" onclick="$('.cp-form').hide();">Отменить</button>
-            </div>
-        </div>
-    </div>
-  </div>
-</div>
-<div class="content">
-<!-- File: a -->
-</div>
-<div class="footer">
-<!--Elapsed-->
-</div>
-<FORM method="POST" id="post" action="/{_global_.z}/"><input type="hidden" name="_xsrf" value="{_global_.xsrf}"></FORM>
-<script src="/js/popper.min.js"></script>
-<script src="/js/bootstrap.min.js"></script>
-<script src="/js/main.js?00{_global_.version}"></script>
-<script>
-localize();
-function changePwd(){
-    if($('#old-pwd').val()===''||$('#new-pwd').val()===''||$('#new-again').val()==='')
-        return changeMsg('alert-danger','Заполните все поля');
-    $('.ch-toggle,wait-toggle').toggle();
-    var obj=new XMLHttpRequest();
-    obj.open('POST','/'+db+'/auth?JSON',true);
-    obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
-    obj.onload=function(e){
-        $('.ch-toggle,wait-toggle').toggle();
-        try{
-            json=JSON.parse(this.responseText);
-        }
-        catch(e){
-            console.log(e);
-            $('#pwdchangemsg').html(this.responseText);
-        }
-        if(json.msg){
-            if(json.msg.indexOf('[err')===-1){
-                changeMsg('alert-success',json.msg);
-                $('#old-pwd,#new-pwd,#new-again').val('');
-            }
-            else
-                changeMsg('alert-danger',json.msg.replace(/ ?\[.+\]/,''));
-            token=json.token;
-            xsrf=json.xsrf;
-        }
-        else
-            changeMsg('alert-danger','Неверный пароль');
-        obj.abort();
-    }
-    obj.send('change=1&login={_global_.user}&pwd='+$('#old-pwd').val()+'&npw1='+$('#new-pwd').val()+'&npw2='+$('#new-again').val());
-}
-function changeMsg(cl,msg){
-    $('#pwdchangemsg').removeClass('alert-danger').removeClass('alert-success').addClass(cl).html(msg).show().delay(4500).slideUp(400);
-}
-function exitLogin(){
-    document.cookie='{_global_.z}=;Path=/';
-    document.location.href='/{_global_.z}'; 
-}
-function toggleLocale(){
-    document.cookie='{_global_.z}_locale='+(locale==='[EN]'?'RU':'EN')+';Path=/';
-    location.reload();
-}
-</script>
+
+    <script>
+        var menuData = [
+        <!-- Begin: MyRoleMenu -->
+        {menu_id:'{menu_id}',menu_up:'{menu_up}',name:'{name}',href:'{href}',icon:'{icon}'},
+        <!-- End: MyRoleMenu -->
+        ];
+    </script>
+    <script src="/js/app.js"></script>
+    <script src="/js/main-app.js"></script>
 </body>
 </html>
