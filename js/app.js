@@ -546,8 +546,12 @@ class App {
                 const result = await this.auth.login(email, password, selectedDb);
                 if (result.success) {
                     CookieUtil.set('last_db', selectedDb, 365);
-                    this.hideAuthPanel();
-                    this.auth.init();
+                    if (this._postLoginUri) {
+                        window.location.href = window.location.origin + this._postLoginUri;
+                    } else {
+                        this.hideAuthPanel();
+                        this.auth.init();
+                    }
                 } else {
                     showToast(result.message, 'error');
                 }
@@ -599,6 +603,25 @@ class App {
 
         // Check auth state from cookies
         this.auth.init();
+
+        // Handle r=InvalidToken URL parameter: show login form
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('r') === 'InvalidToken') {
+            const dbParam = urlParams.get('db');
+            const uriParam = urlParams.get('uri');
+
+            // If db param specified, ensure it's available in the auth DB selector
+            if (dbParam && dbParam !== 'my' && !this.auth.validDbs.includes(dbParam)) {
+                this.auth.validDbs.push(dbParam);
+            }
+
+            // Store uri for post-login redirect
+            if (uriParam) {
+                this._postLoginUri = uriParam;
+            }
+
+            this.showAuthPanel(dbParam || undefined);
+        }
     }
 
     showAuthPanel(preselect) {
