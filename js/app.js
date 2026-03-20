@@ -327,6 +327,9 @@ class AuthManager {
             });
 
             if (!response.ok) {
+                if (response.status === 401) {
+                    return { success: false, message: 'Неверное имя пользователя или пароль' };
+                }
                 throw new Error('HTTP ' + response.status);
             }
 
