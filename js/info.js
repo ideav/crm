@@ -123,7 +123,11 @@
             var header = item.querySelector('.info-action-header');
             if (!header) return;
             header.addEventListener('click', function() {
-                item.classList.toggle('open');
+                var isOpen = item.classList.contains('open');
+                // Close all items (accordion behaviour)
+                items.forEach(function(other) { other.classList.remove('open'); });
+                // Toggle the clicked item
+                if (!isOpen) item.classList.add('open');
             });
         });
     }
