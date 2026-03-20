@@ -1778,12 +1778,27 @@ class IntegramTable{
                 fullValueForEditing = (isGrantOrReportColumn && refValueId) ? refValueId : String(displayValue);
                 // Issue #947: Convert URLs in text cells to clickable hyperlinks
                 if (format === 'SHORT' || format === 'CHARS' || format === 'MEMO') {
-                    escapedValue = this.linkifyText(escapedValue);
+                    // Issue #1077: Truncation must happen BEFORE linkification to avoid cutting HTML tags.
+                    // Check length on plain escaped text; if too long, truncate the plain text first,
+                    // then linkify both the truncated display portion and the full value for the modal.
+                    if (this.settings.truncateLongValues && escapedValue.length > 127) {
+                        const truncatedEscaped = escapedValue.substring(0, 127);
+                        const fullLinkified = this.linkifyText(escapedValue);
+                        const fullValueEscaped = fullLinkified
+                            .replace(/\\/g, '\\\\')
+                            .replace(/\n/g, '\\n')
+                            .replace(/\r/g, '\\r')
+                            .replace(/'/g, '\\\'');
+                        const instanceName = this.options.instanceName;
+                        escapedValue = `${ this.linkifyText(truncatedEscaped) }<a href="#" class="show-full-value" onclick="window.${ instanceName }.showFullValue(event, '${ fullValueEscaped }'); return false;">...</a>`;
+                    } else {
+                        escapedValue = this.linkifyText(escapedValue);
+                    }
                 }
             }
 
-            // Truncate long values if setting is enabled
-            if (this.settings.truncateLongValues && escapedValue.length > 127) {
+            // Truncate long values if setting is enabled (for non-linkified formats)
+            if (this.settings.truncateLongValues && escapedValue.length > 127 && format !== 'SHORT' && format !== 'CHARS' && format !== 'MEMO') {
                 const truncated = escapedValue.substring(0, 127);
                 // Properly escape all JavaScript special characters for use in onclick string literal
                 const fullValueEscaped = escapedValue
