@@ -476,7 +476,6 @@
     /* Cards settings modal field row */
     .cards-col-item-row {
         padding: 6px 8px;
-        border: 1px solid var(--border-color);
         border-radius: 4px;
         margin-bottom: 4px;
         background: var(--bg-primary);
@@ -499,23 +498,30 @@
     }
 
     .cards-field-type-select {
-        width: 100px;
+        width: auto;
         font-size: 12px;
         padding: 2px 4px;
         margin-left: 6px;
-        border: 1px solid var(--input-border);
+        border: none;
         border-radius: var(--cards-radius);
-        background-color: var(--input-bg);
+        background-color: #efefef;
         color: var(--text-primary);
     }
 
     .cards-col-item-label {
         font-size: 11px;
         margin-left: 8px;
-        display: flex;
+        display: inline-flex;
         align-items: center;
         gap: 3px;
         color: var(--text-secondary);
+        cursor: pointer;
+    }
+
+    .cards-col-item-label input[type="checkbox"] {
+        width: auto;
+        margin: 0;
+        cursor: pointer;
     }
 
     .cards-settings-footer {
@@ -1403,7 +1409,16 @@
                 if (statusColor) {
                     badge.style.cssText = makeStatusStyle(statusColor);
                 }
-                badge.textContent = String(statusVal);
+                if (statusField.showLabel) {
+                    var statusLabelText = statusField.alias || cols[statusField.colIdx].name || '';
+                    if (statusLabelText) {
+                        var statusLabelSpan = document.createElement('span');
+                        statusLabelSpan.className = 'cards-card-field-label';
+                        statusLabelSpan.textContent = statusLabelText + ': ';
+                        badge.appendChild(statusLabelSpan);
+                    }
+                }
+                badge.appendChild(document.createTextNode(String(statusVal)));
                 badge.title = 'Нажмите для копирования';
                 badge.addEventListener('click', function(e) {
                     e.stopPropagation();
@@ -1912,7 +1927,7 @@
                 html += '<option value="' + type + '" ' + sel + '>' + fieldTypeLabels[type] + '</option>';
             }
             html += '</select>';
-            html += '<label class="cards-col-item-label">';
+            html += '<label class="cards-col-item-label" title="Выводить имя поля перед его значением">';
             html += '<input type="checkbox" class="field-show-label" ' + labelChecked + '>Имя</label>';
             html += '</div>';
             return html;
