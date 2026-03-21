@@ -36,6 +36,11 @@ else
     
 if($z==="auth.asp" && !empty($_GET['code']))
     $z = "my";
+elseif($z==="auth.asp" && !empty($_GET['error'])){
+    # OAuth error callback (e.g. access_denied from Yandex or Google)
+    include "include/connection.php";
+    login("", "", "oauthError", htmlspecialchars($_GET['error']));
+}
 elseif(!preg_match(DB_MASK, $z))
     die("Invalid database");
 
@@ -291,6 +296,8 @@ elseif(($z == "my") && !empty($_GET['code'])){
         }
 		header("Location: ".(!$isYandex && isset($_GET['state'])?$_GET['state']:"/$z"));
     }
+    else
+        login("", "", "oauthError", isset($data['error_description']) ? $data['error_description'] : (isset($data['error']) ? $data['error'] : "tokenExchangeFailed"));
 	die();
 }
 elseif($_SERVER["REQUEST_METHOD"] == "OPTIONS"){
