@@ -164,7 +164,7 @@
 .info-action-buttons {
     display: flex;
     gap: 8px;
-    margin-bottom: 8px;
+    margin: 8px;
     flex-wrap: wrap;
 }
 
