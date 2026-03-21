@@ -6389,10 +6389,7 @@ class IntegramTable{
             modal.innerHTML = `
                 <h3>Настройка представления</h3>
                 <div class="column-settings-list">
-                    <div class="table-settings-item">
-                        <button class="btn btn-sm btn-danger" id="reset-settings-btn">Сбросить настройки</button>
-                        ${ this.getDataSourceType() === 'table' && (this.objectTableId || this.options.tableTypeId) ? `<a href="/${window.db}/object/${ this.objectTableId || this.options.tableTypeId }" style="margin-left: 10px;">Перейти в старый интерфейс</a>` : '' }
-                    </div>
+                    ${ this.getDataSourceType() === 'table' && (this.objectTableId || this.options.tableTypeId) ? `<div class="table-settings-item"><a href="/${window.db}/object/${ this.objectTableId || this.options.tableTypeId }">Перейти в старый интерфейс</a></div>` : '' }
 
                     <div class="table-settings-item">
                         <label>Отступы:</label>
@@ -6446,7 +6443,8 @@ class IntegramTable{
                         </label>
                     </div>
                 </div>
-                <div style="text-align: right; margin-top: 15px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px;">
+                    <button class="btn btn-sm btn-danger" id="reset-settings-btn">Сбросить настройки</button>
                     <button class="btn btn-secondary" id="close-settings-btn">Закрыть</button>
                 </div>
             `;
