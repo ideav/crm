@@ -83,7 +83,7 @@
         renderTabs(tabId);
     };
 
-    // ── Menu item hover highlight from action links ───────────────────────────
+    // ── Menu item hover highlight from action links and Меню XXX text ─────────
 
     function initActionLinkHover() {
         var links = document.querySelectorAll('.info-action-link[href]');
@@ -97,15 +97,21 @@
         });
     }
 
-    function highlightMenuItemForLink(href, on) {
-        if (!href || href === '#') return;
-        // Strip leading slash and db prefix (e.g. "/mydb/tables" -> "tables")
-        // Menu item data-href stores the path after the db prefix
-        var parts = href.replace(/^\//, '').split('/');
-        // Remove the db segment (first part) to get the menu href
-        var menuHref = parts.slice(1).join('/');
-        if (!menuHref) return;
+    function initMenuNameHover() {
+        var names = document.querySelectorAll('strong[data-menu-href]');
+        names.forEach(function(el) {
+            var menuHref = el.getAttribute('data-menu-href');
+            el.addEventListener('mouseenter', function() {
+                highlightMenuItemByHref(menuHref, true);
+            });
+            el.addEventListener('mouseleave', function() {
+                highlightMenuItemByHref(menuHref, false);
+            });
+        });
+    }
 
+    function highlightMenuItemByHref(menuHref, on) {
+        if (!menuHref) return;
         var menuItems = document.querySelectorAll('.app-menu-item[data-href]');
         menuItems.forEach(function(item) {
             var itemHref = item.getAttribute('data-href') || '';
@@ -113,6 +119,16 @@
                 item.classList.toggle('link-hover', on);
             }
         });
+    }
+
+    function highlightMenuItemForLink(href, on) {
+        if (!href || href === '#') return;
+        // Strip leading slash and db prefix (e.g. "/mydb/tables" -> "tables")
+        // Menu item data-href stores the path after the db prefix
+        var parts = href.replace(/^\//, '').split('/');
+        // Remove the db segment (first part) to get the menu href
+        var menuHref = parts.slice(1).join('/');
+        highlightMenuItemByHref(menuHref, on);
     }
 
     // ── Expandable action items ──────────────────────────────────────────────
@@ -223,6 +239,7 @@
         initActionItems();
         updateHintButtons();
         initActionLinkHover();
+        initMenuNameHover();
     });
 
 })();

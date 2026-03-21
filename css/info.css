@@ -144,6 +144,11 @@
     margin: 16px 0 16px 0;
 }
 
+/* ── Menu name hover highlight (Меню XXX bold text) ── */
+strong[data-menu-href] {
+    cursor: default;
+}
+
 .info-action-link {
     display: inline-flex;
     align-items: center;
