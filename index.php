@@ -168,60 +168,103 @@ if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Registe
         my_die("Запрос не распознан");
 }
 elseif(($z == "my") && !empty($_GET['code'])){
-    # potok4hr@gmail.com
-    $params = array(
-    	'client_id'     => G_CLIENT_ID,
-    	'client_secret' => G_CLIENT_PK,
-    	'redirect_uri'  => 'https://'.$_SERVER["SERVER_NAME"].'/auth.asp',
-    	'grant_type'    => 'authorization_code',
-    	'code'          => $_GET['code']
-    );	
-    
-    $ch = curl_init('https://accounts.google.com/o/oauth2/token');
-    curl_setopt($ch, CURLOPT_POST, 1);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, $params); 
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-    curl_setopt($ch, CURLOPT_HEADER, false);
-    $data = curl_exec($ch);
-    curl_close($ch);
-    
-    $data = json_decode($data, true);
+    $isYandex = isset($_GET['state']) && $_GET['state'] === 'yandex';
+    if($isYandex){
+        # Yandex OAuth: exchange code for token
+        $params = array(
+            'grant_type'    => 'authorization_code',
+            'code'          => $_GET['code'],
+            'client_id'     => Y_CLIENT_ID,
+            'client_secret' => Y_CLIENT_PK
+        );
+        $ch = curl_init('https://oauth.yandex.ru/token');
+        curl_setopt($ch, CURLOPT_POST, 1);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($params));
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_HEADER, false);
+        $data = curl_exec($ch);
+        curl_close($ch);
+        $data = json_decode($data, true);
+        if(!empty($data['access_token'])){
+            # Got the token, retrieve the user info from Yandex
+            $ch = curl_init('https://login.yandex.ru/info?format=json');
+            curl_setopt($ch, CURLOPT_HTTPHEADER, array('Authorization: OAuth '.$data['access_token']));
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            $info = curl_exec($ch);
+            curl_close($ch);
+            $info = json_decode($info, true);
+            if(!isset($info["id"]))
+                my_die("Authentication error");
+            $db = "";
+            $socialId = $info["id"];
+            $email = isset($info["default_email"]) ? $info["default_email"] : "";
+            $name = isset($info["display_name"]) ? $info["display_name"] : (isset($info["real_name"]) ? $info["real_name"] : "");
+            $picture = "https://avatars.yandex.net/get-yapic/".(isset($info["default_avatar_id"]) ? $info["default_avatar_id"] : "0")."/islands-200";
+            $socialName = "Yandex";
+        }
+    }
+    else{
+        # Google OAuth: exchange code for token
+        $params = array(
+            'client_id'     => G_CLIENT_ID,
+            'client_secret' => G_CLIENT_PK,
+            'redirect_uri'  => 'https://'.$_SERVER["SERVER_NAME"].'/auth.asp',
+            'grant_type'    => 'authorization_code',
+            'code'          => $_GET['code']
+        );
+        $ch = curl_init('https://accounts.google.com/o/oauth2/token');
+        curl_setopt($ch, CURLOPT_POST, 1);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_HEADER, false);
+        $data = curl_exec($ch);
+        curl_close($ch);
+        $data = json_decode($data, true);
+        if(!empty($data['access_token'])){
+            # Got the token, retrieve the user data
+            $params = array('access_token' => $data['access_token'],
+                        'id_token'     => $data['id_token'],
+                        'token_type'   => 'Bearer',
+                        'expires_in'   => 3599);
+            $info = file_get_contents('https://www.googleapis.com/oauth2/v1/userinfo?' . urldecode(http_build_query($params)));
+            $info = json_decode($info, true);
+            if(!isset($info["id"]))
+                my_die("Authentication error");
+            $db = isset($_GET['state'])?(checkDbName(USER_DB_MASK, $_GET['state'])?$_GET['state']:""):"";
+            $socialId = $info["id"];
+            $email = $info["email"];
+            $name = $info["name"];
+            $picture = $info["picture"];
+            $socialName = "Google";
+        }
+    }
     if(!empty($data['access_token'])){
-    	# Got the token, retrieve the user data
-    	$params = array('access_token' => $data['access_token'],
-            		'id_token'     => $data['id_token'],
-            		'token_type'   => 'Bearer',
-            		'expires_in'   => 3599);
-    	$info = file_get_contents('https://www.googleapis.com/oauth2/v1/userinfo?' . urldecode(http_build_query($params)));
-    	$info = json_decode($info, true);
-        if(!isset($info["id"])) # In case the token is invalid
-            my_die("Authentication error");
-        $db = isset($_GET['state'])?(checkDbName(USER_DB_MASK, $_GET['state'])?$_GET['state']:""):"";
         if($row = mysqli_fetch_array(Exec_sql("SELECT user.id uid, token.id tok, token.val token, xsrf.id xsrf, act.id act, db.val db
                                         FROM $z user LEFT JOIN $z token ON token.up=user.id AND token.t=".TOKEN
                                                 ." LEFT JOIN $z xsrf ON xsrf.up=user.id AND xsrf.t=".XSRF
                                                 ." LEFT JOIN $z act ON act.up=user.id AND act.t=".ACTIVITY
                                                 ." LEFT JOIN $z db ON db.up=user.id AND db.t=".DATABASE
                                                 .(strlen($db)?" AND db.val='$db'":"")
-                                        ." WHERE user.val='".$info["id"]."' AND user.t=".USER
-                                            , "Get google user and their DBs"))){
+                                        ." WHERE user.val='".$socialId."' AND user.t=".USER
+                                            , "Get $socialName user and their DBs"))){
 			updateTokens($row);
     	    if($row["db"]){
     	        $z = $row["db"];
-    	        # Get the token of the target DB to let the google user use it
                 if($row = mysqli_fetch_array(Exec_sql("SELECT user.id, token.val tok, xsrf.val xsrf FROM $z user LEFT JOIN $z token ON token.up=user.id AND token.t=".TOKEN
                                                         ." LEFT JOIN $z xsrf ON xsrf.up=user.id AND xsrf.t=".XSRF
                                                     ." WHERE user.val='$z' AND user.t=".USER
-                                                    , "Get token for google user"))){
+                                                    , "Get token for $socialName user"))){
         	        if($row["tok"])
             	        $token = $row["tok"];
             	    else{
             			$token = md5(microtime(TRUE));
-                        Insert($row["id"], 1, TOKEN, $token, "Reset token for G admin");
+                        Insert($row["id"], 1, TOKEN, $token, "Reset token for $socialName admin");
             	    }
         	        if(!$row["xsrf"])
-                        Insert($row["id"], 1, XSRF, xsrf($token, $z), "Reset xsrf for G admin");
+                        Insert($row["id"], 1, XSRF, xsrf($token, $z), "Reset xsrf for $socialName admin");
                 }
     	        else
             		login($z, "", "adminNotFound");
@@ -233,18 +276,16 @@ elseif(($z == "my") && !empty($_GET['code'])){
         else{
 			$GLOBALS["GLOBAL_VARS"]["token"] = md5(microtime(TRUE));
 			$GLOBALS["GLOBAL_VARS"]["xsrf"] = xsrf($GLOBALS["GLOBAL_VARS"]["token"], $z);
-            $id = newUser($info["id"], $info["email"], "115", $info["name"], $info["picture"]);
-            Insert($id, 1, 274, "Google", "Set social for new G user");
-            Insert($id, 1, TOKEN, $GLOBALS["GLOBAL_VARS"]["token"], "Set token for new G user");
-            Insert($id, 1, XSRF, $GLOBALS["GLOBAL_VARS"]["xsrf"], "Set xsrf for new G user");
-            #Insert($id, 1, 1143, "1146", "Insert new Plan ref");
-            #Insert($id, 1, 1145, date("Ymd", strtotime("+1 months") + $GLOBALS["tzone"]), "Insert new Plan date");
+            $id = newUser($socialId, $email, "115", $name, $picture);
+            Insert($id, 1, 274, $socialName, "Set social for new $socialName user");
+            Insert($id, 1, TOKEN, $GLOBALS["GLOBAL_VARS"]["token"], "Set token for new $socialName user");
+            Insert($id, 1, XSRF, $GLOBALS["GLOBAL_VARS"]["xsrf"], "Set xsrf for new $socialName user");
             if(isset($_COOKIE["_aff"]))
-                Insert($id, 1, 1012, (int)$_COOKIE["_aff"], "Insert the googel affiliate ref");
+                Insert($id, 1, 1012, (int)$_COOKIE["_aff"], "Insert the $socialName affiliate ref");
         	setcookie("idb_$z", $GLOBALS["GLOBAL_VARS"]["token"], time() + 2592000*12, "/"); # 30*12 days
-        	createDb($id, $info["name"], $info["email"]);
+        	createDb($id, $name, $email);
         }
-		header("Location: ".(isset($_GET['state'])?$_GET['state']:"/$z"));
+		header("Location: ".(!$isYandex && isset($_GET['state'])?$_GET['state']:"/$z"));
     }
 	die();
 }
