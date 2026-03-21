@@ -168,7 +168,7 @@ if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Registe
         my_die("Запрос не распознан");
 }
 elseif(($z == "my") && !empty($_GET['code'])){
-    $isYandex = isset($_GET['state']) && $_GET['state'] === 'yandex';
+    $isYandex = isset($_GET['state']) && strpos($_GET['state'], 'yandex') === 0;
     if($isYandex){
         # Yandex OAuth: exchange code for token
         $params = array(
@@ -197,7 +197,11 @@ elseif(($z == "my") && !empty($_GET['code'])){
             $info = json_decode($info, true);
             if(!isset($info["id"]))
                 my_die("Authentication error");
-            $db = "";
+            # Extract DB from state parameter: "yandex:<db>" or just "yandex"
+            $yandexDb = "";
+            if(strpos($_GET['state'], 'yandex:') === 0)
+                $yandexDb = urldecode(substr($_GET['state'], 7));
+            $db = ($yandexDb !== "" && checkDbName(USER_DB_MASK, $yandexDb)) ? $yandexDb : "";
             $socialId = $info["id"];
             $email = isset($info["default_email"]) ? $info["default_email"] : "";
             $name = isset($info["display_name"]) ? $info["display_name"] : (isset($info["real_name"]) ? $info["real_name"] : "");
