@@ -172,9 +172,10 @@ class YandexAuthManager {
             return;
         }
         const params = new URLSearchParams({
-            response_type: 'token',
+            response_type: 'code',
             client_id: this.apiConfig.yandexClientId,
-            redirect_uri: this.redirectUri
+            redirect_uri: this.redirectUri,
+            state: 'yandex'
         });
         window.location.href = 'https://oauth.yandex.ru/authorize?' + params.toString();
     }
