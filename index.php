@@ -176,6 +176,11 @@ elseif(($z == "my") && !empty($_GET['code'])){
     $isYandex = isset($_GET['state']) && strpos($_GET['state'], 'yandex') === 0;
     if($isYandex){
         # Yandex OAuth: exchange code for token
+        $oauthCodePrefix = substr($_GET['code'], 0, 8);
+        $oauthState = isset($_GET['state']) ? $_GET['state'] : '';
+        wlog("[Yandex OAuth] callback received: ip=".$_SERVER["REMOTE_ADDR"]
+            .", code_prefix=$oauthCodePrefix, state=$oauthState"
+            .", time=".date("Y-m-d H:i:s"), "log");
         $params = array(
             'grant_type'    => 'authorization_code',
             'code'          => $_GET['code'],
@@ -188,9 +193,30 @@ elseif(($z == "my") && !empty($_GET['code'])){
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
         curl_setopt($ch, CURLOPT_HEADER, false);
+        $oauthTokenRequestTime = microtime(true);
         $data = curl_exec($ch);
+        $oauthCurlErrno = curl_errno($ch);
+        $oauthCurlError = curl_error($ch);
+        $oauthHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $oauthElapsed = round((microtime(true) - $oauthTokenRequestTime) * 1000);
         curl_close($ch);
+        $dataRaw = $data;
         $data = json_decode($data, true);
+        if($oauthCurlErrno || $oauthHttpCode != 200 || empty($data['access_token'])){
+            # Log the full response for diagnosis (mask the token if present)
+            $logData = $data;
+            if(isset($logData['access_token']))
+                $logData['access_token'] = substr($logData['access_token'], 0, 4).'***';
+            wlog("[Yandex OAuth] token exchange FAILED: http=$oauthHttpCode"
+                .", curl_errno=$oauthCurlErrno, curl_error=$oauthCurlError"
+                .", elapsed_ms=$oauthElapsed"
+                .", response=".json_encode($logData, JSON_UNESCAPED_UNICODE)
+                .", code_prefix=$oauthCodePrefix", "log");
+        } else {
+            wlog("[Yandex OAuth] token exchange OK: http=$oauthHttpCode"
+                .", elapsed_ms=$oauthElapsed"
+                .", code_prefix=$oauthCodePrefix", "log");
+        }
         if(!empty($data['access_token'])){
             # Got the token, retrieve the user info from Yandex
             $ch = curl_init('https://login.yandex.ru/info?format=json');
@@ -198,10 +224,19 @@ elseif(($z == "my") && !empty($_GET['code'])){
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
             $info = curl_exec($ch);
+            $infoHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $infoCurlErrno = curl_errno($ch);
+            $infoCurlError = curl_error($ch);
             curl_close($ch);
             $info = json_decode($info, true);
-            if(!isset($info["id"]))
+            if(!isset($info["id"])){
+                wlog("[Yandex OAuth] userinfo FAILED: http=$infoHttpCode"
+                    .", curl_errno=$infoCurlErrno, curl_error=$infoCurlError"
+                    .", response=".json_encode($info, JSON_UNESCAPED_UNICODE), "log");
                 my_die("Authentication error");
+            }
+            wlog("[Yandex OAuth] userinfo OK: http=$infoHttpCode"
+                .", yandex_id=".(isset($info["id"]) ? $info["id"] : "?"), "log");
             # Extract DB from state parameter: "yandex:<db>" or just "yandex"
             $yandexDb = "";
             if(strpos($_GET['state'], 'yandex:') === 0)
