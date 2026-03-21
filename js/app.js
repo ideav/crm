@@ -166,16 +166,22 @@ class YandexAuthManager {
         return this.apiConfig.hasYandexAuth();
     }
 
-    initiateLogin() {
+    initiateLogin(db) {
         if (!this.isEnabled()) {
             showToast('Yandex OAuth не настроен. Укажите Client ID в настройках.', 'error');
             return;
+        }
+        // Encode the selected DB in state so the backend can redirect after auth.
+        // Format: "yandex" or "yandex:<db>" — backend detects Yandex by the "yandex" prefix.
+        var state = 'yandex';
+        if (db && db !== 'my') {
+            state = 'yandex:' + encodeURIComponent(db);
         }
         const params = new URLSearchParams({
             response_type: 'code',
             client_id: this.apiConfig.yandexClientId,
             redirect_uri: this.redirectUri,
-            state: 'yandex'
+            state: state
         });
         window.location.href = 'https://oauth.yandex.ru/authorize?' + params.toString();
     }
@@ -470,14 +476,24 @@ class App {
             if (yandexRegDivider) { yandexRegDivider.style.display = ''; }
         }
 
-        // Yandex button handlers
+        // Yandex button handlers — pass the selected DB so the backend can redirect after auth
         const yandexLoginBtn = document.getElementById('yandex-login-btn');
         if (yandexLoginBtn) {
-            yandexLoginBtn.addEventListener('click', () => this.yandexAuth.initiateLogin());
+            yandexLoginBtn.addEventListener('click', () => {
+                const dbSelect = document.getElementById('auth-db-select');
+                const customInput = document.getElementById('auth-db-custom');
+                var db = dbSelect ? dbSelect.value : 'my';
+                if (db === '__other__') {
+                    db = customInput ? customInput.value.trim() : '';
+                }
+                this.yandexAuth.initiateLogin(db || 'my');
+            });
         }
         const yandexRegisterBtn = document.getElementById('yandex-register-btn');
         if (yandexRegisterBtn) {
-            yandexRegisterBtn.addEventListener('click', () => this.yandexAuth.initiateLogin());
+            yandexRegisterBtn.addEventListener('click', () => {
+                this.yandexAuth.initiateLogin('my');
+            });
         }
 
         // Login button: show auth panel
