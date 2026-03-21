@@ -362,7 +362,7 @@ mark.search-highlight {
                     <li><strong>Фильтрация:</strong> поддерживаются маски и диапазоны для поиска, операторы <code>&gt;</code>, <code>&lt;</code>, <code>&gt;=</code>, <code>&lt;=</code> для чисел и дат.</li>
                     <li><strong>Поиск в списках:</strong> в выпадающих списках работает поиск по введённым символам.</li>
                 </ul>
-                <div class="tip">Доступны служебные слова: <code>[TODAY]</code> — текущая дата, <code>[USER]</code> — текущий пользователь.</div>
+                <div class="tip">Доступны служебные слова: <code>[TODAY]</code> — текущая дата, <code>[USER]</code> — текущий пользователь и другие, которые помогут определить текущий контекст и тонко настроить поведение системы.</div>
                 <div class="topic-links"><span>Видео:</span><a href="https://rutube.ru/video/8b21501218c81b9afdf6c2021cd04f4d/" target="_blank"><i class="pi pi-youtube"></i> Умный отчёт для редактирования данных</a><span>Документация:</span><a href="https://help.integram.io/#rec219525382" target="_blank"><i class="pi pi-book"></i> Поиск в таблицах</a><a href="https://help.integram.io/#rec218333212" target="_blank"><i class="pi pi-book"></i> Таблицы-справочники</a></div>
             </div>
         </details>
@@ -385,8 +385,8 @@ mark.search-highlight {
                 <p>Расширенные возможности:</p>
                 <ul>
                     <li><strong>Интерактивные отчёты</strong> — с гиперссылками для перехода к записям.</li>
-                    <li><strong>Вложенные запросы</strong> — для сложной аналитики.</li>
-                    <li><strong>Параметры</strong> — передача параметров в отчёт через URL.</li>
+                    <li><strong>Вложенные запросы и рекурсия</strong> — для сложной аналитики и любых вычислений.</li>
+                    <li><strong>Параметры</strong> — передача параметров в отчёт через URL, служебные слова.</li>
                     <li><strong>JSON-экспорт</strong> — для интеграции с внешними системами.</li>
                 </ul>
                 <div class="topic-links"><span>Видео:</span><a href="https://rutube.ru/video/8b21501218c81b9afdf6c2021cd04f4d/" target="_blank"><i class="pi pi-youtube"></i> Умный отчёт для редактирования данных</a><a href="https://rutube.ru/video/272216e94592d3afd90fc233396c0e9f/" target="_blank"><i class="pi pi-youtube"></i> Базовые возможности BI</a><span>Документация:</span><a href="https://help.integram.io/#rec219546651" target="_blank"><i class="pi pi-book"></i> Запросы (отчёты)</a><a href="https://help.integram.io/#rec220512147" target="_blank"><i class="pi pi-book"></i> Агрегация в отчётах</a><a href="https://help.integram.io/#rec220513366" target="_blank"><i class="pi pi-book"></i> Интерактивные отчёты</a><span>Статья:</span><a href="https://vc.ru/dev/1238972-intellektualnyi-otchet-dlya-redaktirovaniya-dannyh-v-tablicah" target="_blank"><i class="pi pi-external-link"></i> Умный отчёт для редактирования данных</a></div>
@@ -400,7 +400,7 @@ mark.search-highlight {
                 Конструктор форм и шаблоны
             </summary>
             <div class="welcome-topic-content">
-                <p>Интеграм использует систему пяти универсальных форм и HTML-шаблоны — вы полностью контролируете внешний вид:</p>
+                <p>Интеграм использует систему пяти основных универсальных форм и произвольные HTML-шаблоны — вы полностью контролируете внешний вид:</p>
                 <ol>
                     <li>Формы хранятся в папке <code>templates</code> вашей базы и редактируются в любом текстовом редакторе.</li>
                     <li>Для вставки значений полей используются блоки данных: <code>&#123;ИмяПоля}</code>.</li>
@@ -408,7 +408,7 @@ mark.search-highlight {
                     <li>Передача параметров запроса: <code>&#123;_request_.ИмяПоля}</code>.</li>
                     <li>Глобальные константы доступны через: <code>&#123;_global_.ИмяКонстанты}</code>.</li>
                 </ol>
-                <div class="tip">Шаблоны редактируются локально и загружаются через меню «Файлы».</div>
+                <div class="tip">Шаблоны редактируются локально и загружаются через меню «Файлы» или из Git в рамках CI/CD процессов.</div>
                 <div class="topic-links"><span>Видео:</span><a href="https://rutube.ru/video/db1ca2d9f407d9d1c286129217f55706/" target="_blank"><i class="pi pi-youtube"></i> Печатные формы — создание из Excel</a><a href="https://rutube.ru/video/549098cbb63fb386a1cf1958eaa6bf40/" target="_blank"><i class="pi pi-youtube"></i> Бесплатная форма заявок для сайта</a><span>Документация:</span><a href="https://help.integram.io/#rec220711628" target="_blank"><i class="pi pi-book"></i> Пользовательские HTML-формы</a><a href="https://help.integram.io/#rec220711265" target="_blank"><i class="pi pi-book"></i> Генерация веб-страниц</a><span>Статья:</span><a href="https://vc.ru/id568649/1810140-kak-redaktirovat-shablon-integrama-lokalno" target="_blank"><i class="pi pi-external-link"></i> Редактирование шаблона локально</a></div>
             </div>
         </details>
@@ -427,7 +427,7 @@ mark.search-highlight {
                     <li><strong>Нормализация данных:</strong> при загрузке плоских таблиц из Excel данные автоматически распределяются по связанным таблицам.</li>
                     <li><strong>Экспорт:</strong> любой отчёт выгружается в Excel или JSON в один клик.</li>
                 </ul>
-                <div class="tip">При импорте данных из Excel справочники создаются первыми — это позволяет правильно связать основные таблицы.</div>
+                <div class="tip">При импорте данных из Excel у вас есть все средства, чтобы правильно связать основные таблицы.</div>
                 <div class="topic-links"><span>Видео:</span><a href="https://rutube.ru/video/27a33314960dd37c713fe0773e664a67/" target="_blank"><i class="pi pi-youtube"></i> Загрузка подчинённых таблиц из файла</a><span>Документация:</span><a href="https://help.integram.io/#rec219528044" target="_blank"><i class="pi pi-book"></i> Экспорт и импорт данных</a><span>Статья:</span><a href="https://vc.ru/dev/1046757-normalizaciya-dannyh-iz-tablic-excel-v-integrale" target="_blank"><i class="pi pi-external-link"></i> Нормализация данных из Excel</a></div>
             </div>
         </details>
@@ -486,7 +486,7 @@ mark.search-highlight {
                     <li><strong>Удаление:</strong> массовое удаление записей по любому фильтру с помощью запросов <code>DELETE</code>.</li>
                     <li><strong>Интеллектуальные отчёты:</strong> данные нескольких таблиц редактируются прямо в отчёте (как в Excel).</li>
                 </ul>
-                <div class="tip">Перед массовыми операциями выборку удобно проверить через обычный отчёт.</div>
+                <div class="tip">Перед массовыми операциями выборку удобно проверить через обычный отчёт, который покажет, какие изменения будут внесены в данные.</div>
                 <div class="topic-links"><span>Видео:</span><a href="https://rutube.ru/video/8b21501218c81b9afdf6c2021cd04f4d/" target="_blank"><i class="pi pi-youtube"></i> Умный отчёт для редактирования данных</a><span>Документация:</span><a href="https://help.integram.io/#rec220520254" target="_blank"><i class="pi pi-book"></i> Запросы модификации данных</a><span>Статья:</span><a href="https://vc.ru/dev/1238972-intellektualnyi-otchet-dlya-redaktirovaniya-dannyh-v-tablicah" target="_blank"><i class="pi pi-external-link"></i> Умный отчёт для редактирования данных</a></div>
             </div>
         </details>
