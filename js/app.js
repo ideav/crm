@@ -635,8 +635,8 @@ class App {
                 this.auth.validDbs.push(dbParam);
             }
 
-            // Store uri for post-login redirect
-            if (uriParam) {
+            // Store uri for post-login redirect, but never redirect back to OAuth callbacks
+            if (uriParam && !uriParam.toLowerCase().includes('auth.asp')) {
                 this._postLoginUri = uriParam;
             }
 
