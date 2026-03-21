@@ -543,7 +543,11 @@ function login($z="", $u="", $message="", $details=""){
 	    $p .= "login=".htmlentities($_GET["login"])."&";
 	if(strlen($message))
 		$p .= "r=$message&";
-    $p .= "uri=".htmlentities($_SERVER["REQUEST_URI"])."&";
+    // Do not pass auth.asp as a post-login redirect target — it is an OAuth callback
+    // URL and must not be replayed after a successful login.
+    $uri = $_SERVER["REQUEST_URI"];
+    if(strpos(strtolower($uri), "auth.asp") === FALSE)
+        $p .= "uri=".htmlentities($uri)."&";
 	if(strlen($details))
 		$p .= "d=".urlencode($details)."&";
 	header("Location: /index.html".substr($p, 0, -1));
