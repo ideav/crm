@@ -641,6 +641,12 @@ class App {
             }
 
             this.showAuthPanel(dbParam || undefined);
+        } else if (urlParams.get('r') === 'oauthError') {
+            // OAuth provider returned an error or token exchange failed
+            const details = urlParams.get('d');
+            const msg = details ? details : 'Ошибка авторизации';
+            showToast(msg, 'error');
+            this.showAuthPanel();
         }
     }
 
