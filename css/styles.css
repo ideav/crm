@@ -593,6 +593,9 @@ body {
 
 /* Primary nav button (Войти / db name) */
 .btn-primary-nav {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background-color: var(--button-primary);
     color: white;
     border: none;
