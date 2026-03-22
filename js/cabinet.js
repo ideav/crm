@@ -316,19 +316,25 @@ class CabinetController {
             const description = db.Description || '';
             const recordCount = db.Count || '0';
             const planDate = db['Plan date'] ? this.formatDate(db['Plan date']) : '-';
-            const publicName = db['Public name'] || '';
-            const registrationOpen = db['Registration open'] === '1' || db['Registration open'] === 'true' || db['Registration open'] === 'Да';
-            const tokenLifetime = db['Token lifetime'] || '';
+            const planDateRaw = db['Plan date'] || '';
+            const publicName = db.PublicName || '';
+            const registrationOpen = !!(db.Register);
+            const tokenLifetime = db.TTL || '';
             const dbId = db.DBID;
+
+            const dbNameCapitalized = db.DB ? db.DB.charAt(0).toUpperCase() + db.DB.slice(1) : '';
+            const planDatePassed = this.isDatePassed(planDateRaw);
 
             card.innerHTML = `
                 <div class="database-info">
-                    <div class="database-name">${this.escapeHtml(db.DB)}</div>
-                    <div class="database-id">ID: ${dbId}</div>
+                    <div class="database-name-row">
+                        <a class="database-name-link" href="https://${this.apiConfig.host}/${db.DB}" target="${this.escapeHtml(db.DB)}">${this.escapeHtml(dbNameCapitalized)}</a>
+                        <span class="database-id-inline">${this.escapeHtml(dbId)}</span>
+                    </div>
                     <div class="database-stats">
                         <span class="database-stat"><span>Шаблон:</span> <strong>${this.escapeHtml(templateLabel)}</strong></span>
-                        <span class="database-stat"><span>Записей:</span> <strong>${recordCount}</strong></span>
-                        <span class="database-stat"><span>Оплачено до:</span> <strong>${planDate}</strong></span>
+                        <span class="database-stat"><span>Расход:</span> <strong>${recordCount}</strong></span>
+                        <span class="database-stat database-stat-right"><span>Оплачено до:</span> <strong class="${planDatePassed ? 'plan-date-expired' : ''}">${planDate}</strong></span>
                     </div>
                     <div class="database-edit-fields">
                         <div class="database-field-group">
@@ -337,26 +343,23 @@ class CabinetController {
                         </div>
                         <div class="database-field-group">
                             <label class="database-field-label">Публичное имя</label>
-                            <input type="text" class="database-field-input" maxlength="127" pattern="[A-Za-zА-Яа-яЁё0-9\\s.,!?;:—…«»'&quot;\\-]+" data-field="t305" value="${this.escapeHtml(publicName)}">
+                            <input type="text" class="database-field-input database-public-name-input" maxlength="127" pattern="[A-Za-zА-Яа-яЁё0-9\\s.,!?;:—…«»'&quot;\\-]+" data-field="t305" data-dbname="${this.escapeHtml(db.DB)}" value="${this.escapeHtml(publicName)}">
                         </div>
-                        <div class="database-field-group database-field-group-row">
-                            <label class="database-field-label">
+                        <div class="database-field-group database-field-group-row database-inline-row">
+                            <label class="database-field-label database-inline-label">
                                 <input type="checkbox" class="database-checkbox" data-field="t367"${registrationOpen ? ' checked' : ''}>
                                 Регистрация открыта
                             </label>
-                        </div>
-                        <div class="database-field-group">
-                            <label class="database-field-label">Время жизни токена, минут</label>
-                            <input type="number" class="database-field-input database-field-input-short" min="0" step="1" data-field="t369" value="${this.escapeHtml(tokenLifetime)}">
+                            <label class="database-field-label database-inline-label">
+                                Время жизни токена, минут
+                                <input type="number" class="database-field-input database-field-input-short" min="0" step="1" data-field="t369" value="${this.escapeHtml(tokenLifetime)}">
+                            </label>
                         </div>
                         <div class="database-save-row">
                             <button type="button" class="btn-primary btn-small database-save-btn" style="display:none">Сохранить</button>
                             <span class="database-save-status"></span>
                         </div>
                     </div>
-                </div>
-                <div class="database-actions">
-                    <button type="button" class="btn-secondary btn-small" onclick="window.open('https://${this.apiConfig.host}/${db.DB}', '_blank')">Открыть</button>
                 </div>
             `;
 
@@ -375,6 +378,17 @@ class CabinetController {
                     this.onDbFieldChange(card, origValues);
                 });
             });
+
+            // Save public name to cookie when edited
+            const publicNameInput = card.querySelector('.database-public-name-input');
+            if (publicNameInput) {
+                publicNameInput.addEventListener('input', () => {
+                    const dbName = publicNameInput.dataset.dbname;
+                    if (dbName) {
+                        document.cookie = 'idbname_' + dbName + '=' + encodeURIComponent(publicNameInput.value) + ';path=/;max-age=31536000';
+                    }
+                });
+            }
 
             // Set up save button
             const saveBtn = card.querySelector('.database-save-btn');
@@ -413,7 +427,7 @@ class CabinetController {
             const fd = new FormData();
             card.querySelectorAll('[data-field]').forEach(input => {
                 if (input.type === 'checkbox') {
-                    fd.append(input.dataset.field, input.checked ? '1' : '0');
+                    fd.append(input.dataset.field, input.checked ? '1' : '');
                 } else {
                     fd.append(input.dataset.field, input.value);
                 }
@@ -439,6 +453,15 @@ class CabinetController {
                     origValues[field] = input.value;
                 }
             });
+
+            // Save public name to cookie after successful save
+            const publicNameInput = card.querySelector('.database-public-name-input');
+            if (publicNameInput) {
+                const dbName = publicNameInput.dataset.dbname;
+                if (dbName) {
+                    document.cookie = 'idbname_' + dbName + '=' + encodeURIComponent(publicNameInput.value) + ';path=/;max-age=31536000';
+                }
+            }
 
             if (saveBtn) saveBtn.style.display = 'none';
             showToast('Настройки базы данных сохранены', 'success');
@@ -750,6 +773,15 @@ class CabinetController {
                 window.location.href = 'index.html';
             });
         }
+    }
+
+    isDatePassed(dateStr) {
+        // Input format: DD.MM.YYYY
+        if (!dateStr) return false;
+        const parts = dateStr.split('.');
+        if (parts.length !== 3) return false;
+        const date = new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+        return date < new Date();
     }
 
     formatDate(dateStr) {
