@@ -329,7 +329,7 @@ class CabinetController {
                 <div class="database-info">
                     <div class="database-name-row">
                         <a class="database-name-link" href="https://${this.apiConfig.host}/${db.DB}" target="${this.escapeHtml(db.DB)}">${this.escapeHtml(dbNameCapitalized)}</a>
-                        <span class="database-id-inline">${this.escapeHtml(dbId)}</span>
+                        <span class="database-id-inline">#${this.escapeHtml(dbId)}</span>
                     </div>
                     <div class="database-stats">
                         <span class="database-stat"><span>Шаблон:</span> <strong>${this.escapeHtml(templateLabel)}</strong></span>

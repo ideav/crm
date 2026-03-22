@@ -627,6 +627,10 @@
     gap: 1.5rem;
 }
 
+.database-inline-row .database-inline-label:last-child {
+    margin-left: auto;
+}
+
 .database-inline-label {
     display: flex;
     align-items: center;
