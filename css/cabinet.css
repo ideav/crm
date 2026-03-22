@@ -518,8 +518,7 @@
     border-radius: 12px;
     padding: 1.5rem;
     display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
+    flex-direction: column;
     transition: box-shadow 0.2s ease;
 }
 
@@ -544,6 +543,29 @@
     margin-bottom: 0.5rem;
 }
 
+.database-name-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.database-name-link {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--primary-color, #3b82f6);
+    text-decoration: none;
+}
+
+.database-name-link:hover {
+    text-decoration: underline;
+}
+
+.database-id-inline {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
 .database-description {
     font-size: 0.9rem;
     color: var(--text-secondary);
@@ -562,6 +584,14 @@
 
 .database-stat strong {
     color: var(--text-primary);
+}
+
+.database-stat-right {
+    margin-left: auto;
+}
+
+.plan-date-expired {
+    color: #ef4444 !important;
 }
 
 .database-actions {
@@ -588,6 +618,20 @@
 .database-field-group-row {
     flex-direction: row;
     align-items: center;
+}
+
+.database-inline-row {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+}
+
+.database-inline-label {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-shrink: 0;
 }
 
 .database-field-label {
@@ -890,14 +934,6 @@
         flex-direction: column;
         align-items: flex-start;
         gap: 1rem;
-    }
-
-    .database-actions {
-        width: 100%;
-    }
-
-    .database-actions .btn-secondary {
-        flex: 1;
     }
 
     .data-table {
