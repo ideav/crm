@@ -335,12 +335,17 @@ elseif(($z == "my") && !empty($_GET['code'])){
         }
     }
     if(!empty($data['access_token'])){
+        # For Yandex, $db from state is only a desired redirect target — do not filter the
+        # user lookup by it, otherwise an existing Yandex user who previously logged in for
+        # a different DB would not be found and a duplicate account would be created.
+        # For Google, $db IS the state/redirect URL passed through OAuth — keep filter as-is.
+        $dbFilter = (!$isYandex && strlen($db)) ? " AND db.val='$db'" : "";
         if($row = mysqli_fetch_array(Exec_sql("SELECT user.id uid, token.id tok, token.val token, xsrf.id xsrf, act.id act, db.val db
                                         FROM $z user LEFT JOIN $z token ON token.up=user.id AND token.t=".TOKEN
                                                 ." LEFT JOIN $z xsrf ON xsrf.up=user.id AND xsrf.t=".XSRF
                                                 ." LEFT JOIN $z act ON act.up=user.id AND act.t=".ACTIVITY
                                                 ." LEFT JOIN $z db ON db.up=user.id AND db.t=".DATABASE
-                                                .(strlen($db)?" AND db.val='$db'":"")
+                                                .$dbFilter
                                         ." WHERE user.val='".$socialId."' AND user.t=".USER
                                             , "Get $socialName user and their DBs"))){
 			updateTokens($row);
@@ -503,14 +508,14 @@ function createDb($id, $name, $email, $pwd=""){
 }
 function updateTokens($row){
 	global $z;
-	$xsrf = $GLOBALS["GLOBAL_VARS"]["xsrf"] = xsrf($token, $z);
-	setcookie("idb_$z", $token, time() + 2592000*12, "/"); # 30*12 days
 	if($row["tok"])
     	$token = $GLOBALS["GLOBAL_VARS"]["token"] = $row["token"];
 	else{
     	$token = $GLOBALS["GLOBAL_VARS"]["token"] = md5(microtime(TRUE));
 		Insert($row["uid"], 1, TOKEN, $token, "Save token");
 	}
+	$xsrf = $GLOBALS["GLOBAL_VARS"]["xsrf"] = xsrf($token, $z);
+	setcookie("idb_$z", $token, time() + 2592000*12, "/"); # 30*12 days
 	if($row["xsrf"])
 		Update_Val($row["xsrf"], $xsrf);
 	else
