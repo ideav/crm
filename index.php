@@ -178,14 +178,31 @@ elseif(($z == "my") && !empty($_GET['code'])){
         # Yandex OAuth: exchange code for token
         $oauthCodePrefix = substr($_GET['code'], 0, 8);
         $oauthState = isset($_GET['state']) ? $_GET['state'] : '';
+        # HTTP_HOST reflects the Host header the client sent (e.g. "ideav.ru") even behind a
+        # reverse proxy, whereas SERVER_NAME may return the internal/configured hostname.
+        # This must exactly match the redirect_uri sent by the browser in the /authorize step.
+        $oauthHost = isset($_SERVER["HTTP_HOST"]) ? $_SERVER["HTTP_HOST"] : $_SERVER["SERVER_NAME"];
         wlog("[Yandex OAuth] callback received: ip=".$_SERVER["REMOTE_ADDR"]
             .", code_prefix=$oauthCodePrefix, state=$oauthState"
+            .", host=$oauthHost, server_name=".$_SERVER["SERVER_NAME"]
             .", time=".date("Y-m-d H:i:s"), "log");
-        # Guard against duplicate callback requests (e.g. CDN replay, browser retry).
-        # If two requests arrive with the same code concurrently, only the first one
-        # should exchange it; the second would get "Code has expired" from Yandex.
-        # Use a lock file to serialise concurrent callbacks for the same code.
-        $oauthLockFile = sys_get_temp_dir()."/yandex_oauth_".md5($_GET['code']).".lock";
+        # Guard against duplicate callback requests (e.g. CDN replay, browser retry, link
+        # preview crawlers).  Two scenarios:
+        #   (a) Concurrent: two requests arrive with the same code at the same time — a lock
+        #       file serialises them; the second request waits and then redirects.
+        #   (b) Sequential: a bot fetches the URL after the browser already exchanged the code
+        #       — a "used codes" marker file (TTL 10 min) detects this and redirects without
+        #       attempting a second token exchange that Yandex would reject as "Code has expired".
+        $oauthCodeHash = md5($_GET['code']);
+        $oauthLockFile = sys_get_temp_dir()."/yandex_oauth_".$oauthCodeHash.".lock";
+        $oauthUsedFile = sys_get_temp_dir()."/yandex_oauth_".$oauthCodeHash.".used";
+        # Check sequential duplicate first (no lock needed for the read)
+        if(file_exists($oauthUsedFile) && (time() - filemtime($oauthUsedFile)) < 600){
+            wlog("[Yandex OAuth] duplicate callback detected (code already exchanged), code_prefix=$oauthCodePrefix", "log");
+            $dupDb = (strpos($oauthState, 'yandex:') === 0) ? urldecode(substr($oauthState, 7)) : "";
+            header("Location: /".($dupDb !== "" && preg_match(USER_DB_MASK, $dupDb) ? $dupDb : $z));
+            die();
+        }
         $oauthLockFp = fopen($oauthLockFile, 'c');
         if($oauthLockFp){
             if(!flock($oauthLockFp, LOCK_EX | LOCK_NB)){
@@ -205,7 +222,7 @@ elseif(($z == "my") && !empty($_GET['code'])){
             'code'          => $_GET['code'],
             'client_id'     => Y_CLIENT_ID,
             'client_secret' => Y_CLIENT_PK,
-            'redirect_uri'  => 'https://'.$_SERVER["SERVER_NAME"].'/auth.asp'
+            'redirect_uri'  => 'https://'.$oauthHost.'/auth.asp'
         );
         $ch = curl_init('https://oauth.yandex.ru/token');
         curl_setopt($ch, CURLOPT_POST, 1);
@@ -222,6 +239,9 @@ elseif(($z == "my") && !empty($_GET['code'])){
         curl_close($ch);
         $dataRaw = $data;
         $data = json_decode($data, true);
+        # Mark the code as consumed so sequential duplicate requests (bots, link crawlers)
+        # that arrive after this request completes are redirected without hitting Yandex again.
+        @touch($oauthUsedFile);
         # Release lock now that the code has been consumed (or failed)
         if($oauthLockFp){
             flock($oauthLockFp, LOCK_UN);
