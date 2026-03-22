@@ -128,7 +128,7 @@
     justify-content: center;
     width: var(--sidebar-toggle-size, 2.5rem);
     height: var(--sidebar-toggle-size, 2.5rem);
-    margin: 0 auto 0.75rem 0.75rem;
+    margin: 0 auto 0.75rem 1.3rem;
     background: none;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md, 6px);
