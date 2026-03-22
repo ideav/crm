@@ -181,11 +181,31 @@ elseif(($z == "my") && !empty($_GET['code'])){
         wlog("[Yandex OAuth] callback received: ip=".$_SERVER["REMOTE_ADDR"]
             .", code_prefix=$oauthCodePrefix, state=$oauthState"
             .", time=".date("Y-m-d H:i:s"), "log");
+        # Guard against duplicate callback requests (e.g. CDN replay, browser retry).
+        # If two requests arrive with the same code concurrently, only the first one
+        # should exchange it; the second would get "Code has expired" from Yandex.
+        # Use a lock file to serialise concurrent callbacks for the same code.
+        $oauthLockFile = sys_get_temp_dir()."/yandex_oauth_".md5($_GET['code']).".lock";
+        $oauthLockFp = fopen($oauthLockFile, 'c');
+        if($oauthLockFp){
+            if(!flock($oauthLockFp, LOCK_EX | LOCK_NB)){
+                # Another request is already exchanging this code — wait for it, then redirect.
+                wlog("[Yandex OAuth] duplicate callback detected (code already in use), code_prefix=$oauthCodePrefix", "log");
+                flock($oauthLockFp, LOCK_EX); # blocking wait
+                flock($oauthLockFp, LOCK_UN);
+                fclose($oauthLockFp);
+                # First request already set the cookie; redirect to the DB home page.
+                $dupDb = (strpos($oauthState, 'yandex:') === 0) ? urldecode(substr($oauthState, 7)) : "";
+                header("Location: /".($dupDb !== "" && preg_match(USER_DB_MASK, $dupDb) ? $dupDb : $z));
+                die();
+            }
+        }
         $params = array(
             'grant_type'    => 'authorization_code',
             'code'          => $_GET['code'],
             'client_id'     => Y_CLIENT_ID,
-            'client_secret' => Y_CLIENT_PK
+            'client_secret' => Y_CLIENT_PK,
+            'redirect_uri'  => 'https://'.$_SERVER["SERVER_NAME"].'/auth.asp'
         );
         $ch = curl_init('https://oauth.yandex.ru/token');
         curl_setopt($ch, CURLOPT_POST, 1);
@@ -202,6 +222,12 @@ elseif(($z == "my") && !empty($_GET['code'])){
         curl_close($ch);
         $dataRaw = $data;
         $data = json_decode($data, true);
+        # Release lock now that the code has been consumed (or failed)
+        if($oauthLockFp){
+            flock($oauthLockFp, LOCK_UN);
+            fclose($oauthLockFp);
+            @unlink($oauthLockFile);
+        }
         if($oauthCurlErrno || $oauthHttpCode != 200 || empty($data['access_token'])){
             # Log the full response for diagnosis (mask the token if present)
             $logData = $data;
