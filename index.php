@@ -34,8 +34,35 @@ if(isset($com[1]))
 else
     $z = "my";
     
-if($z==="auth.asp" && !empty($_GET['code']))
+if($z==="auth.asp" && !empty($_GET['code'])){
+    # Guard against duplicate OAuth callback requests (CDN replay, browser retry, link-preview
+    # crawlers) for all providers.  Two scenarios:
+    #   (a) Concurrent: two requests arrive with the same code at the same time — a lock file
+    #       serialises them; the second waits and then redirects.
+    #   (b) Sequential: a bot fetches the URL after the browser already exchanged the code —
+    #       a "used" marker file (TTL 10 min) detects this and redirects immediately.
+    $oauthCodeHash = md5($_GET['code']);
+    $oauthLockFile = sys_get_temp_dir()."/oauth_".$oauthCodeHash.".lock";
+    $oauthUsedFile = sys_get_temp_dir()."/oauth_".$oauthCodeHash.".used";
+    $oauthState = isset($_GET['state']) ? $_GET['state'] : '';
+    $oauthDupDb = (strpos($oauthState, 'yandex:') === 0) ? urldecode(substr($oauthState, 7)) : "";
+    if(file_exists($oauthUsedFile) && (time() - filemtime($oauthUsedFile)) < 600){
+        wlog("[OAuth] duplicate callback detected (code already exchanged), code_prefix=".substr($_GET['code'], 0, 8), "log");
+        header("Location: /".($oauthDupDb !== "" && preg_match(USER_DB_MASK, $oauthDupDb) ? $oauthDupDb : "my"));
+        die();
+    }
+    $oauthLockFp = fopen($oauthLockFile, 'c');
+    if($oauthLockFp && !flock($oauthLockFp, LOCK_EX | LOCK_NB)){
+        # Another request is already exchanging this code — wait for it, then redirect.
+        wlog("[OAuth] duplicate callback detected (code already in use), code_prefix=".substr($_GET['code'], 0, 8), "log");
+        flock($oauthLockFp, LOCK_EX); # blocking wait
+        flock($oauthLockFp, LOCK_UN);
+        fclose($oauthLockFp);
+        header("Location: /".($oauthDupDb !== "" && preg_match(USER_DB_MASK, $oauthDupDb) ? $oauthDupDb : "my"));
+        die();
+    }
     $z = "my";
+}
 elseif($z==="auth.asp" && !empty($_GET['error'])){
     # OAuth error callback (e.g. access_denied from Yandex or Google)
     include "include/connection.php";
@@ -186,37 +213,6 @@ elseif(($z == "my") && !empty($_GET['code'])){
             .", code_prefix=$oauthCodePrefix, state=$oauthState"
             .", host=$oauthHost, server_name=".$_SERVER["SERVER_NAME"]
             .", time=".date("Y-m-d H:i:s"), "log");
-        # Guard against duplicate callback requests (e.g. CDN replay, browser retry, link
-        # preview crawlers).  Two scenarios:
-        #   (a) Concurrent: two requests arrive with the same code at the same time — a lock
-        #       file serialises them; the second request waits and then redirects.
-        #   (b) Sequential: a bot fetches the URL after the browser already exchanged the code
-        #       — a "used codes" marker file (TTL 10 min) detects this and redirects without
-        #       attempting a second token exchange that Yandex would reject as "Code has expired".
-        $oauthCodeHash = md5($_GET['code']);
-        $oauthLockFile = sys_get_temp_dir()."/yandex_oauth_".$oauthCodeHash.".lock";
-        $oauthUsedFile = sys_get_temp_dir()."/yandex_oauth_".$oauthCodeHash.".used";
-        # Check sequential duplicate first (no lock needed for the read)
-        if(file_exists($oauthUsedFile) && (time() - filemtime($oauthUsedFile)) < 600){
-            wlog("[Yandex OAuth] duplicate callback detected (code already exchanged), code_prefix=$oauthCodePrefix", "log");
-            $dupDb = (strpos($oauthState, 'yandex:') === 0) ? urldecode(substr($oauthState, 7)) : "";
-            header("Location: /".($dupDb !== "" && preg_match(USER_DB_MASK, $dupDb) ? $dupDb : $z));
-            die();
-        }
-        $oauthLockFp = fopen($oauthLockFile, 'c');
-        if($oauthLockFp){
-            if(!flock($oauthLockFp, LOCK_EX | LOCK_NB)){
-                # Another request is already exchanging this code — wait for it, then redirect.
-                wlog("[Yandex OAuth] duplicate callback detected (code already in use), code_prefix=$oauthCodePrefix", "log");
-                flock($oauthLockFp, LOCK_EX); # blocking wait
-                flock($oauthLockFp, LOCK_UN);
-                fclose($oauthLockFp);
-                # First request already set the cookie; redirect to the DB home page.
-                $dupDb = (strpos($oauthState, 'yandex:') === 0) ? urldecode(substr($oauthState, 7)) : "";
-                header("Location: /".($dupDb !== "" && preg_match(USER_DB_MASK, $dupDb) ? $dupDb : $z));
-                die();
-            }
-        }
         $params = array(
             'grant_type'    => 'authorization_code',
             'code'          => $_GET['code'],
@@ -313,6 +309,13 @@ elseif(($z == "my") && !empty($_GET['code'])){
         $data = curl_exec($ch);
         curl_close($ch);
         $data = json_decode($data, true);
+        # Mark the code as consumed and release the lock (set at the auth.asp routing level).
+        if(isset($oauthUsedFile)) @touch($oauthUsedFile);
+        if(isset($oauthLockFp) && $oauthLockFp){
+            flock($oauthLockFp, LOCK_UN);
+            fclose($oauthLockFp);
+            if(isset($oauthLockFile)) @unlink($oauthLockFile);
+        }
         if(!empty($data['access_token'])){
             # Got the token, retrieve the user data
             $params = array('access_token' => $data['access_token'],
