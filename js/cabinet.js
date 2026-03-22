@@ -316,16 +316,43 @@ class CabinetController {
             const description = db.Description || '';
             const recordCount = db.Count || '0';
             const planDate = db['Plan date'] ? this.formatDate(db['Plan date']) : '-';
+            const publicName = db['Public name'] || '';
+            const registrationOpen = db['Registration open'] === '1' || db['Registration open'] === 'true' || db['Registration open'] === 'Да';
+            const tokenLifetime = db['Token lifetime'] || '';
+            const dbId = db.DBID;
 
             card.innerHTML = `
                 <div class="database-info">
                     <div class="database-name">${this.escapeHtml(db.DB)}</div>
-                    <div class="database-id">ID: ${db.DBID}</div>
-                    ${description ? '<div class="database-description">' + this.escapeHtml(description) + '</div>' : ''}
+                    <div class="database-id">ID: ${dbId}</div>
                     <div class="database-stats">
                         <span class="database-stat"><span>Шаблон:</span> <strong>${this.escapeHtml(templateLabel)}</strong></span>
                         <span class="database-stat"><span>Записей:</span> <strong>${recordCount}</strong></span>
                         <span class="database-stat"><span>Оплачено до:</span> <strong>${planDate}</strong></span>
+                    </div>
+                    <div class="database-edit-fields">
+                        <div class="database-field-group">
+                            <label class="database-field-label">Описание</label>
+                            <textarea class="database-field-input database-description-input" rows="2" data-field="t276">${this.escapeHtml(description)}</textarea>
+                        </div>
+                        <div class="database-field-group">
+                            <label class="database-field-label">Публичное имя</label>
+                            <input type="text" class="database-field-input" maxlength="127" pattern="[A-Za-zА-Яа-яЁё0-9\\s.,!?;:—…«»'&quot;\\-]+" data-field="t305" value="${this.escapeHtml(publicName)}">
+                        </div>
+                        <div class="database-field-group database-field-group-row">
+                            <label class="database-field-label">
+                                <input type="checkbox" class="database-checkbox" data-field="t367"${registrationOpen ? ' checked' : ''}>
+                                Регистрация открыта
+                            </label>
+                        </div>
+                        <div class="database-field-group">
+                            <label class="database-field-label">Время жизни токена, минут</label>
+                            <input type="number" class="database-field-input database-field-input-short" min="0" step="1" data-field="t369" value="${this.escapeHtml(tokenLifetime)}">
+                        </div>
+                        <div class="database-save-row">
+                            <button type="button" class="btn-primary btn-small database-save-btn" style="display:none">Сохранить</button>
+                            <span class="database-save-status"></span>
+                        </div>
                     </div>
                 </div>
                 <div class="database-actions">
@@ -333,9 +360,94 @@ class CabinetController {
                 </div>
             `;
 
+            // Track original values for change detection
+            const origValues = {
+                t276: description,
+                t305: publicName,
+                t367: registrationOpen,
+                t369: tokenLifetime
+            };
+
+            // Set up change detection
+            card.querySelectorAll('[data-field]').forEach(input => {
+                const eventType = input.type === 'checkbox' ? 'change' : 'input';
+                input.addEventListener(eventType, () => {
+                    this.onDbFieldChange(card, origValues);
+                });
+            });
+
+            // Set up save button
+            const saveBtn = card.querySelector('.database-save-btn');
+            if (saveBtn) {
+                saveBtn.addEventListener('click', () => this.saveDatabase(dbId, card, origValues));
+            }
+
             container.appendChild(card);
         });
+    }
 
+    onDbFieldChange(card, origValues) {
+        const saveBtn = card.querySelector('.database-save-btn');
+        if (!saveBtn) return;
+
+        const hasChanges = Array.from(card.querySelectorAll('[data-field]')).some(input => {
+            const field = input.dataset.field;
+            if (input.type === 'checkbox') {
+                return input.checked !== origValues[field];
+            }
+            return input.value !== origValues[field];
+        });
+
+        saveBtn.style.display = hasChanges ? '' : 'none';
+    }
+
+    async saveDatabase(dbId, card, origValues) {
+        const saveBtn = card.querySelector('.database-save-btn');
+        const statusEl = card.querySelector('.database-save-status');
+        if (saveBtn) saveBtn.disabled = true;
+
+        try {
+            const host = this.apiConfig.host;
+            const url = 'https://' + host + '/my/_m_set/' + encodeURIComponent(dbId) + '?JSON';
+
+            const fd = new FormData();
+            card.querySelectorAll('[data-field]').forEach(input => {
+                if (input.type === 'checkbox') {
+                    fd.append(input.dataset.field, input.checked ? '1' : '0');
+                } else {
+                    fd.append(input.dataset.field, input.value);
+                }
+            });
+            fd.append('_xsrf', xsrf);
+
+            const response = await fetch(url, {
+                method: 'POST',
+                credentials: 'include',
+                body: fd
+            });
+
+            if (!response.ok) {
+                throw new Error('HTTP ' + response.status);
+            }
+
+            // Update original values after successful save
+            card.querySelectorAll('[data-field]').forEach(input => {
+                const field = input.dataset.field;
+                if (input.type === 'checkbox') {
+                    origValues[field] = input.checked;
+                } else {
+                    origValues[field] = input.value;
+                }
+            });
+
+            if (saveBtn) saveBtn.style.display = 'none';
+            showToast('Настройки базы данных сохранены', 'success');
+        } catch (err) {
+            console.error('[cabinet] Error saving database settings:', err);
+            showToast('Ошибка сохранения настроек базы данных', 'error');
+        } finally {
+            if (saveBtn) saveBtn.disabled = false;
+        }
     }
 
     populateBonuses() {
