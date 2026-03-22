@@ -145,6 +145,25 @@ body {
     width: auto;
 }
 
+.navbar-center {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    pointer-events: none;
+}
+
+.navbar-workspace {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 300px;
+}
+
 .navbar-right {
     display: flex;
     align-items: center;
@@ -399,6 +418,10 @@ body {
     }
 
     .account-email {
+        display: none;
+    }
+
+    .navbar-workspace {
         display: none;
     }
 
