@@ -123,6 +123,23 @@
 .form-item-name {
     flex: 1;
     font-weight: 500;
+    color: var(--text-color, #333);
+    text-decoration: none;
+}
+
+.form-item-name:hover {
+    text-decoration: underline;
+    color: #007bff;
+}
+
+.form-item-name-input {
+    flex: 1;
+    font-weight: 500;
+    padding: 2px 6px;
+    border: 1px solid #007bff;
+    border-radius: 4px;
+    font-size: 14px;
+    outline: none;
 }
 
 .form-item-actions {
@@ -455,6 +472,25 @@
     margin-bottom: 15px;
 }
 
+.panel-button-edit-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px dashed #ccc;
+    border-radius: 4px;
+    padding: 2px 4px;
+}
+
+.panel-button-edit-btn {
+    opacity: 0.6;
+    padding: 2px 6px !important;
+    font-size: 11px !important;
+}
+
+.panel-button-edit-btn:hover {
+    opacity: 1;
+}
+
 /* Hidden utility */
 .hidden {
     display: none !important;
@@ -723,6 +759,30 @@
                     <option value="stretch">Растягивать (по размеру содержимого)</option>
                 </select>
             </div>
+            <div class="form-field" style="margin-top: 15px;">
+                <label>Тип панели</label>
+                <select id="editPanelType" onchange="toggleEditPanelSourceFields()">
+                    <option value="">Не изменять</option>
+                    <option value="XYChart">Линейный график</option>
+                    <option value="PieChart">Круговая диаграмма</option>
+                    <option value="Histogram">Гистограмма</option>
+                    <option value="Pivot">Сводная таблица</option>
+                    <option value="Report">Отчет (таблица)</option>
+                    <option value="DataEntry">Форма ввода</option>
+                </select>
+            </div>
+            <div class="form-field" style="margin-top: 15px;" id="editPanelTableSourceField">
+                <label>Таблица (объект)</label>
+                <select id="editPanelTableSource">
+                    <option value="">Не изменять</option>
+                </select>
+            </div>
+            <div class="form-field" style="margin-top: 15px;" id="editPanelReportSourceField">
+                <label>Запрос (отчет)</label>
+                <select id="editPanelReportSource">
+                    <option value="">Не изменять</option>
+                </select>
+            </div>
         </div>
         <div class="modal-footer">
             <button class="btn btn-danger" onclick="deletePanel()">
@@ -776,6 +836,50 @@
                 Добавить
             </button>
             <button class="btn btn-secondary" onclick="hideAddButtonModal()">
+                Отменить
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Button Modal -->
+<div class="modal-overlay hidden" id="editButtonModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Редактировать кнопку</h3>
+            <button class="modal-close" onclick="hideEditButtonModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="editButtonId">
+            <div class="form-field">
+                <label>Текст кнопки</label>
+                <input type="text" id="editButtonText">
+            </div>
+            <div class="form-field" style="margin-top: 15px;">
+                <label>Действие</label>
+                <select id="editButtonActionType" onchange="toggleEditButtonActionFields()">
+                    <option value="js">Вызов функции JS</option>
+                    <option value="link">Переход по ссылке</option>
+                </select>
+            </div>
+            <div class="form-field" id="editJsActionField" style="margin-top: 10px;">
+                <label>Имя функции</label>
+                <input type="text" id="editButtonJsFunction" placeholder="Например: myFunction()">
+            </div>
+            <div class="form-field hidden" id="editLinkActionField" style="margin-top: 10px;">
+                <label>URL ссылки</label>
+                <input type="text" id="editButtonLinkUrl" placeholder="Например: /workplace?param=value">
+            </div>
+            <div class="form-field" style="margin-top: 15px;">
+                <label>CSS класс кнопки</label>
+                <input type="text" id="editButtonClass" placeholder="btn btn-primary">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-primary" onclick="saveButton()">
+                Сохранить
+            </button>
+            <button class="btn btn-secondary" onclick="hideEditButtonModal()">
                 Отменить
             </button>
         </div>
@@ -1023,12 +1127,18 @@ function loadForms() {
 
         let html = '';
         FormConstructor.forms.forEach(function(form) {
+            const rawName = getDisplayValue(form.val) || 'Form ' + form.id;
+            const displayName = escapeHtml(rawName);
             html += '<div class="form-item">';
-            // For reference fields (id:name format), display only the name
-            html += '<span class="form-item-name">' + escapeHtml(getDisplayValue(form.val) || 'Form ' + form.id) + '</span>';
+            // Form name as hyperlink to open the form
+            html += '<a href="/' + FormConstructor.db + '/forms/' + form.id + '" class="form-item-name">' + displayName + '</a>';
             html += '<div class="form-item-actions">';
-            html += '<a href="/' + FormConstructor.db + '/forms/' + form.id + '" class="btn btn-sm btn-secondary">' + 'Открыть' + '</a>';
-            html += '<a href="/' + FormConstructor.db + '/forms/' + form.id + '?EDIT" class="btn btn-sm btn-primary">' + 'Редактировать' + '</a>';
+            // Inline editable name input (hidden by default)
+            html += '<input type="text" class="form-item-name-input hidden" id="form-name-input-' + form.id + '" value="' + displayName + '" onblur="saveFormName(' + form.id + ')" onkeydown="handleFormNameKey(event, ' + form.id + ')">';
+            // Edit name button (pencil icon)
+            html += '<button class="btn btn-sm btn-secondary" onclick="startEditFormName(' + form.id + ')" title="' + 'Переименовать' + '"><i class="pi pi-pencil"></i></button>';
+            // Edit (settings) button - icon only, links to edit mode
+            html += '<a href="/' + FormConstructor.db + '/forms/' + form.id + '?EDIT" class="btn btn-sm btn-primary" title="' + 'Редактировать' + '"><i class="pi pi-cog"></i></a>';
             html += '</div>';
             html += '</div>';
         });
@@ -1423,7 +1533,16 @@ function loadPanelButtons(panelId, container) {
             const btnAction = btnReqs[0] || '';
             const btnClass = btnReqs[1] || 'btn btn-secondary';
 
-            if (btnAction.indexOf('javascript:') === 0 || btnAction.indexOf('(') > 0) {
+            if (FormConstructor.editMode) {
+                // Store button data for edit modal
+                FormConstructor.buttonData = FormConstructor.buttonData || {};
+                FormConstructor.buttonData[btnId] = { name: btnName, action: btnAction, cls: btnClass };
+                html += '<span class="panel-button-edit-wrap">';
+                html += '<span class="' + escapeHtml(btnClass) + '">' + escapeHtml(btnName) + '</span>';
+                html += '<button class="btn btn-sm btn-secondary panel-button-edit-btn" onclick="showEditButtonModal(' + btnId + ')" title="' + 'Редактировать кнопку' + '"><i class="pi pi-pencil"></i></button>';
+                html += '<button class="btn btn-sm btn-danger panel-button-edit-btn" onclick="deleteButton(' + btnId + ')" title="' + 'Удалить кнопку' + '"><i class="pi pi-trash"></i></button>';
+                html += '</span>';
+            } else if (btnAction.indexOf('javascript:') === 0 || btnAction.indexOf('(') > 0) {
                 html += '<button class="' + escapeHtml(btnClass) + '" onclick="' + escapeHtml(btnAction.replace('javascript:', '')) + '">' + escapeHtml(btnName) + '</button>';
             } else {
                 html += '<a href="/' + FormConstructor.db + '/' + escapeHtml(btnAction) + '" class="' + escapeHtml(btnClass) + '">' + escapeHtml(btnName) + '</a>';
@@ -2103,10 +2222,56 @@ function showEditPanelModal(panelId) {
     document.getElementById('editPanelNextAction').value = panelReqs[257] || panelReqs['257'] || '';
     document.getElementById('editPanelOverflowMode').value = panelReqs[258] || panelReqs['258'] || '';
     document.getElementById('editPanelGroup').value = panelReqs[256] || panelReqs['256'] || '';
-    document.getElementById('editPanelFilter').value = panelReqs[181] || panelReqs['181'] || '';
-    document.getElementById('editPanelNextAction').value = panelReqs[257] || panelReqs['257'] || '';
 
+    // Populate type and source fields
+    const currentType = panelReqs[184] || panelReqs['184'] || '';
+    const chartTypes = ['XYChart', 'PieChart', 'Histogram', 'Pivot', 'Bubble'];
+    if (chartTypes.includes(currentType) || currentType === 'Report') {
+        document.getElementById('editPanelType').value = currentType;
+    } else if (currentType) {
+        // It's a table ID (DataEntry or Report from table)
+        document.getElementById('editPanelType').value = 'DataEntry';
+    } else {
+        document.getElementById('editPanelType').value = '';
+    }
+
+    // Populate table source select
+    const tableSelect = document.getElementById('editPanelTableSource');
+    tableSelect.innerHTML = '<option value="">' + 'Не изменять' + '</option>';
+    FormConstructor.tables.forEach(function(table) {
+        const opt = document.createElement('option');
+        opt.value = table.id;
+        opt.textContent = getDisplayValue(table.val) || 'Table ' + table.id;
+        if (String(table.id) === String(currentType)) opt.selected = true;
+        tableSelect.appendChild(opt);
+    });
+
+    // Populate report source select
+    const reportRef = parseReferenceValue(panelReqs['ref_161'] || panelReqs[161] || panelReqs['161'] || '');
+    const currentReportId = reportRef ? reportRef.id : (panelReqs[161] || panelReqs['161'] || '');
+    const reportSelect = document.getElementById('editPanelReportSource');
+    reportSelect.innerHTML = '<option value="">' + 'Не изменять' + '</option>';
+    FormConstructor.reports.forEach(function(report) {
+        const opt = document.createElement('option');
+        opt.value = report.id;
+        opt.textContent = getDisplayValue(report.val) || 'Report ' + report.id;
+        if (String(report.id) === String(currentReportId)) opt.selected = true;
+        reportSelect.appendChild(opt);
+    });
+
+    toggleEditPanelSourceFields();
     document.getElementById('editPanelModal').classList.remove('hidden');
+}
+
+function toggleEditPanelSourceFields() {
+    const type = document.getElementById('editPanelType').value;
+    const tableField = document.getElementById('editPanelTableSourceField');
+    const reportField = document.getElementById('editPanelReportSourceField');
+    // Show table source for DataEntry
+    tableField.style.display = (type === 'DataEntry' || type === 'Report') ? '' : 'none';
+    // Show report source for chart types, Pivot, Report
+    const needsReport = ['XYChart', 'PieChart', 'Histogram', 'Pivot', 'Bubble', 'Report'].includes(type);
+    reportField.style.display = needsReport ? '' : 'none';
 }
 
 function hideEditPanelModal() {
@@ -2132,6 +2297,44 @@ function hideAddButtonModal() {
 // ============================================================
 // CRUD Operations
 // ============================================================
+function startEditFormName(formId) {
+    const nameLink = document.querySelector('#formsList a.form-item-name[href*="/forms/' + formId + '"]');
+    const nameInput = document.getElementById('form-name-input-' + formId);
+    if (!nameLink || !nameInput) return;
+    // Use textContent (plain text) as value for the input
+    nameInput.value = nameLink.textContent;
+    nameLink.classList.add('hidden');
+    nameInput.classList.remove('hidden');
+    nameInput.focus();
+    nameInput.select();
+}
+
+function saveFormName(formId) {
+    const nameLink = document.querySelector('#formsList a.form-item-name[href*="/forms/' + formId + '"]');
+    const nameInput = document.getElementById('form-name-input-' + formId);
+    if (!nameLink || !nameInput) return;
+    const newName = nameInput.value.trim();
+    if (newName && newName !== nameLink.textContent) {
+        apiRequest('POST', '_m_set/' + formId + '?JSON', { 't137': newName }, function(json) {
+            nameLink.textContent = newName;
+        });
+    }
+    nameInput.classList.add('hidden');
+    nameLink.classList.remove('hidden');
+}
+
+function handleFormNameKey(event, formId) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        saveFormName(formId);
+    } else if (event.key === 'Escape') {
+        const nameLink = document.querySelector('#formsList a.form-item-name[href*="/forms/' + formId + '"]');
+        const nameInput = document.getElementById('form-name-input-' + formId);
+        if (nameInput) nameInput.classList.add('hidden');
+        if (nameLink) nameLink.classList.remove('hidden');
+    }
+}
+
 function createNewForm(event) {
     event.preventDefault();
 
@@ -2206,6 +2409,9 @@ function savePanel() {
     const filter = document.getElementById('editPanelFilter').value;
     const nextAction = document.getElementById('editPanelNextAction').value;
     const overflowMode = document.getElementById('editPanelOverflowMode').value;
+    const panelType = document.getElementById('editPanelType').value;
+    const tableSourceId = document.getElementById('editPanelTableSource').value;
+    const reportSourceId = document.getElementById('editPanelReportSource').value;
 
     const data = {
         't138': name,
@@ -2216,6 +2422,26 @@ function savePanel() {
         't257': nextAction,
         't258': overflowMode
     };
+
+    // Update panel type if changed
+    if (panelType) {
+        if (['XYChart', 'PieChart', 'Histogram', 'Pivot', 'Bubble'].includes(panelType)) {
+            data['t184'] = panelType;
+        } else if (panelType === 'DataEntry' && tableSourceId) {
+            data['t184'] = tableSourceId;
+        } else if (panelType === 'Report') {
+            if (tableSourceId) {
+                data['t184'] = tableSourceId;
+            } else {
+                data['t184'] = panelType;
+            }
+        }
+    }
+
+    // Update report source if changed
+    if (reportSourceId) {
+        data['t161'] = reportSourceId;
+    }
 
     apiRequest('POST', '_m_set/' + panelId + '?JSON', data, function(json) {
         hideEditPanelModal();
@@ -2270,6 +2496,74 @@ function addButtonToPanel() {
         } else {
             showNotification('Ошибка добавления кнопки', 'error');
         }
+    });
+}
+
+function showEditButtonModal(btnId) {
+    const data = (FormConstructor.buttonData || {})[btnId] || {};
+    const btnName = data.name || '';
+    const btnAction = data.action || '';
+    const btnClass = data.cls || 'btn btn-secondary';
+
+    document.getElementById('editButtonId').value = btnId;
+    document.getElementById('editButtonText').value = btnName;
+    document.getElementById('editButtonClass').value = btnClass;
+
+    const isJs = btnAction && (btnAction.indexOf('javascript:') === 0 || btnAction.indexOf('(') > 0);
+    document.getElementById('editButtonActionType').value = isJs ? 'js' : 'link';
+    if (isJs) {
+        document.getElementById('editButtonJsFunction').value = btnAction.replace('javascript:', '');
+        document.getElementById('editButtonLinkUrl').value = '';
+    } else {
+        document.getElementById('editButtonJsFunction').value = '';
+        document.getElementById('editButtonLinkUrl').value = btnAction || '';
+    }
+    toggleEditButtonActionFields();
+    document.getElementById('editButtonModal').classList.remove('hidden');
+}
+
+function hideEditButtonModal() {
+    document.getElementById('editButtonModal').classList.add('hidden');
+}
+
+function toggleEditButtonActionFields() {
+    const actionType = document.getElementById('editButtonActionType').value;
+    document.getElementById('editJsActionField').classList.toggle('hidden', actionType !== 'js');
+    document.getElementById('editLinkActionField').classList.toggle('hidden', actionType !== 'link');
+}
+
+function saveButton() {
+    const btnId = document.getElementById('editButtonId').value;
+    const text = document.getElementById('editButtonText').value;
+    const actionType = document.getElementById('editButtonActionType').value;
+    const jsFunction = document.getElementById('editButtonJsFunction').value;
+    const linkUrl = document.getElementById('editButtonLinkUrl').value;
+    const btnClass = document.getElementById('editButtonClass').value;
+
+    if (!text) {
+        showNotification('Введите текст кнопки', 'error');
+        return;
+    }
+
+    const action = actionType === 'js' ? jsFunction : linkUrl;
+
+    const data = {
+        't150': text,
+        't216': action,
+        't218': btnClass
+    };
+
+    apiRequest('POST', '_m_set/' + btnId + '?JSON', data, function(json) {
+        hideEditButtonModal();
+        loadFormPanels(FormConstructor.currentFormId);
+    });
+}
+
+function deleteButton(btnId) {
+    showConfirmModal('Удалить эту кнопку?', function() {
+        apiRequest('POST', '_m_del/' + btnId + '?JSON', {}, function(json) {
+            loadFormPanels(FormConstructor.currentFormId);
+        });
     });
 }
 
