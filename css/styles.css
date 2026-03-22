@@ -337,6 +337,7 @@ body {
     width: 100%;
     padding: 0.875rem;
     font-size: 1rem;
+    justify-content: center;
 }
 
 .auth-links {
