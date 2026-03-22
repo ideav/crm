@@ -557,8 +557,12 @@ class App {
         // Login form
         const loginForm = document.getElementById('login-form');
         if (loginForm) {
+            let loginInProgress = false;
             loginForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
+                // Guard against double-submit while the async login request is in flight.
+                if (loginInProgress) return;
+                loginInProgress = true;
                 const email = document.getElementById('login-email').value;
                 const password = document.getElementById('login-password').value;
                 const dbSelect = document.getElementById('auth-db-select');
@@ -568,6 +572,7 @@ class App {
                     selectedDb = customInput ? customInput.value.trim() : '';
                     if (!selectedDb) {
                         showToast('Введите имя базы данных', 'error');
+                        loginInProgress = false;
                         return;
                     }
                 }
@@ -582,6 +587,7 @@ class App {
                     }
                 } else {
                     showToast(result.message, 'error');
+                    loginInProgress = false;
                 }
             });
         }
@@ -589,8 +595,11 @@ class App {
         // Register form
         const registerForm = document.getElementById('register-form');
         if (registerForm) {
+            let registerInProgress = false;
             registerForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
+                // Guard against double-submit while the async register request is in flight.
+                if (registerInProgress) return;
                 const email = document.getElementById('reg-email').value;
                 const password = document.getElementById('reg-password').value;
                 const confirmPassword = document.getElementById('reg-confirm-password').value;
@@ -604,10 +613,13 @@ class App {
                     return;
                 }
 
+                registerInProgress = true;
                 const result = await this.auth.register(email, password);
                 showToast(result.message, result.success ? 'success' : 'error');
                 if (result.success) {
                     this.hideAuthPanel();
+                } else {
+                    registerInProgress = false;
                 }
             });
         }
