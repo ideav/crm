@@ -158,8 +158,11 @@ function showToast(message, type = 'info') {
 class YandexAuthManager {
     constructor(apiConfig) {
         this.apiConfig = apiConfig;
-        // Yandex redirects to auth.asp on the current host (ideav.ru)
-        this.redirectUri = 'https://ideav.ru/auth.asp';
+        // Use the current origin so the redirect_uri always matches the host the user is on.
+        // This must exactly match what the backend sends in the token-exchange request
+        // (index.php uses HTTP_HOST for the same reason).
+        this.redirectUri = window.location.origin + '/auth.asp';
+        this._inProgress = false;
     }
 
     isEnabled() {
@@ -171,6 +174,11 @@ class YandexAuthManager {
             showToast('Yandex OAuth не настроен. Укажите Client ID в настройках.', 'error');
             return;
         }
+        // Guard against double-click / rapid re-entry: once the browser is already
+        // navigating to Yandex the flag stays set; it is never reset in this page
+        // lifecycle because window.location.href causes a navigation away.
+        if (this._inProgress) return;
+        this._inProgress = true;
         // Encode the selected DB in state so the backend can redirect after auth.
         // Format: "yandex" or "yandex:<db>" — backend detects Yandex by the "yandex" prefix.
         var state = 'yandex';
