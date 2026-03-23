@@ -129,8 +129,7 @@
                     </div>
                     <div class="form-group">
                         <label for="profile-email">Email</label>
-                        <input type="email" id="profile-email" name="email" readonly disabled>
-                        <span class="field-hint">Email нельзя изменить</span>
+                        <input type="email" id="profile-email" name="email" readonly disabled class="profile-email-disabled" title="Email нельзя изменить">
                     </div>
                     <div class="form-group">
                         <label for="profile-about">Обо мне</label>
@@ -145,6 +144,13 @@
                             <input type="file" id="profile-photo" name="photo" accept="image/*" style="display: none;">
                             <button type="button" id="upload-photo-btn" class="btn-secondary">Загрузить фото</button>
                         </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="profile-public-label">
+                            <input type="checkbox" id="profile-public" name="public">
+                            Публичный профиль
+                        </label>
+                        <span class="field-hint">В публичном профиле видно только Имя и описание, а телефон и email скрыты</span>
                     </div>
                     <button type="button" id="save-profile-btn" class="btn-primary">Сохранить изменения</button>
                 </div>

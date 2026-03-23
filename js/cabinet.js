@@ -219,11 +219,18 @@ class CabinetController {
         const aboutInput = document.getElementById('profile-about');
         if (aboutInput) aboutInput.value = this.userData.Notes || '';
 
+        // Public profile checkbox (t307)
+        const publicCheckbox = document.getElementById('profile-public');
+        if (publicCheckbox) {
+            publicCheckbox.checked = !!(this.userData.t307 || this.userData.Public);
+        }
+
         // Store original values for change detection
         this.originalProfileValues = {
             'profile-name': this.userData.Name || '',
             'profile-phone': this.userData.Phone || '',
-            'profile-about': this.userData.Notes || ''
+            'profile-about': this.userData.Notes || '',
+            'profile-public': !!(this.userData.t307 || this.userData.Public)
         };
 
         // Hide save button initially
@@ -235,6 +242,11 @@ class CabinetController {
             const el = document.getElementById(id);
             if (el) el.addEventListener('input', () => this.onProfileChange());
         });
+
+        // Change detection for public profile checkbox
+        if (publicCheckbox) {
+            publicCheckbox.addEventListener('change', () => this.onProfileChange());
+        }
 
         // Photo preview
         if (this.userData.Picture) {
@@ -553,12 +565,15 @@ class CabinetController {
         const saveBtn = document.getElementById('save-profile-btn');
         if (!saveBtn) return;
 
-        const hasChanges = ['profile-name', 'profile-phone', 'profile-about'].some(id => {
+        const textChanged = ['profile-name', 'profile-phone', 'profile-about'].some(id => {
             const el = document.getElementById(id);
             return el && el.value !== this.originalProfileValues[id];
         });
 
-        saveBtn.style.display = hasChanges ? '' : 'none';
+        const publicCheckbox = document.getElementById('profile-public');
+        const publicChanged = publicCheckbox && (publicCheckbox.checked !== this.originalProfileValues['profile-public']);
+
+        saveBtn.style.display = (textChanged || publicChanged) ? '' : 'none';
     }
 
     async saveProfile() {
@@ -575,10 +590,18 @@ class CabinetController {
             const host = this.apiConfig.host;
             const url = 'https://' + host + '/my/_m_save/' + this.me + '?JSON';
 
+            const photoInput = document.getElementById('profile-photo');
+            const hasPhoto = photoInput && photoInput.files && photoInput.files.length > 0;
+
             const fd = new FormData();
             fd.append('t33', document.getElementById('profile-name')?.value || '');
             fd.append('t30', document.getElementById('profile-phone')?.value || '');
             fd.append('t39', document.getElementById('profile-about')?.value || '');
+            const publicCheckbox = document.getElementById('profile-public');
+            fd.append('t307', publicCheckbox && publicCheckbox.checked ? '1' : '');
+            if (hasPhoto) {
+                fd.append('t38', photoInput.files[0]);
+            }
             fd.append('_xsrf', xsrf);
 
             const response = await fetch(url, {
@@ -595,6 +618,7 @@ class CabinetController {
             this.originalProfileValues['profile-name'] = document.getElementById('profile-name')?.value || '';
             this.originalProfileValues['profile-phone'] = document.getElementById('profile-phone')?.value || '';
             this.originalProfileValues['profile-about'] = document.getElementById('profile-about')?.value || '';
+            this.originalProfileValues['profile-public'] = !!(publicCheckbox && publicCheckbox.checked);
 
             if (saveBtn) saveBtn.style.display = 'none';
             showToast('Профиль сохранен', 'success');
@@ -620,7 +644,9 @@ class CabinetController {
         };
         reader.readAsDataURL(file);
 
-        // TODO: Implement photo upload API call
+        // Show save button since there's a new photo to save
+        const saveBtn = document.getElementById('save-profile-btn');
+        if (saveBtn) saveBtn.style.display = '';
     }
 
     changePlan() {
