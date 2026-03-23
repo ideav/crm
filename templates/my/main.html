@@ -66,7 +66,11 @@
             <nav class="cabinet-menu">
                 <button class="cabinet-menu-item active" data-section="databases">
                     <span class="menu-icon"><i class="pi pi-database"></i></span>
-                    <span>Базы данных</span>
+                    <span>Мои базы данных</span>
+                </button>
+                <button class="cabinet-menu-item" data-section="community">
+                    <span class="menu-icon"><i class="pi pi-key"></i></span>
+                    <span>Сообщество</span>
                 </button>
                 <button class="cabinet-menu-item" data-section="profile">
                     <span class="menu-icon"><i class="pi pi-user"></i></span>
@@ -79,10 +83,6 @@
                 <button class="cabinet-menu-item" data-section="balance">
                     <span class="menu-icon"><i class="pi pi-wallet"></i></span>
                     <span>Баланс</span>
-                </button>
-                <button class="cabinet-menu-item" data-section="access">
-                    <span class="menu-icon"><i class="pi pi-key"></i></span>
-                    <span>Доступы</span>
                 </button>
                 <button class="cabinet-menu-item" data-section="bonuses">
                     <span class="menu-icon"><i class="pi pi-gift"></i></span>
@@ -246,14 +246,14 @@
                 </div>
             </section>
 
-            <!-- Access Section -->
-            <section id="section-access" class="cabinet-section" style="display: none;">
+            <!-- Community Section -->
+            <section id="section-community" class="cabinet-section" style="display: none;">
                 <h1>Доступы</h1>
 
                 <p class="section-description">Список Баз данных с назначенными на них пользователями</p>
 
-                <div class="access-list" id="access-list">
-                    <!-- Access items will be rendered here -->
+                <div class="community-list" id="community-list">
+                    <!-- Community items will be rendered here -->
                     <p class="empty-message">Нет данных о доступах</p>
                 </div>
             </section>
