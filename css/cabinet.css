@@ -303,6 +303,31 @@
     margin-top: 0.25rem;
 }
 
+.profile-email-disabled {
+    background-color: #f0f0f0 !important;
+    color: #888 !important;
+    cursor: not-allowed;
+}
+
+[data-theme="dark"] .profile-email-disabled {
+    background-color: #2a2a2a !important;
+    color: #777 !important;
+}
+
+.profile-public-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.profile-public-label input[type="checkbox"] {
+    width: 1rem;
+    height: 1rem;
+    cursor: pointer;
+}
+
 /* Photo Upload */
 .photo-upload {
     display: flex;
