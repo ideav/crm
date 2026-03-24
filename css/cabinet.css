@@ -904,6 +904,170 @@
     color: var(--text-primary);
 }
 
+/* Databases Header */
+.databases-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+}
+
+.databases-header h1 {
+    margin-bottom: 0;
+}
+
+.databases-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.databases-search-input {
+    padding: 0.45rem 0.75rem;
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    font-size: 0.875rem;
+    background-color: var(--input-bg);
+    color: var(--text-primary);
+    width: 180px;
+    transition: border-color 0.15s ease;
+}
+
+.databases-search-input:focus {
+    outline: none;
+    border-color: var(--primary-color, #3b82f6);
+}
+
+/* Sort Button + Dropdown */
+.databases-sort-wrapper {
+    position: relative;
+}
+
+.databases-sort-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.45rem 0.65rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: none;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 1rem;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.databases-sort-btn:hover {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+.databases-sort-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px var(--nav-shadow);
+    min-width: 160px;
+    z-index: 100;
+    overflow: hidden;
+    animation: userMenuSlideIn 0.15s ease-out;
+}
+
+.sort-option {
+    display: block;
+    width: 100%;
+    padding: 0.6rem 1rem;
+    background: none;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    font-family: inherit;
+    transition: background-color 0.15s ease;
+}
+
+.sort-option:hover {
+    background-color: var(--bg-secondary);
+}
+
+.sort-option.active {
+    color: var(--button-primary);
+    font-weight: 600;
+}
+
+/* Create DB Form */
+.create-db-form {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.25rem;
+}
+
+.create-db-fields {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.create-db-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.create-db-field label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.create-db-field .database-field-input {
+    width: auto;
+    min-width: 180px;
+}
+
+.create-db-error {
+    font-size: 0.8rem;
+    color: #ef4444;
+    margin-top: 0.15rem;
+}
+
+.input-invalid {
+    border-color: #ef4444 !important;
+}
+
+.create-db-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding-bottom: 1px; /* align with inputs */
+}
+
+.db-limit-warning {
+    margin-top: 0.75rem;
+    padding: 0.75rem 1rem;
+    background-color: var(--bg-secondary);
+    border-left: 3px solid var(--button-primary);
+    border-radius: 4px;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+/* DB Creation Date */
+.database-created-date {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-left: auto;
+}
+
 /* Responsive Design */
 @media (max-width: 900px) {
     .cabinet-layout {
