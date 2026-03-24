@@ -13587,11 +13587,42 @@ class IntegramCreateFormHelper {
             const baseFormat = this.normalizeFormat(baseTypeId);
             const isRequired = attrs.required;
 
+            const isMulti = attrs.multi; // Issue #1136
+
             html += `<div class="form-group">`;
             html += `<label for="field-${req.id}">${fieldName}${isRequired ? ' <span class="required">*</span>' : ''}</label>`;
 
-            // Reference field (searchable dropdown)
-            if (req.ref_id) {
+            // Multi-select reference field (issue #1136)
+            if (req.ref_id && isMulti) {
+                const currentValue = reqValue || '';
+                html += `
+                    <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}" data-multi="1" data-current-value="${this.escapeHtml(currentValue)}">
+                        <div class="inline-editor-reference form-ref-editor-box inline-editor-multi-reference">
+                            <div class="multi-ref-tags-container form-multi-ref-tags-container">
+                                <span class="multi-ref-tags-placeholder">Загрузка...</span>
+                            </div>
+                            <div class="inline-editor-reference-header">
+                                <input type="text"
+                                       class="inline-editor-reference-search form-ref-search"
+                                       id="field-${req.id}-search"
+                                       placeholder="Добавить..."
+                                       autocomplete="off">
+                            </div>
+                            <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${req.id}-dropdown" style="display:none;">
+                                <div class="inline-editor-reference-empty">Загрузка...</div>
+                            </div>
+                        </div>
+                        <input type="hidden"
+                               class="form-ref-value form-multi-ref-value"
+                               id="field-${req.id}"
+                               name="t${req.id}"
+                               value=""
+                               data-ref-id="${req.id}">
+                    </div>
+                `;
+            }
+            // Single-select reference field (searchable dropdown)
+            else if (req.ref_id) {
                 const currentValue = reqValue || '';
                 html += `
                     <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}">
@@ -13784,6 +13815,13 @@ class IntegramCreateFormHelper {
         for (const req of reqs) {
             if (!req.ref_id) continue;
 
+            // Issue #1136: Check if this is a multi-reference editor
+            const wrapper = modal.querySelector(`.form-reference-editor[data-ref-id="${req.id}"]`);
+            if (wrapper && wrapper.dataset.multi === '1') {
+                this.initMultiReferenceEditor(wrapper, req.id, modal);
+                continue;
+            }
+
             const dropdown = modal.querySelector(`#field-${req.id}-dropdown`);
             const hiddenInput = modal.querySelector(`#field-${req.id}`);
             const searchInput = modal.querySelector(`#field-${req.id}-search`);
@@ -13875,6 +13913,194 @@ class IntegramCreateFormHelper {
                 });
             }
         });
+    }
+
+    /**
+     * Initialize multi-reference editor for standalone forms (issue #1136)
+     * Mirrors IntegramTable.initFormMultiReferenceEditor behavior
+     */
+    async initMultiReferenceEditor(wrapper, refReqId, modal) {
+        const searchInput = wrapper.querySelector('.form-ref-search');
+        const dropdown = wrapper.querySelector('.form-ref-dropdown');
+        const hiddenInput = wrapper.querySelector('.form-multi-ref-value');
+        const tagsContainer = wrapper.querySelector('.form-multi-ref-tags-container');
+
+        if (!searchInput || !dropdown || !hiddenInput || !tagsContainer) return;
+
+        try {
+            const url = `${this.apiBase}/_ref_reqs/${refReqId}?JSON&LIMIT=50`;
+            const response = await fetch(url);
+            const data = await response.json();
+
+            // Parse options into [id, text] tuples
+            const options = Object.entries(data);
+            wrapper._referenceOptions = options;
+
+            // Parse current value: "id1,id2,...:val1,val2,..." or plain display names
+            const currentRawValue = wrapper.dataset.currentValue || '';
+            const selectedItems = [];
+            const rawColonIndex = currentRawValue.indexOf(':');
+            if (currentRawValue && rawColonIndex > 0) {
+                const ids = currentRawValue.substring(0, rawColonIndex).split(',').map(v => v.trim()).filter(v => v.length > 0);
+                for (const id of ids) {
+                    const match = options.find(([optId]) => String(optId) === id);
+                    if (match) {
+                        selectedItems.push({ id: match[0], text: match[1] });
+                    } else {
+                        selectedItems.push({ id, text: id });
+                    }
+                }
+            } else {
+                const currentTexts = currentRawValue
+                    ? currentRawValue.split(',').map(v => v.trim()).filter(v => v.length > 0)
+                    : [];
+                for (const text of currentTexts) {
+                    const match = options.find(([id, t]) => t === text);
+                    if (match) {
+                        selectedItems.push({ id: match[0], text: match[1] });
+                    } else if (text) {
+                        selectedItems.push({ id: '', text });
+                    }
+                }
+            }
+            wrapper._selectedItems = selectedItems;
+
+            const self = this;
+
+            const updateHiddenInput = () => {
+                const ids = (wrapper._selectedItems || []).map(s => s.id).filter(id => id);
+                hiddenInput.value = ids.join(',');
+            };
+
+            const renderTags = () => {
+                const selected = wrapper._selectedItems || [];
+                if (selected.length === 0) {
+                    tagsContainer.innerHTML = '<span class="multi-ref-tags-placeholder">Нет выбранных значений</span>';
+                } else {
+                    tagsContainer.innerHTML = selected.map(({ id, text }) => `
+                        <span class="multi-ref-tag" data-id="${self.escapeHtml(id)}" data-text="${self.escapeHtml(text)}">
+                            ${self.escapeHtml(text)}
+                            <button class="multi-ref-tag-remove" type="button" title="Удалить" aria-label="Удалить ${self.escapeHtml(text)}"><i class="pi pi-times"></i></button>
+                        </span>
+                    `).join('');
+                }
+            };
+
+            const renderDropdown = (searchText = '') => {
+                const selectedIds = new Set((wrapper._selectedItems || []).map(s => s.id));
+                const filtered = (wrapper._referenceOptions || []).filter(([id, text]) =>
+                    !selectedIds.has(id) && text.toLowerCase().includes(searchText.toLowerCase())
+                );
+                if (filtered.length === 0) {
+                    dropdown.innerHTML = '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
+                } else {
+                    dropdown.innerHTML = filtered.map(([id, text]) => {
+                        const et = self.escapeHtml(text);
+                        return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
+                    }).join('');
+                }
+            };
+
+            // Initial render
+            renderTags();
+            updateHiddenInput();
+
+            // Show dropdown on focus
+            searchInput.addEventListener('focus', () => {
+                renderDropdown(searchInput.value.trim());
+                dropdown.style.display = 'block';
+            });
+
+            // Filter on input
+            let searchTimeout;
+            searchInput.addEventListener('input', (e) => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(() => {
+                    renderDropdown(e.target.value.trim());
+                    dropdown.style.display = 'block';
+                }, 200);
+            });
+
+            // Handle option selection
+            dropdown.addEventListener('click', (e) => {
+                const option = e.target.closest('.inline-editor-reference-option');
+                if (!option) return;
+                const id = option.dataset.id;
+                const text = option.dataset.text;
+                if (!(wrapper._selectedItems || []).find(s => s.id === id)) {
+                    wrapper._selectedItems = [...(wrapper._selectedItems || []), { id, text }];
+                    renderTags();
+                    updateHiddenInput();
+                }
+                searchInput.value = '';
+                dropdown.style.display = 'none';
+            });
+
+            // Handle tag removal and click
+            tagsContainer.addEventListener('click', (e) => {
+                const removeBtn = e.target.closest('.multi-ref-tag-remove');
+                if (removeBtn) {
+                    const tag = removeBtn.closest('.multi-ref-tag');
+                    if (!tag) return;
+                    const id = tag.dataset.id;
+                    const text = tag.dataset.text;
+                    wrapper._selectedItems = (wrapper._selectedItems || []).filter(s => !(s.id === id && s.text === text));
+                    renderTags();
+                    updateHiddenInput();
+                    return;
+                }
+                const tag = e.target.closest('.multi-ref-tag');
+                if (!tag) {
+                    searchInput.focus();
+                    return;
+                }
+            });
+
+            // Keyboard navigation
+            searchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    const firstOption = dropdown.querySelector('.inline-editor-reference-option');
+                    if (firstOption) firstOption.focus();
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const firstOption = dropdown.querySelector('.inline-editor-reference-option');
+                    if (firstOption) firstOption.click();
+                } else if (e.key === 'Escape') {
+                    dropdown.style.display = 'none';
+                    searchInput.blur();
+                }
+            });
+
+            // Keyboard navigation for dropdown options
+            dropdown.addEventListener('keydown', (e) => {
+                const option = e.target.closest('.inline-editor-reference-option');
+                if (!option) return;
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    const next = option.nextElementSibling;
+                    if (next && next.classList.contains('inline-editor-reference-option')) next.focus();
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const prev = option.previousElementSibling;
+                    if (prev && prev.classList.contains('inline-editor-reference-option')) {
+                        prev.focus();
+                    } else {
+                        searchInput.focus();
+                    }
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    option.click();
+                } else if (e.key === 'Escape') {
+                    dropdown.style.display = 'none';
+                    searchInput.focus();
+                }
+            });
+
+        } catch (error) {
+            console.error(`Error loading multi-reference options for field ${refReqId}:`, error);
+            dropdown.innerHTML = '<div class="inline-editor-reference-empty">Ошибка загрузки</div>';
+        }
     }
 
     attachDatePickerHandlers(modal) {
@@ -14792,16 +15018,60 @@ class IntegramCreateFormHelper {
 
             let fieldHtml = '';
 
-            if (req.ref_id) {
-                // Reference field - dropdown
-                const selectedText = fieldValue ? this.escapeHtml(fieldValue) : '';
-                const selectedTerm = fieldTermValue || '';
-                fieldHtml = `<select class="form-control ref-dropdown" id="field-${fieldId}" name="r${fieldId}"
-                    data-ref-id="${req.ref_id}" data-field-id="${fieldId}"
-                    data-current-value="${this.escapeHtml(selectedTerm)}"
-                    ${isRequired ? 'required' : ''} ${isMulti ? 'multiple' : ''}>
-                    ${selectedText ? `<option value="${this.escapeHtml(selectedTerm)}" selected>${selectedText}</option>` : '<option value="">Загрузка...</option>'}
-                </select>`;
+            if (req.ref_id && isMulti) {
+                // Multi-select reference field (issue #1136)
+                const currentValue = fieldValue || '';
+                fieldHtml = `
+                    <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${fieldId}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}" data-multi="1" data-current-value="${this.escapeHtml(currentValue)}">
+                        <div class="inline-editor-reference form-ref-editor-box inline-editor-multi-reference">
+                            <div class="multi-ref-tags-container form-multi-ref-tags-container">
+                                <span class="multi-ref-tags-placeholder">Загрузка...</span>
+                            </div>
+                            <div class="inline-editor-reference-header">
+                                <input type="text"
+                                       class="inline-editor-reference-search form-ref-search"
+                                       id="field-${fieldId}-search"
+                                       placeholder="Добавить..."
+                                       autocomplete="off">
+                            </div>
+                            <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${fieldId}-dropdown" style="display:none;">
+                                <div class="inline-editor-reference-empty">Загрузка...</div>
+                            </div>
+                        </div>
+                        <input type="hidden"
+                               class="form-ref-value form-multi-ref-value"
+                               id="field-${fieldId}"
+                               name="t${fieldId}"
+                               value=""
+                               data-ref-id="${fieldId}">
+                    </div>
+                `;
+            } else if (req.ref_id) {
+                // Single-select reference field (searchable dropdown) (issue #1136)
+                const currentValue = fieldValue || '';
+                fieldHtml = `
+                    <div class="form-reference-editor" data-ref-id="${fieldId}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}">
+                        <div class="inline-editor-reference form-ref-editor-box">
+                            <div class="inline-editor-reference-header">
+                                <input type="text"
+                                       class="inline-editor-reference-search form-ref-search"
+                                       id="field-${fieldId}-search"
+                                       placeholder="Поиск..."
+                                       autocomplete="off">
+                                <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
+                            </div>
+                            <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${fieldId}-dropdown">
+                                <div class="inline-editor-reference-empty">Загрузка...</div>
+                            </div>
+                        </div>
+                        <input type="hidden"
+                               class="form-ref-value"
+                               id="field-${fieldId}"
+                               name="t${fieldId}"
+                               value="${this.escapeHtml(currentValue)}"
+                               data-ref-id="${fieldId}">
+                    </div>
+                `;
             } else if (fieldType === 'BOOLEAN') {
                 const isChecked = fieldValue ? 'checked' : '';
                 fieldHtml = `<input type="checkbox" id="field-${fieldId}" name="t${fieldId}" value="1" ${isChecked}>`;
