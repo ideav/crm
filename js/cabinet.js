@@ -8,9 +8,14 @@ class CabinetController {
         this.databases = [];
         this.currentSection = 'databases';
         this.apiConfig = new ApiConfig();
-        
+
         this.me = null; // user identifier for save API
         this.originalProfileValues = {}; // tracks original values to detect changes
+
+        // Databases tab state
+        this.dbSortField = null; // 'name' | 'count' | 'date'
+        this.dbSortDir = 'asc';  // 'asc' | 'desc'
+        this.dbSearchQuery = '';
     }
 
     async init() {
@@ -35,6 +40,9 @@ class CabinetController {
 
         // Setup referrals tabs
         this.setupReferralsTabs();
+
+        // Setup databases controls (sort, search, create)
+        this.setupDatabasesControls();
 
         // Setup user menu dropdown
         this.setupUserMenuDropdown();
@@ -315,12 +323,65 @@ class CabinetController {
 
         container.innerHTML = '';
 
-        if (this.databases.length === 0) {
+        // Apply search filter
+        const query = this.dbSearchQuery.trim().toLowerCase();
+        let dbs = this.databases.filter(db => {
+            if (!query) return true;
+            const fields = [
+                db.DB || '',
+                db.Template || '',
+                db.Description || '',
+                db.Count || '',
+                db.Date || '',
+                db['Plan date'] || '',
+                db.PublicName || ''
+            ];
+            return fields.some(f => f.toLowerCase().includes(query));
+        });
+
+        // Apply sort
+        if (this.dbSortField) {
+            const dir = this.dbSortDir === 'asc' ? 1 : -1;
+            dbs = dbs.slice().sort((a, b) => {
+                if (this.dbSortField === 'name') {
+                    return dir * (a.DB || '').localeCompare(b.DB || '');
+                }
+                if (this.dbSortField === 'count') {
+                    return dir * (parseInt(a.Count || '0', 10) - parseInt(b.Count || '0', 10));
+                }
+                if (this.dbSortField === 'date') {
+                    // Date format: DD.MM.YYYY
+                    const parseDate = s => {
+                        if (!s) return 0;
+                        const p = s.split('.');
+                        if (p.length !== 3) return 0;
+                        return new Date(parseInt(p[2], 10), parseInt(p[1], 10) - 1, parseInt(p[0], 10)).getTime();
+                    };
+                    return dir * (parseDate(a.Date) - parseDate(b.Date));
+                }
+                return 0;
+            });
+        }
+
+        // Show DB limit warning if needed (free plan: max 3 DBs)
+        const planId = parseInt(this.userData && this.userData.PlanID || '0', 10);
+        const createForm = document.getElementById('create-db-form');
+        const limitWarning = document.getElementById('db-limit-warning');
+        const submitBtn = document.getElementById('create-db-submit-btn');
+        const nameInput = document.getElementById('new-db-name');
+        const templateSelect = document.getElementById('new-db-template');
+        const atLimit = this.databases.length >= 3 && planId < 1147;
+        if (limitWarning) limitWarning.style.display = atLimit ? '' : 'none';
+        if (submitBtn) submitBtn.disabled = atLimit;
+        if (nameInput) nameInput.disabled = atLimit;
+        if (templateSelect) templateSelect.disabled = atLimit;
+
+        if (dbs.length === 0) {
             container.innerHTML = '<p class="empty-message">Нет баз данных</p>';
             return;
         }
 
-        this.databases.forEach(db => {
+        dbs.forEach(db => {
             const card = document.createElement('div');
             card.className = 'database-card';
 
@@ -333,6 +394,7 @@ class CabinetController {
             const registrationOpen = !!(db.Register);
             const tokenLifetime = db.TTL || '';
             const dbId = db.DBID;
+            const createdDate = db.Date ? this.formatDate(db.Date) : '';
 
             const dbNameCapitalized = db.DB ? db.DB.charAt(0).toUpperCase() + db.DB.slice(1) : '';
             const planDatePassed = this.isDatePassed(planDateRaw);
@@ -342,6 +404,7 @@ class CabinetController {
                     <div class="database-name-row">
                         <a class="database-name-link" href="https://${this.apiConfig.host}/${db.DB}" target="${this.escapeHtml(db.DB)}">${this.escapeHtml(dbNameCapitalized)}</a>
                         <span class="database-id-inline">#${this.escapeHtml(dbId)}</span>
+                        ${createdDate ? `<span class="database-created-date">Создана: ${this.escapeHtml(createdDate)}</span>` : ''}
                     </div>
                     <div class="database-stats">
                         <span class="database-stat"><span>Шаблон:</span> <strong>${this.escapeHtml(templateLabel)}</strong></span>
@@ -676,6 +739,193 @@ class CabinetController {
     withdrawReferrals() {
         // TODO: Implement referral withdrawal functionality
         showToast('Функция вывода средств будет доступна позже', 'info');
+    }
+
+    setupDatabasesControls() {
+        // Create DB button — toggle form
+        const createBtn = document.getElementById('create-db-btn');
+        const createForm = document.getElementById('create-db-form');
+        const cancelBtn = document.getElementById('create-db-cancel-btn');
+        const submitBtn = document.getElementById('create-db-submit-btn');
+        const nameInput = document.getElementById('new-db-name');
+
+        if (createBtn && createForm) {
+            createBtn.addEventListener('click', () => {
+                const isVisible = createForm.style.display !== 'none';
+                createForm.style.display = isVisible ? 'none' : '';
+                if (!isVisible && nameInput) {
+                    nameInput.focus();
+                }
+            });
+        }
+
+        if (cancelBtn && createForm) {
+            cancelBtn.addEventListener('click', () => {
+                createForm.style.display = 'none';
+                this.resetCreateDbForm();
+            });
+        }
+
+        if (submitBtn) {
+            submitBtn.addEventListener('click', () => this.createDatabase());
+        }
+
+        if (nameInput) {
+            nameInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') this.createDatabase();
+                // Clear error on input
+                const errEl = document.getElementById('new-db-name-error');
+                if (errEl) { errEl.style.display = 'none'; nameInput.classList.remove('input-invalid'); }
+            });
+        }
+
+        // Sort button — toggle dropdown
+        const sortBtn = document.getElementById('databases-sort-btn');
+        const sortDropdown = document.getElementById('databases-sort-dropdown');
+        if (sortBtn && sortDropdown) {
+            sortBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isOpen = sortDropdown.style.display !== 'none';
+                sortDropdown.style.display = isOpen ? 'none' : '';
+            });
+
+            document.addEventListener('click', (e) => {
+                if (!sortBtn.contains(e.target) && !sortDropdown.contains(e.target)) {
+                    sortDropdown.style.display = 'none';
+                }
+            });
+
+            sortDropdown.querySelectorAll('.sort-option').forEach(opt => {
+                opt.addEventListener('click', () => {
+                    this.dbSortField = opt.dataset.sort;
+                    this.dbSortDir = opt.dataset.dir;
+                    sortDropdown.style.display = 'none';
+
+                    // Mark active
+                    sortDropdown.querySelectorAll('.sort-option').forEach(o => o.classList.remove('active'));
+                    opt.classList.add('active');
+
+                    this.populateDatabases();
+                });
+            });
+        }
+
+        // Search input — filter on input
+        const searchInput = document.getElementById('databases-search');
+        if (searchInput) {
+            searchInput.addEventListener('input', () => {
+                this.dbSearchQuery = searchInput.value;
+                this.populateDatabases();
+            });
+        }
+    }
+
+    resetCreateDbForm() {
+        const nameInput = document.getElementById('new-db-name');
+        const errEl = document.getElementById('new-db-name-error');
+        if (nameInput) { nameInput.value = ''; nameInput.classList.remove('input-invalid'); nameInput.disabled = false; }
+        if (errEl) errEl.style.display = 'none';
+        const submitBtn = document.getElementById('create-db-submit-btn');
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Создать'; }
+    }
+
+    async createDatabase() {
+        const nameInput = document.getElementById('new-db-name');
+        const templateSelect = document.getElementById('new-db-template');
+        const errEl = document.getElementById('new-db-name-error');
+        const submitBtn = document.getElementById('create-db-submit-btn');
+
+        if (!nameInput || !templateSelect) return;
+
+        const dbName = nameInput.value.trim();
+        const template = templateSelect.value;
+
+        // Validate name: 3-15 latin chars/digits, starting with a letter
+        if (!(/^[a-zA-Z][a-zA-Z0-9]{2,14}$/).test(dbName)) {
+            if (errEl) {
+                errEl.textContent = 'От 3 до 15 латинских символов и цифр, начиная с буквы';
+                errEl.style.display = '';
+            }
+            nameInput.classList.add('input-invalid');
+            nameInput.focus();
+            return;
+        }
+
+        if (errEl) errEl.style.display = 'none';
+        nameInput.classList.remove('input-invalid');
+
+        if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Проверка...'; }
+        if (nameInput) nameInput.disabled = true;
+
+        try {
+            const host = this.apiConfig.host;
+
+            // Step 1: Check if DB name is taken (report/292)
+            const checkFd = new FormData();
+            checkFd.append('_xsrf', xsrf);
+            const checkUrl = 'https://' + host + '/my/report/292?JSON&FR_DB=' + encodeURIComponent(dbName);
+            const checkResp = await fetch(checkUrl, {
+                method: 'POST',
+                credentials: 'include',
+                body: checkFd
+            });
+
+            if (!checkResp.ok) throw new Error('HTTP ' + checkResp.status);
+
+            const checkData = await checkResp.json();
+            // If DB field is '0' — name is free; otherwise — taken
+            const dbExists = this.getJsonValue(checkData, 'DB', 0);
+            if (dbExists !== '0' && dbExists !== 0 && dbExists !== '') {
+                // Name is taken
+                if (errEl) {
+                    errEl.textContent = 'Это имя занято, придумайте другое';
+                    errEl.style.display = '';
+                }
+                nameInput.classList.add('input-invalid');
+                nameInput.disabled = false;
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Создать'; }
+                return;
+            }
+
+            // Step 2: Create the database (_new_db/)
+            if (submitBtn) submitBtn.textContent = 'Создание...';
+            const createFd = new FormData();
+            createFd.append('_xsrf', xsrf);
+            const createUrl = 'https://' + host + '/my/_new_db/?JSON&db=' + encodeURIComponent(dbName) + '&template=' + encodeURIComponent(template);
+            const createResp = await fetch(createUrl, {
+                method: 'POST',
+                credentials: 'include',
+                body: createFd
+            });
+
+            if (!createResp.ok) throw new Error('HTTP ' + createResp.status);
+
+            // Success: hide form, reload databases
+            const createForm = document.getElementById('create-db-form');
+            if (createForm) createForm.style.display = 'none';
+            this.resetCreateDbForm();
+
+            showToast('База данных создана', 'success');
+
+            // Reload user data to refresh the list
+            await this.loadUserData();
+        } catch (err) {
+            console.error('[cabinet] Error creating database:', err);
+            showToast('Ошибка создания базы данных', 'error');
+            if (nameInput) nameInput.disabled = false;
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Создать'; }
+        }
+    }
+
+    // Helper: get value from JSON_KV-style response
+    getJsonValue(json, colName, rowIndex) {
+        if (!json || !json.columns || !json.data) return '';
+        for (let i = 0; i < json.columns.length; i++) {
+            if (json.columns[i].name === colName) {
+                return json.data[i][rowIndex] !== undefined ? json.data[i][rowIndex] : '';
+            }
+        }
+        return '';
     }
 
     setupReferralsTabs() {

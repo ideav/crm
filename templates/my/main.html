@@ -259,7 +259,57 @@
 
             <!-- Databases Section -->
             <section id="section-databases" class="cabinet-section" style="display: none;">
-                <h1>Мои базы данных</h1>
+                <div class="databases-header">
+                    <h1>Мои базы данных</h1>
+                    <div class="databases-controls">
+                        <input type="text" id="databases-search" class="databases-search-input" placeholder="Поиск..." title="Поиск по любому полю">
+                        <div class="databases-sort-wrapper">
+                            <button type="button" id="databases-sort-btn" class="databases-sort-btn" title="Сортировка">
+                                <i class="pi pi-sort-alt"></i>
+                            </button>
+                            <div id="databases-sort-dropdown" class="databases-sort-dropdown" style="display:none;">
+                                <button type="button" class="sort-option" data-sort="name" data-dir="asc">По имени ↑</button>
+                                <button type="button" class="sort-option" data-sort="name" data-dir="desc">По имени ↓</button>
+                                <button type="button" class="sort-option" data-sort="count" data-dir="asc">По расходу ↑</button>
+                                <button type="button" class="sort-option" data-sort="count" data-dir="desc">По расходу ↓</button>
+                                <button type="button" class="sort-option" data-sort="date" data-dir="asc">По дате ↑</button>
+                                <button type="button" class="sort-option" data-sort="date" data-dir="desc">По дате ↓</button>
+                            </div>
+                        </div>
+                        <button type="button" id="create-db-btn" class="btn-primary btn-small">
+                            <i class="pi pi-plus"></i> Создать БД
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Create DB Form -->
+                <div id="create-db-form" class="create-db-form" style="display:none;">
+                    <div class="create-db-fields">
+                        <div class="create-db-field">
+                            <label for="new-db-name">Имя базы данных</label>
+                            <input type="text" id="new-db-name" class="database-field-input" autocomplete="off"
+                                placeholder="от 3 до 15 латинских символов"
+                                title="От 3 до 15 латинских символов и цифр, начиная с буквы">
+                            <span id="new-db-name-error" class="create-db-error" style="display:none;"></span>
+                        </div>
+                        <div class="create-db-field">
+                            <label for="new-db-template">Шаблон</label>
+                            <select id="new-db-template" class="database-field-input">
+                                <option value="RU">Русский</option>
+                                <option value="EN">English</option>
+                                <option value="FU">Full with HTMLs</option>
+                            </select>
+                        </div>
+                        <div class="create-db-actions">
+                            <button type="button" id="create-db-submit-btn" class="btn-primary btn-small">Создать</button>
+                            <button type="button" id="create-db-cancel-btn" class="btn-secondary btn-small">Отмена</button>
+                        </div>
+                    </div>
+                    <div id="db-limit-warning" class="db-limit-warning" style="display:none;">
+                        На бесплатном тарифном плане можно создать не более трёх баз данных.
+                    </div>
+                </div>
+
                 <div class="databases-list" id="databases-list">
                     <!-- Databases will be rendered here -->
                 </div>
