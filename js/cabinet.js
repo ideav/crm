@@ -333,6 +333,7 @@ class CabinetController {
                 db.Description || '',
                 db.Count || '',
                 db.Date || '',
+                db.RegDate || '',
                 db['Plan date'] || '',
                 db.PublicName || ''
             ];
