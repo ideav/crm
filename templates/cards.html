@@ -3,6 +3,10 @@
     :root {
         --cards-radius: 4px;
         --cards-transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        --cards-primary: #2563eb;
+        --cards-primary-light: #3b82f6;
+        --cards-shadow-sm: 0 2px 1px -1px rgba(0,0,0,0.2), 0 1px 1px 0 rgba(0,0,0,0.14), 0 1px 3px 0 rgba(0,0,0,0.12);
+        --cards-shadow-md: 0 3px 5px -1px rgba(0,0,0,0.2), 0 6px 10px 0 rgba(0,0,0,0.14), 0 1px 18px 0 rgba(0,0,0,0.12);
     }
 
     /* Container */
@@ -19,10 +23,14 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        padding: 12px 16px 8px;
+        padding: 10px 16px;
         flex-shrink: 0;
         flex-wrap: wrap;
         gap: 8px;
+        background: linear-gradient(135deg, var(--cards-primary) 0%, var(--cards-primary-light) 100%);
+        color: #fff;
+        border-radius: var(--cards-radius) var(--cards-radius) 0 0;
+        box-shadow: 0 2px 4px -1px rgba(0,0,0,0.2);
     }
 
     .cards-title-area {
@@ -32,9 +40,9 @@
     }
 
     .cards-title {
-        font-size: 20px;
+        font-size: 18px;
         font-weight: 500;
-        color: var(--text-primary);
+        color: #fff;
         letter-spacing: 0.15px;
     }
 
@@ -45,15 +53,28 @@
         flex-wrap: wrap;
     }
 
+    /* Count badge in header */
+    .cards-count {
+        font-size: 13px;
+        background-color: rgba(255, 255, 255, 0.25);
+        color: #fff;
+        padding: 3px 10px;
+        border-radius: 12px;
+        font-weight: 500;
+        white-space: nowrap;
+    }
+
     /* Search bar */
     /* Combined search + filters row */
     .cards-search-row {
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 4px 16px 8px;
+        padding: 8px 16px;
         flex-shrink: 0;
         flex-wrap: wrap;
+        background: var(--bg-primary);
+        border-bottom: 1px solid var(--border-color);
     }
 
     .cards-search-input {
@@ -71,8 +92,8 @@
     }
 
     .cards-search-input:focus {
-        border-color: var(--button-primary);
-        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        border-color: var(--cards-primary);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
     }
 
     /* Field filters row — inline with search row */
@@ -110,68 +131,76 @@
 
     .cards-field-filter input:focus,
     .cards-field-filter select:focus {
-        border-color: var(--button-primary);
-        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        border-color: var(--cards-primary);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
     }
 
     /* Cards grid */
     .cards-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-        gap: 12px;
-        padding: 4px 16px 16px;
+        gap: 14px;
+        padding: 16px;
         overflow-y: auto;
         flex: 1;
         min-height: 0;
+        background: var(--bg-secondary);
     }
 
     /* Card */
     .cards-card {
         background: var(--bg-primary);
-        border: 1px solid var(--border-color);
+        border: none;
+        border-left: 3px solid var(--cards-primary-light);
         border-radius: var(--cards-radius);
-        box-shadow: 0 1px 3px var(--nav-shadow);
+        box-shadow: var(--cards-shadow-sm);
         padding: 14px 14px 12px;
         position: relative;
-        transition: all 0.2s ease;
+        transition: var(--cards-transition);
         cursor: default;
     }
 
     .cards-card:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 2px 8px var(--nav-shadow);
+        transform: translateY(-2px);
+        box-shadow: var(--cards-shadow-md);
     }
 
     /* Card title (clickable) */
     .cards-card-title {
         font-size: 15px;
-        font-weight: 500;
-        color: var(--button-primary);
+        font-weight: 600;
+        color: var(--cards-primary);
         cursor: pointer;
         margin-bottom: 6px;
         padding-right: 60px;
         line-height: 1.4;
         word-break: break-word;
+        transition: color 0.2s ease;
     }
 
     .cards-card-title:hover {
-        text-decoration: none;
+        color: var(--cards-primary);
+        text-decoration: underline;
     }
 
     /* Record ID badge (to the right of title) */
     .cards-card-record-id {
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 400;
-        color: #999;
+        color: var(--text-secondary);
         cursor: pointer;
         margin-left: 6px;
         white-space: nowrap;
-        transition: color 0.2s ease;
+        background: var(--bg-secondary);
+        padding: 1px 5px;
+        border-radius: 10px;
+        transition: all 0.2s ease;
         vertical-align: middle;
     }
 
     .cards-card-record-id:hover {
-        color: #666;
+        background: rgba(37, 99, 235, 0.1);
+        color: var(--cards-primary);
     }
 
     /* Date — top-right corner */
@@ -182,18 +211,22 @@
         font-size: 11px;
         color: var(--text-secondary);
         white-space: nowrap;
+        background: var(--bg-secondary);
+        padding: 1px 6px;
+        border-radius: 10px;
     }
 
     /* Status badge */
     .cards-card-status {
         display: inline-block;
-        padding: 2px 8px !important;
+        padding: 3px 10px !important;
         border-radius: 12px;
         font-size: 12px;
         font-weight: 500;
-        margin-bottom: 3px !important;
-        background: rgba(59, 130, 246, 0.12);
-        color: var(--button-primary);
+        margin-bottom: 5px !important;
+        background: rgba(37, 99, 235, 0.12);
+        color: var(--cards-primary);
+        letter-spacing: 0.02em;
     }
 
     /* Description */
@@ -201,16 +234,19 @@
         font-size: 13px;
         color: var(--text-secondary);
         margin-bottom: 4px;
-        line-height: 1.4;
+        line-height: 1.5;
         word-break: break-word;
     }
 
     /* Amount */
     .cards-card-amount {
-        font-size: 15px;
+        font-size: 16px;
         font-weight: 600;
-        color: var(--button-primary);
-        margin-top: 6px;
+        color: var(--cards-primary);
+        margin-top: 8px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
     }
 
     /* Extra fields */
@@ -225,19 +261,20 @@
     .cards-loading,
     .cards-empty {
         text-align: center;
-        padding: 40px;
+        padding: 48px 24px;
         color: var(--text-secondary);
         font-size: 15px;
         grid-column: 1 / -1;
     }
 
     .cards-error {
-        background: #ffebee;
-        color: #b71c1c;
+        background: var(--color-error-bg, #fee2e2);
+        color: var(--color-error, #dc2626);
         padding: 14px 18px;
         border-radius: var(--cards-radius);
         margin: 12px 16px;
         font-size: 14px;
+        border-left: 3px solid var(--color-error, #dc2626);
     }
 
     /* Scroll sentinel */
@@ -262,7 +299,7 @@
         background: var(--bg-primary);
         color: var(--text-primary);
         border-radius: 6px;
-        box-shadow: 0 24px 38px rgba(0,0,0,0.14);
+        box-shadow: 0 24px 38px rgba(0,0,0,0.18), 0 9px 46px rgba(0,0,0,0.12);
         z-index: 1051;
         padding: 20px 24px;
         min-width: 320px;
@@ -363,6 +400,7 @@
         border: none;
     }
 
+    /* Settings icon — displayed in the gradient header, use white */
     .cards-settings-icon {
         display: inline-flex;
         align-items: center;
@@ -371,25 +409,27 @@
         height: 32px;
         border-radius: var(--cards-radius);
         cursor: pointer;
-        color: var(--text-secondary);
+        color: rgba(255, 255, 255, 0.85);
         transition: all 0.2s ease;
         font-size: 16px;
     }
 
     .cards-settings-icon:hover {
-        background: rgba(0,0,0,0.06);
-        color: var(--text-primary);
+        background: rgba(255, 255, 255, 0.2);
+        color: #fff;
     }
 
-    [data-theme="dark"] .cards-settings-icon:hover {
-        background: rgba(255,255,255,0.1);
+    /* Create button in header — white style */
+    .cards-header .title-create-btn {
+        color: rgba(255, 255, 255, 0.9) !important;
+        border: 1px solid rgba(255, 255, 255, 0.4) !important;
+        background: rgba(255, 255, 255, 0.15) !important;
+        border-radius: var(--cards-radius) !important;
     }
 
-    /* Record count */
-    .cards-count {
-        font-size: 13px;
-        color: var(--text-secondary);
-        white-space: nowrap;
+    .cards-header .title-create-btn:hover {
+        background: rgba(255, 255, 255, 0.25) !important;
+        color: #fff !important;
     }
 
     /* Contact icons (phone, email) - positioned bottom-right */
@@ -414,13 +454,13 @@
     }
 
     .cards-card-contact-icon.active {
-        background-color: rgba(59, 130, 246, 0.12);
-        color: var(--button-primary);
+        background-color: rgba(37, 99, 235, 0.12);
+        color: var(--cards-primary);
         cursor: pointer;
     }
 
     .cards-card-contact-icon.active:hover {
-        background-color: rgba(59, 130, 246, 0.2);
+        background-color: rgba(37, 99, 235, 0.22);
         transform: scale(1.1);
     }
 
@@ -440,17 +480,17 @@
     }
 
     .cards-card-copyable:hover {
-        background-color: rgba(59, 130, 246, 0.08);
+        background-color: rgba(37, 99, 235, 0.08);
     }
 
     .cards-card-copyable.copied {
-        background-color: rgba(76, 175, 80, 0.15);
+        background-color: rgba(16, 185, 129, 0.15);
     }
 
     /* Card with contact icons needs extra padding */
     .cards-card.has-contacts {
         padding-right: 44px;
-        padding-bottom: 30px; 
+        padding-bottom: 30px;
     }
 
     /* Field with label */
@@ -461,7 +501,7 @@
 
     /* Breadcrumb links in title */
     .cards-breadcrumb-link {
-        color: var(--button-primary);
+        color: var(--cards-primary);
         text-decoration: none;
         cursor: pointer;
     }
@@ -504,7 +544,7 @@
         margin-left: 6px;
         border: none;
         border-radius: var(--cards-radius);
-        background-color: #efefef;
+        background-color: var(--bg-secondary);
         color: var(--text-primary);
     }
 
