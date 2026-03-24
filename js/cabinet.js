@@ -196,9 +196,9 @@ class CabinetController {
             avatarEl.textContent = this.userData.Email.charAt(0).toUpperCase();
         }
 
-        // If there's a picture, show it in avatar
-        if (avatarEl && this.userData.Picture) {
-            avatarEl.innerHTML = '<img src="' + this.userData.Picture + '" alt="Avatar" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">';
+        // If there's a photo, show it in avatar
+        if (avatarEl && this.userData.Photo) {
+            avatarEl.innerHTML = '<img src="' + this.userData.Photo + '" alt="Avatar" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">';
         }
     }
 
@@ -219,10 +219,10 @@ class CabinetController {
         const aboutInput = document.getElementById('profile-about');
         if (aboutInput) aboutInput.value = this.userData.Notes || '';
 
-        // Public profile checkbox (t307)
+        // Public profile checkbox (IsPublic: empty = no, any value = yes)
         const publicCheckbox = document.getElementById('profile-public');
         if (publicCheckbox) {
-            publicCheckbox.checked = !!(this.userData.t307 || this.userData.Public);
+            publicCheckbox.checked = !!(this.userData.IsPublic);
         }
 
         // Store original values for change detection
@@ -230,7 +230,7 @@ class CabinetController {
             'profile-name': this.userData.Name || '',
             'profile-phone': this.userData.Phone || '',
             'profile-about': this.userData.Notes || '',
-            'profile-public': !!(this.userData.t307 || this.userData.Public)
+            'profile-public': !!(this.userData.IsPublic)
         };
 
         // Hide save button initially
@@ -248,11 +248,11 @@ class CabinetController {
             publicCheckbox.addEventListener('change', () => this.onProfileChange());
         }
 
-        // Photo preview
-        if (this.userData.Picture) {
+        // Photo preview (Photo field contains a relative path)
+        if (this.userData.Photo) {
             const photoPreview = document.getElementById('profile-photo-preview');
             if (photoPreview) {
-                photoPreview.innerHTML = '<img src="' + this.userData.Picture + '" alt="Profile photo">';
+                photoPreview.innerHTML = '<img src="' + this.userData.Photo + '" alt="Profile photo">';
             }
         }
 
