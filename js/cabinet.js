@@ -824,10 +824,14 @@ class CabinetController {
     resetCreateDbForm() {
         const nameInput = document.getElementById('new-db-name');
         const errEl = document.getElementById('new-db-name-error');
-        if (nameInput) { nameInput.value = ''; nameInput.classList.remove('input-invalid'); nameInput.disabled = false; }
+        const planId = parseInt(this.userData && this.userData.PlanID || '0', 10);
+        const atLimit = this.databases.length >= 3 && planId < 1147;
+        if (nameInput) { nameInput.value = ''; nameInput.classList.remove('input-invalid'); nameInput.disabled = atLimit; }
         if (errEl) errEl.style.display = 'none';
         const submitBtn = document.getElementById('create-db-submit-btn');
-        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Создать'; }
+        if (submitBtn) { submitBtn.disabled = atLimit; submitBtn.textContent = 'Создать'; }
+        const templateSelect = document.getElementById('new-db-template');
+        if (templateSelect) templateSelect.disabled = atLimit;
     }
 
     async createDatabase() {
