@@ -27,10 +27,9 @@
         flex-shrink: 0;
         flex-wrap: wrap;
         gap: 8px;
-        background: linear-gradient(135deg, var(--cards-primary) 0%, var(--cards-primary-light) 100%);
-        color: #fff;
+        background: var(--bg-secondary);
         border-radius: var(--cards-radius) var(--cards-radius) 0 0;
-        box-shadow: 0 2px 4px -1px rgba(0,0,0,0.2);
+        border-bottom: 1px solid var(--border-color, rgba(0,0,0,0.08));
     }
 
     .cards-title-area {
@@ -42,7 +41,7 @@
     .cards-title {
         font-size: 18px;
         font-weight: 500;
-        color: #fff;
+        color: var(--text-primary);
         letter-spacing: 0.15px;
     }
 
@@ -56,8 +55,8 @@
     /* Count badge in header */
     .cards-count {
         font-size: 13px;
-        background-color: rgba(255, 255, 255, 0.25);
-        color: #fff;
+        background-color: rgba(var(--cards-primary-rgb, 37, 99, 235), 0.1);
+        color: var(--cards-primary);
         padding: 3px 10px;
         border-radius: 12px;
         font-weight: 500;
@@ -400,7 +399,7 @@
         border: none;
     }
 
-    /* Settings icon — displayed in the gradient header, use white */
+    /* Settings icon in header */
     .cards-settings-icon {
         display: inline-flex;
         align-items: center;
@@ -409,27 +408,19 @@
         height: 32px;
         border-radius: var(--cards-radius);
         cursor: pointer;
-        color: rgba(255, 255, 255, 0.85);
+        color: var(--text-secondary, #666);
         transition: all 0.2s ease;
         font-size: 16px;
     }
 
     .cards-settings-icon:hover {
-        background: rgba(255, 255, 255, 0.2);
-        color: #fff;
+        background: rgba(0, 0, 0, 0.06);
+        color: var(--text-primary);
     }
 
-    /* Create button in header — white style */
+    /* Create button in header */
     .cards-header .title-create-btn {
-        color: rgba(255, 255, 255, 0.9) !important;
-        border: 1px solid rgba(255, 255, 255, 0.4) !important;
-        background: rgba(255, 255, 255, 0.15) !important;
         border-radius: var(--cards-radius) !important;
-    }
-
-    .cards-header .title-create-btn:hover {
-        background: rgba(255, 255, 255, 0.25) !important;
-        color: #fff !important;
     }
 
     /* Contact icons (phone, email) - positioned bottom-right */
