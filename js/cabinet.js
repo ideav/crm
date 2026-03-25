@@ -845,9 +845,12 @@ class CabinetController {
         );
         this.renderCommunityList('community-my-invites-list', myInvites, 'my-invites');
 
-        // Tab 2: Invitations to me (GuestUserID === uid OR GuestUserID is empty)
+        // Tab 2: Invitations to me (GuestUserID === uid OR GuestUserID is empty), excluding own invitations
         const invitationsToMe = filterByArchive(
-            this.communityInvites.filter(i => i.GuestUserID === currentUid || i.GuestUserID === '')
+            this.communityInvites.filter(i =>
+                i.HostUserID !== currentUid &&
+                (i.GuestUserID === currentUid || i.GuestUserID === '')
+            )
         );
         this.renderCommunityList('community-invitations-list', invitationsToMe, 'invitations');
 
@@ -864,6 +867,26 @@ class CabinetController {
         this.renderCommunityList('community-requests-list', requests, 'requests');
     }
 
+    formatCommunityDate(inviteDate) {
+        if (!inviteDate) return '';
+        const ts = parseInt(inviteDate, 10);
+        if (!isNaN(ts) && ts > 1000000000) {
+            const d = new Date(ts * 1000);
+            // Date and time without seconds
+            return d.toLocaleDateString('ru-RU') + ' ' +
+                d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        }
+        return inviteDate;
+    }
+
+    buildCommunityNameDesc(name, description) {
+        // Returns "(name, description)" or "(name)" or "(description)" or "" if both empty
+        const parts = [];
+        if (name) parts.push(this.escapeHtml(name));
+        if (description) parts.push(this.escapeHtml(description));
+        return parts.length > 0 ? ' (' + parts.join(', ') + ')' : '';
+    }
+
     renderCommunityList(containerId, items, tabType) {
         const container = document.getElementById(containerId);
         if (!container) return;
@@ -875,6 +898,7 @@ class CabinetController {
         }
 
         container.innerHTML = '';
+        const isArchive = this.communityArchive;
 
         items.forEach(item => {
             const card = document.createElement('div');
@@ -886,39 +910,99 @@ class CabinetController {
             const publicName = item.Name || '';
             const description = item.Description || '';
             const guestUser = item.GuestUser || '';
-            const inviteDate = item.Invite || '';
+            const isPublic = !item.GuestUserID; // public invite if no GuestUserID
+            const dateStr = this.formatCommunityDate(item.Invite);
+            const nameDesc = this.buildCommunityNameDesc(publicName, description);
+            const stateId = item.StateID || '';
+            const recordId = item.ID || '';
 
-            // Format invite date if it looks like a timestamp
-            let dateStr = '';
-            if (inviteDate) {
-                const ts = parseInt(inviteDate, 10);
-                if (!isNaN(ts) && ts > 1000000000) {
-                    const d = new Date(ts * 1000);
-                    dateStr = d.toLocaleDateString('ru-RU');
+            let titleHtml = '';
+            if (tabType === 'my-invites') {
+                // Personal invite: "Персональное для {GuestUser} в {DB} (name, desc)"
+                // Public invite:   "{DB} (name, desc)"
+                if (guestUser) {
+                    titleHtml = this.escapeHtml(dateStr) + ': Персональное для ' +
+                        '<strong>' + this.escapeHtml(guestUser) + '</strong>' +
+                        ' в ' + this.escapeHtml(dbName) + nameDesc;
                 } else {
-                    dateStr = inviteDate;
+                    titleHtml = this.escapeHtml(dateStr) + ': ' + this.escapeHtml(dbName) + nameDesc;
+                }
+            } else if (tabType === 'invitations') {
+                // Personal invite: "Персональное в {DB} (name, desc)"
+                // Public invite:   "{DB} (name, desc)"
+                if (!isPublic) {
+                    titleHtml = this.escapeHtml(dateStr) + ': Персональное в ' +
+                        this.escapeHtml(dbName) + nameDesc;
+                } else {
+                    titleHtml = this.escapeHtml(dateStr) + ': ' + this.escapeHtml(dbName) + nameDesc;
+                }
+            } else if (tabType === 'requests') {
+                const requestsType = this.communityRequestsType;
+                if (requestsType === 'to-me') {
+                    // "Доступ для {GuestUser} к БД {DB} (name, desc)"
+                    titleHtml = this.escapeHtml(dateStr) + ': Доступ для ' +
+                        '<strong>' + this.escapeHtml(guestUser) + '</strong>' +
+                        ' к БД ' + this.escapeHtml(dbName) + nameDesc;
+                } else {
+                    // "БД {DB} (name, desc)"
+                    titleHtml = this.escapeHtml(dateStr) + ': БД ' + this.escapeHtml(dbName) + nameDesc;
                 }
             }
 
-            let detailsHtml = '';
-            detailsHtml += '<span>БД: <strong>' + this.escapeHtml(dbName) + '</strong></span>';
-            if (publicName) {
-                detailsHtml += '<span>Имя: <strong>' + this.escapeHtml(publicName) + '</strong></span>';
+            // Build right badges
+            let badgesHtml = '';
+            if (isPublic && (tabType === 'invitations' || (tabType === 'requests' && this.communityRequestsType === 'from-me'))) {
+                badgesHtml += '<span class="community-card-status status-public">публичное</span>';
             }
-            if (guestUser && tabType === 'my-invites') {
-                detailsHtml += '<span>Гость: <strong>' + this.escapeHtml(guestUser) + '</strong></span>';
-            }
-            if (dateStr) {
-                detailsHtml += '<span>Дата: <strong>' + this.escapeHtml(dateStr) + '</strong></span>';
+            badgesHtml += '<span class="community-card-status ' + statusClass + '">' + this.escapeHtml(statusLabel) + '</span>';
+
+            // Build action buttons
+            let actionsHtml = '';
+            if (tabType === 'my-invites' && !isArchive) {
+                // "Отозвать" button in active section
+                actionsHtml += '<button type="button" class="btn-secondary btn-small community-action-btn" ' +
+                    'data-action="revoke" data-id="' + this.escapeHtml(recordId) + '">' +
+                    'Отозвать</button>';
+            } else if (tabType === 'invitations') {
+                // "Принять" button for Новое (371) or Отказ (373) — in both active and archive
+                if (stateId === '371' || stateId === '373') {
+                    actionsHtml += '<button type="button" class="btn-primary btn-small community-action-btn" ' +
+                        'data-action="accept" data-id="' + this.escapeHtml(recordId) + '">' +
+                        'Принять</button>';
+                }
+            } else if (tabType === 'requests') {
+                if (this.communityRequestsType === 'to-me') {
+                    // "Принять" and "Отказать" buttons
+                    actionsHtml +=
+                        '<button type="button" class="btn-primary btn-small community-action-btn" ' +
+                        'data-action="accept" data-id="' + this.escapeHtml(recordId) + '">' +
+                        'Принять</button>' +
+                        '<button type="button" class="btn-danger btn-small community-action-btn" ' +
+                        'data-action="reject" data-id="' + this.escapeHtml(recordId) + '">' +
+                        'Отказать</button>';
+                } else {
+                    // "Отозвать" button
+                    actionsHtml += '<button type="button" class="btn-secondary btn-small community-action-btn" ' +
+                        'data-action="revoke" data-id="' + this.escapeHtml(recordId) + '">' +
+                        'Отозвать</button>';
+                }
             }
 
             card.innerHTML =
                 '<div class="community-card-header">' +
-                    '<span class="community-card-name">' + this.escapeHtml(publicName || dbName) + '</span>' +
-                    '<span class="community-card-status ' + statusClass + '">' + this.escapeHtml(statusLabel) + '</span>' +
+                    '<span class="community-card-title">' + titleHtml + '</span>' +
+                    '<div class="community-card-badges">' + badgesHtml + '</div>' +
                 '</div>' +
-                '<div class="community-card-details">' + detailsHtml + '</div>' +
-                (description ? '<div class="community-card-description">' + this.escapeHtml(description) + '</div>' : '');
+                (actionsHtml ? '<div class="community-card-actions">' + actionsHtml + '</div>' : '');
+
+            // Attach action button listeners
+            card.querySelectorAll('.community-action-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const action = btn.dataset.action;
+                    const id = btn.dataset.id;
+                    this.handleCommunityAction(action, id, item, card);
+                });
+            });
 
             container.appendChild(card);
         });
@@ -932,6 +1016,42 @@ class CabinetController {
             case '374': return 'status-revoked';
             case '375': return 'status-request';
             default: return '';
+        }
+    }
+
+    async handleCommunityAction(action, id, item, card) {
+        const btn = card.querySelector('[data-action="' + action + '"]');
+        if (btn) btn.disabled = true;
+
+        try {
+            const host = this.apiConfig.host;
+            // Action endpoint: /my/_invite_action/?JSON&id=<id>&action=<revoke|accept|reject>
+            const url = 'https://' + host + '/my/_invite_action/?JSON' +
+                '&id=' + encodeURIComponent(id) +
+                '&action=' + encodeURIComponent(action);
+
+            const fd = new FormData();
+            fd.append('_xsrf', xsrf);
+
+            const response = await fetch(url, {
+                method: 'POST',
+                credentials: 'include',
+                body: fd
+            });
+
+            if (!response.ok) {
+                throw new Error('HTTP ' + response.status);
+            }
+
+            // Reload community data to reflect new state
+            await this.loadCommunityData();
+
+            const messages = { revoke: 'Приглашение отозвано', accept: 'Принято', reject: 'Отказ отправлен' };
+            showToast(messages[action] || 'Готово', 'success');
+        } catch (err) {
+            console.error('[cabinet] Error performing community action:', err);
+            showToast('Ошибка выполнения действия', 'error');
+            if (btn) btn.disabled = false;
         }
     }
 
