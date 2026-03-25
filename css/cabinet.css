@@ -1101,6 +1101,35 @@
     accent-color: var(--button-primary);
 }
 
+.invite-form {
+    margin-bottom: 1rem;
+    padding: 1rem 1.25rem;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+}
+
+.invite-form-fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: flex-end;
+}
+
+.invite-form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    min-width: 180px;
+    flex: 1;
+}
+
+.invite-form-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-end;
+}
+
 .community-requests-filter {
     display: flex;
     gap: 1rem;

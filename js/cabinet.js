@@ -774,9 +774,20 @@ class CabinetController {
                 const content = document.getElementById('community-tab-' + tabName);
                 if (content) content.style.display = '';
 
+                // Show/hide invite button based on active tab
+                const inviteBtn = document.getElementById('invite-btn');
+                if (inviteBtn) inviteBtn.style.display = tabName === 'my-invites' ? '' : 'none';
+
+                // Hide invite form when switching tabs
+                const inviteForm = document.getElementById('invite-form');
+                if (inviteForm) inviteForm.style.display = 'none';
+
                 this.renderCommunityData();
             });
         });
+
+        // Setup invite button and form
+        this.setupInviteForm();
 
         // Active/Archive radio toggle
         document.querySelectorAll('input[name="community-archive"]').forEach(radio => {
@@ -1052,6 +1063,119 @@ class CabinetController {
             console.error('[cabinet] Error performing community action:', err);
             showToast('Ошибка выполнения действия', 'error');
             if (btn) btn.disabled = false;
+        }
+    }
+
+    setupInviteForm() {
+        const inviteBtn = document.getElementById('invite-btn');
+        const inviteForm = document.getElementById('invite-form');
+        const submitBtn = document.getElementById('invite-submit-btn');
+        const cancelBtn = document.getElementById('invite-cancel-btn');
+
+        // Show invite button on initial load since my-invites tab is active by default
+        if (inviteBtn) inviteBtn.style.display = '';
+
+        if (inviteBtn && inviteForm) {
+            inviteBtn.addEventListener('click', () => {
+                const isVisible = inviteForm.style.display !== 'none';
+                if (!isVisible) {
+                    // Populate DB dropdown with user's own databases
+                    const dbSelect = document.getElementById('invite-db');
+                    if (dbSelect) {
+                        dbSelect.innerHTML = '';
+                        this.databases.forEach(db => {
+                            const opt = document.createElement('option');
+                            opt.value = db.DB || '';
+                            opt.textContent = db.DB || '';
+                            dbSelect.appendChild(opt);
+                        });
+                    }
+                }
+                inviteForm.style.display = isVisible ? 'none' : '';
+            });
+        }
+
+        if (cancelBtn && inviteForm) {
+            cancelBtn.addEventListener('click', () => {
+                inviteForm.style.display = 'none';
+                this.resetInviteForm();
+            });
+        }
+
+        if (submitBtn) {
+            submitBtn.addEventListener('click', () => this.sendInvite());
+        }
+    }
+
+    resetInviteForm() {
+        const userInput = document.getElementById('invite-user');
+        const descrInput = document.getElementById('invite-descr');
+        if (userInput) userInput.value = '';
+        if (descrInput) descrInput.value = '';
+    }
+
+    async sendInvite() {
+        const dbSelect = document.getElementById('invite-db');
+        const userInput = document.getElementById('invite-user');
+        const descrInput = document.getElementById('invite-descr');
+        const submitBtn = document.getElementById('invite-submit-btn');
+
+        const db = dbSelect ? dbSelect.value.trim() : '';
+        const user = userInput ? userInput.value.trim() : '';
+        const descr = descrInput ? descrInput.value.trim() : '';
+
+        if (!db) {
+            showToast('Выберите базу данных', 'error');
+            return;
+        }
+
+        if (submitBtn) submitBtn.disabled = true;
+
+        try {
+            const host = this.apiConfig.host;
+            const url = 'https://' + host + '/my/report/385?JSON_KV';
+
+            const fd = new FormData();
+            fd.append('confirmed', '1');
+            fd.append('_xsrf', xsrf);
+            fd.append('db', db);
+            if (user) fd.append('user', user);
+            if (descr) fd.append('descr', descr);
+
+            const response = await fetch(url, {
+                method: 'POST',
+                credentials: 'include',
+                body: fd
+            });
+
+            const text = await response.text();
+            console.log('[cabinet] Invite response:', text);
+
+            let parsed;
+            try {
+                parsed = JSON.parse(text);
+            } catch (e) {
+                console.error('[cabinet] Invite response is not valid JSON:', text);
+                showToast('Ошибка: ' + text, 'error');
+                return;
+            }
+
+            // Valid JSON response — success
+            console.log('[cabinet] Invite created:', parsed);
+            showToast('Приглашение отправлено', 'success');
+
+            // Hide form and reset
+            const inviteForm = document.getElementById('invite-form');
+            if (inviteForm) inviteForm.style.display = 'none';
+            this.resetInviteForm();
+
+            // Reload community data to show new invite
+            await this.loadCommunityData();
+        } catch (err) {
+            console.error('[cabinet] Error sending invite:', err);
+            showToast('Ошибка отправки приглашения', 'error');
+        } finally {
+            if (submitBtn) submitBtn.disabled = false;
         }
     }
 

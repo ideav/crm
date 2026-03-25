@@ -334,6 +334,30 @@
                     <label class="community-radio-label">
                         <input type="radio" name="community-archive" value="archive"> Архив
                     </label>
+                    <button type="button" id="invite-btn" class="btn-primary btn-small" style="display:none; margin-left: auto;">Пригласить</button>
+                </div>
+
+                <!-- Invite Form (shown when Пригласить is clicked) -->
+                <div id="invite-form" class="invite-form" style="display:none;">
+                    <div class="invite-form-fields">
+                        <div class="invite-form-field">
+                            <label for="invite-db" class="database-field-label">База данных</label>
+                            <select id="invite-db" class="database-field-input">
+                            </select>
+                        </div>
+                        <div class="invite-form-field">
+                            <label for="invite-user" class="database-field-label">Имя или email (необязательно)</label>
+                            <input type="text" id="invite-user" class="database-field-input" placeholder="Имя или email приглашаемого">
+                        </div>
+                        <div class="invite-form-field">
+                            <label for="invite-descr" class="database-field-label">Описание (необязательно)</label>
+                            <input type="text" id="invite-descr" class="database-field-input" placeholder="Описание приглашения">
+                        </div>
+                        <div class="invite-form-actions">
+                            <button type="button" id="invite-submit-btn" class="btn-primary btn-small">Отправить</button>
+                            <button type="button" id="invite-cancel-btn" class="btn-secondary btn-small">Отмена</button>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Tab: My Invitations (Приглашенные мной) -->
