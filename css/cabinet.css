@@ -1134,15 +1134,31 @@
 
 .community-card-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
+    gap: 1rem;
     margin-bottom: 0.5rem;
 }
 
-.community-card-name {
-    font-size: 1.05rem;
-    font-weight: 600;
+.community-card-title {
+    font-size: 0.9rem;
     color: var(--text-primary);
+    line-height: 1.5;
+    flex: 1;
+}
+
+.community-card-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    flex-shrink: 0;
+}
+
+.community-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
 }
 
 .community-card-status {
@@ -1150,6 +1166,11 @@
     padding: 0.25rem 0.65rem;
     border-radius: 12px;
     font-weight: 500;
+}
+
+.community-card-status.status-public {
+    background-color: rgba(168, 85, 247, 0.12);
+    color: #a855f7;
 }
 
 .community-card-status.status-new {
@@ -1281,6 +1302,20 @@
 
     .community-card {
         padding: 1rem 1.15rem;
+    }
+
+    .community-card-header {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .community-card-actions {
+        flex-direction: column;
+    }
+
+    .community-card-actions .btn-small {
+        width: 100%;
+        justify-content: center;
     }
 
     .database-card {
