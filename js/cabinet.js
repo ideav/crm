@@ -1160,6 +1160,23 @@ class CabinetController {
                 return;
             }
 
+            // Check for error field in response
+            if (parsed && parsed.error) {
+                console.error('[cabinet] Invite error from server:', parsed.error);
+                showToast('Ошибка: ' + parsed.error, 'error');
+                return;
+            }
+
+            // When a user was specified, verify GuestUserID is non-empty (empty means user not found)
+            if (user) {
+                const record = Array.isArray(parsed) ? parsed[0] : parsed;
+                if (!record || !record.GuestUserID) {
+                    console.error('[cabinet] Invite error: user not found, response:', parsed);
+                    showToast('Ошибка: пользователь не найден', 'error');
+                    return;
+                }
+            }
+
             // Valid JSON response — success
             console.log('[cabinet] Invite created:', parsed);
             showToast('Приглашение отправлено', 'success');
