@@ -1061,6 +1061,140 @@
     color: var(--text-secondary);
 }
 
+/* Community (Cooperation) Tabs */
+.community-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid var(--border-color);
+    margin-bottom: 1rem;
+}
+
+.community-tab {
+    padding: 0.75rem 1.5rem;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    font-family: inherit;
+    transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.community-tab:hover {
+    color: var(--text-primary);
+}
+
+.community-tab.active {
+    color: var(--button-primary);
+    border-bottom-color: var(--button-primary);
+    font-weight: 600;
+}
+
+.community-tab-content {
+    display: block;
+}
+
+.community-filter {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.community-radio-label {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.9rem;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.community-radio-label input[type="radio"] {
+    accent-color: var(--button-primary);
+}
+
+.community-requests-filter {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    padding: 0.75rem 1rem;
+    background-color: var(--bg-secondary);
+    border-radius: 8px;
+}
+
+.community-card {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.community-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+}
+
+.community-card-name {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.community-card-status {
+    font-size: 0.8rem;
+    padding: 0.25rem 0.65rem;
+    border-radius: 12px;
+    font-weight: 500;
+}
+
+.community-card-status.status-new {
+    background-color: rgba(59, 130, 246, 0.12);
+    color: #3b82f6;
+}
+
+.community-card-status.status-accepted {
+    background-color: rgba(34, 197, 94, 0.12);
+    color: #22c55e;
+}
+
+.community-card-status.status-request {
+    background-color: rgba(234, 179, 8, 0.12);
+    color: #ca8a04;
+}
+
+.community-card-status.status-rejected {
+    background-color: rgba(239, 68, 68, 0.12);
+    color: #ef4444;
+}
+
+.community-card-status.status-revoked {
+    background-color: rgba(107, 114, 128, 0.12);
+    color: #6b7280;
+}
+
+.community-card-details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.community-card-details span strong {
+    color: var(--text-primary);
+}
+
+.community-card-description {
+    margin-top: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
 /* DB Creation Date */
 .database-created-date {
     font-size: 0.78rem;
@@ -1121,6 +1255,32 @@
     .bonuses-info,
     .referrals-subsection {
         padding: 1.25rem;
+    }
+
+    .community-tabs {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+    }
+
+    .community-tabs::-webkit-scrollbar {
+        display: none;
+    }
+
+    .community-tab {
+        white-space: nowrap;
+        flex-shrink: 0;
+        padding: 0.6rem 1rem;
+        font-size: 0.85rem;
+    }
+
+    .community-filter,
+    .community-requests-filter {
+        flex-wrap: wrap;
+    }
+
+    .community-card {
+        padding: 1rem 1.15rem;
     }
 
     .database-card {

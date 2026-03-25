@@ -16,6 +16,12 @@ class CabinetController {
         this.dbSortField = null; // 'name' | 'count' | 'date'
         this.dbSortDir = 'asc';  // 'asc' | 'desc'
         this.dbSearchQuery = '';
+
+        // Community tab state
+        this.communityInvites = [];
+        this.communityTab = 'my-invites';
+        this.communityArchive = false;
+        this.communityRequestsType = 'to-me';
     }
 
     async init() {
@@ -43,6 +49,9 @@ class CabinetController {
 
         // Setup databases controls (sort, search, create)
         this.setupDatabasesControls();
+
+        // Setup community (cooperation) tabs
+        this.setupCommunityTabs();
 
         // Setup user menu dropdown
         this.setupUserMenuDropdown();
@@ -190,6 +199,9 @@ class CabinetController {
 
         // Populate referrals section
         this.populateReferrals();
+
+        // Load community (cooperation) data
+        this.loadCommunityData();
     }
 
     updateNavbarAccount() {
@@ -740,6 +752,187 @@ class CabinetController {
     withdrawReferrals() {
         // TODO: Implement referral withdrawal functionality
         showToast('Функция вывода средств будет доступна позже', 'info');
+    }
+
+    // ============================================================
+    // Community (Cooperation) Section
+    // ============================================================
+
+    setupCommunityTabs() {
+        // Tab switching
+        const tabs = document.querySelectorAll('.community-tab');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabName = tab.dataset.communityTab;
+                this.communityTab = tabName;
+
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+
+                const contents = document.querySelectorAll('.community-tab-content');
+                contents.forEach(c => c.style.display = 'none');
+                const content = document.getElementById('community-tab-' + tabName);
+                if (content) content.style.display = '';
+
+                this.renderCommunityData();
+            });
+        });
+
+        // Active/Archive radio toggle
+        document.querySelectorAll('input[name="community-archive"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                this.communityArchive = radio.value === 'archive';
+                this.renderCommunityData();
+            });
+        });
+
+        // Requests sub-filter (to my DB / my requests)
+        document.querySelectorAll('input[name="community-requests-type"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                this.communityRequestsType = radio.value;
+                this.renderCommunityData();
+            });
+        });
+    }
+
+    async loadCommunityData() {
+        try {
+            const host = this.apiConfig.host;
+            const url = 'https://' + host + '/my/report/380?JSON_KV';
+
+            const response = await fetch(url, {
+                method: 'GET',
+                credentials: 'include'
+            });
+
+            if (!response.ok) {
+                throw new Error('HTTP ' + response.status);
+            }
+
+            const data = await response.json();
+            console.log('[cabinet] Community data loaded:', data);
+
+            if (Array.isArray(data)) {
+                this.communityInvites = data;
+            } else {
+                this.communityInvites = [];
+            }
+
+            this.renderCommunityData();
+        } catch (err) {
+            console.error('[cabinet] Error loading community data:', err);
+            this.communityInvites = [];
+            this.renderCommunityData();
+        }
+    }
+
+    renderCommunityData() {
+        const currentUid = uid; // from global var set in <script> tag
+        const isArchive = this.communityArchive;
+        // Archive statuses: 373 (Отказ), 374 (Отозвано)
+        const archiveStatuses = ['373', '374'];
+
+        const filterByArchive = (items) => {
+            return items.filter(item => {
+                const inArchive = archiveStatuses.includes(item.StateID);
+                return isArchive ? inArchive : !inArchive;
+            });
+        };
+
+        // Tab 1: My invitations (HostUserID === uid)
+        const myInvites = filterByArchive(
+            this.communityInvites.filter(i => i.HostUserID === currentUid)
+        );
+        this.renderCommunityList('community-my-invites-list', myInvites, 'my-invites');
+
+        // Tab 2: Invitations to me (GuestUserID === uid OR GuestUserID is empty)
+        const invitationsToMe = filterByArchive(
+            this.communityInvites.filter(i => i.GuestUserID === currentUid || i.GuestUserID === '')
+        );
+        this.renderCommunityList('community-invitations-list', invitationsToMe, 'invitations');
+
+        // Tab 3: Requests (StateID === "375")
+        const allRequests = this.communityInvites.filter(i => i.StateID === '375');
+        let requests;
+        if (this.communityRequestsType === 'to-me') {
+            // Requests to my DB
+            requests = filterByArchive(allRequests.filter(i => i.HostUserID === currentUid));
+        } else {
+            // My requests to other DBs
+            requests = filterByArchive(allRequests.filter(i => i.GuestUserID === currentUid));
+        }
+        this.renderCommunityList('community-requests-list', requests, 'requests');
+    }
+
+    renderCommunityList(containerId, items, tabType) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        if (items.length === 0) {
+            const emptyMsg = this.communityArchive ? 'Нет записей в архиве' : 'Нет записей';
+            container.innerHTML = '<p class="empty-message">' + emptyMsg + '</p>';
+            return;
+        }
+
+        container.innerHTML = '';
+
+        items.forEach(item => {
+            const card = document.createElement('div');
+            card.className = 'community-card';
+
+            const statusClass = this.getStatusClass(item.StateID);
+            const statusLabel = item.State || '';
+            const dbName = item.DB || '';
+            const publicName = item.Name || '';
+            const description = item.Description || '';
+            const guestUser = item.GuestUser || '';
+            const inviteDate = item.Invite || '';
+
+            // Format invite date if it looks like a timestamp
+            let dateStr = '';
+            if (inviteDate) {
+                const ts = parseInt(inviteDate, 10);
+                if (!isNaN(ts) && ts > 1000000000) {
+                    const d = new Date(ts * 1000);
+                    dateStr = d.toLocaleDateString('ru-RU');
+                } else {
+                    dateStr = inviteDate;
+                }
+            }
+
+            let detailsHtml = '';
+            detailsHtml += '<span>БД: <strong>' + this.escapeHtml(dbName) + '</strong></span>';
+            if (publicName) {
+                detailsHtml += '<span>Имя: <strong>' + this.escapeHtml(publicName) + '</strong></span>';
+            }
+            if (guestUser && tabType === 'my-invites') {
+                detailsHtml += '<span>Гость: <strong>' + this.escapeHtml(guestUser) + '</strong></span>';
+            }
+            if (dateStr) {
+                detailsHtml += '<span>Дата: <strong>' + this.escapeHtml(dateStr) + '</strong></span>';
+            }
+
+            card.innerHTML =
+                '<div class="community-card-header">' +
+                    '<span class="community-card-name">' + this.escapeHtml(publicName || dbName) + '</span>' +
+                    '<span class="community-card-status ' + statusClass + '">' + this.escapeHtml(statusLabel) + '</span>' +
+                '</div>' +
+                '<div class="community-card-details">' + detailsHtml + '</div>' +
+                (description ? '<div class="community-card-description">' + this.escapeHtml(description) + '</div>' : '');
+
+            container.appendChild(card);
+        });
+    }
+
+    getStatusClass(stateId) {
+        switch (stateId) {
+            case '371': return 'status-new';
+            case '372': return 'status-accepted';
+            case '373': return 'status-rejected';
+            case '374': return 'status-revoked';
+            case '375': return 'status-request';
+            default: return '';
+        }
     }
 
     setupDatabasesControls() {

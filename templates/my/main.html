@@ -319,9 +319,50 @@
             <section id="section-community" class="cabinet-section" style="display: none;">
                 <h1>Кооперации</h1>
 
-                <div class="community-list" id="community-list">
-                    <!-- Community items will be rendered here -->
-                    <p class="empty-message">Загрузка данных сообщества</p>
+                <!-- Community Tabs -->
+                <div class="community-tabs">
+                    <button class="community-tab active" data-community-tab="my-invites">Приглашенные мной</button>
+                    <button class="community-tab" data-community-tab="invitations">Приглашения</button>
+                    <button class="community-tab" data-community-tab="requests">Запросы</button>
+                </div>
+
+                <!-- Active/Archive Toggle -->
+                <div class="community-filter">
+                    <label class="community-radio-label">
+                        <input type="radio" name="community-archive" value="active" checked> Активные
+                    </label>
+                    <label class="community-radio-label">
+                        <input type="radio" name="community-archive" value="archive"> Архив
+                    </label>
+                </div>
+
+                <!-- Tab: My Invitations (Приглашенные мной) -->
+                <div class="community-tab-content active" id="community-tab-my-invites">
+                    <div class="community-list" id="community-my-invites-list">
+                        <p class="empty-message">Загрузка данных...</p>
+                    </div>
+                </div>
+
+                <!-- Tab: Invitations to me (Приглашения) -->
+                <div class="community-tab-content" id="community-tab-invitations" style="display: none;">
+                    <div class="community-list" id="community-invitations-list">
+                        <p class="empty-message">Загрузка данных...</p>
+                    </div>
+                </div>
+
+                <!-- Tab: Requests (Запросы) -->
+                <div class="community-tab-content" id="community-tab-requests" style="display: none;">
+                    <div class="community-requests-filter">
+                        <label class="community-radio-label">
+                            <input type="radio" name="community-requests-type" value="to-me" checked> Запросы к моей базе
+                        </label>
+                        <label class="community-radio-label">
+                            <input type="radio" name="community-requests-type" value="from-me"> Мои запросы к чужим базам
+                        </label>
+                    </div>
+                    <div class="community-list" id="community-requests-list">
+                        <p class="empty-message">Загрузка данных...</p>
+                    </div>
                 </div>
             </section>
 
