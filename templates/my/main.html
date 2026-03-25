@@ -121,24 +121,24 @@
                 <h1>Профиль</h1>
 
                 <div class="profile-form">
-                    <div class="form-group">
-                        <label for="profile-name">Имя</label>
-                        <input type="text" id="profile-name" name="name" placeholder="Введите ваше имя">
+                    <div class="database-field-group">
+                        <label for="profile-name" class="database-field-label">Имя</label>
+                        <input type="text" id="profile-name" name="name" placeholder="Введите ваше имя" class="database-field-input">
                     </div>
-                    <div class="form-group">
-                        <label for="profile-phone">Телефон</label>
-                        <input type="tel" id="profile-phone" name="phone" placeholder="+7 (xxx) xxx-xx-xx">
+                    <div class="database-field-group">
+                        <label for="profile-phone" class="database-field-label">Телефон</label>
+                        <input type="tel" id="profile-phone" name="phone" placeholder="+7 (xxx) xxx-xx-xx" class="database-field-input">
                     </div>
-                    <div class="form-group">
-                        <label for="profile-email">Email</label>
-                        <input type="email" id="profile-email" name="email" readonly disabled class="profile-email-disabled" title="Email нельзя изменить">
+                    <div class="database-field-group">
+                        <label for="profile-email" class="database-field-label">Email</label>
+                        <input type="email" id="profile-email" name="email" readonly disabled class="database-field-input profile-email-disabled" title="Email нельзя изменить">
                     </div>
-                    <div class="form-group">
-                        <label for="profile-about">Обо мне</label>
-                        <textarea id="profile-about" name="notes" rows="4" placeholder="Расскажите о себе"></textarea>
+                    <div class="database-field-group">
+                        <label for="profile-about" class="database-field-label">Обо мне</label>
+                        <textarea id="profile-about" name="notes" rows="4" placeholder="Расскажите о себе" class="database-field-input"></textarea>
                     </div>
-                    <div class="form-group">
-                        <label>Фото</label>
+                    <div class="database-field-group">
+                        <label class="database-field-label">Фото</label>
                         <div class="photo-upload">
                             <div id="profile-photo-preview" class="photo-preview">
                                 <span class="photo-placeholder"><i class="pi pi-camera"></i></span>
@@ -147,7 +147,7 @@
                             <button type="button" id="upload-photo-btn" class="btn-secondary">Загрузить фото</button>
                         </div>
                     </div>
-                    <div class="form-group">
+                    <div class="database-field-group">
                         <label class="profile-public-label">
                             <input type="checkbox" id="profile-public" name="public">
                             Публичный профиль

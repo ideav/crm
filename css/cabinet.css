@@ -269,31 +269,17 @@
     margin-bottom: 2rem;
 }
 
-.profile-form .form-group {
+.profile-form .database-field-group {
     margin-bottom: 1.25rem;
 }
 
-.profile-form .form-group:last-of-type {
+.profile-form .database-field-group:last-of-type {
     margin-bottom: 1.5rem;
 }
 
-.profile-form textarea {
-    width: 100%;
-    padding: 0.75rem;
-    border: 1px solid var(--input-border);
-    border-radius: 6px;
-    font-size: 1rem;
-    background-color: var(--input-bg);
-    color: var(--text-primary);
+.profile-form textarea.database-field-input {
     resize: vertical;
     font-family: inherit;
-    transition: all 0.3s ease;
-}
-
-.profile-form textarea:focus {
-    outline: none;
-    border-color: var(--button-primary);
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .field-hint {
