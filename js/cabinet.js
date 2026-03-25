@@ -62,8 +62,12 @@ class CabinetController {
         // Load user data
         await this.loadUserData();
 
-        // Show default section
-        this.showSection('databases');
+        // Show section from URL hash, or default to 'databases'
+        const { section, subTab } = this.parseUrlHash();
+        const validSections = ['databases', 'community', 'profile', 'tariff', 'balance', 'bonuses', 'referrals'];
+        const targetSection = (section && validSections.includes(section)) ? section : 'databases';
+        this.showSection(targetSection);
+        if (subTab) this.showSubTab(targetSection, subTab);
     }
 
     async checkAuth() {
@@ -104,12 +108,66 @@ class CabinetController {
             item.addEventListener('click', () => {
                 const section = item.dataset.section;
                 this.showSection(section);
+                this.updateUrlHash(section);
 
                 // Update active state
                 menuItems.forEach(mi => mi.classList.remove('active'));
                 item.classList.add('active');
             });
         });
+
+        // Restore section from URL hash on load
+        window.addEventListener('hashchange', () => {
+            const { section, subTab } = this.parseUrlHash();
+            if (section) {
+                this.showSection(section);
+                if (subTab) this.showSubTab(section, subTab);
+            }
+        });
+    }
+
+    // Parse URL hash into section and optional sub-tab
+    // Format: #section or #section/subtab
+    parseUrlHash() {
+        const hash = window.location.hash.replace('#', '');
+        if (!hash) return { section: null, subTab: null };
+        const parts = hash.split('/');
+        return { section: parts[0] || null, subTab: parts[1] || null };
+    }
+
+    // Update the URL hash to reflect current section and optional sub-tab
+    updateUrlHash(section, subTab) {
+        const newHash = subTab ? section + '/' + subTab : section;
+        history.replaceState(null, '', '#' + newHash);
+    }
+
+    // Activate a sub-tab within a given section without triggering full tab setup
+    showSubTab(section, subTab) {
+        if (section === 'referrals') {
+            const tabs = document.querySelectorAll('.referrals-tab');
+            const contents = document.querySelectorAll('.referrals-tab-content');
+            tabs.forEach(t => {
+                if (t.dataset.tab === subTab) t.classList.add('active');
+                else t.classList.remove('active');
+            });
+            contents.forEach(c => c.style.display = 'none');
+            const content = document.getElementById('referrals-tab-' + subTab);
+            if (content) content.style.display = '';
+        } else if (section === 'community') {
+            const tabs = document.querySelectorAll('.community-tab');
+            const contents = document.querySelectorAll('.community-tab-content');
+            tabs.forEach(t => {
+                if (t.dataset.communityTab === subTab) t.classList.add('active');
+                else t.classList.remove('active');
+            });
+            contents.forEach(c => c.style.display = 'none');
+            const content = document.getElementById('community-tab-' + subTab);
+            if (content) content.style.display = '';
+            this.communityTab = subTab;
+            const inviteBtn = document.getElementById('invite-btn');
+            if (inviteBtn) inviteBtn.style.display = subTab === 'my-invites' ? '' : 'none';
+            this.renderCommunityData();
+        }
     }
 
     showSection(sectionName) {
@@ -783,6 +841,9 @@ class CabinetController {
                 if (inviteForm) inviteForm.style.display = 'none';
 
                 this.renderCommunityData();
+
+                // Update URL hash
+                this.updateUrlHash('community', tabName);
             });
         });
 
@@ -1402,6 +1463,9 @@ class CabinetController {
                 contents.forEach(c => c.style.display = 'none');
                 const content = document.getElementById('referrals-tab-' + tabName);
                 if (content) content.style.display = '';
+
+                // Update URL hash
+                this.updateUrlHash('referrals', tabName);
             });
         });
     }
