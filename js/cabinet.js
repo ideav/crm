@@ -986,7 +986,7 @@ class CabinetController {
             const dateStr = this.formatCommunityDate(item.Invite);
             const nameDesc = this.buildCommunityNameDesc(publicName, description);
             const stateId = item.StateID || '';
-            const recordId = item.ID || '';
+            const recordId = item.InviteID || '';
 
             let titleHtml = '';
             if (tabType === 'my-invites') {
@@ -1100,12 +1100,16 @@ class CabinetController {
             let response;
 
             if (action === 'revoke') {
-                // Revoke endpoint: /my/report/236429/?FR_InviteID=<id>
-                const url = 'https://' + host + '/my/report/236429/?FR_InviteID=' + encodeURIComponent(id);
+                // Revoke endpoint: /my/report/236429/?JSON_KV&FR_InviteID=<id>
+                const url = 'https://' + host + '/my/report/236429/?JSON_KV&FR_InviteID=' + encodeURIComponent(id);
+
+                const fd = new FormData();
+                fd.append('_xsrf', xsrf);
 
                 response = await fetch(url, {
-                    method: 'GET',
-                    credentials: 'include'
+                    method: 'POST',
+                    credentials: 'include',
+                    body: fd
                 });
 
                 if (!response.ok) {
