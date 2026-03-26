@@ -1122,8 +1122,24 @@ class CabinetController {
                 if (!Array.isArray(data) || data.length === 0 || !data[0].InviteID) {
                     throw new Error('Unexpected revoke response');
                 }
+            } else if (action === 'accept') {
+                // Accept endpoint: /my/report/236472/?JSON_KV&confirmed=1&FR_InviteID=<id>
+                const url = 'https://' + host + '/my/report/236472/?JSON_KV&confirmed=1&FR_InviteID=' + encodeURIComponent(id);
+
+                const fd = new FormData();
+                fd.append('_xsrf', xsrf);
+
+                response = await fetch(url, {
+                    method: 'POST',
+                    credentials: 'include',
+                    body: fd
+                });
+
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status);
+                }
             } else {
-                // Action endpoint: /my/_invite_action/?JSON&id=<id>&action=<accept|reject>
+                // Action endpoint: /my/_invite_action/?JSON&id=<id>&action=<reject>
                 const url = 'https://' + host + '/my/_invite_action/?JSON' +
                     '&id=' + encodeURIComponent(id) +
                     '&action=' + encodeURIComponent(action);
