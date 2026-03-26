@@ -1077,10 +1077,10 @@ class CabinetController {
                         'data-action="reject" data-id="' + this.escapeHtml(recordId) + '">' +
                         'Отказать</button>';
                 } else {
-                    // "Отозвать" button
+                    // "Отозвать запрос" button
                     actionsHtml += '<button type="button" class="btn-secondary btn-small community-action-btn" ' +
-                        'data-action="revoke" data-id="' + this.escapeHtml(recordId) + '">' +
-                        'Отозвать</button>';
+                        'data-action="revoke-request" data-id="' + this.escapeHtml(recordId) + '">' +
+                        'Отозвать запрос</button>';
                 }
             }
 
@@ -1146,6 +1146,29 @@ class CabinetController {
                 if (!Array.isArray(data) || data.length === 0 || !data[0].InviteID) {
                     throw new Error('Unexpected revoke response');
                 }
+            } else if (action === 'revoke-request') {
+                // Revoke request endpoint: /my/report/236536/?JSON_KV&confirmed=1&FR_InviteID=<id>
+                const url = 'https://' + host + '/my/report/236536/?JSON_KV&confirmed=1&FR_InviteID=' + encodeURIComponent(id);
+
+                const fd = new FormData();
+                fd.append('_xsrf', xsrf);
+
+                response = await fetch(url, {
+                    method: 'POST',
+                    credentials: 'include',
+                    body: fd
+                });
+
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status);
+                }
+
+                const data = await response.json();
+                console.log('[cabinet] Revoke request response:', data);
+
+                if (!Array.isArray(data) || data.length === 0 || !data[0].InviteID) {
+                    throw new Error('Unexpected revoke-request response');
+                }
             } else if (action === 'accept') {
                 // Accept endpoint: /my/report/236472/?JSON_KV&confirmed=1&FR_InviteID=<id>
                 const url = 'https://' + host + '/my/report/236472/?JSON_KV&confirmed=1&FR_InviteID=' + encodeURIComponent(id);
@@ -1185,7 +1208,7 @@ class CabinetController {
             // Reload community data to reflect new state
             await this.loadCommunityData();
 
-            const messages = { revoke: 'Приглашение отозвано', accept: 'Принято', reject: 'Отказ отправлен' };
+            const messages = { revoke: 'Приглашение отозвано', 'revoke-request': 'Запрос отозван', accept: 'Принято', reject: 'Отказ отправлен' };
             showToast(messages[action] || 'Готово', 'success');
         } catch (err) {
             console.error('[cabinet] Error performing community action:', err);
