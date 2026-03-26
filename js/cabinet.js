@@ -940,11 +940,12 @@ class CabinetController {
         );
         this.renderCommunityList('community-my-invites-list', myInvites, 'my-invites');
 
-        // Tab 2: Invitations to me (GuestUserID === uid OR GuestUserID is empty), excluding own invitations
+        // Tab 2: Invitations to me (GuestUserID === uid OR GuestUserID is empty), excluding own invitations and requests (StateID === '375')
         const invitationsToMe = filterByArchive(
             this.communityInvites.filter(i =>
                 i.HostUserID !== currentUid &&
-                (i.GuestUserID === currentUid || i.GuestUserID === '')
+                (i.GuestUserID === currentUid || i.GuestUserID === '') &&
+                i.StateID !== '375'
             )
         );
         this.renderCommunityList('community-invitations-list', invitationsToMe, 'invitations');
