@@ -63,11 +63,15 @@ class CabinetController {
         await this.loadUserData();
 
         // Show section from URL hash, or default to 'databases'
-        const { section, subTab } = this.parseUrlHash();
+        const { section, subTab, extra } = this.parseUrlHash();
         const validSections = ['databases', 'community', 'profile', 'tariff', 'balance', 'bonuses', 'referrals'];
         const targetSection = (section && validSections.includes(section)) ? section : 'databases';
         this.showSection(targetSection);
         if (subTab) this.showSubTab(targetSection, subTab);
+        // Handle deep-link: #community/requests/request/{dbName}
+        if (targetSection === 'community' && subTab === 'requests' && extra[0] === 'request' && extra[1]) {
+            this.openCreateRequestForm(extra[1]);
+        }
     }
 
     async checkAuth() {
@@ -118,21 +122,25 @@ class CabinetController {
 
         // Restore section from URL hash on load
         window.addEventListener('hashchange', () => {
-            const { section, subTab } = this.parseUrlHash();
+            const { section, subTab, extra } = this.parseUrlHash();
             if (section) {
                 this.showSection(section);
                 if (subTab) this.showSubTab(section, subTab);
+                // Handle deep-link: #community/requests/request/{dbName}
+                if (section === 'community' && subTab === 'requests' && extra[0] === 'request' && extra[1]) {
+                    this.openCreateRequestForm(extra[1]);
+                }
             }
         });
     }
 
-    // Parse URL hash into section and optional sub-tab
-    // Format: #section or #section/subtab
+    // Parse URL hash into section, optional sub-tab, and optional extra path segments
+    // Format: #section or #section/subtab or #section/subtab/action/param
     parseUrlHash() {
         const hash = window.location.hash.replace('#', '');
-        if (!hash) return { section: null, subTab: null };
+        if (!hash) return { section: null, subTab: null, extra: [] };
         const parts = hash.split('/');
-        return { section: parts[0] || null, subTab: parts[1] || null };
+        return { section: parts[0] || null, subTab: parts[1] || null, extra: parts.slice(2) };
     }
 
     // Update the URL hash to reflect current section and optional sub-tab
@@ -840,6 +848,12 @@ class CabinetController {
                 const inviteForm = document.getElementById('invite-form');
                 if (inviteForm) inviteForm.style.display = 'none';
 
+                // Hide create request form and button when switching tabs
+                const createRequestForm = document.getElementById('create-request-form');
+                if (createRequestForm) createRequestForm.style.display = 'none';
+                const createRequestBtn = document.getElementById('create-request-btn');
+                if (createRequestBtn) createRequestBtn.style.display = 'none';
+
                 this.renderCommunityData();
 
                 // Update URL hash
@@ -849,6 +863,9 @@ class CabinetController {
 
         // Setup invite button and form
         this.setupInviteForm();
+
+        // Setup create request button and form
+        this.setupCreateRequestForm();
 
         // Active/Archive radio toggle
         document.querySelectorAll('input[name="community-archive"]').forEach(radio => {
@@ -862,6 +879,12 @@ class CabinetController {
         document.querySelectorAll('input[name="community-requests-type"]').forEach(radio => {
             radio.addEventListener('change', () => {
                 this.communityRequestsType = radio.value;
+                // Show "Создать запрос" button only for "from-me" sub-filter
+                const createRequestBtn = document.getElementById('create-request-btn');
+                if (createRequestBtn) createRequestBtn.style.display = radio.value === 'from-me' ? '' : 'none';
+                // Hide form when switching sub-filter
+                const createRequestForm = document.getElementById('create-request-form');
+                if (createRequestForm) createRequestForm.style.display = 'none';
                 this.renderCommunityData();
             });
         });
@@ -1218,6 +1241,127 @@ class CabinetController {
         if (descrInput) descrInput.value = '';
     }
 
+    setupCreateRequestForm() {
+        const createRequestBtn = document.getElementById('create-request-btn');
+        const createRequestForm = document.getElementById('create-request-form');
+        const submitBtn = document.getElementById('request-submit-btn');
+        const cancelBtn = document.getElementById('request-cancel-btn');
+
+        if (createRequestBtn && createRequestForm) {
+            createRequestBtn.addEventListener('click', () => {
+                const isVisible = createRequestForm.style.display !== 'none';
+                createRequestForm.style.display = isVisible ? 'none' : '';
+                if (!isVisible) {
+                    const dbInput = document.getElementById('request-db');
+                    if (dbInput) dbInput.focus();
+                }
+            });
+        }
+
+        if (cancelBtn && createRequestForm) {
+            cancelBtn.addEventListener('click', () => {
+                createRequestForm.style.display = 'none';
+                this.resetCreateRequestForm();
+            });
+        }
+
+        if (submitBtn) {
+            submitBtn.addEventListener('click', () => this.sendRequest());
+        }
+    }
+
+    resetCreateRequestForm() {
+        const dbInput = document.getElementById('request-db');
+        const descrInput = document.getElementById('request-descr');
+        const errEl = document.getElementById('request-db-error');
+        if (dbInput) { dbInput.value = ''; dbInput.classList.remove('input-invalid'); }
+        if (descrInput) descrInput.value = '';
+        if (errEl) errEl.style.display = 'none';
+    }
+
+    async sendRequest() {
+        const dbInput = document.getElementById('request-db');
+        const descrInput = document.getElementById('request-descr');
+        const errEl = document.getElementById('request-db-error');
+        const submitBtn = document.getElementById('request-submit-btn');
+
+        const dbName = dbInput ? dbInput.value.trim() : '';
+        const descr = descrInput ? descrInput.value.trim() : '';
+
+        if (!dbName) {
+            showToast('Введите имя базы данных', 'error');
+            return;
+        }
+
+        // Check if the entered DB is one of the user's own databases
+        const ownDbs = this.databases.map(d => (d.DB || '').toLowerCase());
+        if (ownDbs.includes(dbName.toLowerCase())) {
+            if (errEl) { errEl.textContent = 'Нельзя отправить запрос к собственной базе'; errEl.style.display = ''; }
+            if (dbInput) dbInput.classList.add('input-invalid');
+            return;
+        }
+
+        if (errEl) errEl.style.display = 'none';
+        if (dbInput) dbInput.classList.remove('input-invalid');
+        if (submitBtn) submitBtn.disabled = true;
+
+        try {
+            const host = this.apiConfig.host;
+            const url = 'https://' + host + '/my/report/236495/?JSON_KV&confirmed=1&FR_DB=' + encodeURIComponent(dbName);
+
+            const fd = new FormData();
+            fd.append('_xsrf', xsrf);
+            if (descr) fd.append('descr', descr);
+
+            const response = await fetch(url, {
+                method: 'POST',
+                credentials: 'include',
+                body: fd
+            });
+
+            const text = await response.text();
+            console.log('[cabinet] Create request response:', text);
+
+            let parsed;
+            try {
+                parsed = JSON.parse(text);
+            } catch (e) {
+                console.error('[cabinet] Create request response is not valid JSON:', text);
+                if (errEl) { errEl.textContent = 'База не найдена или скрыта владельцем'; errEl.style.display = ''; }
+                if (dbInput) dbInput.classList.add('input-invalid');
+                return;
+            }
+
+            // Expect 1 row with "Invite" field; empty array = DB not found
+            if (!Array.isArray(parsed) || parsed.length === 0 || !parsed[0].Invite) {
+                console.error('[cabinet] Create request: DB not found, response:', parsed);
+                if (errEl) { errEl.textContent = 'База не найдена или скрыта владельцем'; errEl.style.display = ''; }
+                if (dbInput) dbInput.classList.add('input-invalid');
+                return;
+            }
+
+            console.log('[cabinet] Request created:', parsed);
+            showToast('Запрос отправлен', 'success');
+
+            // Hide form and reset
+            const createRequestForm = document.getElementById('create-request-form');
+            if (createRequestForm) createRequestForm.style.display = 'none';
+            this.resetCreateRequestForm();
+
+            // Switch to "from-me" view and reload data
+            this.communityRequestsType = 'from-me';
+            const fromMeRadio = document.querySelector('input[name="community-requests-type"][value="from-me"]');
+            if (fromMeRadio) fromMeRadio.checked = true;
+
+            await this.loadCommunityData();
+        } catch (err) {
+            console.error('[cabinet] Error sending request:', err);
+            showToast('Ошибка отправки запроса', 'error');
+        } finally {
+            if (submitBtn) submitBtn.disabled = false;
+        }
+    }
+
     async sendInvite() {
         const dbSelect = document.getElementById('invite-db');
         const userInput = document.getElementById('invite-user');
@@ -1298,6 +1442,28 @@ class CabinetController {
         } finally {
             if (submitBtn) submitBtn.disabled = false;
         }
+    }
+
+    // Open create request form pre-filled with dbName (used by deep-link)
+    openCreateRequestForm(dbName) {
+        // Switch to "from-me" sub-filter
+        this.communityRequestsType = 'from-me';
+        const fromMeRadio = document.querySelector('input[name="community-requests-type"][value="from-me"]');
+        if (fromMeRadio) fromMeRadio.checked = true;
+
+        // Show the "Создать запрос" button
+        const createRequestBtn = document.getElementById('create-request-btn');
+        if (createRequestBtn) createRequestBtn.style.display = '';
+
+        // Show the form
+        const createRequestForm = document.getElementById('create-request-form');
+        if (createRequestForm) createRequestForm.style.display = '';
+
+        // Pre-fill the DB name
+        const dbInput = document.getElementById('request-db');
+        if (dbInput) dbInput.value = dbName;
+
+        this.renderCommunityData();
     }
 
     setupDatabasesControls() {

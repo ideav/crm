@@ -383,7 +383,28 @@
                         <label class="community-radio-label">
                             <input type="radio" name="community-requests-type" value="from-me"> Мои запросы к чужим базам
                         </label>
+                        <button type="button" id="create-request-btn" class="btn-primary btn-small" style="margin-left: auto; display: none;">Создать запрос</button>
                     </div>
+
+                    <!-- Create Request Form -->
+                    <div id="create-request-form" class="invite-form" style="display:none;">
+                        <div class="invite-form-fields">
+                            <div class="invite-form-field">
+                                <label for="request-db" class="database-field-label">Имя базы данных</label>
+                                <input type="text" id="request-db" class="database-field-input" placeholder="Имя базы данных">
+                                <span id="request-db-error" class="field-error" style="display:none;">База не найдена или скрыта владельцем</span>
+                            </div>
+                            <div class="invite-form-field">
+                                <label for="request-descr" class="database-field-label">Описание (сопроводительный текст)</label>
+                                <input type="text" id="request-descr" class="database-field-input" placeholder="Сопроводительный текст к запросу">
+                            </div>
+                            <div class="invite-form-actions">
+                                <button type="button" id="request-submit-btn" class="btn-primary btn-small">Отправить</button>
+                                <button type="button" id="request-cancel-btn" class="btn-secondary btn-small">Отмена</button>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="community-list" id="community-requests-list">
                         <p class="empty-message">Загрузка данных...</p>
                     </div>
