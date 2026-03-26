@@ -1047,7 +1047,7 @@ class CabinetController {
 
             // Build right badges
             let badgesHtml = '';
-            if (isPublic && (tabType === 'invitations' || (tabType === 'requests' && this.communityRequestsType === 'from-me'))) {
+            if (isPublic) { // && (tabType === 'invitations' || (tabType === 'requests' && this.communityRequestsType === 'from-me'))) {
                 badgesHtml += '<span class="community-card-status status-public">публичное</span>';
             }
             badgesHtml += '<span class="community-card-status ' + statusClass + '">' + this.escapeHtml(statusLabel) + '</span>';
