@@ -1101,7 +1101,7 @@ class CabinetController {
 
             if (action === 'revoke') {
                 // Revoke endpoint: /my/report/236429/?JSON_KV&FR_InviteID=<id>
-                const url = 'https://' + host + '/my/report/236429/?JSON_KV&FR_InviteID=' + encodeURIComponent(id);
+                const url = 'https://' + host + '/my/report/236429/?JSON_KV&confirmed=1&FR_InviteID=' + encodeURIComponent(id);
 
                 const fd = new FormData();
                 fd.append('_xsrf', xsrf);
