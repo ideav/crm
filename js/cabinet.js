@@ -1012,6 +1012,15 @@ class CabinetController {
             const stateId = item.StateID || '';
             const recordId = item.InviteID || '';
 
+            // DB name is bold; it's a hyperlink if invitation accepted or DB is my own
+            const isMyDb = tabType === 'my-invites' ||
+                (tabType === 'requests' && this.communityRequestsType === 'to-me');
+            const isAccepted = stateId === '372';
+            const dbEscaped = this.escapeHtml(dbName);
+            const dbBold = isMyDb || isAccepted
+                ? '<a href="/' + dbEscaped + '" target="' + dbEscaped + '"><strong>' + dbEscaped + '</strong></a>'
+                : '<strong>' + dbEscaped + '</strong>';
+
             let titleHtml = '';
             if (tabType === 'my-invites') {
                 // Personal invite: "Персональное для {GuestUser} в {DB} (name, desc)"
@@ -1019,18 +1028,18 @@ class CabinetController {
                 if (guestUser) {
                     titleHtml = this.escapeHtml(dateStr) + ': Персональное для ' +
                         '<strong>' + this.escapeHtml(guestUser) + '</strong>' +
-                        ' в ' + this.escapeHtml(dbName) + nameDesc;
+                        ' в ' + dbBold + nameDesc;
                 } else {
-                    titleHtml = this.escapeHtml(dateStr) + ': ' + this.escapeHtml(dbName) + nameDesc;
+                    titleHtml = this.escapeHtml(dateStr) + ': ' + dbBold + nameDesc;
                 }
             } else if (tabType === 'invitations') {
                 // Personal invite: "Персональное в {DB} (name, desc)"
                 // Public invite:   "{DB} (name, desc)"
                 if (!isPublic) {
                     titleHtml = this.escapeHtml(dateStr) + ': Персональное в ' +
-                        this.escapeHtml(dbName) + nameDesc;
+                        dbBold + nameDesc;
                 } else {
-                    titleHtml = this.escapeHtml(dateStr) + ': ' + this.escapeHtml(dbName) + nameDesc;
+                    titleHtml = this.escapeHtml(dateStr) + ': ' + dbBold + nameDesc;
                 }
             } else if (tabType === 'requests') {
                 const requestsType = this.communityRequestsType;
@@ -1038,10 +1047,10 @@ class CabinetController {
                     // "Доступ для {GuestUser} к БД {DB} (name, desc)"
                     titleHtml = this.escapeHtml(dateStr) + ': Доступ для ' +
                         '<strong>' + this.escapeHtml(guestUser) + '</strong>' +
-                        ' к БД ' + this.escapeHtml(dbName) + nameDesc;
+                        ' к БД ' + dbBold + nameDesc;
                 } else {
                     // "БД {DB} (name, desc)"
-                    titleHtml = this.escapeHtml(dateStr) + ': БД ' + this.escapeHtml(dbName) + nameDesc;
+                    titleHtml = this.escapeHtml(dateStr) + ': БД ' + dbBold + nameDesc;
                 }
             }
 
