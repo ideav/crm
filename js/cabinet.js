@@ -1097,22 +1097,45 @@ class CabinetController {
 
         try {
             const host = this.apiConfig.host;
-            // Action endpoint: /my/_invite_action/?JSON&id=<id>&action=<revoke|accept|reject>
-            const url = 'https://' + host + '/my/_invite_action/?JSON' +
-                '&id=' + encodeURIComponent(id) +
-                '&action=' + encodeURIComponent(action);
+            let response;
 
-            const fd = new FormData();
-            fd.append('_xsrf', xsrf);
+            if (action === 'revoke') {
+                // Revoke endpoint: /my/report/236429/?FR_InviteID=<id>
+                const url = 'https://' + host + '/my/report/236429/?FR_InviteID=' + encodeURIComponent(id);
 
-            const response = await fetch(url, {
-                method: 'POST',
-                credentials: 'include',
-                body: fd
-            });
+                response = await fetch(url, {
+                    method: 'GET',
+                    credentials: 'include'
+                });
 
-            if (!response.ok) {
-                throw new Error('HTTP ' + response.status);
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status);
+                }
+
+                const data = await response.json();
+                console.log('[cabinet] Revoke response:', data);
+
+                if (!Array.isArray(data) || data.length === 0 || !data[0].InviteID) {
+                    throw new Error('Unexpected revoke response');
+                }
+            } else {
+                // Action endpoint: /my/_invite_action/?JSON&id=<id>&action=<accept|reject>
+                const url = 'https://' + host + '/my/_invite_action/?JSON' +
+                    '&id=' + encodeURIComponent(id) +
+                    '&action=' + encodeURIComponent(action);
+
+                const fd = new FormData();
+                fd.append('_xsrf', xsrf);
+
+                response = await fetch(url, {
+                    method: 'POST',
+                    credentials: 'include',
+                    body: fd
+                });
+
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status);
+                }
             }
 
             // Reload community data to reflect new state
