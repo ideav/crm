@@ -1179,11 +1179,12 @@ class CabinetController {
                     throw new Error('Unexpected revoke-request response');
                 }
             } else if (action === 'accept') {
-                // Accept endpoint: /my/report/236472/?JSON_KV&confirmed=1&FR_InviteID=<id>
+                // Accept endpoint: /my/report/236472/?JSON_KV&confirmed=1&FR_InviteID=<id> with cmd=372
                 const url = 'https://' + host + '/my/report/236472/?JSON_KV&confirmed=1&FR_InviteID=' + encodeURIComponent(id);
 
                 const fd = new FormData();
                 fd.append('_xsrf', xsrf);
+                fd.append('cmd', '372');
 
                 response = await fetch(url, {
                     method: 'POST',
@@ -1194,8 +1195,35 @@ class CabinetController {
                 if (!response.ok) {
                     throw new Error('HTTP ' + response.status);
                 }
+
+                const acceptData = await response.json();
+                if (!Array.isArray(acceptData) || acceptData.length === 0 || acceptData[0]['Статус'] !== '372') {
+                    throw new Error('Операция не выполнена');
+                }
+            } else if (action === 'reject') {
+                // Reject endpoint: /my/report/236472/?JSON_KV&confirmed=1&FR_InviteID=<id> with cmd=373
+                const url = 'https://' + host + '/my/report/236472/?JSON_KV&confirmed=1&FR_InviteID=' + encodeURIComponent(id);
+
+                const fd = new FormData();
+                fd.append('_xsrf', xsrf);
+                fd.append('cmd', '373');
+
+                response = await fetch(url, {
+                    method: 'POST',
+                    credentials: 'include',
+                    body: fd
+                });
+
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status);
+                }
+
+                const rejectData = await response.json();
+                if (!Array.isArray(rejectData) || rejectData.length === 0 || rejectData[0]['Статус'] !== '373') {
+                    throw new Error('Операция не выполнена');
+                }
             } else {
-                // Action endpoint: /my/_invite_action/?JSON&id=<id>&action=<reject>
+                // Action endpoint: /my/_invite_action/?JSON&id=<id>&action=<action>
                 const url = 'https://' + host + '/my/_invite_action/?JSON' +
                     '&id=' + encodeURIComponent(id) +
                     '&action=' + encodeURIComponent(action);
