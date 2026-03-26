@@ -934,9 +934,9 @@ class CabinetController {
             });
         };
 
-        // Tab 1: My invitations (HostUserID === uid)
+        // Tab 1: My invitations (HostUserID === uid), excluding requests (StateID === '375')
         const myInvites = filterByArchive(
-            this.communityInvites.filter(i => i.HostUserID === currentUid)
+            this.communityInvites.filter(i => i.HostUserID === currentUid && i.StateID !== '375')
         );
         this.renderCommunityList('community-my-invites-list', myInvites, 'my-invites');
 
