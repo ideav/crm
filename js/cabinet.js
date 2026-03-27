@@ -1900,6 +1900,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Wait for app.js to initialize first
     setTimeout(() => {
         const cabinet = new CabinetController();
+        window._cabinetController = cabinet;
         cabinet.init();
     }, 100);
 });
