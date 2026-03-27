@@ -147,16 +147,173 @@
                             <button type="button" id="upload-photo-btn" class="btn-secondary">Загрузить фото</button>
                         </div>
                     </div>
+                    <div class="database-field-group" id="profile-username-group">
+                        <label for="profile-username" class="database-field-label">Аккаунт</label>
+                        <div class="profile-username-row" style="display:flex;align-items:center;gap:8px;">
+                            <input type="text" id="profile-username" name="username" placeholder="латинские буквы, цифры, дефис" class="database-field-input" maxlength="33" title="Только латинские буквы, цифры и дефис, начинается с буквы, до 33 символов" autocomplete="off" style="flex:1;">
+                            <button type="button" id="save-username-btn" class="btn-primary btn-small" style="display:none;white-space:nowrap;">Сохранить аккаунт</button>
+                        </div>
+                        <span class="field-hint" id="profile-username-hint" style="display:none;">Только латинские буквы, цифры и дефис, начинается с буквы, до 33 символов</span>
+                        <span class="field-hint field-hint-error" id="profile-username-error" style="display:none;color:#c0392b;"></span>
+                    </div>
                     <div class="database-field-group">
                         <label class="profile-public-label">
                             <input type="checkbox" id="profile-public" name="public">
                             Публичный профиль
                         </label>
-                        <span class="field-hint">В публичном профиле видно только Имя и Обо мне, а телефон и email скрыты</span>
+                        <span class="field-hint">В публичном профиле видно только Аккаунт и Обо мне, а телефон и email скрыты</span>
                     </div>
                     <button type="button" id="save-profile-btn" class="btn-primary">Сохранить изменения</button>
                 </div>
             </section>
+
+            <script>
+            (function() {
+                var USERNAME_REGEX = /^[a-zA-Z]([a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,32}$/;
+
+                function isValidUsername(val) {
+                    return USERNAME_REGEX.test(val);
+                }
+
+                function initAccountField() {
+                    var usernameInput = document.getElementById('profile-username');
+                    var saveUsernameBtn = document.getElementById('save-username-btn');
+                    var usernameHint = document.getElementById('profile-username-hint');
+                    var usernameError = document.getElementById('profile-username-error');
+                    var publicCheckbox = document.getElementById('profile-public');
+
+                    if (!usernameInput || !saveUsernameBtn || !publicCheckbox) return;
+
+                    var originalUsername = usernameInput.value;
+
+                    function updateUsernameUI() {
+                        var val = usernameInput.value;
+                        var changed = val !== originalUsername;
+                        var valid = isValidUsername(val);
+
+                        // Show save button if value changed
+                        saveUsernameBtn.style.display = changed ? '' : 'none';
+
+                        // Show hint while editing (field is focused or has content being edited)
+                        usernameHint.style.display = changed ? '' : 'none';
+
+                        // Clear error while typing
+                        usernameError.style.display = 'none';
+                        usernameError.textContent = '';
+                    }
+
+                    usernameInput.addEventListener('input', updateUsernameUI);
+                    usernameInput.addEventListener('focus', function() {
+                        if (!isValidUsername(usernameInput.value)) {
+                            usernameHint.style.display = '';
+                        }
+                    });
+                    usernameInput.addEventListener('blur', function() {
+                        if (usernameInput.value === originalUsername) {
+                            usernameHint.style.display = 'none';
+                        }
+                    });
+
+                    saveUsernameBtn.addEventListener('click', async function() {
+                        var val = usernameInput.value.trim();
+                        if (!isValidUsername(val)) {
+                            usernameError.textContent = 'Неверный формат аккаунта. Только латинские буквы, цифры и дефис, начинается с буквы, до 33 символов';
+                            usernameError.style.display = '';
+                            return;
+                        }
+
+                        saveUsernameBtn.disabled = true;
+                        usernameError.style.display = 'none';
+
+                        try {
+                            var apiConfig = window._cabinetController && window._cabinetController.apiConfig;
+                            var host = apiConfig ? apiConfig.host : location.hostname;
+                            var url = 'https://' + host + '/my/report/236592?JSON_KV';
+
+                            var fd = new FormData();
+                            fd.append('name', val);
+                            if (typeof xsrf !== 'undefined') fd.append('_xsrf', xsrf);
+
+                            var response = await fetch(url, {
+                                method: 'POST',
+                                credentials: 'include',
+                                body: fd
+                            });
+
+                            if (!response.ok) {
+                                throw new Error('HTTP ' + response.status);
+                            }
+
+                            var data = await response.json();
+
+                            if (!data || typeof data.name === 'undefined' || data.name !== val) {
+                                throw new Error('Сервер вернул неожиданный ответ');
+                            }
+
+                            // Success
+                            originalUsername = val;
+                            usernameInput.value = val;
+                            updateUsernameUI();
+                            if (typeof showToast === 'function') showToast('Аккаунт сохранен', 'success');
+                        } catch (err) {
+                            usernameError.textContent = 'Ошибка сохранения: ' + (err.message || 'неизвестная ошибка');
+                            usernameError.style.display = '';
+                            if (typeof showToast === 'function') showToast('Ошибка сохранения аккаунта', 'error');
+                        } finally {
+                            saveUsernameBtn.disabled = false;
+                        }
+                    });
+
+                    // Restrict public profile checkbox if account is not valid
+                    publicCheckbox.addEventListener('click', function(e) {
+                        var currentVal = usernameInput.value;
+                        if (!isValidUsername(currentVal)) {
+                            e.preventDefault();
+                            publicCheckbox.checked = false;
+                            usernameError.textContent = 'Сначала укажите Аккаунт в правильном формате, чтобы включить публичный профиль';
+                            usernameError.style.display = '';
+                            usernameInput.focus();
+                            return false;
+                        }
+                    });
+                }
+
+                // Wait for DOM + cabinet data load, then patch loadUserData to also set username
+                function patchCabinetController() {
+                    if (!window._cabinetController) {
+                        setTimeout(patchCabinetController, 100);
+                        return;
+                    }
+                    var ctrl = window._cabinetController;
+                    var origPopulateProfile = ctrl.populateProfile.bind(ctrl);
+                    ctrl.populateProfile = function() {
+                        origPopulateProfile();
+                        // Populate username field from UserName field
+                        var usernameInput = document.getElementById('profile-username');
+                        if (usernameInput && ctrl.userData) {
+                            var uname = ctrl.userData.UserName || '';
+                            usernameInput.value = uname;
+                            // If already valid, make it readonly
+                            if (USERNAME_REGEX.test(uname)) {
+                                usernameInput.readOnly = true;
+                                usernameInput.title = 'Аккаунт уже задан и не может быть изменён';
+                                usernameInput.style.opacity = '0.7';
+                                usernameInput.style.cursor = 'not-allowed';
+                                var saveBtn = document.getElementById('save-username-btn');
+                                if (saveBtn) saveBtn.style.display = 'none';
+                                var hint = document.getElementById('profile-username-hint');
+                                if (hint) hint.style.display = 'none';
+                            }
+                        }
+                    };
+                }
+
+                document.addEventListener('DOMContentLoaded', function() {
+                    initAccountField();
+                    patchCabinetController();
+                });
+            })();
+            </script>
 
             <!-- Tariff Section -->
             <section id="section-tariff" class="cabinet-section" style="display: none;">
