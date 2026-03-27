@@ -1069,21 +1069,25 @@ class CabinetController {
                     'data-action="revoke" data-id="' + this.escapeHtml(recordId) + '">' +
                     'Отозвать</button>';
             } else if (tabType === 'invitations') {
-                // "Принять" button for Новое (371) or Отказ (373) — in both active and archive
+                // "Принять" and "Отказать" buttons for Новое (371) or Отказ (373) — use report/inviteAccept
                 if (stateId === '371' || stateId === '373') {
-                    actionsHtml += '<button type="button" class="btn-primary btn-small community-action-btn" ' +
-                        'data-action="accept" data-id="' + this.escapeHtml(recordId) + '">' +
-                        'Принять</button>';
+                    actionsHtml +=
+                        '<button type="button" class="btn-primary btn-small community-action-btn" ' +
+                        'data-action="accept" data-id="' + this.escapeHtml(recordId) + '" data-tab-type="invitations">' +
+                        'Принять</button>' +
+                        '<button type="button" class="btn-danger btn-small community-action-btn" ' +
+                        'data-action="reject" data-id="' + this.escapeHtml(recordId) + '" data-tab-type="invitations">' +
+                        'Отказать</button>';
                 }
             } else if (tabType === 'requests') {
                 if (this.communityRequestsType === 'to-me') {
-                    // "Принять" and "Отказать" buttons
+                    // "Принять" and "Отказать" buttons — use report/inviteRequestAccept
                     actionsHtml +=
                         '<button type="button" class="btn-primary btn-small community-action-btn" ' +
-                        'data-action="accept" data-id="' + this.escapeHtml(recordId) + '">' +
+                        'data-action="accept" data-id="' + this.escapeHtml(recordId) + '" data-tab-type="requests">' +
                         'Принять</button>' +
                         '<button type="button" class="btn-danger btn-small community-action-btn" ' +
-                        'data-action="reject" data-id="' + this.escapeHtml(recordId) + '">' +
+                        'data-action="reject" data-id="' + this.escapeHtml(recordId) + '" data-tab-type="requests">' +
                         'Отказать</button>';
                 } else {
                     // "Отозвать запрос" button
@@ -1179,8 +1183,10 @@ class CabinetController {
                     throw new Error('Unexpected revoke-request response');
                 }
             } else if (action === 'accept') {
-                // Accept endpoint: /my/report/236472/?JSON_KV&confirmed=1&FR_InviteID=<id> with cmd=372
-                const url = 'https://' + host + '/my/report/236472/?JSON_KV&confirmed=1&FR_InviteID=' + encodeURIComponent(id);
+                // Invitations use report/inviteAccept; requests use report/inviteRequestAccept (236472)
+                const tabType = btn ? btn.dataset.tabType : 'requests';
+                const reportId = tabType === 'invitations' ? 'inviteAccept' : '236472';
+                const url = 'https://' + host + '/my/report/' + reportId + '/?JSON_KV&confirmed=1&FR_InviteID=' + encodeURIComponent(id);
 
                 const fd = new FormData();
                 fd.append('_xsrf', xsrf);
@@ -1201,8 +1207,10 @@ class CabinetController {
                     throw new Error('Операция не выполнена');
                 }
             } else if (action === 'reject') {
-                // Reject endpoint: /my/report/236472/?JSON_KV&confirmed=1&FR_InviteID=<id> with cmd=373
-                const url = 'https://' + host + '/my/report/236472/?JSON_KV&confirmed=1&FR_InviteID=' + encodeURIComponent(id);
+                // Invitations use report/inviteAccept; requests use report/inviteRequestAccept (236472)
+                const tabType = btn ? btn.dataset.tabType : 'requests';
+                const reportId = tabType === 'invitations' ? 'inviteAccept' : '236472';
+                const url = 'https://' + host + '/my/report/' + reportId + '/?JSON_KV&confirmed=1&FR_InviteID=' + encodeURIComponent(id);
 
                 const fd = new FormData();
                 fd.append('_xsrf', xsrf);
