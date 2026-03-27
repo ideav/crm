@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Главная</title>
     <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="css/cabinet.css">
     <link rel="stylesheet" href="assets/vendor/primeicons/primeicons.css">
 </head>
 <body>
@@ -672,20 +673,24 @@ mark.search-highlight {
             <div id="login-section">
                 <form id="login-form">
                     <!-- DB selector -->
-                    <div id="auth-db-group" style="margin-bottom:1rem;">
-                        <label for="auth-db-select" class="mb-0">База данных</label>
-                        <select id="auth-db-select" class="form-control pe-1 ps-1 mb-2" style="border: 1px solid lightgray !important;">
+                    <div class="database-field-group" id="auth-db-group">
+                        <label for="auth-db-select" class="database-field-label">База данных</label>
+                        <select id="auth-db-select" class="auth-db-select database-field-input">
                             <option value="my">Личный кабинет</option>
                         </select>
                         <div id="auth-db-custom-group" style="display:none; margin-top:0.5rem;">
-                            <input type="text" id="auth-db-custom" class="form-control pe-1 ps-1 mb-2" placeholder="Введите имя базы данных" autocomplete="off" style="border: 1px solid lightgray !important;">
+                            <input type="text" id="auth-db-custom" class="auth-db-custom-input database-field-input" placeholder="Введите имя базы данных" autocomplete="off">
                             <a href="#" id="auth-db-back" class="auth-db-back-link">&#8592; Вернуться к выбору</a>
                         </div>
                     </div>
-                    <label for="login-email" class="mb-0">Email адрес</label>
-                    <input type="email" id="login-email" name="email" required placeholder="your@email.com" class="form-control pe-1 ps-1 mb-2" style="border: 1px solid lightgray !important;">
-                    <label for="login-password" class="mb-0">Пароль</label>
-                    <input type="password" id="login-password" name="password" required class="form-control pe-1 ps-1 mb-2" style="border: 1px solid lightgray !important;">
+                    <div class="database-field-group">
+                        <label for="login-email" class="database-field-label">Email адрес</label>
+                        <input type="email" id="login-email" name="email" required placeholder="your@email.com" class="database-field-input">
+                    </div>
+                    <div class="database-field-group">
+                        <label for="login-password" class="database-field-label">Пароль</label>
+                        <input type="password" id="login-password" name="password" required class="database-field-input">
+                    </div>
                     <button type="submit" class="btn-primary">Войти</button>
                 </form>
 
@@ -703,12 +708,18 @@ mark.search-highlight {
             <!-- Register form -->
             <div id="register-section" style="display:none;">
                 <form id="register-form">
-                    <label for="reg-email" class="mb-0">Email адрес</label>
-                    <input type="email" id="reg-email" name="email" required placeholder="your@email.com" class="form-control pe-1 ps-1 mb-2" style="border: 1px solid lightgray !important;">
-                    <label for="reg-password" class="mb-0">Пароль</label>
-                    <input type="password" id="reg-password" name="password" required minlength="6" class="form-control pe-1 ps-1 mb-2" style="border: 1px solid lightgray !important;">
-                    <label for="reg-confirm-password" class="mb-0">Подтвердите пароль</label>
-                    <input type="password" id="reg-confirm-password" name="confirm-password" required class="form-control pe-1 ps-1 mb-2" style="border: 1px solid lightgray !important;">
+                    <div class="database-field-group">
+                        <label for="reg-email" class="database-field-label">Email адрес</label>
+                        <input type="email" id="reg-email" name="email" required placeholder="your@email.com" class="database-field-input">
+                    </div>
+                    <div class="database-field-group">
+                        <label for="reg-password" class="database-field-label">Пароль</label>
+                        <input type="password" id="reg-password" name="password" required minlength="6" class="database-field-input">
+                    </div>
+                    <div class="database-field-group">
+                        <label for="reg-confirm-password" class="database-field-label">Подтвердите пароль</label>
+                        <input type="password" id="reg-confirm-password" name="confirm-password" required class="database-field-input">
+                    </div>
                     <button type="submit" class="btn-primary">Зарегистрироваться</button>
                 </form>
 
