@@ -197,6 +197,13 @@
     filter: none;
 }
 
+.cabinet-menu-item--disabled,
+.cabinet-menu-item--disabled:hover {
+    opacity: 0.45;
+    cursor: not-allowed;
+    background: none;
+}
+
 .menu-icon {
     font-size: var(--menu-icon-size, 1.25rem);
     width: 1.5rem;
