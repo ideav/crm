@@ -1204,8 +1204,16 @@ class CabinetController {
                 }
 
                 const acceptData = await response.json();
-                if (!Array.isArray(acceptData) || acceptData.length === 0 || acceptData[0]['Статус'] !== '372') {
-                    throw new Error('Операция не выполнена');
+                const acceptTabType = btn ? btn.dataset.tabType : 'requests';
+                if (acceptTabType === 'requests') {
+                    // inviteRequestAccept: success = non-empty InviteID
+                    if (!Array.isArray(acceptData) || acceptData.length === 0 || !acceptData[0].InviteID) {
+                        throw new Error('Операция не выполнена');
+                    }
+                } else {
+                    if (!Array.isArray(acceptData) || acceptData.length === 0 || acceptData[0]['Статус'] !== '372') {
+                        throw new Error('Операция не выполнена');
+                    }
                 }
             } else if (action === 'reject') {
                 // Invitations use report/inviteAccept; requests use report/inviteRequestAccept (236472)
@@ -1228,8 +1236,15 @@ class CabinetController {
                 }
 
                 const rejectData = await response.json();
-                if (!Array.isArray(rejectData) || rejectData.length === 0 || rejectData[0]['Статус'] !== '373') {
-                    throw new Error('Операция не выполнена');
+                if (tabType === 'requests') {
+                    // inviteRequestAccept: success = non-empty InviteID
+                    if (!Array.isArray(rejectData) || rejectData.length === 0 || !rejectData[0].InviteID) {
+                        throw new Error('Операция не выполнена');
+                    }
+                } else {
+                    if (!Array.isArray(rejectData) || rejectData.length === 0 || rejectData[0]['Статус'] !== '373') {
+                        throw new Error('Операция не выполнена');
+                    }
                 }
             } else {
                 // Action endpoint: /my/_invite_action/?JSON&id=<id>&action=<action>
