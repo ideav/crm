@@ -93,8 +93,9 @@ class CabinetController {
         const toggleBtn = document.getElementById('sidebar-toggle');
         if (!sidebar || !toggleBtn) return;
 
-        // Restore collapsed state from localStorage
-        if (localStorage.getItem('sidebarCollapsed') === 'true') {
+        // Restore collapsed state from localStorage (desktop only — mobile uses horizontal tab bar)
+        const isMobile = () => window.innerWidth <= 900;
+        if (!isMobile() && localStorage.getItem('sidebarCollapsed') === 'true') {
             sidebar.classList.add('collapsed');
             toggleBtn.title = 'Развернуть меню';
         }
