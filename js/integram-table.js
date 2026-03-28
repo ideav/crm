@@ -5674,7 +5674,7 @@ class IntegramTable{
                 if (result.success) {
                     closeColEdit();
                     this.closeColumnSettings();
-                    this.loadData(0);
+                    window.location.href = '/' + (window.db || window.location.pathname.split('/')[1]) + '/tables';
                 } else if (result.hasData) {
                     // Show forced delete option
                     delBtn.style.display = 'none';
@@ -5685,7 +5685,7 @@ class IntegramTable{
                         if (result2.success) {
                             closeColEdit();
                             this.closeColumnSettings();
-                            this.loadData(0);
+                            window.location.href = '/' + (window.db || window.location.pathname.split('/')[1]) + '/tables';
                         } else {
                             showStatus('Ошибка удаления: ' + result2.error, true);
                         }
