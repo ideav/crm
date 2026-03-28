@@ -1186,7 +1186,7 @@ class CabinetController {
             } else if (action === 'accept') {
                 // Invitations use report/inviteAccept; requests use report/inviteRequestAccept (236472)
                 const tabType = btn ? btn.dataset.tabType : 'requests';
-                const reportId = tabType === 'invitations' ? 'inviteAccept' : '236472';
+                const reportId = tabType === 'invitations' ? 'inviteAccept' : 'inviteRequestAccept';
                 const url = 'https://' + host + '/my/report/' + reportId + '/?JSON_KV&confirmed=1&FR_InviteID=' + encodeURIComponent(id);
 
                 const fd = new FormData();
@@ -1210,7 +1210,7 @@ class CabinetController {
             } else if (action === 'reject') {
                 // Invitations use report/inviteAccept; requests use report/inviteRequestAccept (236472)
                 const tabType = btn ? btn.dataset.tabType : 'requests';
-                const reportId = tabType === 'invitations' ? 'inviteAccept' : '236472';
+                const reportId = tabType === 'invitations' ? 'inviteAccept' : 'inviteRequestAccept';
                 const url = 'https://' + host + '/my/report/' + reportId + '/?JSON_KV&confirmed=1&FR_InviteID=' + encodeURIComponent(id);
 
                 const fd = new FormData();
