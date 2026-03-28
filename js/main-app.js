@@ -1467,6 +1467,7 @@ class MainAppController {
         const currentPath = window.location.pathname;
         const currentSearch = window.location.search; // e.g. "?EDIT"
 
+        let activeMenuName = null;
         const menuItems = document.querySelectorAll('.app-menu-item');
         menuItems.forEach(item => {
             // Use data-href attribute which contains the actual href value (without db prefix)
@@ -1485,24 +1486,36 @@ class MainAppController {
             const hrefParts = dataHrefPath.split('/').filter(p => p);
             const lastPart = hrefParts[hrefParts.length - 1];
 
+            let isActive = false;
             // When dataHref contains a query string (e.g. "forms?EDIT"), match against both
             // the current path action and the current URL query string
             if (dataHrefQuery) {
                 if (currentAction && lastPart === currentAction && currentSearch === dataHrefQuery) {
-                    item.classList.add('active');
-                    this.expandParentMenus(item);
+                    isActive = true;
                 } else if (currentPath.includes(dataHrefPath) && currentSearch === dataHrefQuery) {
-                    item.classList.add('active');
-                    this.expandParentMenus(item);
+                    isActive = true;
                 }
             } else if (currentAction && lastPart === currentAction) {
-                item.classList.add('active');
-                this.expandParentMenus(item);
+                isActive = true;
             } else if (currentPath.includes(dataHref)) {
+                isActive = true;
+            }
+
+            if (isActive) {
                 item.classList.add('active');
                 this.expandParentMenus(item);
+                if (!activeMenuName) {
+                    const textSpan = item.querySelector('.menu-text');
+                    activeMenuName = textSpan ? textSpan.textContent.trim() : '';
+                }
             }
         });
+
+        // Update navbar-workspace with active menu item name
+        const navbarWorkspace = document.querySelector('.navbar-workspace');
+        if (navbarWorkspace && activeMenuName) {
+            navbarWorkspace.textContent = activeMenuName;
+        }
     }
 
     /**
