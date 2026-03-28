@@ -1866,6 +1866,14 @@ class CabinetController {
                 window.location.href = 'index.html';
             });
         }
+
+        const logoutEverywhereBtn = document.getElementById('logout-everywhere-btn');
+        if (logoutEverywhereBtn) {
+            logoutEverywhereBtn.addEventListener('click', async () => {
+                try { await fetch('/my/exit'); } catch (e) {}
+                window.location.href = '/my';
+            });
+        }
     }
 
     isDatePassed(dateStr) {
