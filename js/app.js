@@ -672,7 +672,7 @@ class App {
                 }
                 resetSubmitBtn.disabled = true;
                 try {
-                    const url = `auth?JSON&reset&db=${encodeURIComponent(selectedDb)}&login=${encodeURIComponent(loginVal)}`;
+                    const url = `${encodeURIComponent(selectedDb)}/auth?JSON&reset&db=${encodeURIComponent(selectedDb)}&login=${encodeURIComponent(loginVal)}`;
                     const response = await fetch(url);
                     const text = await response.text();
                     let data = null;
