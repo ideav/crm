@@ -444,6 +444,10 @@ body {
         font-size: 0.8rem;
     }
 
+    .auth-container {
+        padding: 1rem;
+    }
+
     .auth-card {
         padding: 1.5rem;
     }
