@@ -1450,6 +1450,15 @@ class MainAppController {
                 window.location.href = '/';
             });
         }
+
+        const logoutEverywhereBtn = document.getElementById('logout-everywhere-btn');
+        if (logoutEverywhereBtn) {
+            logoutEverywhereBtn.addEventListener('click', async () => {
+                const dbName = typeof db !== 'undefined' ? db : '';
+                try { await fetch('/' + dbName + '/exit'); } catch (e) {}
+                window.location.href = '/' + dbName;
+            });
+        }
     }
 
     highlightActiveMenuItem() {
