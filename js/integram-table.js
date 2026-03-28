@@ -8726,6 +8726,14 @@ class IntegramTable{
             const firstColumnValue = !isCreate && recordData && recordData.obj ? recordData.obj.val : null;
             const title = isCreate ? `Создание: ${ typeName }` : `Редактирование: ${ firstColumnValue || typeName }`;
             const instanceName = this.options.instanceName;
+
+            // Save and update navbar-workspace + document.title with object value
+            const navbarWorkspace = document.querySelector('.navbar-workspace');
+            const prevWorkspaceText = navbarWorkspace ? navbarWorkspace.textContent : null;
+            const prevDocTitle = document.title;
+            const objectValue = firstColumnValue || typeName;
+            if (navbarWorkspace) navbarWorkspace.textContent = objectValue;
+            document.title = objectValue;
             const recordId = recordData && recordData.obj ? recordData.obj.id : null;
             // Issue #616: For create mode, use F_U from URL as parent when F_U > 1
             const defaultParentId = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
@@ -8902,6 +8910,9 @@ class IntegramTable{
                 if (modalDepth === 1) {
                     this.currentEditModal = null;
                 }
+                // Restore navbar-workspace and document.title
+                if (navbarWorkspace && prevWorkspaceText !== null) navbarWorkspace.textContent = prevWorkspaceText;
+                document.title = prevDocTitle;
             };
 
             // Attach close handlers to buttons with data-close-modal attribute
