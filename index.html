@@ -687,16 +687,23 @@ mark.search-highlight {
                         </div>
                     </div>
                     <div class="database-field-group">
-                        <label for="login-email" class="database-field-label">Email / имя пользователя</label>
+                        <label for="login-email" class="database-field-label" id="login-email-label">Email / имя пользователя</label>
                         <input type="text" id="login-email" name="email" required placeholder="your@email.com или имя пользователя" class="database-field-input">
                     </div>
-                    <div class="database-field-group">
+                    <div class="database-field-group" id="login-password-group">
                         <label for="login-password" class="database-field-label">Пароль</label>
                         <input type="password" id="login-password" name="password" required class="database-field-input">
                     </div>
+                    <div id="reset-hint" style="display:none; font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.5rem;">Введите имя пользователя или email, мы попробуем найти вашу учетную запись и пришлем новый пароль на вашу почту</div>
                     <br />
-                    <button type="submit" class="btn-primary">Войти</button>
+                    <button type="submit" id="login-submit-btn" class="btn-primary">Войти</button>
+                    <button type="button" id="reset-submit-btn" class="btn-primary" style="display:none;">Сбросить пароль</button>
                 </form>
+                <div id="reset-message" style="display:none; margin-top:0.75rem; padding:0.5rem 0.75rem; border-radius:var(--radius-sm); font-size:0.9rem;"></div>
+                <div style="text-align:center; margin-top:0.75rem;">
+                    <a href="#" id="reset-link" style="font-size:0.85rem; color:var(--link-color); text-decoration:none;">Сбросить пароль</a>
+                    <a href="#" id="back-to-login-link" style="display:none; font-size:0.85rem; color:var(--link-color); text-decoration:none;">Войти с паролем</a>
+                </div>
 
                 <div id="yandex-divider" class="auth-divider" style="display:none;">или</div>
                 <div class="oauth-buttons-container">

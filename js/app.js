@@ -592,6 +592,123 @@ class App {
             });
         }
 
+        // Password reset toggle
+        const resetLink = document.getElementById('reset-link');
+        const backToLoginLink = document.getElementById('back-to-login-link');
+        const resetSubmitBtn = document.getElementById('reset-submit-btn');
+        const loginSubmitBtn = document.getElementById('login-submit-btn');
+        const resetHint = document.getElementById('reset-hint');
+        const loginPasswordGroup = document.getElementById('login-password-group');
+        const loginEmailLabel = document.getElementById('login-email-label');
+        const loginEmailInput = document.getElementById('login-email');
+        const resetMessage = document.getElementById('reset-message');
+
+        function enterResetMode() {
+            if (loginSubmitBtn) loginSubmitBtn.style.display = 'none';
+            if (resetSubmitBtn) resetSubmitBtn.style.display = '';
+            if (resetHint) resetHint.style.display = '';
+            if (loginPasswordGroup) loginPasswordGroup.style.display = 'none';
+            if (resetLink) resetLink.style.display = 'none';
+            if (backToLoginLink) backToLoginLink.style.display = '';
+            if (loginEmailLabel) loginEmailLabel.textContent = 'Имя пользователя или Email';
+            if (loginEmailInput) {
+                loginEmailInput.type = 'text';
+                loginEmailInput.placeholder = 'username или email';
+                loginEmailInput.removeAttribute('required');
+            }
+            const loginPassword = document.getElementById('login-password');
+            if (loginPassword) loginPassword.removeAttribute('required');
+            if (resetMessage) resetMessage.style.display = 'none';
+        }
+
+        function exitResetMode() {
+            if (loginSubmitBtn) loginSubmitBtn.style.display = '';
+            if (resetSubmitBtn) resetSubmitBtn.style.display = 'none';
+            if (resetHint) resetHint.style.display = 'none';
+            if (loginPasswordGroup) loginPasswordGroup.style.display = '';
+            if (resetLink) resetLink.style.display = '';
+            if (backToLoginLink) backToLoginLink.style.display = 'none';
+            if (loginEmailLabel) loginEmailLabel.textContent = 'Email / имя пользователя';
+            if (loginEmailInput) {
+                loginEmailInput.type = 'text';
+                loginEmailInput.placeholder = 'your@email.com или имя пользователя';
+                loginEmailInput.setAttribute('required', '');
+            }
+            const loginPassword = document.getElementById('login-password');
+            if (loginPassword) loginPassword.setAttribute('required', '');
+            if (resetMessage) resetMessage.style.display = 'none';
+        }
+
+        if (resetLink) {
+            resetLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                enterResetMode();
+            });
+        }
+
+        if (backToLoginLink) {
+            backToLoginLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                exitResetMode();
+            });
+        }
+
+        if (resetSubmitBtn) {
+            resetSubmitBtn.addEventListener('click', async () => {
+                const loginVal = loginEmailInput ? loginEmailInput.value.trim() : '';
+                if (!loginVal) {
+                    showToast('Введите имя пользователя или email', 'error');
+                    return;
+                }
+                const dbSelect = document.getElementById('auth-db-select');
+                const customInput = document.getElementById('auth-db-custom');
+                let selectedDb = dbSelect ? dbSelect.value : 'my';
+                if (selectedDb === '__other__') {
+                    selectedDb = customInput ? customInput.value.trim() : '';
+                    if (!selectedDb) {
+                        showToast('Введите имя базы данных', 'error');
+                        return;
+                    }
+                }
+                resetSubmitBtn.disabled = true;
+                try {
+                    const url = `auth?JSON&reset&db=${encodeURIComponent(selectedDb)}&login=${encodeURIComponent(loginVal)}`;
+                    const response = await fetch(url);
+                    const text = await response.text();
+                    let data = null;
+                    try { data = JSON.parse(text); } catch (e) { data = null; }
+                    if (resetMessage) {
+                        resetMessage.style.display = '';
+                        if (data === null) {
+                            resetMessage.style.background = 'var(--bg-secondary)';
+                            resetMessage.style.color = 'var(--text-primary)';
+                            resetMessage.textContent = text;
+                        } else {
+                            const msg = (data.message || '').toUpperCase();
+                            const isError = msg.includes('WRONG') || msg.includes('ERROR');
+                            if (!isError) {
+                                resetMessage.style.background = 'var(--bg-secondary)';
+                                resetMessage.style.color = 'var(--text-primary)';
+                                resetMessage.textContent = data.details || data.message || text;
+                            } else {
+                                resetMessage.style.background = 'var(--bg-secondary)';
+                                resetMessage.style.color = 'var(--error-color, #ef4444)';
+                                resetMessage.textContent = Object.entries(data).map(([k, v]) => `${k}: ${v}`).join(', ');
+                            }
+                        }
+                    }
+                } catch (err) {
+                    if (resetMessage) {
+                        resetMessage.style.display = '';
+                        resetMessage.style.color = 'var(--error-color, #ef4444)';
+                        resetMessage.textContent = err.message || 'Ошибка при сбросе пароля';
+                    }
+                } finally {
+                    resetSubmitBtn.disabled = false;
+                }
+            });
+        }
+
         // Register form
         const registerForm = document.getElementById('register-form');
         if (registerForm) {
