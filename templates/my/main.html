@@ -176,6 +176,7 @@
             <script>
             (function() {
                 var USERNAME_REGEX = /^[a-zA-Z]([a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,32}$/;
+                var savedUsername = ''; // tracks the last successfully saved (or loaded) username
 
                 function isValidUsername(val) {
                     return USERNAME_REGEX.test(val);
@@ -259,6 +260,7 @@
 
                             // Success
                             originalUsername = val;
+                            savedUsername = val;
                             usernameInput.value = val;
                             updateUsernameUI();
                             if (typeof showToast === 'function') showToast('Аккаунт сохранен', 'success');
@@ -271,13 +273,12 @@
                         }
                     });
 
-                    // Restrict public profile checkbox if account is not valid
+                    // Restrict public profile checkbox if account is not saved with valid format
                     publicCheckbox.addEventListener('click', function(e) {
-                        var currentVal = usernameInput.value;
-                        if (!isValidUsername(currentVal)) {
+                        if (!isValidUsername(savedUsername)) {
                             e.preventDefault();
                             publicCheckbox.checked = false;
-                            usernameError.textContent = 'Сначала укажите Аккаунт в правильном формате, чтобы включить публичный профиль';
+                            usernameError.textContent = 'Сначала сохраните Аккаунт в правильном формате, чтобы включить публичный профиль';
                             usernameError.style.display = '';
                             usernameInput.focus();
                             return false;
@@ -300,12 +301,13 @@
                         if (usernameInput && ctrl.userData) {
                             var uname = ctrl.userData.UserName || '';
                             usernameInput.value = uname;
-                            // If already valid, make it readonly
+                            // If already valid, mark as saved and make it readonly
                             if (USERNAME_REGEX.test(uname)) {
+                                savedUsername = uname;
                                 usernameInput.readOnly = true;
+                                usernameInput.disabled = true;
                                 usernameInput.title = 'Аккаунт уже задан и не может быть изменён';
-                                usernameInput.style.opacity = '0.7';
-                                usernameInput.style.cursor = 'not-allowed';
+                                usernameInput.classList.add('profile-email-disabled');
                                 var saveBtn = document.getElementById('save-username-btn');
                                 if (saveBtn) saveBtn.style.display = 'none';
                                 var hint = document.getElementById('profile-username-hint');
