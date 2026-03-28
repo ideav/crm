@@ -687,8 +687,7 @@ class App {
                             const msg = (data.message || '').toUpperCase();
                             const isError = msg.includes('WRONG') || msg.includes('ERROR');
                             if (!isError) {
-                                resetMessage.style.background = 'var(--bg-secondary)';
-                                resetMessage.style.color = 'var(--text-primary)';
+                                resetMessage.className = 'success-message';
                                 resetMessage.textContent = data.details || data.message || text;
                             } else {
                                 resetMessage.style.background = 'var(--bg-secondary)';
