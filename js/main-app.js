@@ -1514,7 +1514,7 @@ class MainAppController {
         // Update navbar-workspace with active menu item name
         const navbarWorkspace = document.querySelector('.navbar-workspace');
         if (navbarWorkspace && activeMenuName) {
-            navbarWorkspace.textContent = activeMenuName;
+            navbarWorkspace.textContent = activeMenuName.length > 32 ? activeMenuName.slice(0, 32) + '...' : activeMenuName;
         }
     }
 

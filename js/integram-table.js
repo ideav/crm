@@ -8732,8 +8732,9 @@ class IntegramTable{
             const prevWorkspaceText = navbarWorkspace ? navbarWorkspace.textContent : null;
             const prevDocTitle = document.title;
             const objectValue = firstColumnValue || typeName;
-            if (navbarWorkspace) navbarWorkspace.textContent = objectValue;
-            document.title = objectValue;
+            const truncatedValue = objectValue && objectValue.length > 32 ? objectValue.slice(0, 32) + '...' : objectValue;
+            if (navbarWorkspace) navbarWorkspace.textContent = truncatedValue;
+            document.title = truncatedValue;
             const recordId = recordData && recordData.obj ? recordData.obj.id : null;
             // Issue #616: For create mode, use F_U from URL as parent when F_U > 1
             const defaultParentId = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
