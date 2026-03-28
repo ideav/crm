@@ -582,8 +582,7 @@ class App {
                     if (this._postLoginUri) {
                         window.location.href = window.location.origin + this._postLoginUri;
                     } else {
-                        this.hideAuthPanel();
-                        this.auth.init();
+                        window.location.href = window.location.origin + '/' + selectedDb;
                     }
                 } else {
                     showToast(result.message, 'error');
