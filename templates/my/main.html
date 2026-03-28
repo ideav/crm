@@ -238,6 +238,7 @@
 
                             var fd = new FormData();
                             fd.append('name', val);
+                            fd.append('confirmed', '1');
                             if (typeof xsrf !== 'undefined') fd.append('_xsrf', xsrf);
 
                             var response = await fetch(url, {
