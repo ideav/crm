@@ -409,6 +409,14 @@
     border-top: 1px solid var(--border-color);
 }
 
+.plan-change-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
 .plan-select {
     padding: 0.5rem 1rem;
     border: 1px solid var(--input-border);
@@ -416,7 +424,6 @@
     font-size: 0.95rem;
     background-color: var(--input-bg);
     color: var(--text-primary);
-    margin-right: 0.75rem;
     cursor: pointer;
 }
 

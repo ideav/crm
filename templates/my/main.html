@@ -11,6 +11,7 @@
 <!-- End: noAdmin1 -->
     <script>
         var db='{_global_.z}',xsrf='{_global_.xsrf}',id='{_global_.id}',token='{_global_.token}',name='{_global_.user}',uid='{_global_.user_id}',action='{_global_.action}',menu=[];
+        var paidThisMonth=parseFloat('0<!-- Begin:paidThisMonth -->{Payment}<!-- End:paidThisMonth -->');
     </script>
 <!-- Begin: isAdmin1 --><!--{Role}-->
     <link rel="stylesheet" href="/css/bootstrap4.5.2.min.css">
@@ -361,12 +362,15 @@
                         </div>
                         <div class="plan-change">
                             <p>Для смены плана требуется иметь достаточное количество средств на счете. Пополнить счет вы можете здесь, выбрав нужный план:</p>
-                            <select id="plan-select" class="plan-select">
-                                <option value="free">Free</option>
-                                <option value="startup">Startup</option>
-                                <option value="scalable">Scalable</option>
-                            </select>
-                            <button type="button" id="change-plan-btn" class="btn-secondary">Сменить план</button>
+                            <div class="plan-change-row">
+                                <select id="plan-select" class="plan-select" onchange="window._cabinetController && window._cabinetController.planSelected(this.value)">
+                                    <option value="1146">Free</option>
+                                    <option value="1147" data-price="650">Startup — 650 руб./мес.</option>
+                                    <option value="1148" data-price="1950">Scalable — 1950 руб./мес.</option>
+                                </select>
+                                <button type="button" id="topup-btn" class="btn-primary plan-action-btn" style="display:none">Пополнить на <span id="topup-amount"></span></button>
+                                <button type="button" id="change-plan-btn" class="btn-primary plan-action-btn" style="display:none">Перейти за <span id="change-plan-amount"></span></button>
+                            </div>
                         </div>
                     </div>
                 </div>

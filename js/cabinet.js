@@ -255,6 +255,9 @@ class CabinetController {
         // Populate profile section
         this.populateProfile();
 
+        // Populate tariff section
+        this.populateTariff();
+
         // Populate balance section
         this.populateBalance();
 
@@ -343,17 +346,6 @@ class CabinetController {
             }
         }
 
-        // Tariff info
-        const currentPlan = document.getElementById('current-plan');
-        if (currentPlan) {
-            currentPlan.textContent = this.userData.Plan || 'Free';
-        }
-
-        const nextChargeDate = document.getElementById('next-charge-date');
-        if (nextChargeDate && this.userData['Plan date']) {
-            nextChargeDate.textContent = this.formatDate(this.userData['Plan date']);
-        }
-
         // Usage info
         this.updateUsageInfo();
     }
@@ -393,6 +385,150 @@ class CabinetController {
         const balanceAmount = document.getElementById('balance-amount');
         if (balanceAmount) {
             balanceAmount.textContent = this.userData.Balance || '0';
+        }
+        // Load transaction history lazily when balance section is visible
+        this.loadTransactionHistory();
+    }
+
+    async loadTransactionHistory() {
+        const tbody = document.getElementById('balance-history-body');
+        if (!tbody) return;
+
+        try {
+            const host = this.apiConfig.host;
+            const url = 'https://' + host + '/my/report/1095?JSON_KV';
+            const resp = await fetch(url, { method: 'GET', credentials: 'include' });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+            const data = await resp.json();
+            if (!Array.isArray(data) || data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" class="empty-message">Нет операций</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = data.map(row => {
+                const paid = this.escapeHtml(row.Paid || '');
+                const payment = this.escapeHtml(row.Payment || '');
+                const notes = this.escapeHtml(row.Notes || '');
+                return '<tr><td>' + paid + '</td><td>' + payment + '</td><td>' + notes + '</td></tr>';
+            }).join('');
+        } catch (err) {
+            console.error('[cabinet] loadTransactionHistory error:', err);
+            tbody.innerHTML = '<tr><td colspan="3" class="empty-message">Нет операций</td></tr>';
+        }
+    }
+
+    populateTariff() {
+        if (!this.userData) return;
+
+        // Store plan state for planSelected logic
+        this.planID = parseInt(this.userData.PlanID || '0', 10) || 1146;
+        this.balance = parseFloat(this.userData.Balance || '0') || 0;
+
+        // Current plan name
+        const currentPlan = document.getElementById('current-plan');
+        if (currentPlan) {
+            currentPlan.textContent = this.userData.Plan || 'Free';
+        }
+
+        // Next billing date
+        const nextChargeDate = document.getElementById('next-charge-date');
+        if (nextChargeDate) {
+            nextChargeDate.textContent = this.userData['Plan date']
+                ? this.formatDate(this.userData['Plan date'])
+                : '';
+        }
+
+        // Select current plan in dropdown
+        const planSelect = document.getElementById('plan-select');
+        if (planSelect) {
+            const opt = planSelect.querySelector('option[value="' + this.planID + '"]');
+            if (opt) opt.selected = true;
+            // Hide action buttons initially
+            const topupBtn = document.getElementById('topup-btn');
+            const changePlanBtn = document.getElementById('change-plan-btn');
+            if (topupBtn) topupBtn.style.display = 'none';
+            if (changePlanBtn) changePlanBtn.style.display = 'none';
+        }
+    }
+
+    planSelected(v) {
+        const topupBtn = document.getElementById('topup-btn');
+        const changePlanBtn = document.getElementById('change-plan-btn');
+        const topupAmount = document.getElementById('topup-amount');
+        const changePlanAmount = document.getElementById('change-plan-amount');
+
+        if (topupBtn) topupBtn.style.display = 'none';
+        if (changePlanBtn) changePlanBtn.style.display = 'none';
+
+        const selectedId = parseInt(v, 10);
+        if (selectedId === this.planID) return;
+
+        if (selectedId < this.planID) {
+            // Downgrade: free
+            if (changePlanAmount) changePlanAmount.textContent = '0 руб.';
+            if (changePlanBtn) changePlanBtn.style.display = '';
+        } else {
+            // Upgrade: check if balance is sufficient
+            const planSelect = document.getElementById('plan-select');
+            const opt = planSelect && planSelect.querySelector('option[value="' + v + '"]');
+            const price = opt ? parseFloat(opt.dataset.price || '0') : 0;
+            const paidThisMonth = typeof window.paidThisMonth !== 'undefined' ? window.paidThisMonth : 0;
+            let toPay = price - this.balance - paidThisMonth;
+            if (toPay > 0) {
+                toPay = parseFloat(toPay.toFixed(2));
+                if (topupAmount) topupAmount.textContent = toPay + ' руб.';
+                if (topupBtn) {
+                    topupBtn.dataset.toPay = toPay;
+                    topupBtn.style.display = '';
+                }
+            } else {
+                toPay = Math.max(0, parseFloat((price - paidThisMonth).toFixed(2)));
+                if (changePlanAmount) changePlanAmount.textContent = toPay + ' руб.';
+                if (changePlanBtn) changePlanBtn.style.display = '';
+            }
+        }
+    }
+
+    async topUp() {
+        const topupBtn = document.getElementById('topup-btn');
+        const toPay = topupBtn && topupBtn.dataset.toPay;
+        if (!toPay) return;
+
+        if (topupBtn) topupBtn.disabled = true;
+        try {
+            const host = this.apiConfig.host;
+            // Step 1: create payment order
+            const orderUrl = 'https://' + host + '/my/report/2192?JSON&confirmed=1&amount=' + encodeURIComponent(toPay);
+            const orderResp = await fetch(orderUrl, { method: 'POST', credentials: 'include', body: new URLSearchParams({ _xsrf: xsrf }) });
+            if (!orderResp.ok) throw new Error('HTTP ' + orderResp.status);
+
+            // Step 2: get payment form
+            const formUrl = 'https://' + host + '/my/report/1905?JSON';
+            const formResp = await fetch(formUrl, { method: 'GET', credentials: 'include' });
+            if (!formResp.ok) throw new Error('HTTP ' + formResp.status);
+
+            const formData = await formResp.json();
+            if (Array.isArray(formData) && formData.length > 0 && formData[0].Pay) {
+                // Inject payment form into tariff section and submit
+                const section = document.getElementById('section-tariff');
+                if (section) {
+                    const tmp = document.createElement('div');
+                    tmp.innerHTML = formData[0].Pay;
+                    const form = tmp.querySelector('form');
+                    if (form) {
+                        section.appendChild(form);
+                        form.submit();
+                        return;
+                    }
+                }
+            }
+            showToast('Ошибка оплаты, обратитесь в поддержку', 'error');
+        } catch (err) {
+            console.error('[cabinet] topUp error:', err);
+            showToast('Ошибка оплаты, обратитесь в поддержку', 'error');
+        } finally {
+            if (topupBtn) topupBtn.disabled = false;
         }
     }
 
@@ -679,16 +815,25 @@ class CabinetController {
             photoInput.addEventListener('change', (e) => this.handlePhotoUpload(e));
         }
 
+        // Top up button
+        const topupBtn = document.getElementById('topup-btn');
+        if (topupBtn) {
+            topupBtn.addEventListener('click', () => this.topUp());
+        }
+
         // Change plan button
         const changePlanBtn = document.getElementById('change-plan-btn');
         if (changePlanBtn) {
             changePlanBtn.addEventListener('click', () => this.changePlan());
         }
 
-        // Add funds button
+        // Add funds button (balance section shortcut — navigates to tariff)
         const addFundsBtn = document.getElementById('add-funds-btn');
         if (addFundsBtn) {
-            addFundsBtn.addEventListener('click', () => this.addFunds());
+            addFundsBtn.addEventListener('click', () => {
+                this.showSection('tariff');
+                this.updateUrlHash('tariff');
+            });
         }
 
         // Convert bonuses button
@@ -792,17 +937,42 @@ class CabinetController {
         if (saveBtn) saveBtn.style.display = '';
     }
 
-    changePlan() {
+    async changePlan() {
         const planSelect = document.getElementById('plan-select');
-        const selectedPlan = planSelect?.value || 'free';
+        const planID = planSelect ? planSelect.value : null;
+        if (!planID) return;
 
-        // TODO: Implement plan change API call
-        showToast('Для смены плана обратитесь в поддержку', 'info');
-    }
+        const changePlanBtn = document.getElementById('change-plan-btn');
+        const changePlanAmount = document.getElementById('change-plan-amount');
+        const amountText = changePlanAmount ? changePlanAmount.textContent : '';
+        if (changePlanBtn) changePlanBtn.disabled = true;
 
-    addFunds() {
-        // TODO: Implement add funds functionality
-        showToast('Функция пополнения счета будет доступна позже', 'info');
+        try {
+            const host = this.apiConfig.host;
+            const url = 'https://' + host + '/my/report/1278?JSON&confirmed=1&plan=' + encodeURIComponent(planID);
+            const resp = await fetch(url, {
+                method: 'POST',
+                credentials: 'include',
+                body: new URLSearchParams({ _xsrf: xsrf })
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const data = await resp.json();
+
+            if (Array.isArray(data) && data.length > 0 && data[0]) {
+                showToast('Тарифный план изменён', 'success');
+                const paid = parseFloat(amountText) || 0;
+                window.paidThisMonth = (window.paidThisMonth || 0) + paid;
+                await this.loadUserData();
+                this.loadTransactionHistory();
+            } else {
+                showToast('Произошла ошибка, обратитесь в поддержку', 'error');
+            }
+        } catch (err) {
+            console.error('[cabinet] changePlan error:', err);
+            showToast('Произошла ошибка, обратитесь в поддержку', 'error');
+        } finally {
+            if (changePlanBtn) changePlanBtn.disabled = false;
+        }
     }
 
     convertBonuses() {
@@ -812,8 +982,22 @@ class CabinetController {
             return;
         }
 
-        // TODO: Implement bonus conversion API call
-        showToast('Функция конвертации бонусов будет доступна позже', 'info');
+        const btn = document.getElementById('convert-bonuses-btn');
+        if (btn) btn.disabled = true;
+        const host = this.apiConfig.host;
+        const url = 'https://' + host + '/my/report/1042?JSON&confirmed=1';
+        fetch(url, { method: 'POST', credentials: 'include', body: new URLSearchParams({ _xsrf: xsrf }) })
+            .then(resp => {
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                showToast('Бонусы сконвертированы в баланс', 'success');
+                return this.loadUserData();
+            })
+            .then(() => this.loadTransactionHistory())
+            .catch(err => {
+                console.error('[cabinet] convertBonuses error:', err);
+                showToast('Ошибка конвертации бонусов, обратитесь в поддержку', 'error');
+            })
+            .finally(() => { if (btn) btn.disabled = false; });
     }
 
     withdrawReferrals() {
