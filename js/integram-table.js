@@ -9322,6 +9322,14 @@ class IntegramTable{
                 document.body.appendChild(overlay);
                 document.body.appendChild(modal);
 
+                // Save and update navbar-workspace + document.title with subordinate table name (issue #1219)
+                const navbarWorkspace = document.querySelector('.navbar-workspace');
+                const prevWorkspaceText = navbarWorkspace ? navbarWorkspace.textContent : null;
+                const prevDocTitle = document.title;
+                const truncatedTypeName = typeName && typeName.length > 32 ? typeName.slice(0, 32) + '...' : typeName;
+                if (navbarWorkspace) navbarWorkspace.textContent = truncatedTypeName;
+                document.title = truncatedTypeName;
+
                 // Load subordinate table data
                 const container = modal.querySelector('.subordinate-table-container');
                 await this.loadSubordinateTable(container, arrId, parentRecordId, null);
@@ -9339,6 +9347,9 @@ class IntegramTable{
                     overlay.remove();
                     window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
                     this.cellSubordinateContext = null;
+                    // Restore navbar-workspace and document.title (issue #1219)
+                    if (navbarWorkspace && prevWorkspaceText !== null) navbarWorkspace.textContent = prevWorkspaceText;
+                    document.title = prevDocTitle;
                 };
 
                 modal.querySelector('.subordinate-modal-close').addEventListener('click', closeModal);
