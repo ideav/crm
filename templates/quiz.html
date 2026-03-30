@@ -98,15 +98,25 @@ if(parseInt(id) > 0){
     text-align: left;
     max-width: 1024px;
 }
+.forms-title {
+    font-size: 20px;
+    font-weight: 500;
+    color: var(--md-text-primary);
+    letter-spacing: 0.15px;
+    margin: 0;
+}
 </style>
 <script src="/js/jquery3.1.1.min.js"></script>
 <script src="/js/jquery-ui1.12.1.min.js"></script>
 <script src="/js/js.js"></script>
 
 <div id="messages" class="msgs w-100" onclick="this.innerHTML=''" style="position:fixed; top:50px;"></div>
-<div class="select-dash" id="dashlist" style="display:none">
-    <div class="pl-1 pl-sm-3 pt-3"><p>Выберите опрос или создайте новый:</p></div>
-    <div class="pl-1 pl-sm-3 dict-list" id="bi">
+<div class="pl-1 pl-sm-3 select-dash" id="dashlist" style="display:none">
+	<div class="forms-header">
+        <h1 class="forms-title" id="formTitle">Конструктор форм</h1>
+    </div>
+	<div class="pt-3"><p>Выберите опрос или создайте новый:</p></div>
+    <div class="dict-list" id="bi">
         <a class="dict-href"  id=":id:" onclick="selectQuiz(this.id)">
             <div class="dash-bar">
                 <span class="google-visualization-charteditor-category-label">:name:</span>
