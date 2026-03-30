@@ -163,11 +163,15 @@ class MainAppController {
             sidebar.appendChild(resizeHandle);
         }
 
-        // Restore width from cookie
+        // Restore width from cookie without animation
         const cookieName = 'sidebarWidth_' + (typeof db !== 'undefined' ? db : 'default');
         const savedWidth = this.getCookie(cookieName);
         if (savedWidth && !sidebar.classList.contains('collapsed')) {
+            sidebar.style.transition = 'none';
             sidebar.style.width = savedWidth + 'px';
+            // Force reflow so the width is applied before re-enabling transitions
+            sidebar.offsetWidth; // eslint-disable-line no-unused-expressions
+            sidebar.style.transition = '';
         }
 
         let isResizing = false;
