@@ -505,7 +505,7 @@ class CabinetController {
             if (!orderResp.ok) throw new Error('HTTP ' + orderResp.status);
 
             // Step 2: get payment form
-            const formUrl = 'https://' + host + '/my/report/1905?JSON';
+            const formUrl = 'https://' + host + '/my/report/1905?JSON_KV';
             const formResp = await fetch(formUrl, { method: 'GET', credentials: 'include' });
             if (!formResp.ok) throw new Error('HTTP ' + formResp.status);
 
