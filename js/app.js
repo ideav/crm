@@ -343,6 +343,12 @@ class AuthManager {
 
             if (!response.ok) {
                 if (response.status === 401) {
+                    try {
+                        const errData = await response.json();
+                        if (errData.error) {
+                            return { success: false, message: errData.error };
+                        }
+                    } catch (e) { /* ignore parse errors */ }
                     return { success: false, message: 'Неверное имя пользователя или пароль' };
                 }
                 throw new Error('HTTP ' + response.status);
