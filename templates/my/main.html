@@ -82,6 +82,11 @@
                         <span class="user-menu-value" id="theme-value">Темная</span>
                     </button>
                     <div class="user-menu-divider"></div>
+                    <button id="change-password-btn" class="user-menu-item" type="button" onclick="$('.cp-form').css('display','table');$('.ch-toggle').show();$('.wait-toggle').hide();">
+                        <span class="user-menu-icon"><i class="pi pi-lock"></i></span>
+                        <span>Сменить пароль</span>
+                    </button>
+                    <div class="user-menu-divider"></div>
                     <button id="logout-everywhere-btn" class="user-menu-item user-menu-item-danger" type="button" title="Выйти на всех устройствах, где совершен вход">
                         <span class="user-menu-icon"><i class="pi pi-sign-out"></i></span>
                         <span>Выйти везде</span>
@@ -797,14 +802,66 @@
     localize();
     function exitLogin(){
         document.cookie='{_global_.z}=;Path=/';
-        document.location.href='/'; 
+        document.location.href='/';
     }
     function toggleLocale(){
         document.cookie='{_global_.z}_locale='+(locale==='[EN]'?'RU':'EN')+';Path=/';
         location.reload();
     }
+    function changePwd(){
+        if($('#old-pwd').val()===''||$('#new-pwd').val()===''||$('#new-again').val()==='')
+            return changeMsg('alert-danger','Заполните все поля');
+        $('.ch-toggle,.wait-toggle').toggle();
+        var obj=new XMLHttpRequest();
+        obj.open('POST','/'+db+'/auth?JSON',true);
+        obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+        obj.onload=function(e){
+            $('.ch-toggle,.wait-toggle').toggle();
+            var json;
+            try{json=JSON.parse(this.responseText);}
+            catch(e){console.log(e);$('#pwdchangemsg').html(this.responseText);}
+            if(json&&json.msg){
+                if(json.msg.indexOf('[err')===-1){
+                    changeMsg('alert-success',json.msg);
+                    $('#old-pwd,#new-pwd,#new-again').val('');
+                }else
+                    changeMsg('alert-danger',json.msg.replace(/ ?\[.+\]/,''));
+                if(json.token)token=json.token;
+                if(json.xsrf)xsrf=json.xsrf;
+            }else
+                changeMsg('alert-danger','Неверный пароль');
+            obj.abort();
+        };
+        obj.send('change=1&login='+name+'&pwd='+encodeURIComponent($('#old-pwd').val())+'&npw1='+encodeURIComponent($('#new-pwd').val())+'&npw2='+encodeURIComponent($('#new-again').val()));
+    }
+    function changeMsg(cl,msg){
+        $('#pwdchangemsg').removeClass('alert-danger').removeClass('alert-success').addClass(cl).html(msg).show().delay(4500).slideUp(400);
+    }
     </script>
 <!-- End: isAdmin -->
+
+    <!-- Change Password Modal -->
+    <div class="cp-form" style="display: none; position: fixed; top: 0; left: 0; height: 100%; width: 100%; z-index: 9999; background: rgba(0,0,0,.4);" onclick="$(this).hide();">
+        <div style="display: flex; align-items: center; justify-content: center; height: 100%;">
+            <div style="border-radius: 8px; background-color: #fff; max-width: 360px; width: 100%; padding: 1.5rem; box-shadow: 0 4px 24px rgba(0,0,0,.18);" onclick="event.stopPropagation();" onkeyup="if(event.keyCode===13)changePwd()">
+                <div class="w-100 text-center mb-3">
+                    <h5 style="margin:0 0 1rem;">Смена пароля</h5>
+                </div>
+                <div id="pwdchangemsg" class="alert w-100" style="display: none;"></div>
+                <label for="old-pwd" style="margin-bottom:0.25rem; display:block;">Действующий пароль</label>
+                <input type="password" id="old-pwd" class="form-control" style="border: 1px solid lightgray; margin-bottom: 0.75rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px;">
+                <label for="new-pwd" style="margin-bottom:0.25rem; display:block;">Новый пароль</label>
+                <input type="password" id="new-pwd" class="form-control" style="border: 1px solid lightgray; margin-bottom: 0.75rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px;">
+                <label for="new-again" style="margin-bottom:0.25rem; display:block;">Повторите пароль</label>
+                <input type="password" id="new-again" class="form-control" style="border: 1px solid lightgray; margin-bottom: 1rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px;">
+                <div style="text-align:center; display:none;" class="wait-toggle"><img src="/i/ajax.gif"></div>
+                <div style="display: flex; gap: 0.5rem;" class="ch-toggle">
+                    <button style="flex:1; padding:0.5rem; background:#3b82f6; color:#fff; border:none; border-radius:6px; cursor:pointer;" type="button" onclick="changePwd()">Сменить</button>
+                    <button style="flex:1; padding:0.5rem; background:#fff; color:#333; border:1px solid #ccc; border-radius:6px; cursor:pointer;" type="button" onclick="$('.cp-form').hide();">Отменить</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Cookie Consent Banner -->
     <div id="cookie-consent">
