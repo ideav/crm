@@ -1324,6 +1324,15 @@ class IntegramTable{
             `;
 
             this.container.innerHTML = html;
+
+            // Update document.title and .navbar-workspace with table title (issue #1223)
+            if (this.options.title && !window._integramModalDepth) {
+                const navbarWorkspace = document.querySelector('.navbar-workspace');
+                const truncatedTitle = this.options.title.length > 32 ? this.options.title.slice(0, 32) + '...' : this.options.title;
+                if (navbarWorkspace) navbarWorkspace.textContent = truncatedTitle;
+                document.title = truncatedTitle;
+            }
+
             this.attachEventListeners();
             this.attachScrollListener();
             this.attachStickyScrollbar();
