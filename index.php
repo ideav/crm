@@ -3659,7 +3659,6 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     								curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
     								curl_setopt($ch, CURLOPT_VERBOSE, true);
                                     curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
-                                    curl_setopt($ch, CURLOPT_CAINFO, "/var/www/isboxon1/data/www/etc/ssl/certs/cacert.pem");
                                     #curl_setopt($ch, CURLOPT_CAPATH, "/var/www/isboxon1/data/www/etc/ssl/certs/cacert.pem");
                                     #curl_setopt($ch, CURLOPT_FAILONERROR, true);
     								curl_setopt($ch, CURLOPT_URL, $val);
