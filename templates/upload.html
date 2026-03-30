@@ -1044,3 +1044,88 @@ localize();
 </script>
 <script src="/js/bootstrap4.5.2.min.js"></script>
 <script src="/js/main.js"></script>
+<!-- Workspace hints -->
+<div id="upload-hints-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.5); z-index:2000; align-items:center; justify-content:center;">
+    <div style="background:var(--card-bg,#fff); border-radius:12px; padding:1.5rem; width:90%; max-width:440px; box-shadow:0 8px 32px rgba(0,0,0,0.2); animation:slideIn 0.15s ease-out;">
+        <div id="upload-hint-1" style="display:none;">
+            <h3 style="margin:0 0 0.75rem; font-size:1.1rem; color:var(--text-primary);">Выбор файла и параметры импорта</h3>
+            <p style="color:var(--text-secondary); font-size:0.95rem; line-height:1.5; margin:0 0 1rem;">Выберите таблицу из списка, затем вставьте текст данных или загрузите файл (JSON, CSV, TXT). Нажмите «Настроить», чтобы задать разделитель полей, кодировку и указать, содержит ли первая строка заголовки.</p>
+            <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+                <button onclick="uploadHintClose()" style="padding:0.4rem 1rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer;">Закрыть</button>
+                <button onclick="uploadHintShow(2)" style="padding:0.4rem 1rem; border:none; border-radius:6px; background:var(--button-primary,#0d6efd); color:#fff; cursor:pointer;">Далее →</button>
+            </div>
+        </div>
+        <div id="upload-hint-2" style="display:none;">
+            <h3 style="margin:0 0 0.75rem; font-size:1.1rem; color:var(--text-primary);">Сопоставление полей файла с колонками</h3>
+            <p style="color:var(--text-secondary); font-size:0.95rem; line-height:1.5; margin:0 0 1rem;">После нажатия «Проверить» появится список колонок. Перетащите их в нужном порядке, чтобы они совпадали с колонками вашего файла. При необходимости задайте формулы для вычисляемых полей.</p>
+            <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+                <button onclick="uploadHintShow(1)" style="padding:0.4rem 1rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer;">← Назад</button>
+                <button onclick="uploadHintClose()" style="padding:0.4rem 1rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer;">Закрыть</button>
+                <button onclick="uploadHintShow(3)" style="padding:0.4rem 1rem; border:none; border-radius:6px; background:var(--button-primary,#0d6efd); color:#fff; cursor:pointer;">Далее →</button>
+            </div>
+        </div>
+        <div id="upload-hint-3" style="display:none;">
+            <h3 style="margin:0 0 0.75rem; font-size:1.1rem; color:var(--text-primary);">Запуск загрузки и проверка результата</h3>
+            <p style="color:var(--text-secondary); font-size:0.95rem; line-height:1.5; margin:0 0 1rem;">Нажмите «Загрузить» и подтвердите операцию. По завершении откройте «Статистику» — там отображается количество загруженных, пропущенных и ошибочных записей. При наличии ошибок они будут показаны в отдельном блоке.</p>
+            <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+                <button onclick="uploadHintShow(2)" style="padding:0.4rem 1rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer;">← Назад</button>
+                <button onclick="uploadHintClose()" style="padding:0.4rem 1rem; border:none; border-radius:6px; background:var(--button-primary,#0d6efd); color:#fff; cursor:pointer;">Понятно</button>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+(function() {
+    function getCookie(name) {
+        var prefix = name + '=';
+        var parts = document.cookie.split(';');
+        for (var i = 0; i < parts.length; i++) {
+            var part = parts[i].trim();
+            if (part.indexOf(prefix) === 0) {
+                return decodeURIComponent(part.substring(prefix.length));
+            }
+        }
+        return null;
+    }
+    function setCookie(name, value, days) {
+        var expires = '';
+        if (days) {
+            var d = new Date();
+            d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
+            expires = '; expires=' + d.toUTCString();
+        }
+        document.cookie = name + '=' + encodeURIComponent(value) + expires + '; path=/';
+    }
+
+    var WORKSPACE = 'upload';
+
+    window.uploadHintShow = function(n) {
+        [1, 2, 3].forEach(function(i) {
+            var el = document.getElementById('upload-hint-' + i);
+            if (el) el.style.display = (i === n) ? '' : 'none';
+        });
+        var overlay = document.getElementById('upload-hints-overlay');
+        if (overlay) overlay.style.display = 'flex';
+    };
+
+    window.uploadHintClose = function() {
+        var overlay = document.getElementById('upload-hints-overlay');
+        if (overlay) overlay.style.display = 'none';
+        var seen = getCookie('hints_seen_workspaces') || '';
+        var list = seen ? seen.split(',') : [];
+        if (list.indexOf(WORKSPACE) === -1) {
+            list.push(WORKSPACE);
+            setCookie('hints_seen_workspaces', list.join(','), 365);
+        }
+    };
+
+    document.addEventListener('DOMContentLoaded', function() {
+        var mode = getCookie('hints_mode');
+        if (mode === 'off') return;
+        var seen = getCookie('hints_seen_workspaces') || '';
+        var list = seen ? seen.split(',') : [];
+        if (list.indexOf(WORKSPACE) !== -1) return;
+        uploadHintShow(1);
+    });
+})();
+</script>
