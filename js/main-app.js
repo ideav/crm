@@ -167,11 +167,15 @@ class MainAppController {
         const cookieName = 'sidebarWidth_' + (typeof db !== 'undefined' ? db : 'default');
         const savedWidth = this.getCookie(cookieName);
         if (savedWidth && !sidebar.classList.contains('collapsed')) {
-            sidebar.style.transition = 'none';
             sidebar.style.width = savedWidth + 'px';
-            // Force reflow so the width is applied before re-enabling transitions
+        }
+
+        // Remove the init style that suppressed transitions during initial render
+        const initStyle = document.getElementById('sidebar-init-style');
+        if (initStyle) {
+            // Force reflow so the current width is committed before re-enabling transitions
             sidebar.offsetWidth; // eslint-disable-line no-unused-expressions
-            sidebar.style.transition = '';
+            initStyle.remove();
         }
 
         let isResizing = false;

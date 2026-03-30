@@ -23,6 +23,28 @@
             roleId = '{_global_.role_id}',
             action = '{_global_.action}';
     </script>
+    <script>
+        (function() {
+            var dbName = '{_global_.z}' || 'default';
+            var storageKey = 'appSidebarCollapsed_' + dbName;
+            var cookieName = 'sidebarWidth_' + dbName;
+            var isCollapsed = localStorage.getItem(storageKey) === 'true';
+            var savedWidth = null;
+            var match = document.cookie.match(new RegExp('(?:^|; )' + cookieName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+            if (match) savedWidth = decodeURIComponent(match[1]);
+            // Apply sidebar state via CSS before the DOM renders to prevent flash/jump
+            var cssRules = '.app-sidebar{transition:none!important;}';
+            if (isCollapsed) {
+                cssRules += '.app-sidebar{width:56px!important;}';
+            } else if (savedWidth) {
+                cssRules += '.app-sidebar{width:' + parseInt(savedWidth, 10) + 'px!important;}';
+            }
+            var el = document.createElement('style');
+            el.id = 'sidebar-init-style';
+            el.textContent = cssRules;
+            document.head.appendChild(el);
+        })();
+    </script>
 </head>
 <body>
     <!-- Navigation Bar -->
