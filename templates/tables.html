@@ -4,7 +4,7 @@
             <h1>Таблицы</h1>
             <div class="tables-actions">
                 <div class="search-box">
-                    <input type="text" id="tables-search" placeholder="Поиск таблиц..." class="search-input">
+                    <input type="text" id="tables-search" placeholder="Поиск таблиц..." class="search-input" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')">
                     <i class="search-icon pi pi-search"></i>
                 </div>
                 <button type="button" id="add-table-btn" class="btn-primary btn-small">
