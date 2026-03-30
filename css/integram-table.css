@@ -339,6 +339,28 @@
     transform: translateY(-50%) scale(0.95);
 }
 
+/* Quick add column header cell (issue #1230) */
+.add-column-header-cell {
+    width: 36px;
+    min-width: 36px;
+    text-align: center;
+    cursor: pointer;
+    color: var(--md-on-surface-variant, #666);
+    transition: var(--md-transition);
+    padding: 0 !important;
+}
+
+.add-column-header-cell:hover {
+    background: var(--md-primary-container, #e8f0fe);
+    color: var(--md-primary, #1a73e8);
+}
+
+.add-column-filter-cell {
+    width: 36px;
+    min-width: 36px;
+    padding: 0 !important;
+}
+
 /* Compact mode */
 .integram-table.compact th {
     padding: 8px 5px;
