@@ -1761,9 +1761,29 @@ class IntegramTable{
                     break;
                 case 'HTML':
                     return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
-                case 'BUTTON':
-                    displayValue = `<button class="btn btn-sm btn-primary"><i class="pi pi-play"></i></button>`;
+                case 'BUTTON': {
+                    const pathParts = window.location.pathname.split('/');
+                    const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+                    let recordId = null;
+                    if (this.rawObjectData && this.rawObjectData[rowIndex]) {
+                        recordId = this.rawObjectData[rowIndex].i;
+                    }
+                    const btnValue = value !== null && value !== undefined ? String(value) : '';
+                    let btnHref, btnTarget;
+                    if (btnValue.match(/^https?:\/\//i)) {
+                        btnHref = btnValue;
+                        btnTarget = recordId !== null ? String(recordId) : '_blank';
+                    } else if (btnValue) {
+                        btnHref = `/${dbName}/${btnValue.replace(/^\//, '')}`;
+                        btnTarget = '_blank';
+                    }
+                    if (btnHref) {
+                        displayValue = `<a href="${ btnHref }" target="${ btnTarget }" onclick="event.stopPropagation();"><button class="btn btn-sm btn-primary"><i class="pi pi-play"></i></button></a>`;
+                    } else {
+                        displayValue = `<button class="btn btn-sm btn-primary"><i class="pi pi-play"></i></button>`;
+                    }
                     return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle } style="text-align: center;">${ displayValue }</td>`;
+                }
             }
 
             let escapedValue;
