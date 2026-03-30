@@ -82,7 +82,7 @@
                         <span class="user-menu-value" id="theme-value">Темная</span>
                     </button>
                     <div class="user-menu-divider"></div>
-                    <button id="change-password-btn" class="user-menu-item" type="button" onclick="$('.cp-form').css('display','table');$('.ch-toggle').show();$('.wait-toggle').hide();">
+                    <button id="change-password-btn" class="user-menu-item" type="button" onclick="document.querySelector('.cp-form').style.display='block';document.querySelectorAll('.ch-toggle').forEach(function(el){el.style.display='';});document.querySelectorAll('.wait-toggle').forEach(function(el){el.style.display='none';});">
                         <span class="user-menu-icon"><i class="pi pi-lock"></i></span>
                         <span>Сменить пароль</span>
                     </button>
@@ -745,6 +745,49 @@
     </script>
     <script src="/js/app.js"></script>
     <script src="/js/cabinet.js"></script>
+    <script>
+    function changePwd(){
+        var oldPwd=document.getElementById('old-pwd').value;
+        var newPwd=document.getElementById('new-pwd').value;
+        var newAgain=document.getElementById('new-again').value;
+        if(oldPwd===''||newPwd===''||newAgain==='')
+            return changeMsg('alert-danger','Заполните все поля');
+        document.querySelectorAll('.ch-toggle,.wait-toggle').forEach(function(el){el.style.display=el.style.display==='none'?'':'none';});
+        var obj=new XMLHttpRequest();
+        obj.open('POST','/'+db+'/auth?JSON',true);
+        obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+        obj.onload=function(e){
+            document.querySelectorAll('.ch-toggle,.wait-toggle').forEach(function(el){el.style.display=el.style.display==='none'?'':'none';});
+            var json;
+            try{json=JSON.parse(this.responseText);}
+            catch(e){console.log(e);document.getElementById('pwdchangemsg').innerHTML=this.responseText;}
+            if(json&&json.msg){
+                if(json.msg.indexOf('[err')===-1){
+                    changeMsg('alert-success',json.msg);
+                    ['old-pwd','new-pwd','new-again'].forEach(function(id){document.getElementById(id).value='';});
+                }else
+                    changeMsg('alert-danger',json.msg.replace(/ ?\[.+\]/,''));
+                if(json.token)token=json.token;
+                if(json.xsrf)xsrf=json.xsrf;
+            }else
+                changeMsg('alert-danger','Неверный пароль');
+            obj.abort();
+        };
+        obj.send('change=1&login='+name+'&pwd='+encodeURIComponent(oldPwd)+'&npw1='+encodeURIComponent(newPwd)+'&npw2='+encodeURIComponent(newAgain));
+    }
+    function changeMsg(cl,msg){
+        var el=document.getElementById('pwdchangemsg');
+        el.classList.remove('alert-danger','alert-success');
+        el.classList.add(cl);
+        el.innerHTML=msg;
+        el.style.display='';
+        setTimeout(function(){
+            el.style.transition='opacity 0.4s';
+            el.style.opacity='0';
+            setTimeout(function(){el.style.display='none';el.style.opacity='';el.style.transition='';},400);
+        },4500);
+    }
+    </script>
 <!-- End: noAdmin -->
 <!-- Begin: isAdmin --><!--{Role}-->
     <nav id="nav" class="navbar navbar-expand-562 fixed-top dark navbar-fixed-top">
@@ -841,7 +884,7 @@
 <!-- End: isAdmin -->
 
     <!-- Change Password Modal -->
-    <div class="cp-form" style="display: none; position: fixed; top: 0; left: 0; height: 100%; width: 100%; z-index: 9999; background: rgba(0,0,0,.4);" onclick="$(this).hide();">
+    <div class="cp-form" style="display: none; position: fixed; top: 0; left: 0; height: 100%; width: 100%; z-index: 9999; background: rgba(0,0,0,.4);" onclick="this.style.display='none';">
         <div style="display: flex; align-items: center; justify-content: center; height: 100%;">
             <div style="border-radius: 8px; background-color: #fff; max-width: 360px; width: 100%; padding: 1.5rem; box-shadow: 0 4px 24px rgba(0,0,0,.18);" onclick="event.stopPropagation();" onkeyup="if(event.keyCode===13)changePwd()">
                 <div class="w-100 text-center mb-3">
@@ -857,7 +900,7 @@
                 <div style="text-align:center; display:none;" class="wait-toggle"><img src="/i/ajax.gif"></div>
                 <div style="display: flex; gap: 0.5rem;" class="ch-toggle">
                     <button style="flex:1; padding:0.5rem; background:#3b82f6; color:#fff; border:none; border-radius:6px; cursor:pointer;" type="button" onclick="changePwd()">Сменить</button>
-                    <button style="flex:1; padding:0.5rem; background:#fff; color:#333; border:1px solid #ccc; border-radius:6px; cursor:pointer;" type="button" onclick="$('.cp-form').hide();">Отменить</button>
+                    <button style="flex:1; padding:0.5rem; background:#fff; color:#333; border:1px solid #ccc; border-radius:6px; cursor:pointer;" type="button" onclick="document.querySelector('.cp-form').style.display='none';">Отменить</button>
                 </div>
             </div>
         </div>
