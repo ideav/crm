@@ -1762,8 +1762,8 @@ class IntegramTable{
                 case 'HTML':
                     return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
                 case 'BUTTON':
-                    displayValue = `<button class="btn btn-sm btn-primary">${ value || 'Действие' }</button>`;
-                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
+                    displayValue = `<button class="btn btn-sm btn-primary"><i class="pi pi-play"></i></button>`;
+                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle } style="text-align: center;">${ displayValue }</td>`;
             }
 
             let escapedValue;
