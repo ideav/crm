@@ -22,6 +22,7 @@ class CabinetController {
         this.communityTab = 'my-invites';
         this.communityArchive = false;
         this.communityRequestsType = 'to-me';
+        this.communitySearchQuery = '';
     }
 
     async init() {
@@ -1073,6 +1074,15 @@ class CabinetController {
                 this.renderCommunityData();
             });
         });
+
+        // Search input — filter on input
+        const communitySearch = document.getElementById('community-search');
+        if (communitySearch) {
+            communitySearch.addEventListener('input', () => {
+                this.communitySearchQuery = communitySearch.value;
+                this.renderCommunityData();
+            });
+        }
     }
 
     async loadCommunityData() {
@@ -1106,9 +1116,37 @@ class CabinetController {
         }
     }
 
+    communityItemMatchesSearch(item, query) {
+        if (!query) return true;
+        const q = query.trim().toLowerCase();
+        if (!q) return true;
+        const fields = [
+            item.DB || '',
+            item.Name || '',
+            item.Description || '',
+            item.State || '',
+            item.GuestUser || '',
+            item.HostUser || ''
+        ];
+        return fields.some(f => f.toLowerCase().includes(q));
+    }
+
+    highlightCommunityText(text, query) {
+        if (!query) return this.escapeHtml(text);
+        const q = query.trim();
+        if (!q) return this.escapeHtml(text);
+        const escaped = this.escapeHtml(text);
+        const escapedQ = this.escapeHtml(q);
+        // Case-insensitive replace
+        const regex = new RegExp('(' + escapedQ.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+        return escaped.replace(regex, '<mark class="community-search-highlight">$1</mark>');
+    }
+
     renderCommunityData() {
         const currentUid = uid; // from global var set in <script> tag
         const isArchive = this.communityArchive;
+        const searchQuery = this.communitySearchQuery || '';
+        const isSearching = searchQuery.trim().length > 0;
         // Archive statuses: 373 (Отказ), 374 (Отозвано)
         const archiveStatuses = ['373', '374'];
 
@@ -1119,33 +1157,65 @@ class CabinetController {
             });
         };
 
-        // Tab 1: My invitations (HostUserID === uid), excluding requests (StateID === '375')
-        const myInvites = filterByArchive(
-            this.communityInvites.filter(i => i.HostUserID === currentUid && i.StateID !== '375')
-        );
-        this.renderCommunityList('community-my-invites-list', myInvites, 'my-invites');
+        const filterBySearch = (items) => {
+            if (!isSearching) return items;
+            return items.filter(item => this.communityItemMatchesSearch(item, searchQuery));
+        };
 
-        // Tab 2: Invitations to me (GuestUserID === uid OR GuestUserID is empty), excluding own invitations and requests (StateID === '375')
-        const invitationsToMe = filterByArchive(
-            this.communityInvites.filter(i =>
-                i.HostUserID !== currentUid &&
-                (i.GuestUserID === currentUid || i.GuestUserID === '') &&
-                i.StateID !== '375'
-            )
-        );
-        this.renderCommunityList('community-invitations-list', invitationsToMe, 'invitations');
+        if (isSearching) {
+            // When searching: show all matching cards across all tabs and statuses
+            // Tab 1: My invitations
+            const myInvites = filterBySearch(
+                this.communityInvites.filter(i => i.HostUserID === currentUid && i.StateID !== '375')
+            );
+            this.renderCommunityList('community-my-invites-list', myInvites, 'my-invites', searchQuery);
 
-        // Tab 3: Requests (StateID === "375")
-        const allRequests = this.communityInvites.filter(i => i.StateID === '375');
-        let requests;
-        if (this.communityRequestsType === 'to-me') {
-            // Requests to my DB
-            requests = filterByArchive(allRequests.filter(i => i.HostUserID === currentUid));
+            // Tab 2: Invitations to me
+            const invitationsToMe = filterBySearch(
+                this.communityInvites.filter(i =>
+                    i.HostUserID !== currentUid &&
+                    (i.GuestUserID === currentUid || i.GuestUserID === '') &&
+                    i.StateID !== '375'
+                )
+            );
+            this.renderCommunityList('community-invitations-list', invitationsToMe, 'invitations', searchQuery);
+
+            // Tab 3: Requests
+            const allRequests = this.communityInvites.filter(i => i.StateID === '375');
+            const myRequests = filterBySearch(allRequests.filter(i =>
+                i.HostUserID === currentUid || i.GuestUserID === currentUid
+            ));
+            this.renderCommunityList('community-requests-list', myRequests, 'requests', searchQuery);
         } else {
-            // My requests to other DBs
-            requests = filterByArchive(allRequests.filter(i => i.GuestUserID === currentUid));
+            // Normal mode: respect archive filter and tab filters
+            // Tab 1: My invitations (HostUserID === uid), excluding requests (StateID === '375')
+            const myInvites = filterByArchive(
+                this.communityInvites.filter(i => i.HostUserID === currentUid && i.StateID !== '375')
+            );
+            this.renderCommunityList('community-my-invites-list', myInvites, 'my-invites', '');
+
+            // Tab 2: Invitations to me (GuestUserID === uid OR GuestUserID is empty), excluding own invitations and requests (StateID === '375')
+            const invitationsToMe = filterByArchive(
+                this.communityInvites.filter(i =>
+                    i.HostUserID !== currentUid &&
+                    (i.GuestUserID === currentUid || i.GuestUserID === '') &&
+                    i.StateID !== '375'
+                )
+            );
+            this.renderCommunityList('community-invitations-list', invitationsToMe, 'invitations', '');
+
+            // Tab 3: Requests (StateID === "375")
+            const allRequests = this.communityInvites.filter(i => i.StateID === '375');
+            let requests;
+            if (this.communityRequestsType === 'to-me') {
+                // Requests to my DB
+                requests = filterByArchive(allRequests.filter(i => i.HostUserID === currentUid));
+            } else {
+                // My requests to other DBs
+                requests = filterByArchive(allRequests.filter(i => i.GuestUserID === currentUid));
+            }
+            this.renderCommunityList('community-requests-list', requests, 'requests', '');
         }
-        this.renderCommunityList('community-requests-list', requests, 'requests');
     }
 
     formatCommunityDate(inviteDate) {
@@ -1168,12 +1238,13 @@ class CabinetController {
         return parts.length > 0 ? ' (' + parts.join(', ') + ')' : '';
     }
 
-    renderCommunityList(containerId, items, tabType) {
+    renderCommunityList(containerId, items, tabType, searchQuery) {
         const container = document.getElementById(containerId);
         if (!container) return;
 
         if (items.length === 0) {
-            const emptyMsg = this.communityArchive ? 'Нет записей в архиве' : 'Нет записей';
+            const isSearching = searchQuery && searchQuery.trim().length > 0;
+            const emptyMsg = isSearching ? 'Ничего не найдено' : (this.communityArchive ? 'Нет записей в архиве' : 'Нет записей');
             container.innerHTML = '<p class="empty-message">' + emptyMsg + '</p>';
             return;
         }
@@ -1202,9 +1273,18 @@ class CabinetController {
                 (tabType === 'requests' && this.communityRequestsType === 'to-me');
             const isAccepted = stateId === '372';
             const dbEscaped = this.escapeHtml(dbName);
+            const dbHighlighted = this.highlightCommunityText(dbName, searchQuery);
             const dbBold = isMyDb || isAccepted
-                ? '<a href="/' + dbEscaped + '" target="' + dbEscaped + '"><strong>' + dbEscaped + '</strong></a>'
-                : '<strong>' + dbEscaped + '</strong>';
+                ? '<a href="/' + dbEscaped + '" target="' + dbEscaped + '"><strong>' + dbHighlighted + '</strong></a>'
+                : '<strong>' + dbHighlighted + '</strong>';
+
+            // Build name/desc with highlight
+            const nameDescParts = [];
+            if (publicName) nameDescParts.push(this.highlightCommunityText(publicName, searchQuery));
+            if (description) nameDescParts.push(this.highlightCommunityText(description, searchQuery));
+            const nameDescHighlighted = nameDescParts.length > 0 ? ' (' + nameDescParts.join(', ') + ')' : '';
+
+            const guestUserHighlighted = this.highlightCommunityText(guestUser, searchQuery);
 
             let titleHtml = '';
             if (tabType === 'my-invites') {
@@ -1212,30 +1292,30 @@ class CabinetController {
                 // Public invite:   "{DB} (name, desc)"
                 if (guestUser) {
                     titleHtml = this.escapeHtml(dateStr) + ': Персональное для ' +
-                        '<strong>' + this.escapeHtml(guestUser) + '</strong>' +
-                        ' в ' + dbBold + nameDesc;
+                        '<strong>' + guestUserHighlighted + '</strong>' +
+                        ' в ' + dbBold + nameDescHighlighted;
                 } else {
-                    titleHtml = this.escapeHtml(dateStr) + ': ' + dbBold + nameDesc;
+                    titleHtml = this.escapeHtml(dateStr) + ': ' + dbBold + nameDescHighlighted;
                 }
             } else if (tabType === 'invitations') {
                 // Personal invite: "Персональное в {DB} (name, desc)"
                 // Public invite:   "{DB} (name, desc)"
                 if (!isPublic) {
                     titleHtml = this.escapeHtml(dateStr) + ': Персональное в ' +
-                        dbBold + nameDesc;
+                        dbBold + nameDescHighlighted;
                 } else {
-                    titleHtml = this.escapeHtml(dateStr) + ': ' + dbBold + nameDesc;
+                    titleHtml = this.escapeHtml(dateStr) + ': ' + dbBold + nameDescHighlighted;
                 }
             } else if (tabType === 'requests') {
                 const requestsType = this.communityRequestsType;
-                if (requestsType === 'to-me') {
+                if (requestsType === 'to-me' || searchQuery) {
                     // "Доступ для {GuestUser} к БД {DB} (name, desc)"
                     titleHtml = this.escapeHtml(dateStr) + ': Доступ для ' +
-                        '<strong>' + this.escapeHtml(guestUser) + '</strong>' +
-                        ' к БД ' + dbBold + nameDesc;
+                        '<strong>' + guestUserHighlighted + '</strong>' +
+                        ' к БД ' + dbBold + nameDescHighlighted;
                 } else {
                     // "БД {DB} (name, desc)"
-                    titleHtml = this.escapeHtml(dateStr) + ': БД ' + dbBold + nameDesc;
+                    titleHtml = this.escapeHtml(dateStr) + ': БД ' + dbBold + nameDescHighlighted;
                 }
             }
 
