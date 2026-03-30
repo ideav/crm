@@ -7990,7 +7990,8 @@ switch($a)  # Check actions, which don't require authentication
 		}
 		elseif(isApi()){
 			header("HTTP/1.0 401 Unauthorized");
-		    api_dump(json_encode(["error" => t9n("[RU]Неверный логин или пароль $u @ $z".". Логин и пароль следует отправлять POST-параметрами.[EN]Wrong credentials for user $u in $z".". Please send login and password as POST-parameters.")], JSON_UNESCAPED_UNICODE));
+		    api_dump(json_encode(["error" => t9n("[RU]Неверный логин или пароль $u @ $z [EN]Wrong credentials for user $u in $z")
+							 	,"hint" => t9n("[RU]Логин и пароль следует отправлять POST-параметрами.[EN]Please send login and password as POST-parameters.")], JSON_UNESCAPED_UNICODE));
 		}
 		else
 			login($z, $_REQUEST["u"], "wrong");
