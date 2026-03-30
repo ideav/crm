@@ -2,6 +2,21 @@
 error_reporting(E_ALL);
 ini_set('log_errors', 1);
 ini_set('error_log', 'logs/php-error.log');
+
+register_shutdown_function(function() {
+    $error = error_get_last();
+    if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+        header('Content-Type: application/json');
+        echo json_encode([
+            'error' => 'PHP Fatal error',
+            'message' => $error['message'],
+            'file' => $error['file'],
+            'line' => $error['line']
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        exit;
+    }
+});
+
 header("Cache-Control: no-store, no-cache, must-revalidate");
 header("Pragma: no-cache");
 header('Access-Control-Allow-Headers: X-Authorization, x-authorization,Content-Type,content-type,Origin,Authorization,authorization');
@@ -22,6 +37,8 @@ define("EMAIL", 41);
 define("ROLE", 42);
 define("ACTIVITY", 124);
 define("PASSWORD", 20);
+define("RETRIES", 300);
+define("RETRIES_LIMIT", 5);
 define("TOKEN", 125);
 define("SECRET", 130);
 define("VERSION", 8);
@@ -118,18 +135,21 @@ if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Registe
     if(isset($_GET["c"]) && isset($_GET["u"])){
     	$u = (int)$_GET["u"];
     	if($u > 0){
+			$hash = $_GET["c"];
+			if(preg_match('/^[a-z0-9]{6,128}$/', $hash) !== 1)
+				my_die("Invalid confirmation code");
         	$result = Exec_sql("SELECT user.val user, user.id uid, token.id tok, token.val token, xsrf.id xsrf, act.id act, pwd.val pwd, pwd.id pid, email.val email
                                 FROM $z user LEFT JOIN $z token ON token.up=user.id AND token.t=".TOKEN
                                         ." LEFT JOIN $z xsrf ON xsrf.up=user.id AND xsrf.t=".XSRF
                                         ." LEFT JOIN $z pwd ON pwd.up=user.id AND pwd.t=".PASSWORD
                                         ." LEFT JOIN $z act ON act.up=user.id AND act.t=".ACTIVITY
                                         ." LEFT JOIN $z email ON email.up=user.id AND email.t=".EMAIL
-                                ." WHERE user.id=$u AND user.t=".USER
+                                ." WHERE user.id=$u AND pwd.val='$hash' AND user.t=".USER
 							, "Check user & conf code");
         	if($row = mysqli_fetch_array($result))
         		if($row["uid"]){ # User found
         			# Update the user in the CRM
-        			Exec_sql("UPDATE $z SET val='".hash('sha512', Salt($row["user"], $row["pwd"]))."' WHERE id=".$row["pid"], "Update user's password");
+        			Exec_sql("UPDATE $z SET val='".$row["token"]."' WHERE id=".$row["pid"], "Update user's password");
         			updateTokens($row);
                 	createDb($row["uid"], "", $row["email"], $row["pwd"]);
             		header("Location: /$z");
@@ -156,15 +176,16 @@ if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Registe
         if(strlen($msg))
         	my_die($msg);
         
-        if($row = mysqli_fetch_array(Exec_sql("SELECT 1 FROM $z WHERE val='$email' AND t=".USER, "Check user name uniquity")))
+        if($row = mysqli_fetch_array(Exec_sql("SELECT 1 FROM $z WHERE val='$email' AND t=".EMAIL, "Check user name uniquity")))
         	if($row[0])	# Inform of the errors, if any, and let him try again
         		my_die(t9n("[RU]Этот email уже зарегистрирован.[EN]This email is already registered")." [errMailExists]");
 
         # Insert new user and its data into CRM
         $id = newUser($email, $email, "115", "", "");
-        Insert($id, 1, PASSWORD, $_POST["regpwd"], "Insert password");
-        $confirm = md5("xz$email");
-        Insert($id, 1, TOKEN, $confirm, "Insert confirmation code");
+		# Save password into token so that the user cannot log in until the confirmation
+        Insert($id, 1, TOKEN, hash("sha512", Salt($id, $_POST["regpwd"])), "Insert password");
+        $confirm = hash("sha512", "xz$email");
+        Insert($id, 1, PASSWORD, $confirm, "Insert confirmation code"); # Save confirmation code into password
         if(isset($_COOKIE["_aff"]))
             Insert($id, 1, 1012, (int)$_COOKIE["_aff"], "Insert the affiliate ref");
         if(isset($_COOKIE["yd_param"])){
@@ -335,17 +356,12 @@ elseif(($z == "my") && !empty($_GET['code'])){
         }
     }
     if(!empty($data['access_token'])){
-        # For Yandex, $db from state is only a desired redirect target — do not filter the
-        # user lookup by it, otherwise an existing Yandex user who previously logged in for
-        # a different DB would not be found and a duplicate account would be created.
-        # For Google, $db IS the state/redirect URL passed through OAuth — keep filter as-is.
-        $dbFilter = (!$isYandex && strlen($db)) ? " AND db.val='$db'" : "";
         if($row = mysqli_fetch_array(Exec_sql("SELECT user.id uid, token.id tok, token.val token, xsrf.id xsrf, act.id act, db.val db
                                         FROM $z user LEFT JOIN $z token ON token.up=user.id AND token.t=".TOKEN
                                                 ." LEFT JOIN $z xsrf ON xsrf.up=user.id AND xsrf.t=".XSRF
                                                 ." LEFT JOIN $z act ON act.up=user.id AND act.t=".ACTIVITY
                                                 ." LEFT JOIN $z db ON db.up=user.id AND db.t=".DATABASE
-                                                .$dbFilter
+                                                .(strlen($db)?" AND db.val='$db'":"")
                                         ." WHERE user.val='".$socialId."' AND user.t=".USER
                                             , "Get $socialName user and their DBs"))){
 			updateTokens($row);
@@ -508,14 +524,14 @@ function createDb($id, $name, $email, $pwd=""){
 }
 function updateTokens($row){
 	global $z;
+	$xsrf = $GLOBALS["GLOBAL_VARS"]["xsrf"] = xsrf($token, $z);
+	setcookie("idb_$z", $token, time() + 2592000*12, "/"); # 30*12 days
 	if($row["tok"])
     	$token = $GLOBALS["GLOBAL_VARS"]["token"] = $row["token"];
 	else{
     	$token = $GLOBALS["GLOBAL_VARS"]["token"] = md5(microtime(TRUE));
 		Insert($row["uid"], 1, TOKEN, $token, "Save token");
 	}
-	$xsrf = $GLOBALS["GLOBAL_VARS"]["xsrf"] = xsrf($token, $z);
-	setcookie("idb_$z", $token, time() + 2592000*12, "/"); # 30*12 days
 	if($row["xsrf"])
 		Update_Val($row["xsrf"], $xsrf);
 	else
@@ -551,7 +567,7 @@ function newDb($db, $template, $name, $email, $pwd){
 	Insert($id, 1, XSRF, $GLOBALS["GLOBAL_VARS"]["xsrf"], "Save xsrf DB");
 	Insert($id, 1, ACTIVITY, microtime(TRUE), "Save activity time DB");
     if(strlen($pwd))
-        Insert($id, 1, PASSWORD, hash('sha512', Salt($z, $pwd)), "Insert user password");
+        Insert($id, 1, PASSWORD, hash("sha512", Salt($z, $pwd)), "Insert user password");
 	setcookie("idb_$z", $GLOBALS["GLOBAL_VARS"]["token"], time() + 2592000*12, "/"); # 30*12 days
 	
 	# Create folders for files and templates
@@ -615,7 +631,7 @@ function isApi(){
     return (isset($dumpAPI) || !empty(array_filter(array_merge($_POST, $_GET), function($value, $key) { return strpos($key, 'JSON') === 0;}, ARRAY_FILTER_USE_BOTH)));
 }
 function xsrf($a, $b){
-	return substr(hash('sha512', Salt($a, $b)), 0, 22);
+	return substr(hash("sha512", Salt($a, $b)), 0, 22);
 }
 function login($z="", $u="", $message="", $details=""){
 	wlog(" @".$_SERVER["REMOTE_ADDR"], "log");
@@ -660,6 +676,7 @@ function trace($text){
 function Exec_sql($sql, $err_msg, $log=TRUE, $fatal=TRUE){
 	global $connection, $z;
 	$time_start = microtime(TRUE);
+	trace("Try Exec_sql $sql");
 	if(!$result = mysqli_query($connection, $sql))
 	{
     	if(mysqli_errno($connection)===1146)
@@ -736,7 +753,7 @@ function BlackList($ext)
 function GetSha($i)
 {
 	global $z;
-	return hash('sha512', Salt($z, $i));
+	return hash("sha512", Salt($z, $i));
 }
 # Get the Subdirectory name to securely store files on the server
 function GetSubdir($id)
@@ -1326,7 +1343,7 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
                         $value = base64_decode($value);
         		    $tmp = explode(":", $value);
                     $u = $tmp[0];
-                    $pwd = hash('sha512', Salt($u, $tmp[1]));
+                    $pwd = hash("sha512", Salt($u, $tmp[1]));
             		$data_set = Exec_sql("SELECT tok.val tok, u.id FROM $z pwd, $z u"
             									." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
             								." WHERE u.t=".USER." AND u.val='$u' AND pwd.up=u.id AND pwd.val='$pwd'"
@@ -1386,11 +1403,11 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
             getGrants($row["r"]);
 #print_r($GLOBALS); die($v." ".$attrs." ".count($blocks[$attrs][strtolower($attrs)]));
 		}
-		elseif((isset($_COOKIE["idb_$z"]) && $_COOKIE["idb_$z"] === hash('sha512', ADMINHASH.$z)) || ($tok === hash('sha512', ADMINHASH.$z))){
+		elseif((isset($_COOKIE["idb_$z"]) && $_COOKIE["idb_$z"] === hash("sha512", ADMINHASH.$z)) || ($tok === hash("sha512", ADMINHASH.$z))){
 			$GLOBALS["GLOBAL_VARS"]["user"] = $GLOBALS["GLOBAL_VARS"]["role"] = "admin";
 			$GLOBALS["GLOBAL_VARS"]["user_id"] = 0;
 			$GLOBALS["GLOBAL_VARS"]["role_id"] = 145;
-			$xsrf = hash('sha512', $z.ADMINHASH);
+			$xsrf = hash("sha512", $z.ADMINHASH);
 		}
 		$GLOBALS["tzone"] = isset($_COOKIE["tzone"]) ? $_COOKIE["tzone"] : 0;
 	}
@@ -3149,6 +3166,9 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 					if(isset($GLOBALS["STORED_REPS"][$GLOBALS["STORED_REPS"][$sub_query]["_rep_id"]]["sql"]))
 					{
 #print_r($GLOBALS);print($having."\n");die($having1);
+						$field = str_replace('\'['.$sub_query.']\''
+									, "(".$GLOBALS["STORED_REPS"][$GLOBALS["STORED_REPS"][$sub_query]["_rep_id"]]["sql"].")"
+									, $field);
 						$field = str_replace('['.$sub_query.']'
 									, "(".$GLOBALS["STORED_REPS"][$GLOBALS["STORED_REPS"][$sub_query]["_rep_id"]]["sql"].")"
 									, $field);
@@ -3193,24 +3213,24 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     									, "(".$GLOBALS["STORED_REPS"][$GLOBALS["STORED_REPS"][$sub_query]["_rep_id"]]["sql"].")"
     									, $having);
 						}
-						$fieldsAll = str_replace('['.$sub_query.']'
+						$fieldsAll = str_replace('\'['.$sub_query.']\''	# The report might be used in WHERE too
 									, "(".$GLOBALS["STORED_REPS"][$GLOBALS["STORED_REPS"][$sub_query]["_rep_id"]]["sql"].")"
 									, $fieldsAll);
-						$fieldsAll = str_replace('\'['.$sub_query.']\''	# The report might be used in WHERE too
+						$fieldsAll = str_replace('['.$sub_query.']'
 									, "(".$GLOBALS["STORED_REPS"][$GLOBALS["STORED_REPS"][$sub_query]["_rep_id"]]["sql"].")"
 									, $fieldsAll);
             			foreach($joined as $k => $v)
             			{
-    						$joined[$k] = str_replace('['.$sub_query.']'
-    									, "(".$GLOBALS["STORED_REPS"][$GLOBALS["STORED_REPS"][$sub_query]["_rep_id"]]["sql"].")"
-    									, $joined[$k]);
     						$joined[$k] = str_replace('\'['.$sub_query.']\''	# The report might be used in WHERE too
     									, "(".$GLOBALS["STORED_REPS"][$GLOBALS["STORED_REPS"][$sub_query]["_rep_id"]]["sql"].")"
     									, $joined[$k]);
-    						$joinedOn[$k] = str_replace('['.$sub_query.']'
+    						$joined[$k] = str_replace('['.$sub_query.']'
+    									, "(".$GLOBALS["STORED_REPS"][$GLOBALS["STORED_REPS"][$sub_query]["_rep_id"]]["sql"].")"
+    									, $joined[$k]);
+    						$joinedOn[$k] = str_replace('\'['.$sub_query.']\''	# The report might be used in WHERE too
     									, "(".$GLOBALS["STORED_REPS"][$GLOBALS["STORED_REPS"][$sub_query]["_rep_id"]]["sql"].")"
     									, $joinedOn[$k]);
-    						$joinedOn[$k] = str_replace('\'['.$sub_query.']\''	# The report might be used in WHERE too
+    						$joinedOn[$k] = str_replace('['.$sub_query.']'
     									, "(".$GLOBALS["STORED_REPS"][$GLOBALS["STORED_REPS"][$sub_query]["_rep_id"]]["sql"].")"
     									, $joinedOn[$k]);
             			}
@@ -3604,7 +3624,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 											$headers = str_replace("[$a]", $cur_line[$i], $headers);
 									}
 #print_r($GLOBALS);die($_SERVER["HTTP_HOST"].":".parse_url($val, 1));
-                                $hash = hash('sha512', $val.$post.$headers);
+                                $hash = hash("sha512", $val.$post.$headers);
                                 trace("curl_exec headers $headers");
     						    $headers = explode(",", $headers);
     						    $a = array_map('trim', array_keys($headers));
@@ -4764,7 +4784,6 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				{
 					if((!isset($parent_listed) && ($pid == $GLOBALS["parent_val"])))
 						$parent_listed = TRUE;
-					
 					$on_list[$pid] = ""; # Mark it listed
 					$blocks[$block]["id"][] = $pid;
 					$blocks[$block]["val"][] = $row["par_name"];
@@ -4783,7 +4802,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
         			}
 				}
 #print_r($blocks);die();
-				if(strlen($row["arr"]) || !isset($row["req_id"])) # Skip Array reqs or objects without reqs
+				if((isset($row["arr"]) && strlen($row["arr"])) || !isset($row["req_id"])) # Skip Array reqs or objects without reqs
 					continue;
 				if(!Check_Grant($pid, $row["req_id"], "READ", FALSE))
 					continue;
@@ -7275,11 +7294,10 @@ function GetRefOrd($parent, $typ)
 	return $row["ord"] + 1;
 }
 # Add user name and some salt to the password value
-function Salt($u, $val)
-{
+function Salt($u, $val){
 	global $z;
-	$u = strtoupper($u);
-	return SALT."$u$z$val";
+	# $u = strtoupper($u);
+	return SALT."$z$val";
 }
 # Inserts new values in a batch
 function Insert_batch($up, $ord, $t, $val, $message){
@@ -7617,29 +7635,34 @@ function mysendmail($to,$subj,$msg){
     wlog("\nResult: ".($res ? " Ok" : " Failed")."\n=====\n", "log");
     return $res;
 }
-function pwd_reset($u)
-{
-	global $z;
-	$data_set = Exec_sql("SELECT u.id, email.val, pwd.id pwd, phone.val phone, pwd.val old, u.val u
+function getUserForReset($z, $u, $msg="getUserForReset"){
+	return Exec_sql("SELECT u.id, email.val, pwd.id pwd, phone.val phone, pwd.val old, u.val u
 						FROM $z u LEFT JOIN $z email ON email.up=u.id AND email.t=".EMAIL
 						." LEFT JOIN $z pwd ON pwd.up=u.id AND pwd.t=".PASSWORD
 						." LEFT JOIN $z phone ON phone.up=u.id AND phone.t=".PHONE
-						." WHERE u.val='$u' AND u.t=".USER
-					, "Get user's reqs");
-	if(!($row = mysqli_fetch_array($data_set))){
-    	$data_set = Exec_sql("SELECT u.id, email.val, pwd.id pwd, phone.val phone, pwd.val old, u.val u
-    						FROM $z u LEFT JOIN $z email ON email.up=u.id AND email.t=".EMAIL
-    						." LEFT JOIN $z pwd ON pwd.up=u.id AND pwd.t=".PASSWORD
-    						." LEFT JOIN $z phone ON phone.up=u.id AND phone.t=".PHONE
-    						." WHERE email.val='$u' AND u.t=".USER
-    					, "Get user's reqs by email");
-    	$row = mysqli_fetch_array($data_set);
+						." WHERE (u.val='$u' OR email.val='$u') AND u.t=".USER
+					, $msg);
+}
+function pwd_reset($u){
+	global $z;
+	$data_set = getUserForReset($z, $u, "Get user's reqs");
+	if(!($row = mysqli_fetch_array($data_set)) && ($z !== "my")){
+    	$data_set = getUserForReset("my", $u, "Get user's reqs from my");
+    	if($row = mysqli_fetch_array($data_set))
+			if(($z === $u) || ($u === $data_set["val"])){ # No admin found in the DB, restore it
+				$id = Insert(1, 0, USER, $u, "Insert new user");
+				Insert($id, 1, 156, date("Ymd"), "Insert date");
+				Insert($id, 1, EMAIL, $data_set["val"], "Insert DB email");
+				Insert($id, 1, 145, "115", "Insert Admin role link");
+				$data_set = getUserForReset($z, $u, "Get user's reqs"); # The admin has been restored - reset the password
+			}
+			else
+				login($z, $u, "WRONG_DB", t9n("[RU]Учетная запись есть в Личном кабинете, но не найдена в этой базе. Рекомендую создать пользователя заново.[EN]The account exists in your Personal Account, but it's not found in this database. I recommend creating a new user."));
 	}
-#print_r($GLOBALS); die();
 	if($row){
 	    $u = $row["u"];
-		$pwd = substr(md5(mt_rand()), 0, 6);	# Create the password
-		$sha = hash('sha512', Salt($u, $pwd));	# Make the password hash
+		$pwd = substr(hash("sha512", mt_rand()), 0, 6);	# Create the password
+		$sha = hash("sha512", Salt($u, $pwd));	# Make the password hash
 		if(preg_match(MAIL_MASK, $row["val"])){
 			if($row["pwd"])  # There is a password already
 			{
@@ -7868,34 +7891,60 @@ switch($a)  # Check actions, which don't require authentication
 		
 	case "auth":
 		$GLOBALS["GLOBAL_VARS"]["uri"] = isset($_POST["uri"]) ? htmlentities($_POST["uri"]) : "/$z";
-		$u = addslashes(strtolower(trim($_POST["login"])));
+		if(isset($_POST["login"]))
+			$u = $_POST["login"];
+		elseif(isset($_GET["login"]))
+			$u = $_GET["login"];
+		else
+			my_die("Login is not defined");
+		$u = addslashes(strtolower(trim($u)));
 		if(isset($_POST["reset"]) || isset($_GET["reset"]))  # A new user wants to get the password
 			pwd_reset($u);
-		if(isset($_POST["tzone"]))
-		{
+		if(isset($_POST["tzone"])){
 			$GLOBALS["tzone"] = round(((int)$_POST["tzone"] - time() - date("Z"))/1800)*1800; # Round the time zone shift to 30 min
 			setcookie("tzone", $GLOBALS["tzone"], time() + COOKIES_EXPIRE, "/"); # 30 days
 		}
 		$msg = "";
 		$p = $_POST["pwd"];
-		$pwd = hash('sha512', Salt($u, $p)); # Add some salt
-		$data_set = Exec_sql("SELECT u.id uid, u.val, pwd.id pwd_id, pwd.val pwd, tok.id tok, tok.val token, act.id act, xsrf.id xsrf
+		$pwd = hash("sha512", Salt($u, $p));
+		$data_set = Exec_sql("SELECT u.id uid, u.val, pwd.id pwd_id, pwd.val pwd, tok.id tok, tok.val token, act.id act, xsrf.id xsrf, retries.id retries_id, retries.val retries
 								FROM $z pwd, $z u LEFT JOIN $z act ON act.up=u.id AND act.t=".ACTIVITY
 									." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
 									." LEFT JOIN $z xsrf ON xsrf.up=u.id AND xsrf.t=".XSRF
-								." WHERE u.t=".USER." AND u.val='$u' AND pwd.up=u.id AND pwd.val='$pwd'"
+									." LEFT JOIN $z retries ON retries.up=u.id AND retries.t=".RETRIES
+								." WHERE u.t=".USER." AND u.val='$u' AND pwd.up=u.id AND pwd.t=".PASSWORD
 						, "Authenticate user");
-		$row = mysqli_fetch_array($data_set);
+		if($row = mysqli_fetch_array($data_set)){
+			if($row["pwd"] !== $pwd){
+				if((int)$row["retries"] >= RETRIES_LIMIT){
+					$msg .= t9n("[RU]Превышено количество попыток авторизации. Рекомендуем сбросить пароль.[EN]The number of login attempts has been exceeded. We recommend that you reset your password.");
+					if(isApi()){
+						header("HTTP/1.0 401 Unauthorized");
+						api_dump(json_encode(["error" => $msg], JSON_UNESCAPED_UNICODE));
+					}
+				}
+				elseif($row["retries_id"])
+					Update_Val($row["retries_id"], 1 + (int)$row["retries"]);
+				else
+					Insert($row["uid"], 1, RETRIES, 1, "Increment retries count");
+				$row = false;
+			}
+		}
 		if(!$row){ # Check the user Cabinet
 		    $prevz = $z;
 		    $z = "my";
-    		$pwd = hash('sha512', Salt($u, $p)); # Add some salt
+    		$pwd = hash("sha512", Salt($u, $p));
 		    $z = $prevz;
+			wlog("Authenticate $u / $pwd in Cabinet", "log");
+			wlog("SELECT 1 FROM my email JOIN my pwd ON pwd.up=email.up AND pwd.val='$pwd'"
+                					."     JOIN my db ON db.up=email.up AND db.val='$z' AND db.t=".DATABASE
+                					." WHERE email.t=".EMAIL." AND email.val='$u'", "log");
     		$data_set = Exec_sql("SELECT 1 FROM my email JOIN my pwd ON pwd.up=email.up AND pwd.val='$pwd'"
                 					."     JOIN my db ON db.up=email.up AND db.val='$z' AND db.t=".DATABASE
                 					." WHERE email.t=".EMAIL." AND email.val='$u'"
 					    , "Authenticate in Cabinet");
     		if($row = mysqli_fetch_array($data_set)){
+				wlog(" OK", "log");
         		$data_set = Exec_sql("SELECT u.id uid, u.val, pwd.id pwd_id, pwd.val pwd, tok.id tok, tok.val token, act.id act, xsrf.id xsrf
         								FROM $z pwd, $z u LEFT JOIN $z act ON act.up=u.id AND act.t=".ACTIVITY
         									." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
@@ -7904,6 +7953,8 @@ switch($a)  # Check actions, which don't require authentication
         						, "Authenticate user from Cabinet");
         		$row = mysqli_fetch_array($data_set);
     		}
+			else
+				wlog(" Failed", "log");
 		}
 		if($row){
 			$GLOBALS["GLOBAL_VARS"]["user"] = $row["val"];
@@ -7921,7 +7972,7 @@ switch($a)  # Check actions, which don't require authentication
 					$msg .= t9n("[RU]Введите новый пароль дважды одинаково[EN]Please input the same password twice")." [errDiffer]. ";
 				else
 				{
-					Update_Val($row["pwd_id"], hash('sha512', Salt($u, $npw1)));
+					Update_Val($row["pwd_id"], hash("sha512", Salt($u, $npw1)));
 					$msg = t9n("[RU]Пароль успешно изменен[EN]The password has been changed");
 				}
 			}
@@ -7931,12 +7982,12 @@ switch($a)  # Check actions, which don't require authentication
 #			else
 				setcookie("idb_$z", $GLOBALS["GLOBAL_VARS"]["token"], time() + COOKIES_EXPIRE, "/"); # 30 days
 		}
-		elseif((strtolower($u) == "admin") && (hash('sha512', sha1($_SERVER["SERVER_NAME"].$z.$p).$z) === hash('sha512', ADMINHASH.$z))){
+		elseif((strtolower($u) == "admin") && (hash("sha512", sha1($_SERVER["SERVER_NAME"].$z.$p).$z) === hash("sha512", ADMINHASH.$z))){
 			$GLOBALS["GLOBAL_VARS"]["user"] = $GLOBALS["GLOBAL_VARS"]["role"] = "admin";
 			$GLOBALS["GLOBAL_VARS"]["user_id"] = 0;
-			$GLOBALS["GLOBAL_VARS"]["xsrf"] = hash('sha512', $z.ADMINHASH);
-			$GLOBALS["GLOBAL_VARS"]["token"] = hash('sha512', ADMINHASH.$z);
-			setcookie("idb_$z", hash('sha512', ADMINHASH.$z), 0, "/");
+			$GLOBALS["GLOBAL_VARS"]["xsrf"] = hash("sha512", $z.ADMINHASH);
+			$GLOBALS["GLOBAL_VARS"]["token"] = hash("sha512", ADMINHASH.$z);
+			setcookie("idb_$z", hash("sha512", ADMINHASH.$z), 0, "/");
 		}
 		elseif(isApi()){
 			header("HTTP/1.0 401 Unauthorized");
@@ -7946,7 +7997,7 @@ switch($a)  # Check actions, which don't require authentication
 			login($z, $_REQUEST["u"], "wrong");
 		if(isApi())
 			api_dump(json_encode(array("_xsrf"=>$GLOBALS["GLOBAL_VARS"]["xsrf"],"token"=>$GLOBALS["GLOBAL_VARS"]["token"],"id"=>$GLOBALS["GLOBAL_VARS"]["user_id"],"msg"=>$msg)), "login.json");
-		if($msg!=="")
+		if($msg !== "")
 			die($msg.BACK_LINK);
 	    if(substr($GLOBALS["GLOBAL_VARS"]["uri"],0,strlen($z)+1) != "/$z")
 		    $GLOBALS["GLOBAL_VARS"]["uri"] = "/$z";
@@ -7960,7 +8011,11 @@ switch($a)  # Check actions, which don't require authentication
 						, "Get user's pwd")))
 		{
 			Exec_sql("UPDATE $z SET val='".addslashes($_REQUEST["p"])."' WHERE id=".$row[0], "Reset the password");
-			login($z,$_REQUEST["u"],"confirm");
+			if(isApi())
+				login($z, $_REQUEST["u"], "confirm");
+			else
+				header("Location: /$z");
+			die();
 		}
 		login($z, urlencode($_REQUEST["u"]), "obsolete");
 		break;
@@ -8429,7 +8484,7 @@ if(Validate_Token())
 						}
 						else{
         					if($t == PASSWORD) // Encrypt the password in case it's updated
-        						$v = hash('sha512', Salt(isset($_REQUEST["t".USER]) ? trim($_REQUEST["t".USER]) : $cur_val, $v)); // Salt it with the new or current user name
+        						$v = hash("sha512", Salt(isset($_REQUEST["t".USER]) ? trim($_REQUEST["t".USER]) : $cur_val, $v)); // Salt it with the new or current user name
             				trace("BuiltIn $v of ".$t." = ".BuiltIn($v));
             				trace(" base = ".$GLOBALS["REV_BT"][$t]);
         					#$v = Format_Val($t, BuiltIn($v));
@@ -8805,7 +8860,7 @@ if(Validate_Token())
 #							my_die(t9n("[RU]Неверный тип объекта ($t) с ID=$v или объект не найден [EN]Invalid object type with ID=$v or the object was not found"));
 					}
 					elseif($t == PASSWORD)
-						Insert($i, 1, $t, hash('sha512', Salt($val, $v)), "Insert a first time password");
+						Insert($i, 1, $t, hash("sha512", Salt($val, $v)), "Insert a first time password");
 					else
 						Insert($i, 1, $t, $v, "Insert new non-empty req");
 				}
@@ -9083,7 +9138,7 @@ if(Validate_Token())
             					Delete($row[0]);
 					    }
 					    else
-    						my_die(t9n("[RU]Вы хотите удалить реквизит у типа при наличии этого реквизита у экземпляров (всего: "
+    						my_die("ERROR_COLUMN_DATA ".t9n("[RU]Вы хотите удалить реквизит у типа при наличии этого реквизита у экземпляров (всего: "
     						        ."[EN]You are going to delete a requisite if there are records of this type (total records: ").$row[0].")!");
 					}
 					$sql = "SELECT ".REP_COLS." t FROM $z WHERE t=".REP_COLS." AND val='$id' "
