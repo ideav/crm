@@ -343,8 +343,8 @@
 .add-column-header-cell {
     width: 36px;
     min-width: 36px;
-    text-align: center;
-    cursor: pointer;
+    text-align: center !important;
+    cursor: pointer !important;
     color: var(--md-on-surface-variant, #666);
     transition: var(--md-transition);
     padding: 0 !important;
