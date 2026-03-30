@@ -1289,6 +1289,7 @@ class IntegramTable{
                                     `;
                                     }).join('')
                                 }
+                                <th class="add-column-header-cell" style="width: 36px; min-width: 36px;" title="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus"></i></th>
                             </tr>
                             ${ this.filtersEnabled ? `
                             <tr class="filter-row">
@@ -1297,6 +1298,7 @@ class IntegramTable{
                                     this.renderGroupedFilterRow(orderedColumns) :
                                     orderedColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('')
                                 }
+                                <td class="add-column-filter-cell"></td>
                             </tr>
                             ` : '' }
                         </thead>
@@ -5219,6 +5221,13 @@ class IntegramTable{
             return `<span class="col-type-icon" title="${info.title}" style="font-size:11px;font-weight:600;opacity:0.65;min-width:16px;text-align:center;">${info.icon}</span>`;
         }
 
+        /**
+         * Directly open the add column form without going through column settings (issue #1230)
+         */
+        quickAddColumn() {
+            this.showAddColumnForm(null);
+        }
+
         openColumnSettings() {
             this._columnSettingsChanged = false;
             const overlay = document.createElement('div');
@@ -6158,7 +6167,8 @@ class IntegramTable{
                         }
 
                         // Add new column to the column settings list in the parent modal (issue #949)
-                        const columnList = parentModal.querySelector(`#column-settings-list-${instanceName}`);
+                        // parentModal may be null when called directly via quickAddColumn (issue #1230)
+                        const columnList = parentModal ? parentModal.querySelector(`#column-settings-list-${instanceName}`) : null;
                         if (columnList) {
                             const newItem = document.createElement('div');
                             newItem.className = 'column-settings-item';
