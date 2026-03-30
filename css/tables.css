@@ -16,9 +16,11 @@
 }
 
 .tables-header h1 {
-    font-size: 1.75rem;
+    font-size: 20px;
+    font-weight: 500;
+    color: var(--md-text-primary);
+    letter-spacing: 0.15px;
     margin: 0;
-    color: var(--text-primary);
 }
 
 .tables-actions {
@@ -565,7 +567,7 @@
     }
 
     .tables-header h1 {
-        font-size: 1.25rem;
+        font-size: 20px;
     }
 
     .tables-actions {
@@ -643,7 +645,7 @@
 
 @media (max-width: 480px) {
     .tables-header h1 {
-        font-size: 1.1rem;
+        font-size: 20px;
     }
 
     .table-card {
