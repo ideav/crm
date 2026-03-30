@@ -29,6 +29,22 @@
         .nav-link {
             color: #eee !important;
         }
+        @media (min-width: 563px) {
+            .navbar-expand-562 {
+                flex-flow: row nowrap;
+                justify-content: flex-start;
+            }
+            .navbar-expand-562 .navbar-nav {
+                flex-direction: row;
+            }
+            .navbar-expand-562 .navbar-collapse {
+                display: flex !important;
+                flex-basis: auto;
+            }
+            .navbar-expand-562 .navbar-toggler {
+                display: none;
+            }
+        }
     </style>
     <title>Integral</title>
     <script src="/js/jquery3.1.1.min.js"></script>
