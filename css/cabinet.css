@@ -1061,6 +1061,45 @@
     color: var(--text-secondary);
 }
 
+/* Community (Cooperation) Header */
+.community-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 0;
+}
+
+.community-header h1 {
+    margin: 0;
+    flex: 1 1 auto;
+}
+
+.community-search-input {
+    padding: 0.45rem 0.75rem;
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    font-size: 0.875rem;
+    background-color: var(--input-bg);
+    color: var(--text-primary);
+    width: 180px;
+    transition: border-color 0.15s ease;
+    margin-left: auto;
+}
+
+.community-search-input:focus {
+    outline: none;
+    border-color: var(--primary-color, #3b82f6);
+}
+
+/* Search highlight */
+.community-search-highlight {
+    background-color: #ffeb3b;
+    color: inherit;
+    padding: 0 2px;
+    border-radius: 2px;
+}
+
 /* Community (Cooperation) Tabs */
 .community-tabs {
     display: flex;
