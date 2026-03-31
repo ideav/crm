@@ -1048,14 +1048,15 @@ localize();
 <style>
 #upload-hint-box {
     position: fixed;
-    bottom: 1.5rem;
-    right: 1.5rem;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
     width: 90%;
-    max-width: 380px;
+    max-width: 420px;
     background: var(--card-bg, #fff);
     border-radius: 12px;
     padding: 1.25rem 1.25rem 1rem;
-    box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+    box-shadow: 0 8px 40px rgba(0,0,0,0.28);
     z-index: 2000;
     display: none;
     cursor: default;
@@ -1090,28 +1091,28 @@ localize();
     justify-content: center;
 }
 @media (max-width: 767px) {
-    #upload-hint-box { right: 0.5rem; left: 0.5rem; width: auto; max-width: none; }
+    #upload-hint-box { width: calc(100% - 2rem); max-width: none; }
     #upload-hint-mobile-toggle { display: flex; }
 }
 </style>
 <div id="upload-hint-box">
     <div class="hint-drag-handle" id="upload-hint-drag-handle"></div>
     <div id="upload-hint-1" style="display:none;">
-        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);">Выбор файла и параметры импорта</h3>
+        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Выбор файла и параметры импорта</h3>
         <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Выберите таблицу из списка, затем вставьте текст данных или загрузите файл (JSON, CSV, TXT). Нажмите «Настроить», чтобы задать разделитель полей, кодировку и наличие заголовков. Затем нажмите «Проверить» — появится следующий совет.</p>
         <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
             <button onclick="uploadHintClose()" style="padding:0.35rem 0.9rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer; font-size:0.85rem;">Закрыть</button>
         </div>
     </div>
     <div id="upload-hint-2" style="display:none;">
-        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);">Сопоставление полей файла с колонками</h3>
+        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Сопоставление полей файла с колонками</h3>
         <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Перетащите колонки в нужном порядке, чтобы они совпадали с колонками вашего файла. При необходимости задайте формулы для вычисляемых полей. Затем нажмите «Загрузить» — появится следующий совет.</p>
         <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
             <button onclick="uploadHintClose()" style="padding:0.35rem 0.9rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer; font-size:0.85rem;">Закрыть</button>
         </div>
     </div>
     <div id="upload-hint-3" style="display:none;">
-        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);">Запуск загрузки и проверка результата</h3>
+        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Запуск загрузки и проверка результата</h3>
         <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Подтвердите операцию нажав «Да, грузим». По завершении откройте «Статистику» — там отображается количество загруженных, пропущенных и ошибочных записей. При наличии ошибок они будут показаны в отдельном блоке.</p>
         <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
             <button onclick="uploadHintClose()" style="padding:0.35rem 0.9rem; border:none; border-radius:6px; background:var(--button-primary,#0d6efd); color:#fff; cursor:pointer; font-size:0.85rem;">Понятно</button>
@@ -1199,7 +1200,7 @@ localize();
         // Dragging support (desktop)
         var handle = document.getElementById('upload-hint-drag-handle');
         if (handle && hintBox) {
-            var dragging = false, startX, startY, origLeft, origBottom, origTop, origRight;
+            var dragging = false, startX, startY, origLeft, origTop;
             handle.addEventListener('mousedown', function(e) {
                 dragging = true;
                 startX = e.clientX;
@@ -1207,10 +1208,10 @@ localize();
                 var rect = hintBox.getBoundingClientRect();
                 origLeft = rect.left;
                 origTop = rect.top;
-                hintBox.style.right = 'auto';
-                hintBox.style.bottom = 'auto';
-                hintBox.style.left = origLeft + 'px';
+                // Switch from transform-based centering to absolute positioning
+                hintBox.style.transform = 'none';
                 hintBox.style.top = origTop + 'px';
+                hintBox.style.left = origLeft + 'px';
                 e.preventDefault();
             });
             document.addEventListener('mousemove', function(e) {
@@ -1236,8 +1237,12 @@ localize();
             mobileToggle.addEventListener('click', function() {
                 if (!hintBox) return;
                 hintAtTop = !hintAtTop;
+                // Switch from transform-based centering to explicit positioning
+                hintBox.style.transform = 'none';
+                hintBox.style.left = '50%';
                 hintBox.style.top = hintAtTop ? '1rem' : 'auto';
                 hintBox.style.bottom = hintAtTop ? 'auto' : '1.5rem';
+                hintBox.style.marginLeft = '-' + (hintBox.offsetWidth / 2) + 'px';
                 mobileToggle.style.top = hintAtTop ? 'auto' : '5rem';
                 mobileToggle.style.bottom = hintAtTop ? '1rem' : 'auto';
                 mobileToggle.innerHTML = hintAtTop ? '&#8595;' : '&#8593;';
