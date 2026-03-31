@@ -752,6 +752,19 @@ mark.search-highlight {
             doSearch('');
             searchInput.focus();
         });
+
+        // Accordion: close other open topics when one is opened
+        topics.forEach(function(topic) {
+            topic.addEventListener('click', function(e) {
+                if (!topic.open) {
+                    topics.forEach(function(other) {
+                        if (other !== topic && other.open) {
+                            other.removeAttribute('open');
+                        }
+                    });
+                }
+            });
+        });
     })();
     </script>
 
