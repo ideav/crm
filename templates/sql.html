@@ -840,6 +840,13 @@ function myApi(m,u,b,vars,index){ // Параметры: метод, адрес,
                     byId('warning').classList.remove('hidden');
                 }
                 $('#rbody').show();
+                // Attach col-title-wrapper change listener here, after elements exist
+                if (!window._colTitleHintBound) {
+                    window._colTitleHintBound = true;
+                    $(document).on('change', '.col-title-wrapper', function() {
+                        if (window.sqlHintAdvance) window.sqlHintAdvance(2);
+                    });
+                }
                 break;
 
         }
