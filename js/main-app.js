@@ -1101,13 +1101,13 @@ class MainAppController {
 
     async updateMenuItem(menuId, name, href, icon) {
         // Update menu item via API
-        // POST: /{db}/_m_set/{menuId}?JSON
+        // POST: /{db}/_m_save/{menuId}?JSON
         // Parameters: t151 (name), t153 (href), t391 (icon)
         const item = this.menuItems[menuId];
         if (!item) return;
 
         const dbName = typeof db !== 'undefined' ? db : '';
-        const url = '/' + dbName + '/_m_set/' + encodeURIComponent(menuId) + '?JSON';
+        const url = '/' + dbName + '/_m_save/' + encodeURIComponent(menuId) + '?JSON';
 
         const params = new URLSearchParams();
         params.append('_xsrf', window.xsrf || '');
