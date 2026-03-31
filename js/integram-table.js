@@ -10320,11 +10320,14 @@ class IntegramTable{
                 // Store the file object in the upload container for later submission
                 uploadContainer._fileToUpload = file;
 
-                // Update UI - replace link with plain text since it's a new upload
-                if (fileName.tagName === 'A') {
-                    fileName.outerHTML = `<span class="file-name">${ this.escapeHtml(file.name) }</span>`;
-                } else {
-                    fileName.textContent = file.name;
+                // Update UI - replace link with plain text since it's a new upload.
+                // Re-query from uploadContainer to avoid using a stale reference that may have
+                // been detached from the DOM by a previous outerHTML replacement (issue #1311).
+                const currentFileName = uploadContainer.querySelector('.file-name');
+                if (currentFileName && currentFileName.tagName === 'A') {
+                    currentFileName.outerHTML = `<span class="file-name">${ this.escapeHtml(file.name) }</span>`;
+                } else if (currentFileName) {
+                    currentFileName.textContent = file.name;
                 }
                 dropzone.style.display = 'none';
                 preview.style.display = 'flex';
