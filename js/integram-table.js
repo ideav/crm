@@ -4071,7 +4071,12 @@ class IntegramTable{
             // Attach save handler
             const saveBtn = modal.querySelector('#save-record-ref-btn');
             saveBtn.addEventListener('click', async () => {
-                await this.saveRecordForReference(modal, typeId, parentRecordId);
+                saveBtn.disabled = true;
+                try {
+                    await this.saveRecordForReference(modal, typeId, parentRecordId);
+                } finally {
+                    saveBtn.disabled = false;
+                }
             });
 
             // Close modal helper function
@@ -8923,8 +8928,13 @@ class IntegramTable{
             // Attach save handler
             const saveBtn = modal.querySelector('#save-record-btn');
 
-            saveBtn.addEventListener('click', () => {
-                this.saveRecord(modal, isCreate, recordId, typeId, parentId, columnId);
+            saveBtn.addEventListener('click', async () => {
+                saveBtn.disabled = true;
+                try {
+                    await this.saveRecord(modal, isCreate, recordId, typeId, parentId, columnId);
+                } finally {
+                    saveBtn.disabled = false;
+                }
             });
 
             // Attach delete handler (edit mode only)
@@ -11075,7 +11085,12 @@ class IntegramTable{
             // Attach save handler
             const saveBtn = modal.querySelector('#save-form-ref-btn');
             saveBtn.addEventListener('click', async () => {
-                await this.saveRecordForFormReference(modal, overlay, typeId, parentRecordId, hiddenInput, searchInput, wrapper, dropdown);
+                saveBtn.disabled = true;
+                try {
+                    await this.saveRecordForFormReference(modal, overlay, typeId, parentRecordId, hiddenInput, searchInput, wrapper, dropdown);
+                } finally {
+                    saveBtn.disabled = false;
+                }
             });
 
             // Close modal helper
@@ -13537,8 +13552,13 @@ class IntegramCreateFormHelper {
 
         // Attach save handler
         const saveBtn = modal.querySelector('#save-record-btn');
-        saveBtn.addEventListener('click', () => {
-            this.saveRecord(modal, metadata);
+        saveBtn.addEventListener('click', async () => {
+            saveBtn.disabled = true;
+            try {
+                await this.saveRecord(modal, metadata);
+            } finally {
+                saveBtn.disabled = false;
+            }
         });
 
         // Close modal helper function
@@ -14542,8 +14562,13 @@ class IntegramCreateFormHelper {
 
         // Attach save handler
         const saveBtn = modal.querySelector('#save-record-btn');
-        saveBtn.addEventListener('click', () => {
-            this.saveEditedRecord(modal, metadata, recordId);
+        saveBtn.addEventListener('click', async () => {
+            saveBtn.disabled = true;
+            try {
+                await this.saveEditedRecord(modal, metadata, recordId);
+            } finally {
+                saveBtn.disabled = false;
+            }
         });
 
         // Close modal helper function
