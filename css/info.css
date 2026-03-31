@@ -115,6 +115,11 @@
     color: var(--text-primary);
 }
 
+.info-action-item[data-action="where-am-i"] .info-action-title,
+.info-action-item[data-action="hints"] .info-action-title {
+    font-weight: 700;
+}
+
 .info-action-toggle {
     flex-shrink: 0;
     color: var(--text-secondary);
