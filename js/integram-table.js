@@ -14658,10 +14658,24 @@ class IntegramCreateFormHelper {
 
     /**
      * Fetch metadata for a table type (issue #837).
+     * Uses globalMetadata from IntegramTable instances if available to avoid redundant requests (issue #1302).
      */
     async fetchMetadataStandalone(typeId) {
         if (this.metadataCache[typeId]) {
             return this.metadataCache[typeId];
+        }
+
+        // Check globalMetadata from existing IntegramTable instances (issue #1302)
+        if (window._integramTableInstances && window._integramTableInstances.length > 0) {
+            for (const inst of window._integramTableInstances) {
+                if (inst && inst.globalMetadata) {
+                    const cached = inst.globalMetadata.find(item => item.id === typeId || item.id === Number(typeId));
+                    if (cached) {
+                        this.metadataCache[typeId] = cached;
+                        return cached;
+                    }
+                }
+            }
         }
 
         const response = await fetch(`${this.apiBase}/metadata/${typeId}`);
