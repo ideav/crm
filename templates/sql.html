@@ -1181,7 +1181,7 @@ document.addEventListener('DOMContentLoaded', function() {
         workspace: 'sql',
         steps: 3,
         onInit: function(api) {
-            var tableSelect = document.getElementsByClassName('col-title-wrapper');
+            var tableSelect = document.getElementsByClassName('col-title-wrapper')[0];
             if (tableSelect) tableSelect.addEventListener('change', function() { api.advance(2); });
             var interactCheck = document.getElementById('interact');
             if (interactCheck) interactCheck.addEventListener('change', function() { api.advance(3); });
