@@ -1098,22 +1098,22 @@ localize();
 <div id="upload-hint-box">
     <div class="hint-drag-handle" id="upload-hint-drag-handle"></div>
     <div id="upload-hint-1" style="display:none;">
-        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Выбор файла и параметры импорта</h3>
-        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Выберите таблицу из списка, затем вставьте текст данных или загрузите файл (JSON, CSV, TXT). Нажмите «Настроить», чтобы задать разделитель полей, кодировку и наличие заголовков. Затем нажмите «Проверить» — появится следующий совет.</p>
+        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Выбор таблицы и проверка файла</h3>
+        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Выберите таблицу из списка или нажмите «Создать новую таблицу из файла», затем вставьте текст данных или загрузите файл (JSON, CSV, TXT). Нажмите «Проверить», а затем нажмите «Настроить», чтобы задать разделитель полей, кодировку и наличие заголовков — появится следующий совет.</p>
         <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
             <button onclick="uploadHintClose()" style="padding:0.35rem 0.9rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer; font-size:0.85rem;">Закрыть</button>
         </div>
     </div>
     <div id="upload-hint-2" style="display:none;">
-        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Сопоставление полей файла с колонками</h3>
-        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Перетащите колонки в нужном порядке, чтобы они совпадали с колонками вашего файла. При необходимости задайте формулы для вычисляемых полей. Затем нажмите «Загрузить» — появится следующий совет.</p>
+        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Проверка статистики данных</h3>
+        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">После настройки нажмите «Статистика» и убедитесь, что данные в нужном количестве и правильно распознаны по типам — появится следующий совет.</p>
         <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
             <button onclick="uploadHintClose()" style="padding:0.35rem 0.9rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer; font-size:0.85rem;">Закрыть</button>
         </div>
     </div>
     <div id="upload-hint-3" style="display:none;">
-        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Запуск загрузки и проверка результата</h3>
-        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Подтвердите операцию нажав «Да, грузим». По завершении откройте «Статистику» — там отображается количество загруженных, пропущенных и ошибочных записей. При наличии ошибок они будут показаны в отдельном блоке.</p>
+        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Загрузка данных</h3>
+        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Когда всё проверили — нажмите «Загрузить» и подтвердите загрузку. По завершении в статистике отобразится количество загруженных, пропущенных и ошибочных записей.</p>
         <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
             <button onclick="uploadHintClose()" style="padding:0.35rem 0.9rem; border:none; border-radius:6px; background:var(--button-primary,#0d6efd); color:#fff; cursor:pointer; font-size:0.85rem;">Понятно</button>
         </div>
@@ -1186,16 +1186,13 @@ localize();
         var list = seen ? seen.split(',') : [];
         if (list.indexOf(WORKSPACE) !== -1) return;
 
-        // Bind action triggers: "Настроить" or "Проверить" → advance hint 1 → 2
+        // Bind action triggers: "Настроить" → advance hint 1 → 2
         var tuneBtn = document.getElementById('tune-btn');
-        var tryBtn = document.querySelector('#try button');
-        function onStep1Action() { uploadHintAdvance(2); }
-        if (tuneBtn) tuneBtn.addEventListener('click', onStep1Action);
-        if (tryBtn) tryBtn.addEventListener('click', onStep1Action);
+        if (tuneBtn) tuneBtn.addEventListener('click', function() { uploadHintAdvance(2); });
 
-        // "Загрузить" → advance hint 2 → 3
-        var doUploadBtn = document.getElementById('do-upload');
-        if (doUploadBtn) doUploadBtn.addEventListener('click', function() { uploadHintAdvance(3); });
+        // "Статистика" → advance hint 2 → 3
+        var showStatsBtn = document.getElementById('show-stats');
+        if (showStatsBtn) showStatsBtn.addEventListener('click', function() { uploadHintAdvance(3); });
 
         // Dragging support (desktop)
         var handle = document.getElementById('upload-hint-drag-handle');
