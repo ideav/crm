@@ -183,6 +183,110 @@
     text-decoration: underline;
 }
 
+.pricing-section {
+    margin-top: 24px;
+    padding: 16px 20px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+}
+
+.pricing-section h3 {
+    font-size: 0.95rem;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+    text-align: center;
+}
+
+.pricing-intro {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    line-height: 1.5;
+    margin-bottom: 14px;
+}
+
+.pricing-cards {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+
+.pricing-card {
+    flex: 1 1 180px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+}
+
+.pricing-price {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--button-primary);
+    margin-bottom: 4px;
+}
+
+.pricing-name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+}
+
+.pricing-desc {
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    line-height: 1.5;
+    margin-bottom: 6px;
+}
+
+.pricing-note {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.pricing-table-wrap {
+    margin-top: 8px;
+}
+
+.pricing-table-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.pricing-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+}
+
+.pricing-table th,
+.pricing-table td {
+    border: 1px solid var(--border-color);
+    padding: 6px 10px;
+    text-align: right;
+}
+
+.pricing-table th:first-child,
+.pricing-table td:first-child {
+    text-align: center;
+}
+
+.pricing-table th {
+    background: var(--bg-secondary);
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.pricing-table tbody tr:hover {
+    background: var(--bg-secondary);
+}
+
 .welcome-links {
     margin-top: 24px;
     padding: 16px;
@@ -316,7 +420,7 @@ mark.search-highlight {
         <details class="welcome-topic">
             <summary>
                 <i class="pi pi-user topic-icon"></i>
-                Регистрация и начало работы
+                Регистрация и&nbsp;начало работы
             </summary>
             <div class="welcome-topic-content">
                 <p>Интеграм позволяет быстро начать работу без сложной настройки:</p>
@@ -335,14 +439,14 @@ mark.search-highlight {
         <details class="welcome-topic">
             <summary>
                 <i class="pi pi-database topic-icon"></i>
-                Создание структуры данных (таблицы и поля)
+                Создание структуры данных (таблицы и&nbsp;поля)
             </summary>
             <div class="welcome-topic-content">
                 <p>Модель данных в Интеграме состоит из связанных между собой таблиц. Вы можете создать структуру любой сложности:</p>
                 <ol>
                     <li><strong>Редактор структуры</strong> находится в меню «Структура» — там создаются и редактируются все таблицы.</li>
                     <li>Создавайте новые таблицы (термины) — задавайте им человеческие названия и описания.</li>
-                    <li>Доступны поля разных типов: <code>SHORT</code> (короткий текст), <code>CHARS</code> (строка), <code>MEMO</code> (длинный текст), <code>DATE</code> (дата), <code>NUMBER</code> (число).</li>
+                    <li>Доступны поля разных типов: <code>SHORT</code> (короткий текст), <code>CHARS</code> (строка), <code>MEMO</code> (длинный текст), <code>DATE</code> (дата), <code>NUMBER</code> (число) и другие основные типы.</li>
                     <li>Для выпадающих списков используйте <strong>справочные поля</strong> — они ссылаются на другую таблицу.</li>
                     <li>Для вложенных данных (например, позиции заказа) доступны <strong>подчинённые таблицы</strong>.</li>
                 </ol>
@@ -355,7 +459,7 @@ mark.search-highlight {
         <details class="welcome-topic">
             <summary>
                 <i class="pi pi-table topic-icon"></i>
-                Работа с таблицами и записями
+                Работа с таблицами и&nbsp;записями
             </summary>
             <div class="welcome-topic-content">
                 <p>В Интеграме доступны все основные операции с данными:</p>
@@ -366,7 +470,7 @@ mark.search-highlight {
                     <li><strong>Фильтрация:</strong> поддерживаются маски и диапазоны для поиска, операторы <code>&gt;</code>, <code>&lt;</code>, <code>&gt;=</code>, <code>&lt;=</code> для чисел и дат.</li>
                     <li><strong>Поиск в списках:</strong> в выпадающих списках работает поиск по введённым символам.</li>
                 </ul>
-                <div class="tip">Доступны служебные слова: <code>[TODAY]</code> — текущая дата, <code>[USER]</code> — текущий пользователь и другие, которые помогут определить текущий контекст и тонко настроить поведение системы.</div>
+                <div class="tip">Доступны служебные слова, например: <code>[TODAY]</code> — текущая дата, <code>[USER]</code> — текущий пользователь и другие, которые помогут определить текущий контекст и тонко настроить поведение системы.</div>
                 <div class="topic-links"><span>Видео:</span><a href="https://rutube.ru/video/8b21501218c81b9afdf6c2021cd04f4d/" target="_blank"><i class="pi pi-youtube"></i> Умный отчёт для редактирования данных</a><span>Документация:</span><a href="https://help.integram.io/#rec219525382" target="_blank"><i class="pi pi-book"></i> Поиск в таблицах</a><a href="https://help.integram.io/#rec218333212" target="_blank"><i class="pi pi-book"></i> Таблицы-справочники</a></div>
             </div>
         </details>
@@ -375,7 +479,7 @@ mark.search-highlight {
         <details class="welcome-topic">
             <summary>
                 <i class="pi pi-chart-bar topic-icon"></i>
-                Создание отчётов и запросов
+                Создание отчётов и&nbsp;запросов
             </summary>
             <div class="welcome-topic-content">
                 <p>Конструктор запросов позволяет строить отчёты без знания SQL:</p>
@@ -401,7 +505,7 @@ mark.search-highlight {
         <details class="welcome-topic">
             <summary>
                 <i class="pi pi-file-edit topic-icon"></i>
-                Конструктор форм и шаблоны
+                Конструктор форм и&nbsp;шаблоны
             </summary>
             <div class="welcome-topic-content">
                 <p>Интеграм использует систему пяти основных универсальных форм и произвольные HTML-шаблоны — вы полностью контролируете внешний вид:</p>
@@ -460,7 +564,7 @@ mark.search-highlight {
         <details class="welcome-topic">
             <summary>
                 <i class="pi pi-link topic-icon"></i>
-                API и интеграция с внешними сервисами
+                API и интеграция с&nbsp;внешними сервисами
             </summary>
             <div class="welcome-topic-content">
                 <p>Интеграм предоставляет API для полноценной интеграции с внешними системами:</p>
@@ -480,7 +584,7 @@ mark.search-highlight {
         <details class="welcome-topic">
             <summary>
                 <i class="pi pi-sync topic-icon"></i>
-                Массовые операции с данными
+                Массовые операции с&nbsp;данными
             </summary>
             <div class="welcome-topic-content">
                 <p>Запросы модификации данных открывают широкие возможности для работы с большими объёмами записей:</p>
@@ -499,7 +603,7 @@ mark.search-highlight {
         <details class="welcome-topic">
             <summary>
                 <i class="pi pi-cog topic-icon"></i>
-                Служебные функции и формулы
+                Служебные функции и&nbsp;формулы
             </summary>
             <div class="welcome-topic-content">
                 <p>В Интеграме доступен широкий набор встроенных функций для работы с данными:</p>
@@ -519,7 +623,7 @@ mark.search-highlight {
         <details class="welcome-topic">
             <summary>
                 <i class="pi pi-send topic-icon"></i>
-                Формы с оповещением в Телеграм
+                Формы с оповещением в&nbsp;Телеграм
             </summary>
             <div class="welcome-topic-content">
                 <p>Интеграм позволяет создать единую систему: форма на сайте, данные в базе и мгновенные уведомления в Телеграм:</p>
@@ -651,6 +755,455 @@ mark.search-highlight {
     })();
     </script>
 
+<style>
+/* Tariff Section Styles */
+.tariff-section {
+    margin-top: 32px;
+    padding: 20px 0;
+    border: none !important;
+}
+
+.tariff-header {
+    text-align: center;
+    margin-bottom: 32px;
+}
+
+.tariff-header h2 {
+    font-size: 1.8rem;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+}
+
+.tariff-header p {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    max-width: 800px;
+    margin: 0 auto 8px;
+}
+
+.tariff-note {
+    background: var(--bg-secondary);
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: var(--radius-md);
+    font-size: 0.85rem;
+}
+
+/* Tariff Cards */
+.tariff-cards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    justify-content: center;
+    margin-bottom: 24px;
+}
+
+.tariff-card {
+    flex: 1;
+    min-width: 260px;
+    max-width: 320px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 24px 20px;
+    transition: transform 0.2s, box-shadow 0.2s;
+    position: relative;
+    margin-bottom: 24px;
+}
+
+.tariff-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+}
+
+.tariff-free {
+    border-top: 4px solid #10b981;
+}
+
+.tariff-startup {
+    border-top: 4px solid #3b82f6;
+}
+
+.tariff-scale {
+    border-top: 4px solid #8b5cf6;
+}
+
+.tariff-card-header {
+    text-align: center;
+    margin-bottom: 16px;
+}
+
+.tariff-card-header h3 {
+    font-size: 1.5rem;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.tariff-price {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.tariff-price span {
+    font-size: 0.9rem;
+    font-weight: 400;
+    color: var(--text-secondary);
+}
+
+.tariff-tokens {
+    text-align: center;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--button-primary);
+    padding: 12px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    margin-bottom: 20px;
+}
+
+.tariff-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 400;
+    background: var(--button-primary);
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 20px;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+
+.tariff-features {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.tariff-features li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.tariff-features li:last-child {
+    border-bottom: none;
+}
+
+.tariff-features i {
+    color: var(--button-primary);
+    font-size: 0.9rem;
+    min-width: 20px;
+}
+
+/* Regression Scale */
+.regression-scale {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    margin-bottom: 32px;
+	margin-top: 42px;
+	text-align: center;
+}
+
+.regression-scale h3 {
+    font-size: 1.3rem;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+}
+
+.regression-scale > p {
+    color: var(--text-secondary);
+    margin-bottom: 24px;
+    font-size: 0.9rem;
+}
+
+.table-wrapper {
+    overflow-x: auto;
+    display: flex;
+    justify-content: center; 
+}
+
+.tariff-table {
+    width: 100%;
+	max-width: 633px;
+    border-collapse: collapse;
+    background: var(--card-bg);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.tariff-table th,
+.tariff-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+.tariff-table th{
+    text-align: center;
+}
+
+.align-right {
+    text-align: right;
+	padding-right: 48px !important;
+}
+
+.tariff-table th {
+    background: var(--bg-secondary);
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.tariff-table tr:last-child td {
+    border-bottom: none;
+}
+
+.tariff-table td {
+    color: var(--text-primary);
+}
+
+.table-note {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-top: 16px;
+    text-align: center;
+}
+
+/* Info Block */
+.tariff-info {
+    display: flex;
+    justify-content: center;
+}
+
+.info-block {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+    max-width: 500px;
+}
+
+.info-block i {
+    font-size: 1.5rem;
+    color: var(--button-primary);
+}
+
+.info-block strong {
+    display: block;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.info-block p {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin: 0;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .tariff-cards {
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    .tariff-card {
+        max-width: 100%;
+        width: 100%;
+    }
+    
+    .tariff-header h2 {
+        font-size: 1.5rem;
+    }
+    
+    .regression-scale {
+        padding: 16px;
+    }
+    
+    .tariff-table th,
+    .tariff-table td {
+        padding: 8px 12px;
+        font-size: 0.85rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .tariff-table th,
+    .tariff-table td {
+        padding: 8px 10px;
+        font-size: 0.75rem;
+    }
+}
+</style>
+
+<!-- Тарифы и цены -->
+<div class="tariff-section">
+    <div class="tariff-header">
+        <h2>Тарифы</h2>
+        <p>Стоимость сервиса рассчитывается из&nbsp;нагрузки на&nbsp;сервер. Мы используем токены как&nbsp;единицу измерения: <strong>1&nbsp;токен&nbsp;≈&nbsp;одному действию</strong> в&nbsp;системе: открытие таблицы, создание записи, запуск отчета, сохранение формы&nbsp;и&nbsp;т.д.</p>
+        <p class="tariff-note">Тяжеловесные действия (импорт десятков тысяч записей) могут требовать 10–50&nbsp;токенов.</p>
+    </div>
+
+    <div class="tariff-cards">
+        <!-- Знакомство -->
+        <div class="tariff-card tariff-free">
+            <div class="tariff-card-header">
+                <h3>Знакомство</h3>
+                <div class="tariff-price">0 ₽<span>/мес</span></div>
+            </div>
+            <div class="tariff-tokens">3&nbsp;000 токенов</div>
+            <ul class="tariff-features">
+                <li><i class="pi pi-check"></i>Однопользовательский</li>
+                <li><i class="pi pi-clock"></i>2 часа плотной работы каждый рабочий день</li>
+                <li><i class="pi pi-infinity"></i> Бесплатно навсегда</li>
+            </ul>
+        </div>
+
+        <!-- Стартап -->
+        <div class="tariff-card tariff-startup">
+            <div class="tariff-card-header">
+                <h3>Стартап</h3>
+                <div class="tariff-price">1&nbsp;950 ₽<span>/мес</span></div>
+            </div>
+            <div class="tariff-tokens">5&nbsp;000 токенов</div>
+            <ul class="tariff-features">
+                <li><i class="pi pi-users"></i>Многопользовательский</li>
+                <li><i class="pi pi-clock"></i>3–4 часа работы команды из&nbsp;5&nbsp;человек</li>
+                <li><i class="pi pi-chart-line"></i>Подходит для 80%&nbsp;клиентов</li>
+            </ul>
+        </div>
+
+        <!-- Масштабируемый -->
+        <div class="tariff-card tariff-scale">
+            <div class="tariff-card-header">
+                <h3>Масштабируемый</h3>
+                <div class="tariff-price">от&nbsp;4&nbsp;900&nbsp;₽<span>/мес</span></div>
+            </div>
+            <div class="tariff-tokens">от&nbsp;10&nbsp;000 токенов</div>
+            <ul class="tariff-features">
+                <li><i class="pi pi-users"></i> Многопользовательский</li>
+                <li><i class="pi pi-chart-line"></i> Регрессионная шкала: каждый следующий пакет на&nbsp;20%&nbsp;дешевле</li>
+                <li><i class="pi pi-arrow-down"></i> При превышении — работа не&nbsp;блокируется</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Условия -->
+    <div class="tariff-info">
+        <div class="info-block">
+            <i class="pi pi-info-circle"></i>
+            <div>
+                <strong>Превышение лимита</strong>
+                <p>При превышении лимита в течение месяца работа не&nbsp;блокируется. В&nbsp;следующем месяце будет предложено перейти на&nbsp;повышенный тариф.</p>
+            </div>
+        </div>
+    </div>
+
+<!-- Регрессионная шкала -->
+<div class="regression-scale">
+    <h3 class="spoiler-title" id="spoilerTitle">
+        <span class="spoiler-icon">▶</span> Масштабируемый тариф — регрессионная шкала
+    </h3>
+    <p>При исчерпании базового пакета (10&nbsp;000 токенов) вы&nbsp;можете приобретать дополнительные пакеты. Каждый следующий пакет дешевле предыдущего на&nbsp;<strong>20%</strong>.</p>
+    
+    <div class="spoiler-content" id="spoilerContent" style="display: none;">
+        <div class="table-wrapper">
+            <table class="tariff-table">
+                <thead>
+                    <tr>
+                        <th>Пакет токенов<br />(всего)</th>
+                        <th>Цена пакета,<br />₽</th>
+                        <th>Полная стоимость,<br />₽ в месяц</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>1-й пакет (10 000)</td><td class="align-right">4 900</td><td class="align-right">4 900</td></tr>
+                    <tr><td>2-й пакет (20 000)</td><td class="align-right">3 920</td><td class="align-right">8 820</td></tr>
+                    <tr><td>3-й пакет (30 000)</td><td class="align-right">3 140</td><td class="align-right">11 960</td></tr>
+                    <tr><td>4-й пакет (40 000)</td><td class="align-right">2 510</td><td class="align-right">14 470</td></tr>
+                    <tr><td>5-й пакет (50 000)</td><td class="align-right">2 010</td><td class="align-right">16 480</td></tr>
+                    <tr><td>6-й пакет (60 000)</td><td class="align-right">1 610</td><td class="align-right">18 090</td></tr>
+                    <tr><td>7-й пакет (70 000)</td><td class="align-right">1 290</td><td class="align-right">19 380</td></tr>
+                    <tr><td>8-й пакет (80 000)</td><td class="align-right">1 030</td><td class="align-right">20 410</td></tr>
+                    <tr><td>9-й пакет (90 000)</td><td class="align-right">820</td><td class="align-right">21 230</td></tr>
+                    <tr><td>10-й пакет (100 000)</td><td class="align-right">660</td><td class="align-right">21 890</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="table-note">Цены округлены до&nbsp;10&nbsp;рублей. Последующие пакеты продолжают снижаться по&nbsp;той&nbsp;же логике, стремясь к&nbsp;минимальной стоимости.</p>
+    </div>
+</div>
+
+<style>
+/* Spoiler Title Styles */
+.spoiler-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 1.3rem;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+    border-bottom: 1px dashed var(--button-primary);
+    transition: opacity 0.2s ease;
+}
+
+.spoiler-title:hover {
+    opacity: 0.8;
+}
+
+.spoiler-icon {
+    font-size: 0.9rem;
+    transition: transform 0.2s ease;
+    color: var(--button-primary);
+}
+
+.spoiler-content {
+    animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+</style>
+
+<script>
+(function() {
+    const spoilerTitle = document.getElementById('spoilerTitle');
+    const spoilerContent = document.getElementById('spoilerContent');
+    const spoilerIcon = spoilerTitle.querySelector('.spoiler-icon');
+    
+    if (spoilerTitle && spoilerContent) {
+        spoilerTitle.addEventListener('click', function() {
+            const isVisible = spoilerContent.style.display !== 'none';
+            
+            if (isVisible) {
+                spoilerContent.style.display = 'none';
+                spoilerIcon.innerHTML = '▶';
+            } else {
+                spoilerContent.style.display = 'block';
+                spoilerIcon.innerHTML = '▼';
+            }
+        });
+    }
+})();
+</script>
+
+</div>
+
     <div class="welcome-links">
         <h3>Полезные ресурсы</h3>
         <a href="https://rutube.ru/channel/41204904/videos/" target="_blank"><i class="pi pi-youtube"></i> RUTUBE-канал</a>
@@ -750,107 +1303,185 @@ mark.search-highlight {
 
     <script src="js/app.js"></script>
 
-    <!-- Footer -->
-    <footer id="site-footer">
-        <div class="footer-container">
-            <div class="footer-logo-block">
-                <img src="https://integram.io/img/logo2.svg" alt="Integram" class="footer-logo">
-                <div class="footer-registry">
-                    <span>В реестре отечественного ПО</span>
+<style>
+/* Footer Styles */
+.site-footer {
+    margin-top: 48px;
+    padding: 48px 20px 32px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+}
+
+.footer-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 32px;
+}
+
+.footer-column {
+    display: flex;
+    flex-direction: column;
+}
+
+.footer-brand {
+    gap: 8px;
+}
+
+.footer-logo {
+	height: 72px;
+    width: 129px;
+    margin-bottom: 8px;
+}
+
+.footer-copyright,
+.footer-inn {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    margin: 0;
+    line-height: 1.5;
+}
+
+.footer-column h4 {
+    color: var(--text-primary);
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 16px;
+}
+
+.footer-links {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.footer-links li {
+    margin-bottom: 10px;
+}
+
+.footer-links a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.85rem;
+    transition: color 0.2s;
+}
+
+.footer-links a:hover {
+    color: var(--button-primary);
+    text-decoration: underline;
+}
+
+.footer-phone {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary) !important;
+}
+
+.footer-phone:hover {
+    color: var(--button-primary) !important;
+}
+
+.footer-email {
+    font-size: 0.9rem;
+}
+
+.footer-workhours {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    margin-bottom: 10px;
+}
+
+.footer-badge {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    background: var(--card-bg);
+    padding: 12px 16px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.badge-icon {
+    font-size: 1.5rem;
+    color: #10b981;
+}
+
+.badge-text {
+    display: flex;
+    flex-direction: column;
+}
+
+.badge-text strong {
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    margin-bottom: 4px;
+}
+
+.badge-text span {
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+}
+
+@media (max-width: 768px) {
+    .site-footer {
+        padding: 32px 16px 24px;
+    }
+    
+    .footer-container {
+        grid-template-columns: 1fr;
+        gap: 24px;
+    }
+    
+    .footer-column {
+        text-align: center;
+        align-items: center;
+    }
+    
+    .footer-badge {
+        text-align: left;
+    }
+}
+</style>
+<!-- Footer -->
+<footer class="site-footer">
+    <div class="footer-container">
+        <div class="footer-column footer-brand">
+            <img src="https://integram.io/img/logo2.svg" alt="Интеграм" class="footer-logo">
+            <p class="footer-copyright">© 2026 АО Интеграм</p>
+            <p class="footer-inn">ИНН: 9716002710</p>
+        </div>
+        
+        <div class="footer-column">
+            <h4>Документы</h4>
+            <ul class="footer-links">
+                <li><a href="/terms.html">Правила использования</a></li>
+                <li><a href="/OfferOJSC.pdf">Публичная оферта</a></li>
+                <li><a href="/acct.html">Платежная информация</a></li>
+            </ul>
+        </div>
+        
+        <div class="footer-column">
+            <h4>Контакты</h4>
+            <ul class="footer-links">
+                <li><a href="tel:+79955060167" class="footer-phone">+7 (995) 506-01-67</a></li>
+                <li class="footer-workhours">ежедневно с 8:00 до 22:00 (Мск)</li>
+                <li><a href="mailto:care@integram.io" class="footer-email">care@integram.io</a></li>
+            </ul>
+        </div>
+        
+        <div class="footer-column">
+            <div class="footer-badge">
+                <span class="badge-icon">✓</span>
+                <div class="badge-text">
+                    <strong>В реестре отечественного ПО</strong>
                     <span>Реестровая запись №30872</span>
                 </div>
             </div>
-            <div class="footer-links-block">
-                <a href="/terms.html">Правила использования</a>
-                <a href="/OfferOJSC.pdf">Публичная оферта</a>
-                <a href="/acct.html">Платежная информация</a>
-            </div>
-            <div class="footer-contacts-block">
-                <span class="footer-contacts-title">Контакты:</span>
-                <a href="tel:+79955060167">+7 (995) 506-01-67</a>
-                <span class="footer-contacts-hours">ежедневно с 8:00 до 22:00 (Мск)</span>
-                <a href="mailto:care@integram.io">care@integram.io</a>
-            </div>
-            <div class="footer-company-block">
-                <span>АО Интеграм, ИНН: 9716002710</span>
-            </div>
         </div>
-    </footer>
-    <style>
-        #site-footer {
-            background-color: var(--bg-secondary);
-            border-top: 1px solid var(--border-color);
-            padding: 1.5rem 0;
-            margin-top: 2rem;
-            font-size: 0.85rem;
-            color: var(--text-secondary);
-        }
-        .footer-container {
-            max-width: 900px;
-            margin: 0 auto;
-            padding: 0 20px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 1.5rem;
-            align-items: flex-start;
-        }
-        .footer-logo-block {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-        }
-        .footer-logo {
-            height: 32px;
-            width: auto;
-        }
-        .footer-registry {
-            display: flex;
-            flex-direction: column;
-            gap: 0.1rem;
-            font-size: 0.8rem;
-        }
-        .footer-links-block {
-            display: flex;
-            flex-direction: column;
-            gap: 0.4rem;
-        }
-        .footer-links-block a {
-            color: var(--link-color);
-            text-decoration: none;
-        }
-        .footer-links-block a:hover {
-            text-decoration: underline;
-        }
-        .footer-contacts-block {
-            display: flex;
-            flex-direction: column;
-            gap: 0.4rem;
-        }
-        .footer-contacts-title {
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-        .footer-contacts-block a {
-            color: var(--link-color);
-            text-decoration: none;
-        }
-        .footer-contacts-block a:hover {
-            text-decoration: underline;
-        }
-        .footer-contacts-hours {
-            font-size: 0.8rem;
-        }
-        .footer-company-block {
-            display: flex;
-            align-items: flex-end;
-        }
-        @media (max-width: 600px) {
-            .footer-container {
-                flex-direction: column;
-                gap: 1rem;
-            }
-        }
-    </style>
+    </div>
+</footer>
+
 
     <!-- Cookie Consent Banner -->
     <div id="cookie-consent">
