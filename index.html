@@ -1109,6 +1109,217 @@ mark.search-highlight {
         </div>
     </div>
 
+<!-- Акция: Год за 15900 -->
+<div class="promo-section" id="promoSection">
+    <button class="promo-button" id="promoButton">
+        <span class="promo-price">Год за 15 900 ₽</span>
+    </button>
+    <div class="promo-subtitle">Акция: Тарифный план Стартап за 15900 рублей в год при оплате сейчас</div>
+    
+    <div class="promo-form" id="promoForm" style="display: none;">
+        <div class="promo-form-group">
+            <label for="promoEmail">Email для оплаты</label>
+            <input type="email" id="promoEmail" placeholder="your@email.com" class="promo-input">
+            <div class="promo-error" id="promoError"></div>
+        </div>
+        <button class="promo-pay-button" id="promoPayButton">Оплатить 15 900 ₽</button>
+    </div>
+</div>
+
+<style>
+/* Promo Section Styles */
+.promo-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    margin: 32px auto 50px;
+    max-width: 600px;
+}
+
+.promo-button {
+    background: #f59e0b;
+    border: none;
+    border-radius: var(--radius-lg);
+    padding: 12px 32px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-align: center;
+    width: 100%;
+	max-width: 400px;
+	box-shadow: 0 2px 8px rgba(245, 158, 11, 0.2);
+}
+
+.promo-button:hover {
+    background: #f59e0b;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+}
+
+.promo-price {
+    display: block;
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: #fff;
+}
+
+.promo-subtitle {
+    display: block;
+    font-size: 1rem;
+    color: var(--text-secondary);
+    margin-top: 8px;
+    text-align: center;
+}
+
+.promo-form {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    width: 100%;
+    margin-top: 16px;
+    animation: fadeIn 0.3s ease;
+}
+
+.promo-form-group {
+    /* margin-bottom: 20px; */
+}
+
+.promo-form-group label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.promo-input {
+    width: 100%;
+    padding: 12px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    transition: border-color 0.2s;
+    box-sizing: border-box;
+}
+
+.promo-input:focus {
+    outline: none;
+    border-color: var(--button-primary);
+}
+
+.promo-input.error {
+    border-color: #ef4444;
+}
+
+.promo-error {
+    font-size: 0.75rem;
+    color: #ef4444;
+    margin-top: 4px;
+    min-height: 20px;
+}
+
+.promo-pay-button {
+    width: 100%;
+    background: var(--button-primary);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-md);
+    padding: 12px 24px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.promo-pay-button:hover:not(:disabled) {
+    background: var(--button-primary-dark, #2563eb);
+    transform: translateY(-1px);
+}
+
+.promo-pay-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+</style>
+
+<script>
+(function() {
+    const promoButton = document.getElementById('promoButton');
+    const promoForm = document.getElementById('promoForm');
+    const promoEmail = document.getElementById('promoEmail');
+    const promoError = document.getElementById('promoError');
+    const promoPayButton = document.getElementById('promoPayButton');
+    
+    // Валидация email
+    function validateEmail(email) {
+        const re = /^[^\s@]+@([^\s@]+\.)+[^\s@]+$/;
+        return re.test(email);
+    }
+    
+    // Показать ошибку
+    function showError(message) {
+        promoError.textContent = message;
+        promoEmail.classList.add('error');
+    }
+    
+    // Скрыть ошибку
+    function hideError() {
+        promoError.textContent = '';
+        promoEmail.classList.remove('error');
+    }
+    
+    // Обработчик кнопки акции
+    promoButton.addEventListener('click', function() {
+        promoButton.style.display = 'none';
+        promoForm.style.display = 'block';
+    });
+    
+    // Валидация при вводе
+    promoEmail.addEventListener('input', function() {
+        if (promoEmail.value.trim()) {
+            hideError();
+        }
+    });
+    
+    // Обработчик кнопки оплаты
+    promoPayButton.addEventListener('click', function() {
+        const email = promoEmail.value.trim();
+        
+        // Валидация email
+        if (!email) {
+            showError('Введите email');
+            return;
+        }
+        
+        if (!validateEmail(email)) {
+            showError('Введите корректный email (например, name@example.com)');
+            return;
+        }
+        
+        // Делаем кнопку неактивной
+        promoPayButton.disabled = true;
+        promoPayButton.textContent = 'Перенаправление...';
+        
+        // Перенаправляем на страницу оплаты
+        window.location.href = '/pay.php?amount=9900&email=' + encodeURIComponent(email);
+    });
+})();
+</script>
+	
     <!-- Условия -->
     <div class="tariff-info">
         <div class="info-block">
