@@ -1071,8 +1071,18 @@ localize();
     height: 2rem;
     cursor: grab;
     border-radius: 12px 12px 0 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 #upload-hint-box .hint-drag-handle:active { cursor: grabbing; }
+#upload-hint-box .hint-drag-handle .hint-drag-icon {
+    font-size: 1rem;
+    color: var(--text-secondary, #888);
+    pointer-events: none;
+    line-height: 1;
+    letter-spacing: 2px;
+}
 #upload-hint-mobile-toggle {
     display: none;
     position: fixed;
@@ -1096,7 +1106,7 @@ localize();
 }
 </style>
 <div id="upload-hint-box">
-    <div class="hint-drag-handle" id="upload-hint-drag-handle"></div>
+    <div class="hint-drag-handle" id="upload-hint-drag-handle" title="Это окно можно перетаскивать по экрану"><span class="hint-drag-icon">⠿⠿</span></div>
     <div id="upload-hint-1" style="display:none;">
         <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Выбор таблицы и проверка файла</h3>
         <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Выберите таблицу из списка или нажмите «Создать новую таблицу из файла», затем вставьте текст данных или загрузите файл (JSON, CSV, TXT). Нажмите «Проверить», а затем нажмите «Настроить», чтобы задать разделитель полей, кодировку и наличие заголовков — появится следующий совет.</p>
