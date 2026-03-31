@@ -784,9 +784,7 @@ function importParse(){
         Papa.parse($('#input').val(),{delimiter:$('#delim').val(),linebreak:$('#caret').val(),skipEmptyLines:true
             ,LocalChunkSize:1048024
             ,RemoteChunkSize:1048024
-            ,chunk: (results, parser) => {
-            	importDoParse(results);
-            }
+            ,chunk: (results, parser) =>{importDoParse(results);}
         });
     else{
     	var file,files = document.getElementById('selectFiles').files;
