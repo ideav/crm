@@ -750,6 +750,108 @@ mark.search-highlight {
 
     <script src="js/app.js"></script>
 
+    <!-- Footer -->
+    <footer id="site-footer">
+        <div class="footer-container">
+            <div class="footer-logo-block">
+                <img src="https://integram.io/img/logo2.svg" alt="Integram" class="footer-logo">
+                <div class="footer-registry">
+                    <span>В реестре отечественного ПО</span>
+                    <span>Реестровая запись №30872</span>
+                </div>
+            </div>
+            <div class="footer-links-block">
+                <a href="/terms.html">Правила использования</a>
+                <a href="/OfferOJSC.pdf">Публичная оферта</a>
+                <a href="/acct.html">Платежная информация</a>
+            </div>
+            <div class="footer-contacts-block">
+                <span class="footer-contacts-title">Контакты:</span>
+                <a href="tel:+79955060167">+7 (995) 506-01-67</a>
+                <span class="footer-contacts-hours">ежедневно с 8:00 до 22:00 (Мск)</span>
+                <a href="mailto:care@integram.io">care@integram.io</a>
+            </div>
+            <div class="footer-company-block">
+                <span>АО Интеграм, ИНН: 9716002710</span>
+            </div>
+        </div>
+    </footer>
+    <style>
+        #site-footer {
+            background-color: var(--bg-secondary);
+            border-top: 1px solid var(--border-color);
+            padding: 1.5rem 0;
+            margin-top: 2rem;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        .footer-container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 0 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+            align-items: flex-start;
+        }
+        .footer-logo-block {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .footer-logo {
+            height: 32px;
+            width: auto;
+        }
+        .footer-registry {
+            display: flex;
+            flex-direction: column;
+            gap: 0.1rem;
+            font-size: 0.8rem;
+        }
+        .footer-links-block {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+        .footer-links-block a {
+            color: var(--link-color);
+            text-decoration: none;
+        }
+        .footer-links-block a:hover {
+            text-decoration: underline;
+        }
+        .footer-contacts-block {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+        .footer-contacts-title {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .footer-contacts-block a {
+            color: var(--link-color);
+            text-decoration: none;
+        }
+        .footer-contacts-block a:hover {
+            text-decoration: underline;
+        }
+        .footer-contacts-hours {
+            font-size: 0.8rem;
+        }
+        .footer-company-block {
+            display: flex;
+            align-items: flex-end;
+        }
+        @media (max-width: 600px) {
+            .footer-container {
+                flex-direction: column;
+                gap: 1rem;
+            }
+        }
+    </style>
+
     <!-- Cookie Consent Banner -->
     <div id="cookie-consent">
         <span style="font-size:0.9rem;">Мы используем куки для обеспечения работы сайта. Продолжая использовать сайт, вы соглашаетесь с их использованием.</span>
