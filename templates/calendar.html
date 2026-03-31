@@ -1262,3 +1262,108 @@ window.addEventListener('beforeunload', function() {
     }
 });
 </script>
+<script src="/js/hints.js"></script>
+<!-- Workspace hints -->
+<style>
+#calendar-hint-box {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 90%;
+    max-width: 420px;
+    background: var(--card-bg, #fff);
+    border-radius: 12px;
+    padding: 1.25rem 1.25rem 1rem;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.28);
+    z-index: 2000;
+    display: none;
+    cursor: default;
+    user-select: none;
+    -webkit-user-select: none;
+}
+#calendar-hint-box .hint-drag-handle {
+    position: absolute;
+    top: 6px;
+    left: 0;
+    right: 12px;
+    height: 2rem;
+    cursor: grab;
+    border-radius: 12px 12px 0 0;
+    display: flex;
+    align-items: center;
+    justify-content: right;
+}
+#calendar-hint-box .hint-drag-handle:active { cursor: grabbing; }
+#calendar-hint-box .hint-drag-handle .hint-drag-icon {
+    font-size: 1rem;
+    color: var(--text-secondary, #888);
+    pointer-events: none;
+    line-height: 1;
+    letter-spacing: 2px;
+}
+#calendar-hint-mobile-toggle {
+    display: none;
+    position: fixed;
+    right: 1rem;
+    z-index: 2001;
+    background: var(--button-primary, #0d6efd);
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    width: 2.4rem;
+    height: 2.4rem;
+    font-size: 1.2rem;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    align-items: center;
+    justify-content: center;
+}
+@media (max-width: 767px) {
+    #calendar-hint-box { width: calc(100% - 2rem); max-width: none; }
+    #calendar-hint-mobile-toggle { display: flex; }
+}
+</style>
+<div id="calendar-hint-box">
+    <div class="hint-drag-handle" id="calendar-hint-drag-handle" title="Это окно можно перетаскивать по экрану"><span class="hint-drag-icon">⠿⠿</span></div>
+    <div id="calendar-hint-1" style="display:none;">
+        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Навигация по датам</h3>
+        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Используйте кнопки «вперёд» и «назад» в шапке календаря для перемещения между месяцами и неделями. Кнопка «Сегодня» мгновенно вернёт вас к текущей дате. Переключайтесь между видами (месяц / неделя / день) в правом верхнем углу.</p>
+        <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+            <button onclick="calendarHintClose()" style="padding:0.35rem 0.9rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer; font-size:0.85rem;">Закрыть</button>
+        </div>
+    </div>
+    <div id="calendar-hint-2" style="display:none;">
+        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Фильтрация событий</h3>
+        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Используйте выпадающие списки «Исполнитель», «Тип задачи» и «Статус», чтобы отображать только нужные события. Установите флажок «Важные», чтобы выделить приоритетные задачи. Просроченные задачи собраны в отдельном разделе внизу.</p>
+        <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+            <button onclick="calendarHintClose()" style="padding:0.35rem 0.9rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer; font-size:0.85rem;">Закрыть</button>
+        </div>
+    </div>
+    <div id="calendar-hint-3" style="display:none;">
+        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Компактный и расширенный вид</h3>
+        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Нажмите на любое событие, чтобы открыть его карточку для редактирования. Раздел «Просроченные» можно свернуть или развернуть кликом, чтобы не загромождать экран.</p>
+        <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+            <button onclick="calendarHintClose()" style="padding:0.35rem 0.9rem; border:none; border-radius:6px; background:var(--button-primary,#0d6efd); color:#fff; cursor:pointer; font-size:0.85rem;">Понятно</button>
+        </div>
+    </div>
+</div>
+<button id="calendar-hint-mobile-toggle" title="Переместить подсказку" aria-label="Переместить подсказку вверх/вниз" style="bottom:5rem;"></button>
+<script>
+// Workspace-specific hint configuration for 'calendar'.
+// Texts and steps are defined here; the display mechanism is in /js/hints.js.
+document.addEventListener('DOMContentLoaded', function() {
+    window.initHints({
+        workspace: 'calendar',
+        steps: 3,
+        onInit: function(api) {
+            var execFilter = document.getElementById('executorFilter');
+            if (execFilter) execFilter.addEventListener('change', function() { api.advance(2); });
+            var nextBtn = document.querySelector('.fc-next-button');
+            if (nextBtn) nextBtn.addEventListener('click', function() { api.advance(2); });
+            var importantFilter = document.getElementById('importantFilter');
+            if (importantFilter) importantFilter.addEventListener('change', function() { api.advance(3); });
+        }
+    });
+});
+</script>
