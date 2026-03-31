@@ -1152,21 +1152,21 @@ else // In case a report is requested - draw it
     <div class="hint-drag-handle" id="sql-hint-drag-handle" title="Это окно можно перетаскивать по экрану"><span class="hint-drag-icon">⠿⠿</span></div>
     <div id="sql-hint-1" style="display:none;">
         <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Выбор источника данных</h3>
-        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Введите слева вверху имя запроса — Права — и нажмите Создать запрос (нажмите там <i class="pi pi-list"></i>, если не видите поля ввода). Далее из списка справа вверху выберите таблицу-источник для запроса — Пользователь, а затем поле — Пользователь.</p>
+        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Введите слева вверху имя запроса — Права — и нажмите Создать запрос (нажмите там <i class="pi pi-list"></i>, если не видите поля ввода). Далее из списка справа вверху выберите таблицу-источник для запроса — Пользователь, а затем её колонку — Пользователь.</p>
         <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
             <button onclick="sqlHintClose()" style="padding:0.35rem 0.9rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer; font-size:0.85rem;">Закрыть</button>
         </div>
     </div>
     <div id="sql-hint-2" style="display:none;">
-        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Настройка и выполнение запроса</h3>
-        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Используйте кнопки «Фильтр», «Сортировка», «Итоги», чтобы настроить параметры выборки. Нажмите кнопку «Выполнить» (или значок ▶), чтобы получить результаты в виде таблицы.</p>
+        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Добавление колонок в запрос</h3>
+        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Аналогично добавьте в запрос: таблицу Роль и колонку Роль, таблицу Объекты и колонку Объекты, таблицу Доступ и колонку Доступ -> Описание. Затем установите флажок «Интерактивный» (слева вверху).</p>
         <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
             <button onclick="sqlHintClose()" style="padding:0.35rem 0.9rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer; font-size:0.85rem;">Закрыть</button>
         </div>
     </div>
     <div id="sql-hint-3" style="display:none;">
-        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Построение диаграммы</h3>
-        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Установите флажок «Интерактивный», выберите тип графика и укажите столбцы для осей. Нажмите «Выполнить» снова — ниже таблицы появится интерактивная диаграмма.</p>
+        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Настройка и выполнение запроса</h3>
+        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Нажмите название запроса (синяя ссылка вверху), чтобы получить результаты в виде таблицы.</p>
         <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
             <button onclick="sqlHintClose()" style="padding:0.35rem 0.9rem; border:none; border-radius:6px; background:var(--button-primary,#0d6efd); color:#fff; cursor:pointer; font-size:0.85rem;">Понятно</button>
         </div>
@@ -1181,7 +1181,7 @@ document.addEventListener('DOMContentLoaded', function() {
         workspace: 'sql',
         steps: 3,
         onInit: function(api) {
-            var tableSelect = document.getElementById('table');
+            var tableSelect = document.getElementsByClassName('col-title-wrapper');
             if (tableSelect) tableSelect.addEventListener('change', function() { api.advance(2); });
             var interactCheck = document.getElementById('interact');
             if (interactCheck) interactCheck.addEventListener('change', function() { api.advance(3); });
