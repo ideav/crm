@@ -4256,20 +4256,35 @@ class IntegramTable{
                 if (parentInfo.isFirstColumn) {
                     // Use _m_save for first column
                     url = `${ apiBase }/_m_save/${ parentRecordId }?JSON`;
-                    params.append(`t${ colType }`, newValue);
                 } else {
                     // Use _m_set for requisites
                     url = `${ apiBase }/_m_set/${ parentRecordId }?JSON`;
-                    params.append(`t${ colType }`, newValue);
                 }
 
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded'
-                    },
-                    body: params.toString()
-                });
+                // For FILE type with a pending file, send directly as multipart (issue #1310)
+                const format = this.currentEditingCell.format;
+                const editorEl = cell.querySelector('.inline-editor');
+                let response;
+                if (format === 'FILE' && editorEl && editorEl._fileToUpload) {
+                    const formData = new FormData();
+                    if (typeof xsrf !== 'undefined') {
+                        formData.append('_xsrf', xsrf);
+                    }
+                    formData.append(`t${ colType }`, editorEl._fileToUpload);
+                    response = await fetch(url, {
+                        method: 'POST',
+                        body: formData
+                    });
+                } else {
+                    params.append(`t${ colType }`, newValue);
+                    response = await fetch(url, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded'
+                        },
+                        body: params.toString()
+                    });
+                }
 
                 let result;
                 const responseText = await response.text();
@@ -4290,6 +4305,12 @@ class IntegramTable{
                 // These are informational warnings that don't block the save
                 if (result.warnings) {
                     this.showWarningsModal(result.warnings);
+                }
+
+                // For FILE type: get saved path from server response (issue #1310)
+                if (format === 'FILE' && editorEl && editorEl._fileToUpload) {
+                    newValue = result.path || result.file || result.filename || editorEl._fileToUpload.name;
+                    editorEl._fileToUpload = null;
                 }
 
                 // Update the cell display with the new value
@@ -12189,25 +12210,13 @@ class IntegramTable{
         }
 
         async handleFileSelection(file, editor, dropzone, preview, fileName) {
-            // Show loading state
-            const dropzoneText = dropzone.querySelector('.file-dropzone-text');
-            const originalText = dropzoneText.textContent;
-            dropzoneText.textContent = 'Загрузка...';
-
-            try {
-                // Upload file to server
-                const uploadedPath = await this.uploadFile(file);
-
-                // Update UI
-                fileName.textContent = file.name;
-                dropzone.style.display = 'none';
-                preview.style.display = 'flex';
-                editor.dataset.fileValue = uploadedPath;
-            } catch (error) {
-                console.error('Error uploading file:', error);
-                this.showToast(`Ошибка загрузки файла: ${ error.message }`, 'error');
-                dropzoneText.textContent = originalText;
-            }
+            // Store file for direct submission to _m_set on save (issue #1310)
+            editor._fileToUpload = file;
+            editor.dataset.fileValue = file.name;
+            // Update UI
+            fileName.textContent = file.name;
+            dropzone.style.display = 'none';
+            preview.style.display = 'flex';
         }
 
         async uploadFile(file) {
