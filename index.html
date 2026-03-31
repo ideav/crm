@@ -1348,6 +1348,18 @@ mark.search-highlight {
     margin-bottom: 8px;
 }
 
+.footer-logo-dark {
+    display: none;
+}
+
+[data-theme="dark"] .footer-logo-light {
+    display: none;
+}
+
+[data-theme="dark"] .footer-logo-dark {
+    display: block;
+}
+
 .footer-copyright,
 .footer-inn {
     color: var(--text-secondary);
@@ -1460,7 +1472,8 @@ mark.search-highlight {
 <footer class="site-footer">
     <div class="footer-container">
         <div class="footer-column footer-brand">
-            <img src="https://integram.io/img/logo2.svg" alt="Интеграм" class="footer-logo">
+            <img src="https://integram.io/img/logo2.svg" alt="Интеграм" class="footer-logo footer-logo-light">
+            <img src="i/logo_black_bg.jpg" alt="Интеграм" class="footer-logo footer-logo-dark">
             <p class="footer-copyright">© 2026 АО Интеграм</p>
             <p class="footer-inn">ИНН: 9716002710</p>
         </div>
