@@ -1274,6 +1274,7 @@ document.addEventListener('DOMContentLoaded', function() {
         workspace: 'quiz',
         steps: 3,
         onInit: function(api) {
+			return;
             var btns = document.querySelectorAll('button, .btn, [role="button"]');
             btns.forEach(function(btn) {
                 var txt = btn.textContent || btn.innerText || '';
