@@ -768,8 +768,8 @@ function parseType(input){
         }
         $('#sortable').html(h);
     }
-    $('#tune').show();
-    $('#tune-btn').hide();
+    //$('#tune').show();
+    //$('#tune-btn').hide();
     //$('#save-set-form').hide();
     gatherSet();
 }
@@ -784,9 +784,7 @@ function importParse(){
         Papa.parse($('#input').val(),{delimiter:$('#delim').val(),linebreak:$('#caret').val(),skipEmptyLines:true
             ,LocalChunkSize:1048024
             ,RemoteChunkSize:1048024
-            ,chunk: (results, parser) => {
-            	importDoParse(results);
-            }
+            ,chunk: (results, parser) =>{importDoParse(results);}
         });
     else{
     	var file,files = document.getElementById('selectFiles').files;
@@ -1044,18 +1042,20 @@ localize();
 </script>
 <script src="/js/bootstrap4.5.2.min.js"></script>
 <script src="/js/main.js"></script>
+<script src="/js/hints.js"></script>
 <!-- Workspace hints -->
 <style>
 #upload-hint-box {
     position: fixed;
-    bottom: 1.5rem;
-    right: 1.5rem;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
     width: 90%;
-    max-width: 380px;
+    max-width: 420px;
     background: var(--card-bg, #fff);
     border-radius: 12px;
     padding: 1.25rem 1.25rem 1rem;
-    box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+    box-shadow: 0 8px 40px rgba(0,0,0,0.28);
     z-index: 2000;
     display: none;
     cursor: default;
@@ -1064,14 +1064,24 @@ localize();
 }
 #upload-hint-box .hint-drag-handle {
     position: absolute;
-    top: 0;
+    top: 6px;
     left: 0;
-    right: 0;
+    right: 12px;
     height: 2rem;
     cursor: grab;
     border-radius: 12px 12px 0 0;
+    display: flex;
+    align-items: center;
+    justify-content: right;
 }
 #upload-hint-box .hint-drag-handle:active { cursor: grabbing; }
+#upload-hint-box .hint-drag-handle .hint-drag-icon {
+    font-size: 1rem;
+    color: var(--text-secondary, #888);
+    pointer-events: none;
+    line-height: 1;
+    letter-spacing: 2px;
+}
 #upload-hint-mobile-toggle {
     display: none;
     position: fixed;
@@ -1095,24 +1105,24 @@ localize();
 }
 </style>
 <div id="upload-hint-box">
-    <div class="hint-drag-handle" id="upload-hint-drag-handle"></div>
+    <div class="hint-drag-handle" id="upload-hint-drag-handle" title="Это окно можно перетаскивать по экрану"><span class="hint-drag-icon">⠿⠿</span></div>
     <div id="upload-hint-1" style="display:none;">
-        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);">Выбор файла и параметры импорта</h3>
-        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Выберите таблицу из списка, затем вставьте текст данных или загрузите файл (JSON, CSV, TXT). Нажмите «Настроить», чтобы задать разделитель полей, кодировку и наличие заголовков. Затем нажмите «Проверить» — появится следующий совет.</p>
+        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Выбор таблицы и проверка файла</h3>
+        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Выберите таблицу из списка или нажмите «Создать новую таблицу из файла», затем вставьте текст данных или загрузите файл (JSON, CSV, TXT). Нажмите «Проверить», а затем нажмите «Настроить», чтобы задать разделитель полей, кодировку и наличие заголовков — появится следующий совет.</p>
         <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
             <button onclick="uploadHintClose()" style="padding:0.35rem 0.9rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer; font-size:0.85rem;">Закрыть</button>
         </div>
     </div>
     <div id="upload-hint-2" style="display:none;">
-        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);">Сопоставление полей файла с колонками</h3>
-        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Перетащите колонки в нужном порядке, чтобы они совпадали с колонками вашего файла. При необходимости задайте формулы для вычисляемых полей. Затем нажмите «Загрузить» — появится следующий совет.</p>
+        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Проверка статистики данных</h3>
+        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">После настройки нажмите «Статистика» и убедитесь, что данные в нужном количестве и правильно распознаны по типам — появится следующий совет.</p>
         <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
             <button onclick="uploadHintClose()" style="padding:0.35rem 0.9rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer; font-size:0.85rem;">Закрыть</button>
         </div>
     </div>
     <div id="upload-hint-3" style="display:none;">
-        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);">Запуск загрузки и проверка результата</h3>
-        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Подтвердите операцию нажав «Да, грузим». По завершении откройте «Статистику» — там отображается количество загруженных, пропущенных и ошибочных записей. При наличии ошибок они будут показаны в отдельном блоке.</p>
+        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Загрузка данных</h3>
+        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Когда всё проверили — нажмите «Загрузить» и подтвердите загрузку. По завершении в статистике отобразится количество загруженных, пропущенных и ошибочных записей.</p>
         <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
             <button onclick="uploadHintClose()" style="padding:0.35rem 0.9rem; border:none; border-radius:6px; background:var(--button-primary,#0d6efd); color:#fff; cursor:pointer; font-size:0.85rem;">Понятно</button>
         </div>
@@ -1246,5 +1256,5 @@ localize();
 
         uploadHintShow(1);
     });
-})();
+});
 </script>

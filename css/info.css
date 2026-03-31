@@ -110,9 +110,14 @@
 
 .info-action-title {
     flex: 1;
-    font-size: 0.95rem;
+    font-size: 1rem;
     font-weight: 500;
     color: var(--text-primary);
+}
+
+.info-action-item[data-action="where-am-i"] .info-action-title,
+.info-action-item[data-action="hints"] .info-action-title {
+    font-weight: 700;
 }
 
 .info-action-toggle {
