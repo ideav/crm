@@ -1179,3 +1179,191 @@ if(search.del)
 <input id="copy_path" type="text" value="" style="display:none;">
 <script src="/js/bootstrap4.5.2.min.js"></script>
 <script src="/js/main.js"></script>
+<!-- Workspace hints -->
+<style>
+#quiz-hint-box {
+    position: fixed;
+    right: 1.5rem;
+    bottom: 1.5rem;
+    width: 320px;
+    background: var(--bg-primary, #fff);
+    border: 1px solid var(--border-color, #dee2e6);
+    border-radius: 12px;
+    padding: 1.25rem 1.25rem 1rem;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.13);
+    z-index: 2000;
+    display: none;
+    cursor: default;
+    user-select: none;
+    -webkit-user-select: none;
+}
+#quiz-hint-box .hint-drag-handle {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2rem;
+    cursor: grab;
+    border-radius: 12px 12px 0 0;
+}
+#quiz-hint-box .hint-drag-handle:active { cursor: grabbing; }
+#quiz-hint-mobile-toggle {
+    display: none;
+    position: fixed;
+    right: 1rem;
+    z-index: 2001;
+    background: var(--button-primary, #0d6efd);
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    width: 2.4rem;
+    height: 2.4rem;
+    font-size: 1.2rem;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    align-items: center;
+    justify-content: center;
+}
+@media (max-width: 767px) {
+    #quiz-hint-box { right: 0.5rem; left: 0.5rem; width: auto; max-width: none; }
+    #quiz-hint-mobile-toggle { display: flex; }
+}
+</style>
+<div id="quiz-hint-box">
+    <div class="hint-drag-handle" id="quiz-hint-drag-handle"></div>
+    <div id="quiz-hint-1" style="display:none;">
+        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);">Создание опроса</h3>
+        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Нажмите «Создать опрос», выберите или создайте таблицу для хранения ответов, задайте заголовок и описание. Каждый опрос связан с конкретной таблицей базы данных. После нажатия появится следующий совет.</p>
+        <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+            <button onclick="quizHintClose()" style="padding:0.35rem 0.9rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer; font-size:0.85rem;">Закрыть</button>
+        </div>
+    </div>
+    <div id="quiz-hint-2" style="display:none;">
+        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);">Добавление вопросов</h3>
+        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Нажмите «Добавить вопрос» и выберите тип: текстовый, выбор из списка, множественный выбор и др. Вопросы можно перетаскивать для изменения порядка.</p>
+        <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+            <button onclick="quizHintClose()" style="padding:0.35rem 0.9rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer; font-size:0.85rem;">Закрыть</button>
+        </div>
+    </div>
+    <div id="quiz-hint-3" style="display:none;">
+        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);">Публикация и просмотр ответов</h3>
+        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Скопируйте ссылку на опрос, чтобы поделиться с пользователями. Ответы автоматически сохраняются в выбранную таблицу — откройте её для анализа результатов.</p>
+        <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+            <button onclick="quizHintClose()" style="padding:0.35rem 0.9rem; border:none; border-radius:6px; background:var(--button-primary,#0d6efd); color:#fff; cursor:pointer; font-size:0.85rem;">Понятно</button>
+        </div>
+    </div>
+</div>
+<button id="quiz-hint-mobile-toggle" title="Переместить подсказку" aria-label="Переместить подсказку вверх/вниз" style="bottom:5rem;"></button>
+<script>
+(function() {
+    function getCookie(name) {
+        var prefix = name + '=';
+        var parts = document.cookie.split(';');
+        for (var i = 0; i < parts.length; i++) {
+            var part = parts[i].trim();
+            if (part.indexOf(prefix) === 0) return decodeURIComponent(part.substring(prefix.length));
+        }
+        return null;
+    }
+    function setCookie(name, value, days) {
+        var expires = '';
+        if (days) {
+            var d = new Date();
+            d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
+            expires = '; expires=' + d.toUTCString();
+        }
+        document.cookie = name + '=' + encodeURIComponent(value) + expires + '; path=/';
+    }
+
+    var WORKSPACE = 'quiz';
+    var hintBox = null;
+    var hintAtTop = false;
+
+    window.quizHintShow = function(n) {
+        if (!hintBox) return;
+        [1, 2, 3].forEach(function(i) {
+            var el = document.getElementById('quiz-hint-' + i);
+            if (el) el.style.display = (i === n) ? '' : 'none';
+        });
+        hintBox.style.display = 'block';
+        var tog = document.getElementById('quiz-hint-mobile-toggle');
+        if (tog) tog.innerHTML = hintAtTop ? '&#8595;' : '&#8593;';
+    };
+
+    window.quizHintClose = function() {
+        if (hintBox) hintBox.style.display = 'none';
+        var tog = document.getElementById('quiz-hint-mobile-toggle');
+        if (tog) tog.style.display = 'none';
+        var seen = getCookie('hints_seen_workspaces') || '';
+        var list = seen ? seen.split(',') : [];
+        if (list.indexOf(WORKSPACE) === -1) {
+            list.push(WORKSPACE);
+            setCookie('hints_seen_workspaces', list.join(','), 365);
+        }
+    };
+
+    window.quizHintAdvance = function(toStep) {
+        if (!hintBox || hintBox.style.display === 'none') return;
+        quizHintShow(toStep);
+    };
+
+    document.addEventListener('DOMContentLoaded', function() {
+        hintBox = document.getElementById('quiz-hint-box');
+        var mode = getCookie('hints_mode');
+        if (mode === 'off') return;
+        var seen = getCookie('hints_seen_workspaces') || '';
+        var list = seen ? seen.split(',') : [];
+        if (list.indexOf(WORKSPACE) !== -1) return;
+
+        // Action bindings: create/add button → advance on click
+        var btns = document.querySelectorAll('button, .btn, [role="button"]');
+        btns.forEach(function(btn) {
+            var txt = btn.textContent || btn.innerText || '';
+            if (txt.toLowerCase().indexOf('создать') !== -1 || txt.toLowerCase().indexOf('добавить') !== -1 || txt.toLowerCase().indexOf('create') !== -1 || txt.toLowerCase().indexOf('add') !== -1) {
+                btn.addEventListener('click', function() { quizHintAdvance(2); });
+            }
+        });
+
+        // Dragging support (desktop)
+        var handle = document.getElementById('quiz-hint-drag-handle');
+        if (handle && hintBox) {
+            var dragging = false, startX, startY, origLeft, origTop;
+            handle.addEventListener('mousedown', function(e) {
+                dragging = true;
+                startX = e.clientX; startY = e.clientY;
+                var rect = hintBox.getBoundingClientRect();
+                origLeft = rect.left; origTop = rect.top;
+                hintBox.style.right = 'auto'; hintBox.style.bottom = 'auto';
+                hintBox.style.left = origLeft + 'px'; hintBox.style.top = origTop + 'px';
+                e.preventDefault();
+            });
+            document.addEventListener('mousemove', function(e) {
+                if (!dragging) return;
+                var newLeft = origLeft + (e.clientX - startX);
+                var newTop = origTop + (e.clientY - startY);
+                newLeft = Math.max(0, Math.min(newLeft, window.innerWidth - hintBox.offsetWidth));
+                newTop = Math.max(0, Math.min(newTop, window.innerHeight - hintBox.offsetHeight));
+                hintBox.style.left = newLeft + 'px'; hintBox.style.top = newTop + 'px';
+            });
+            document.addEventListener('mouseup', function() { dragging = false; });
+        }
+
+        // Mobile toggle
+        var mobileToggle = document.getElementById('quiz-hint-mobile-toggle');
+        if (mobileToggle) {
+            mobileToggle.innerHTML = '&#8593;';
+            mobileToggle.addEventListener('click', function() {
+                if (!hintBox) return;
+                hintAtTop = !hintAtTop;
+                hintBox.style.top = hintAtTop ? '1rem' : 'auto';
+                hintBox.style.bottom = hintAtTop ? 'auto' : '1.5rem';
+                mobileToggle.style.top = hintAtTop ? 'auto' : '5rem';
+                mobileToggle.style.bottom = hintAtTop ? '1rem' : 'auto';
+                mobileToggle.innerHTML = hintAtTop ? '&#8595;' : '&#8593;';
+            });
+        }
+
+        quizHintShow(1);
+    });
+})();
+</script>

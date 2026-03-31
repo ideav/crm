@@ -1100,7 +1100,7 @@ localize();
     justify-content: center;
 }
 @media (max-width: 767px) {
-    #upload-hint-box { width: calc(100% - 2rem); max-width: none; }
+    #upload-hint-box { right: 0.5rem; left: 0.5rem; width: auto; max-width: none; }
     #upload-hint-mobile-toggle { display: flex; }
 }
 </style>
@@ -1130,21 +1130,131 @@ localize();
 </div>
 <button id="upload-hint-mobile-toggle" title="Переместить подсказку" aria-label="Переместить подсказку вверх/вниз" style="bottom:5rem;"></button>
 <script>
-// Workspace-specific hint configuration for 'upload'.
-// Texts and steps are defined here; the display mechanism is in /js/hints.js.
-document.addEventListener('DOMContentLoaded', function() {
-    window.initHints({
-        workspace: 'upload',
-        steps: 3,
-        onInit: function(api) {
-            // "Настроить" → advance hint 1 → 2
-            var tuneBtn = document.getElementById('tune-btn');
-            if (tuneBtn) tuneBtn.addEventListener('click', function() { api.advance(2); });
-
-            // "Статистика" → advance hint 2 → 3
-            var showStatsBtn = document.getElementById('show-stats');
-            if (showStatsBtn) showStatsBtn.addEventListener('click', function() { api.advance(3); });
+(function() {
+    function getCookie(name) {
+        var prefix = name + '=';
+        var parts = document.cookie.split(';');
+        for (var i = 0; i < parts.length; i++) {
+            var part = parts[i].trim();
+            if (part.indexOf(prefix) === 0) {
+                return decodeURIComponent(part.substring(prefix.length));
+            }
         }
+        return null;
+    }
+    function setCookie(name, value, days) {
+        var expires = '';
+        if (days) {
+            var d = new Date();
+            d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
+            expires = '; expires=' + d.toUTCString();
+        }
+        document.cookie = name + '=' + encodeURIComponent(value) + expires + '; path=/';
+    }
+
+    var WORKSPACE = 'upload';
+    var hintBox = null;
+    var hintAtTop = false;
+
+    window.uploadHintShow = function(n) {
+        if (!hintBox) return;
+        [1, 2, 3].forEach(function(i) {
+            var el = document.getElementById('upload-hint-' + i);
+            if (el) el.style.display = (i === n) ? '' : 'none';
+        });
+        hintBox.style.display = 'block';
+        // Update mobile toggle icon
+        var tog = document.getElementById('upload-hint-mobile-toggle');
+        if (tog) tog.innerHTML = hintAtTop ? '&#8595;' : '&#8593;';
+    };
+
+    window.uploadHintClose = function() {
+        if (hintBox) hintBox.style.display = 'none';
+        var tog = document.getElementById('upload-hint-mobile-toggle');
+        if (tog) tog.style.display = 'none';
+        var seen = getCookie('hints_seen_workspaces') || '';
+        var list = seen ? seen.split(',') : [];
+        if (list.indexOf(WORKSPACE) === -1) {
+            list.push(WORKSPACE);
+            setCookie('hints_seen_workspaces', list.join(','), 365);
+        }
+    };
+
+    // Advance hint when user performs the advised action
+    window.uploadHintAdvance = function(toStep) {
+        if (!hintBox || hintBox.style.display === 'none') return;
+        uploadHintShow(toStep);
+    };
+
+    document.addEventListener('DOMContentLoaded', function() {
+        hintBox = document.getElementById('upload-hint-box');
+
+        var mode = getCookie('hints_mode');
+        if (mode === 'off') return;
+        var seen = getCookie('hints_seen_workspaces') || '';
+        var list = seen ? seen.split(',') : [];
+        if (list.indexOf(WORKSPACE) !== -1) return;
+
+        // Bind action triggers: "Настроить" or "Проверить" → advance hint 1 → 2
+        var tuneBtn = document.getElementById('tune-btn');
+        var tryBtn = document.querySelector('#try button');
+        function onStep1Action() { uploadHintAdvance(2); }
+        if (tuneBtn) tuneBtn.addEventListener('click', onStep1Action);
+        if (tryBtn) tryBtn.addEventListener('click', onStep1Action);
+
+        // "Загрузить" → advance hint 2 → 3
+        var doUploadBtn = document.getElementById('do-upload');
+        if (doUploadBtn) doUploadBtn.addEventListener('click', function() { uploadHintAdvance(3); });
+
+        // Dragging support (desktop)
+        var handle = document.getElementById('upload-hint-drag-handle');
+        if (handle && hintBox) {
+            var dragging = false, startX, startY, origLeft, origBottom, origTop, origRight;
+            handle.addEventListener('mousedown', function(e) {
+                dragging = true;
+                startX = e.clientX;
+                startY = e.clientY;
+                var rect = hintBox.getBoundingClientRect();
+                origLeft = rect.left;
+                origTop = rect.top;
+                hintBox.style.right = 'auto';
+                hintBox.style.bottom = 'auto';
+                hintBox.style.left = origLeft + 'px';
+                hintBox.style.top = origTop + 'px';
+                e.preventDefault();
+            });
+            document.addEventListener('mousemove', function(e) {
+                if (!dragging) return;
+                var dx = e.clientX - startX;
+                var dy = e.clientY - startY;
+                var newLeft = origLeft + dx;
+                var newTop = origTop + dy;
+                var maxLeft = window.innerWidth - hintBox.offsetWidth;
+                var maxTop = window.innerHeight - hintBox.offsetHeight;
+                newLeft = Math.max(0, Math.min(newLeft, maxLeft));
+                newTop = Math.max(0, Math.min(newTop, maxTop));
+                hintBox.style.left = newLeft + 'px';
+                hintBox.style.top = newTop + 'px';
+            });
+            document.addEventListener('mouseup', function() { dragging = false; });
+        }
+
+        // Mobile toggle: snap hint to top or bottom
+        var mobileToggle = document.getElementById('upload-hint-mobile-toggle');
+        if (mobileToggle) {
+            mobileToggle.innerHTML = '&#8593;';
+            mobileToggle.addEventListener('click', function() {
+                if (!hintBox) return;
+                hintAtTop = !hintAtTop;
+                hintBox.style.top = hintAtTop ? '1rem' : 'auto';
+                hintBox.style.bottom = hintAtTop ? 'auto' : '1.5rem';
+                mobileToggle.style.top = hintAtTop ? 'auto' : '5rem';
+                mobileToggle.style.bottom = hintAtTop ? '1rem' : 'auto';
+                mobileToggle.innerHTML = hintAtTop ? '&#8595;' : '&#8593;';
+            });
+        }
+
+        uploadHintShow(1);
     });
 });
 </script>
