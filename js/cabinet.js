@@ -359,7 +359,7 @@ class CabinetController {
         });
 
         const limit = parseInt(this.userData.PlanLimit || '0', 10) || 3000;
-        const usagePercent = ((totalCount / limit) * 100).toFixed(0);
+        const usagePercent = Math.round(totalCount / limit * 100);
 
         // Profile section
         const usageUnits = document.getElementById('usage-units');
