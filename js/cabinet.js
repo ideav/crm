@@ -367,7 +367,7 @@ class CabinetController {
         const usageLimitEl = document.getElementById('usage-limit');
         const usageBarFill = document.getElementById('usage-bar-fill');
 
-        if (usageUnits) usageUnits.textContent = totalCount.toFixed(2);
+        if (usageUnits) usageUnits.textContent = totalCount.toString();
         if (usagePercentEl) usagePercentEl.textContent = usagePercent + '%';
         if (usageLimitEl) usageLimitEl.textContent = limit.toString();
         if (usageBarFill) usageBarFill.style.width = Math.min(parseFloat(usagePercent), 100) + '%';
@@ -377,7 +377,7 @@ class CabinetController {
         const balanceUsagePercent = document.getElementById('balance-usage-percent');
         const balanceUsageLimit = document.getElementById('balance-usage-limit');
 
-        if (balanceUsageUnits) balanceUsageUnits.textContent = totalCount.toFixed(2);
+        if (balanceUsageUnits) balanceUsageUnits.textContent = totalCount.toString();
         if (balanceUsagePercent) balanceUsagePercent.textContent = usagePercent + '%';
         if (balanceUsageLimit) balanceUsageLimit.textContent = limit.toString();
     }
