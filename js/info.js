@@ -35,18 +35,36 @@
         return null;
     }
 
+    // ── Owner check ──────────────────────────────────────────────────────────
+
+    function isOwner() {
+        return window.user && window.db && window.user === window.db;
+    }
+
     // ── Tab switching ────────────────────────────────────────────────────────
 
     var TAB_ORDER = ['intro', 'quicklinks', 'forms'];
 
     function getActiveTab() {
         var saved = getCookie(COOKIE_ACTIVE_TAB);
-        return (saved && TAB_ORDER.indexOf(saved) >= 0) ? saved : TAB_ORDER[0];
+        if (saved && TAB_ORDER.indexOf(saved) >= 0) {
+            // Non-owners cannot access the intro tab
+            if (saved === 'intro' && !isOwner()) return 'forms';
+            return saved;
+        }
+        // Default tab: intro for owners, forms for everyone else
+        return isOwner() ? 'intro' : 'forms';
     }
 
     function renderTabs(activeTab) {
         var tabsEl = document.getElementById('info-tabs');
         if (!tabsEl) return;
+
+        // Show or hide the intro tab based on ownership
+        var tabIntro = document.getElementById('tab-intro');
+        if (tabIntro) {
+            tabIntro.style.display = isOwner() ? '' : 'none';
+        }
 
         var active = activeTab || getActiveTab();
 
@@ -66,6 +84,9 @@
     }
 
     function showContent(tabId) {
+        // Non-owners cannot see the intro tab content; fall back to forms
+        if (tabId === 'intro' && !isOwner()) tabId = 'forms';
+
         ['intro', 'quicklinks', 'forms'].forEach(function(id) {
             var el = document.getElementById('content-' + id);
             if (el) el.style.display = (id === tabId) ? '' : 'none';
@@ -151,6 +172,8 @@
     // ── Hints mode ──────────────────────────────────────────────────────────
 
     window.infoHints = function(action) {
+        if (!isOwner()) return;
+
         var statusEl = document.getElementById('hints-status');
 
         if (action === 'enable') {
@@ -170,6 +193,8 @@
     };
 
     function updateHintButtons() {
+        if (!isOwner()) return;
+
         var mode = getCookie(COOKIE_HINTS_MODE);
         var enableBtn = document.getElementById('hints-enable');
         var disableBtn = document.getElementById('hints-disable');
