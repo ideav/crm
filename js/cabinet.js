@@ -29,7 +29,7 @@ class CabinetController {
         // Check authentication first
         const isAuthenticated = await this.checkAuth();
         if (!isAuthenticated) {
-            window.location.href = 'index.html';
+            window.location.href = 'start.html';
             return;
         }
 
@@ -2172,7 +2172,7 @@ class CabinetController {
                 });
 
                 // Redirect to index
-                window.location.href = 'index.html';
+                window.location.href = 'start.html';
             });
         }
 
