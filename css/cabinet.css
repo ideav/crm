@@ -531,6 +531,23 @@
     margin-top: 1.5rem;
 }
 
+.add-funds-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.add-funds-amount-input {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--input-bg, var(--card-bg));
+    color: var(--text-color);
+    font-size: 1rem;
+    width: 14rem;
+}
+
 /* Databases List */
 .databases-list {
     display: grid;
