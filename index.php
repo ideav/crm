@@ -655,7 +655,7 @@ function login($z="", $u="", $message="", $details=""){
         $p .= "uri=".htmlentities($uri)."&";
 	if(strlen($details))
 		$p .= "d=".urlencode($details)."&";
-	header("Location: /index.html".substr($p, 0, -1));
+	header("Location: /start.html".substr($p, 0, -1));
 	die();
 }
 function wlog($text, $mode="log"){
