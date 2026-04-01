@@ -358,7 +358,7 @@ class CabinetController {
             totalCount += parseInt(db.Count || '0', 10);
         });
 
-        const limit = 20000; // Free plan limit
+        const limit = parseInt(this.userData.PlanLimit || '0', 10) || 20000;
         const usagePercent = ((totalCount / limit) * 100).toFixed(2);
 
         // Profile section
