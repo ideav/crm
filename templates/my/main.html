@@ -389,9 +389,8 @@
                             <p>Для смены плана требуется иметь достаточное количество средств на счете. Пополнить счет вы можете здесь, выбрав нужный план:</p>
                             <div class="plan-change-row">
                                 <select id="plan-select" class="plan-select" onchange="window._cabinetController && window._cabinetController.planSelected(this.value)">
-                                    <option value="1146">Знакомство — бесплатный</option>
-                                    <option value="1147" data-price="1950">Стартап — 1950 руб./мес.</option>
-                                    <option value="1148" data-price="4900">Масштабируемый — 4900 руб./мес.</option>
+                                    <!-- Begin: plans --><option value="{PlanID}" data-price="{Price}" data-limit="{limit}">{PlanName} — {Price} руб./мес.</option>
+                                    <!-- End: plans -->
                                 </select>
                                 <button type="button" id="topup-btn" class="btn-primary plan-action-btn" style="display:none">Пополнить на <span id="topup-amount"></span></button>
                                 <button type="button" id="change-plan-btn" class="btn-primary plan-action-btn" style="display:none">Перейти за <span id="change-plan-amount"></span></button>
