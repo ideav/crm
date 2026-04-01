@@ -533,6 +533,54 @@ class CabinetController {
         }
     }
 
+    async addFunds() {
+        const addFundsBtn = document.getElementById('add-funds-btn');
+        const amountInput = document.getElementById('add-funds-amount');
+        const amount = amountInput && parseFloat(amountInput.value);
+
+        if (!amount || amount <= 0) {
+            showToast('Введите сумму пополнения', 'error');
+            if (amountInput) amountInput.focus();
+            return;
+        }
+
+        if (addFundsBtn) addFundsBtn.disabled = true;
+        try {
+            const host = this.apiConfig.host;
+            // Step 1: create payment order for the specified amount
+            const orderUrl = 'https://' + host + '/my/report/2192?JSON&confirmed=1&amount=' + encodeURIComponent(amount);
+            const orderResp = await fetch(orderUrl, { method: 'POST', credentials: 'include', body: new URLSearchParams({ _xsrf: xsrf }) });
+            if (!orderResp.ok) throw new Error('HTTP ' + orderResp.status);
+
+            // Step 2: get Tochka Bank payment form
+            const formUrl = 'https://' + host + '/my/report/1905?JSON_KV';
+            const formResp = await fetch(formUrl, { method: 'GET', credentials: 'include' });
+            if (!formResp.ok) throw new Error('HTTP ' + formResp.status);
+
+            const formData = await formResp.json();
+            if (Array.isArray(formData) && formData.length > 0 && formData[0].Pay) {
+                // Inject payment form into balance section and submit
+                const section = document.getElementById('section-balance');
+                if (section) {
+                    const tmp = document.createElement('div');
+                    tmp.innerHTML = formData[0].Pay;
+                    const form = tmp.querySelector('form');
+                    if (form) {
+                        section.appendChild(form);
+                        form.submit();
+                        return;
+                    }
+                }
+            }
+            showToast('Ошибка оплаты, обратитесь в поддержку', 'error');
+        } catch (err) {
+            console.error('[cabinet] addFunds error:', err);
+            showToast('Ошибка оплаты, обратитесь в поддержку', 'error');
+        } finally {
+            if (addFundsBtn) addFundsBtn.disabled = false;
+        }
+    }
+
     populateDatabases() {
         const container = document.getElementById('databases-list');
         if (!container) return;
@@ -828,13 +876,10 @@ class CabinetController {
             changePlanBtn.addEventListener('click', () => this.changePlan());
         }
 
-        // Add funds button (balance section shortcut — navigates to tariff)
+        // Add funds button (balance section — top up arbitrary amount via Tochka Bank)
         const addFundsBtn = document.getElementById('add-funds-btn');
         if (addFundsBtn) {
-            addFundsBtn.addEventListener('click', () => {
-                this.showSection('tariff');
-                this.updateUrlHash('tariff');
-            });
+            addFundsBtn.addEventListener('click', () => this.addFunds());
         }
 
         // Convert bonuses button
