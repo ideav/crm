@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Test: Issue #1321 - Table 440 info modal</title>
+    <style>
+        body { font-family: sans-serif; padding: 1rem; background: #f5f5f5; }
+        .test-case { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+        .test-case h3 { margin: 0 0 0.5rem; }
+        .pass { color: green; font-weight: bold; }
+        .fail { color: red; font-weight: bold; }
+        button.test-btn { margin: 0.25rem; padding: 0.4rem 0.8rem; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>Test: Issue #1321 – Info modal for table/440</h1>
+
+    <!-- Mocks -->
+    <script>
+        // Simulate main.html globals
+        var db = 'mydb';
+        var user = 'mydb'; // owner: user === db
+        // Override pathname for testing
+        window._testPath = null;
+        var _origPathDesc = Object.getOwnPropertyDescriptor(window.location, 'pathname');
+    </script>
+
+    <!-- Include the modal HTML/CSS/JS from table.html directly -->
+    <style>
+    #table-info-modal-overlay {
+        display: none;
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.45);
+        z-index: 3000;
+        align-items: center;
+        justify-content: center;
+    }
+    #table-info-modal-overlay.visible {
+        display: flex;
+    }
+    #table-info-modal {
+        background: #fff;
+        border-radius: 12px;
+        padding: 1.5rem 1.5rem 1.25rem;
+        box-shadow: 0 8px 40px rgba(0,0,0,0.32);
+        width: 90%;
+        max-width: 440px;
+        z-index: 3001;
+    }
+    #table-info-modal p {
+        color: #555;
+        font-size: 0.9rem;
+        line-height: 1.6;
+        margin: 0 0 1.25rem;
+    }
+    #table-info-modal .modal-footer {
+        display: flex;
+        justify-content: flex-end;
+    }
+    </style>
+    <div id="table-info-modal-overlay">
+        <div id="table-info-modal">
+            <p>В этой таблице вы можете хранить свои клубные и дисконтные карты, чтобы не носить их с собой, а показывать их фото в различных заведениях. Добавляйте здесь записи с названием заведений и прикладывайте к ним фото карт.</p>
+            <div class="modal-footer">
+                <button onclick="tableInfoModalClose()" style="padding:0.4rem 1.1rem; border:none; border-radius:6px; background:#0d6efd; color:#fff; cursor:pointer; font-size:0.9rem;">Понятно</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // --- Copy of the modal logic from table.html ---
+    (function() {
+        function getCookie(name) {
+            var prefix = name + '=';
+            var parts = document.cookie.split(';');
+            for (var i = 0; i < parts.length; i++) {
+                var part = parts[i].trim();
+                if (part.indexOf(prefix) === 0) {
+                    return decodeURIComponent(part.substring(prefix.length));
+                }
+            }
+            return null;
+        }
+        function setCookie(name, value, days) {
+            var d = new Date();
+            d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
+            document.cookie = name + '=' + encodeURIComponent(value) + '; expires=' + d.toUTCString() + '; path=/';
+        }
+        function deleteCookie(name) {
+            document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
+        }
+        window.tableInfoModalClose = function() {
+            var overlay = document.getElementById('table-info-modal-overlay');
+            if (overlay) overlay.classList.remove('visible');
+            setCookie('table_info_440_seen', '1', 365);
+        };
+
+        // Expose helpers for testing
+        window._testGetCookie = getCookie;
+        window._testSetCookie = setCookie;
+        window._testDeleteCookie = deleteCookie;
+
+        window._showModalIfNeeded = function(path, userVal, dbVal, hintsMode, seenCookie) {
+            // Simulate cookie state
+            if (seenCookie) setCookie('table_info_440_seen', '1', 365);
+            else deleteCookie('table_info_440_seen');
+            if (hintsMode === 'off') setCookie('hints_mode', 'off', 365);
+            else deleteCookie('hints_mode');
+
+            var isTable440 = /\/table\/440(\/.*)?$/.test(path);
+            if (!isTable440) return false;
+            if (typeof userVal === 'undefined' || typeof dbVal === 'undefined') return false;
+            if (userVal !== dbVal) return false;
+            if (getCookie('hints_mode') === 'off') return false;
+            if (getCookie('table_info_440_seen') === '1') return false;
+
+            var overlay = document.getElementById('table-info-modal-overlay');
+            if (overlay) overlay.classList.add('visible');
+            return true;
+        };
+    })();
+    </script>
+
+    <!-- Test harness -->
+    <div class="test-case" id="tc1">
+        <h3>Test 1: Modal shows when URL is /mydb/table/440, user===db, hints enabled, not seen</h3>
+        <div id="tc1-result">Pending</div>
+    </div>
+    <div class="test-case" id="tc2">
+        <h3>Test 2: Modal does NOT show when URL is /mydb/table/999 (wrong table)</h3>
+        <div id="tc2-result">Pending</div>
+    </div>
+    <div class="test-case" id="tc3">
+        <h3>Test 3: Modal does NOT show when user !== db (not the owner)</h3>
+        <div id="tc3-result">Pending</div>
+    </div>
+    <div class="test-case" id="tc4">
+        <h3>Test 4: Modal does NOT show when hints_mode=off</h3>
+        <div id="tc4-result">Pending</div>
+    </div>
+    <div class="test-case" id="tc5">
+        <h3>Test 5: Modal does NOT show when already seen (cookie set)</h3>
+        <div id="tc5-result">Pending</div>
+    </div>
+    <div class="test-case" id="tc6">
+        <h3>Test 6: "Понятно" button sets seen cookie and closes modal</h3>
+        <div id="tc6-result">Pending</div>
+    </div>
+
+    <hr>
+    <button class="test-btn" onclick="runTests()">Run All Tests</button>
+    <button class="test-btn" onclick="document.getElementById('table-info-modal-overlay').classList.add('visible')">Show Modal Manually</button>
+    <button class="test-btn" onclick="window._testDeleteCookie('table_info_440_seen'); window._testDeleteCookie('hints_mode')">Reset Cookies</button>
+
+    <script>
+    function runTests() {
+        // Reset overlay state between tests
+        function resetOverlay() {
+            var ov = document.getElementById('table-info-modal-overlay');
+            if (ov) ov.classList.remove('visible');
+        }
+        function isVisible() {
+            var ov = document.getElementById('table-info-modal-overlay');
+            return ov && ov.classList.contains('visible');
+        }
+        function result(id, pass, msg) {
+            var el = document.getElementById(id + '-result');
+            el.innerHTML = (pass ? '<span class="pass">PASS</span>' : '<span class="fail">FAIL</span>') + ' — ' + msg;
+        }
+
+        // Test 1: Should show
+        resetOverlay();
+        var shown = window._showModalIfNeeded('/mydb/table/440', 'mydb', 'mydb', null, false);
+        result('tc1', shown && isVisible(), shown ? 'Modal shown correctly' : 'Modal did NOT show (unexpected)');
+
+        // Test 2: Wrong table ID
+        resetOverlay();
+        shown = window._showModalIfNeeded('/mydb/table/999', 'mydb', 'mydb', null, false);
+        result('tc2', !shown && !isVisible(), !shown ? 'Modal not shown (correct)' : 'Modal shown (unexpected)');
+
+        // Test 3: user !== db
+        resetOverlay();
+        shown = window._showModalIfNeeded('/mydb/table/440', 'otheruser', 'mydb', null, false);
+        result('tc3', !shown && !isVisible(), !shown ? 'Modal not shown for non-owner (correct)' : 'Modal shown (unexpected)');
+
+        // Test 4: hints disabled
+        resetOverlay();
+        shown = window._showModalIfNeeded('/mydb/table/440', 'mydb', 'mydb', 'off', false);
+        result('tc4', !shown && !isVisible(), !shown ? 'Modal not shown when hints off (correct)' : 'Modal shown (unexpected)');
+
+        // Test 5: already seen
+        resetOverlay();
+        shown = window._showModalIfNeeded('/mydb/table/440', 'mydb', 'mydb', null, true);
+        result('tc5', !shown && !isVisible(), !shown ? 'Modal not shown when already seen (correct)' : 'Modal shown (unexpected)');
+
+        // Test 6: Close sets cookie
+        resetOverlay();
+        window._testDeleteCookie('table_info_440_seen');
+        // Show the modal manually
+        document.getElementById('table-info-modal-overlay').classList.add('visible');
+        // Simulate click on Понятно
+        window.tableInfoModalClose();
+        var cookieSet = window._testGetCookie('table_info_440_seen') === '1';
+        var hidden = !isVisible();
+        result('tc6', cookieSet && hidden, cookieSet && hidden ? 'Cookie set and modal hidden (correct)' : 'cookie=' + cookieSet + ' hidden=' + hidden);
+
+        // Cleanup
+        window._testDeleteCookie('table_info_440_seen');
+        window._testDeleteCookie('hints_mode');
+    }
+
+    // Auto-run
+    runTests();
+    </script>
+</body>
+</html>

@@ -96,6 +96,84 @@
     </div>
 </div>
 <button id="table-hint-mobile-toggle" title="Переместить подсказку" aria-label="Переместить подсказку вверх/вниз" style="bottom:5rem;"></button>
+<!-- Info modal for table/440 (discount/club cards) -->
+<style>
+#table-info-modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 3000;
+    align-items: center;
+    justify-content: center;
+}
+#table-info-modal-overlay.visible {
+    display: flex;
+}
+#table-info-modal {
+    background: var(--card-bg, #fff);
+    border-radius: 12px;
+    padding: 1.5rem 1.5rem 1.25rem;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.32);
+    width: 90%;
+    max-width: 440px;
+    z-index: 3001;
+}
+#table-info-modal p {
+    color: var(--text-secondary, #555);
+    font-size: 0.9rem;
+    line-height: 1.6;
+    margin: 0 0 1.25rem;
+}
+#table-info-modal .modal-footer {
+    display: flex;
+    justify-content: flex-end;
+}
+</style>
+<div id="table-info-modal-overlay">
+    <div id="table-info-modal">
+        <p>В этой таблице вы можете хранить свои клубные и дисконтные карты, чтобы не носить их с собой, а показывать их фото в различных заведениях. Добавляйте здесь записи с названием заведений и прикладывайте к ним фото карт.</p>
+        <div class="modal-footer">
+            <button onclick="tableInfoModalClose()" style="padding:0.4rem 1.1rem; border:none; border-radius:6px; background:var(--button-primary,#0d6efd); color:#fff; cursor:pointer; font-size:0.9rem;">Понятно</button>
+        </div>
+    </div>
+</div>
+<script>
+(function() {
+    function getCookie(name) {
+        var prefix = name + '=';
+        var parts = document.cookie.split(';');
+        for (var i = 0; i < parts.length; i++) {
+            var part = parts[i].trim();
+            if (part.indexOf(prefix) === 0) {
+                return decodeURIComponent(part.substring(prefix.length));
+            }
+        }
+        return null;
+    }
+    function setCookie(name, value, days) {
+        var d = new Date();
+        d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
+        document.cookie = name + '=' + encodeURIComponent(value) + '; expires=' + d.toUTCString() + '; path=/';
+    }
+    window.tableInfoModalClose = function() {
+        var overlay = document.getElementById('table-info-modal-overlay');
+        if (overlay) overlay.classList.remove('visible');
+        setCookie('table_info_440_seen', '1', 365);
+    };
+    document.addEventListener('DOMContentLoaded', function() {
+        var path = window.location.pathname;
+        var isTable440 = /\/table\/440(\/.*)?$/.test(path);
+        if (!isTable440) return;
+        if (typeof user === 'undefined' || typeof db === 'undefined') return;
+        if (user !== db) return;
+        if (getCookie('hints_mode') === 'off') return;
+        if (getCookie('table_info_440_seen') === '1') return;
+        var overlay = document.getElementById('table-info-modal-overlay');
+        if (overlay) overlay.classList.add('visible');
+    });
+})();
+</script>
 <script>
 // Workspace-specific hint configuration for 'table'.
 // Texts and steps are defined here; the display mechanism is in /js/hints.js.
