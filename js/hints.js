@@ -146,10 +146,18 @@
 
         // Check cookies and show first hint if not seen
         var mode = getCookie('hints_mode');
-        if (mode === 'off') return;
+        if (mode === 'off') {
+            var togOff = document.getElementById(workspace + '-hint-mobile-toggle');
+            if (togOff) togOff.style.display = 'none';
+            return;
+        }
         var seen = getCookie('hints_seen_workspaces') || '';
         var list = seen ? seen.split(',') : [];
-        if (list.indexOf(workspace) !== -1) return;
+        if (list.indexOf(workspace) !== -1) {
+            var togSeen = document.getElementById(workspace + '-hint-mobile-toggle');
+            if (togSeen) togSeen.style.display = 'none';
+            return;
+        }
 
         // Run workspace-specific initialization (bind triggers, etc.)
         if (typeof config.onInit === 'function') {
