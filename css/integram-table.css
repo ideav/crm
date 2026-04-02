@@ -107,6 +107,17 @@
     color: var(--md-primary-dark, #1565c0);
 }
 
+/* Table name (first .integram-title-link as span) shown as plain black text (issue #1345) */
+span.integram-title-link:not(.integram-parent-record-link) {
+    color: var(--text-primary, #212121);
+    cursor: default;
+}
+
+span.integram-title-link:not(.integram-parent-record-link):hover {
+    text-decoration: none;
+    color: var(--text-primary, #212121);
+}
+
 .integram-table-controls {
     display: flex;
     align-items: center;
