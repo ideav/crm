@@ -452,9 +452,10 @@
 
                 <div class="balance-actions">
                     <div class="add-funds-row">
-                        <input type="number" id="add-funds-amount" class="add-funds-amount-input" min="1" step="1" placeholder="Сумма пополнения, руб." autocomplete="off">
+                        <input type="number" id="add-funds-amount" class="add-funds-amount-input" min="100" step="1" value="100" placeholder="Сумма пополнения, руб." autocomplete="off" autocorrect="off" autocapitalize="off" inputmode="numeric">
                         <button type="button" id="add-funds-btn" class="btn-primary">Пополнить счет</button>
                     </div>
+                    <div id="add-funds-hint" class="add-funds-hint" style="display:none;">Минимальная сумма пополнения — 100 рублей</div>
                 </div>
             </section>
 

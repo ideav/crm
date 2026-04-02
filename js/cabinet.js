@@ -496,6 +496,11 @@ class CabinetController {
         const toPay = topupBtn && topupBtn.dataset.toPay;
         if (!toPay) return;
 
+        if (parseFloat(toPay) < 100) {
+            showToast('Минимальная сумма пополнения — 100 рублей', 'error');
+            return;
+        }
+
         if (topupBtn) topupBtn.disabled = true;
         try {
             const host = this.apiConfig.host;
@@ -533,11 +538,13 @@ class CabinetController {
         const amountInput = document.getElementById('add-funds-amount');
         const amount = amountInput && parseFloat(amountInput.value);
 
-        if (!amount || amount <= 0) {
-            showToast('Введите сумму пополнения', 'error');
+        const hint = document.getElementById('add-funds-hint');
+        if (!amount || amount < 100) {
+            if (hint) hint.style.display = '';
             if (amountInput) amountInput.focus();
             return;
         }
+        if (hint) hint.style.display = 'none';
 
         if (addFundsBtn) addFundsBtn.disabled = true;
         try {
