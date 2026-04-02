@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{_global_.action} - {_global_.z}</title>
+    <link rel="stylesheet" href="/css/styles.css">
+    <link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="/css/main-app.css">
+    <style>
+        html {
+            font-size: .82rem;
+        }
+    </style>
+    <script>
+        var db = '{_global_.z}',
+            xsrf = '{_global_.xsrf}',
+            id = '{_global_.id}',
+            token = '{_global_.token}',
+            uid = '{_global_.user_id}',
+            user = '{_global_.user}',
+            role = '{_global_.role}',
+            roleId = '{_global_.role_id}',
+            action = '{_global_.action}';
+    </script>
+    <script>
+        (function() {
+            var dbName = '{_global_.z}' || 'default';
+            var storageKey = 'appSidebarCollapsed_' + dbName;
+            var cookieName = 'sidebarWidth_' + dbName;
+            var isCollapsed = localStorage.getItem(storageKey) === 'true';
+            var savedWidth = null;
+            var match = document.cookie.match(new RegExp('(?:^|; )' + cookieName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+            if (match) savedWidth = decodeURIComponent(match[1]);
+            // Apply sidebar state via CSS before the DOM renders to prevent flash/jump
+            var cssRules = '.app-sidebar{transition:none!important;}';
+            if (isCollapsed) {
+                cssRules += '.app-sidebar{width:56px!important;}';
+            } else if (savedWidth) {
+                cssRules += '.app-sidebar{width:' + parseInt(savedWidth, 10) + 'px!important;}';
+            }
+            var el = document.createElement('style');
+            el.id = 'sidebar-init-style';
+            el.textContent = cssRules;
+            document.head.appendChild(el);
+        })();
+    </script>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+        <div class="navbar-left">
+            <button id="mobile-sidebar-toggle" class="mobile-sidebar-toggle" type="button" aria-label="Открыть меню" title="Открыть меню"><i class="pi pi-bars"></i></button>
+            <a href="/{_global_.z}/" class="navbar-brand">
+                <img src="/images/logo.png" alt="Logo" class="logo">
+                <span class="brand-name">{_global_.z}</span>
+            </a>
+        </div>
+        <div class="navbar-center">
+            <div class="navbar-workspace">{_global_.action}</div>
+        </div>
+        <div class="navbar-right">
+            <div class="user-menu-wrapper">
+                <button id="user-menu-toggle" class="account-info" type="button" title="User menu">
+                    <div id="account-avatar" class="account-avatar">{_global_.user}</div>
+                    <span id="account-email" class="account-email">{_global_.user}</span>
+                    <i class="user-menu-arrow pi pi-chevron-down"></i>
+                </button>
+                <div id="user-menu-dropdown" class="user-menu-dropdown" style="display: none;">
+                    <!-- Begin: showCabinet --><!--{_global_.z}-->
+                    <a href="/my" class="user-menu-item">
+                        <i class="user-menu-icon pi pi-user"></i>
+                        <span>Личный кабинет</span>
+                    </a>
+                    <div class="user-menu-divider"></div>
+                    <!-- End: showCabinet -->
+                    <button id="theme-toggle" class="user-menu-item" type="button">
+                        <i class="user-menu-icon pi pi-moon" id="theme-icon"></i>
+                        <span>Тема</span>
+                        <span class="user-menu-value" id="theme-value">Темная</span>
+                    </button>
+                    <div class="user-menu-divider"></div>
+                    <button id="change-password-btn" class="user-menu-item" type="button" onclick="document.querySelector('.cp-form').style.display='block';document.querySelectorAll('.ch-toggle').forEach(function(el){el.style.display='flex';});document.querySelectorAll('.wait-toggle').forEach(function(el){el.style.display='none';});">
+                        <i class="user-menu-icon pi pi-lock"></i>
+                        <span>Сменить пароль</span>
+                    </button>
+                    <div class="user-menu-divider"></div>
+                    <button id="logout-everywhere-btn" class="user-menu-item user-menu-item-danger" type="button" title="Выйти на всех устройствах, где совершен вход">
+                        <i class="user-menu-icon pi pi-sign-out"></i>
+                        <span>Выйти везде</span>
+                    </button>
+                    <button id="logout-btn" class="user-menu-item user-menu-item-danger" type="button">
+                        <i class="user-menu-icon pi pi-sign-out"></i>
+                        <span>Выйти</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Mobile sidebar backdrop overlay -->
+    <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
+
+    <!-- Main Application Layout -->
+    <div class="app-layout">
+        <!-- Left Sidebar Menu -->
+        <aside class="app-sidebar" id="app-sidebar">
+            <div class="sidebar-header">
+                <button id="sidebar-toggle" class="sidebar-toggle" type="button" title="Свернуть/развернуть меню" aria-label="Toggle sidebar"><i class="pi pi-bars"></i></button>
+                <div class="menu-search-wrapper">
+                    <i class="pi pi-search menu-search-icon"></i>
+                    <input type="text" id="menu-search" class="menu-search-input" placeholder="Поиск..." aria-label="Поиск по меню" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')">
+                    <button type="button" id="menu-search-clear" class="menu-search-clear" style="display: none;" aria-label="Очистить поиск"><i class="pi pi-times"></i></button>
+                </div>
+            </div>
+            <nav class="app-menu" id="app-menu">
+                <!-- Menu will be built from menuData by JavaScript -->
+            </nav>
+            <button id="sidebar-settings" class="sidebar-settings" type="button" title="Редактировать меню" aria-label="Edit menu"><i class="pi pi-cog"></i></button>
+            <div class="sidebar-resize-handle"></div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="app-content">
+            <!-- File: a -->
+        </main>
+    </div>
+
+    <script>
+        var menuData = [
+        <!-- Begin: MyRoleMenu -->
+        {menu_id:'{menu_id}',menu_up:'{menu_up}',name:'{name}',href:'{href}',icon:'{icon}'},
+        <!-- End: MyRoleMenu -->
+        ];
+    </script>
+    <script src="/js/app.js"></script>
+    <script src="/js/main-app.js"></script>
+    <script>
+    function changePwd(){
+        var oldPwd=document.getElementById('old-pwd').value,
+            newPwd=document.getElementById('new-pwd').value,
+            newAgain=document.getElementById('new-again').value;
+        if(oldPwd===''||newPwd===''||newAgain==='')
+            return changeMsg('alert-danger','Заполните все поля');
+        document.querySelectorAll('.ch-toggle').forEach(function(el){el.style.display='none';});
+        document.querySelectorAll('.wait-toggle').forEach(function(el){el.style.display='block';});
+        var obj=new XMLHttpRequest();
+        obj.open('POST','/'+db+'/auth?JSON',true);
+        obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+        obj.onload=function(){
+            document.querySelectorAll('.ch-toggle').forEach(function(el){el.style.display='flex';});
+            document.querySelectorAll('.wait-toggle').forEach(function(el){el.style.display='none';});
+            var json;
+            try{json=JSON.parse(this.responseText);}
+            catch(e){console.log(e);document.getElementById('pwdchangemsg').innerHTML=this.responseText;}
+            if(json&&json.msg){
+                if(json.msg.indexOf('[err')===-1){
+                    changeMsg('alert-success',json.msg);
+                    document.getElementById('old-pwd').value='';
+                    document.getElementById('new-pwd').value='';
+                    document.getElementById('new-again').value='';
+                }else
+                    changeMsg('alert-danger',json.msg.replace(/ ?\[.+\]/,''));
+                if(json.token)token=json.token;
+                if(json.xsrf)xsrf=json.xsrf;
+            }else
+                changeMsg('alert-danger','Неверный пароль');
+        };
+        obj.send('change=1&login='+user+'&pwd='+encodeURIComponent(oldPwd)+'&npw1='+encodeURIComponent(newPwd)+'&npw2='+encodeURIComponent(newAgain));
+    }
+    function changeMsg(cl,msg){
+        var el=document.getElementById('pwdchangemsg');
+        el.className='alert w-100 '+cl;
+        el.innerHTML=msg;
+        el.style.display='block';
+        setTimeout(function(){
+            el.style.transition='opacity 0.4s';
+            el.style.opacity='0';
+            setTimeout(function(){el.style.display='none';el.style.opacity='';el.style.transition='';},400);
+        },4500);
+    }
+    </script>
+
+    <!-- Change Password Modal -->
+    <div class="cp-form" style="display: none; position: fixed; top: 0; left: 0; height: 100%; width: 100%; z-index: 9999; background: rgba(0,0,0,.4);" onclick="this.style.display='none';">
+        <div style="display: flex; align-items: center; justify-content: center; height: 100%;">
+            <div style="border-radius: 8px; background-color: #fff; max-width: 360px; width: 100%; padding: 1.5rem; box-shadow: 0 4px 24px rgba(0,0,0,.18);" onclick="event.stopPropagation();" onkeyup="if(event.keyCode===13)changePwd()">
+                <div style="text-align:center; margin-bottom:1rem;">
+                    <h5 style="margin:0;">Смена пароля</h5>
+                </div>
+                <div id="pwdchangemsg" class="alert w-100" style="display: none;"></div>
+                <label for="old-pwd" style="margin-bottom:0.25rem; display:block;">Действующий пароль</label>
+                <input type="password" id="old-pwd" style="border: 1px solid lightgray; margin-bottom: 0.75rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px; box-sizing:border-box;">
+                <label for="new-pwd" style="margin-bottom:0.25rem; display:block;">Новый пароль</label>
+                <input type="password" id="new-pwd" style="border: 1px solid lightgray; margin-bottom: 0.75rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px; box-sizing:border-box;">
+                <label for="new-again" style="margin-bottom:0.25rem; display:block;">Повторите пароль</label>
+                <input type="password" id="new-again" style="border: 1px solid lightgray; margin-bottom: 1rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px; box-sizing:border-box;">
+                <div style="text-align:center; display:none;" class="wait-toggle"><img src="/i/ajax.gif"></div>
+                <div style="display: flex; gap: 0.5rem;" class="ch-toggle">
+                    <button style="flex:1; padding:0.5rem; background:#3b82f6; color:#fff; border:none; border-radius:6px; cursor:pointer;" type="button" onclick="changePwd()">Сменить</button>
+                    <button style="flex:1; padding:0.5rem; background:#fff; color:#333; border:1px solid #ccc; border-radius:6px; cursor:pointer;" type="button" onclick="document.querySelector('.cp-form').style.display='none';">Отменить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cookie Consent Banner -->
+    <div id="cookie-consent">
+        <span style="font-size:0.9rem;">Мы используем куки для обеспечения работы сайта. Продолжая использовать сайт, вы соглашаетесь с их использованием.</span>
+        <button type="button" onclick="cookieAccept()" style="background:#3b82f6; color:#fff; border:none; border-radius:6px; padding:0.5rem 1.25rem; font-size:0.9rem; cursor:pointer; white-space:nowrap;">Принять</button>
+    </div>
+    <script>
+        (function() {
+            if (!localStorage.getItem('cookie_consent')) {
+                document.getElementById('cookie-consent').style.display = 'flex';
+            }
+        })();
+        function cookieAccept() {
+            localStorage.setItem('cookie_consent', '1');
+            document.getElementById('cookie-consent').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
