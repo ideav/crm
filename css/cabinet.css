@@ -558,6 +558,12 @@
     -moz-appearance: textfield;
 }
 
+.add-funds-hint {
+    font-size: 0.8rem;
+    color: var(--error-color, #dc3545);
+    margin-top: 0.25rem;
+}
+
 /* Databases List */
 .databases-list {
     display: grid;
