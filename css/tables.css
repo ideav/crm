@@ -588,6 +588,12 @@
         font-size: 0.85rem;
     }
 
+    /* Match button height to reduced mobile search input padding (issue #1354) */
+    .tables-actions #add-table-btn {
+        padding-top: 0.4rem;
+        padding-bottom: 0.4rem;
+    }
+
     .search-box {
         flex: 1;
         min-width: 0;
