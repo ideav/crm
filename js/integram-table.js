@@ -6455,7 +6455,7 @@ class IntegramTable{
             modal.innerHTML = `
                 <h3>Настройка представления</h3>
                 <div class="column-settings-list">
-                    ${ this.getDataSourceType() === 'table' && (this.objectTableId || this.options.tableTypeId) ? `<div class="table-settings-item"><a href="/${window.db}/object/${ this.objectTableId || this.options.tableTypeId }">Перейти в старый интерфейс</a></div>` : '' }
+                    ${ this.getDataSourceType() === 'table' && (this.objectTableId || this.options.tableTypeId) ? `<div class="table-settings-item"><a href="/${window.db}/cards/${ this.objectTableId || this.options.tableTypeId }">В виде карточек</a></div><div class="table-settings-item"><a href="/${window.db}/object/${ this.objectTableId || this.options.tableTypeId }">Перейти в старый интерфейс</a></div>` : '' }
 
                     <div class="table-settings-item">
                         <label>Отступы:</label>
