@@ -280,22 +280,10 @@ class IntegramTable{
         }
 
         /**
-         * Check if the current table type is a subordinate table (table requisite).
-         * A subordinate table appears as arr_id in some parent table's requisites in globalMetadata (issue #1338).
-         */
-        isSubordinateTableType() {
-            const currentTypeId = this.objectTableId || (this.options.tableTypeId ? Number(this.options.tableTypeId) : null);
-            if (!currentTypeId || !this.globalMetadata) return false;
-            return this.globalMetadata.some(item =>
-                item.reqs && item.reqs.some(req => Number(req.arr_id) === currentTypeId)
-            );
-        }
-
-        /**
          * Generate title HTML with parent info breadcrumb (issue #571)
          * Format: "{parent table name} {record value}: {current table name}"
-         * For independent tables: parent table name and record value are shown as links.
-         * For subordinate tables (table requisites): shown as plain text (issue #1338).
+         * Where {parent table name} links to table/{parent type id}
+         * And {record value} links to table/{parent record id}
          */
         renderTitleHtml() {
             if (!this.options.title && !this.parentInfo) {
@@ -321,14 +309,10 @@ class IntegramTable{
                 const parentRecordId = this.parentInfo.id || '';
                 const currentTitle = this.escapeHtml(this.options.title || '');
 
-                // For subordinate tables (table requisites): show as plain text, not links (issue #1338)
-                if (this.isSubordinateTableType()) {
-                    return `<div class="integram-table-title-area">${ this.renderCheckboxToggleHtml() }<div class="integram-table-title"><span class="integram-title-link">${ parentTypeName }</span> <span class="integram-title-link">${ parentVal }</span>${ currentTitle ? ': ' + currentTitle : '' }</div>${ createBtnHtml }</div>`;
-                }
-
-                // For independent tables: show as clickable links
+                // Build links
                 const parentTypeLink = `/${ dbName }/table/${ parentTypeId }`;
                 // Parent record link is now a clickable span that opens modal edit form (issue #575)
+
                 return `<div class="integram-table-title-area">${ this.renderCheckboxToggleHtml() }<div class="integram-table-title"><a href="${ parentTypeLink }" class="integram-title-link">${ parentTypeName }</a> <span class="integram-title-link integram-parent-record-link" data-parent-record-id="${ parentRecordId }" data-parent-type-id="${ parentTypeId }" style="cursor: pointer;">${ parentVal }</span>${ currentTitle ? ': ' + currentTitle : '' }</div>${ createBtnHtml }</div>`;
             }
 
