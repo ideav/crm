@@ -29,6 +29,12 @@
     gap: 1rem;
 }
 
+/* Match button height to search input (issue #1350) */
+.tables-actions #add-table-btn {
+    padding-top: 0.625rem;
+    padding-bottom: 0.625rem;
+}
+
 /* Search Box */
 .search-box {
     position: relative;
