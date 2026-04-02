@@ -511,17 +511,12 @@ class CabinetController {
 
             const formData = await formResp.json();
             if (Array.isArray(formData) && formData.length > 0 && formData[0].Pay) {
-                // Inject payment form into tariff section and submit
-                const section = document.getElementById('section-tariff');
-                if (section) {
-                    const tmp = document.createElement('div');
-                    tmp.innerHTML = formData[0].Pay;
-                    const form = tmp.querySelector('form');
-                    if (form) {
-                        section.appendChild(form);
-                        form.submit();
-                        return;
-                    }
+                try {
+                    new URL(formData[0].Pay);
+                    window.location.href = formData[0].Pay;
+                    return;
+                } catch {
+                    // not a valid URL, fall through to error
                 }
             }
             showToast('Ошибка оплаты, обратитесь в поддержку', 'error');
@@ -559,17 +554,12 @@ class CabinetController {
 
             const formData = await formResp.json();
             if (Array.isArray(formData) && formData.length > 0 && formData[0].Pay) {
-                // Inject payment form into balance section and submit
-                const section = document.getElementById('section-balance');
-                if (section) {
-                    const tmp = document.createElement('div');
-                    tmp.innerHTML = formData[0].Pay;
-                    const form = tmp.querySelector('form');
-                    if (form) {
-                        section.appendChild(form);
-                        form.submit();
-                        return;
-                    }
+                try {
+                    new URL(formData[0].Pay);
+                    window.location.href = formData[0].Pay;
+                    return;
+                } catch {
+                    // not a valid URL, fall through to error
                 }
             }
             showToast('Ошибка оплаты, обратитесь в поддержку', 'error');
