@@ -1710,6 +1710,9 @@
             input.placeholder = 'Фильтр...';
             input.value = self.fieldFilters[f.col.id] || '';
             input.dataset.filterCol = f.col.id;
+            input.autocomplete = 'off';
+            input.setAttribute('autocorrect', 'off');
+            input.setAttribute('autocapitalize', 'off');
             input.addEventListener('input', function() {
                 self.fieldFilters[f.col.id] = this.value;
                 // Server-side reload with filter
