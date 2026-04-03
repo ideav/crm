@@ -36,7 +36,7 @@
 }
 
 .integram-table-container {
-    /* overflow-x: auto; */
+    overflow-x: auto;
     width: 100%;
     /* border-radius: 4px; */
 }
