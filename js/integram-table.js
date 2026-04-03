@@ -7708,6 +7708,22 @@ class IntegramTable{
                 this.urlFilters = {};
             }
 
+            // Also clear @{id} record filter (issue #1392): when the table was opened with F_I=@{recordId}
+            // (e.g. via URL or options.recordId), the filter is re-added by parseUrlFiltersFromParams()
+            // on every loadData() call because options.recordId persists. Clear it so the user's
+            // explicit "clear all filters" action removes this filter too.
+            if (this.options.recordId) {
+                this.options.recordId = null;
+                this.overriddenUrlParams.add('F_I');
+                // Remove F_I from browser URL if present
+                const newUrlParams = new URLSearchParams(window.location.search);
+                if (newUrlParams.has('F_I')) {
+                    newUrlParams.delete('F_I');
+                    const newUrl = window.location.pathname + (newUrlParams.toString() ? '?' + newUrlParams.toString() : '');
+                    window.history.replaceState({}, '', newUrl);
+                }
+            }
+
             // Reset data and load from beginning
             this.data = [];
             this.loadedRecords = 0;
