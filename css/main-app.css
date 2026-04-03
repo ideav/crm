@@ -426,9 +426,11 @@
 /* Main Content */
 .app-content {
     flex: 1;
+    min-width: 0;
     padding: 12px;
     background-color: var(--bg-primary);
     overflow-y: auto;
+    overflow-x: hidden;
     min-height: calc(100vh - 70px);
 }
 
