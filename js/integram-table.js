@@ -3206,6 +3206,24 @@ class IntegramTable{
             }, 100);
         }
 
+        /**
+         * Issue #1384: Move a reference dropdown out of the table's overflow-clipping context
+         * by appending it to document.body and positioning it with fixed coordinates.
+         * Stores the detached element on currentEditingCell.fixedDropdown for cleanup.
+         */
+        _attachFixedDropdown(dropdown, header) {
+            const rect = header.getBoundingClientRect();
+            dropdown.style.position = 'fixed';
+            dropdown.style.top = `${rect.bottom}px`;
+            dropdown.style.left = `${rect.left}px`;
+            dropdown.style.width = `${rect.width}px`;
+            dropdown.style.right = 'auto';
+            document.body.appendChild(dropdown);
+            if (this.currentEditingCell) {
+                this.currentEditingCell.fixedDropdown = dropdown;
+            }
+        }
+
         async renderReferenceEditor(cell, currentValue) {
             // Save original content for cancel
             const originalContent = cell.innerHTML;
@@ -3255,6 +3273,13 @@ class IntegramTable{
                 const dropdown = cell.querySelector('.inline-editor-reference-dropdown');
                 const clearButton = cell.querySelector('.inline-editor-reference-clear');
                 const addButton = cell.querySelector('.inline-editor-reference-add');
+
+                // Issue #1384: Move dropdown to body so it is not clipped by the table's overflow.
+                // Position it fixed below the header using the header's bounding rect.
+                const header = cell.querySelector('.inline-editor-reference-header');
+                if (header) {
+                    this._attachFixedDropdown(dropdown, header);
+                }
 
                 // Store original options for filtering (array of [id, text] tuples)
                 this.currentEditingCell.referenceOptions = options;
@@ -3434,6 +3459,11 @@ class IntegramTable{
                         if (refModal || refOverlay) {
                             return;
                         }
+                        // Issue #1384: dropdown is detached from cell (appended to body), so check it separately
+                        const fixedDropdown = this.currentEditingCell && this.currentEditingCell.fixedDropdown;
+                        if (fixedDropdown && fixedDropdown.contains(e.target)) {
+                            return;
+                        }
                         if (!cell.contains(e.target)) {
                             document.removeEventListener('click', outsideClickHandler);
 
@@ -3572,6 +3602,16 @@ class IntegramTable{
                     const tagsContainer = cell.querySelector('.multi-ref-tags-container');
                     const addButton = cell.querySelector('.inline-editor-reference-add');
 
+                    // Issue #1384: Move dropdown to body so it is not clipped by the table's overflow.
+                    // Remove any previously detached dropdown from body before attaching the new one.
+                    if (this.currentEditingCell && this.currentEditingCell.fixedDropdown && this.currentEditingCell.fixedDropdown.parentNode) {
+                        this.currentEditingCell.fixedDropdown.parentNode.removeChild(this.currentEditingCell.fixedDropdown);
+                    }
+                    const multiRefHeader = cell.querySelector('.inline-editor-reference-header');
+                    if (multiRefHeader) {
+                        this._attachFixedDropdown(dropdown, multiRefHeader);
+                    }
+
                     // Handle add button click: open create form (issue #875)
                     if (addButton && origType) {
                         addButton.addEventListener('click', async (e) => {
@@ -3700,6 +3740,11 @@ class IntegramTable{
                 const editingCellRef = this.currentEditingCell;
                 setTimeout(() => {
                     const outsideClickHandler = (e) => {
+                        // Issue #1384: dropdown is detached from cell (appended to body), so check it separately
+                        const fixedDropdown = this.currentEditingCell && this.currentEditingCell.fixedDropdown;
+                        if (fixedDropdown && fixedDropdown.contains(e.target)) {
+                            return;
+                        }
                         if (!cell.contains(e.target)) {
                             document.removeEventListener('click', outsideClickHandler);
                             // Issue #879: Use saved content if any saves occurred, otherwise restore original
@@ -3874,6 +3919,10 @@ class IntegramTable{
                     this.clearRequiredCellHighlights(this.currentEditingCell.cell);
                     if (this.currentEditingCell.outsideClickHandler) {
                         document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
+                    }
+                    // Issue #1384: Remove fixed dropdown overlay from body if present
+                    if (this.currentEditingCell.fixedDropdown && this.currentEditingCell.fixedDropdown.parentNode) {
+                        this.currentEditingCell.fixedDropdown.parentNode.removeChild(this.currentEditingCell.fixedDropdown);
                     }
                     this.currentEditingCell = null;
                 }
@@ -4685,6 +4734,11 @@ class IntegramTable{
                 document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
             }
 
+            // Issue #1384: Remove fixed dropdown overlay from body if present
+            if (this.currentEditingCell.fixedDropdown && this.currentEditingCell.fixedDropdown.parentNode) {
+                this.currentEditingCell.fixedDropdown.parentNode.removeChild(this.currentEditingCell.fixedDropdown);
+            }
+
             this.currentEditingCell = null;
 
             // Navigate to pending cell if set (issue #518)
@@ -4715,6 +4769,10 @@ class IntegramTable{
             if (this.currentEditingCell) {
                 if (this.currentEditingCell.outsideClickHandler) {
                     document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
+                }
+                // Issue #1384: Remove fixed dropdown overlay from body if present
+                if (this.currentEditingCell.fixedDropdown && this.currentEditingCell.fixedDropdown.parentNode) {
+                    this.currentEditingCell.fixedDropdown.parentNode.removeChild(this.currentEditingCell.fixedDropdown);
                 }
                 this.currentEditingCell = null;
             }
