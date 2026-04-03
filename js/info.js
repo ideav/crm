@@ -35,6 +35,16 @@
         return null;
     }
 
+    function deleteCookiesByMask(prefix, suffix) {
+        var parts = document.cookie.split(';');
+        parts.forEach(function(part) {
+            var name = part.trim().split('=')[0];
+            if (name.indexOf(prefix) === 0 && name.slice(-suffix.length) === suffix) {
+                document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+            }
+        });
+    }
+
     // ── Owner check ──────────────────────────────────────────────────────────
 
     function isOwner() {
@@ -185,6 +195,7 @@
         } else if (action === 'reset') {
             setCookie(COOKIE_HINTS_MODE, 'on', 365);
             setCookie(COOKIE_HINTS_SEEN, '', 365);
+            deleteCookiesByMask('table_info_', '_seen');
             if (statusEl) statusEl.textContent = 'Режим подсказок сброшен — подсказки будут показаны заново.';
         }
 
