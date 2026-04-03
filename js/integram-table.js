@@ -309,11 +309,8 @@ class IntegramTable{
                 const parentRecordId = this.parentInfo.id || '';
                 const currentTitle = this.escapeHtml(this.options.title || '');
 
-                // Build links
-                const parentTypeLink = `/${ dbName }/table/${ parentTypeId }`;
-                // Parent record link is now a clickable span that opens modal edit form (issue #575)
-
-                return `<div class="integram-table-title-area">${ this.renderCheckboxToggleHtml() }<div class="integram-table-title"><a href="${ parentTypeLink }" class="integram-title-link">${ parentTypeName }</a> <span class="integram-title-link integram-parent-record-link" data-parent-record-id="${ parentRecordId }" data-parent-type-id="${ parentTypeId }" style="cursor: pointer;">${ parentVal }</span>${ currentTitle ? ': ' + currentTitle : '' }</div>${ createBtnHtml }</div>`;
+                // Table name shown as plain black text (issue #1338); record value remains clickable (issue #575)
+                return `<div class="integram-table-title-area">${ this.renderCheckboxToggleHtml() }<div class="integram-table-title"><span class="integram-title-link">${ parentTypeName }</span> <span class="integram-title-link integram-parent-record-link" data-parent-record-id="${ parentRecordId }" data-parent-type-id="${ parentTypeId }" style="cursor: pointer;">${ parentVal }</span>${ currentTitle ? ': ' + currentTitle : '' }</div>${ createBtnHtml }</div>`;
             }
 
             // No parent info, just show the title
@@ -6454,7 +6451,7 @@ class IntegramTable{
             modal.innerHTML = `
                 <h3>Настройка представления</h3>
                 <div class="column-settings-list">
-                    ${ this.getDataSourceType() === 'table' && (this.objectTableId || this.options.tableTypeId) ? `<div class="table-settings-item"><a href="/${window.db}/object/${ this.objectTableId || this.options.tableTypeId }">Перейти в старый интерфейс</a></div>` : '' }
+                    ${ this.getDataSourceType() === 'table' && (this.objectTableId || this.options.tableTypeId) ? `<div class="table-settings-item"><a href="/${window.db}/cards/${ this.objectTableId || this.options.tableTypeId }">В виде карточек</a></div><div class="table-settings-item"><a href="/${window.db}/object/${ this.objectTableId || this.options.tableTypeId }">Перейти в старый интерфейс</a></div>` : '' }
 
                     <div class="table-settings-item">
                         <label>Отступы:</label>
