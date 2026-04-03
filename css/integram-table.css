@@ -2534,11 +2534,9 @@ td:has(.inline-editor) {
     color: var(--md-text-hint);
 }
 
+/* Issue #1384: dropdown is moved to document.body by JS (_attachFixedDropdown) so it
+   escapes the table's overflow clipping. position/top/left/width are set via JS. */
 .inline-editor-reference-dropdown {
-    position: absolute;
-    top: 100%;
-    left: -2px;
-    right: -2px;
     max-height: 200px;
     overflow-y: auto;
     background: var(--md-surface);
@@ -2546,7 +2544,7 @@ td:has(.inline-editor) {
     border-top: none;
     border-radius: 0 0 4px 4px;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-    z-index: 1000;
+    z-index: 10000;
 }
 
 .inline-editor-reference-option {
