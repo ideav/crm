@@ -126,6 +126,7 @@
 .app-layout {
     display: flex;
     min-height: calc(100vh - 70px);
+    overflow-x: hidden;
 }
 
 /* Sidebar */
