@@ -1161,6 +1161,7 @@
         var dateIdx  = [];
         var numIdx   = [];
         var listIdx  = [];
+        var fileIdx  = [];
         var phoneIdx = -1;
         var emailIdx = -1;
         var colorIdx = -1;
@@ -1186,6 +1187,8 @@
                 dateIdx.push(i);
             } else if (isNumType(t)) {
                 numIdx.push(i);
+            } else if (isFileType(t)) {
+                fileIdx.push(i);
             }
         }
 
@@ -1263,6 +1266,20 @@
             });
             usedIdx.add(numIdx[0]);
         }
+
+        // File fields: add as ADDITIONAL (visible) so images are shown by default
+        fileIdx.forEach(function(fi) {
+            settings.push({
+                colId: cols[fi].id,
+                colIdx: fi,
+                visible: true,
+                showLabel: true,
+                alias: null,
+                order: order++,
+                fieldType: CARD_FIELD_TYPES.ADDITIONAL
+            });
+            usedIdx.add(fi);
+        });
 
         // Phone field
         if (phoneIdx >= 0) {
