@@ -490,6 +490,27 @@
         color: var(--text-primary);
     }
 
+    /* File field image (type 10) */
+    .cards-card-file-img {
+        width: 75px;
+        height: 75px;
+        object-fit: cover;
+        border-radius: 4px;
+        display: block;
+        cursor: pointer;
+    }
+
+    .cards-card-file-link {
+        font-size: 13px;
+        color: var(--cards-primary);
+        text-decoration: none;
+        word-break: break-all;
+    }
+
+    .cards-card-file-link:hover {
+        text-decoration: underline;
+    }
+
     /* Breadcrumb links in title */
     .cards-breadcrumb-link {
         color: var(--cards-primary);
@@ -650,8 +671,20 @@
     function isDateType(t)  { return DATE_TYPES.has(String(t)); }
     function isNumType(t)   { return NUM_TYPES.has(String(t)); }
     function isListType(t)  { return LIST_TYPES.has(String(t)); }
+    function isFileType(t)  { return String(t) === '10'; }
     // Reference fields (справочник) have 'ref' attribute pointing to another table
     function isRefField(col) { return col && col.ref != null && col.ref !== ''; }
+
+    // Parse an anchor HTML string from a file field into { href, name }
+    function parseFileLink(val) {
+        var tmp = document.createElement('div');
+        tmp.innerHTML = val;
+        var a = tmp.querySelector('a');
+        if (!a) return null;
+        return { href: a.getAttribute('href') || '', name: a.textContent || a.getAttribute('href') || '' };
+    }
+
+    var IMAGE_EXTS = new Set(['jpg','jpeg','png','gif','bmp','webp','svg','ico','tiff','tif']);
 
     // ─── Card Field Types ──────────────────────────────────────────────────────
     // Field types as per issue requirements
@@ -1541,22 +1574,52 @@
 
             // Format based on column type
             var colType = cols[f.colIdx] ? cols[f.colIdx].type : '3';
-            var formattedVal = val;
-            if (isDateType(colType)) {
-                formattedVal = formatDate(val);
-            } else if (isNumType(colType)) {
-                formattedVal = formatNum(val);
+            if (isFileType(colType)) {
+                // File field: render as image or link
+                var fileInfo = parseFileLink(String(val));
+                if (fileInfo) {
+                    var ext = fileInfo.href.split('.').pop().split('?')[0].toLowerCase();
+                    if (IMAGE_EXTS.has(ext)) {
+                        var img = document.createElement('img');
+                        img.src = fileInfo.href;
+                        img.alt = fileInfo.name;
+                        img.className = 'cards-card-file-img';
+                        img.addEventListener('click', function(e) {
+                            e.stopPropagation();
+                            window.open(fileInfo.href, '_blank');
+                        });
+                        fieldEl.appendChild(img);
+                    } else {
+                        var link = document.createElement('a');
+                        link.href = fileInfo.href;
+                        link.target = '_blank';
+                        link.textContent = fileInfo.name;
+                        link.className = 'cards-card-file-link';
+                        link.addEventListener('click', function(e) { e.stopPropagation(); });
+                        fieldEl.appendChild(link);
+                    }
+                } else {
+                    fieldEl.appendChild(document.createTextNode(String(val)));
+                }
+                div.appendChild(fieldEl);
             } else {
-                formattedVal = String(val);
-            }
+                var formattedVal = val;
+                if (isDateType(colType)) {
+                    formattedVal = formatDate(val);
+                } else if (isNumType(colType)) {
+                    formattedVal = formatNum(val);
+                } else {
+                    formattedVal = String(val);
+                }
 
-            fieldEl.appendChild(document.createTextNode(formattedVal));
-            fieldEl.title = 'Нажмите для копирования';
-            fieldEl.addEventListener('click', function(e) {
-                e.stopPropagation();
-                self2._copyToClipboard(String(val), fieldEl);
-            });
-            div.appendChild(fieldEl);
+                fieldEl.appendChild(document.createTextNode(formattedVal));
+                fieldEl.title = 'Нажмите для копирования';
+                fieldEl.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    self2._copyToClipboard(String(val), fieldEl);
+                });
+                div.appendChild(fieldEl);
+            }
         });
 
         // ── Phone and Email icons (bottom-right) ────────────────────────────────
