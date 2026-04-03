@@ -845,7 +845,7 @@
             '</div>' +
             '<div class="cards-search-row">' +
                 '<i class="pi pi-search cards-search-icon"></i>' +
-                '<input class="cards-search-input" id="' + inst + '-search" type="text" placeholder="Быстрый поиск..." autocomplete="off" autocorrect="off" autocapitalize="off" />' +
+                '<input class="cards-search-input" id="' + inst + '-search" type="text" placeholder="Быстрый поиск..." autocomplete="new-password" autocorrect="off" autocapitalize="off" />' +
                 '<div class="cards-filters-row" id="' + inst + '-filters-row"></div>' +
             '</div>' +
             '<div class="cards-grid" id="' + inst + '-grid">' +
@@ -1773,7 +1773,7 @@
             input.placeholder = 'Фильтр...';
             input.value = self.fieldFilters[f.col.id] || '';
             input.dataset.filterCol = f.col.id;
-            input.autocomplete = 'off';
+            input.autocomplete = 'new-password';
             input.setAttribute('autocorrect', 'off');
             input.setAttribute('autocapitalize', 'off');
             input.addEventListener('input', function() {
