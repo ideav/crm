@@ -1455,7 +1455,7 @@ class MainAppController {
                     document.cookie = db + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
                 }
                 // Redirect to root
-                window.location.href = '/';
+                window.location.href = '/' + (db || '');
             });
         }
 
