@@ -695,6 +695,7 @@ class CabinetController {
                         <div class="database-save-row">
                             <button type="button" class="btn-primary btn-small database-save-btn" style="display:none">Сохранить</button>
                             <span class="database-save-status"></span>
+                            <button type="button" class="btn-secondary btn-small database-restore-admin-btn">Восстановить админа</button>
                         </div>
                     </div>
                 </div>
@@ -731,6 +732,12 @@ class CabinetController {
             const saveBtn = card.querySelector('.database-save-btn');
             if (saveBtn) {
                 saveBtn.addEventListener('click', () => this.saveDatabase(dbId, card, origValues));
+            }
+
+            // Set up restore admin button
+            const restoreAdminBtn = card.querySelector('.database-restore-admin-btn');
+            if (restoreAdminBtn) {
+                restoreAdminBtn.addEventListener('click', () => this.restoreAdmin(db.DB, restoreAdminBtn));
             }
 
             container.appendChild(card);
@@ -807,6 +814,39 @@ class CabinetController {
             showToast('Ошибка сохранения настроек базы данных', 'error');
         } finally {
             if (saveBtn) saveBtn.disabled = false;
+        }
+    }
+
+    async restoreAdmin(dbName, btn) {
+        if (btn) btn.disabled = true;
+        try {
+            const host = this.apiConfig.host;
+            const url = 'https://' + host + '/' + encodeURIComponent(dbName) + '/restore_admin';
+
+            const fd = new FormData();
+            fd.append('_xsrf', xsrf);
+
+            const response = await fetch(url, {
+                method: 'POST',
+                credentials: 'include',
+                body: fd
+            });
+
+            if (!response.ok) {
+                throw new Error('HTTP ' + response.status);
+            }
+
+            const data = await response.json();
+            if (data && data.result === 'ok') {
+                showToast('Администратор восстановлен', 'success');
+            } else {
+                showToast('Ошибка: ' + JSON.stringify(data), 'error');
+            }
+        } catch (err) {
+            console.error('[cabinet] Error restoring admin:', err);
+            showToast('Ошибка восстановления администратора', 'error');
+        } finally {
+            if (btn) btn.disabled = false;
         }
     }
 
