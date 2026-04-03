@@ -3258,7 +3258,7 @@ class IntegramTable{
                             <input type="text"
                                    class="inline-editor-reference-search"
                                    placeholder="Поиск..."
-                                   autocomplete="off">
+                                   autocomplete="off" name="no_auto">
                             ${buttonHtml}
                         </div>
                         <div class="inline-editor-reference-dropdown">
