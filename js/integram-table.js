@@ -15203,19 +15203,36 @@ class IntegramCreateFormHelper {
                 fieldHtml = `<textarea class="form-control" id="field-${fieldId}" name="t${fieldId}" rows="3"
                     ${isRequired ? 'required' : ''}>${this.escapeHtml(fieldValue)}</textarea>`;
             } else if (fieldType === 'FILE') {
-                const hasFile = fieldValue && fieldValue !== '';
+                // Parse file link from HTML if present (issue #1372)
+                let fileHref = '';
+                let fileDisplayName = '';
+                let hasFile = false;
+
+                if (fieldValue && fieldValue !== '') {
+                    const linkMatch = fieldValue.match(/<a[^>]*href=["']([^"']+)["'][^>]*>([^<]+)<\/a>/i);
+                    if (linkMatch) {
+                        fileHref = linkMatch[1];
+                        fileDisplayName = linkMatch[2];
+                        hasFile = true;
+                    } else {
+                        fileHref = fieldValue;
+                        fileDisplayName = fieldValue.split('/').pop() || fieldValue;
+                        hasFile = true;
+                    }
+                }
+
                 fieldHtml = `
-                    <div class="form-file-upload" data-field-id="${fieldId}">
-                        <input type="file" class="file-input" id="file-${fieldId}" style="display:none;">
-                        <input type="hidden" id="field-${fieldId}" name="t${fieldId}" value="${this.escapeHtml(fieldValue)}">
-                        <div class="file-dropzone" style="border:2px dashed #ccc;padding:20px;text-align:center;cursor:pointer;border-radius:4px;">
-                            <i class="pi pi-upload" style="font-size:24px;color:#666;"></i>
-                            <p style="margin:8px 0 0;color:#666;">Перетащите файл или нажмите для выбора</p>
+                    <div class="form-file-upload" data-req-id="${fieldId}" data-original-value="${this.escapeHtml(fieldValue)}">
+                        <input type="file" class="file-input" id="field-${fieldId}-file" style="display: none;">
+                        <div class="file-dropzone" style="${hasFile ? 'display: none;' : ''}">
+                            <span class="file-dropzone-text">Перетащите файл или нажмите для выбора</span>
+                            <button type="button" class="file-select-btn">Выбрать файл</button>
                         </div>
-                        <div class="file-preview" style="display:${hasFile ? 'flex' : 'none'};align-items:center;gap:8px;margin-top:8px;">
-                            <span class="file-name">${this.escapeHtml(fieldValue)}</span>
-                            <button type="button" class="file-remove-btn btn btn-sm btn-outline-danger"><i class="pi pi-times"></i></button>
+                        <div class="file-preview" style="${hasFile ? 'display: flex;' : 'display: none;'}">
+                            ${fileHref ? `<a href="${this.escapeHtml(fileHref)}" target="_blank" class="file-name file-link">${this.escapeHtml(fileDisplayName)}</a>` : `<span class="file-name">${this.escapeHtml(fileDisplayName)}</span>`}
+                            <button type="button" class="file-remove-btn" title="Удалить файл"><i class="pi pi-times"></i></button>
                         </div>
+                        <input type="hidden" id="field-${fieldId}" name="t${fieldId}" value="${this.escapeHtml(fieldValue)}" ${isRequired ? 'required' : ''} data-file-deleted="false">
                     </div>
                 `;
             } else if (fieldType === 'NUMBER' || fieldType === 'SIGNED') {
@@ -15261,23 +15278,57 @@ class IntegramCreateFormHelper {
             let requestBody;
             const headers = {};
 
-            // Check for file inputs
-            const fileInputs = form.querySelectorAll('input[type="file"]');
-            let hasFiles = false;
-
-            fileInputs.forEach(input => {
-                if (input.files && input.files.length > 0) {
-                    hasFiles = true;
-                    formData.append(input.name || input.id, input.files[0]);
+            // Check for new file uploads via _fileToUpload pattern (issue #1372)
+            const fileUploads = modal.querySelectorAll('.form-file-upload');
+            let hasNewFiles = false;
+            for (const uploadContainer of fileUploads) {
+                if (uploadContainer._fileToUpload) {
+                    hasNewFiles = true;
+                    break;
                 }
-            });
+            }
 
-            if (hasFiles) {
+            if (hasNewFiles) {
+                const multipartBody = new FormData();
+
                 // Add XSRF token for file uploads (issue #839)
                 if (typeof xsrf !== 'undefined') {
-                    formData.append('_xsrf', xsrf);
+                    multipartBody.append('_xsrf', xsrf);
                 }
-                requestBody = formData;
+
+                // Get main value
+                const mainValue = formData.get('main');
+                if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
+                    multipartBody.append(`t${this.tableTypeId}`, mainValue);
+                }
+
+                // Add all form fields, substituting file uploads where needed
+                for (const [key, value] of formData.entries()) {
+                    if (key === 'main') continue;
+
+                    const fieldMatch = key.match(/^t(\d+)$/);
+                    if (fieldMatch) {
+                        const reqId = fieldMatch[1];
+                        const uploadContainer = modal.querySelector(`.form-file-upload[data-req-id="${reqId}"]`);
+                        if (uploadContainer && uploadContainer._fileToUpload) {
+                            multipartBody.append(key, uploadContainer._fileToUpload);
+                            continue;
+                        }
+                    }
+
+                    if (value !== '' && value !== null && value !== undefined) {
+                        multipartBody.append(key, value);
+                    }
+                }
+
+                // Handle checkbox fields explicitly (not included in formData when unchecked)
+                form.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+                    if (checkbox.name) {
+                        multipartBody.set(checkbox.name, checkbox.checked ? '1' : '0');
+                    }
+                });
+
+                requestBody = multipartBody;
             } else {
                 const params = new URLSearchParams();
 
