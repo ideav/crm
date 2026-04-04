@@ -1332,43 +1332,6 @@ mark.search-highlight {
             </div>
         </div>
     </div>
-
-<!-- Регрессионная шкала -->
-<div class="regression-scale">
-    <h3 class="spoiler-title" id="spoilerTitle">
-        <span class="spoiler-icon">▶</span> Масштабируемый тариф — регрессионная шкала
-    </h3>
-    <p>При исчерпании базового пакета (10&nbsp;000 токенов) вы&nbsp;можете приобретать дополнительные пакеты. Каждый следующий пакет дешевле предыдущего на&nbsp;<strong>20%</strong>.</p>
-    <p>10&nbsp;000 токенов — это если 2 человека по 8 часов в день, без выходных в течение месяца будут вбивать карточки клиентов в компьютер.</p>
-    
-    <div class="spoiler-content" id="spoilerContent" style="display: none;">
-        <div class="table-wrapper">
-            <table class="tariff-table">
-                <thead>
-                    <tr>
-                        <th>Пакет токенов<br />(всего)</th>
-                        <th>Цена пакета,<br />₽</th>
-                        <th>Полная стоимость,<br />₽ в месяц</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr><td>1-й пакет (10 000)</td><td class="align-right">4 900</td><td class="align-right">4 900</td></tr>
-                    <tr><td>2-й пакет (20 000)</td><td class="align-right">3 920</td><td class="align-right">8 820</td></tr>
-                    <tr><td>3-й пакет (30 000)</td><td class="align-right">3 140</td><td class="align-right">11 960</td></tr>
-                    <tr><td>4-й пакет (40 000)</td><td class="align-right">2 510</td><td class="align-right">14 470</td></tr>
-                    <tr><td>5-й пакет (50 000)</td><td class="align-right">2 010</td><td class="align-right">16 480</td></tr>
-                    <tr><td>6-й пакет (60 000)</td><td class="align-right">1 610</td><td class="align-right">18 090</td></tr>
-                    <tr><td>7-й пакет (70 000)</td><td class="align-right">1 290</td><td class="align-right">19 380</td></tr>
-                    <tr><td>8-й пакет (80 000)</td><td class="align-right">1 030</td><td class="align-right">20 410</td></tr>
-                    <tr><td>9-й пакет (90 000)</td><td class="align-right">820</td><td class="align-right">21 230</td></tr>
-                    <tr><td>10-й пакет (100 000)</td><td class="align-right">660</td><td class="align-right">21 890</td></tr>
-                </tbody>
-            </table>
-        </div>
-        <p class="table-note">Цены округлены до&nbsp;10&nbsp;рублей. Последующие пакеты продолжают снижаться по&nbsp;той&nbsp;же логике, стремясь к&nbsp;минимальной стоимости.</p>
-    </div>
-</div>
-
 <style>
 /* Spoiler Title Styles */
 .spoiler-title {
@@ -1378,7 +1341,7 @@ mark.search-highlight {
     cursor: pointer;
     font-size: 1.3rem;
     color: var(--text-primary);
-    margin-bottom: 12px;
+    margin-bottom: 24px;
     border-bottom: 1px dashed var(--button-primary);
     transition: opacity 0.2s ease;
 }
@@ -1407,7 +1370,48 @@ mark.search-highlight {
         transform: translateY(0);
     }
 }
+.tokens {
+	color: var(--link-color);
+    text-decoration: none;
+}
 </style>
+
+<!-- Регрессионная шкала -->
+<div class="regression-scale">
+    <h3 class="spoiler-title" id="spoilerTitle">
+        <span class="spoiler-icon">▶</span> Масштабируемый тариф — регрессионная шкала
+    </h3>
+    <p>При исчерпании базового пакета (10&nbsp;000 токенов) вы&nbsp;можете приобретать дополнительные пакеты. Каждый следующий пакет дешевле предыдущего на&nbsp;<strong>20%</strong>.</p>
+    <p>10&nbsp;000 токенов — это если 2 человека по 8 часов в день, без выходных в течение месяца будут вбивать карточки клиентов в компьютер.</p>
+	<p><a href="/tokens.html" class="tokens"><i class="pi pi-help"></i> Я ничего не понял. Объясните попроще про токены</a></p>
+	
+    <div class="spoiler-content" id="spoilerContent" style="display: none;">
+        <div class="table-wrapper">
+            <table class="tariff-table">
+                <thead>
+                    <tr>
+                        <th>Пакет токенов<br />(всего)</th>
+                        <th>Цена пакета,<br />₽</th>
+                        <th>Полная стоимость,<br />₽ в месяц</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>1-й пакет (10 000)</td><td class="align-right">4 900</td><td class="align-right">4 900</td></tr>
+                    <tr><td>2-й пакет (20 000)</td><td class="align-right">3 920</td><td class="align-right">8 820</td></tr>
+                    <tr><td>3-й пакет (30 000)</td><td class="align-right">3 140</td><td class="align-right">11 960</td></tr>
+                    <tr><td>4-й пакет (40 000)</td><td class="align-right">2 510</td><td class="align-right">14 470</td></tr>
+                    <tr><td>5-й пакет (50 000)</td><td class="align-right">2 010</td><td class="align-right">16 480</td></tr>
+                    <tr><td>6-й пакет (60 000)</td><td class="align-right">1 610</td><td class="align-right">18 090</td></tr>
+                    <tr><td>7-й пакет (70 000)</td><td class="align-right">1 290</td><td class="align-right">19 380</td></tr>
+                    <tr><td>8-й пакет (80 000)</td><td class="align-right">1 030</td><td class="align-right">20 410</td></tr>
+                    <tr><td>9-й пакет (90 000)</td><td class="align-right">820</td><td class="align-right">21 230</td></tr>
+                    <tr><td>10-й пакет (100 000)</td><td class="align-right">660</td><td class="align-right">21 890</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="table-note">Цены округлены до&nbsp;10&nbsp;рублей. Последующие пакеты продолжают снижаться по&nbsp;той&nbsp;же логике, стремясь к&nbsp;минимальной стоимости.</p>
+    </div>
+</div>
 
 <script>
 (function() {
