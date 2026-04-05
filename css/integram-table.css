@@ -2607,14 +2607,16 @@ td:has(.inline-editor-reference) {
 }
 
 .form-ref-editor-box .inline-editor-reference-dropdown {
-    position: relative;
-    top: auto;
-    left: auto;
+    position: absolute;
+    top: 100%;
+    left: 0;
     right: auto;
+    width: 100%;
     max-height: 200px;
     border-top: none;
     border-radius: 0 0 4px 4px;
     display: none;
+    z-index: 1000;
 }
 
 /* ========================================
