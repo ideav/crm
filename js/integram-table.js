@@ -5615,12 +5615,12 @@ class IntegramTable{
                             ${ availableTypes.map(t => `<option value="${t.id}" ${ String(col.type) === String(t.id) ? 'selected' : '' }>${t.name}</option>`).join('') }
                         </select>` : `<span class="col-edit-value">Ссылочный тип (справочник)</span>` }
                     </div>
-                    <div class="col-edit-row">
+                    ${ isFirstColumn ? `<div class="col-edit-row">
                         <label class="col-edit-label col-edit-check-label">
                             <input type="checkbox" id="col-edit-unique-${instanceName}" ${ isUnique ? 'checked' : '' }>
                             Уникальные значения
                         </label>
-                    </div>
+                    </div>` : '' }
                     <div class="col-edit-row">
                         <label class="col-edit-label col-edit-check-label">
                             <input type="checkbox" id="col-edit-required-${instanceName}" ${ (isRequired || isFirstColumn) ? 'checked' : '' } ${ isFirstColumn ? 'disabled' : '' }>
@@ -5699,7 +5699,7 @@ class IntegramTable{
                     if (!isRef) {
                         const newTypeId = colEditModal.querySelector(`#col-edit-type-${instanceName}`).value;
                         const currentColName = colEditModal.querySelector(`#col-edit-name-${instanceName}`).value.trim() || col.name;
-                        const newUnique = colEditModal.querySelector(`#col-edit-unique-${instanceName}`).checked;
+                        const newUnique = colEditModal.querySelector(`#col-edit-unique-${instanceName}`)?.checked ?? isUnique;
                         if (String(newTypeId) !== String(col.type) || newUnique !== isUnique) {
                             const result = await this.saveColumnType(col.orig || col.id, newTypeId, currentColName, newUnique);
                             if (!result.success) {
