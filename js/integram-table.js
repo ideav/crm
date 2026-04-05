@@ -11609,40 +11609,7 @@ class IntegramTable{
             const apiBase = this.getApiBase();
 
             try {
-                // Step 1: Handle file deletions first (only for edit mode)
-                if (!isCreate) {
-                    const fileUploads = modal.querySelectorAll('.form-file-upload');
-                    for (const uploadContainer of fileUploads) {
-                        const reqId = uploadContainer.dataset.reqId;
-                        const hiddenInput = uploadContainer.querySelector(`#field-${ reqId }`);
-                        const originalValue = uploadContainer.dataset.originalValue || '';
-
-                        // Check if file was deleted
-                        if (hiddenInput.dataset.fileDeleted === 'true' && originalValue) {
-                            // Send deletion command: _m_set/{recordId}?JSON&t{reqId}=
-                            const deleteParams = new URLSearchParams();
-                            if (typeof xsrf !== 'undefined') {
-                                deleteParams.append('_xsrf', xsrf);
-                            }
-                            deleteParams.append(`t${ reqId }`, '');
-
-                            const deleteUrl = `${ apiBase }/_m_set/${ recordId }?JSON`;
-                            const deleteResponse = await fetch(deleteUrl, {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/x-www-form-urlencoded'
-                                },
-                                body: deleteParams.toString()
-                            });
-
-                            if (!deleteResponse.ok) {
-                                throw new Error(`Ошибка удаления файла: ${ deleteResponse.statusText }`);
-                            }
-                        }
-                    }
-                }
-
-                // Step 2: Prepare form data for save
+                // Step 1: Prepare form data for save
                 const fileUploads = modal.querySelectorAll('.form-file-upload');
                 let hasNewFiles = false;
 
@@ -11701,8 +11668,9 @@ class IntegramTable{
                                     continue;
                                 }
 
-                                // If file was deleted, skip it (already handled above)
+                                // If file was deleted, send empty value to signal deletion via save
                                 if (hiddenInput.dataset.fileDeleted === 'true') {
+                                    requestBody.append(key, '');
                                     continue;
                                 }
 
@@ -11750,8 +11718,8 @@ class IntegramTable{
                                 const originalValue = uploadContainer.dataset.originalValue || '';
                                 const hiddenInput = uploadContainer.querySelector(`#field-${ reqId }`);
 
-                                // Skip existing files and deleted files
-                                if ((originalValue && hiddenInput.dataset.hasNewFile !== 'true') || hiddenInput.dataset.fileDeleted === 'true') {
+                                // Skip existing unchanged files; deleted files pass through with empty value
+                                if (originalValue && hiddenInput.dataset.hasNewFile !== 'true' && hiddenInput.dataset.fileDeleted !== 'true') {
                                     continue;
                                 }
                             }
@@ -11778,7 +11746,7 @@ class IntegramTable{
                     headers['Content-Type'] = 'application/x-www-form-urlencoded';
                 }
 
-                // Step 3: Save the record
+                // Step 2: Save the record
                 let url;
                 if (isCreate) {
                     url = `${ apiBase }/_m_new/${ typeId }?JSON&up=${ parentId || 1 }`;
