@@ -2344,7 +2344,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .inline-editor {
     width: 100%;
     padding: 6px 10px;
-    border: 2px solid var(--md-primary);
+    /* border: 2px solid var(--md-primary); */
     border-radius: 4px;
     font-size: 14px;
     font-family: inherit;
@@ -2442,7 +2442,7 @@ td:has(.inline-editor) {
     width: 100%;
     position: relative;
     background: var(--md-surface);
-    border: 2px solid var(--md-primary);
+    /* border: 2px solid var(--md-primary); */
     border-radius: 4px;
     box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.15);
 }
@@ -2540,7 +2540,7 @@ td:has(.inline-editor) {
     max-height: 200px;
     overflow-y: auto;
     background: var(--md-surface);
-    border: 2px solid var(--md-primary);
+    /* border: 2px solid var(--md-primary); */
     border-top: none;
     border-radius: 0 0 4px 4px;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
