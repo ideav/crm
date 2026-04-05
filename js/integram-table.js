@@ -5767,6 +5767,11 @@ class IntegramTable{
                     showStatus('Изменения сохранены', false);
                     // Clear metadata cache so edit/add forms fetch fresh metadata (issue #1386)
                     this.metadataCache = {};
+                    // Clear globalMetadata so fetchMetadata() re-fetches fresh column info (issue #1400)
+                    this.globalMetadata = null;
+                    this.globalMetadataPromise = null;
+                    // Clear columns so loadDataFromTable() re-fetches metadata (issue #1400)
+                    this.columns = [];
                     // Reload column state in the settings list
                     setTimeout(() => {
                         closeColEdit();
