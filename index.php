@@ -35,6 +35,7 @@ define("PHONE", 30);
 define("XSRF", 40);
 define("EMAIL", 41);
 define("ROLE", 42);
+define("ADMINROLE", 145);
 define("ACTIVITY", 124);
 define("PASSWORD", 20);
 define("RETRIES", 300);
@@ -90,11 +91,14 @@ elseif(!preg_match(DB_MASK, $z))
 
 include "include/connection.php";
 # Check the DB existence
-if(!mysqli_query($connection, "SELECT 1 FROM $z LIMIT 1") && ($z !== "auth.asp")){
+$billing = mysqli_query($connection
+			, "SELECT bal.val FROM $z db LEFT JOIN my ON my.t=".DATABASE." AND my.val='$z'
+				LEFT JOIN my bal ON bal.up=db.up AND bal.t=285
+				LIMIT 1");
+if(!$billing && ($z !== "auth.asp")){
     header("HTTP/1.0 404 Not found");
     die("$z does not exist");
 }
-
 $locale = isset($_COOKIE[$z."_locale"]) ? $_COOKIE[$z."_locale"] : (isset($_COOKIE["my_locale"]) ? $_COOKIE["my_locale"] : "RU");
 																									
 # The trace cookie to be deleted upon the session close
@@ -115,6 +119,9 @@ if(isset($_GET["TRACE_IT"]) || isset($_COOKIE["TRACE_IT"])){
     wlog(" headers: $hdr", "log");
     fclose($file);
 }
+$row = mysqli_fetch_assoc($billing);
+if(isset($row["val"]) && ((int)$row["val"] < 0.01))
+	trace("Billing: read only");
 # Fetch all the parameters from the body and log them
 $params = "";
 if(strlen(file_get_contents('php://input'))){
@@ -560,7 +567,7 @@ function newDb($db, $template, $name, $email, $pwd){
 		Insert($id, 1, EMAIL, $email, "Insert DB email");
 	if(strlen($name))
 		Insert($id, 1, 33, $name, "Insert user name");
-	Insert($id, 1, 145, "115", "Insert Admin role link");
+	Insert($id, 1, ADMINROLE, "115", "Insert Admin role link");
 	
     # Set token and xsfr as of the current user's
 	Insert($id, 1, TOKEN, $GLOBALS["GLOBAL_VARS"]["token"], "Save token DB");
@@ -677,8 +684,7 @@ function Exec_sql($sql, $err_msg, $log=TRUE, $fatal=TRUE){
 	global $connection, $z;
 	$time_start = microtime(TRUE);
 	trace("Try Exec_sql $sql");
-	if(!$result = mysqli_query($connection, $sql))
-	{
+	if(!$result = mysqli_query($connection, $sql)){
     	if(mysqli_errno($connection)===1146)
     	    login("", "", "dBNotExists", t9n("[RU]База $z не существует[EN]The $z DB does not exist")." [$err_msg]");
     	$msg = "Couldn't execute query [$err_msg] ".mysqli_error($connection)." ($sql; )";
@@ -1406,7 +1412,7 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
 		elseif((isset($_COOKIE["idb_$z"]) && $_COOKIE["idb_$z"] === hash("sha512", ADMINHASH.$z)) || ($tok === hash("sha512", ADMINHASH.$z))){
 			$GLOBALS["GLOBAL_VARS"]["user"] = $GLOBALS["GLOBAL_VARS"]["role"] = "admin";
 			$GLOBALS["GLOBAL_VARS"]["user_id"] = 0;
-			$GLOBALS["GLOBAL_VARS"]["role_id"] = 145;
+			$GLOBALS["GLOBAL_VARS"]["role_id"] = ADMINROLE;
 			$xsrf = hash("sha512", $z.ADMINHASH);
 		}
 		$GLOBALS["tzone"] = isset($_COOKIE["tzone"]) ? $_COOKIE["tzone"] : 0;
@@ -6660,6 +6666,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				$base_typ = isset($GLOBALS["BT"][$literal_typ]) ? $GLOBALS["BT"][$literal_typ] : $GLOBALS["BT"]["SHORT"];
                 $blocks[$block]["typ"][] = $key;
                 
+				if($literal_typ == "BUTTON"){
+				    $tmp = removeMasks($GLOBALS["attrs"][$key]);
+					$btnLink = str_replace("[ID]", $blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["id"]
+										, str_replace("[VAL]", $blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["val"], $tmp));
+				}
 				$req_id = isset($row["id"]) ? $row["id"] : 0;
 				if(isApi()){
 					if(isset($GLOBALS["ARR_typs"][$key])) # Array of linked values
@@ -6674,8 +6685,12 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 						else
 							$v = Format_Val_View($base_typ, $val);
 					}
-					elseif($literal_typ == "BUTTON")
-						$v = "***";
+					elseif($literal_typ == "BUTTON"){
+						if(isset($_REQUEST["JSON_OBJ"]))
+							$v = $btnLink;
+						else
+							$v = "***";
+					}
 					else
 					    $v = $val;
     			    if($v != ""){
@@ -6735,12 +6750,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 						else
 							$blocks[$block]["val"][] = Format_Val_View($base_typ, htmlspecialchars($val));
 					}
-					elseif($literal_typ == "BUTTON"){
-					    $tmp = removeMasks($GLOBALS["attrs"][$key]);
-						$blocks[$block]["val"][] = " <A HREF=\"/$z/".str_replace("[ID]", $blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["id"]
-														, str_replace("[VAL]", $blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["val"]
-																		, $tmp))."\">***</A>";
-					}
+					elseif($literal_typ == "BUTTON")
+						$blocks[$block]["val"][] = " <A HREF=\"/$z/$btnLink\">***</A>";
 					else
 						$blocks[$block]["val"][] = "";
 				}
@@ -7652,7 +7663,7 @@ function pwd_reset($u){
 				$id = Insert(1, 0, USER, $u, "Insert new user");
 				Insert($id, 1, 156, date("Ymd"), "Insert date");
 				Insert($id, 1, EMAIL, $data_set["val"], "Insert DB email");
-				Insert($id, 1, 145, "115", "Insert Admin role link");
+				Insert($id, 1, ADMINROLE, "115", "Insert Admin role link");
 				$data_set = getUserForReset($z, $u, "Get user's reqs"); # The admin has been restored - reset the password
 			}
 			else
@@ -7726,6 +7737,7 @@ function api_dump($json, $name="api.json")
 	fwrite($api, $json);
 	fclose($api);
 	echo ob_get_clean();
+	updateBilling();
 	die();
 }
 function myexit(){
@@ -7847,6 +7859,10 @@ function authJWT($u){
 	}
 	else
 	    die("{\"error\":\"No user found\"}");
+}
+function updateBilling(){
+	global $connection, $z, $time_start;
+	mysqli_query($connection, "UPDATE my SET ord=ord+".min(50, max(1, floor(substr(microtime(TRUE) - $time_start, 0, 6)*50)))." WHERE t=".DATABASE." AND val='$z'");
 }
 # ################# Start here #################
 $time_start = microtime(TRUE);
@@ -8083,6 +8099,28 @@ switch($a)  # Check actions, which don't require authentication
 		}
 	    die('{"error":"invalid data"}');
 		break;
+
+	case "restore_admin":
+		if($_SERVER["REQUEST_METHOD"] === "POST"){
+    		$data_set = Exec_sql("SELECT u.id, r.id rid, r.t rol FROM $z u LEFT JOIN $z r ON r.up=u.id AND r.val='115' WHERE u.t=".USER." AND u.val='$z'"
+								, "Check the admin");
+    		if($row = mysqli_fetch_array($data_set)){ # There is the user
+				if($row["rid"]){ # The role is assigned
+					if((int)$row["rol"] !== ADMINROLE) # but not admin
+						UpdateTyp($row["rid"], ADMINROLE);
+				}
+				else
+    				Insert($row["id"], 1, ROLE, ADMINROLE, "Restore admin role");
+			}
+			else{ # No admin found
+   				$id = Insert($row["id"], 1, USER, $z, "Restore admin ");
+   				Insert($id, 1, ROLE, ADMINROLE, "Set admin role");
+			}
+		}
+		else
+			die('{"result":"error, use POST"}');
+	    die('{"result":"ok"}');
+		break;
 }
 
 $GLOBALS["GLOBAL_VARS"]["uri"] = htmlentities($_SERVER["REQUEST_URI"]);
@@ -8254,9 +8292,9 @@ if(Validate_Token())
         					if($cur_id){ # The Req exists
         					    $id = $cur_id;
         						if($val==""){
-        							if($GLOBALS["REV_BT"][$row["t"]] === "FILE") // Remove the file from the server
-        							    RemoveDir(GetSubdir($cur_id)."/".GetFilename($cur_id).".".substr(strrchr($cur_val,'.'),1));
         							Delete($cur_id);
+        							if($GLOBALS["REV_BT"][$row["t"]] === "FILE") // Remove the file from the server
+        							    @RemoveDir(GetSubdir($cur_id)."/".GetFilename($cur_id).".".substr(strrchr($cur_val,'.'),1));
         						}
         						else{
         							$val = Format_Val($row["t"], $val);
@@ -8500,13 +8538,18 @@ if(Validate_Token())
 						foreach($cur_value as $cur_ref) # Clean all the refs
 							Exec_sql("DELETE FROM $z WHERE t=$cur_ref AND up=$id AND val='$t'", "Drop the removed Ref Attr");
 					}
-					else # The Value was cleared, and it's not a multi Ref
-					{
+					else{ # The Value was cleared, and it's not a multi Ref
 					    if($req_id == 0)
 							$GLOBALS["warning"] .= t9n("[RU]Пустой тип реквизита![EN]Empty attribute type")."<br>";
-						elseif($t != $typ) # We cannot clear the Object's Val (just skip the action)
-							Exec_sql("DELETE FROM $z WHERE id=$req_id OR up=$req_id", "Delete Empty Obj");
-						else
+						elseif($t != $typ){
+							if($base_typ === "FILE"){ // Remove the file from the server
+								Delete($req_id);
+								@RemoveDir(GetSubdir($req_id)."/".GetFilename($req_id).".".substr(strrchr($value,'.'),1));
+							}
+							else
+								Exec_sql("DELETE FROM $z WHERE id=$req_id OR up=$req_id", "Delete Empty Obj");
+						}
+						else # We cannot clear the Object's Val (just skip the action)
 							$GLOBALS["warning"] .= t9n("[RU]Нельзя оставить пустым имя объекта![EN]Object name cannot be blank!")."<br>";
 					}
 				}
@@ -9633,7 +9676,7 @@ if(Validate_Token())
         	$stime = round($GLOBALS["sql_time"], 4);
         	$scount = $GLOBALS["sqls"];
         	$tzone = $GLOBALS["tzone"];
-            mysqli_query($connection, "UPDATE my SET ord=ord+".round($time*1000, 0)." WHERE t=".DATABASE." AND val='$z'");
+			updateBilling();
     		wlog("$user@".$_SERVER["REMOTE_ADDR"]."[$scount/$time/$stime]", "log");
 			if(isApi())
 			    if(isset($_REQUEST["JSON_DATA"]))
