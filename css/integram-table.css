@@ -408,9 +408,6 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     background-color: var(--md-hover);
 }
 
-.integram-table tbody tr:last-child td {
-    border-bottom: none;
-}
 
 .integram-table .number-cell {
     text-align: right;
