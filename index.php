@@ -8283,7 +8283,9 @@ if(Validate_Token())
             				if(!in_array($t, array(101, 102, 103, 132, 49)))
             					$val = BuiltIn($val);
         					# Format the value
-        					if(($GLOBALS["REV_BT"][$row["t"]] == "NUMBER") && ($val != 0))
+							if($row["t"] == PASSWORD) // Encrypt the password
+        						$val = hash("sha512", Salt($z, $val));
+        					elseif(($GLOBALS["REV_BT"][$row["t"]] == "NUMBER") && ($val != 0))
         						$val = (int)$val;
         					elseif(($GLOBALS["REV_BT"][$row["t"]] == "SIGNED") && ($val != 0))
         						$val = (double)str_replace(",",".",$val);
@@ -8982,18 +8984,19 @@ if(Validate_Token())
 		case "_d_save":
 		case "_patchterm":
 			if($val == "")
-				my_die(t9n("[RU]Неверный тип ($val) [EN]Invalid type ($val)"));
-			if($row = mysqli_fetch_array(Exec_sql("SELECT obj.t, obj.val, obj.ord FROM $z obj
+				my_die(t9n("[RU]Неверный тип ("") [EN]Invalid type ("")"));
+			if($row = mysqli_fetch_array(Exec_sql("SELECT obj.t, obj.val, obj.ord, dup.id dup FROM $z obj
 									LEFT JOIN $z dup ON dup.id!=$id AND dup.id!=dup.t AND dup.val='".addslashes($val)
-								."' AND dup.t=$t WHERE obj.id=$id AND dup.id IS NULL", "Get Object and check duplicates"))){
-	
+								."' AND dup.t=$t WHERE obj.id=$id AND obj.up=0", "Get Object and check duplicates"))){
+				if($row["dup"])
+					my_die(t9n("[RU]Тип $val с базовым типом ".$GLOBALS["REV_BT"][$t]." уже существует. [EN]The $val type with the base type ". $GLOBALS ["REV_BT"][$t]. " already exists."));
 				if(($row["t"] != 0) && ($t == 0))
 					my_die(t9n("[RU]Неверный базовый тип ($t) [EN]Invalid base type ($t)"));
 				if(($row["t"] != $t) || ($row["val"] != $val) || ($row["ord"] != $unique))
 					Exec_sql("UPDATE $z SET t=$t, val='".addslashes($val)."', ord='$unique' WHERE id=$id", "Change typ");
 			}
 			else
-				my_die(t9n("[RU]Тип $val с базовым типом ".$GLOBALS["REV_BT"][$t]." уже существует. [EN]The $val type with the base type ". $GLOBALS ["REV_BT"][$t]. " already exists."));
+				my_die(t9n("[RU]Тип не найден. [EN]The type was not found."));
 			$obj=$id;
 			break;
 
