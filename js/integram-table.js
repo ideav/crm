@@ -3882,6 +3882,37 @@ class IntegramTable{
 
             const { cell, colType, parentInfo } = this.currentEditingCell;
 
+            // --- Issue #1431: Immediately release the editor ---
+
+            // Snapshot state before clearing
+            const format = this.currentEditingCell.format;
+            const originalContent = cell.dataset.originalContent;
+
+            // Optimistically update cell display
+            this.updateCellDisplay(cell, selectedText, format);
+
+            // Mark the cell as "saving" with a pale pink highlight (issue #1431)
+            cell.classList.add('cell-saving');
+
+            // Clean up editor state so the next cell can be edited immediately
+            this.clearRequiredCellHighlights(cell);
+            if (this.currentEditingCell.outsideClickHandler) {
+                document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
+            }
+            // Issue #1384: Remove fixed dropdown overlay from body if present
+            if (this.currentEditingCell.fixedDropdown && this.currentEditingCell.fixedDropdown.parentNode) {
+                this.currentEditingCell.fixedDropdown.parentNode.removeChild(this.currentEditingCell.fixedDropdown);
+            }
+            this.currentEditingCell = null;
+
+            // Navigate to the pending cell immediately (issue #1431)
+            if (this.pendingCellClick) {
+                const targetCell = this.pendingCellClick;
+                this.pendingCellClick = null;
+                this.navigateToCell(targetCell);
+            }
+
+            // --- Perform the actual API save in the background ---
             try {
                 const apiBase = this.getApiBase();
                 const params = new URLSearchParams();
@@ -3927,36 +3958,18 @@ class IntegramTable{
                 // previously empty and gets its first value via a reference selection
                 cell.dataset.refValueId = selectedId;
 
-                // Update the cell display with the selected text
-                this.updateCellDisplay(cell, selectedText, this.currentEditingCell.format);
+                // Save confirmed — remove the saving highlight
+                cell.classList.remove('cell-saving');
 
                 this.showToast('Изменения сохранены', 'success');
 
             } catch (error) {
                 console.error('Error saving reference edit:', error);
                 this.showToast(`Ошибка сохранения: ${error.message}`, 'error');
-                // Restore original content on error (cancelInlineEdit also clears required highlights)
-                this.cancelInlineEdit(cell.dataset.originalContent);
-            } finally {
-                // Clean up
-                if (this.currentEditingCell) {
-                    // Remove required field highlighting (issue #779)
-                    this.clearRequiredCellHighlights(this.currentEditingCell.cell);
-                    if (this.currentEditingCell.outsideClickHandler) {
-                        document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
-                    }
-                    // Issue #1384: Remove fixed dropdown overlay from body if present
-                    if (this.currentEditingCell.fixedDropdown && this.currentEditingCell.fixedDropdown.parentNode) {
-                        this.currentEditingCell.fixedDropdown.parentNode.removeChild(this.currentEditingCell.fixedDropdown);
-                    }
-                    this.currentEditingCell = null;
-                }
-
-                // Navigate to pending cell if set (issue #518)
-                if (this.pendingCellClick) {
-                    const targetCell = this.pendingCellClick;
-                    this.pendingCellClick = null;
-                    this.navigateToCell(targetCell);
+                // Restore original content on error and remove saving highlight
+                cell.classList.remove('cell-saving');
+                if (typeof originalContent === 'string') {
+                    cell.innerHTML = originalContent;
                 }
             }
         }
@@ -4324,6 +4337,44 @@ class IntegramTable{
                 return;
             }
 
+            // --- Issue #1431: Immediately release the editor so the user can move on ---
+
+            // Snapshot everything we need for the async save before clearing state
+            const format = this.currentEditingCell.format;
+            const displayText = this.currentEditingCell.displayText;
+            const originalContent = cell.dataset.originalContent;
+            const editorEl = cell.querySelector('.inline-editor');
+            // For FILE type: grab the pending file before we clear the editor from the DOM
+            const fileToUpload = (format === 'FILE' && editorEl && editorEl._fileToUpload) ? editorEl._fileToUpload : null;
+
+            // Compute the optimistic display value and immediately show it in the cell
+            const optimisticDisplay = (format === 'GRANT' || format === 'REPORT_COLUMN')
+                ? (displayText || newValue)
+                : newValue;
+            this.updateCellDisplay(cell, optimisticDisplay, format);
+
+            // Mark the cell as "saving" with a pale pink highlight (issue #1431)
+            cell.classList.add('cell-saving');
+
+            // Clean up the editor state so the next cell can be edited immediately
+            this.clearRequiredCellHighlights(cell);
+            if (this.currentEditingCell.outsideClickHandler) {
+                document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
+            }
+            // Issue #1384: Remove fixed dropdown overlay from body if present
+            if (this.currentEditingCell.fixedDropdown && this.currentEditingCell.fixedDropdown.parentNode) {
+                this.currentEditingCell.fixedDropdown.parentNode.removeChild(this.currentEditingCell.fixedDropdown);
+            }
+            this.currentEditingCell = null;
+
+            // Navigate to the pending cell immediately, without waiting for the save (issue #1431)
+            if (this.pendingCellClick) {
+                const targetCell = this.pendingCellClick;
+                this.pendingCellClick = null;
+                this.navigateToCell(targetCell);
+            }
+
+            // --- Perform the actual API save in the background ---
             try {
                 // Determine API endpoint and parameters
                 const apiBase = this.getApiBase();
@@ -4353,15 +4404,13 @@ class IntegramTable{
                 }
 
                 // For FILE type with a pending file, send directly as multipart (issue #1310)
-                const format = this.currentEditingCell.format;
-                const editorEl = cell.querySelector('.inline-editor');
                 let response;
-                if (format === 'FILE' && editorEl && editorEl._fileToUpload) {
+                if (format === 'FILE' && fileToUpload) {
                     const formData = new FormData();
                     if (typeof xsrf !== 'undefined') {
                         formData.append('_xsrf', xsrf);
                     }
-                    formData.append(`t${ colType }`, editorEl._fileToUpload);
+                    formData.append(`t${ colType }`, fileToUpload);
                     response = await fetch(url, {
                         method: 'POST',
                         body: formData
@@ -4398,42 +4447,24 @@ class IntegramTable{
                     this.showWarningsModal(result.warnings);
                 }
 
-                // For FILE type: get saved path from server response (issue #1310)
-                if (format === 'FILE' && editorEl && editorEl._fileToUpload) {
-                    newValue = result.path || result.file || result.filename || editorEl._fileToUpload.name;
-                    editorEl._fileToUpload = null;
+                // For FILE type: update displayed value with server-confirmed path (issue #1310)
+                if (format === 'FILE' && fileToUpload) {
+                    const confirmedValue = result.path || result.file || result.filename || fileToUpload.name;
+                    this.updateCellDisplay(cell, confirmedValue, format);
                 }
 
-                // Update the cell display with the new value
-                // For GRANT/REPORT_COLUMN, use the display text instead of the ID (issue #601)
-                const displayValue = (this.currentEditingCell.format === 'GRANT' || this.currentEditingCell.format === 'REPORT_COLUMN')
-                    ? (this.currentEditingCell.displayText || newValue)
-                    : newValue;
-                this.updateCellDisplay(cell, displayValue, this.currentEditingCell.format);
+                // Save confirmed — remove the saving highlight
+                cell.classList.remove('cell-saving');
 
                 this.showToast('Изменения сохранены', 'success');
 
             } catch (error) {
                 console.error('Error saving inline edit:', error);
                 this.showToast(`Ошибка сохранения: ${ error.message }`, 'error');
-                // Restore original content on error (cancelInlineEdit also clears required highlights)
-                this.cancelInlineEdit(cell.dataset.originalContent);
-            } finally {
-                // Clean up
-                if (this.currentEditingCell) {
-                    // Remove required field highlighting (issue #779)
-                    this.clearRequiredCellHighlights(this.currentEditingCell.cell);
-                    if (this.currentEditingCell.outsideClickHandler) {
-                        document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
-                    }
-                    this.currentEditingCell = null;
-                }
-
-                // Navigate to pending cell if set (issue #518)
-                if (this.pendingCellClick) {
-                    const targetCell = this.pendingCellClick;
-                    this.pendingCellClick = null;
-                    this.navigateToCell(targetCell);
+                // Restore original content on error and remove saving highlight
+                cell.classList.remove('cell-saving');
+                if (typeof originalContent === 'string') {
+                    cell.innerHTML = originalContent;
                 }
             }
         }

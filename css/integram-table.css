@@ -2402,6 +2402,12 @@ td:has(.inline-editor) {
     padding: 4px !important;
 }
 
+/* Visual feedback for cells that are being saved (issue #1431) */
+td.cell-saving {
+    background-color: rgba(255, 182, 193, 0.45) !important;
+    transition: background-color 0.2s ease;
+}
+
 /* Ensure proper sizing in compact mode */
 .integram-table.compact td:has(.inline-editor) {
     padding: 2px !important;
