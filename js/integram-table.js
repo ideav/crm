@@ -6390,6 +6390,12 @@ class IntegramTable{
                         this.saveColumnState();
                         this.render();
 
+                        // Clear metadata cache so edit/add forms fetch fresh metadata (issue #1424)
+                        this.metadataCache = {};
+                        // Clear globalMetadata so fetchMetadata() re-fetches fresh column info (issue #1424)
+                        this.globalMetadata = null;
+                        this.globalMetadataPromise = null;
+
                         // Close the add column modal but keep the parent column settings modal open
                         closeAddColumnModal();
                     } else {
