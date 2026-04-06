@@ -3058,6 +3058,10 @@ class IntegramTable{
                         </select>
                     `;
                     break;
+                case 'PWD':
+                    // Password field - render as type=password input (issue #1441)
+                    editorHtml = `<input type="password" class="inline-editor inline-editor-password" value="${ escapedValue }" autocomplete="new-password">`;
+                    break;
                 default:
                     // SHORT, CHARS, etc. - text input
                     editorHtml = `<input type="text" class="inline-editor inline-editor-text" value="${ escapedValue }" autocomplete="off">`;
@@ -4063,6 +4067,9 @@ class IntegramTable{
                 mainFieldHtml = `<input type="number" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required step="0.01">`;
             } else if (mainFieldType === 'MEMO') {
                 mainFieldHtml = `<textarea class="form-control memo-field" id="field-main-ref-create" name="main" rows="4" required>${ this.escapeHtml(initialValue) }</textarea>`;
+            } else if (mainFieldType === 'PWD') {
+                // Password field - render as type=password input (issue #1441)
+                mainFieldHtml = `<input type="password" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required autocomplete="new-password">`;
             } else {
                 // Default: text input (SHORT, CHARS, etc.)
                 mainFieldHtml = `<input type="text" class="form-control" id="field-main-ref-create" name="main" value="${this.escapeHtml(initialValue)}" required>`;
@@ -4118,8 +4125,14 @@ class IntegramTable{
                         </div>
                     `;
                 } else {
-                    // Render as simple text input
-                    attributesHtml += `<input type="text" class="form-control" id="field-ref-${req.id}" name="t${req.id}"${isRequired ? ' required' : ''}>`;
+                    const reqBaseFormat = this.normalizeFormat(req.type);
+                    if (reqBaseFormat === 'PWD') {
+                        // Password field - render as type=password input (issue #1441)
+                        attributesHtml += `<input type="password" class="form-control" id="field-ref-${req.id}" name="t${req.id}"${isRequired ? ' required' : ''} autocomplete="new-password">`;
+                    } else {
+                        // Render as simple text input
+                        attributesHtml += `<input type="text" class="form-control" id="field-ref-${req.id}" name="t${req.id}"${isRequired ? ' required' : ''}>`;
+                    }
                 }
 
                 attributesHtml += `</div>`;
@@ -9253,6 +9266,9 @@ class IntegramTable{
                 mainFieldHtml = `<input type="number" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required step="0.01">`;
             } else if (mainFieldType === 'MEMO') {
                 mainFieldHtml = `<textarea class="form-control memo-field" id="field-main" name="main" rows="4" required>${ this.escapeHtml(mainValue) }</textarea>`;
+            } else if (mainFieldType === 'PWD') {
+                // Password field - render as type=password input (issue #1441)
+                mainFieldHtml = `<input type="password" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required autocomplete="new-password">`;
             } else if (mainFieldType === 'GRANT') {
                 // GRANT field (dropdown with options from GET grants API - issue #581)
                 mainFieldHtml = `
@@ -9453,6 +9469,10 @@ class IntegramTable{
                     // Store current value (ID) for later selection after options load (issue #925)
                     const repColTermValue = recordReqs[req.id] && recordReqs[req.id].term !== undefined ? recordReqs[req.id].term : reqValue;
                     html += `<input type="hidden" id="field-${ req.id }-current-value" value="${ this.escapeHtml(repColTermValue) }">`;
+                }
+                // PWD field - password input (issue #1441)
+                else if (baseFormat === 'PWD') {
+                    html += `<input type="password" class="form-control" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(reqValue) }" ${ isRequired ? 'required' : '' } autocomplete="new-password">`;
                 }
                 // Regular text field
                 else {
