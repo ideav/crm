@@ -2582,9 +2582,12 @@ td.cell-saving {
 }
 
 /* Visual feedback for reference editing active state */
+/* vertical-align: top ensures the editor sits at the top of a tall (multi-line) row
+   so the fixed-position dropdown is placed directly below the search input (issue #1433) */
 td:has(.inline-editor-reference) {
     background-color: rgba(25, 118, 210, 0.08) !important;
     padding: 4px !important;
+    vertical-align: top !important;
 }
 
 /* ========================================
