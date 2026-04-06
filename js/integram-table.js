@@ -4181,6 +4181,12 @@ class IntegramTable{
                 }
             };
             document.addEventListener('keydown', handleEscape);
+
+            // Focus the first visible, non-hidden input/textarea/select in the form (issue #1420)
+            const firstField = modal.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([readonly]), textarea, select');
+            if (firstField) {
+                firstField.focus();
+            }
         }
 
         async saveRecordForReference(modal, typeId, parentRecordId) {
@@ -9124,6 +9130,12 @@ class IntegramTable{
                 }
             };
             document.addEventListener('keydown', handleEscape);
+
+            // Focus the first visible, non-hidden input/textarea/select in the form (issue #1420)
+            const firstField = modal.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([readonly]), textarea, select');
+            if (firstField) {
+                firstField.focus();
+            }
         }
 
         renderAttributesForm(metadata, recordData, regularFields, recordReqs, isCreate = false, typeId = null) {
