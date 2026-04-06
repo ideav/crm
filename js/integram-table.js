@@ -4116,7 +4116,7 @@ class IntegramTable{
                     <button class="edit-form-close" data-close-modal-ref="true"><i class="pi pi-times"></i></button>
                 </div>
                 <div class="edit-form-body">
-                    <form id="edit-form-ref-create" class="edit-form" onsubmit="return false;">
+                    <form id="edit-form-ref-create" class="edit-form" onsubmit="return false;" autocomplete="off">
                         ${attributesHtml}
                     </form>
                 </div>
@@ -8984,7 +8984,7 @@ class IntegramTable{
                 ${ tabsHtml }
                 <div class="edit-form-body">
                     <div class="edit-form-tab-content active" data-tab-content="attributes">
-                        <form id="edit-form" class="edit-form" onsubmit="return false;">
+                        <form id="edit-form" class="edit-form" onsubmit="return false;" autocomplete="off">
                             ${ attributesHtml }
                         </form>
                     </div>
@@ -10082,7 +10082,7 @@ class IntegramTable{
                     <button class="edit-form-close subordinate-close-btn"><i class="pi pi-times"></i></button>
                 </div>
                 <div class="edit-form-body">
-                    <form id="subordinate-edit-form" class="edit-form" onsubmit="return false;">
+                    <form id="subordinate-edit-form" class="edit-form" onsubmit="return false;" autocomplete="off">
                         <div class="form-group">
                             <label for="sub-field-main">${ typeName } <span class="required">*</span></label>
                             ${ mainFieldHtml }
@@ -11197,7 +11197,7 @@ class IntegramTable{
                     <button class="edit-form-close" data-close-form-ref-modal="true"><i class="pi pi-times"></i></button>
                 </div>
                 <div class="edit-form-body">
-                    <form id="edit-form-form-ref-create" class="edit-form" onsubmit="return false;">
+                    <form id="edit-form-form-ref-create" class="edit-form" onsubmit="return false;" autocomplete="off">
                         ${attributesHtml}
                     </form>
                 </div>
@@ -13617,7 +13617,7 @@ class IntegramCreateFormHelper {
             </div>
             <div class="edit-form-body">
                 <div class="edit-form-tab-content active" data-tab-content="attributes">
-                    <form id="edit-form" class="edit-form" onsubmit="return false;">
+                    <form id="edit-form" class="edit-form" onsubmit="return false;" autocomplete="off">
                         ${attributesHtml}
                     </form>
                 </div>
@@ -14593,7 +14593,7 @@ class IntegramCreateFormHelper {
             ${tabsHtml}
             <div class="edit-form-body">
                 <div class="edit-form-tab-content active" data-tab-content="attributes">
-                    <form id="edit-form" class="edit-form" onsubmit="return false;">
+                    <form id="edit-form" class="edit-form" onsubmit="return false;" autocomplete="off">
                         ${attributesHtml}
                     </form>
                 </div>
