@@ -8984,7 +8984,7 @@ if(Validate_Token())
 		case "_d_save":
 		case "_patchterm":
 			if($val == "")
-				my_die(t9n("[RU]Неверный тип ("") [EN]Invalid type ("")"));
+				my_die(t9n("[RU]Неверный тип[EN]Invalid type"));
 			if($row = mysqli_fetch_array(Exec_sql("SELECT obj.t, obj.val, obj.ord, dup.id dup FROM $z obj
 									LEFT JOIN $z dup ON dup.id!=$id AND dup.id!=dup.t AND dup.val='".addslashes($val)
 								."' AND dup.t=$t WHERE obj.id=$id AND obj.up=0", "Get Object and check duplicates"))){
