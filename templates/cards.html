@@ -610,6 +610,15 @@
 <link rel="stylesheet" href="/css/integram-table.css" />
 <script src="/js/integram-table.js"></script>
 <script>
+(function() {
+    var fake = document.createElement('div');
+    fake.style.cssText = 'position:absolute;left:-9999px;opacity:0;pointer-events:none;';
+    fake.innerHTML = '<input type="text" name="fake_username" value=""><input type="password" name="fake_password" value="">';
+    document.body.appendChild(fake);
+    setTimeout(function() { fake.parentNode && fake.parentNode.removeChild(fake); }, 500);
+})();
+</script>
+<script>
 /**
  * CardsView Component
  *
@@ -845,7 +854,7 @@
             '</div>' +
             '<div class="cards-search-row">' +
                 '<i class="pi pi-search cards-search-icon"></i>' +
-                '<input class="cards-search-input" id="' + inst + '-search" type="text" placeholder="Быстрый поиск..." autocomplete="off" autocorrect="off" autocapitalize="off" readonly onfocus="this.removeAttribute(\'readonly\')" onmousedown="this.removeAttribute(\'readonly\')" />' +
+                '<input class="cards-search-input" id="' + inst + '-search" type="text" placeholder="Быстрый поиск..." autocomplete="off" autocorrect="off" autocapitalize="off" />' +
                 '<div class="cards-filters-row" id="' + inst + '-filters-row"></div>' +
             '</div>' +
             '<div class="cards-grid" id="' + inst + '-grid">' +
@@ -1793,9 +1802,6 @@
             input.setAttribute('autocomplete', 'off');
             input.setAttribute('autocorrect', 'off');
             input.setAttribute('autocapitalize', 'off');
-            input.setAttribute('readonly', '');
-            input.addEventListener('focus', function() { this.removeAttribute('readonly'); });
-            input.addEventListener('mousedown', function() { this.removeAttribute('readonly'); });
             input.addEventListener('input', function() {
                 self.fieldFilters[f.col.id] = this.value;
                 // Server-side reload with filter
