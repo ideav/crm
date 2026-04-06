@@ -5685,12 +5685,20 @@ class IntegramTable{
             // Original (base) column name for renaming (issue #1018)
             const currentName = col.val || col.name;
 
+            // For reference columns, build a grey hyperlink to table/{ref} instead of an editable name input (issue #1435)
+            const refTypeId = col.ref || col.orig || col.ref_id;
+            const dbName = window.location.pathname.split('/')[1];
+            const refTableUrl = refTypeId ? `/${ dbName }/table/${ refTypeId }` : '#';
+            const nameFieldHtml = isRef
+                ? `<a href="${ this.escapeHtml(refTableUrl) }" target="${ refTypeId }" style="color: grey;">${ this.escapeHtml(currentName) }</a>`
+                : `<input type="text" id="col-edit-name-${instanceName}" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(currentName) }" placeholder="Введите название колонки" autocomplete="off">`;
+
             colEditModal.innerHTML = `
                 <h3 style="margin: 0 0 16px 0; font-weight: 500; font-size: 18px;">Редактирование колонки: <em style="font-style: normal; color: var(--md-primary, #1976d2);">${ this.escapeHtml(col.name) }</em></h3>
                 <div class="col-edit-section">
                     <div class="col-edit-row">
                         <label class="col-edit-label">Название:</label>
-                        <input type="text" id="col-edit-name-${instanceName}" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(currentName) }" placeholder="Введите название колонки" autocomplete="off">
+                        ${ nameFieldHtml }
                     </div>
                     <div class="col-edit-row">
                         <label class="col-edit-label">Базовый тип:</label>
@@ -5766,7 +5774,9 @@ class IntegramTable{
 
                 try {
                     // 0. Rename column (issue #1018, extended to first column in issue #1026)
-                    const newName = colEditModal.querySelector(`#col-edit-name-${instanceName}`).value.trim();
+                    // For ref columns the name field is a hyperlink (not editable), so the input won't exist (issue #1435)
+                    const nameInput = colEditModal.querySelector(`#col-edit-name-${instanceName}`);
+                    const newName = nameInput ? nameInput.value.trim() : '';
                     if (newName && newName !== currentName) {
                         const result = await this.renameColumn(col.orig || col.id, newName, col.type);
                         if (!result.success) {
