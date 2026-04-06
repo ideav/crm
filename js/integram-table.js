@@ -1387,7 +1387,8 @@ class IntegramTable{
                                        class="filter-input-with-icon filter-ref-text-input"
                                        data-column-id="${ column.id }"
                                        value="${ displayValue }"
-                                       placeholder="${ placeholder }">
+                                       placeholder="${ placeholder }"
+                                       autocomplete="new-password">
                             </div>
                         </td>
                     `;
@@ -1483,7 +1484,8 @@ class IntegramTable{
                                class="filter-input-with-icon"
                                data-column-id="${ column.id }"
                                value="${ displayValue }"
-                               placeholder="${ placeholder }">
+                               placeholder="${ placeholder }"
+                               autocomplete="new-password">
                     </div>
                 </td>
             `;
@@ -1983,8 +1985,31 @@ class IntegramTable{
                 }
 
                 if (shouldShowEditIcon) {
+                    // Issue #1404: For reference fields with a known record ID, wrap value in hyperlink
+                    let displayContent = escapedValue;
+                    if (isRefField && refValueId && !isArrayField) {
+                        const refTypeId = column.orig || column.ref_id || typeId;
+                        if (refTypeId) {
+                            const pathParts = window.location.pathname.split('/');
+                            const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+                            const refUrl = `/${ dbName }/table/${ refTypeId }?F_I=${ refValueId }`;
+                            displayContent = `<a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a>`;
+                        }
+                    }
                     const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 14px;"></i></span>`;
-                    escapedValue = `<div class="cell-content-wrapper">${ escapedValue }${ editIcon }</div>`;
+                    escapedValue = `<div class="cell-content-wrapper">${ displayContent }${ editIcon }</div>`;
+                }
+            }
+
+            // Issue #1404: For reference fields without edit icon, still wrap value in a hyperlink
+            // inside a cell-content-wrapper when the referenced record ID is available
+            if (isRefField && refValueId && !isArrayField && !escapedValue.includes('cell-content-wrapper')) {
+                const refTypeId = column.orig || column.ref_id;
+                if (refTypeId) {
+                    const pathParts = window.location.pathname.split('/');
+                    const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+                    const refUrl = `/${ dbName }/table/${ refTypeId }?F_I=${ refValueId }`;
+                    escapedValue = `<div class="cell-content-wrapper"><a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a></div>`;
                 }
             }
 
@@ -3035,7 +3060,7 @@ class IntegramTable{
                     break;
                 default:
                     // SHORT, CHARS, etc. - text input
-                    editorHtml = `<input type="text" class="inline-editor inline-editor-text" value="${ escapedValue }">`;
+                    editorHtml = `<input type="text" class="inline-editor inline-editor-text" value="${ escapedValue }" autocomplete="new-password">`;
             }
 
             cell.innerHTML = editorHtml;
@@ -3258,7 +3283,7 @@ class IntegramTable{
                             <input type="text"
                                    class="inline-editor-reference-search"
                                    placeholder="Поиск..."
-                                   autocomplete="off" name="no_auto" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                   autocomplete="new-password">
                             ${buttonHtml}
                         </div>
                         <div class="inline-editor-reference-dropdown">
@@ -3588,7 +3613,7 @@ class IntegramTable{
                                 <input type="text"
                                        class="inline-editor-reference-search"
                                        placeholder="Добавить..."
-                                       autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                       autocomplete="new-password">
                                 ${addButtonHtml}
                             </div>
                             <div class="inline-editor-reference-dropdown" style="display:none;">
@@ -4093,7 +4118,7 @@ class IntegramTable{
                     <button class="edit-form-close" data-close-modal-ref="true"><i class="pi pi-times"></i></button>
                 </div>
                 <div class="edit-form-body">
-                    <form id="edit-form-ref-create" class="edit-form" onsubmit="return false;">
+                    <form id="edit-form-ref-create" class="edit-form" onsubmit="return false;" autocomplete="off">
                         ${attributesHtml}
                     </form>
                 </div>
@@ -4652,6 +4677,17 @@ class IntegramTable{
                 } else {
                     cell.setAttribute('data-full-value', fullValueForEditing);
                 }
+            }
+
+            // Issue #1404: For reference fields, wrap the value in a hyperlink inside cell-content-wrapper
+            const cellIsRef = cell.dataset.ref === '1';
+            const cellRefValueId = cell.dataset.refValueId;
+            const cellEditTypeId = cell.dataset.editTypeId;
+            if (cellIsRef && cellRefValueId && cellEditTypeId && !cell.dataset.array) {
+                const pathParts = window.location.pathname.split('/');
+                const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+                const refUrl = `/${ dbName }/table/${ cellEditTypeId }?F_I=${ cellRefValueId }`;
+                escapedValue = `<a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a>`;
             }
 
             // Restore edit icon if present, or add it if the cell just got its first value (issue #915)
@@ -8465,7 +8501,7 @@ class IntegramTable{
                     <input type="text"
                            class="filter-ref-search"
                            placeholder="Поиск..."
-                           autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                           autocomplete="new-password">
                     <button type="button" class="filter-ref-clear" title="Очистить выбор">✕</button>
                 </div>
                 <div class="filter-ref-options">
@@ -8950,7 +8986,7 @@ class IntegramTable{
                 ${ tabsHtml }
                 <div class="edit-form-body">
                     <div class="edit-form-tab-content active" data-tab-content="attributes">
-                        <form id="edit-form" class="edit-form" onsubmit="return false;">
+                        <form id="edit-form" class="edit-form" onsubmit="return false;" autocomplete="off">
                             ${ attributesHtml }
                         </form>
                     </div>
@@ -9581,7 +9617,7 @@ class IntegramTable{
                         + Добавить
                     </button>
                     <div class="subordinate-search-wrapper">
-                        <input type="text" class="subordinate-search-input" placeholder="Поиск..." value="${ this.escapeHtml(searchTerm) }" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                        <input type="text" class="subordinate-search-input" placeholder="Поиск..." value="${ this.escapeHtml(searchTerm) }" autocomplete="new-password">
                         <button type="button" class="subordinate-search-clear" title="Очистить поиск"${ searchTerm ? '' : ' style="display: none;"' }><i class="pi pi-times"></i></button>
                     </div>
                     <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
@@ -10048,7 +10084,7 @@ class IntegramTable{
                     <button class="edit-form-close subordinate-close-btn"><i class="pi pi-times"></i></button>
                 </div>
                 <div class="edit-form-body">
-                    <form id="subordinate-edit-form" class="edit-form" onsubmit="return false;">
+                    <form id="subordinate-edit-form" class="edit-form" onsubmit="return false;" autocomplete="off">
                         <div class="form-group">
                             <label for="sub-field-main">${ typeName } <span class="required">*</span></label>
                             ${ mainFieldHtml }
@@ -11163,7 +11199,7 @@ class IntegramTable{
                     <button class="edit-form-close" data-close-form-ref-modal="true"><i class="pi pi-times"></i></button>
                 </div>
                 <div class="edit-form-body">
-                    <form id="edit-form-form-ref-create" class="edit-form" onsubmit="return false;">
+                    <form id="edit-form-form-ref-create" class="edit-form" onsubmit="return false;" autocomplete="off">
                         ${attributesHtml}
                     </form>
                 </div>
@@ -13583,7 +13619,7 @@ class IntegramCreateFormHelper {
             </div>
             <div class="edit-form-body">
                 <div class="edit-form-tab-content active" data-tab-content="attributes">
-                    <form id="edit-form" class="edit-form" onsubmit="return false;">
+                    <form id="edit-form" class="edit-form" onsubmit="return false;" autocomplete="off">
                         ${attributesHtml}
                     </form>
                 </div>
@@ -14559,7 +14595,7 @@ class IntegramCreateFormHelper {
             ${tabsHtml}
             <div class="edit-form-body">
                 <div class="edit-form-tab-content active" data-tab-content="attributes">
-                    <form id="edit-form" class="edit-form" onsubmit="return false;">
+                    <form id="edit-form" class="edit-form" onsubmit="return false;" autocomplete="off">
                         ${attributesHtml}
                     </form>
                 </div>

@@ -2812,6 +2812,18 @@ td:has(.inline-editor-reference) {
     text-decoration: underline;
 }
 
+/* Reference field hyperlinks (issue #1404) */
+.ref-value-link {
+    color: var(--md-primary);
+    text-decoration: none;
+    transition: var(--md-transition);
+}
+
+.ref-value-link:hover {
+    color: var(--md-primary-dark);
+    text-decoration: underline;
+}
+
 /* Hyperlinks in text cells (issue #947) */
 .cell-hyperlink {
     color: var(--md-primary);
