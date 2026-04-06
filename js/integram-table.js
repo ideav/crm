@@ -1983,8 +1983,31 @@ class IntegramTable{
                 }
 
                 if (shouldShowEditIcon) {
+                    // Issue #1404: For reference fields with a known record ID, wrap value in hyperlink
+                    let displayContent = escapedValue;
+                    if (isRefField && refValueId && !isArrayField) {
+                        const refTypeId = column.orig || column.ref_id || typeId;
+                        if (refTypeId) {
+                            const pathParts = window.location.pathname.split('/');
+                            const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+                            const refUrl = `/${ dbName }/table/${ refTypeId }?F_I=${ refValueId }`;
+                            displayContent = `<a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a>`;
+                        }
+                    }
                     const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 14px;"></i></span>`;
-                    escapedValue = `<div class="cell-content-wrapper">${ escapedValue }${ editIcon }</div>`;
+                    escapedValue = `<div class="cell-content-wrapper">${ displayContent }${ editIcon }</div>`;
+                }
+            }
+
+            // Issue #1404: For reference fields without edit icon, still wrap value in a hyperlink
+            // inside a cell-content-wrapper when the referenced record ID is available
+            if (isRefField && refValueId && !isArrayField && !escapedValue.includes('cell-content-wrapper')) {
+                const refTypeId = column.orig || column.ref_id;
+                if (refTypeId) {
+                    const pathParts = window.location.pathname.split('/');
+                    const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+                    const refUrl = `/${ dbName }/table/${ refTypeId }?F_I=${ refValueId }`;
+                    escapedValue = `<div class="cell-content-wrapper"><a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a></div>`;
                 }
             }
 
@@ -4652,6 +4675,17 @@ class IntegramTable{
                 } else {
                     cell.setAttribute('data-full-value', fullValueForEditing);
                 }
+            }
+
+            // Issue #1404: For reference fields, wrap the value in a hyperlink inside cell-content-wrapper
+            const cellIsRef = cell.dataset.ref === '1';
+            const cellRefValueId = cell.dataset.refValueId;
+            const cellEditTypeId = cell.dataset.editTypeId;
+            if (cellIsRef && cellRefValueId && cellEditTypeId && !cell.dataset.array) {
+                const pathParts = window.location.pathname.split('/');
+                const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+                const refUrl = `/${ dbName }/table/${ cellEditTypeId }?F_I=${ cellRefValueId }`;
+                escapedValue = `<a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a>`;
             }
 
             // Restore edit icon if present, or add it if the cell just got its first value (issue #915)
