@@ -615,7 +615,6 @@
     fake.style.cssText = 'position:absolute;left:-9999px;opacity:0;pointer-events:none;';
     fake.innerHTML = '<input type="text" name="fake_username" value=""><input type="password" name="fake_password" value="">';
     document.body.appendChild(fake);
-    setTimeout(function() { fake.parentNode && fake.parentNode.removeChild(fake); }, 500);
 })();
 </script>
 <script>
