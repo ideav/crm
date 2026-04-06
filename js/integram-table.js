@@ -4182,6 +4182,16 @@ class IntegramTable{
             };
             document.addEventListener('keydown', handleEscape);
 
+            // Enter in input/textarea triggers Save (issue #1422)
+            modal.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+                    if (!saveBtn.disabled) {
+                        e.preventDefault();
+                        saveBtn.click();
+                    }
+                }
+            });
+
             // Focus the first visible, non-hidden input/textarea/select in the form (issue #1420)
             const firstField = modal.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([readonly]), textarea, select');
             if (firstField) {
@@ -9131,6 +9141,16 @@ class IntegramTable{
             };
             document.addEventListener('keydown', handleEscape);
 
+            // Enter in input/textarea triggers Save (issue #1422)
+            modal.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+                    if (!saveBtn.disabled) {
+                        e.preventDefault();
+                        saveBtn.click();
+                    }
+                }
+            });
+
             // Focus the first visible, non-hidden input/textarea/select in the form (issue #1420)
             const firstField = modal.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([readonly]), textarea, select');
             if (firstField) {
@@ -11273,6 +11293,16 @@ class IntegramTable{
                 }
             };
             document.addEventListener('keydown', handleEscape);
+
+            // Enter in input/textarea triggers Save (issue #1422)
+            modal.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+                    if (!saveBtn.disabled) {
+                        e.preventDefault();
+                        saveBtn.click();
+                    }
+                }
+            });
         }
 
         async saveRecordForFormReference(modal, overlay, typeId, parentRecordId, hiddenInput, searchInput, wrapper, dropdown) {
@@ -13698,6 +13728,16 @@ class IntegramCreateFormHelper {
             }
         };
         document.addEventListener('keydown', handleEscape);
+
+        // Enter in input/textarea triggers Save (issue #1422)
+        modal.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+                if (!saveBtn.disabled) {
+                    e.preventDefault();
+                    saveBtn.click();
+                }
+            }
+        });
     }
 
     renderAttributesForm(metadata, recordData, regularFields, recordReqs, fieldValues) {
@@ -14707,6 +14747,16 @@ class IntegramCreateFormHelper {
             }
         };
         document.addEventListener('keydown', handleEscape);
+
+        // Enter in input/textarea triggers Save (issue #1422)
+        modal.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+                if (!saveBtn.disabled) {
+                    e.preventDefault();
+                    saveBtn.click();
+                }
+            }
+        });
     }
 
     /**
