@@ -3258,7 +3258,8 @@ class IntegramTable{
                             <input type="text"
                                    class="inline-editor-reference-search"
                                    placeholder="Поиск..."
-                                   autocomplete="off" name="no_auto">
+                                   autocomplete="off" name="no_auto"
+                                   readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
                             ${buttonHtml}
                         </div>
                         <div class="inline-editor-reference-dropdown">
@@ -3588,7 +3589,8 @@ class IntegramTable{
                                 <input type="text"
                                        class="inline-editor-reference-search"
                                        placeholder="Добавить..."
-                                       autocomplete="off">
+                                       autocomplete="off"
+                                       readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
                                 ${addButtonHtml}
                             </div>
                             <div class="inline-editor-reference-dropdown" style="display:none;">
@@ -4063,7 +4065,8 @@ class IntegramTable{
                                            class="inline-editor-reference-search form-ref-search"
                                            id="field-ref-${req.id}-search"
                                            placeholder="Поиск..."
-                                           autocomplete="off">
+                                           autocomplete="off"
+                                           readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
                                     <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
                                     <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                                 </div>
@@ -6021,7 +6024,7 @@ class IntegramTable{
                 <h3 style="margin: 0 0 20px 0; font-weight: 500; font-size: 20px;">Добавить новую колонку</h3>
                 <div style="margin-bottom: 16px; position: relative;">
                     <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px;">Имя колонки:</label>
-                    <input type="text" id="new-column-name-${instanceName}" class="form-control" placeholder="Введите имя колонки" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 14px; box-sizing: border-box;" autocomplete="off">
+                    <input type="text" id="new-column-name-${instanceName}" class="form-control" placeholder="Введите имя колонки" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 14px; box-sizing: border-box;" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
                     <div id="column-name-suggestions-${instanceName}" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #dee2e6; border-radius: 4px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-height: 250px; overflow-y: auto; z-index: 1003;"></div>
                 </div>
                 <div style="margin-bottom: 16px;">
@@ -8465,7 +8468,8 @@ class IntegramTable{
                     <input type="text"
                            class="filter-ref-search"
                            placeholder="Поиск..."
-                           autocomplete="off">
+                           autocomplete="off"
+                           readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
                     <button type="button" class="filter-ref-clear" title="Очистить выбор">✕</button>
                 </div>
                 <div class="filter-ref-options">
@@ -9208,7 +9212,8 @@ class IntegramTable{
                                            class="inline-editor-reference-search form-ref-search"
                                            id="field-${ req.id }-search"
                                            placeholder="Добавить..."
-                                           autocomplete="off">
+                                           autocomplete="off"
+                                           readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
                                 </div>
                                 <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${ req.id }-dropdown" style="display:none;">
                                     <div class="inline-editor-reference-empty">Загрузка...</div>
@@ -9234,7 +9239,8 @@ class IntegramTable{
                                            class="inline-editor-reference-search form-ref-search"
                                            id="field-${ req.id }-search"
                                            placeholder="Поиск..."
-                                           autocomplete="off">
+                                           autocomplete="off"
+                                           readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
                                     <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
                                     <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                                 </div>
@@ -10074,7 +10080,8 @@ class IntegramTable{
                                            class="inline-editor-reference-search form-ref-search"
                                            id="sub-field-${ req.id }-search"
                                            placeholder="Поиск..."
-                                           autocomplete="off">
+                                           autocomplete="off"
+                                           readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
                                     <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
                                     <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                                 </div>
@@ -11133,7 +11140,8 @@ class IntegramTable{
                                            class="inline-editor-reference-search form-ref-search"
                                            id="field-form-ref-${req.id}-search"
                                            placeholder="Поиск..."
-                                           autocomplete="off">
+                                           autocomplete="off"
+                                           readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
                                     <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
                                     <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                                 </div>
@@ -13750,7 +13758,8 @@ class IntegramCreateFormHelper {
                                        class="inline-editor-reference-search form-ref-search"
                                        id="field-${req.id}-search"
                                        placeholder="Добавить..."
-                                       autocomplete="off">
+                                       autocomplete="off"
+                                       readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
                             </div>
                             <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${req.id}-dropdown" style="display:none;">
                                 <div class="inline-editor-reference-empty">Загрузка...</div>
@@ -13776,7 +13785,8 @@ class IntegramCreateFormHelper {
                                        class="inline-editor-reference-search form-ref-search"
                                        id="field-${req.id}-search"
                                        placeholder="Поиск..."
-                                       autocomplete="off">
+                                       autocomplete="off"
+                                       readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
                                 <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
                             </div>
                             <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${req.id}-dropdown">
@@ -15195,7 +15205,8 @@ class IntegramCreateFormHelper {
                                        class="inline-editor-reference-search form-ref-search"
                                        id="field-${fieldId}-search"
                                        placeholder="Добавить..."
-                                       autocomplete="off">
+                                       autocomplete="off"
+                                       readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
                             </div>
                             <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${fieldId}-dropdown" style="display:none;">
                                 <div class="inline-editor-reference-empty">Загрузка...</div>
@@ -15220,7 +15231,8 @@ class IntegramCreateFormHelper {
                                        class="inline-editor-reference-search form-ref-search"
                                        id="field-${fieldId}-search"
                                        placeholder="Поиск..."
-                                       autocomplete="off">
+                                       autocomplete="off"
+                                       readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
                                 <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
                             </div>
                             <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${fieldId}-dropdown">
