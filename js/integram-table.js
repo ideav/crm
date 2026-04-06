@@ -3060,7 +3060,7 @@ class IntegramTable{
                     break;
                 default:
                     // SHORT, CHARS, etc. - text input
-                    editorHtml = `<input type="text" class="inline-editor inline-editor-text" value="${ escapedValue }" autocomplete="off" readonly onfocus="setTimeout(()=>{this.removeAttribute('readonly')},10)" onmousedown="setTimeout(()=>{this.removeAttribute('readonly')},10)">`;
+                    editorHtml = `<input type="text" class="inline-editor inline-editor-text" value="${ escapedValue }" autocomplete="off" readonly onfocus="setTimeout(()=>{this.removeAttribute('readonly')},100)" onmousedown="setTimeout(()=>{this.removeAttribute('readonly')},100)">`;
             }
 
             cell.innerHTML = editorHtml;
