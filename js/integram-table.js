@@ -4687,6 +4687,12 @@ class IntegramTable{
                     // Fix for issue #684: Store RAW value for editing, not escaped
                     fullValueForEditing = String(displayValue);
                     break;
+                case 'PWD':
+                    // Password field - display as asterisks in the cell (issue #1443)
+                    escapedValue = (newValue !== null && newValue !== undefined && newValue !== '') ? '******' : '';
+                    // Store the actual value for re-editing (so the input can be pre-filled)
+                    fullValueForEditing = String(newValue);
+                    break;
                 case 'GRANT':
                 case 'REPORT_COLUMN':
                     // For GRANT/REPORT_COLUMN: newValue is the display text (issue #601)
