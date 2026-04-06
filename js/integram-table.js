@@ -1387,7 +1387,8 @@ class IntegramTable{
                                        class="filter-input-with-icon filter-ref-text-input"
                                        data-column-id="${ column.id }"
                                        value="${ displayValue }"
-                                       placeholder="${ placeholder }">
+                                       placeholder="${ placeholder }"
+                                       autocomplete="new-password">
                             </div>
                         </td>
                     `;
@@ -1483,7 +1484,8 @@ class IntegramTable{
                                class="filter-input-with-icon"
                                data-column-id="${ column.id }"
                                value="${ displayValue }"
-                               placeholder="${ placeholder }">
+                               placeholder="${ placeholder }"
+                               autocomplete="new-password">
                     </div>
                 </td>
             `;
@@ -3058,7 +3060,7 @@ class IntegramTable{
                     break;
                 default:
                     // SHORT, CHARS, etc. - text input
-                    editorHtml = `<input type="text" class="inline-editor inline-editor-text" value="${ escapedValue }">`;
+                    editorHtml = `<input type="text" class="inline-editor inline-editor-text" value="${ escapedValue }" autocomplete="new-password">`;
             }
 
             cell.innerHTML = editorHtml;
@@ -3281,7 +3283,7 @@ class IntegramTable{
                             <input type="text"
                                    class="inline-editor-reference-search"
                                    placeholder="Поиск..."
-                                   autocomplete="off" name="no_auto">
+                                   autocomplete="new-password">
                             ${buttonHtml}
                         </div>
                         <div class="inline-editor-reference-dropdown">
@@ -3611,7 +3613,7 @@ class IntegramTable{
                                 <input type="text"
                                        class="inline-editor-reference-search"
                                        placeholder="Добавить..."
-                                       autocomplete="off">
+                                       autocomplete="new-password">
                                 ${addButtonHtml}
                             </div>
                             <div class="inline-editor-reference-dropdown" style="display:none;">
@@ -8499,7 +8501,7 @@ class IntegramTable{
                     <input type="text"
                            class="filter-ref-search"
                            placeholder="Поиск..."
-                           autocomplete="off">
+                           autocomplete="new-password">
                     <button type="button" class="filter-ref-clear" title="Очистить выбор">✕</button>
                 </div>
                 <div class="filter-ref-options">
@@ -9615,7 +9617,7 @@ class IntegramTable{
                         + Добавить
                     </button>
                     <div class="subordinate-search-wrapper">
-                        <input type="text" class="subordinate-search-input" placeholder="Поиск..." value="${ this.escapeHtml(searchTerm) }">
+                        <input type="text" class="subordinate-search-input" placeholder="Поиск..." value="${ this.escapeHtml(searchTerm) }" autocomplete="new-password">
                         <button type="button" class="subordinate-search-clear" title="Очистить поиск"${ searchTerm ? '' : ' style="display: none;"' }><i class="pi pi-times"></i></button>
                     </div>
                     <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
