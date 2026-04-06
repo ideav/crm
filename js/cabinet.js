@@ -689,7 +689,7 @@ class CabinetController {
                             </label>
                             <label class="database-field-label database-inline-label">
                                 Время жизни токена, минут
-                                <input type="number" class="database-field-input database-field-input-short" min="0" step="1" data-field="t369" value="${this.escapeHtml(tokenLifetime)}" autocomplete="new-password">
+                                <input type="number" class="database-field-input database-field-input-short" min="0" step="1" data-field="t369" value="${this.escapeHtml(tokenLifetime)}" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
                             </label>
                         </div>
                         <div class="database-save-row">
