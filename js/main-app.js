@@ -55,6 +55,27 @@ class MainAppController {
             return this.globalMetadataPromise;
         }
 
+        // Reuse globalMetadata from an existing IntegramTable instance to avoid a duplicate /metadata request (issue #1463)
+        if (window._integramTableInstances && window._integramTableInstances.length > 0) {
+            for (const inst of window._integramTableInstances) {
+                if (inst && inst.globalMetadata) {
+                    this.globalMetadata = inst.globalMetadata;
+                    return this.globalMetadata;
+                }
+            }
+            // If an IntegramTable instance is currently fetching globalMetadata, piggyback on that promise
+            for (const inst of window._integramTableInstances) {
+                if (inst && inst.globalMetadataPromise) {
+                    this.globalMetadataPromise = inst.globalMetadataPromise.then(() => {
+                        if (inst.globalMetadata) this.globalMetadata = inst.globalMetadata;
+                        this.globalMetadataPromise = null;
+                        return this.globalMetadata;
+                    });
+                    return this.globalMetadataPromise;
+                }
+            }
+        }
+
         const dbName = typeof db !== 'undefined' ? db : '';
         this.globalMetadataPromise = (async () => {
             try {
