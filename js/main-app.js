@@ -485,6 +485,15 @@ class MainAppController {
         const existingPanel = document.getElementById('sidebar-role-panel');
         if (existingPanel) {
             existingPanel.remove();
+            // Also exit edit mode if active
+            if (this.editMode) {
+                this.editMode = false;
+                sidebar.classList.remove('edit-mode');
+                settingsBtn.classList.remove('active');
+                document.querySelectorAll('.app-menu-item').forEach(item => {
+                    item.setAttribute('draggable', 'false');
+                });
+            }
             return;
         }
 
