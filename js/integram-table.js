@@ -59,6 +59,7 @@ class IntegramTable{
             this.idColumns = new Set();  // Set of hidden ID column IDs
             this.columnWidths = {};  // Map of column IDs to their widths in pixels
             this.metadataCache = {};  // Cache for metadata by type ID
+            this.metadataFetchPromises = {};  // In-progress fetch promises by type ID (issue #1455)
             this.grantOptionsCache = null;  // Cache for GRANT dropdown options (issue #607)
             this.reportColumnOptionsCache = null;  // Cache for REPORT_COLUMN dropdown options (issue #607)
             this.refOptionsCache = {};  // Cache for reference field filter dropdown options by column ID (issue #795)
@@ -223,6 +224,16 @@ class IntegramTable{
         }
 
         async loadGlobalMetadata() {
+            // If already loaded, return immediately (issue #1455)
+            if (this.globalMetadata) {
+                return;
+            }
+
+            // If loading is already in progress, wait for it instead of starting a new fetch (issue #1455)
+            if (this.globalMetadataPromise) {
+                return this.globalMetadataPromise;
+            }
+
             try {
                 const apiBase = this.getApiBase();
                 const response = await fetch(`${ apiBase }/metadata`);
@@ -5879,6 +5890,7 @@ class IntegramTable{
                     showStatus('Изменения сохранены', false);
                     // Clear metadata cache so edit/add forms fetch fresh metadata (issue #1386)
                     this.metadataCache = {};
+                    this.metadataFetchPromises = {};  // Clear in-progress fetches (issue #1455)
                     // Clear globalMetadata so fetchMetadata() re-fetches fresh column info (issue #1400)
                     this.globalMetadata = null;
                     this.globalMetadataPromise = null;
@@ -6452,6 +6464,7 @@ class IntegramTable{
 
                         // Clear metadata cache so edit/add forms fetch fresh metadata (issue #1424)
                         this.metadataCache = {};
+                        this.metadataFetchPromises = {};  // Clear in-progress fetches (issue #1455)
                         // Clear globalMetadata so fetchMetadata() re-fetches fresh column info (issue #1424)
                         this.globalMetadata = null;
                         this.globalMetadataPromise = null;
@@ -8242,35 +8255,52 @@ class IntegramTable{
                 }
             }
 
+            // If metadata is already cached, return it immediately (issue #1455)
+            if (this.metadataCache[typeId]) {
+                return this.metadataCache[typeId];
+            }
+
+            // If a fetch for this typeId is already in progress, await it instead of starting a new one (issue #1455)
+            if (this.metadataFetchPromises[typeId]) {
+                return this.metadataFetchPromises[typeId];
+            }
+
             const apiBase = this.getApiBase();
-            const response = await fetch(`${ apiBase }/metadata/${ typeId }`);
+            const fetchPromise = (async () => {
+                const response = await fetch(`${ apiBase }/metadata/${ typeId }`);
 
-            if (!response.ok) {
-                throw new Error(`Failed to fetch metadata: ${ response.statusText }`);
-            }
-
-            const text = await response.text();
-
-            try {
-                let data = JSON.parse(text);
-
-                // Handle case where API returns an array instead of an object
-                if (Array.isArray(data)) {
-                    data = data[0] || {};
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch metadata: ${ response.statusText }`);
                 }
 
-                // Check for error in response
-                if (data.error) {
-                    throw new Error(data.error);
-                }
+                const text = await response.text();
 
-                return data;
-            } catch (e) {
-                if (e.message && e.message.includes('error')) {
-                    throw e;
+                try {
+                    let data = JSON.parse(text);
+
+                    // Handle case where API returns an array instead of an object
+                    if (Array.isArray(data)) {
+                        data = data[0] || {};
+                    }
+
+                    // Check for error in response
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+
+                    this.metadataCache[typeId] = data;
+                    return data;
+                } catch (e) {
+                    if (e.message && e.message.includes('error')) {
+                        throw e;
+                    }
+                    throw new Error(`Invalid JSON response: ${ text }`);
+                } finally {
+                    delete this.metadataFetchPromises[typeId];
                 }
-                throw new Error(`Invalid JSON response: ${ text }`);
-            }
+            })();
+            this.metadataFetchPromises[typeId] = fetchPromise;
+            return fetchPromise;
         }
 
         async fetchRecordData(recordId, typeId, metadata) {
@@ -13535,6 +13565,7 @@ class IntegramCreateFormHelper {
         this.tableTypeId = tableTypeId;
         this.parentId = parentId;
         this.metadataCache = {};
+        this.metadataFetchPromises = {};  // In-progress fetch promises by type ID (issue #1455)
         this.grantOptionsCache = null;  // Cache for GRANT dropdown options (issue #607)
         this.reportColumnOptionsCache = null;  // Cache for REPORT_COLUMN dropdown options (issue #607)
     }
@@ -14936,14 +14967,27 @@ class IntegramCreateFormHelper {
             }
         }
 
-        const response = await fetch(`${this.apiBase}/metadata/${typeId}`);
-        if (!response.ok) {
-            throw new Error(`Failed to fetch metadata: ${response.statusText}`);
+        // If a fetch for this typeId is already in progress, await it instead of starting a new one (issue #1455)
+        if (this.metadataFetchPromises[typeId]) {
+            return this.metadataFetchPromises[typeId];
         }
 
-        const metadata = await response.json();
-        this.metadataCache[typeId] = metadata;
-        return metadata;
+        const fetchPromise = (async () => {
+            try {
+                const response = await fetch(`${this.apiBase}/metadata/${typeId}`);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch metadata: ${response.statusText}`);
+                }
+
+                const metadata = await response.json();
+                this.metadataCache[typeId] = metadata;
+                return metadata;
+            } finally {
+                delete this.metadataFetchPromises[typeId];
+            }
+        })();
+        this.metadataFetchPromises[typeId] = fetchPromise;
+        return fetchPromise;
     }
 
     /**
