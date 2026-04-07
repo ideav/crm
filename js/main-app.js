@@ -40,6 +40,38 @@ class MainAppController {
         this.draggedItem = null;
         this.menuItems = {}; // Map of menu_id to menu item data
         this.menuElements = {}; // Map of menu_id to DOM elements
+        this.globalMetadata = null;  // Cache for global metadata (issue #1459)
+        this.globalMetadataPromise = null;  // In-progress global metadata fetch promise (issue #1459)
+    }
+
+    async loadGlobalMetadata() {
+        // If already loaded, return immediately (issue #1459)
+        if (this.globalMetadata) {
+            return this.globalMetadata;
+        }
+
+        // If loading is already in progress, wait for it instead of starting a new fetch (issue #1459)
+        if (this.globalMetadataPromise) {
+            return this.globalMetadataPromise;
+        }
+
+        const dbName = typeof db !== 'undefined' ? db : '';
+        this.globalMetadataPromise = (async () => {
+            try {
+                const response = await fetch('/' + dbName + '/metadata');
+                if (!response.ok) return null;
+                const metadata = await response.json();
+                if (!Array.isArray(metadata)) return null;
+                this.globalMetadata = metadata;
+                return metadata;
+            } catch (e) {
+                console.error('Error loading global metadata:', e);
+                return null;
+            } finally {
+                this.globalMetadataPromise = null;
+            }
+        })();
+        return this.globalMetadataPromise;
     }
 
     /**
@@ -455,11 +487,8 @@ class MainAppController {
 
         // Case B: check metadata - find the Role type and see if 'Меню' req has granted: 'WRITE'
         try {
-            const dbName = typeof db !== 'undefined' ? db : '';
-            const response = await fetch('/' + dbName + '/metadata');
-            if (!response.ok) return false;
-            const metadata = await response.json();
-            if (!Array.isArray(metadata)) return false;
+            const metadata = await this.loadGlobalMetadata();
+            if (!metadata) return false;
 
             // Find the Role type entry (val = 'Роль' or 'Role')
             const roleType = metadata.find(item =>
