@@ -551,7 +551,7 @@ function resetPwd(){
 }
 function resetPwdMail(){
     resetPwd();
-    copy2Buffer('Ссылка для входа'+': https://'+location.host+'/'+db+'/login?u='+$('#t18').val()+'\n '+'пароль: '+$('#t20').val());
+    copy2Buffer($('#t18').val()+'\n'+'Ссылка для входа: https://'+location.host+'/start.html?db='+db+'&u='+encodeURIComponent($('#t18').val())+'\nПароль: '+$('#t20').val());
     showError('Ссылка для входа скопирована в буфер. <b>Сохраните изменения</b>, чтобы они вступили в силу!','warning');
 }
 $('#t18').on('keyup',warnUserName);

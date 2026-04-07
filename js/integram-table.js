@@ -10569,7 +10569,7 @@ class IntegramTable{
                     const userField = modal.querySelector('#field-18');
                     const username = userField ? userField.value : '';
                     const db = window.location.pathname.split('/')[1] || '';
-                    const loginLink = `Ссылка для входа: https://${ location.host }/${ db }/login?u=${ username }\n пароль: ${ pwd }`;
+                    const loginLink = `${ username }\nСсылка для входа: https://${ location.host }/start.html?db=${ db }&u=${ encodeURIComponent(username) }\nПароль: ${ pwd }`;
                     copyToClipboard(loginLink);
                     showCopied(fieldId);
                 });
