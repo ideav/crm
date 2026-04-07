@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Test: Role Selector in Sidebar Settings (Issue #1451)</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/primeicons@7/primeicons.css">
+    <style>
+        /* Minimal app layout */
+        body { margin: 0; font-family: sans-serif; display: flex; height: 100vh; }
+        :root {
+            --text-primary: #212529;
+            --text-secondary: #6c757d;
+            --border-color: #dee2e6;
+            --card-bg: #fff;
+            --bg-secondary: #f8f9fa;
+            --input-bg: #fff;
+            --button-primary: #3b82f6;
+            --button-primary-hover: #2563eb;
+        }
+        #app-sidebar {
+            width: 240px;
+            background: var(--card-bg);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        .app-menu { flex: 1; overflow-y: auto; padding: 0.5rem; }
+        #app-menu a { display: block; padding: 0.5rem; border-radius: 6px; text-decoration: none; color: var(--text-primary); margin-bottom: 2px; }
+        #app-menu a:hover { background: var(--bg-secondary); }
+        #sidebar-settings {
+            display: flex; align-items: center; justify-content: center;
+            width: 2.5rem; height: 2.5rem; margin: 0.75rem;
+            background: none; border: none; border-radius: 50%;
+            cursor: pointer; color: var(--text-secondary); font-size: 1.25rem;
+            transition: background-color 0.2s ease, color 0.2s ease, transform 0.3s ease;
+            flex-shrink: 0;
+        }
+        #sidebar-settings:hover { background: rgba(0,0,0,0.04); color: var(--text-primary); }
+        #sidebar-settings.active { color: var(--button-primary); transform: rotate(45deg); }
+        #log { flex: 1; padding: 1rem; background: #f8f9fa; overflow-y: auto; font-size: 0.85rem; }
+        #log h3 { margin-top: 0; }
+        .log-entry { margin-bottom: 0.5rem; padding: 0.375rem 0.5rem; background: #fff; border-radius: 4px; border-left: 3px solid #3b82f6; }
+    </style>
+</head>
+<body>
+<aside id="app-sidebar">
+    <nav class="app-menu" id="app-menu"><!-- filled by JS --></nav>
+    <button id="sidebar-settings" type="button" title="Настройки меню"><i class="pi pi-cog"></i></button>
+</aside>
+
+<div id="log">
+    <h3>Test Log (Issue #1451 - Role Selector)</h3>
+    <div id="log-entries"></div>
+</div>
+
+<script>
+// Mock globals
+const db = 'testdb';
+window.roleId = '145';
+window.xsrf = 'test-xsrf';
+const menuEditGranted = '1';
+
+// Initial menu data (for role 145)
+var menuData = [
+    {"name":"Таблицы","menu_id":"293","menu_up":"145","href":"tables","icon":"<i class=\"pi pi-table\"></i>"},
+    {"name":"Загрузка","menu_id":"242","menu_up":"145","href":"upload","icon":"<i class=\"pi pi-cloud-upload\"></i>"},
+    {"name":"Пользователи","menu_id":"167","menu_up":"145","href":"table/18","icon":"<i class=\"pi pi-users\"></i>"}
+];
+
+function log(msg, color) {
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+    entry.style.borderLeftColor = color || '#3b82f6';
+    entry.textContent = msg;
+    document.getElementById('log-entries').prepend(entry);
+}
+
+// Mock fetch for testing
+const origFetch = window.fetch;
+window.fetch = async (url, opts) => {
+    log('fetch: ' + url, '#10b981');
+    if (url.includes('object/42')) {
+        // Return mock roles
+        return {
+            ok: true,
+            json: async () => [
+                {"i":145,"u":1,"o":1,"r":["admin",4,9,""]},
+                {"i":164,"u":1,"o":1,"r":["user",2,"",""]},
+                {"i":453,"u":1,"o":1,"r":["Исполнитель","","","Обрабатывает тендеры"]},
+                {"i":471,"u":1,"o":1,"r":["Бухгалтер","","",""]},
+                {"i":500,"u":1,"o":1,"r":["Скаут",1,1,"Ищет тендеры"]}
+            ]
+        };
+    }
+    if (url.includes('report/MyRoleMenu')) {
+        const roleId = new URL(url, 'http://x').searchParams.get('FR_RoleID');
+        log('Loading menu for role: ' + roleId, '#f59e0b');
+        // Return different menus for different roles
+        if (roleId === '164') {
+            return {
+                ok: true,
+                json: async () => [
+                    {"name":"Мои задачи","menu_id":"1","menu_up":"164","href":"tasks","icon":"<i class=\"pi pi-list-check\"></i>"},
+                    {"name":"Профиль","menu_id":"2","menu_up":"164","href":"profile","icon":"<i class=\"pi pi-user\"></i>"}
+                ]
+            };
+        }
+        return {
+            ok: true,
+            json: async () => [
+                {"name":"Таблицы","menu_id":"293","menu_up":roleId,"href":"tables","icon":"<i class=\"pi pi-table\"></i>"},
+                {"name":"Пользователи","menu_id":"167","menu_up":roleId,"href":"table/18","icon":"<i class=\"pi pi-users\"></i>"}
+            ]
+        };
+    }
+    return origFetch ? origFetch(url, opts) : { ok: false };
+};
+</script>
+<script src="../js/main-app.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+        log('Initial menu items: ' + menuData.length, '#6366f1');
+        log('Current roleId: ' + window.roleId, '#6366f1');
+        log('Click the settings (gear) button to test role selector', '#6366f1');
+    }, 100);
+});
+</script>
+</body>
+</html>

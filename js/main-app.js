@@ -438,16 +438,142 @@ class MainAppController {
             return;
         }
 
-        settingsBtn.addEventListener('click', () => {
-            this.editMode = !this.editMode;
+        settingsBtn.addEventListener('click', async () => {
+            // Show role selector panel before entering edit mode
+            await this.showRoleSelector();
+        });
+    }
+
+    async showRoleSelector() {
+        const sidebar = document.getElementById('app-sidebar');
+        const settingsBtn = document.getElementById('sidebar-settings');
+
+        // Remove existing role panel if any
+        const existingPanel = document.getElementById('sidebar-role-panel');
+        if (existingPanel) {
+            existingPanel.remove();
+            return;
+        }
+
+        // Create role selector panel
+        const panel = document.createElement('div');
+        panel.id = 'sidebar-role-panel';
+        panel.className = 'sidebar-role-panel';
+        panel.innerHTML = `
+            <div class="sidebar-role-panel-header">
+                <span class="sidebar-role-panel-title">Настройки меню</span>
+                <button type="button" class="sidebar-role-panel-close" aria-label="Закрыть"><i class="pi pi-times"></i></button>
+            </div>
+            <div class="sidebar-role-panel-body">
+                <label class="sidebar-role-label">Роль</label>
+                <select id="sidebar-role-select" class="sidebar-role-select">
+                    <option value="">Загрузка...</option>
+                </select>
+            </div>
+            <div class="sidebar-role-panel-footer">
+                <label class="sidebar-edit-mode-label">
+                    <input type="checkbox" id="sidebar-edit-mode-checkbox" class="sidebar-edit-mode-checkbox">
+                    Режим редактирования
+                </label>
+            </div>
+        `;
+
+        // Insert panel before settings button
+        sidebar.insertBefore(panel, settingsBtn);
+
+        // Wire up close button
+        panel.querySelector('.sidebar-role-panel-close').addEventListener('click', () => {
+            panel.remove();
+            // Also exit edit mode if active
+            if (this.editMode) {
+                this.editMode = false;
+                sidebar.classList.remove('edit-mode');
+                settingsBtn.classList.remove('active');
+                document.querySelectorAll('.app-menu-item').forEach(item => {
+                    item.setAttribute('draggable', 'false');
+                });
+            }
+        });
+
+        // Wire up edit mode checkbox
+        const editCheckbox = panel.querySelector('#sidebar-edit-mode-checkbox');
+        editCheckbox.checked = this.editMode;
+        editCheckbox.addEventListener('change', () => {
+            this.editMode = editCheckbox.checked;
             sidebar.classList.toggle('edit-mode', this.editMode);
             settingsBtn.classList.toggle('active', this.editMode);
-
-            // Enable/disable dragging on menu items
             document.querySelectorAll('.app-menu-item').forEach(item => {
                 item.setAttribute('draggable', this.editMode ? 'true' : 'false');
             });
         });
+
+        // Fetch roles
+        const dbName = typeof db !== 'undefined' ? db : '';
+        const roleSelect = panel.querySelector('#sidebar-role-select');
+        try {
+            const response = await fetch('/' + dbName + '/object/42?JSON_OBJ');
+            if (response.ok) {
+                const roles = await response.json();
+                roleSelect.innerHTML = '';
+                const currentRoleId = typeof window.roleId !== 'undefined' ? String(window.roleId) : '';
+                roles.forEach(roleObj => {
+                    const id = String(roleObj.i);
+                    const name = Array.isArray(roleObj.r) ? roleObj.r[0] : String(roleObj.r);
+                    const option = document.createElement('option');
+                    option.value = id;
+                    option.textContent = name;
+                    if (id === currentRoleId) {
+                        option.selected = true;
+                    }
+                    roleSelect.appendChild(option);
+                });
+            } else {
+                roleSelect.innerHTML = '<option value="">Ошибка загрузки</option>';
+            }
+        } catch (err) {
+            console.error('Error fetching roles:', err);
+            roleSelect.innerHTML = '<option value="">Ошибка загрузки</option>';
+        }
+
+        // On role change, reload menu for selected role
+        roleSelect.addEventListener('change', async () => {
+            const selectedRoleId = roleSelect.value;
+            if (!selectedRoleId) return;
+            await this.loadMenuForRole(selectedRoleId);
+        });
+    }
+
+    async loadMenuForRole(roleId) {
+        const dbName = typeof db !== 'undefined' ? db : '';
+        try {
+            const url = '/' + dbName + '/report/MyRoleMenu?JSON_KV&FR_ПользовательID=%&FR_RoleID=' + encodeURIComponent(roleId);
+            const response = await fetch(url);
+            if (response.ok) {
+                const newMenuData = await response.json();
+                if (Array.isArray(newMenuData)) {
+                    // Replace global menuData
+                    if (typeof menuData !== 'undefined' && Array.isArray(menuData)) {
+                        menuData.length = 0;
+                        newMenuData.forEach(item => menuData.push(item));
+                    }
+                    // Rebuild menu
+                    this.buildMenu();
+                    this.highlightActiveMenuItem();
+                    // Restore edit mode if active
+                    if (this.editMode) {
+                        const sidebar = document.getElementById('app-sidebar');
+                        if (sidebar) sidebar.classList.add('edit-mode');
+                        document.querySelectorAll('.app-menu-item').forEach(item => {
+                            item.setAttribute('draggable', 'true');
+                        });
+                    }
+                }
+            } else {
+                console.error('Failed to load menu for role:', response.status);
+            }
+        } catch (err) {
+            console.error('Error loading menu for role:', err);
+        }
     }
 
     setupMenuSearch() {
