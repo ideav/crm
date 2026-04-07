@@ -9183,6 +9183,11 @@ class IntegramTable{
             // Store recordId on the modal element for subordinate table loading in nested modals
             modal.dataset.recordId = recordId;
 
+            // Store first column value on the modal element for use in password reset handlers (issue #1479)
+            if (firstColumnValue != null) {
+                modal.dataset.firstColumnValue = firstColumnValue;
+            }
+
             // Store modal context for subordinate tables - ONLY for the first level (parent form)
             // Don't overwrite when opening subordinate record forms (nested modals)
             if (modalDepth === 1) {
@@ -10565,9 +10570,8 @@ class IntegramTable{
                     if (!pwdInput) return;
                     const pwd = generatePassword();
                     pwdInput.value = pwd;
-                    // Copy login link (username from field id=18, login URL)
-                    const userField = modal.querySelector('#field-18');
-                    const username = userField ? userField.value : '';
+                    // Copy login link (username from first column of the table, issue #1479)
+                    const username = modal.dataset.firstColumnValue || '';
                     const db = window.location.pathname.split('/')[1] || '';
                     const loginLink = `${ username }\nСсылка для входа: https://${ location.host }/start.html?db=${ db }&u=${ encodeURIComponent(username) }\nПароль: ${ pwd }`;
                     copyToClipboard(loginLink);
