@@ -1205,7 +1205,8 @@ class MainAppController {
         // Response: JSON with key 'obj' containing the new menu item ID
 
         const dbName = typeof db !== 'undefined' ? db : '';
-        const upParam = parentId || (typeof window.roleId !== 'undefined' ? window.roleId : '');
+        const sidebarRoleSelect = document.getElementById('sidebar-role-select');
+        const upParam = parentId || (sidebarRoleSelect ? sidebarRoleSelect.value : (typeof window.roleId !== 'undefined' ? window.roleId : ''));
         const url = '/' + dbName + '/_m_new/151?JSON&up=' + encodeURIComponent(upParam);
 
         const params = new URLSearchParams();
