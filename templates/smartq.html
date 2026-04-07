@@ -105,6 +105,14 @@ input.inline-edit,textarea.inline-edit{
 <script src="/js/js.js"></script>
 <link href="/css/select2.min.css" rel="stylesheet" />
 <script src="/js/select2.min.js"></script>
+<script>
+(function() {
+    var fake = document.createElement('div');
+    fake.style.cssText = 'position:absolute;left:-9999px;opacity:0;pointer-events:none;';
+    fake.innerHTML = '<input type="text" name="fake_username" value=""><input type="password" name="fake_password" value="">';
+    document.body.appendChild(fake);
+})();
+</script>
 <div class="err-msg card bg-warning position-absolute mt-5 p-3" onclick="$(this).hide()" style="display: none;"></div>
 <div class="sub-totals-tab bg-light border shadow position-absolute mt-3 ml-3 mr-3 p-3" style="display: none;">
     <nobr><span>SUM: </span><span class="sub-totals-sum">0</span>, </nobr>&nbsp; 
