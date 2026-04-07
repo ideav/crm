@@ -8283,7 +8283,7 @@ if(Validate_Token())
             				if(!in_array($t, array(101, 102, 103, 132, 49)))
             					$val = BuiltIn($val);
         					# Format the value
-							if($row["t"] == PASSWORD) // Encrypt the password
+							if($t == PASSWORD) // Encrypt the password
         						$val = hash("sha512", Salt($z, $val));
         					elseif(($GLOBALS["REV_BT"][$row["t"]] == "NUMBER") && ($val != 0))
         						$val = (int)$val;
@@ -8607,7 +8607,7 @@ if(Validate_Token())
 				foreach($GLOBALS["NOT_NULL"] as $key => $value)
 					if(Check_Grant($typ, $key, "WRITE", FALSE)) # The object is NOT_NULL and we have the grant to change it
 					{
-						if((isset($_REQUEST["t$key"]) ? strlen($_REQUEST["t$key"]) : FALSE)
+						if((isset($_REQUEST["t$key"]) ? strlen($_REQUEST["t$key"]) : TRUE) // Skip not received reqs
 						  || (isset($_REQUEST["NEW_$key"]) ? strlen($_REQUEST["NEW_$key"]) : FALSE)
 						  || (isset($GLOBALS["ARR_typs"][$key]) && ($GLOBALS["REQS"][$key] != 0))
 						  || isset($_REQUEST["copybtn"])
@@ -9293,8 +9293,11 @@ if(Validate_Token())
                     continue;
                 if((int)$row["t"] > 17) // Skip refs
                     continue;
-    	        $meta[$row["id"]] = "\"id\":\"".$row["id"]."\",\"up\":\"".$row["up"]."\",\"type\":\"".$row["t"]."\",\"val\":\"".$row["val"]."\",\"unique\":\"".$row["uniq"]."\""
-									.(isset($refs[$row["id"]]) ? ",\"referenced\":\"".$refs[$row["id"]]."\"" : ""); 
+    	        $meta[$row["id"]] = "\"id\":\"".$row["id"]."\",\"up\":\"".$row["up"]."\",\"type\":\"".$row["t"]."\",\"val\":\"".addcslashes($row["val"], "\\\'")."\",\"unique\":\"".$row["uniq"]."\""
+									.(isset($refs[$row["id"]]) ? ",\"referenced\":\"".$refs[$row["id"]]."\"" : "")
+									.(isset($GLOBALS["GRANTS"][$row["id"]]) ? ",\"granted\":\"".$GLOBALS["GRANTS"][$row["id"]]."\"" : "")
+									.(isset($GLOBALS["GRANTS"]["EXPORT"][$row["id"]]) || isset($GLOBALS["GRANTS"]["EXPORT"][1]) ? ",\"export\":\"1\"" : "")
+									.(isset($GLOBALS["GRANTS"]["DELETE"][$row["id"]]) || isset($GLOBALS["GRANTS"]["DELETE"][1]) ? ",\"delete\":\"1\"" : "");
                 if($row["ord"])
                     $metaReqs[$row["id"]][] = "{\"num\":".$row["ord"].",\"id\":\"".$row["req_t"]."\""
                                 .",\"val\":\"".addcslashes($row["req_val"], "\\\'")."\""
@@ -9302,7 +9305,8 @@ if(Validate_Token())
                                 .",\"type\":\"".$row["base_typ"]."\""
                                 .($row["arr_id"]?",\"arr_id\":\"".$row["arr_id"]."\"":"")
                                 .($row["ref"]?",\"ref\":\"".$row["ref"]."\",\"ref_id\":\"".$row["ref_id"]."\"":"")
-                                .($row["attrs"]?",\"attrs\":\"".$row["attrs"]."\"":"")."}";
+                                .($row["attrs"]?",\"attrs\":\"".$row["attrs"]."\"":"")
+								.(isset($GLOBALS["GRANTS"][$row["req_t"]]) ? ",\"granted\":\"".$GLOBALS["GRANTS"][$row["req_t"]]."\"" : "")."}";
         	}
 	        foreach($meta as $k => $m)
 	            if($metaReqs[$k])
@@ -9652,7 +9656,7 @@ if(Validate_Token())
     		$f_u = isset($_REQUEST["F_U"]) ? (int)$_REQUEST["F_U"] : "1"; # Filter for associated (linked) objects
     		if(isset($_GET["warning"]))
     			$GLOBALS["warning"] = $_REQUEST["warning"];
-
+    
     		if($a == "report")
     		{
     			unset($blocks); # We might get some stuff there already
