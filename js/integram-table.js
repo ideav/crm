@@ -10386,6 +10386,17 @@ class IntegramTable{
             };
             document.addEventListener('keydown', handleEscape);
 
+            // Enter in input/textarea triggers Save (issue #1467)
+            const saveBtn = modal.querySelector('#subordinate-save-btn');
+            modal.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+                    if (!saveBtn.disabled) {
+                        e.preventDefault();
+                        saveBtn.click();
+                    }
+                }
+            });
+
             // Save handler
             modal.querySelector('#subordinate-save-btn').addEventListener('click', async () => {
                 const form = modal.querySelector('#subordinate-edit-form');
