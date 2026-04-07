@@ -429,6 +429,15 @@ class MainAppController {
         const settingsBtn = document.getElementById('sidebar-settings');
         if (!sidebar || !settingsBtn) return;
 
+        // Show the settings button only if the user has menu edit rights:
+        // A) user is the database owner (db === user), OR
+        // B) the user's role has WRITE access to the Menu type (menuEditGranted === '1')
+        const canEditMenu = (typeof menuEditGranted !== 'undefined' && menuEditGranted === '1');
+        if (!canEditMenu) {
+            settingsBtn.style.display = 'none';
+            return;
+        }
+
         settingsBtn.addEventListener('click', () => {
             this.editMode = !this.editMode;
             sidebar.classList.toggle('edit-mode', this.editMode);
