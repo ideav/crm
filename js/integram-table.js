@@ -7367,8 +7367,9 @@ class IntegramTable{
          * Show a notification message (issue #510)
          * @param {string} message - Message to display
          * @param {boolean} isError - Whether this is an error message
+         * @param {number} duration - How long to show the notification in ms (default 2000)
          */
-        showCopyNotification(message, isError = false) {
+        showCopyNotification(message, isError = false, duration = 2000) {
             // Remove any existing notifications
             document.querySelectorAll('.integram-copy-notification').forEach(n => n.remove());
 
@@ -7387,7 +7388,7 @@ class IntegramTable{
                 font-size: 14px;
                 z-index: 10000;
                 box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-                animation: fadeInOut 2s ease-in-out;
+                animation: fadeInOut ${duration / 1000}s ease-in-out;
             `;
 
             // Add animation keyframes if not already present
@@ -7410,7 +7411,7 @@ class IntegramTable{
             // Remove notification after animation completes
             setTimeout(() => {
                 notification.remove();
-            }, 2000);
+            }, duration);
         }
 
         /**
@@ -10560,6 +10561,8 @@ class IntegramTable{
                     pwdInput.value = pwd;
                     copyToClipboard(pwd);
                     showCopied(fieldId);
+                    // Warn user to save the generated password (issue #1481)
+                    this.showCopyNotification('Пароль сгенерирован и скопирован в буфер. Обязательно сохраните его!', false, 5000);
                 });
             });
 
@@ -10576,6 +10579,8 @@ class IntegramTable{
                     const loginLink = `${ username }\nСсылка для входа: https://${ location.host }/start.html?db=${ db }&u=${ encodeURIComponent(username) }\nПароль: ${ pwd }`;
                     copyToClipboard(loginLink);
                     showCopied(fieldId);
+                    // Warn user to save the generated password (issue #1481)
+                    this.showCopyNotification('Пароль сгенерирован и скопирован в буфер. Обязательно сохраните его!', false, 5000);
                 });
             });
         }
