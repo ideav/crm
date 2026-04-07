@@ -633,6 +633,9 @@ class IntegramTable{
                     this.options.title = metadata.val || metadata.value || metadata.name;
                 }
 
+                // Store export flag from metadata (issue #1469)
+                this.tableExportAllowed = metadata.export === '1' || metadata.export === 1;
+
                 // Convert metadata to columns format
                 const columns = [];
 
@@ -1236,6 +1239,7 @@ class IntegramTable{
                                 <i class="pi pi-filter"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">фильтры</span>' : '' }
                             </div>
+                            ${ this.isExportAllowed() ? `
                             <div class="integram-table-export-container">
                                 <div class="integram-table-settings" onclick="window.${ instanceName }.toggleExportMenu(event)" title="Экспорт">
                                     <i class="pi pi-download"></i>
@@ -1253,6 +1257,7 @@ class IntegramTable{
                                     </div>
                                 </div>
                             </div>
+                            ` : '' }
                             ${ this.checkboxMode && this.selectedRows.size > 0 ? `
                             <button class="btn btn-sm btn-danger integram-bulk-delete-btn" id="${ instanceName }-bulk-delete-btn" onclick="window.${ instanceName }.showBulkDeleteConfirm(event)">
                                 Удалить (${ this.selectedRows.size })
@@ -8859,6 +8864,21 @@ class IntegramTable{
             }
             // Fallback: remove everything after ? or last /
             return url.split('?')[0].replace(/\/[^\/]*$/, '');
+        }
+
+        /**
+         * Determine whether the export button should be shown (issue #1469).
+         * For report sources: always allowed.
+         * For table/object sources: only when metadata has export="1".
+         * @returns {boolean}
+         */
+        isExportAllowed() {
+            const sourceType = this.getDataSourceType();
+            if (sourceType === 'report') {
+                return true;
+            }
+            // For table/object sources, only allow if metadata export flag is set
+            return this.tableExportAllowed === true;
         }
 
         /**
