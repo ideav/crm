@@ -61,6 +61,7 @@
 
         var api = {
             show: function(n) {
+                if (getCookie('hints_mode') === 'off') return;
                 for (var i = 1; i <= steps; i++) {
                     var el = document.getElementById(workspace + '-hint-' + i);
                     if (el) el.style.display = (i === n) ? '' : 'none';
