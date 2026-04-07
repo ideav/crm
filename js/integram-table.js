@@ -10562,7 +10562,7 @@ class IntegramTable{
                     copyToClipboard(pwd);
                     showCopied(fieldId);
                     // Warn user to save the generated password (issue #1481)
-                    this.showCopyNotification('Пароль сгенерирован и скопирован в буфер. Обязательно сохраните его!', false, 5000);
+                    this.showCopyNotification('Пароль сгенерирован и скопирован в буфер. Обязательно сохраните эту форму!', false, 7000);
                 });
             });
 
@@ -10580,7 +10580,7 @@ class IntegramTable{
                     copyToClipboard(loginLink);
                     showCopied(fieldId);
                     // Warn user to save the generated password (issue #1481)
-                    this.showCopyNotification('Пароль сгенерирован и скопирован в буфер. Обязательно сохраните его!', false, 5000);
+                    this.showCopyNotification('Пароль сгенерирован и скопирован в буфер. Обязательно сохраните эту форму!', false, 7000);
                 });
             });
         }
