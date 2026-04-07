@@ -50,6 +50,7 @@
      * @param {function} [config.onInit] — callback(api), вызывается после инициализации
      */
     window.initHints = function(config) {
+        if (!(window.user && window.db && window.user === window.db)) return;
         var workspace = config.workspace;
         var steps = config.steps;
 
