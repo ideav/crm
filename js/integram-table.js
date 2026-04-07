@@ -9214,6 +9214,9 @@ class IntegramTable{
             // Attach file upload handlers
             this.attachFormFileUploadHandlers(modal);
 
+            // Attach password reset handlers for field id=20 (issue #1471)
+            this.attachPasswordResetHandlers(modal);
+
             // Attach form field settings handler
             const formSettingsBtn = modal.querySelector('#form-settings-btn');
             formSettingsBtn.addEventListener('click', () => {
@@ -9406,7 +9409,12 @@ class IntegramTable{
                 const isMulti = attrs.multi; // Issue #853
 
                 html += `<div class="form-group">`;
-                html += `<label for="field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
+                // Password reset buttons in label for field id=20 (issue #1471)
+                if (String(req.id) === '20' && baseFormat === 'PWD') {
+                    html += `<label for="field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }&nbsp;<a class="pwd-reset-btn" data-field-id="${ req.id }" title="Задать пароль и скопировать его в буфер" style="cursor:pointer"><svg width="20" height="20" viewBox="0 1 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.42858 9.28572V6.42858C6.42858 5.48137 6.80486 4.57297 7.47463 3.90319C8.1444 3.23342 9.05281 2.85715 10 2.85715C10.9472 2.85715 11.8556 3.23342 12.5254 3.90319C13.1952 4.57297 13.5714 5.48137 13.5714 6.42858V9.28572M5.00001 9.28572H15C15.789 9.28572 16.4286 9.92531 16.4286 10.7143V15.7143C16.4286 16.5033 15.789 17.1429 15 17.1429H5.00001C4.21103 17.1429 3.57144 16.5033 3.57144 15.7143V10.7143C3.57144 9.92531 4.21103 9.28572 5.00001 9.28572Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>&nbsp;<a class="pwd-reset-mail-btn" data-field-id="${ req.id }" title="Задать пароль и скопировать в буфер приглашение пользователю" style="cursor:pointer"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M17.1429 5.71434C17.1429 4.92862 16.5 4.28577 15.7143 4.28577H4.28571C3.5 4.28577 2.85714 4.92862 2.85714 5.71434M17.1429 5.71434V14.2858C17.1429 15.0715 16.5 15.7143 15.7143 15.7143H4.28571C3.5 15.7143 2.85714 15.0715 2.85714 14.2858V5.71434M17.1429 5.71434L10 10.7143L2.85714 5.71434" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/></svg></a><span class="pwd-reset-copied" id="field-${ req.id }-copied" style="display:none">Ok</span></label>`;
+                } else {
+                    html += `<label for="field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
+                }
 
                 // Multi-select reference field (issue #853)
                 if (req.ref_id && isMulti) {
@@ -10507,6 +10515,64 @@ class IntegramTable{
                     console.error('Error creating subordinate record:', error);
                     this.showToast(`Ошибка: ${ error.message }`, 'error');
                 }
+            });
+        }
+
+        attachPasswordResetHandlers(modal) {
+            // Attach reset password button handlers for field id=20 (issue #1471)
+            const resetBtns = modal.querySelectorAll('.pwd-reset-btn');
+            const resetMailBtns = modal.querySelectorAll('.pwd-reset-mail-btn');
+
+            const generatePassword = () => (Math.random().toString(36) + Math.random().toString(36)).replace(/\./g, '').substr(1, 8);
+
+            const copyToClipboard = (text) => {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text);
+                } else {
+                    const el = document.createElement('textarea');
+                    el.value = text;
+                    document.body.appendChild(el);
+                    el.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(el);
+                }
+            };
+
+            const showCopied = (fieldId) => {
+                const copiedSpan = modal.querySelector(`#field-${ fieldId }-copied`);
+                if (copiedSpan) {
+                    copiedSpan.style.display = '';
+                    setTimeout(() => { copiedSpan.style.display = 'none'; }, 2500);
+                }
+            };
+
+            resetBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const fieldId = btn.dataset.fieldId;
+                    const pwdInput = modal.querySelector(`#field-${ fieldId }`);
+                    if (!pwdInput) return;
+                    const pwd = generatePassword();
+                    pwdInput.value = pwd;
+                    copyToClipboard(pwd);
+                    showCopied(fieldId);
+                });
+            });
+
+            resetMailBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const fieldId = btn.dataset.fieldId;
+                    const pwdInput = modal.querySelector(`#field-${ fieldId }`);
+                    if (!pwdInput) return;
+                    const pwd = generatePassword();
+                    pwdInput.value = pwd;
+                    // Copy login link (username from field id=18, login URL)
+                    const userField = modal.querySelector('#field-18');
+                    const username = userField ? userField.value : '';
+                    const db = window.location.pathname.split('/')[1] || '';
+                    const loginLink = `Ссылка для входа: https://${ location.host }/${ db }/login?u=${ username }\n пароль: ${ pwd }`;
+                    copyToClipboard(loginLink);
+                    showCopied(fieldId);
+                });
             });
         }
 
