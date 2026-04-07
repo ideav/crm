@@ -1213,6 +1213,28 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     text-decoration: underline;
 }
 
+/* Copy button in Full Value modal - issue #1465 */
+.full-value-copy-btn {
+    background: none;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    padding: 4px 8px;
+    cursor: pointer;
+    color: #6c757d;
+    font-size: 14px;
+    line-height: 1;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.full-value-copy-btn:hover {
+    color: #007bff;
+    border-color: #007bff;
+}
+
+.full-value-content:hover {
+    background: #e9ecef !important;
+}
+
 .filter-type-menu {
     position: absolute;
     background: var(--md-surface);

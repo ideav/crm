@@ -6852,14 +6852,41 @@ class IntegramTable{
             modal.className = 'column-settings-modal';
 
             modal.innerHTML = `
-                <h3>Полное значение</h3>
-                <div style="max-height: 400px; overflow-y: auto; margin: 15px 0; padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
+                    <h3 style="margin: 0;">Полное значение</h3>
+                    <button class="full-value-copy-btn" title="Копировать в буфер"><i class="pi pi-copy"></i></button>
+                </div>
+                <div class="full-value-content" style="max-height: 400px; overflow-y: auto; margin: 15px 0; padding: 10px; background: #f8f9fa; border-radius: 4px; cursor: pointer;" title="Нажмите, чтобы скопировать">
                     <pre style="white-space: pre-wrap; word-wrap: break-word; margin: 0;">${ fullValue }</pre>
                 </div>
                 <div style="text-align: right;">
                     <button class="btn btn-secondary" onclick="this.closest('.column-settings-modal').remove(); document.querySelector('.column-settings-overlay').remove();">Закрыть</button>
                 </div>
             `;
+
+            // Extract plain text for clipboard (strip HTML tags from linkified content) - issue #1465
+            const plainText = modal.querySelector('pre').textContent;
+
+            // Copy to clipboard helper - issue #1465
+            const copyToClipboard = (btn) => {
+                navigator.clipboard.writeText(plainText).then(() => {
+                    const originalHTML = btn.innerHTML;
+                    btn.innerHTML = '<i class="pi pi-check"></i>';
+                    setTimeout(() => {
+                        btn.innerHTML = originalHTML;
+                    }, 2000);
+                }).catch(err => {
+                    console.error('[integram-table] Copy failed:', err);
+                });
+            };
+
+            // Copy on clicking the copy button (top right) - issue #1465
+            const copyBtn = modal.querySelector('.full-value-copy-btn');
+            copyBtn.addEventListener('click', () => copyToClipboard(copyBtn));
+
+            // Copy on clicking the value content area - issue #1465
+            const contentArea = modal.querySelector('.full-value-content');
+            contentArea.addEventListener('click', () => copyToClipboard(copyBtn));
 
             document.body.appendChild(overlay);
             document.body.appendChild(modal);
