@@ -424,24 +424,57 @@ class MainAppController {
         return menuItem;
     }
 
-    setupEditMode() {
+    async setupEditMode() {
         const sidebar = document.getElementById('app-sidebar');
         const settingsBtn = document.getElementById('sidebar-settings');
         if (!sidebar || !settingsBtn) return;
 
-        // Show the settings button only if the user has menu edit rights:
+        // Hide button until we can verify permissions
+        settingsBtn.style.display = 'none';
+
+        // Check menu edit rights on the frontend:
         // A) user is the database owner (db === user), OR
-        // B) the user's role has WRITE access to the Menu type (menuEditGranted === '1')
-        const canEditMenu = (typeof menuEditGranted !== 'undefined' && menuEditGranted === '1');
+        // B) the user's role metadata has WRITE access to the Menu type ('Меню' or 'Menu')
+        const canEditMenu = await this.checkMenuEditRights();
         if (!canEditMenu) {
-            settingsBtn.style.display = 'none';
             return;
         }
 
+        settingsBtn.style.display = '';
         settingsBtn.addEventListener('click', async () => {
             // Show role selector panel before entering edit mode
             await this.showRoleSelector();
         });
+    }
+
+    async checkMenuEditRights() {
+        // Case A: user is the database owner
+        if (typeof db !== 'undefined' && typeof user !== 'undefined' && db === user) {
+            return true;
+        }
+
+        // Case B: check metadata - find the Role type and see if 'Меню' req has granted: 'WRITE'
+        try {
+            const dbName = typeof db !== 'undefined' ? db : '';
+            const response = await fetch('/' + dbName + '/metadata');
+            if (!response.ok) return false;
+            const metadata = await response.json();
+            if (!Array.isArray(metadata)) return false;
+
+            // Find the Role type entry (val = 'Роль' or 'Role')
+            const roleType = metadata.find(item =>
+                item.val === 'Роль' || item.val === 'Role'
+            );
+            if (!roleType || !Array.isArray(roleType.reqs)) return false;
+
+            // Check if the 'Меню' (or 'Menu') requisite has granted: 'WRITE'
+            return roleType.reqs.some(req =>
+                (req.val === 'Меню' || req.val === 'Menu') && req.granted === 'WRITE'
+            );
+        } catch (e) {
+            console.error('Error checking menu edit rights:', e);
+            return false;
+        }
     }
 
     async showRoleSelector() {

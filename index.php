@@ -9652,14 +9652,7 @@ if(Validate_Token())
     		$f_u = isset($_REQUEST["F_U"]) ? (int)$_REQUEST["F_U"] : "1"; # Filter for associated (linked) objects
     		if(isset($_GET["warning"]))
     			$GLOBALS["warning"] = $_REQUEST["warning"];
-    		# Compute menu edit permission: admin (db===user) or role has WRITE grant for Menu type
-    		if(($z == $user) || ($user == "admin"))
-    		    $GLOBALS["GLOBAL_VARS"]["menu_edit_granted"] = "1";
-    		else{
-    		    $menu_type = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE up=0 AND (val='Меню' OR val='Menu') LIMIT 1", "Get Menu type ID"));
-    		    $GLOBALS["GLOBAL_VARS"]["menu_edit_granted"] = ($menu_type && isset($GLOBALS["GRANTS"][$menu_type["id"]]) && $GLOBALS["GRANTS"][$menu_type["id"]] === "WRITE") ? "1" : "0";
-    		}
-    
+
     		if($a == "report")
     		{
     			unset($blocks); # We might get some stuff there already
