@@ -2307,8 +2307,8 @@ class IntegramTable{
                 return;
             }
 
-            // Create empty row data with placeholder values
-            const emptyRow = this.columns.map(() => '');
+            // Create row data with default values from column attrs (issue #1498)
+            const emptyRow = this.columns.map(col => this.resolveDefaultValue(col.attrs || '', col.format || this.mapTypeIdToFormat(col.type)));
             const newRowIndex = this.data.length;
 
             // Add empty row to data arrays
@@ -8990,7 +8990,8 @@ class IntegramTable{
             const result = {
                 required: false,
                 multi: false,
-                alias: null
+                alias: null,
+                defaultValue: null
             };
 
             if (!attrs) return result;
@@ -8998,12 +8999,94 @@ class IntegramTable{
             result.required = attrs.includes(':!NULL:');
             result.multi = attrs.includes(':MULTI:');
 
-            const aliasMatch = attrs.match(/:ALIAS=(.*?):/);
+            const aliasMatch = attrs.match(/:ALIAS=(.*?):/u);
             if (aliasMatch) {
                 result.alias = aliasMatch[1];
             }
 
+            // Extract default value: strip all known flags and use the remainder
+            let stripped = attrs
+                .replace(/:!NULL:/g, '')
+                .replace(/:MULTI:/g, '')
+                .replace(/:ALIAS=(.*?):/gu, '')
+                .trim();
+            if (stripped.length > 0) {
+                result.defaultValue = stripped;
+            }
+
             return result;
+        }
+
+        /**
+         * Resolve a default value for a field based on attrs and field format (issue #1498)
+         * Supports built-in tokens like [NOW], [TODAY], [USER_ID], etc.
+         * For DATE/DATETIME formats with no attrs default, returns current date/time.
+         * @param {string|null} rawAttrs - The raw attrs string from column metadata
+         * @param {string} format - The field format (DATE, DATETIME, SHORT, etc.)
+         * @returns {string} Resolved default value, or empty string if none
+         */
+        resolveDefaultValue(rawAttrs, format) {
+            const now = new Date();
+
+            // Helper to format date as DD.MM.YYYY
+            const formatDate = (d) => {
+                const dd = String(d.getDate()).padStart(2, '0');
+                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const yyyy = d.getFullYear();
+                return `${dd}.${mm}.${yyyy}`;
+            };
+
+            // Helper to format datetime as DD.MM.YYYY HH:MM:SS
+            const formatDateTime = (d) => {
+                const date = formatDate(d);
+                const hh = String(d.getHours()).padStart(2, '0');
+                const min = String(d.getMinutes()).padStart(2, '0');
+                const ss = String(d.getSeconds()).padStart(2, '0');
+                return `${date} ${hh}:${min}:${ss}`;
+            };
+
+            // Helper for date arithmetic
+            const addDays = (d, days) => new Date(d.getTime() + days * 86400000);
+            const addMonths = (d, months) => {
+                const r = new Date(d);
+                r.setMonth(r.getMonth() + months);
+                return r;
+            };
+
+            // If attrs has a default value token, try to resolve it
+            if (rawAttrs && rawAttrs.trim().length > 0) {
+                const parsed = this.parseAttrs(rawAttrs);
+                const token = parsed.defaultValue;
+                if (token) {
+                    switch (token) {
+                        case '[NOW]':      return formatDateTime(now);
+                        case '[TODAY]':    return formatDate(now);
+                        case '[YESTERDAY]': return formatDate(addDays(now, -1));
+                        case '[TOMORROW]':  return formatDate(addDays(now, 1));
+                        case '[MONTH_AGO]': return formatDate(addMonths(now, -1));
+                        case '[WEEK_AGO]':  return formatDate(addDays(now, -7));
+                        case '[MONTH_PLUS]': return formatDate(addMonths(now, 1));
+                        case '[USER]':     return (typeof name !== 'undefined' ? name : '');
+                        case '[USER_ID]':  return (typeof uid !== 'undefined' ? String(uid) : '');
+                        case '[ROLE]':     return (typeof role !== 'undefined' ? role : '');
+                        case '[ROLE_ID]':  return (typeof roleId !== 'undefined' ? String(roleId) : '');
+                        case '[HTTP_HOST]':    return window.location.hostname || '';
+                        case '[REQUEST_URI]':  return window.location.pathname + window.location.search || '';
+                        default:
+                            // Unknown token or literal value — return as-is
+                            return token;
+                    }
+                }
+            }
+
+            // No attrs default — apply current date/time for date/datetime fields
+            if (format === 'DATE') {
+                return formatDate(now);
+            } else if (format === 'DATETIME') {
+                return formatDateTime(now);
+            }
+
+            return '';
         }
 
         getFormatById(typeId) {
@@ -9416,11 +9499,13 @@ class IntegramTable{
             sortedFields.forEach(req => {
                 const attrs = this.parseAttrs(req.attrs);
                 const fieldName = attrs.alias || req.val;
-                const reqValue = recordReqs[req.id] ? recordReqs[req.id].value : '';
+                const storedValue = recordReqs[req.id] ? recordReqs[req.id].value : '';
                 const baseTypeId = recordReqs[req.id] ? recordReqs[req.id].base : req.type;
                 const baseFormat = this.normalizeFormat(baseTypeId);
                 const isRequired = attrs.required;
                 const isMulti = attrs.multi; // Issue #853
+                // Apply default value from attrs when creating a new record (issue #1498)
+                const reqValue = storedValue || (isCreate ? this.resolveDefaultValue(req.attrs, baseFormat) : '');
 
                 html += `<div class="form-group">`;
                 // Password reset buttons in label for field id=20 (issue #1471)
@@ -9496,19 +9581,17 @@ class IntegramTable{
                 }
                 // Date field with HTML5 date picker
                 else if (baseFormat === 'DATE') {
-                    // Only apply default value for the first column (where req.id equals typeId)
-                    const isFirstColumn = typeId && String(req.id) === String(typeId);
-                    const dateValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, false) : (isCreate && isFirstColumn ? currentDateHtml5 : '');
-                    const dateValueDisplay = reqValue ? this.formatDateForInput(reqValue, false) : (isCreate && isFirstColumn ? currentDateDisplay : '');
+                    // reqValue already includes the default from attrs/current date (resolved above, issue #1498)
+                    const dateValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, false) : '';
+                    const dateValueDisplay = reqValue ? this.formatDateForInput(reqValue, false) : '';
                     html += `<input type="date" class="form-control date-picker" id="field-${ req.id }-picker" value="${ this.escapeHtml(dateValueHtml5) }" ${ isRequired ? 'required' : '' } data-target="field-${ req.id }">`;
                     html += `<input type="hidden" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(dateValueDisplay) }">`;
                 }
                 // DateTime field with HTML5 datetime-local picker (with time rounded to 5 minutes)
                 else if (baseFormat === 'DATETIME') {
-                    // Only apply default value for the first column (where req.id equals typeId)
-                    const isFirstColumn = typeId && String(req.id) === String(typeId);
-                    const dateTimeValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, true) : (isCreate && isFirstColumn ? currentDateTimeHtml5 : '');
-                    const dateTimeValueDisplay = reqValue ? this.formatDateForInput(reqValue, true) : (isCreate && isFirstColumn ? currentDateTimeDisplay : '');
+                    // reqValue already includes the default from attrs/current datetime (resolved above, issue #1498)
+                    const dateTimeValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, true) : '';
+                    const dateTimeValueDisplay = reqValue ? this.formatDateForInput(reqValue, true) : '';
                     html += `<input type="datetime-local" class="form-control datetime-picker" id="field-${ req.id }-picker" value="${ this.escapeHtml(dateTimeValueHtml5) }" ${ isRequired ? 'required' : '' } data-target="field-${ req.id }">`;
                     html += `<input type="hidden" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(dateTimeValueDisplay) }">`;
                 }
@@ -13729,7 +13812,8 @@ class IntegramCreateFormHelper {
         const result = {
             required: false,
             multi: false,
-            alias: null
+            alias: null,
+            defaultValue: null
         };
 
         if (!attrs) return result;
@@ -13737,9 +13821,19 @@ class IntegramCreateFormHelper {
         result.required = attrs.includes(':!NULL:');
         result.multi = attrs.includes(':MULTI:');
 
-        const aliasMatch = attrs.match(/:ALIAS=(.*?):/);
+        const aliasMatch = attrs.match(/:ALIAS=(.*?):/u);
         if (aliasMatch) {
             result.alias = aliasMatch[1];
+        }
+
+        // Extract default value: strip all known flags and use the remainder
+        let stripped = attrs
+            .replace(/:!NULL:/g, '')
+            .replace(/:MULTI:/g, '')
+            .replace(/:ALIAS=(.*?):/gu, '')
+            .trim();
+        if (stripped.length > 0) {
+            result.defaultValue = stripped;
         }
 
         return result;
