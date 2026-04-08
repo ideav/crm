@@ -54,6 +54,7 @@ class IntegramTable{
             this.visibleColumns = [];
             this.filtersEnabled = false;
             this.objectTableId = null;  // Table ID when data is in object/JSON_OBJ format (for _count=1 queries)
+            this.tableGranted = null;  // 'WRITE' = full access, other value = read-only (issue #1508)
             this.rawObjectData = [];  // Raw data array with {i, u, o, r} for object format (preserves record IDs)
             this.styleColumns = {};  // Map of column IDs to their style column values
             this.idColumns = new Set();  // Set of hidden ID column IDs
@@ -199,6 +200,15 @@ class IntegramTable{
         }
 
         /**
+         * Check if the table has WRITE access (issue #1508)
+         * Returns true when tableGranted is null (not set) or equals "WRITE"
+         * Returns false for any other granted value (e.g. "READ")
+         */
+        isTableWritable() {
+            return this.tableGranted === null || this.tableGranted === 'WRITE';
+        }
+
+        /**
          * Check if a type ID is a base (primitive) type (issue #708)
          * Base types (2-17) don't have metadata and cannot be used for edit forms
          * @param {string|number} typeId - Type ID to check
@@ -303,8 +313,8 @@ class IntegramTable{
 
             const instanceName = this.options.instanceName;
 
-            // Show create record button next to title when data source is a table (issue #693, #697)
-            const createBtnHtml = this.getDataSourceType() === 'table'
+            // Show create record button next to title when data source is a table and write access is granted (issue #693, #697, #1508)
+            const createBtnHtml = this.getDataSourceType() === 'table' && this.isTableWritable()
                 ? `<button class="column-add-btn title-create-btn" onclick="window.${ instanceName }.openTitleCreateForm()" title="Создать запись"><i class="pi pi-plus"></i></button>`
                 : '';
 
@@ -636,8 +646,14 @@ class IntegramTable{
                 // Store export flag from metadata (issue #1469)
                 this.tableExportAllowed = metadata.export === '1' || metadata.export === 1;
 
+                // Store table-level granted value for access control (issue #1508)
+                this.tableGranted = metadata.granted !== undefined ? metadata.granted : null;
+
                 // Convert metadata to columns format
                 const columns = [];
+
+                // Determine main column editability: WRITE if table is writable (issue #1508)
+                const mainColGranted = this.isTableWritable() ? 1 : 0;
 
                 // Add main value column (use metadata.id as column id for correct FR_{id} filter params - issue #793)
                 columns.push({
@@ -645,7 +661,7 @@ class IntegramTable{
                     type: metadata.type || 'SHORT',
                     format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
                     name: metadata.val || metadata.name || 'Значение',
-                    granted: 1,
+                    granted: mainColGranted,
                     ref: 0,
                     orig: metadata.id,
                     unique: metadata.unique, // Store unique flag for column edit form (issue #1026)
@@ -657,6 +673,8 @@ class IntegramTable{
                     metadata.reqs.forEach((req, idx) => {
                         const attrs = this.parseAttrs(req.attrs);
                         const isReference = req.hasOwnProperty('ref_id');
+                        // Use req.granted if table is not fully writable; otherwise treat as writable (issue #1508)
+                        const reqGranted = this.isTableWritable() ? 1 : (req.granted === 'WRITE' ? 1 : 0);
                         columns.push({
                             id: String(req.id),
                             type: req.type || 'SHORT',
@@ -664,7 +682,7 @@ class IntegramTable{
                             format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
                             name: attrs.alias || req.val,
                             val: req.val, // Store original name for alias display (issue #945)
-                            granted: 1,  // In object format, allow editing all cells
+                            granted: reqGranted,  // Use metadata granted for access control (issue #1508)
                             ref: isReference ? req.orig : 0,
                             ref_id: req.ref_id || null,
                             orig: req.orig || null,
@@ -777,8 +795,14 @@ class IntegramTable{
                 this.options.title = metadata.val || metadata.value;
             }
 
+            // Store table-level granted value for access control (issue #1508)
+            this.tableGranted = metadata.granted !== undefined ? metadata.granted : null;
+
             // Convert metadata to columns format
             const columns = [];
+
+            // Determine main column editability: WRITE if table is writable (issue #1508)
+            const mainColGranted = this.isTableWritable() ? 1 : 0;
 
             // First column: use metadata.id as column id (not sequential index)
             columns.push({
@@ -786,7 +810,7 @@ class IntegramTable{
                 type: metadata.type || 'SHORT',
                 format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
                 name: metadata.val || 'Значение',
-                granted: 1,
+                granted: mainColGranted,
                 ref: 0,
                 orig: metadata.id, // Store the original table id
                 unique: metadata.unique, // Store unique flag for column edit form (issue #1026)
@@ -798,6 +822,8 @@ class IntegramTable{
                 metadata.reqs.forEach((req, idx) => {
                     const attrs = this.parseAttrs(req.attrs);
                     const isReference = req.hasOwnProperty('ref_id');
+                    // Use req.granted if table is not fully writable; otherwise treat as writable (issue #1508)
+                    const reqGranted = this.isTableWritable() ? 1 : (req.granted === 'WRITE' ? 1 : 0);
 
                     columns.push({
                         id: String(req.id),
@@ -806,7 +832,7 @@ class IntegramTable{
                         format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
                         name: attrs.alias || req.val,
                         val: req.val, // Store original name for alias display (issue #945)
-                        granted: 1,  // In object format, allow editing all cells
+                        granted: reqGranted,  // Use metadata granted for access control (issue #1508)
                         ref: isReference ? req.orig : 0,
                         ref_id: req.ref_id || null,
                         orig: req.orig || null,
@@ -963,8 +989,14 @@ class IntegramTable{
                     this.options.title = metadata.val || metadata.value;
                 }
 
+                // Store table-level granted value for access control (issue #1508)
+                this.tableGranted = metadata.granted !== undefined ? metadata.granted : null;
+
                 // Convert metadata to columns format
                 const columns = [];
+
+                // Determine main column editability: WRITE if table is writable (issue #1508)
+                const mainColGranted = this.isTableWritable() ? 1 : 0;
 
                 // Add main value column (use metadata.id as column id for correct FR_{id} filter params - issue #793)
                 columns.push({
@@ -972,7 +1004,7 @@ class IntegramTable{
                     type: metadata.type || 'SHORT',
                     format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
                     name: metadata.val || metadata.name || 'Значение',
-                    granted: 1,
+                    granted: mainColGranted,
                     ref: 0,
                     orig: metadata.id,
                     unique: metadata.unique, // Store unique flag for column edit form (issue #1026)
@@ -984,6 +1016,8 @@ class IntegramTable{
                     metadata.reqs.forEach((req, idx) => {
                         const attrs = this.parseAttrs(req.attrs);
                         const isReference = req.hasOwnProperty('ref_id');
+                        // Use req.granted if table is not fully writable; otherwise treat as writable (issue #1508)
+                        const reqGranted = this.isTableWritable() ? 1 : (req.granted === 'WRITE' ? 1 : 0);
 
                         columns.push({
                             id: String(req.id),
@@ -992,7 +1026,7 @@ class IntegramTable{
                             format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
                             name: attrs.alias || req.val,
                             val: req.val, // Store original name for alias display (issue #945)
-                            granted: 1,  // In object format, allow editing all cells
+                            granted: reqGranted,  // Use metadata granted for access control (issue #1508)
                             ref: isReference ? req.orig : 0,
                             ref_id: req.ref_id || null,
                             orig: req.orig || null,
@@ -1258,7 +1292,7 @@ class IntegramTable{
                                 </div>
                             </div>
                             ` : '' }
-                            ${ this.checkboxMode && this.selectedRows.size > 0 ? `
+                            ${ this.checkboxMode && this.selectedRows.size > 0 && this.isTableWritable() ? `
                             <button class="btn btn-sm btn-danger integram-bulk-delete-btn" id="${ instanceName }-bulk-delete-btn" onclick="window.${ instanceName }.showBulkDeleteConfirm(event)">
                                 Удалить (${ this.selectedRows.size })
                             </button>
@@ -2275,9 +2309,9 @@ class IntegramTable{
                 ? `<span class="total-count-unknown" onclick="window.${ instanceName }.fetchTotalCount()" title="Нажмите, чтобы узнать общее количество">?</span>`
                 : this.totalRows;
 
-            // Show add row button only for object-source tables (issue #807)
+            // Show add row button only for object-source tables with write access (issue #807, #1508)
             const isObjectSource = this.objectTableId || this.getDataSourceType() === 'table';
-            const addRowBtnHtml = isObjectSource
+            const addRowBtnHtml = isObjectSource && this.isTableWritable()
                 ? `<button class="add-row-btn" onclick="window.${ instanceName }.addNewRow()" title="Добавить строку в таблицу"><i class="pi pi-plus"></i></button>`
                 : '';
 
@@ -9282,8 +9316,18 @@ class IntegramTable{
                 tabsHtml += `</div>`;
             }
 
+            // Determine edit form write access (issue #1508)
+            // Use the metadata's granted field for this specific form (may differ from table-level for nested forms)
+            const metadataGranted = metadata.granted !== undefined ? metadata.granted : null;
+            const formIsReadOnly = metadataGranted !== null && metadataGranted !== 'WRITE';
+            const formHasSomeWritable = formIsReadOnly
+                ? (reqs.some(req => req.granted === 'WRITE'))
+                : true;
+            const showSaveBtn = !formIsReadOnly || formHasSomeWritable;
+            const showDeleteBtn = !isCreate && !formIsReadOnly;
+
             // Build attributes form HTML
-            let attributesHtml = this.renderAttributesForm(metadata, recordData, regularFields, recordReqs, isCreate, typeId);
+            let attributesHtml = this.renderAttributesForm(metadata, recordData, regularFields, recordReqs, isCreate, typeId, formIsReadOnly);
 
             let formHtml = `
                 <div class="edit-form-header">
@@ -9320,8 +9364,8 @@ class IntegramTable{
                         <i class="pi pi-cog"></i>
                     </button>
                     <div class="edit-form-footer-buttons">
-                        ${ !isCreate ? '<button type="button" class="btn btn-danger" id="delete-record-btn" style="display:none;">Удалить</button>' : '' }
-                        <button type="button" class="btn btn-primary" id="save-record-btn">Сохранить</button>
+                        ${ showDeleteBtn ? '<button type="button" class="btn btn-danger" id="delete-record-btn" style="display:none;">Удалить</button>' : '' }
+                        ${ showSaveBtn ? '<button type="button" class="btn btn-primary" id="save-record-btn">Сохранить</button>' : '' }
                         <button type="button" class="btn btn-secondary" data-close-modal="true">Отменить</button>
                     </div>
                 </div>
@@ -9358,6 +9402,13 @@ class IntegramTable{
                 this.attachTabHandlers(modal);
             }
 
+            // Disable form elements in read-only form-groups (issue #1508)
+            if (formIsReadOnly) {
+                modal.querySelectorAll('.form-field-readonly input, .form-field-readonly textarea, .form-field-readonly select').forEach(el => {
+                    el.disabled = true;
+                });
+            }
+
             // Load reference options for dropdowns (scoped to this modal)
             this.loadReferenceOptions(metadata.reqs, recordId || 0, modal);
 
@@ -9382,17 +9433,19 @@ class IntegramTable{
             // Apply saved field visibility settings
             this.applyFormFieldSettings(modal, typeId);
 
-            // Attach save handler
+            // Attach save handler (only if save button is present - issue #1508)
             const saveBtn = modal.querySelector('#save-record-btn');
 
-            saveBtn.addEventListener('click', async () => {
-                saveBtn.disabled = true;
-                try {
-                    await this.saveRecord(modal, isCreate, recordId, typeId, parentId, columnId);
-                } finally {
-                    saveBtn.disabled = false;
-                }
-            });
+            if (saveBtn) {
+                saveBtn.addEventListener('click', async () => {
+                    saveBtn.disabled = true;
+                    try {
+                        await this.saveRecord(modal, isCreate, recordId, typeId, parentId, columnId);
+                    } finally {
+                        saveBtn.disabled = false;
+                    }
+                });
+            }
 
             // Attach delete handler (edit mode only)
             if (!isCreate) {
@@ -9444,14 +9497,16 @@ class IntegramTable{
             document.addEventListener('keydown', handleEscape);
 
             // Enter in input/textarea triggers Save (issue #1422)
-            modal.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
-                    if (!saveBtn.disabled) {
-                        e.preventDefault();
-                        saveBtn.click();
+            if (saveBtn) {
+                modal.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+                        if (!saveBtn.disabled) {
+                            e.preventDefault();
+                            saveBtn.click();
+                        }
                     }
-                }
-            });
+                });
+            }
 
             // Focus the first visible, non-hidden input/textarea/select in the form (issue #1420)
             const firstField = modal.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([readonly]), textarea, select');
@@ -9460,7 +9515,7 @@ class IntegramTable{
             }
         }
 
-        renderAttributesForm(metadata, recordData, regularFields, recordReqs, isCreate = false, typeId = null) {
+        renderAttributesForm(metadata, recordData, regularFields, recordReqs, isCreate = false, typeId = null, formIsReadOnly = false) {
             let html = '';
 
             // Get current date/datetime for default values in create mode
@@ -9479,6 +9534,9 @@ class IntegramTable{
                 currentDateDisplay = now.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.'); // DD.MM.YYYY
                 currentDateTimeDisplay = currentDateDisplay + ' ' + now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); // DD.MM.YYYY HH:MM
             }
+
+            // When formIsReadOnly, the main value field is always read-only (issue #1508)
+            const mainFieldReadOnly = formIsReadOnly;
 
             // Main value field - render according to base type
             const typeName = this.getMetadataName(metadata);
@@ -9535,7 +9593,7 @@ class IntegramTable{
             }
 
             html += `
-                <div class="form-group">
+                <div class="form-group${ mainFieldReadOnly ? ' form-field-readonly' : '' }">
                     <label for="field-main">${ typeName } <span class="required">*</span></label>
                     ${ mainFieldHtml }
                 </div>
@@ -9565,8 +9623,10 @@ class IntegramTable{
                 const isMulti = attrs.multi; // Issue #853
                 // Apply default value from attrs when creating a new record (issue #1498)
                 const reqValue = storedValue || (isCreate ? this.resolveDefaultValue(req.attrs, baseFormat) : '');
+                // Field is read-only when form is read-only and req does not have granted: "WRITE" (issue #1508)
+                const isReqReadOnly = formIsReadOnly && req.granted !== 'WRITE';
 
-                html += `<div class="form-group">`;
+                html += `<div class="form-group${ isReqReadOnly ? ' form-field-readonly' : '' }">`;
                 // Password reset buttons in label for field id=20 (issue #1471)
                 if (String(req.id) === '20' && baseFormat === 'PWD') {
                     html += `<label for="field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }&nbsp;<a class="pwd-reset-btn" data-field-id="${ req.id }" title="Задать пароль и скопировать его в буфер" style="cursor:pointer"><svg width="20" height="20" viewBox="0 1 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.42858 9.28572V6.42858C6.42858 5.48137 6.80486 4.57297 7.47463 3.90319C8.1444 3.23342 9.05281 2.85715 10 2.85715C10.9472 2.85715 11.8556 3.23342 12.5254 3.90319C13.1952 4.57297 13.5714 5.48137 13.5714 6.42858V9.28572M5.00001 9.28572H15C15.789 9.28572 16.4286 9.92531 16.4286 10.7143V15.7143C16.4286 16.5033 15.789 17.1429 15 17.1429H5.00001C4.21103 17.1429 3.57144 16.5033 3.57144 15.7143V10.7143C3.57144 9.92531 4.21103 9.28572 5.00001 9.28572Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>&nbsp;<a class="pwd-reset-mail-btn" data-field-id="${ req.id }" title="Задать пароль и скопировать в буфер приглашение пользователю" style="cursor:pointer"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M17.1429 5.71434C17.1429 4.92862 16.5 4.28577 15.7143 4.28577H4.28571C3.5 4.28577 2.85714 4.92862 2.85714 5.71434M17.1429 5.71434V14.2858C17.1429 15.0715 16.5 15.7143 15.7143 15.7143H4.28571C3.5 15.7143 2.85714 15.0715 2.85714 14.2858V5.71434M17.1429 5.71434L10 10.7143L2.85714 5.71434" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/></svg></a><span class="pwd-reset-copied" id="field-${ req.id }-copied" style="display:none">Ok</span></label>`;
