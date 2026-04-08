@@ -9643,18 +9643,47 @@ class IntegramTable{
                 </div>
             `;
 
-            // Sort fields by saved order if available
+            // Sort fields by saved order if available.
+            // Fields not present in the saved order (e.g. newly added fields) are inserted
+            // at their natural metadata position relative to their neighbors, rather than
+            // being appended at the end (issue #1526).
             const savedFieldOrder = this.loadFormFieldOrder(typeId);
             const sortedFields = [...regularFields];
             if (savedFieldOrder.length > 0) {
-                sortedFields.sort((a, b) => {
-                    const idxA = savedFieldOrder.indexOf(String(a.id));
-                    const idxB = savedFieldOrder.indexOf(String(b.id));
-                    if (idxA === -1 && idxB === -1) return 0;
-                    if (idxA === -1) return 1;
-                    if (idxB === -1) return -1;
-                    return idxA - idxB;
+                // Build a numeric sort key for each field.
+                // Saved fields get integer keys: their saved index * scale.
+                // Unsaved fields get a fractional key placed before the next saved neighbor,
+                // so they appear at approximately the right metadata position.
+                const scale = regularFields.length + 1;
+
+                // Compute saved-order index for each field (-1 if not in savedFieldOrder)
+                const savedIndex = new Map();
+                regularFields.forEach(req => {
+                    savedIndex.set(req.id, savedFieldOrder.indexOf(String(req.id)));
                 });
+
+                // Assign sort keys
+                const sortKey = new Map();
+                regularFields.forEach((req, natIdx) => {
+                    const idx = savedIndex.get(req.id);
+                    if (idx !== -1) {
+                        sortKey.set(req.id, idx * scale);
+                    } else {
+                        // Find saved successor: the nearest saved field that comes AFTER
+                        // this field in the original metadata order
+                        let nextSavedIdx = savedFieldOrder.length; // default: after all saved fields
+                        for (let i = natIdx + 1; i < regularFields.length; i++) {
+                            const si = savedIndex.get(regularFields[i].id);
+                            if (si !== -1) { nextSavedIdx = si; break; }
+                        }
+                        // Count how many unsaved fields share the same saved successor
+                        // so they can be ordered by natIdx within the same slot
+                        // Key = nextSaved slot start - 1 + small fractional offset
+                        sortKey.set(req.id, nextSavedIdx * scale - scale + natIdx + 1);
+                    }
+                });
+
+                sortedFields.sort((a, b) => sortKey.get(a.id) - sortKey.get(b.id));
             }
 
             sortedFields.forEach(req => {
@@ -12126,10 +12155,16 @@ class IntegramTable{
                     // Build a map of fieldId -> form-group element
                     const groupMap = {};
                     formGroups.forEach(group => {
-                        // Find the field input inside to get its ID
-                        const input = group.querySelector('[id^="field-"]');
+                        // Find the field input inside to get its ID.
+                        // Prefer hidden inputs (name^="t") which carry the canonical field ID,
+                        // because FILE-type fields have a type="file" input with id="field-{id}-file"
+                        // that appears before the hidden input id="field-{id}" (issue #1526).
+                        let input = group.querySelector('input[type="hidden"][id^="field-"], input[id^="field-"]:not([type="file"])');
+                        if (!input) {
+                            input = group.querySelector('[id^="field-"]');
+                        }
                         if (input) {
-                            const match = input.id.match(/^field-(.+?)(-search|-picker)?$/);
+                            const match = input.id.match(/^field-(.+?)(-search|-picker|-file)?$/);
                             if (match) {
                                 groupMap[match[1]] = group;
                             }
@@ -12154,9 +12189,13 @@ class IntegramTable{
                     });
                     // Append remaining groups that weren't in the saved order
                     formGroups.forEach(group => {
-                        const input = group.querySelector('[id^="field-"]');
+                        // Use the same reliable input lookup as above (issue #1526)
+                        let input = group.querySelector('input[type="hidden"][id^="field-"], input[id^="field-"]:not([type="file"])');
+                        if (!input) {
+                            input = group.querySelector('[id^="field-"]');
+                        }
                         if (input) {
-                            const match = input.id.match(/^field-(.+?)(-search|-picker)?$/);
+                            const match = input.id.match(/^field-(.+?)(-search|-picker|-file)?$/);
                             if (match && !usedIds.has(match[1])) {
                                 orderedGroups.push(group);
                             }
