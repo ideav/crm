@@ -1286,7 +1286,11 @@ class MainAppController {
 
             if (response.ok) {
                 const data = await response.json();
-                if (data && data.obj) {
+                const serverError = Array.isArray(data) ? (data[0] && data[0].error) : data.error;
+                if (serverError) {
+                    console.error('Failed to create menu item: server error', serverError);
+                    this.showErrorModal('Ошибка создания пункта меню: ' + serverError);
+                } else if (data && data.obj) {
                     // Successfully created - add to local data and rebuild menu
                     const newItem = {
                         menu_id: String(data.obj),
@@ -1354,6 +1358,13 @@ class MainAppController {
             });
 
             if (response.ok) {
+                const data = await response.json();
+                const serverError = Array.isArray(data) ? (data[0] && data[0].error) : data.error;
+                if (serverError) {
+                    console.error('Failed to update menu item: server error', serverError);
+                    this.showErrorModal('Ошибка обновления пункта меню: ' + serverError);
+                    return;
+                }
                 // Successfully saved - update local data
                 item.name = name;
                 item.href = href;

@@ -3857,8 +3857,9 @@ class IntegramTable{
                     throw new Error(`Невалидный JSON ответ: ${responseText}`);
                 }
 
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 // Update cell display with comma-separated text of selected items
@@ -3982,8 +3983,9 @@ class IntegramTable{
                 }
 
                 // Check if response has error key anywhere in the JSON
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 // Save confirmed — remove the saving highlight
@@ -4316,8 +4318,9 @@ class IntegramTable{
                     result = { success: true };
                 }
 
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 // Extract created record ID and value from response
@@ -4480,8 +4483,9 @@ class IntegramTable{
                 }
 
                 // Check if response has error key anywhere in the JSON
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 // Check for warnings (plural) - show modal but continue with save (issue #610)
@@ -4568,8 +4572,9 @@ class IntegramTable{
                     result = { success: true };
                 }
 
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 // Extract created record ID from response
@@ -8364,8 +8369,9 @@ class IntegramTable{
                     }
 
                     // Check for error in response
-                    if (data.error) {
-                        throw new Error(data.error);
+                    const serverError = this.getServerError(data);
+                    if (serverError) {
+                        throw new Error(serverError);
                     }
 
                     this.metadataCache[typeId] = data;
@@ -8548,8 +8554,9 @@ class IntegramTable{
                 const data = JSON.parse(text);
 
                 // Check for error in response
-                if (data.error) {
-                    throw new Error(data.error);
+                const serverError = this.getServerError(data);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 // Parse JSON text to extract key-value pairs in original server order
@@ -8893,6 +8900,18 @@ class IntegramTable{
 
         getMetadataName(metadata) {
             return metadata.val || metadata.name || metadata.title || `Тип #${ metadata.id || '?' }`;
+        }
+
+        /**
+         * Extract error message from server response (issue #1506).
+         * The server may return errors as {"error":"..."} or [{"error":"..."}].
+         * Returns the error string if present, otherwise null.
+         */
+        getServerError(result) {
+            if (Array.isArray(result)) {
+                return (result[0] && result[0].error) || null;
+            }
+            return result.error || null;
         }
 
         getApiBase() {
@@ -10614,8 +10633,9 @@ class IntegramTable{
                         throw new Error(`Невалидный JSON ответ: ${responseText}`);
                     }
 
-                    if (result.error) {
-                        throw new Error(result.error);
+                    const serverError = this.getServerError(result);
+                    if (serverError) {
+                        throw new Error(serverError);
                     }
 
                     closeModal();
@@ -11725,8 +11745,9 @@ class IntegramTable{
                     result = { success: true };
                 }
 
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 const createdId = result.obj || result.id || result.i;
@@ -12223,8 +12244,9 @@ class IntegramTable{
                     result = { success: true };
                 }
 
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 // Check for warning - show modal and stay in edit mode
@@ -12737,8 +12759,9 @@ class IntegramTable{
 
             const result = await response.json();
 
-            if (result.error) {
-                throw new Error(result.error);
+            const serverError = this.getServerError(result);
+            if (serverError) {
+                throw new Error(serverError);
             }
 
             // Return the file path from server response
@@ -14914,8 +14937,9 @@ class IntegramCreateFormHelper {
                 throw new Error(`Invalid response: ${text}`);
             }
 
-            if (result.error) {
-                throw new Error(result.error);
+            const serverError = this.getServerError(result);
+            if (serverError) {
+                throw new Error(serverError);
             }
 
             // Success - close modal
@@ -15919,8 +15943,9 @@ class IntegramCreateFormHelper {
                 throw new Error(`Invalid response: ${text}`);
             }
 
-            if (result.error) {
-                throw new Error(result.error);
+            const serverError = this.getServerError(result);
+            if (serverError) {
+                throw new Error(serverError);
             }
 
             // Success - close modal
