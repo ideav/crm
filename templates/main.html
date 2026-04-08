@@ -227,7 +227,8 @@
             if(m=='POST') // Если это POST запрос, то передаем заданные параметры
                 if(typeof vars=='object')
                     vars.append('_xsrf',xsrf);
-                else{//     obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+                else{
+                    obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
                     vars='_xsrf='+xsrf+'&'+vars; // добавляем токен xsrf, необходимый для POST-запроса
                 }
             obj.onload=function(e){ // Когда запрос вернет результат - сработает эта функция
