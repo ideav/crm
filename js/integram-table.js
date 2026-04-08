@@ -3385,6 +3385,13 @@ class IntegramTable{
                 // Track if all options have been fetched (50+ means we only got first 50)
                 this.currentEditingCell.allOptionsFetched = options.length < 50;
 
+                // Issue #1518: Pre-fill search input with current value so user can see what is selected.
+                // Select all text so any keystroke immediately replaces it for a new search.
+                if (currentValue) {
+                    searchInput.value = currentValue;
+                    searchInput.select();
+                }
+
                 // Focus the search input
                 searchInput.focus();
 
@@ -3394,7 +3401,7 @@ class IntegramTable{
                     const searchText = e.target.value.trim();
 
                     // Toggle buttons based on search input length (issue #217)
-                    // When search has text: show add button (if available), hide clear button
+                    // When search has text (typed by user): show add button (if available), hide clear button
                     // When search is empty: hide add button, show clear button
                     if (searchText.length > 0) {
                         if (addButton) {
