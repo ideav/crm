@@ -1339,43 +1339,77 @@ class IntegramTable{
                     <div class="integram-table-container">
                         <table class="integram-table${ this.settings.compact ? ' compact' : '' }">
                         <thead>
-                            <tr>
-                                ${ this.checkboxMode ? `<th class="checkbox-column-header"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.data.length > 0 && this.selectedRows.size === this.data.length ? 'checked' : '' }></th>` : '' }
-                                ${ this.groupingEnabled && this.groupingColumns.length > 0 ?
-                                    this.renderGroupedHeaders(orderedColumns, instanceName) :
-                                    orderedColumns.map(col => {
+                            ${ (() => {
+                                // Smart header grouping (issue #1540)
+                                // Only apply when NOT in row-grouping mode (grouping mode has its own header)
+                                const useSmartHeaders = !(this.groupingEnabled && this.groupingColumns.length > 0);
+                                const smartTree = useSmartHeaders ? this.buildSmartHeaderTree(orderedColumns) : null;
+                                const smartDepth = smartTree ? this.smartHeaderTreeDepth(smartTree) : 1;
+                                const hasSmartGroups = smartDepth > 1;
+
+                                if (useSmartHeaders && hasSmartGroups) {
+                                    // Multi-row smart header
+                                    const rowsOfCells = this.renderSmartHeaderRows(smartTree, smartDepth, 0, instanceName);
+                                    const checkboxHtml = this.checkboxMode
+                                        ? `<th class="checkbox-column-header" rowspan="${ smartDepth }"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.data.length > 0 && this.selectedRows.size === this.data.length ? 'checked' : '' }></th>`
+                                        : '';
+                                    const addColHtml = this.isStructureWritable()
+                                        ? `<th class="add-column-header-cell" rowspan="${ smartDepth }" style="width: 36px; min-width: 36px;" title="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus"></i></th>`
+                                        : '';
+                                    return rowsOfCells.map((cells, rowIdx) => `
+                                        <tr>
+                                            ${ rowIdx === 0 ? checkboxHtml : '' }
+                                            ${ cells.join('') }
+                                            ${ rowIdx === 0 ? addColHtml : '' }
+                                        </tr>
+                                    `).join('') + (this.filtersEnabled ? `
+                                    <tr class="filter-row">
+                                        ${ this.checkboxMode ? '<td class="checkbox-column-filter"></td>' : '' }
+                                        ${ orderedColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('') }
+                                        <td class="add-column-filter-cell"></td>
+                                    </tr>
+                                    ` : '');
+                                }
+
+                                // Single-row header (original logic)
+                                const singleRowCells = this.groupingEnabled && this.groupingColumns.length > 0
+                                    ? this.renderGroupedHeaders(orderedColumns, instanceName)
+                                    : orderedColumns.map(col => {
                                         const width = this.columnWidths[col.id];
                                         const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
                                         const addButtonHtml = this.shouldShowAddButton(col) ?
                                             `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
-
-                                        // Add sort indicator if this column is sorted
                                         let sortIndicator = '';
                                         if (this.sortColumn === col.id) {
                                             sortIndicator = this.sortDirection === 'asc' ? '<i class="pi pi-sort-amount-up-alt" style="font-size:0.75em;"></i> ' : '<i class="pi pi-sort-amount-down" style="font-size:0.75em;"></i> ';
                                         }
-
                                         return `
-                                        <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
-                                            <span class="column-header-content" data-column-id="${ col.id }">${ sortIndicator }${ col.name }</span>
-                                            ${ addButtonHtml }
-                                            <div class="column-resize-handle" data-column-id="${ col.id }"></div>
-                                        </th>
-                                    `;
-                                    }).join('')
-                                }
-                                ${ this.isStructureWritable() ? `<th class="add-column-header-cell" style="width: 36px; min-width: 36px;" title="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus"></i></th>` : '' }
-                            </tr>
-                            ${ this.filtersEnabled ? `
-                            <tr class="filter-row">
-                                ${ this.checkboxMode ? '<td class="checkbox-column-filter"></td>' : '' }
-                                ${ this.groupingEnabled && this.groupingColumns.length > 0 ?
-                                    this.renderGroupedFilterRow(orderedColumns) :
-                                    orderedColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('')
-                                }
-                                <td class="add-column-filter-cell"></td>
-                            </tr>
-                            ` : '' }
+                                            <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
+                                                <span class="column-header-content" data-column-id="${ col.id }">${ sortIndicator }${ col.name }</span>
+                                                ${ addButtonHtml }
+                                                <div class="column-resize-handle" data-column-id="${ col.id }"></div>
+                                            </th>
+                                        `;
+                                    }).join('');
+
+                                return `
+                                    <tr>
+                                        ${ this.checkboxMode ? `<th class="checkbox-column-header"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.data.length > 0 && this.selectedRows.size === this.data.length ? 'checked' : '' }></th>` : '' }
+                                        ${ singleRowCells }
+                                        ${ this.isStructureWritable() ? `<th class="add-column-header-cell" style="width: 36px; min-width: 36px;" title="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus"></i></th>` : '' }
+                                    </tr>
+                                    ${ this.filtersEnabled ? `
+                                    <tr class="filter-row">
+                                        ${ this.checkboxMode ? '<td class="checkbox-column-filter"></td>' : '' }
+                                        ${ this.groupingEnabled && this.groupingColumns.length > 0 ?
+                                            this.renderGroupedFilterRow(orderedColumns) :
+                                            orderedColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('')
+                                        }
+                                        <td class="add-column-filter-cell"></td>
+                                    </tr>
+                                    ` : '' }
+                                `;
+                            })() }
                         </thead>
                         <tbody>
                             ${ this.groupingEnabled && this.groupedData.length > 0 ?
@@ -2264,6 +2298,176 @@ class IntegramTable{
             });
 
             return rowsHtml;
+        }
+
+        /**
+         * Smart header grouping (issue #1540)
+         * Find the longest common whole-word prefix of two column name strings.
+         */
+        _smartHeaderLCP(a, b) {
+            const wa = a.split(' ');
+            const wb = b.split(' ');
+            let n = 0;
+            for (let i = 0; i < Math.min(wa.length, wb.length); i++) {
+                if (wa[i] === wb[i]) n = i + 1;
+                else break;
+            }
+            return wa.slice(0, n).join(' ');
+        }
+
+        /**
+         * Build smart header grouping tree from an ordered list of columns.
+         *
+         * A group [start..end) with prefix P is valid only if:
+         *   - ≥2 consecutive columns all start with P+" " (non-empty suffix)
+         *   - The column before start (if any) does NOT start with P+" "
+         *   - The column after end (if any) does NOT start with P+" "
+         *   - The group is NOT universal (does not span ALL columns at this level)
+         *
+         * Finds the SHORTEST non-universal prefix first (top-down approach so that
+         * broader groupings like "foo bar" contain narrower ones like "foo bar baz").
+         *
+         * Returns array of nodes:
+         *   { type:'leaf', col, suffix }
+         *   { type:'group', prefix, span, children }
+         */
+        buildSmartHeaderTree(columns) {
+            if (columns.length === 0) return [];
+            if (columns.length === 1) {
+                return [{ type: 'leaf', col: columns[0], suffix: columns[0].name }];
+            }
+
+            // Compute pair-prefix for each adjacent pair
+            const pairPrefixes = [];
+            for (let i = 0; i < columns.length - 1; i++) {
+                const prefix = this._smartHeaderLCP(columns[i].name, columns[i + 1].name);
+                const len = prefix.split(' ').filter(Boolean).length;
+                pairPrefixes.push({ i, prefix, len });
+            }
+
+            // Sort ascending by length to find the SHORTEST non-universal prefix
+            const sorted = [...pairPrefixes].sort((a, b) => a.len - b.len || a.i - b.i);
+
+            let targetLen = -1;
+            for (const pair of sorted) {
+                if (pair.len === 0) continue;
+                const prefix = pair.prefix;
+                // Find the full extent of this prefix among consecutive columns
+                let start = pair.i;
+                while (start > 0 && columns[start - 1].name !== prefix &&
+                       columns[start - 1].name.startsWith(prefix + ' ')) start--;
+                let end = pair.i + 1;
+                while (end < columns.length && columns[end].name !== prefix &&
+                       columns[end].name.startsWith(prefix + ' ')) end++;
+                // Skip if universal (spans ALL columns at this level)
+                if (start === 0 && end === columns.length) continue;
+                targetLen = pair.len;
+                break;
+            }
+
+            if (targetLen === -1) {
+                // No valid non-universal group — all leaves
+                return columns.map(col => ({ type: 'leaf', col, suffix: col.name }));
+            }
+
+            // Build result: form all groups at targetLen, leaves elsewhere
+            const result = [];
+            let i = 0;
+            while (i < columns.length) {
+                let grouped = false;
+                if (i + 1 < columns.length) {
+                    const pairPrefix = this._smartHeaderLCP(columns[i].name, columns[i + 1].name);
+                    const pairLen = pairPrefix.split(' ').filter(Boolean).length;
+                    if (pairLen >= targetLen) {
+                        const prefix = columns[i].name.split(' ').slice(0, targetLen).join(' ');
+                        if (columns[i].name.startsWith(prefix + ' ') && columns[i].name !== prefix) {
+                            const leftOk = i === 0 || !columns[i - 1].name.startsWith(prefix + ' ');
+                            if (leftOk) {
+                                let end = i + 1;
+                                while (end < columns.length && columns[end].name !== prefix &&
+                                       columns[end].name.startsWith(prefix + ' ')) end++;
+                                const rightOk = end >= columns.length || !columns[end].name.startsWith(prefix + ' ');
+                                if (rightOk && end - i >= 2) {
+                                    const groupCols = columns.slice(i, end);
+                                    const suffixCols = groupCols.map(col => ({
+                                        ...col, name: col.name.slice(prefix.length + 1)
+                                    }));
+                                    result.push({
+                                        type: 'group',
+                                        prefix,
+                                        span: end - i,
+                                        children: this.buildSmartHeaderTree(suffixCols)
+                                    });
+                                    i = end;
+                                    grouped = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (!grouped) {
+                    result.push({ type: 'leaf', col: columns[i], suffix: columns[i].name });
+                    i++;
+                }
+            }
+            return result;
+        }
+
+        /**
+         * Compute the depth (number of header rows) of a smart header tree.
+         */
+        smartHeaderTreeDepth(nodes) {
+            return nodes.reduce((max, n) =>
+                Math.max(max, n.type === 'group' ? 1 + this.smartHeaderTreeDepth(n.children) : 1), 0);
+        }
+
+        /**
+         * Render the smart header tree into an array of row HTML strings.
+         * Returns an array of length totalDepth, each element is the inner HTML
+         * of one <tr> (excluding the tr tags themselves).
+         *
+         * Each leaf <th> has data-column-id, draggable, width style, sort indicator,
+         * add button, and resize handle — the full decoration needed for interaction.
+         *
+         * Group <th> cells show only the shared prefix text (truncated via CSS).
+         */
+        renderSmartHeaderRows(nodes, totalDepth, depth, instanceName) {
+            // rows[i] = array of <th> HTML strings for header row i
+            const rows = Array.from({ length: totalDepth }, () => []);
+
+            const visit = (nodes, depth) => {
+                for (const node of nodes) {
+                    if (node.type === 'leaf') {
+                        const col = node.col;
+                        const rowspan = totalDepth - depth;
+                        const width = this.columnWidths[col.id];
+                        const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
+                        const addButtonHtml = this.shouldShowAddButton(col) ?
+                            `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
+                        let sortIndicator = '';
+                        if (this.sortColumn === col.id) {
+                            sortIndicator = this.sortDirection === 'asc'
+                                ? '<i class="pi pi-sort-amount-up-alt" style="font-size:0.75em;"></i> '
+                                : '<i class="pi pi-sort-amount-down" style="font-size:0.75em;"></i> ';
+                        }
+                        rows[depth].push(`
+                            <th data-column-id="${ col.id }" draggable="true"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' }>
+                                <span class="column-header-content" data-column-id="${ col.id }">${ sortIndicator }${ col.name }</span>
+                                ${ addButtonHtml }
+                                <div class="column-resize-handle" data-column-id="${ col.id }"></div>
+                            </th>
+                        `);
+                    } else {
+                        rows[depth].push(`
+                            <th class="smart-header-group" colspan="${ node.span }">${ node.prefix }</th>
+                        `);
+                        visit(node.children, depth + 1);
+                    }
+                }
+            };
+
+            visit(nodes, depth || 0);
+            return rows;
         }
 
         /**
