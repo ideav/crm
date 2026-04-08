@@ -555,6 +555,17 @@
     box-shadow: 0 0 0 2px var(--button-primary);
 }
 
+/* New table highlight animation */
+@keyframes tableCardNewHighlight {
+    0%   { box-shadow: 0 0 0 3px var(--button-primary); background-color: rgba(59, 130, 246, 0.15); }
+    70%  { box-shadow: 0 0 0 3px var(--button-primary); background-color: rgba(59, 130, 246, 0.15); }
+    100% { box-shadow: none; background-color: var(--bg-secondary); }
+}
+
+.table-card.new-table-highlight {
+    animation: tableCardNewHighlight 2s ease-out forwards;
+}
+
 .table-card.search-hidden {
     display: none;
 }
