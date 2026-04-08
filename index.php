@@ -8885,7 +8885,10 @@ if(Validate_Token())
 					$v = (double)$value;
 				else
 */
-				$v = Format_Val($t, BuiltIn($value));
+				if(in_array($t, array(101, 102, 103, 132, 49)))
+					$v = Format_Val($t, $value);
+				else
+					$v = Format_Val($t, BuiltIn($value));
 
 				Check_Grant($i, $t); # Check the grant to change the Req
 				if(strlen($value) != 0){  # Non empty Value
@@ -9296,13 +9299,20 @@ if(Validate_Token())
                     continue;
                 if((int)$row["t"] > 17) // Skip refs
                     continue;
-    	        $meta[$row["id"]] = "\"id\":\"".$row["id"]."\",\"up\":\"".$row["up"]."\",\"type\":\"".$row["t"]."\",\"val\":\"".addcslashes($row["val"], "\\\'")."\",\"unique\":\"".$row["uniq"]."\""
-									.(isset($refs[$row["id"]]) ? ",\"referenced\":\"".$refs[$row["id"]]."\"" : "")
-									.(isset($GLOBALS["GRANTS"][$row["id"]]) ? ",\"granted\":\"".$GLOBALS["GRANTS"][$row["id"]]."\"" : "")
+				if(isset($GLOBALS["GRANTS"][$row["id"]]))
+					$granted = ",\"granted\":\"".$GLOBALS["GRANTS"][$row["id"]]."\"";
+				elseif(isset($GLOBALS["GRANTS"][1]))
+					$granted = ",\"granted\":\"".$GLOBALS["GRANTS"][1]."\"";
+				else
+					$granted = "";
+				if(!isset($meta[$row["id"]]))
+					$meta[$row["id"]] = "\"id\":\"".$row["id"]."\",\"up\":\"".$row["up"]."\",\"type\":\"".$row["t"]."\",\"val\":\"".addcslashes($row["val"], "\\\'")."\",\"unique\":\"".$row["uniq"]."\""
+									.$granted . (isset($refs[$row["id"]]) ? ",\"referenced\":\"".$refs[$row["id"]]."\"" : "")
 									.(isset($GLOBALS["GRANTS"]["EXPORT"][$row["id"]]) || isset($GLOBALS["GRANTS"]["EXPORT"][1]) ? ",\"export\":\"1\"" : "")
 									.(isset($GLOBALS["GRANTS"]["DELETE"][$row["id"]]) || isset($GLOBALS["GRANTS"]["DELETE"][1]) ? ",\"delete\":\"1\"" : "");
                 if($row["ord"])
-                    $metaReqs[$row["id"]][] = "{\"num\":".$row["ord"].",\"id\":\"".$row["req_t"]."\""
+					if(!isset($GLOBALS["GRANTS"][$row["req_t"]]) || ($GLOBALS["GRANTS"][$row["req_t"]] !== "BARRED"))
+						$metaReqs[$row["id"]][] = "{\"num\":".$row["ord"].",\"id\":\"".$row["req_t"]."\""
                                 .",\"val\":\"".addcslashes($row["req_val"], "\\\'")."\""
                                 .",\"orig\":\"".($row["ref"]?$row["ref"]:$row["ref_id"])."\""
                                 .",\"type\":\"".$row["base_typ"]."\""
