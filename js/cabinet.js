@@ -695,7 +695,7 @@ class CabinetController {
                         <div class="database-save-row">
                             <button type="button" class="btn-primary btn-small database-save-btn" style="display:none">Сохранить</button>
                             <span class="database-save-status"></span>
-                            <button type="button" class="btn-secondary btn-small database-restore-admin-btn">Восстановить админа</button>
+                            <button type="button" class="btn-secondary btn-small database-restore-admin-btn" title="Если вы смогли удалить администратора или сменили ему роль, восстановите её здесь">Восстановить админа</button>
                         </div>
                     </div>
                 </div>
