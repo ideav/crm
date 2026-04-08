@@ -6856,7 +6856,10 @@ class IntegramTable{
                                 Нет
                             </label>
                         </div>
-                        <label style="margin-left: 20px;">Переносить заголовки:</label>
+                    </div>
+
+                    <div class="table-settings-item">
+                        <label>Переносить заголовки:</label>
                         <div>
                             <label>
                                 <input type="radio" name="wrap-headers" value="yes" ${ this.settings.wrapHeaders ? 'checked' : '' }>
