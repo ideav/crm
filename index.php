@@ -1164,12 +1164,14 @@ function IsOccupied($id)
 	    return true;
 	return false;
 }
-function my_die($msg){
+function my_die($msg, $code=""){
 	if(isset($GLOBALS["TRACE"])){
 		print_r($GLOBALS["GRANTS"]);
 		print_r($GLOBALS["CUR_VARS"]);
 		print($GLOBALS["TRACE"]);
 	}
+	if($code !== "")
+		header("HTTP/1.0 $code");
 	if(isApi())
 	    api_dump(json_encode([["error" => $msg]], JSON_UNESCAPED_UNICODE));
 	else
@@ -1196,7 +1198,7 @@ function Check_Grant($id, $t=0, $grant="WRITE", $fatal=TRUE)	# $fatal stops the 
 			            .") или его родителю ".$id." (".$GLOBALS["GRANTS"][$id]."). Ваш глобальный доступ: '"
 			        ."[EN]The object is not granted  $id, $t (".$GLOBALS["GRANTS"][$t]
 			            .") neither its parent ".$id." (".$GLOBALS["GRANTS"][$id]."). The access level is: '")
-			.$GLOBALS["GRANTS"][1]."'");
+			.$GLOBALS["GRANTS"][1]."'", "403 Forbidden");
 	}
 	elseif(isset($GLOBALS["GRANTS"][$id]))
 	{
@@ -1209,7 +1211,7 @@ function Check_Grant($id, $t=0, $grant="WRITE", $fatal=TRUE)	# $fatal stops the 
 			            .") или его родителю ".$id." (".$GLOBALS["GRANTS"][$id]."). Ваш глобальный доступ: '"
 			        ."[EN]The object is not granted  $id, $t (".$GLOBALS["GRANTS"][$t]
 			            .") neither its parent ".$id." (".$GLOBALS["GRANTS"][$id]."). The access level is: '")
-			.$GLOBALS["GRANTS"][1]."'");
+			.$GLOBALS["GRANTS"][1]."'", "403 Forbidden");
 	}
 	elseif($t == 0)
 		$data_set = Exec_sql("SELECT obj.t, COALESCE(par.t, 1) par_typ, COALESCE(par.id, 1) par_id, COALESCE(arr.id, -1) arr, obj.val ref
@@ -1263,10 +1265,11 @@ function Check_Grant($id, $t=0, $grant="WRITE", $fatal=TRUE)	# $fatal stops the 
 	}
 	if($fatal)
 		my_die(t9n("[RU]У вас нет доступа к реквизиту объекта: $id, $t (".$GLOBALS["GRANTS"][$row["t"]]
-			    .") или его родителю ".$row["par_id"]." (".$GLOBALS["GRANTS"][$row["par_typ"]]
-			    .")! Ваш глобальный доступ: '".$GLOBALS["GRANTS"][1]
-			."'.[EN]The object is not granted: $id, $t (".$GLOBALS["GRANTS"][$row["t"]].")neither its parent "
-			    .$row["par_id"]." (".$GLOBALS["GRANTS"][$row["par_typ"]].")! The access level is: '".$GLOBALS["GRANTS"][1]."'"));
+					    .") или его родителю ".$row["par_id"]." (".$GLOBALS["GRANTS"][$row["par_typ"]]
+					    .")! Ваш глобальный доступ: '".$GLOBALS["GRANTS"][1]
+					."'.[EN]The object is not granted: $id, $t (".$GLOBALS["GRANTS"][$row["t"]].")neither its parent "
+					    .$row["par_id"]." (".$GLOBALS["GRANTS"][$row["par_typ"]].")! The access level is: '".$GLOBALS["GRANTS"][1]."'")
+			   , "403 Forbidden");
 	return FALSE;
 }
 # Check Grants for ROOT's children
