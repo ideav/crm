@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Test issue #1504 - column-name-dict.js missing from query.html</title>
+</head>
+<body>
+<h2>Issue #1504: Auto-detection not working on query.html</h2>
+<p>This tests whether detectColumnType is available when column-name-dict.js is NOT loaded.</p>
+
+<h3>Test 1: Without column-name-dict.js</h3>
+<p id="test1-result">Checking...</p>
+
+<script>
+// Simulate what integram-table.js does in showAddColumnForm
+var result1 = typeof detectColumnType === 'function' ?
+    'PASS: detectColumnType is available' :
+    'FAIL: detectColumnType is NOT available (auto-detection will not work)';
+document.getElementById('test1-result').textContent = result1;
+document.getElementById('test1-result').style.color = result1.startsWith('PASS') ? 'green' : 'red';
+</script>
+
+<h3>Test 2: With column-name-dict.js loaded</h3>
+<p id="test2-result">Loading script...</p>
+<script>
+var s = document.createElement('script');
+s.src = '/js/column-name-dict.js';
+s.onload = function() {
+    var detected = typeof detectColumnType === 'function' ? detectColumnType('Сумма') : null;
+    var result2 = detected && detected.type === 14 ?
+        'PASS: Сумма detected as type 14 (Число с десятичной частью)' :
+        'FAIL: Сумма not detected correctly. Got: ' + JSON.stringify(detected);
+    document.getElementById('test2-result').textContent = result2;
+    document.getElementById('test2-result').style.color = result2.startsWith('PASS') ? 'green' : 'red';
+};
+document.head.appendChild(s);
+</script>
+</body>
+</html>
