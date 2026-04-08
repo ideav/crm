@@ -103,6 +103,7 @@ class IntegramTable{
                 compactForAll: true,  // true = apply compact setting to all tables without explicit setting (default)
                 pageSize: this.options.pageSize,  // Current page size
                 truncateLongValues: true,  // true = truncate to 127 chars (default)
+                wrapHeaders: false,  // false = nowrap (default), true = wrap column headers
                 hideMenuButtonLabels: false  // false = show labels below toolbar buttons (default)
             };
 
@@ -1385,7 +1386,7 @@ class IntegramTable{
                                         }
                                         return `
                                             <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
-                                                <span class="column-header-content" data-column-id="${ col.id }">${ sortIndicator }${ col.name }</span>
+                                                <span class="column-header-content" data-column-id="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ col.name }</span>
                                                 ${ addButtonHtml }
                                                 <div class="column-resize-handle" data-column-id="${ col.id }"></div>
                                             </th>
@@ -2452,7 +2453,7 @@ class IntegramTable{
                         }
                         rows[depth].push(`
                             <th data-column-id="${ col.id }" draggable="true"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' }>
-                                <span class="column-header-content" data-column-id="${ col.id }">${ sortIndicator }${ col.name }</span>
+                                <span class="column-header-content" data-column-id="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ col.name }</span>
                                 ${ addButtonHtml }
                                 <div class="column-resize-handle" data-column-id="${ col.id }"></div>
                             </th>
@@ -2508,7 +2509,7 @@ class IntegramTable{
 
                 return `
                     <th data-column-id="${ col.id }" draggable="true"${ widthStyle } class="${ groupingClass }">
-                        <span class="column-header-content" data-column-id="${ col.id }">${ groupingBadge }${ sortIndicator }${ col.name }</span>
+                        <span class="column-header-content" data-column-id="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ col.name }</span>
                         ${ addButtonHtml }
                         <div class="column-resize-handle" data-column-id="${ col.id }"></div>
                     </th>
@@ -7062,6 +7063,20 @@ class IntegramTable{
                     </div>
 
                     <div class="table-settings-item">
+                        <label>Переносить заголовки:</label>
+                        <div>
+                            <label>
+                                <input type="radio" name="wrap-headers" value="yes" ${ this.settings.wrapHeaders ? 'checked' : '' }>
+                                Да
+                            </label>
+                            <label style="margin-left: 15px;">
+                                <input type="radio" name="wrap-headers" value="no" ${ !this.settings.wrapHeaders ? 'checked' : '' }>
+                                Нет
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="table-settings-item">
                         <label>
                             <input type="checkbox" id="hide-menu-button-labels" ${ this.settings.hideMenuButtonLabels ? 'checked' : '' }>
                             Скрыть подписи к кнопкам меню
@@ -7150,6 +7165,15 @@ class IntegramTable{
                 });
             });
 
+            // Handle wrap headers change
+            modal.querySelectorAll('input[name="wrap-headers"]').forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    this.settings.wrapHeaders = e.target.value === 'yes';
+                    this.saveSettings();
+                    this.render();
+                });
+            });
+
             // Handle hide menu button labels change
             const hideMenuButtonLabelsCheckbox = modal.querySelector('#hide-menu-button-labels');
             hideMenuButtonLabelsCheckbox.addEventListener('change', (e) => {
@@ -7187,6 +7211,7 @@ class IntegramTable{
                 compactForAll: true,
                 pageSize: 20,
                 truncateLongValues: true,
+                wrapHeaders: false,
                 hideMenuButtonLabels: false
             };
             this.options.pageSize = 20;
@@ -8358,6 +8383,7 @@ class IntegramTable{
                 compactForAll: this.settings.compactForAll,
                 pageSize: this.settings.pageSize,
                 truncateLongValues: this.settings.truncateLongValues,
+                wrapHeaders: this.settings.wrapHeaders,
                 hideMenuButtonLabels: this.settings.hideMenuButtonLabels
             };
             document.cookie = `${ this.options.cookiePrefix }-settings=${ JSON.stringify(settings) }; path=/; max-age=31536000`;
@@ -8380,6 +8406,7 @@ class IntegramTable{
                     this.settings.compactForAll = settings.compactForAll !== undefined ? settings.compactForAll : true;
                     this.settings.pageSize = settings.pageSize || 20;
                     this.settings.truncateLongValues = settings.truncateLongValues !== undefined ? settings.truncateLongValues : true;
+                    this.settings.wrapHeaders = settings.wrapHeaders !== undefined ? settings.wrapHeaders : false;
                     this.settings.hideMenuButtonLabels = settings.hideMenuButtonLabels !== undefined ? settings.hideMenuButtonLabels : false;
 
                     // Update options.pageSize to match loaded settings
