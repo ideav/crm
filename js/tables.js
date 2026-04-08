@@ -679,6 +679,11 @@ class TablesController {
             const result = await response.json();
             console.log('[tables] Config saved:', result);
 
+            const serverError = Array.isArray(result) ? (result[0] && result[0].error) : result.error;
+            if (serverError) {
+                throw new Error(serverError);
+            }
+
             // If created new settings, save the ID
             if (!this.settingsID && result.id) {
                 this.settingsID = result.id;
@@ -686,6 +691,7 @@ class TablesController {
 
         } catch (err) {
             console.error('[tables] Error saving config:', err);
+            this.showErrorModal('Ошибка сохранения настроек: ' + err.message);
         }
     }
 

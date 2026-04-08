@@ -788,6 +788,12 @@ class CabinetController {
                 throw new Error('HTTP ' + response.status);
             }
 
+            const result = await response.json();
+            const serverError = Array.isArray(result) ? (result[0] && result[0].error) : result.error;
+            if (serverError) {
+                throw new Error(serverError);
+            }
+
             // Update original values after successful save
             card.querySelectorAll('[data-field]').forEach(input => {
                 const field = input.dataset.field;
@@ -811,7 +817,7 @@ class CabinetController {
             showToast('Настройки базы данных сохранены', 'success');
         } catch (err) {
             console.error('[cabinet] Error saving database settings:', err);
-            showToast('Ошибка сохранения настроек базы данных', 'error');
+            showToast('Ошибка сохранения настроек базы данных: ' + err.message, 'error');
         } finally {
             if (saveBtn) saveBtn.disabled = false;
         }
@@ -985,6 +991,12 @@ class CabinetController {
                 throw new Error('HTTP ' + response.status);
             }
 
+            const result = await response.json();
+            const serverError = Array.isArray(result) ? (result[0] && result[0].error) : result.error;
+            if (serverError) {
+                throw new Error(serverError);
+            }
+
             // Update original values after successful save
             this.originalProfileValues['profile-name'] = document.getElementById('profile-name')?.value || '';
             this.originalProfileValues['profile-phone'] = document.getElementById('profile-phone')?.value || '';
@@ -995,7 +1007,7 @@ class CabinetController {
             showToast('Профиль сохранен', 'success');
         } catch (err) {
             console.error('[cabinet] Error saving profile:', err);
-            showToast('Ошибка сохранения профиля', 'error');
+            showToast('Ошибка сохранения профиля: ' + err.message, 'error');
         } finally {
             if (saveBtn) saveBtn.disabled = false;
         }
