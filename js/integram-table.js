@@ -6201,10 +6201,19 @@ class IntegramTable{
             // Show/hide multiselect option based on list checkbox
             const listCheckbox = modal.querySelector(`#new-column-list-${instanceName}`);
             const multiselectContainer = modal.querySelector(`#multiselect-container-${instanceName}`);
+
+            // Track whether the user has manually changed type or reference flag (issue #1494)
+            let typeManuallyChanged = false;
+            let refManuallyChanged = false;
+
             listCheckbox.addEventListener('change', () => {
                 multiselectContainer.style.display = listCheckbox.checked ? 'block' : 'none';
                 if (!listCheckbox.checked) {
                     modal.querySelector(`#new-column-multiselect-${instanceName}`).checked = false;
+                }
+                // Mark as manually changed only if not triggered by auto-detection
+                if (!listCheckbox._autoDetecting) {
+                    refManuallyChanged = true;
                 }
             });
 
@@ -6212,6 +6221,11 @@ class IntegramTable{
             const nameInput = modal.querySelector(`#new-column-name-${instanceName}`);
             const suggestionsDiv = modal.querySelector(`#column-name-suggestions-${instanceName}`);
             const typeSelect = modal.querySelector(`#new-column-type-${instanceName}`);
+
+            // Mark type as manually changed when the user edits it directly (issue #1494)
+            typeSelect.addEventListener('change', () => {
+                typeManuallyChanged = true;
+            });
 
             // Get base type name by id
             const getBaseTypeName = (typeId) => {
@@ -6352,12 +6366,31 @@ class IntegramTable{
                 });
             };
 
-            // Input event for search
+            // Input event for search and auto-detection of type/reference (issue #1494)
             nameInput.addEventListener('input', () => {
                 const value = nameInput.value.trim();
                 if (value.length >= 1) {
                     const suggestions = searchMetadata(value);
                     renderSuggestions(suggestions);
+
+                    // Auto-detect base type and reference flag from column name dictionary
+                    if (typeof detectColumnType === 'function') {
+                        const detected = detectColumnType(value);
+                        if (detected) {
+                            if (!typeManuallyChanged) {
+                                typeSelect.value = String(detected.type);
+                            }
+                            if (!refManuallyChanged) {
+                                listCheckbox._autoDetecting = true;
+                                listCheckbox.checked = detected.ref;
+                                listCheckbox._autoDetecting = false;
+                                multiselectContainer.style.display = detected.ref ? 'block' : 'none';
+                                if (!detected.ref) {
+                                    modal.querySelector(`#new-column-multiselect-${instanceName}`).checked = false;
+                                }
+                            }
+                        }
+                    }
                 } else {
                     suggestionsDiv.style.display = 'none';
                 }
