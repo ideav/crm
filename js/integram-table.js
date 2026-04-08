@@ -1253,7 +1253,7 @@ class IntegramTable{
                     <div class="integram-table-header">
                         ${ this.renderTitleHtml() }
                         <div class="integram-table-controls">
-                            <div class="integram-table-settings integram-table-settings-refresh" onclick="window.${ instanceName }.loadData(false)" title="Обновить">
+                            <div class="integram-table-settings integram-table-settings-refresh" onclick="window.${ instanceName }.loadData(true)" title="Обновить">
                                 <i class="pi pi-refresh"></i>
                             </div>
                             ${ this.groupingEnabled ? `
