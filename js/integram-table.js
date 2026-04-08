@@ -398,17 +398,26 @@ class IntegramTable{
                 if (this.getDataSourceType() === 'table') {
                     // Load data from table format (object/{typeId}/?JSON_OBJ&F_U={parentId}) (issue #697)
                     json = await this.loadDataFromTable(append);
-                    newRows = json.rows || [];
                 } else {
                     // Load data from report format (default behavior) (issue #697)
                     json = await this.loadDataFromReport(append);
-                    newRows = json.rows || [];
                     // Auto-set table title from report header if not explicitly provided (issue #537)
-                    if (!this.options.title && json.header) {
+                    if (json && !this.options.title && json.header) {
                         this.options.title = json.header;
                     }
                 }
 
+                // If server returned null or empty result, treat as empty (issue #1514)
+                if (!json) {
+                    this.data = [];
+                    this.loadedRecords = 0;
+                    this.hasMore = false;
+                    this.totalRows = 0;
+                    this.render();
+                    return;
+                }
+
+                newRows = json.rows || [];
                 this.columns = json.columns || [];
 
                 // In grouping mode, disable infinite scroll and use all data (up to 1000)
@@ -1253,7 +1262,7 @@ class IntegramTable{
                     <div class="integram-table-header">
                         ${ this.renderTitleHtml() }
                         <div class="integram-table-controls">
-                            <div class="integram-table-settings integram-table-settings-refresh" onclick="window.${ instanceName }.loadData(true)" title="Обновить">
+                            <div class="integram-table-settings integram-table-settings-refresh" onclick="window.${ instanceName }.refreshData()" title="Обновить">
                                 <i class="pi pi-refresh"></i>
                             </div>
                             ${ this.groupingEnabled ? `
@@ -7139,6 +7148,18 @@ class IntegramTable{
             this.groupedData = [];
 
             // Reload data with normal pagination
+            this.data = [];
+            this.loadedRecords = 0;
+            this.hasMore = true;
+            this.totalRows = null;
+            this.loadData(false);
+        }
+
+        /**
+         * Refresh table data from scratch, clearing existing records (issue #1514).
+         * If the server returns empty or null result, the table is cleared.
+         */
+        refreshData() {
             this.data = [];
             this.loadedRecords = 0;
             this.hasMore = true;
