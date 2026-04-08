@@ -12197,35 +12197,67 @@ class IntegramTable{
                         }
                     });
 
-                    // Ensure the first column (main field) is always at the top
+                    // Ensure the first column (main field) is always at the top.
                     const mainGroup = groupMap['main'];
                     const orderedGroups = [];
-                    const usedIds = new Set();
                     if (mainGroup) {
                         orderedGroups.push(mainGroup);
-                        usedIds.add('main');
                     }
 
-                    // Reorder: append groups in the saved order, then append any remaining
-                    order.forEach(fieldId => {
-                        if (groupMap[fieldId] && !usedIds.has(fieldId)) {
-                            orderedGroups.push(groupMap[fieldId]);
-                            usedIds.add(fieldId);
-                        }
-                    });
-                    // Append remaining groups that weren't in the saved order
-                    formGroups.forEach(group => {
-                        // Use the same reliable input lookup as above (issue #1526)
+                    // Build the natural DOM order of non-main groups (the order produced by
+                    // renderAttributesForm, which already interpolates unsaved fields at their
+                    // correct metadata positions - issue #1526).
+                    const nonMainGroups = formGroups.filter(g => g !== mainGroup);
+                    const nonMainKeys = nonMainGroups.map(group => {
                         let input = group.querySelector('input[type="hidden"][id^="field-"], input[id^="field-"]:not([type="file"])');
-                        if (!input) {
-                            input = group.querySelector('[id^="field-"]');
-                        }
+                        if (!input) input = group.querySelector('[id^="field-"]');
                         if (input) {
                             const match = input.id.match(/^field-(.+?)(-search|-picker|-file)?$/);
-                            if (match && !usedIds.has(match[1])) {
-                                orderedGroups.push(group);
+                            return match ? match[1] : null;
+                        }
+                        return null;
+                    });
+
+                    // Assign sort keys to non-main groups using the same interpolation logic as
+                    // renderAttributesForm (issue #1531): saved fields get integer keys, unsaved
+                    // fields get fractional keys placing them before their next saved neighbor in
+                    // natural DOM order, so they appear at approximately the right position.
+                    const scale = nonMainGroups.length + 1;
+                    const savedIndex = new Map();
+                    nonMainKeys.forEach(key => {
+                        if (key !== null) savedIndex.set(key, order.indexOf(key));
+                    });
+
+                    const sortKey = new Map();
+                    nonMainGroups.forEach((group, natIdx) => {
+                        const key = nonMainKeys[natIdx];
+                        if (key === null) {
+                            sortKey.set(group, natIdx + 1);  // fallback: preserve original position
+                            return;
+                        }
+                        const idx = savedIndex.get(key);
+                        if (idx !== -1) {
+                            sortKey.set(group, idx * scale);
+                        } else {
+                            // Find nearest saved successor in natural DOM order
+                            let nextSavedIdx = order.length;
+                            for (let i = natIdx + 1; i < nonMainGroups.length; i++) {
+                                const k = nonMainKeys[i];
+                                if (k !== null) {
+                                    const si = savedIndex.get(k);
+                                    if (si !== -1) { nextSavedIdx = si; break; }
+                                }
                             }
-                        } else if (!orderedGroups.includes(group)) {
+                            sortKey.set(group, nextSavedIdx * scale - scale + natIdx + 1);
+                        }
+                    });
+
+                    nonMainGroups.sort((a, b) => sortKey.get(a) - sortKey.get(b));
+                    nonMainGroups.forEach(g => orderedGroups.push(g));
+
+                    // Also append any groups that had no field input at all (no key)
+                    formGroups.forEach(group => {
+                        if (!orderedGroups.includes(group)) {
                             orderedGroups.push(group);
                         }
                     });
