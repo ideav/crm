@@ -594,6 +594,12 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     opacity: 1;
 }
 
+/* Show placeholder date/time text (e.g. "дд.мм.гггг") in hint color when no value is set (issue #1510) */
+.filter-date-picker:not([value])::-webkit-datetime-edit,
+.filter-date-picker[value=""]::-webkit-datetime-edit {
+    color: var(--md-text-hint);
+}
+
 /* Reference field filter dropdown trigger button (issue #795, #797) */
 .filter-ref-trigger {
     flex: 1;
@@ -628,11 +634,11 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--md-text-secondary);
+    color: var(--md-text-primary);
 }
 
-.filter-ref-trigger-text:not(:empty) {
-    color: var(--md-text-primary);
+.filter-ref-trigger-text--placeholder {
+    color: var(--md-text-hint);
 }
 
 .filter-ref-trigger-arrow {

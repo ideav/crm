@@ -1457,7 +1457,7 @@ class IntegramTable{
                                     data-column-id="${ column.id }"
                                     data-selected-ids="${ Array.from(selectedIds).join(',') }"
                                     title="${ escapedDisplayText || 'Выбрать значение...' }">
-                                <span class="filter-ref-trigger-text">${ escapedDisplayText || 'Выбрать...' }</span>
+                                <span class="filter-ref-trigger-text${ escapedDisplayText ? '' : ' filter-ref-trigger-text--placeholder' }">${ escapedDisplayText || 'Выбрать...' }</span>
                                 <span class="filter-ref-trigger-arrow">▼</span>
                             </button>
                         </div>
@@ -8642,6 +8642,7 @@ class IntegramTable{
             const textEl = trigger.querySelector('.filter-ref-trigger-text');
             if (textEl) {
                 textEl.textContent = displayText || 'Выбрать...';
+                textEl.classList.toggle('filter-ref-trigger-text--placeholder', !displayText);
             }
             trigger.dataset.selectedIds = Array.from(selectedIds).join(',');
             trigger.title = displayText || 'Выбрать значение...';
