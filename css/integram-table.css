@@ -139,7 +139,9 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     align-items: center;
     gap: 1px;
 }
-
+.integram-table-settings-refresh{
+    border: none !important;
+}
 .integram-table-settings .btn-label {
     font-size: 12px;
     font-weight: 400;
