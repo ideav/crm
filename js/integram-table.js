@@ -385,7 +385,9 @@ class IntegramTable{
         }
 
         async loadData(append = false) {
-            if (this.isLoading || (!append && !this.hasMore && this.loadedRecords > 0)) {
+            // Block concurrent loads; block appending when there are no more records.
+            // Allow non-append (refresh) calls unconditionally so the refresh button works (issue #1516).
+            if (this.isLoading || (append && !this.hasMore)) {
                 return;
             }
 
