@@ -209,6 +209,14 @@ class IntegramTable{
         }
 
         /**
+         * Check if the user has permission to modify table structure (issue #1536)
+         * Returns true when window.grants["1"] equals "WRITE"
+         */
+        isStructureWritable() {
+            return window.grants && window.grants['1'] === 'WRITE';
+        }
+
+        /**
          * Check if a type ID is a base (primitive) type (issue #708)
          * Base types (2-17) don't have metadata and cannot be used for edit forms
          * @param {string|number} typeId - Type ID to check
@@ -1319,10 +1327,12 @@ class IntegramTable{
                                 <i class="pi pi-cog"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">вид</span>' : '' }
                             </div>
+                            ${ this.isStructureWritable() ? `
                             <div class="integram-table-settings" onclick="window.${ instanceName }.openColumnSettings()" title="Настройка колонок">
                                 <i class="pi pi-th-large"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">колонки</span>' : '' }
                             </div>
+                            ` : '' }
                         </div>
                     </div>
                     ${ this.renderHiddenFilterBadges() }
@@ -1354,7 +1364,7 @@ class IntegramTable{
                                     `;
                                     }).join('')
                                 }
-                                <th class="add-column-header-cell" style="width: 36px; min-width: 36px;" title="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus"></i></th>
+                                ${ this.isStructureWritable() ? `<th class="add-column-header-cell" style="width: 36px; min-width: 36px;" title="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus"></i></th>` : '' }
                             </tr>
                             ${ this.filtersEnabled ? `
                             <tr class="filter-row">

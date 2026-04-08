@@ -13,6 +13,15 @@
                 </button>
             </div>
         </div>
+        <script>
+        // Hide "New Table" button when user lacks structure write permission (issue #1536)
+        (function () {
+            if (!(window.grants && window.grants['1'] === 'WRITE')) {
+                var btn = document.getElementById('add-table-btn');
+                if (btn) btn.style.display = 'none';
+            }
+        }());
+        </script>
 
         <div class="tables-container" id="tables-container">
             <!-- Folders with tables will be rendered here by JavaScript -->
