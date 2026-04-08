@@ -356,6 +356,7 @@ class MainAppController {
         menuItem.setAttribute('data-menu-up', item.menu_up || '');
         menuItem.setAttribute('data-level', level);
         menuItem.setAttribute('draggable', 'false'); // Will be enabled in edit mode
+        if (item.name) menuItem.title = item.name;
 
         if (level > 0) {
             menuItem.classList.add('app-menu-item-nested');
