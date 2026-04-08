@@ -1596,6 +1596,21 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     transform: translateY(1px);
 }
 
+/* Read-only form fields (issue #1508) */
+.edit-form .form-field-readonly input,
+.edit-form .form-field-readonly textarea,
+.edit-form .form-field-readonly select {
+    background-color: #f0f0f0;
+    color: #888;
+    pointer-events: none;
+}
+
+.edit-form .form-field-readonly .form-reference-editor {
+    background-color: #f0f0f0;
+    pointer-events: none;
+    opacity: 0.65;
+}
+
 /* Subordinate table indicator */
 .subordinate-table-indicator {
     display: flex;
