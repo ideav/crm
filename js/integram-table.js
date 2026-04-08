@@ -1219,6 +1219,9 @@ class IntegramTable{
                     <div class="integram-table-header">
                         ${ this.renderTitleHtml() }
                         <div class="integram-table-controls">
+                            <div class="integram-table-settings" onclick="window.${ instanceName }.loadData(false)" title="Обновить">
+                                <i class="pi pi-refresh"></i>
+                            </div>
                             ${ this.groupingEnabled ? `
                             <div class="integram-table-settings" onclick="window.${ instanceName }.clearGrouping()" title="Очистить группировку">
                                 <i class="pi pi-undo"></i>
