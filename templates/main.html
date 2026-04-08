@@ -230,16 +230,12 @@
                 else{//     obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
                     vars='_xsrf='+xsrf+'&'+vars; // добавляем токен xsrf, необходимый для POST-запроса
                 }
-            const warnElement = document.getElementById('warn');
-            warnElement.innerHTML = ''; // Очищаем окно предупреждения от прежних результатов
-            warnElement.classList.add('hidden');
             obj.onload=function(e){ // Когда запрос вернет результат - сработает эта функция
                 try{ // в this.responseText лежит ответ от сервера
                     json=JSON.parse(this.responseText); // Пытаемся разобрать ответ как JSON
                 }
                 catch(e){ // Если произошла ошибка при разборе JSON
-                    warnElement.innerHTML = this.responseText; // Выводим ошибку
-                    warnElement.classList.remove('hidden');
+                    changeMsg('alert-danger', this.responseText); // Выводим ошибку
                 }
                 obj.abort(); // Закрываем соединение
                 if(typeof window[b]==='function') // Вызываем функцию-исполнитель переданного действия (callback)
