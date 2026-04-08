@@ -1836,15 +1836,20 @@ class IntegramTable{
                         recordId = this.rawObjectData[rowIndex].i;
                     }
                     const btnValue = value !== null && value !== undefined ? String(value) : '';
-                    let btnHref, btnTarget;
+                    let btnHref, btnTarget, btnOnclick;
                     if (btnValue.match(/^https?:\/\//i)) {
                         btnHref = btnValue;
                         btnTarget = recordId !== null ? String(recordId) : '_blank';
+                    } else if (btnValue.match(/^\w[\w.]*\s*\([\s\S]*\)\s*;?\s*$/)) {
+                        // Value is a JS function call (e.g. newApi('POST','...','','reloadAllIntegramTables'))
+                        btnOnclick = btnValue.replace(/;?\s*$/, '') + '; event.stopPropagation();';
                     } else if (btnValue) {
                         btnHref = `/${dbName}/${btnValue.replace(/^\//, '')}`;
                         btnTarget = '_blank';
                     }
-                    if (btnHref) {
+                    if (btnOnclick) {
+                        displayValue = `<button class="btn btn-sm btn-primary" onclick="${ btnOnclick.replace(/"/g, '&quot;') }"><i class="pi pi-play"></i></button>`;
+                    } else if (btnHref) {
                         displayValue = `<a href="${ btnHref }" target="${ btnTarget }" onclick="event.stopPropagation();"><button class="btn btn-sm btn-primary"><i class="pi pi-play"></i></button></a>`;
                     } else {
                         displayValue = `<button class="btn btn-sm btn-primary"><i class="pi pi-play"></i></button>`;
