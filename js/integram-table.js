@@ -2403,8 +2403,14 @@ class IntegramTable{
             // Highlight required fields in the row (issue #807)
             this.highlightNewRowRequiredCells(cell);
 
+            // Use pre-filled default value from addNewRow (issue #1500)
+            const colDataIndex = this.columns.findIndex(c => c.id === colId);
+            const defaultValue = (this.data[rowIndex] && colDataIndex !== -1)
+                ? (this.data[rowIndex][colDataIndex] || '')
+                : '';
+
             // Create inline editor
-            this.renderInlineEditor(cell, '', format);
+            this.renderInlineEditor(cell, defaultValue, format);
         }
 
         /**
