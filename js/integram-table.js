@@ -3907,6 +3907,13 @@ class IntegramTable{
             // Snapshot state before clearing
             const format = this.currentEditingCell.format;
             const originalContent = cell.dataset.originalContent;
+            const originalRefValueId = cell.dataset.refValueId;
+
+            // Issue #1496: Set refValueId before updateCellDisplay so that reference-type
+            // cells (e.g. User) are immediately rendered as links rather than plain text.
+            // Previously this was only set after the API response, causing the link to be
+            // missing until the page was refreshed.
+            cell.dataset.refValueId = selectedId;
 
             // Optimistically update cell display
             this.updateCellDisplay(cell, selectedText, format);
@@ -3973,11 +3980,6 @@ class IntegramTable{
                     throw new Error(result.error);
                 }
 
-                // Issue #921: Update data-ref-value-id so the edit icon uses the correct
-                // reference record ID (not the parent row's record ID) when the cell was
-                // previously empty and gets its first value via a reference selection
-                cell.dataset.refValueId = selectedId;
-
                 // Save confirmed — remove the saving highlight
                 cell.classList.remove('cell-saving');
 
@@ -3990,6 +3992,12 @@ class IntegramTable{
                 cell.classList.remove('cell-saving');
                 if (typeof originalContent === 'string') {
                     cell.innerHTML = originalContent;
+                }
+                // Issue #1496: Also restore the original refValueId that was set optimistically
+                if (originalRefValueId !== undefined) {
+                    cell.dataset.refValueId = originalRefValueId;
+                } else {
+                    delete cell.dataset.refValueId;
                 }
             }
         }
