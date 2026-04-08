@@ -9689,6 +9689,8 @@ if(Validate_Token())
 
         	if(isset($_REQUEST["TIME"]))
         		set_time_limit(3600);
+			if(isset($GLOBALS["GRANTS"]))
+				$GLOBALS["GLOBAL_VARS"]["grants"] = base64_encode(json_encode($GLOBALS["GRANTS"], JSON_UNESCAPED_UNICODE));
         	Make_tree($text, "&main");
         	$html = Parse_block("&main");
 
