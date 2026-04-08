@@ -101,7 +101,68 @@
         myTablesSet['{ID}'] = {'{TYPE}': '{SETTINGS}'.replace(/&quot;/g, '"')};
         <!-- End: &Settings -->
     </script>
+    <script src="/js/column-name-dict.js"></script>
     <script src="/js/tables.js"></script>
+<script>
+// Auto-detect base type and Справочник flag from table name as user types (issue #1494)
+(function () {
+    var typeManuallyChanged = false;
+    var refManuallyChanged = false;
+
+    function initNewTableAutoDetect() {
+        var nameInput = document.getElementById('new-table-name');
+        var typeSelect = document.getElementById('new-table-type');
+        var uniqueCheckbox = document.getElementById('new-table-unique');
+
+        if (!nameInput || !typeSelect || !uniqueCheckbox) return;
+
+        typeSelect.addEventListener('change', function () {
+            typeManuallyChanged = true;
+        });
+
+        uniqueCheckbox.addEventListener('change', function () {
+            if (!uniqueCheckbox._autoDetecting) {
+                refManuallyChanged = true;
+            }
+        });
+
+        nameInput.addEventListener('input', function () {
+            if (typeof detectColumnType !== 'function') return;
+            var value = nameInput.value.trim();
+            if (!value) return;
+            var detected = detectColumnType(value);
+            if (!detected) return;
+
+            if (!typeManuallyChanged) {
+                typeSelect.value = String(detected.type);
+            }
+            if (!refManuallyChanged) {
+                uniqueCheckbox._autoDetecting = true;
+                uniqueCheckbox.checked = detected.ref;
+                uniqueCheckbox._autoDetecting = false;
+            }
+        });
+
+        // Reset manual-change flags when modal is re-opened so each new name starts fresh
+        function resetFlags() {
+            typeManuallyChanged = false;
+            refManuallyChanged = false;
+        }
+        var addTableBtn = document.getElementById('add-table-btn');
+        if (addTableBtn) addTableBtn.addEventListener('click', resetFlags);
+        var cancelBtn = document.getElementById('cancel-new-table');
+        if (cancelBtn) cancelBtn.addEventListener('click', resetFlags);
+        var closeBtn = document.getElementById('close-new-table-modal');
+        if (closeBtn) closeBtn.addEventListener('click', resetFlags);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initNewTableAutoDetect);
+    } else {
+        initNewTableAutoDetect();
+    }
+}());
+</script>
 <script>
 (function() {
     var fake = document.createElement('div');
