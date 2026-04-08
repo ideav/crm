@@ -5781,10 +5781,16 @@ class IntegramTable{
                 { id: 11, name: 'Логическое значение (Да / Нет)' },
                 { id: 12, name: 'Многострочный текст' },
                 { id: 4, name: 'Дата и время' },
-                { id: 10, name: 'Файл' }
+                { id: 10, name: 'Файл' },
+                { id: 7, name: 'Кнопка' }
             ];
 
             const availableTypes = isFirstColumn ? firstColumnTypes : baseTypes;
+
+            // If the column's current type is not in the list, add it so the select shows the correct value
+            if (!isRef && col.type && !availableTypes.find(t => String(t.id) === String(col.type))) {
+                availableTypes.push({ id: parseInt(col.type), name: `Тип #${ col.type }` });
+            }
 
             const colEditOverlay = document.createElement('div');
             colEditOverlay.className = 'column-settings-overlay';
