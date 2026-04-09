@@ -175,6 +175,14 @@
 <script src="/js/hints.js"></script>
 <!-- Workspace hints -->
 <style>
+:root {
+    --tables-hint-shadow: 0 8px 40px rgba(0,0,0,0.28);
+    --tables-hint-btn-shadow: 0 2px 8px rgba(0,0,0,0.25);
+}
+[data-theme="dark"] {
+    --tables-hint-shadow: 0 8px 40px rgba(0,0,0,0.55);
+    --tables-hint-btn-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
 #tables-hint-box {
     position: fixed;
     top: 50%;
@@ -182,10 +190,10 @@
     transform: translate(-50%, -50%);
     width: 90%;
     max-width: 420px;
-    background: var(--card-bg, #fff);
+    background: var(--card-bg);
     border-radius: 12px;
     padding: 1.25rem 1.25rem 1rem;
-    box-shadow: 0 8px 40px rgba(0,0,0,0.28);
+    box-shadow: var(--tables-hint-shadow);
     z-index: 2000;
     display: none;
     cursor: default;
@@ -207,7 +215,7 @@
 #tables-hint-box .hint-drag-handle:active { cursor: grabbing; }
 #tables-hint-box .hint-drag-handle .hint-drag-icon {
     font-size: 1rem;
-    color: var(--text-secondary, #888);
+    color: var(--text-secondary);
     pointer-events: none;
     line-height: 1;
     letter-spacing: 2px;
@@ -217,7 +225,7 @@
     position: fixed;
     right: 1rem;
     z-index: 2001;
-    background: var(--button-primary, #0d6efd);
+    background: var(--button-primary);
     color: #fff;
     border: none;
     border-radius: 50%;
@@ -225,7 +233,7 @@
     height: 2.4rem;
     font-size: 1.2rem;
     cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    box-shadow: var(--tables-hint-btn-shadow);
     align-items: center;
     justify-content: center;
 }
@@ -254,7 +262,7 @@
         <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Открытие таблицы</h3>
         <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Нажмите на название таблицы в списке, чтобы перейти к просмотру и редактированию её данных.</p>
         <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
-            <button onclick="tablesHintClose()" style="padding:0.35rem 0.9rem; border:none; border-radius:6px; background:var(--button-primary,#0d6efd); color:#fff; cursor:pointer; font-size:0.85rem;">Понятно</button>
+            <button onclick="tablesHintClose()" style="padding:0.35rem 0.9rem; border:none; border-radius:6px; background:var(--button-primary); color:#fff; cursor:pointer; font-size:0.85rem;">Понятно</button>
         </div>
     </div>
 </div>

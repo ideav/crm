@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tables Dark Theme Test</title>
+    <style>
+        /* Simulated styles.css variables - light theme */
+        :root {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8f9fa;
+            --text-primary: #212529;
+            --text-secondary: #6c757d;
+            --border-color: #dee2e6;
+            --nav-bg: #ffffff;
+            --nav-shadow: rgba(0, 0, 0, 0.1);
+            --input-bg: #ffffff;
+            --input-border: #ced4da;
+            --button-primary: #3b82f6;
+            --button-primary-hover: #2563eb;
+            --card-bg: #ffffff;
+            --color-danger: #dc3545;
+            --md-text-primary: #212529;
+        }
+
+        [data-theme="dark"] {
+            --bg-primary: #1a1a1a;
+            --bg-secondary: #2d2d2d;
+            --text-primary: #e9ecef;
+            --text-secondary: #adb5bd;
+            --border-color: #495057;
+            --nav-bg: #212529;
+            --nav-shadow: rgba(0, 0, 0, 0.3);
+            --input-bg: #2d2d2d;
+            --input-border: #495057;
+            --button-primary: #3b82f6;
+            --button-primary-hover: #2563eb;
+            --card-bg: #2d2d2d;
+            --color-danger: #dc3545;
+            --md-text-primary: #e9ecef;
+        }
+
+        /* Tables CSS variables from tables.css */
+        :root {
+            --tables-focus-ring: rgba(59, 130, 246, 0.1);
+            --tables-highlight-bg: rgba(59, 130, 246, 0.15);
+            --tables-modal-backdrop: rgba(0, 0, 0, 0.5);
+            --tables-modal-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+            --tables-tooltip-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+        }
+        [data-theme="dark"] {
+            --tables-focus-ring: rgba(59, 130, 246, 0.2);
+            --tables-highlight-bg: rgba(59, 130, 246, 0.25);
+            --tables-modal-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+            --tables-tooltip-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        }
+
+        /* Hint box styles from tables.html */
+        :root {
+            --tables-hint-shadow: 0 8px 40px rgba(0,0,0,0.28);
+            --tables-hint-btn-shadow: 0 2px 8px rgba(0,0,0,0.25);
+        }
+        [data-theme="dark"] {
+            --tables-hint-shadow: 0 8px 40px rgba(0,0,0,0.55);
+            --tables-hint-btn-shadow: 0 2px 8px rgba(0,0,0,0.5);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 20px;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        .theme-toggle {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            padding: 8px 16px;
+            background: var(--button-primary);
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            z-index: 9999;
+        }
+
+        /* Tables component styles */
+        .tables-workplace { max-width: 800px; }
+
+        .tables-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .tables-header h1 {
+            font-size: 20px;
+            font-weight: 500;
+            color: var(--md-text-primary);
+            margin: 0;
+        }
+
+        .search-input {
+            width: 200px;
+            padding: 0.625rem 1rem 0.625rem 1rem;
+            border: 1px solid var(--input-border);
+            border-radius: 6px;
+            font-size: 0.9rem;
+            background-color: var(--input-bg);
+            color: var(--text-primary);
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--button-primary);
+            box-shadow: 0 0 0 3px var(--tables-focus-ring);
+        }
+
+        .btn-primary {
+            padding: 0.625rem 1rem;
+            background: var(--button-primary);
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+
+        .folder {
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 1rem;
+        }
+
+        .folder-header {
+            display: flex;
+            align-items: center;
+            padding: 0.875rem 1rem;
+            background-color: var(--bg-secondary);
+        }
+
+        .folder-name {
+            flex: 1;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .folder-count {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            background-color: var(--bg-primary);
+            padding: 0.125rem 0.5rem;
+            border-radius: 10px;
+            margin-right: 0.5rem;
+        }
+
+        .folder-content {
+            padding: 1rem;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+        }
+
+        .table-card {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            cursor: pointer;
+            color: var(--text-primary);
+            min-width: 120px;
+        }
+
+        .table-card.search-match {
+            box-shadow: 0 0 0 2px var(--button-primary);
+        }
+
+        .table-card.new-table-highlight {
+            box-shadow: 0 0 0 3px var(--button-primary);
+            background-color: var(--tables-highlight-bg);
+        }
+
+        /* Inline error tooltip */
+        .inline-error-tooltip {
+            background-color: var(--color-danger);
+            color: white;
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            box-shadow: var(--tables-tooltip-shadow);
+            display: inline-block;
+            margin-top: 10px;
+        }
+
+        /* Modal */
+        .modal-demo {
+            position: relative;
+            background-color: var(--card-bg);
+            border-radius: 12px;
+            box-shadow: var(--tables-modal-shadow);
+            width: 100%;
+            max-width: 400px;
+            padding: 1.5rem;
+            margin-top: 1rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .modal-header-demo {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 1rem;
+        }
+
+        .modal-header-demo h2 {
+            margin: 0;
+            font-size: 1.25rem;
+            color: var(--text-primary);
+        }
+
+        /* Hint box */
+        #tables-hint-box-demo {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 1.25rem 1.25rem 1rem;
+            box-shadow: var(--tables-hint-shadow);
+            max-width: 420px;
+            margin-top: 1rem;
+        }
+
+        #tables-hint-mobile-toggle-demo {
+            display: inline-flex;
+            background: var(--button-primary);
+            color: #fff;
+            border: none;
+            border-radius: 50%;
+            width: 2.4rem;
+            height: 2.4rem;
+            font-size: 1.2rem;
+            cursor: pointer;
+            box-shadow: var(--tables-hint-btn-shadow);
+            align-items: center;
+            justify-content: center;
+            margin-top: 1rem;
+        }
+
+        .section-title {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-secondary);
+            margin: 1.5rem 0 0.5rem;
+        }
+
+        form input[type="text"], form select {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border: 1px solid var(--input-border);
+            border-radius: 8px;
+            background-color: var(--input-bg);
+            color: var(--text-primary);
+            font-size: 0.95rem;
+            box-sizing: border-box;
+            margin-bottom: 0.75rem;
+        }
+
+        form input[type="text"]:focus, form select:focus {
+            outline: none;
+            border-color: var(--button-primary);
+            box-shadow: 0 0 0 3px var(--tables-focus-ring);
+        }
+
+        .form-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.75rem;
+            margin-top: 0.5rem;
+        }
+
+        .btn-secondary {
+            padding: 0.5rem 1rem;
+            background: none;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.35rem;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <button class="theme-toggle" onclick="toggleTheme()">Toggle Dark/Light</button>
+
+    <div class="tables-workplace">
+        <div class="tables-header">
+            <h1>Таблицы</h1>
+            <div style="display:flex; gap:1rem; align-items:center;">
+                <input type="text" class="search-input" placeholder="Поиск таблиц...">
+                <button class="btn-primary">+ Новая таблица</button>
+            </div>
+        </div>
+
+        <p class="section-title">Table Cards</p>
+        <div class="folder">
+            <div class="folder-header">
+                <span class="folder-name">Основные таблицы</span>
+                <span class="folder-count">3</span>
+            </div>
+            <div class="folder-content">
+                <div class="table-card">Пользователи</div>
+                <div class="table-card search-match">Заказы</div>
+                <div class="table-card new-table-highlight">Новая таблица ✨</div>
+            </div>
+        </div>
+
+        <p class="section-title">Error Tooltip</p>
+        <div class="inline-error-tooltip">Ошибка: такое название уже существует</div>
+
+        <p class="section-title">Modal (New Table)</p>
+        <div class="modal-demo">
+            <div class="modal-header-demo">
+                <h2>Новая таблица</h2>
+                <span style="color:var(--text-secondary); cursor:pointer;">✕</span>
+            </div>
+            <form>
+                <label for="t-name">Название таблицы</label>
+                <input type="text" id="t-name" placeholder="Введите название">
+                <label for="t-type">Тип</label>
+                <select id="t-type">
+                    <option>Короткая строка (до 127 символов)</option>
+                    <option>Дата</option>
+                    <option>Целое число</option>
+                </select>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary">Отменить</button>
+                    <button type="button" class="btn-primary">Создать</button>
+                </div>
+            </form>
+        </div>
+
+        <p class="section-title">Hint Box</p>
+        <div id="tables-hint-box-demo">
+            <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);">
+                <span style="margin-right:0.4rem;">💡</span>Поиск таблицы
+            </h3>
+            <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">
+                Введите название в строке поиска вверху, чтобы быстро найти нужную таблицу из списка.
+            </p>
+            <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+                <button style="padding:0.35rem 0.9rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer; font-size:0.85rem;">Закрыть</button>
+                <button style="padding:0.35rem 0.9rem; border:none; border-radius:6px; background:var(--button-primary); color:#fff; cursor:pointer; font-size:0.85rem;">Понятно</button>
+            </div>
+        </div>
+
+        <p class="section-title">Mobile Toggle Button</p>
+        <button id="tables-hint-mobile-toggle-demo">?</button>
+    </div>
+
+    <script>
+        function toggleTheme() {
+            const html = document.documentElement;
+            if (html.getAttribute('data-theme') === 'dark') {
+                html.removeAttribute('data-theme');
+                document.querySelector('.theme-toggle').textContent = 'Switch to Dark';
+            } else {
+                html.setAttribute('data-theme', 'dark');
+                document.querySelector('.theme-toggle').textContent = 'Switch to Light';
+            }
+        }
+    </script>
+</body>
+</html>
