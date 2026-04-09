@@ -2554,16 +2554,195 @@ class IntegramTable{
 
             // Show add row button only for object-source tables with write access (issue #807, #1508)
             const isObjectSource = this.objectTableId || this.getDataSourceType() === 'table';
-            const addRowBtnHtml = isObjectSource && this.isTableWritable()
+            const canWrite = isObjectSource && this.isTableWritable();
+            const addRowBtnHtml = canWrite
                 ? `<button class="add-row-btn" onclick="window.${ instanceName }.addNewRow()" title="Добавить строку в таблицу"><i class="pi pi-plus"></i></button>`
+                : '';
+            // Show paste-data icon button next to add-row button for writable tables (issue #1606)
+            const pasteDataBtnHtml = canWrite
+                ? `<button class="paste-data-btn" onclick="window.${ instanceName }.openPasteDataDialog()" title="Вставить данные из буфера"><i class="pi pi-clipboard"></i></button>`
                 : '';
 
             return `
                 <div class="scroll-counter">
-                    ${ addRowBtnHtml }
+                    ${ addRowBtnHtml }${ pasteDataBtnHtml }
                     Показано ${ this.loadedRecords } из ${ totalDisplay }
                 </div>
             `;
+        }
+
+        /**
+         * Open a dialog to paste data from clipboard and insert into the table (issue #1606).
+         * Splits the pasted text by lines, then splits each line by TAB, ";" or ","
+         * and calls _m_new for each line using visible column IDs as field keys.
+         */
+        openPasteDataDialog() {
+            const instanceName = this.options.instanceName;
+            const modalDepth = (window._integramModalDepth || 0) + 1;
+            window._integramModalDepth = modalDepth;
+            const baseZIndex = 1000 + (modalDepth * 10);
+            const cascadeOffset = (modalDepth - 1) * 20;
+
+            const overlay = document.createElement('div');
+            overlay.className = 'edit-form-overlay';
+            overlay.style.zIndex = baseZIndex;
+
+            const modal = document.createElement('div');
+            modal.className = 'edit-form-modal';
+            modal.style.zIndex = baseZIndex + 1;
+            modal.style.transform = `translate(calc(-50% + ${cascadeOffset}px), calc(-50% + ${cascadeOffset}px))`;
+            modal._overlayElement = overlay;
+
+            modal.innerHTML = `
+                <div class="edit-form-header">
+                    <span class="edit-form-title">Вставить данные из буфера</span>
+                    <button class="edit-form-close" data-close-modal-ref="true"><i class="pi pi-times"></i></button>
+                </div>
+                <div class="edit-form-body">
+                    <textarea id="paste-data-textarea" rows="10" style="width:100%;box-sizing:border-box;resize:vertical;"
+                        placeholder="Вставьте данные, и я постараюсь распознать и вставить их в таблицу"></textarea>
+                    <div style="margin-top:6px;color:#888;font-size:0.85em;">Текст, разделённый символами табуляции, «;» или «,»</div>
+                    <div id="paste-data-progress" style="margin-top:8px;display:none;"></div>
+                </div>
+                <div class="edit-form-footer">
+                    <button class="edit-form-save" id="paste-data-insert-btn">Вставить</button>
+                    <button class="edit-form-cancel" id="paste-data-cancel-btn">Отмена</button>
+                </div>
+            `;
+
+            document.body.appendChild(overlay);
+            document.body.appendChild(modal);
+
+            const closeModal = () => {
+                modal.remove();
+                overlay.remove();
+                window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+            };
+
+            modal.querySelector('.edit-form-close').addEventListener('click', closeModal);
+            modal.querySelector('#paste-data-cancel-btn').addEventListener('click', closeModal);
+            overlay.addEventListener('click', closeModal);
+
+            modal.querySelector('#paste-data-insert-btn').addEventListener('click', () => {
+                window[instanceName].insertPastedData(modal, closeModal);
+            });
+
+            // Focus textarea
+            setTimeout(() => modal.querySelector('#paste-data-textarea').focus(), 50);
+        }
+
+        /**
+         * Parse and insert pasted data into the table (issue #1606).
+         * Each line becomes one record; fields within a line are split by TAB, ";" or ",".
+         * Uses visible columns (in order) as field mapping.
+         * Stops on first insert error.
+         */
+        async insertPastedData(modal, closeModal) {
+            const textarea = modal.querySelector('#paste-data-textarea');
+            const progressEl = modal.querySelector('#paste-data-progress');
+            const insertBtn = modal.querySelector('#paste-data-insert-btn');
+            const text = textarea.value;
+
+            if (!text || !text.trim()) {
+                this.showToast('Поле ввода пустое', 'error');
+                return;
+            }
+
+            // Split into lines, skip empty lines
+            const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
+            if (lines.length === 0) {
+                this.showToast('Нет данных для вставки', 'error');
+                return;
+            }
+
+            // Get the ordered list of visible, non-id, editable columns
+            const columnMap = {};
+            this.columns.forEach(col => { columnMap[col.id] = col; });
+            const orderedColIds = (this.columnOrder || this.columns.map(c => c.id))
+                .filter(id => columnMap[id] && !this.idColumns.has(id));
+
+            const typeId = this.options.tableTypeId || this.objectTableId;
+            if (!typeId) {
+                this.showToast('Ошибка: не найден тип таблицы', 'error');
+                return;
+            }
+
+            const apiBase = this.getApiBase();
+            const parentIdForNew = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
+            const url = `${apiBase}/_m_new/${typeId}?JSON&up=${parentIdForNew}`;
+
+            insertBtn.disabled = true;
+            progressEl.style.display = 'block';
+
+            let successCount = 0;
+            const total = lines.length;
+
+            for (let i = 0; i < lines.length; i++) {
+                progressEl.textContent = `Вставлено ${successCount} из ${total}`;
+
+                // Split by TAB first; if only one part, try ";" then ","
+                let parts;
+                if (lines[i].includes('\t')) {
+                    parts = lines[i].split('\t');
+                } else if (lines[i].includes(';')) {
+                    parts = lines[i].split(';');
+                } else {
+                    parts = lines[i].split(',');
+                }
+
+                const params = new URLSearchParams();
+                if (typeof xsrf !== 'undefined') {
+                    params.append('_xsrf', xsrf);
+                }
+
+                // Map each part to the corresponding column id (t{colId} = value)
+                parts.forEach((part, idx) => {
+                    if (idx < orderedColIds.length) {
+                        const trimmed = part.trim();
+                        if (trimmed !== '') {
+                            params.append(`t${orderedColIds[idx]}`, trimmed);
+                        }
+                    }
+                });
+
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: params.toString()
+                    });
+
+                    const responseText = await response.text();
+                    let result;
+                    try {
+                        result = JSON.parse(responseText);
+                    } catch (e) {
+                        if (responseText.includes('error') || !response.ok) {
+                            throw new Error(responseText);
+                        }
+                        result = { success: true };
+                    }
+
+                    const serverError = this.getServerError(result);
+                    if (serverError) {
+                        throw new Error(serverError);
+                    }
+
+                    successCount++;
+                } catch (err) {
+                    progressEl.textContent = `Вставлено ${successCount} из ${total}. Ошибка на строке ${i + 1}: ${err.message}`;
+                    insertBtn.disabled = false;
+                    this.showToast(`Ошибка вставки строки ${i + 1}: ${err.message}`, 'error');
+                    return;
+                }
+            }
+
+            progressEl.textContent = `Вставлено ${successCount} из ${total}`;
+            this.showToast(`Вставлено записей: ${successCount}`, 'success');
+
+            closeModal();
+            // Refresh the table after insertion
+            this.loadData();
         }
 
         /**
