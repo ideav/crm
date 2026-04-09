@@ -3473,6 +3473,38 @@ tr.row-selected {
     font-size: 14px;
 }
 
+/* Paste data button in scroll counter area (issue #1608) */
+.paste-data-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 28px;
+    margin-right: 12px;
+    padding: 0 10px;
+    border: none;
+    border-radius: 6px;
+    background: var(--button-secondary, #6b7280);
+    color: white;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background-color 0.2s ease;
+    vertical-align: middle;
+}
+
+.paste-data-btn:hover {
+    background: var(--button-secondary-hover, #4b5563);
+}
+
+.paste-data-btn:active {
+    background: var(--button-secondary-hover, #4b5563);
+    transform: scale(0.98);
+}
+
+.paste-data-btn i {
+    font-size: 14px;
+}
+
 /* New row editing state */
 .new-row-editing {
     background-color: rgba(25, 118, 210, 0.04);
