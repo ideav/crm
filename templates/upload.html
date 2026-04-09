@@ -85,6 +85,16 @@ input[type="checkbox"] {
     color: var(--color-error, #f87171);
     border: 1px solid var(--color-error, #f87171);
 }
+[data-theme="dark"] #tune input[type="text"],
+[data-theme="dark"] #tune input[type="number"] {
+    background-color: var(--input-bg, #2d2d2d);
+    border-color: var(--input-border, #495057);
+    color: var(--text-primary, #e9ecef);
+}
+[data-theme="dark"] #tune input[type="text"]::placeholder,
+[data-theme="dark"] #tune input[type="number"]::placeholder {
+    color: var(--text-secondary, #adb5bd);
+}
 </style>
 <script src="/js/jquery3.1.1.min.js"></script>
 <script src="/js/jquery-ui1.12.1.min.js"></script>
@@ -806,7 +816,7 @@ function parseType(input){
     gatherSet();
 }
 function chooseBase(i,v){ 
-    var h='<select name="t" id="t'+i+'" onchange="$(\'#upload\').hide();$(\'#refresh\').show();" style="border:none">';
+    var h='<select name="t" id="t'+i+'" onchange="$(\'#upload\').hide();$(\'#refresh\').show();" style="border:none;background:transparent;color:inherit">';
     for(i in bt)
         h+='<option value="'+i+'"'+(v==bt[i]?' selected':'')+'>'+bt[i].toLowerCase()+'</option>';
     return h+'</select>';

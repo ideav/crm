@@ -110,6 +110,29 @@
     --icon-type-16-bg: rgba(167, 139, 250, 0.2);
 }
 
+/* Dark theme overrides for Bootstrap form controls */
+[data-theme="dark"] .form-control,
+[data-theme="dark"] .form-control:focus {
+    background-color: var(--input-bg);
+    border-color: var(--input-border);
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .form-control::placeholder {
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] select.form-control option {
+    background-color: var(--input-bg);
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .input-group-text {
+    background-color: var(--bg-secondary);
+    border-color: var(--input-border);
+    color: var(--text-primary);
+}
+
 /* Reset and base styles */
 * {
     margin: 0;
