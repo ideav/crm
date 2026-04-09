@@ -2601,7 +2601,7 @@ class IntegramTable{
                 <div class="edit-form-body">
                     <textarea id="paste-data-textarea" rows="10" style="width:100%;box-sizing:border-box;resize:vertical;font-family:inherit;"
                         placeholder="Вставьте данные, и я постараюсь распознать и вставить их в таблицу"></textarea>
-                    <div style="margin-top:6px;color:#888;font-size:0.85em;">Текст, разделённый символами табуляции, «;» или «,»</div>
+                    <div style="margin-top:6px;color:#888;font-size:0.9em;">Текст, разделённый символами табуляции, «;» или «,»</div>
                     <div id="paste-data-progress" style="margin-top:8px;display:none;"></div>
                 </div>
                 <div class="edit-form-footer" style="justify-content:flex-end;">
