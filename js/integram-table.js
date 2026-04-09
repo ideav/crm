@@ -9671,6 +9671,7 @@ class IntegramTable{
                 : true;
             const showSaveBtn = !formIsReadOnly || formHasSomeWritable;
             const showDeleteBtn = !isCreate && !formIsReadOnly;
+            const showDuplicateBtn = !isCreate && !formIsReadOnly;
 
             // Build attributes form HTML
             let attributesHtml = this.renderAttributesForm(metadata, recordData, regularFields, recordReqs, isCreate, typeId, formIsReadOnly);
@@ -9711,6 +9712,7 @@ class IntegramTable{
                     </button>
                     <div class="edit-form-footer-buttons">
                         ${ showDeleteBtn ? '<button type="button" class="btn btn-danger" id="delete-record-btn" style="display:none;">Удалить</button>' : '' }
+                        ${ showDuplicateBtn ? '<button type="button" class="btn btn-secondary" id="duplicate-record-btn">Дублировать</button>' : '' }
                         ${ showSaveBtn ? '<button type="button" class="btn btn-primary" id="save-record-btn">Сохранить</button>' : '' }
                         <button type="button" class="btn btn-secondary" data-close-modal="true">Отменить</button>
                     </div>
@@ -9804,6 +9806,21 @@ class IntegramTable{
                     }
                     deleteBtn.addEventListener('click', () => {
                         this.deleteRecord(modal, recordId, typeId);
+                    });
+                }
+            }
+
+            // Attach duplicate handler (edit mode only, issue #1575)
+            if (!isCreate) {
+                const duplicateBtn = modal.querySelector('#duplicate-record-btn');
+                if (duplicateBtn) {
+                    duplicateBtn.addEventListener('click', async () => {
+                        duplicateBtn.disabled = true;
+                        try {
+                            await this.duplicateRecord(modal, recordId, typeId, parentId, metadata);
+                        } finally {
+                            duplicateBtn.disabled = false;
+                        }
                     });
                 }
             }
@@ -12890,6 +12907,182 @@ class IntegramTable{
                 console.error('Error deleting record:', error);
                 this.showToast(`Ошибка удаления: ${ error.message }`, 'error');
             }
+        }
+
+        /**
+         * Duplicate the current record: collect form data, optionally prompt for unique first-column value,
+         * call _m_new with the same parent, then reopen the edit form for the newly created record.
+         * Issue #1575
+         */
+        async duplicateRecord(modal, recordId, typeId, parentId, metadata) {
+            // Check if this type has unique:"1" on the first column
+            const isUnique = metadata && (metadata.unique === '1' || metadata.unique === 1 || metadata.unique === true);
+
+            // Get current first-column value from form
+            const form = modal.querySelector('#edit-form');
+            if (!form) return;
+
+            const formData = new FormData(form);
+            const mainValue = formData.get('main');
+
+            let newFirstColumnValue = mainValue;
+
+            if (isUnique) {
+                // Prompt user to enter a new value for the first (unique) column
+                const prompted = await this.showDuplicateUniqueValueModal(mainValue);
+                if (prompted === null) {
+                    // User cancelled
+                    return;
+                }
+                newFirstColumnValue = prompted;
+            }
+
+            const apiBase = this.getApiBase();
+
+            try {
+                // Build request body same as saveRecord (non-file variant)
+                const params = new URLSearchParams();
+
+                if (typeof xsrf !== 'undefined') {
+                    params.append('_xsrf', xsrf);
+                }
+
+                // Add main value as t{typeId}
+                if (newFirstColumnValue !== '' && newFirstColumnValue !== null && newFirstColumnValue !== undefined) {
+                    params.append(`t${ typeId }`, newFirstColumnValue);
+                }
+
+                // Add all other form fields
+                for (const [key, value] of formData.entries()) {
+                    if (key === 'main') continue;
+                    // Skip file fields (don't duplicate files by reference)
+                    const fieldMatch = key.match(/^t(\d+)$/);
+                    if (fieldMatch) {
+                        const reqId = fieldMatch[1];
+                        const uploadContainer = modal.querySelector(`.form-file-upload[data-req-id="${ reqId }"]`);
+                        if (uploadContainer) continue; // skip file fields
+                    }
+                    if (value !== '' && value !== null && value !== undefined) {
+                        params.append(key, value);
+                    }
+                }
+
+                const url = `${ apiBase }/_m_new/${ typeId }?JSON&up=${ parentId || 1 }`;
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+
+                const text = await response.text();
+                let result;
+                try {
+                    result = JSON.parse(text);
+                } catch (e) {
+                    if (!response.ok) throw new Error(text);
+                    result = { success: true };
+                }
+
+                const serverError = this.getServerError(result);
+                if (serverError) throw new Error(serverError);
+
+                const newId = result.id || result.i || null;
+                if (!newId) throw new Error('Сервер не вернул ID новой записи');
+
+                // Close the current modal
+                modal.remove();
+                if (modal._overlayElement) {
+                    modal._overlayElement.remove();
+                }
+                window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+                if (this.currentEditModal && this.currentEditModal.modal === modal) {
+                    this.currentEditModal = null;
+                }
+
+                this.showToast('Запись дублирована', 'success');
+
+                // Reload table data
+                this.data = [];
+                this.loadedRecords = 0;
+                this.hasMore = true;
+                this.totalRows = null;
+                await this.loadData(false);
+
+                // Open edit form for the newly created record
+                await this.openEditForm(newId, typeId, 0);
+
+            } catch (error) {
+                console.error('Error duplicating record:', error);
+                this.showToast(`Ошибка дублирования: ${ error.message }`, 'error');
+            }
+        }
+
+        /**
+         * Show a modal dialog asking user to enter a new value for the unique first column before duplicating.
+         * @param {string} currentValue - current value of the first column
+         * @returns {Promise<string|null>} - new value entered by user, or null if cancelled
+         */
+        showDuplicateUniqueValueModal(currentValue) {
+            return new Promise((resolve) => {
+                const modalId = `duplicate-unique-${ Date.now() }`;
+                const escapedValue = String(currentValue || '').replace(/"/g, '&quot;');
+                const modalHtml = `
+                    <div class="integram-modal-overlay" id="${ modalId }">
+                        <div class="integram-modal" style="max-width: 440px;">
+                            <div class="integram-modal-header">
+                                <h3>Дублирование записи</h3>
+                            </div>
+                            <div class="integram-modal-body">
+                                <p style="margin: 0 0 12px 0;">Поле первой колонки должно быть уникальным. Введите новое значение:</p>
+                                <input type="text" id="duplicate-unique-input" class="form-control" value="${ escapedValue }" style="width:100%;">
+                            </div>
+                            <div class="integram-modal-footer">
+                                <button type="button" class="btn btn-primary duplicate-unique-ok-btn" style="margin-right: 8px;">Дублировать</button>
+                                <button type="button" class="btn btn-secondary duplicate-unique-cancel-btn">Отменить</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+                const confirmModal = document.getElementById(modalId);
+                const input = confirmModal.querySelector('#duplicate-unique-input');
+
+                // Select all text for easy replacement
+                input.focus();
+                input.select();
+
+                const cleanup = (result) => {
+                    confirmModal.remove();
+                    resolve(result);
+                };
+
+                confirmModal.querySelector('.duplicate-unique-ok-btn').addEventListener('click', () => {
+                    cleanup(input.value);
+                });
+                confirmModal.querySelector('.duplicate-unique-cancel-btn').addEventListener('click', () => cleanup(null));
+
+                // Enter key confirms
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') cleanup(input.value);
+                    if (e.key === 'Escape') cleanup(null);
+                });
+
+                // Close on overlay click
+                confirmModal.addEventListener('click', (e) => {
+                    if (e.target === confirmModal) cleanup(null);
+                });
+
+                // Close on Escape key
+                const handleEscape = (e) => {
+                    if (e.key === 'Escape') {
+                        document.removeEventListener('keydown', handleEscape);
+                        cleanup(null);
+                    }
+                };
+                document.addEventListener('keydown', handleEscape);
+            });
         }
 
         /**
