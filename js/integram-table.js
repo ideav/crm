@@ -11174,12 +11174,18 @@ class IntegramTable{
                     const fieldId = btn.dataset.fieldId;
                     const pwdInput = modal.querySelector(`#field-${ fieldId }`);
                     if (!pwdInput) return;
+                    // Copy login link (username from first column of the table, issue #1479)
+                    // Do not allow copying invitation before the record is saved (issue #1591)
+                    const username = modal.dataset.firstColumnValue || '';
+                    if (!username) {
+                        this.showCopyNotification('Сохраните запись перед копированием приглашения', true, 5000);
+                        return;
+                    }
                     const pwd = generatePassword();
                     pwdInput.value = pwd;
-                    // Copy login link (username from first column of the table, issue #1479)
-                    const username = modal.dataset.firstColumnValue || '';
                     const db = window.location.pathname.split('/')[1] || '';
-                    const loginLink = `${ username }\nСсылка для входа: https://${ location.host }/start.html?db=${ db }&u=${ encodeURIComponent(username) }\nПароль: ${ pwd }`;
+                    // Build login link without prepending username as a separate line (issue #1591)
+                    const loginLink = `Ссылка для входа: https://${ location.host }/start.html?db=${ db }&u=${ encodeURIComponent(username) }\nПароль: ${ pwd }`;
                     copyToClipboard(loginLink);
                     showCopied(fieldId);
                     // Warn user to save the generated password (issue #1481)
