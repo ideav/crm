@@ -390,3 +390,40 @@ strong[data-menu-href] {
     border-radius: 8px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
+
+/* ── Forms tab description banner ── */
+.info-forms-description {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+}
+
+.info-forms-description-text {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.info-forms-description-hide {
+    flex-shrink: 0;
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.info-forms-description-hide:hover {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
