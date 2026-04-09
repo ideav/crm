@@ -2467,7 +2467,7 @@ class IntegramTable{
                         // Display prefix with dots replaced by spaces (issue #1565)
                         const displayPrefix = node.prefix.replace(/\./g, ' ');
                         rows[depth].push(`
-                            <th class="smart-header-group" colspan="${ node.span }">${ displayPrefix }</th>
+                            <th class="smart-header-group" colspan="${ node.span }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ displayPrefix }</th>
                         `);
                         visit(node.children, depth + 1);
                     }
