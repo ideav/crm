@@ -2662,12 +2662,21 @@ class IntegramTable{
 
             // Determine delimiter: a candidate is valid only if it appears the same
             // number of times (> 0) in every non-empty line (issue #1612).
-            const countChar = (str, ch) => str.split(ch).length - 1;
+            // Escaped occurrences (preceded by \) are not counted (issue #1614).
+            const countChar = (str, ch) => {
+                let count = 0;
+                for (let i = 0; i < str.length; i++) {
+                    if (str[i] === ch && (i === 0 || str[i - 1] !== '\\')) {
+                        count++;
+                    }
+                }
+                return count;
+            };
             const isConsistentDelimiter = (delim) => {
                 const counts = lines.map(l => countChar(l, delim));
                 return counts[0] > 0 && counts.every(c => c === counts[0]);
             };
-            let delimiter = ','; // fallback
+            let delimiter = '\t'; // fallback: TAB (issue #1614)
             if (isConsistentDelimiter('\t')) {
                 delimiter = '\t';
             } else if (isConsistentDelimiter(';')) {
