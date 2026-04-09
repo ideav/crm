@@ -2633,7 +2633,10 @@ class IntegramTable{
 
         /**
          * Parse and insert pasted data into the table (issue #1606).
-         * Each line becomes one record; fields within a line are split by TAB, ";" or ",".
+         * Each line becomes one record; fields within a line are split by the detected
+         * delimiter (TAB, ";" or ","). A delimiter is only used if it appears the same
+         * number of times in every non-empty line, preventing false splits when text
+         * contains commas or semicolons as part of values (issue #1612).
          * Uses visible columns (in order) as field mapping.
          * Stops on first insert error.
          */
@@ -2653,6 +2656,22 @@ class IntegramTable{
             if (lines.length === 0) {
                 this.showToast('Нет данных для вставки', 'error');
                 return;
+            }
+
+            // Determine delimiter: a candidate is valid only if it appears the same
+            // number of times (> 0) in every non-empty line (issue #1612).
+            const countChar = (str, ch) => str.split(ch).length - 1;
+            const isConsistentDelimiter = (delim) => {
+                const counts = lines.map(l => countChar(l, delim));
+                return counts[0] > 0 && counts.every(c => c === counts[0]);
+            };
+            let delimiter = ','; // fallback
+            if (isConsistentDelimiter('\t')) {
+                delimiter = '\t';
+            } else if (isConsistentDelimiter(';')) {
+                delimiter = ';';
+            } else if (isConsistentDelimiter(',')) {
+                delimiter = ',';
             }
 
             // Get the ordered list of visible, non-id, editable columns
@@ -2680,15 +2699,9 @@ class IntegramTable{
             for (let i = 0; i < lines.length; i++) {
                 progressEl.textContent = `Вставлено ${successCount} из ${total}`;
 
-                // Split by TAB first; if only one part, try ";" then ","
+                // Split using the pre-determined consistent delimiter
                 let parts;
-                if (lines[i].includes('\t')) {
-                    parts = lines[i].split('\t');
-                } else if (lines[i].includes(';')) {
-                    parts = lines[i].split(';');
-                } else {
-                    parts = lines[i].split(',');
-                }
+                parts = lines[i].split(delimiter);
 
                 const params = new URLSearchParams();
                 if (typeof xsrf !== 'undefined') {
