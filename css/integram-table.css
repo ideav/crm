@@ -2376,6 +2376,69 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 /* ========================================
+   Subordinate Table Row Drag-and-Drop (issue #1617)
+   ======================================== */
+
+/* Header cell for drag handle column */
+.subordinate-drag-handle-th {
+    width: 24px;
+    padding: 0 !important;
+}
+
+/* Cell containing the drag handle */
+.subordinate-drag-handle-td {
+    width: 24px;
+    padding: 0 4px !important;
+    text-align: center;
+    vertical-align: middle;
+}
+
+/* The drag handle icon */
+.subordinate-drag-handle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    color: var(--md-text-hint, #aaa);
+    cursor: grab;
+    border-radius: 3px;
+    transition: color 0.15s ease, background-color 0.15s ease;
+    font-size: 14px;
+    opacity: 0;
+}
+
+.subordinate-table tbody tr:hover .subordinate-drag-handle {
+    opacity: 1;
+}
+
+.subordinate-drag-handle:hover {
+    color: var(--md-text-secondary, #555);
+    background-color: var(--md-hover);
+}
+
+.subordinate-drag-handle:active {
+    cursor: grabbing;
+}
+
+/* Disabled state while _m_ord is in flight */
+.subordinate-drag-handle-disabled {
+    cursor: not-allowed !important;
+    opacity: 0.3 !important;
+    pointer-events: none;
+}
+
+/* Row being dragged */
+.subordinate-row-dragging {
+    opacity: 0.4;
+}
+
+/* Drop target indicator */
+.subordinate-row-drag-over {
+    border-top: 2px solid var(--md-primary, #1976d2) !important;
+}
+
+/* ========================================
    Inline Cell Editing Styles
    ======================================== */
 

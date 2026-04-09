@@ -10633,6 +10633,9 @@ class IntegramTable{
             } else {
                 html += `<div class="subordinate-table-wrapper"><table class="subordinate-table"><thead><tr>`;
 
+                // Drag handle header column (issue #1617)
+                html += `<th class="subordinate-drag-handle-th"></th>`;
+
                 // Header: main value column + requisite columns (with sort indicators)
                 columns.forEach((col, colIdx) => {
                     // Find sort state for this column
@@ -10651,7 +10654,10 @@ class IntegramTable{
                     const rowId = row.i;
                     const values = row.r || [];
 
-                    html += `<tr data-row-id="${ rowId }">`;
+                    html += `<tr data-row-id="${ rowId }" draggable="false">`;
+
+                    // Drag handle cell (issue #1617)
+                    html += `<td class="subordinate-drag-handle-td"><span class="subordinate-drag-handle" title="Перетащить строку"><i class="pi pi-equals"></i></span></td>`;
 
                     // First column (main value) - clickable to edit
                     const mainValue = values[0] || '';
@@ -10719,6 +10725,9 @@ class IntegramTable{
                     this.handleSubordinateSort(container, colIndex);
                 });
             });
+
+            // Attach drag-and-drop row reorder handlers (issue #1617)
+            this.attachSubordinateRowDragHandlers(container, arrId, parentRecordId);
 
             // Attach search input handler
             const searchInput = container.querySelector('.subordinate-search-input');
@@ -10804,6 +10813,151 @@ class IntegramTable{
                 sortState,
                 container._subordinateSearchTerm || ''
             );
+        }
+
+        /**
+         * Attach drag-and-drop handlers to subordinate table rows for reordering (issue #1617).
+         * Uses HTML5 drag-and-drop API. Drag is initiated only via the handle cell.
+         * While _m_ord is in flight, all handles are disabled.
+         */
+        attachSubordinateRowDragHandlers(container, arrId, parentRecordId) {
+            const tbody = container.querySelector('.subordinate-table tbody');
+            if (!tbody) return;
+
+            let dragSrcRow = null;
+
+            const setHandlesDisabled = (disabled) => {
+                container.querySelectorAll('.subordinate-drag-handle').forEach(h => {
+                    h.classList.toggle('subordinate-drag-handle-disabled', disabled);
+                    h.closest('tr').draggable = !disabled;
+                });
+            };
+
+            const getRows = () => Array.from(tbody.querySelectorAll('tr[data-row-id]'));
+
+            // Enable draggable on mousedown of handle, disable on mouseup (so normal clicks don't trigger drag)
+            container.querySelectorAll('.subordinate-drag-handle').forEach(handle => {
+                const row = handle.closest('tr');
+
+                handle.addEventListener('mousedown', () => {
+                    if (!handle.classList.contains('subordinate-drag-handle-disabled')) {
+                        row.draggable = true;
+                    }
+                });
+                handle.addEventListener('mouseup', () => {
+                    row.draggable = false;
+                });
+            });
+
+            tbody.addEventListener('dragstart', (e) => {
+                const row = e.target.closest('tr[data-row-id]');
+                if (!row || !row.draggable) { e.preventDefault(); return; }
+                dragSrcRow = row;
+                row.classList.add('subordinate-row-dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', row.dataset.rowId);
+            });
+
+            tbody.addEventListener('dragend', (e) => {
+                const row = e.target.closest('tr[data-row-id]');
+                if (row) {
+                    row.draggable = false;
+                    row.classList.remove('subordinate-row-dragging');
+                }
+                tbody.querySelectorAll('.subordinate-row-drag-over').forEach(r => r.classList.remove('subordinate-row-drag-over'));
+                dragSrcRow = null;
+            });
+
+            tbody.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                const row = e.target.closest('tr[data-row-id]');
+                if (!row || row === dragSrcRow) return;
+                tbody.querySelectorAll('.subordinate-row-drag-over').forEach(r => r.classList.remove('subordinate-row-drag-over'));
+                row.classList.add('subordinate-row-drag-over');
+            });
+
+            tbody.addEventListener('dragleave', (e) => {
+                const row = e.target.closest('tr[data-row-id]');
+                if (row) row.classList.remove('subordinate-row-drag-over');
+            });
+
+            tbody.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                const targetRow = e.target.closest('tr[data-row-id]');
+                if (!targetRow || !dragSrcRow || targetRow === dragSrcRow) return;
+
+                targetRow.classList.remove('subordinate-row-drag-over');
+
+                // Reorder rows in DOM
+                const rows = getRows();
+                const srcIdx = rows.indexOf(dragSrcRow);
+                const tgtIdx = rows.indexOf(targetRow);
+
+                if (srcIdx === -1 || tgtIdx === -1) return;
+
+                if (srcIdx < tgtIdx) {
+                    tbody.insertBefore(dragSrcRow, targetRow.nextSibling);
+                } else {
+                    tbody.insertBefore(dragSrcRow, targetRow);
+                }
+
+                // Collect new order of row IDs
+                const newOrder = getRows().map(r => r.dataset.rowId);
+
+                // Update in-memory data to reflect new order
+                const dataMap = {};
+                (container._subordinateData || []).forEach(row => { dataMap[row.i] = row; });
+                container._subordinateData = newOrder.map(id => dataMap[id]).filter(Boolean);
+
+                // Disable all handles while saving
+                setHandlesDisabled(true);
+
+                await this.saveSubordinateRowOrder(arrId, parentRecordId, newOrder, container, setHandlesDisabled);
+            });
+        }
+
+        /**
+         * Save the new row order via _m_ord command (issue #1617).
+         * Sends the ordered list of record IDs to the server.
+         * Re-enables handles when done.
+         */
+        async saveSubordinateRowOrder(arrId, parentRecordId, orderedIds, container, setHandlesDisabled) {
+            const apiBase = this.getApiBase();
+            const params = new URLSearchParams();
+            params.append('ids', orderedIds.join(','));
+            if (typeof xsrf !== 'undefined') {
+                params.append('_xsrf', xsrf);
+            }
+
+            try {
+                const response = await fetch(`${apiBase}/_m_ord/${arrId}?JSON&up=${parentRecordId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+
+                const responseText = await response.text();
+                let result;
+                try {
+                    result = JSON.parse(responseText);
+                } catch (jsonError) {
+                    throw new Error(`Невалидный JSON ответ: ${responseText}`);
+                }
+
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
+                }
+            } catch (error) {
+                console.error('Error saving row order:', error);
+                this.showToast(`Ошибка сохранения порядка: ${ error.message }`, 'error');
+                // Reload to get correct server order on error
+                await this.loadSubordinateTable(container, arrId, parentRecordId);
+                return;
+            } finally {
+                setHandlesDisabled(false);
+            }
         }
 
         /**
