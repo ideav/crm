@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Test Dark Theme - smartq.html</title>
+<style>
+/* CSS variables from styles.css */
+:root {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8f9fa;
+    --text-primary: #212529;
+    --text-secondary: #6c757d;
+    --border-color: #dee2e6;
+    --input-bg: #ffffff;
+    --input-border: #ced4da;
+    --color-success: #16a34a;
+    --color-error: #dc2626;
+    --color-error-bg: #fee2e2;
+}
+[data-theme="dark"] {
+    --bg-primary: #1a1a1a;
+    --bg-secondary: #2d2d2d;
+    --text-primary: #e9ecef;
+    --text-secondary: #adb5bd;
+    --border-color: #495057;
+    --input-bg: #2d2d2d;
+    --input-border: #495057;
+    --color-success: #34d399;
+    --color-error: #f87171;
+    --color-error-bg: #7f1d1d;
+}
+body {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: sans-serif;
+    padding: 20px;
+}
+
+/* === smartq.html styles (copy of the updated style block) === */
+tr.no-padding input{
+    width: 100%;
+    background-color: var(--input-bg, #f5f5f5);
+    border: 1px solid var(--input-border, gray);
+    color: var(--text-primary);
+}
+.saving{
+    background-color: var(--color-error-bg, #fff5f5);
+}
+.editing-text{
+    border: 2px solid var(--text-primary, #333) !important;
+}
+.sq-order-num,.sq-order-dir{
+    color: var(--text-secondary, #a1a1a1);
+    font-weight: 400;
+}
+.calculable,.dub-grouped{
+    background-color: var(--bg-secondary, #fafafa);
+}
+.dub-rec{
+    background-color: var(--color-error-bg, #fff5f5);
+}
+.ms-link{
+    color: var(--text-primary, #333);
+}
+.same-object{
+    background-color: var(--border-color, lightgray);
+}
+.sub-totals-left{
+    border-left: 2px solid var(--color-success, darkgreen) !important;
+}
+.sub-totals-right{
+    border-right: 2px solid var(--color-success, darkgreen) !important;
+}
+.sub-totals-top{
+    border-top: 2px solid var(--color-success, darkgreen) !important;
+}
+.sub-totals-bottom{
+    border-bottom: 2px solid var(--color-success, darkgreen) !important;
+}
+.sub-totals{
+    background-color: var(--bg-secondary, #fafafa);
+}
+.sq-table,
+.sq-table th,
+.sq-table td {
+    color: var(--text-primary);
+    border-color: var(--border-color);
+    background-color: var(--bg-primary);
+}
+.sq-table thead th {
+    background-color: var(--bg-secondary);
+}
+[data-theme="dark"] .sub-totals-tab {
+    background-color: var(--bg-secondary) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-primary);
+}
+[data-theme="dark"] svg path[stroke="#1A1A1A"],
+[data-theme="dark"] svg path[stroke="#1a1a1a"] {
+    stroke: var(--text-primary);
+}
+
+/* test page controls */
+.controls { margin-bottom: 20px; }
+.section { margin: 20px 0; padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; }
+.section h3 { margin-top: 0; color: var(--text-primary); }
+table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+th, td { border: 1px solid var(--border-color); padding: 8px; }
+</style>
+</head>
+<body>
+
+<div class="controls">
+    <button onclick="document.documentElement.removeAttribute('data-theme')">Light Theme</button>
+    <button onclick="document.documentElement.setAttribute('data-theme','dark')">Dark Theme</button>
+</div>
+
+<div class="section">
+    <h3>Table (sq-table)</h3>
+    <table class="sq-table">
+        <thead>
+            <tr>
+                <th>Column 1 <span class="sq-order-num">1</span><span class="sq-order-dir">▲</span></th>
+                <th>Column 2</th>
+                <th>Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Normal row</td>
+                <td>Data</td>
+                <td>100</td>
+            </tr>
+            <tr class="saving">
+                <td>Saving row (.saving)</td>
+                <td>Data</td>
+                <td>200</td>
+            </tr>
+            <tr class="dub-rec">
+                <td>Duplicate record (.dub-rec)</td>
+                <td>Data</td>
+                <td>300</td>
+            </tr>
+            <tr class="calculable">
+                <td>Calculable (.calculable)</td>
+                <td>Data</td>
+                <td>400</td>
+            </tr>
+            <tr class="same-object">
+                <td>Same object (.same-object)</td>
+                <td>Data</td>
+                <td>500</td>
+            </tr>
+            <tr>
+                <td class="sub-totals-left sub-totals-top sub-totals-bottom sub-totals">Sub total left</td>
+                <td class="sub-totals sub-totals-top sub-totals-bottom">Sub total mid</td>
+                <td class="sub-totals-right sub-totals-top sub-totals-bottom sub-totals">1500</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="section">
+    <h3>Inline input (.no-padding)</h3>
+    <table>
+        <tr class="no-padding">
+            <td><input type="text" value="Inline edit input"></td>
+        </tr>
+    </table>
+</div>
+
+<div class="section">
+    <h3>SVG icons (stroke="#1A1A1A")</h3>
+    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M13 19L8 14L13 9M20 19L15 14L20 9" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M17 20L11 14L17 8" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M11 20L17 14L11 8" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <span>(arrows should adapt to theme)</span>
+</div>
+
+<div class="section">
+    <h3>Sub-totals popup (sub-totals-tab)</h3>
+    <div class="sub-totals-tab" style="display:inline-block; padding:10px; border:1px solid var(--border-color); box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+        <span>SUM: 1500</span>, <span>COUNT: 3</span>, <span>AVG: 500</span>
+    </div>
+</div>
+
+<div class="section">
+    <h3>Link (.ms-link)</h3>
+    <a class="ms-link" href="#">Multi-select link</a>
+</div>
+
+<div class="section">
+    <h3>Error color (footer warning)</h3>
+    <span style="color: var(--color-error, red)">⚠ Filter applied - value may be inaccurate</span>
+</div>
+
+</body>
+</html>

@@ -13,17 +13,18 @@ tr.no-padding td{
 }
 tr.no-padding input{
     width: 100%;
-    background-color: #f5f5f5;
-    border: 1px solid gray;
+    background-color: var(--input-bg, #f5f5f5);
+    border: 1px solid var(--input-border, gray);
+    color: var(--text-primary);
 }
 .saving{
-    background-color: #fff5f5;
+    background-color: var(--color-error-bg, #fff5f5);
 }
 .editing{
     padding: 0 !important;
 }
 .editing-text{
-    border: 2px solid #333 !important;
+    border: 2px solid var(--text-primary, #333) !important;
 }
 .switch-pages{
     width: 30px;
@@ -35,17 +36,17 @@ tr.no-padding input{
     font-weight: 500;
 }
 .sq-order-num,.sq-order-dir{
-    color: #a1a1a1;
+    color: var(--text-secondary, #a1a1a1);
     font-weight: 400;
 }
 .calculable,.dub-grouped{
-    background-color: #fafafa;
+    background-color: var(--bg-secondary, #fafafa);
 }
 .dub-rec{
-    background-color: #fff5f5;
+    background-color: var(--color-error-bg, #fff5f5);
 }
 .ms-link{
-	color: #333;
+	color: var(--text-primary, #333);
 }
 .err-msg{
     z-index:1000;
@@ -63,7 +64,7 @@ tr.no-padding input{
     padding: .25rem !important;
 }
 .same-object{
-    background-color:lightgray;
+    background-color: var(--border-color, lightgray);
 }
 td[base=SIGNED],td[base=NUMBER]{
     white-space:nowrap;
@@ -74,19 +75,19 @@ input.inline-edit,textarea.inline-edit{
     border: none;
 }
 .sub-totals-left{
-    border-left: 2px solid darkgreen !important;
+    border-left: 2px solid var(--color-success, darkgreen) !important;
 }
 .sub-totals-right{
-    border-right: 2px solid darkgreen !important;
+    border-right: 2px solid var(--color-success, darkgreen) !important;
 }
 .sub-totals-top{
-    border-top: 2px solid darkgreen !important;
+    border-top: 2px solid var(--color-success, darkgreen) !important;
 }
 .sub-totals-bottom{
-    border-bottom: 2px solid darkgreen !important;
+    border-bottom: 2px solid var(--color-success, darkgreen) !important;
 }
 .sub-totals{
-    background-color: #fafafa;
+    background-color: var(--bg-secondary, #fafafa);
 }
 .sub-totals-tab{
     z-index:10;
@@ -97,7 +98,36 @@ input.inline-edit,textarea.inline-edit{
 .tr-sticky{
     position:sticky;
     top: 48px;
-    z-index: 1;   
+    z-index: 1;
+}
+.sq-table,
+.sq-table th,
+.sq-table td {
+    color: var(--text-primary);
+    border-color: var(--border-color);
+    background-color: var(--bg-primary);
+}
+.sq-table thead th {
+    background-color: var(--bg-secondary);
+}
+[data-theme="dark"] .sq-table {
+    --bs-table-bg: var(--bg-primary);
+    --bs-table-border-color: var(--border-color);
+}
+[data-theme="dark"] .sub-totals-tab {
+    background-color: var(--bg-secondary) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-primary);
+}
+[data-theme="dark"] .saving {
+    background-color: var(--color-error-bg);
+}
+[data-theme="dark"] .dub-rec {
+    background-color: var(--color-error-bg);
+}
+[data-theme="dark"] svg path[stroke="#1A1A1A"],
+[data-theme="dark"] svg path[stroke="#1a1a1a"] {
+    stroke: var(--text-primary);
 }
 </style>
 <script src="/js/jquery3.1.1.min.js"></script>
@@ -814,7 +844,7 @@ function saveDone(json,vars){
     var fd=new FormData();
     fd.append('FR_'+$('#'+parentType).find('.sq-col-name').html()+'ID',parentId);
     if($('input[filter-id='+reqId+']').val().length>0&&$('th[footer-id='+reqId+']').html().length>0)
-        $('th[footer-id='+reqId+']').css('color','red').prop('title', t9n('[RU]Возможно, значение неактуально из-за примененного фильтра[EN]The value might be not correct because of the filter applied'));
+        $('th[footer-id='+reqId+']').css('color','var(--color-error, red)').prop('title', t9n('[RU]Возможно, значение неактуально из-за примененного фильтра[EN]The value might be not correct because of the filter applied'));
     else
         newApi('POST','report/'+id+'?JSON','newRecGet',fd,{el:parent,mode:'edit'});
 }
