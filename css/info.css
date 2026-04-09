@@ -81,6 +81,10 @@
     box-shadow: 0 2px 8px rgba(0,0,0,0.08);
 }
 
+[data-theme="dark"] .info-action-item:hover {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+
 .info-action-header {
     display: flex;
     align-items: center;
@@ -104,8 +108,12 @@
 }
 
 .info-action-icon-accent {
-    background: rgba(59, 130, 246, 0.1);
+    background: rgba(59, 130, 246, 0.15);
     color: var(--button-primary);
+}
+
+[data-theme="dark"] .info-action-icon-accent {
+    background: rgba(59, 130, 246, 0.25);
 }
 
 .info-action-title {
@@ -368,8 +376,8 @@ strong[data-menu-href] {
     display: inline-block;
     width: 40px;
     height: 40px;
-    border: 4px solid #f3f3f3;
-    border-top: 4px solid #007bff;
+    border: 4px solid var(--border-color);
+    border-top: 4px solid var(--button-primary);
     border-radius: 50%;
     animation: info-spin 1s linear infinite;
 }
