@@ -13,6 +13,7 @@
     --button-primary-hover: #2563eb;
     --link-color: #3b82f6;
     --card-bg: #ffffff;
+    --modal-overlay: rgba(255, 255, 255, 0.4);
 
     /* Border radius scale */
     --radius-sm: 4px;
@@ -72,6 +73,7 @@
     --button-primary-hover: #2563eb;
     --link-color: #60a5fa;
     --card-bg: #2d2d2d;
+    --modal-overlay: rgba(0, 0, 0, 0.4);
 
     /* Status / semantic colors for dark theme */
     --color-success: #34d399;
