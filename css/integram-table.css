@@ -3585,3 +3585,14 @@ tr.row-selected {
     color: var(--color-error, #f87171);
     background-color: rgba(248, 113, 113, 0.15);
 }
+
+/* Table header (th) — explicit dark background override (issue #1593) */
+[data-theme="dark"] .integram-table th {
+    background-color: var(--bg-secondary, #2d2d2d);
+    border-right-color: rgba(255, 255, 255, 0.06);
+}
+
+/* Filter row — fix column separator color on dark background (issue #1593) */
+[data-theme="dark"] .filter-row td {
+    border-right-color: rgba(255, 255, 255, 0.06);
+}
