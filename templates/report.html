@@ -8,14 +8,21 @@
 <meta http-equiv="Pragma" content="no-cache">
 <title>{VAL}</title>
 <link rel="stylesheet" href="/css/bootstrap.3.3.7.min.css">
+<link rel="stylesheet" href="/css/styles.css">
 <link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
+<script>
+    (function() {
+        var t = localStorage.getItem('theme');
+        if (t) document.documentElement.setAttribute('data-theme', t);
+    })();
+</script>
 <script>
     var db='{_global_.z}';
 </script>
 <script src="/js/jquery-3.5.1.slim.min.js"></script>
 <script src="/js/js.js"></script>
 </head>
-<body style="font-family:Verdana,Tahoma,sans-serif;font-size:13px;line-height:normal;padding:2px">
+<body style="font-family:Verdana,Tahoma,sans-serif;font-size:13px;line-height:normal;padding:2px;background-color:var(--bg-primary,#fff);color:var(--text-primary,#212529)">
 <FORM method="post" id="report" action="/{_global_.z}/report/{_global_.id}">
 <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
     <TABLE>
@@ -50,7 +57,7 @@
 	<TR>
 	<TD colspan="3">
 		<TABLE id="report_table" class="table table-bordered">
-			<TR style="background-color:#f9f9f9; position:sticky; top:-1px;" onclick="toggle_filter();">
+			<TR style="background-color:var(--bg-secondary,#f9f9f9); position:sticky; top:-1px;" onclick="toggle_filter();">
 				<!-- Begin:&Uni_Report_Head -->
 				<TD ALIGN="CENTER" ><B>{VAL}</B></TD>
 				<!-- End:&Uni_Report_Head -->
@@ -145,6 +152,14 @@ if(get_cookie("compact") == "compact")
 <script src="/js/hints.js"></script>
 <!-- Workspace hints -->
 <style>
+:root {
+    --report-hint-shadow: 0 8px 40px rgba(0,0,0,0.28);
+    --report-hint-btn-shadow: 0 2px 8px rgba(0,0,0,0.25);
+}
+[data-theme="dark"] {
+    --report-hint-shadow: 0 8px 40px rgba(0,0,0,0.55);
+    --report-hint-btn-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
 #report-hint-box {
     position: fixed;
     top: 50%;
@@ -155,7 +170,7 @@ if(get_cookie("compact") == "compact")
     background: var(--card-bg, #fff);
     border-radius: 12px;
     padding: 1.25rem 1.25rem 1rem;
-    box-shadow: 0 8px 40px rgba(0,0,0,0.28);
+    box-shadow: var(--report-hint-shadow);
     z-index: 2000;
     display: none;
     cursor: default;
@@ -195,7 +210,7 @@ if(get_cookie("compact") == "compact")
     height: 2.4rem;
     font-size: 1.2rem;
     cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    box-shadow: var(--report-hint-btn-shadow);
     align-items: center;
     justify-content: center;
 }
