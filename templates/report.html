@@ -50,7 +50,7 @@
 		<TD align="right" class="t9n" style="padding-right:10px">
 			<a href="#" title="<t9n>[RU]Управление компактностью представления отчета[EN]Switch between compact and loose view</t9n>" onclick="toggle_compact(); return false;"><i class="pi pi-align-left" style="font-size: 1.25rem;"></i></a>&nbsp;
 			&nbsp;<a href="#" title="<t9n>[RU]Для отображения фильтра кликните здесь или на шапке таблицы[EN]To display the filter, click here or on the heading of the table</t9n>" onclick="toggle_filter(); return false;"><i class="pi pi-filter" style="font-size: 1.25rem;"></i></a>
-			&nbsp;<button id="refresh" type="submit" class="btn btn-default btn-xs" title="<t9n>[RU]Перестроить отчет по заданному фильтру[EN]Apply filter</t9n>" style="border:none;"><a href="#"><i class="pi pi-refresh" style="font-size: 1.25rem;"></i></a></button>
+			&nbsp;<a href="#" id="refresh" onclick="byId('report').submit(); return false;" title="<t9n>[RU]Перестроить отчет по заданному фильтру[EN]Apply filter</t9n>"><i class="pi pi-refresh" style="font-size: 1.25rem;"></i></a>
 			&nbsp;<a href="/{_global_.z}/report/{_global_.id}" title="<t9n>[RU]Очистить фильтр и перезапустить отчет[EN]Reset the filter and run the report</t9n>"><i class="pi pi-times-circle" style="font-size: 1.25rem;"></i></a>&nbsp;
 		</TD>
 	</TR>
@@ -65,7 +65,7 @@
 			<TR id="filter_row" style="display:none;">
 				<!-- Begin:&Uni_Report_Filter -->
 				<TD style="padding:0px;" align="center">
-				<input type="text" name="FR_{COL}" value="{FR_VAL}" size="2" id="FR_{COL}" oninput="adjust('FR_{COL}')">-<input type="text" name="TO_{COL}" value="{TO_VAL}" size="2" id="TO_{COL}" oninput="adjust('TO_{COL}')">
+				<input type="text" name="FR_{COL}" value="{FR_VAL}" size="2" id="FR_{COL}" oninput="adjust('FR_{COL}')" style="background-color:var(--input-bg,#fff);color:var(--text-primary,#212529);border:1px solid var(--input-border,#ced4da);">-<input type="text" name="TO_{COL}" value="{TO_VAL}" size="2" id="TO_{COL}" oninput="adjust('TO_{COL}')" style="background-color:var(--input-bg,#fff);color:var(--text-primary,#212529);border:1px solid var(--input-border,#ced4da);">
 				</TD>
 				<!-- End:&Uni_Report_Filter -->
 			</TR>
