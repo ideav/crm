@@ -2607,7 +2607,7 @@ class IntegramTable{
                 <div class="edit-form-footer" style="justify-content:flex-end;">
                     <div class="edit-form-footer-buttons">
                         <button type="button" class="btn btn-primary" id="paste-data-insert-btn">Вставить</button>
-                        <button type="button" class="btn btn-secondary" id="paste-data-cancel-btn">Отмена</button>
+                        <button type="button" class="btn btn-secondary" id="paste-data-cancel-btn">Отменить</button>
                     </div>
                 </div>
             `;
