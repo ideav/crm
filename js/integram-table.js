@@ -64,6 +64,7 @@ class IntegramTable{
             this.grantOptionsCache = null;  // Cache for GRANT dropdown options (issue #607)
             this.reportColumnOptionsCache = null;  // Cache for REPORT_COLUMN dropdown options (issue #607)
             this.refOptionsCache = {};  // Cache for reference field filter dropdown options by column ID (issue #795)
+            this.refFetchCache = {};  // Cache for fetchReferenceOptions results by composite key (issue #1571)
             this.editableColumns = new Map();  // Map of column IDs to their corresponding ID column IDs
             this.checkboxMode = false;  // Whether checkbox selection column is visible
             this.selectedRows = new Set();  // Set of selected row indices
@@ -3560,12 +3561,13 @@ class IntegramTable{
             // Show loading indicator
             cell.innerHTML = '<div class="inline-editor-loading">Загрузка...</div>';
 
+            // Find the column object to check for granted and orig
+            const column = this.columns.find(c => c.id === colId);
+
             try {
                 // Fetch reference options
-                const options = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId);
+                const options = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, '', {}, column ? column.attrs || '' : '');
 
-                // Find the column object to check for granted and orig
-                const column = this.columns.find(c => c.id === colId);
                 const hasGranted = column && column.granted === 1;
                 const origType = column && column.orig ? column.orig : null;
 
@@ -3660,7 +3662,7 @@ class IntegramTable{
                             // If we have exactly 50 options (not all fetched), re-query from server
                             if (!this.currentEditingCell.allOptionsFetched) {
                                 try {
-                                    const serverOptions = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, searchText);
+                                    const serverOptions = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, searchText, {}, column ? column.attrs || '' : '');
                                     this.currentEditingCell.referenceOptions = serverOptions;
                                     dropdown.innerHTML = this.renderReferenceOptions(serverOptions, currentValue);
                                 } catch (error) {
@@ -3852,7 +3854,7 @@ class IntegramTable{
             cell.innerHTML = '<div class="inline-editor-loading">Загрузка...</div>';
 
             try {
-                const options = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId);
+                const options = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, '', {}, column ? column.attrs || '' : '');
                 this.currentEditingCell.referenceOptions = options;
                 this.currentEditingCell.allOptionsFetched = options.length < 50;
 
@@ -3985,7 +3987,7 @@ class IntegramTable{
 
                             if (!this.currentEditingCell.allOptionsFetched && searchText) {
                                 try {
-                                    const serverOptions = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, searchText);
+                                    const serverOptions = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, searchText, {}, column ? column.attrs || '' : '');
                                     const serverFiltered = serverOptions.filter(([id]) => !currentSelected.has(id));
                                     dropdown.innerHTML = serverFiltered.length > 0
                                         ? serverFiltered.map(([id, text]) => {
@@ -8838,8 +8840,10 @@ class IntegramTable{
             return result;
         }
 
-        async fetchReferenceOptions(requisiteId, recordId = 0, searchQuery = '', extraParams = {}) {
+        async fetchReferenceOptions(requisiteId, recordId = 0, searchQuery = '', extraParams = {}, attrs = '') {
             const apiBase = this.getApiBase();
+            // Determine whether to include id parameter: only when attrs contains a query (square bracket expression)
+            const hasQuery = /\[.+\]/.test(attrs || '');
 
             // Check for override URL in integramTableOverrides.ddls
             if (window.integramTableOverrides &&
@@ -8894,7 +8898,8 @@ class IntegramTable{
                 LIMIT: '50'
             });
 
-            if (recordId && recordId !== 0) {
+            // Only add id parameter when attrs indicates a query (square bracket expression) (issue #1571)
+            if (hasQuery && recordId && recordId !== 0) {
                 params.append('id', recordId);
             }
             if (searchQuery) {
@@ -8902,6 +8907,13 @@ class IntegramTable{
             }
             for (const [key, value] of Object.entries(extraParams)) {
                 params.set(key, value);
+            }
+
+            // Cache by composite key: requisiteId + recordId (when id is used) + searchQuery (issue #1571)
+            const cacheKey = `${requisiteId}_${hasQuery && recordId ? recordId : ''}_${searchQuery}`;
+            const cachedResult = this.refFetchCache[cacheKey];
+            if (cachedResult !== undefined && Object.keys(extraParams).length === 0) {
+                return cachedResult;
             }
 
             const url = `${ apiBase }/_ref_reqs/${ requisiteId }?${ params }`;
@@ -8924,7 +8936,12 @@ class IntegramTable{
 
                 // Parse JSON text to extract key-value pairs in original server order
                 // (JavaScript objects with numeric string keys iterate in numeric order, not insertion order)
-                return this.parseJsonObjectAsArray(text);
+                const result = this.parseJsonObjectAsArray(text);
+                // Cache result for subsequent calls with same requisiteId + recordId + searchQuery (issue #1571)
+                if (Object.keys(extraParams).length === 0) {
+                    this.refFetchCache[cacheKey] = result;
+                }
+                return result;
             } catch (e) {
                 if (e.message && e.message.includes('error')) {
                     throw e;
@@ -11317,14 +11334,18 @@ class IntegramTable{
 
                 if (!searchInput || !dropdown || !hiddenInput) continue;
 
+                // Look up attrs from reqs metadata to determine if id parameter should be included (issue #1571)
+                const reqMeta = reqs && Array.isArray(reqs) ? reqs.find(r => String(r.id) === String(refReqId)) : null;
+                const refAttrs = (reqMeta && reqMeta.attrs) || wrapper.dataset.attrs || '';
+
                 // Issue #853: Handle multi-select reference editors separately
                 if (wrapper.dataset.multi === '1') {
-                    this.initFormMultiReferenceEditor(wrapper, refReqId, recordId);
+                    this.initFormMultiReferenceEditor(wrapper, refReqId, recordId, refAttrs);
                     continue;
                 }
 
                 try {
-                    const options = await this.fetchReferenceOptions(refReqId, recordId);
+                    const options = await this.fetchReferenceOptions(refReqId, recordId, '', {}, refAttrs);
 
                     // Store options data on the wrapper (array of [id, text] tuples)
                     wrapper._referenceOptions = options;
@@ -11375,7 +11396,7 @@ class IntegramTable{
                                 // If not all fetched, re-query from server
                                 if (!wrapper._allOptionsFetched) {
                                     try {
-                                        const serverOptions = await this.fetchReferenceOptions(refReqId, recordId, searchText, wrapper._extraParams || {});
+                                        const serverOptions = await this.fetchReferenceOptions(refReqId, recordId, searchText, wrapper._extraParams || {}, refAttrs);
                                         wrapper._referenceOptions = serverOptions;
                                         this.renderFormReferenceOptions(dropdown, serverOptions, hiddenInput, searchInput);
                                     } catch (error) {
@@ -11497,8 +11518,9 @@ class IntegramTable{
                     const applyHook = async () => {
                         const isEmpty = !watchedHiddenInput.value;
                         targetWrapper._extraParams = isEmpty ? (hook.onEmpty || {}) : (hook.onFilled || {});
+                        const targetAttrs = (reqs && Array.isArray(reqs) ? (reqs.find(r => String(r.id) === String(refReqId)) || {}).attrs : '') || targetWrapper.dataset.attrs || '';
                         try {
-                            const options = await this.fetchReferenceOptions(refReqId, recordId, '', targetWrapper._extraParams);
+                            const options = await this.fetchReferenceOptions(refReqId, recordId, '', targetWrapper._extraParams, targetAttrs);
                             targetWrapper._referenceOptions = options;
                             targetWrapper._allOptionsFetched = options.length < 50;
                             this.renderFormReferenceOptions(targetDropdown, options, targetHiddenInput, targetSearchInput);
@@ -11520,7 +11542,7 @@ class IntegramTable{
          * Shows selected values as removable tags and a search input to add more.
          * Updates the hidden input with comma-separated selected IDs.
          */
-        async initFormMultiReferenceEditor(wrapper, refReqId, recordId) {
+        async initFormMultiReferenceEditor(wrapper, refReqId, recordId, attrs = '') {
             const searchInput = wrapper.querySelector('.form-ref-search');
             const dropdown = wrapper.querySelector('.form-ref-dropdown');
             const hiddenInput = wrapper.querySelector('.form-multi-ref-value');
@@ -11529,7 +11551,7 @@ class IntegramTable{
             if (!searchInput || !dropdown || !hiddenInput || !tagsContainer) return;
 
             try {
-                const options = await this.fetchReferenceOptions(refReqId, recordId);
+                const options = await this.fetchReferenceOptions(refReqId, recordId, '', {}, attrs);
                 wrapper._referenceOptions = options;
                 wrapper._allOptionsFetched = options.length < 50;
 
