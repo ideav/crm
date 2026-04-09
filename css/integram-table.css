@@ -3504,7 +3504,7 @@ tr.row-selected {
 .paste-data-btn i {
     font-size: 14px;
 }
-.paste-data-textarea {
+#paste-data-textarea {
     padding: 3px;
 }
 
