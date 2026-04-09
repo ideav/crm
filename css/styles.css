@@ -82,6 +82,10 @@
     --color-error: #f87171;
     --color-error-bg: #7f1d1d;
 
+    /* Upload workspace cell colors for dark theme */
+    --cell-error-bg: #78350f;
+    --cell-success-bg: #064e3b;
+
     --icon-type-2: #fb7185;
     --icon-type-2-bg: rgba(251, 113, 133, 0.2);
     --icon-type-3: #60a5fa;
