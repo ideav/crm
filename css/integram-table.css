@@ -3504,6 +3504,9 @@ tr.row-selected {
 .paste-data-btn i {
     font-size: 14px;
 }
+.paste-data-textarea {
+    padding: 3px;
+}
 
 /* New row editing state */
 .new-row-editing {
