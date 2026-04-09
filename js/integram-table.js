@@ -6135,6 +6135,15 @@ class IntegramTable{
             colEditOverlay.addEventListener('click', closeColEdit);
             colEditModal.querySelector(`#col-edit-cancel-${instanceName}`).addEventListener('click', closeColEdit);
 
+            // Close on Enter key; stop propagation so the parent column-settings-modal is not affected (issue #1568)
+            colEditModal.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    colEditModal.querySelector(`#col-edit-save-${instanceName}`).click();
+                }
+            });
+
             // Save button: save type (non-ref) + required + alias (ref)
             colEditModal.querySelector(`#col-edit-save-${instanceName}`).addEventListener('click', async () => {
                 const saveBtn = colEditModal.querySelector(`#col-edit-save-${instanceName}`);
@@ -6234,11 +6243,13 @@ class IntegramTable{
                     this.globalMetadataPromise = null;
                     // Clear columns so loadDataFromTable() re-fetches metadata (issue #1400)
                     this.columns = [];
-                    // Reload column state in the settings list
-                    setTimeout(() => {
+                    // Close only the col-edit modal and reopen the parent column settings so the user
+                    // can continue editing other columns; do not close the parent modal (issue #1568)
+                    setTimeout(async () => {
                         closeColEdit();
                         this.closeColumnSettings();
-                        this.loadData(0);
+                        await this.loadData(0);
+                        this.openColumnSettings();
                     }, 800);
                 } catch (err) {
                     showStatus('Ошибка: ' + err.message, true);
