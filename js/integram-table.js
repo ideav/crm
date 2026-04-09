@@ -2302,31 +2302,34 @@ class IntegramTable{
         }
 
         /**
-         * Smart header grouping (issue #1540)
+         * Smart header grouping (issue #1540, #1565)
          * Find the longest common whole-word prefix of two column name strings.
+         * Words are separated by dots (".").
          */
         _smartHeaderLCP(a, b) {
-            const wa = a.split(' ');
-            const wb = b.split(' ');
+            const wa = a.split('.');
+            const wb = b.split('.');
             let n = 0;
             for (let i = 0; i < Math.min(wa.length, wb.length); i++) {
                 if (wa[i] === wb[i]) n = i + 1;
                 else break;
             }
-            return wa.slice(0, n).join(' ');
+            return wa.slice(0, n).join('.');
         }
 
         /**
          * Build smart header grouping tree from an ordered list of columns.
          *
+         * Column names use dots (".") as word separators for grouping (issue #1565).
+         *
          * A group [start..end) with prefix P is valid only if:
-         *   - ≥2 consecutive columns all start with P+" " (non-empty suffix)
-         *   - The column before start (if any) does NOT start with P+" "
-         *   - The column after end (if any) does NOT start with P+" "
+         *   - ≥2 consecutive columns all start with P+"." (non-empty suffix)
+         *   - The column before start (if any) does NOT start with P+"."
+         *   - The column after end (if any) does NOT start with P+"."
          *   - The group is NOT universal (does not span ALL columns at this level)
          *
          * Finds the SHORTEST non-universal prefix first (top-down approach so that
-         * broader groupings like "foo bar" contain narrower ones like "foo bar baz").
+         * broader groupings like "foo.bar" contain narrower ones like "foo.bar.baz").
          *
          * Returns array of nodes:
          *   { type:'leaf', col, suffix }
@@ -2342,7 +2345,7 @@ class IntegramTable{
             const pairPrefixes = [];
             for (let i = 0; i < columns.length - 1; i++) {
                 const prefix = this._smartHeaderLCP(columns[i].name, columns[i + 1].name);
-                const len = prefix.split(' ').filter(Boolean).length;
+                const len = prefix.split('.').filter(Boolean).length;
                 pairPrefixes.push({ i, prefix, len });
             }
 
@@ -2356,10 +2359,10 @@ class IntegramTable{
                 // Find the full extent of this prefix among consecutive columns
                 let start = pair.i;
                 while (start > 0 && columns[start - 1].name !== prefix &&
-                       columns[start - 1].name.startsWith(prefix + ' ')) start--;
+                       columns[start - 1].name.startsWith(prefix + '.')) start--;
                 let end = pair.i + 1;
                 while (end < columns.length && columns[end].name !== prefix &&
-                       columns[end].name.startsWith(prefix + ' ')) end++;
+                       columns[end].name.startsWith(prefix + '.')) end++;
                 // Skip if universal (spans ALL columns at this level)
                 if (start === 0 && end === columns.length) continue;
                 targetLen = pair.len;
@@ -2378,16 +2381,16 @@ class IntegramTable{
                 let grouped = false;
                 if (i + 1 < columns.length) {
                     const pairPrefix = this._smartHeaderLCP(columns[i].name, columns[i + 1].name);
-                    const pairLen = pairPrefix.split(' ').filter(Boolean).length;
+                    const pairLen = pairPrefix.split('.').filter(Boolean).length;
                     if (pairLen >= targetLen) {
-                        const prefix = columns[i].name.split(' ').slice(0, targetLen).join(' ');
-                        if (columns[i].name.startsWith(prefix + ' ') && columns[i].name !== prefix) {
-                            const leftOk = i === 0 || !columns[i - 1].name.startsWith(prefix + ' ');
+                        const prefix = columns[i].name.split('.').slice(0, targetLen).join('.');
+                        if (columns[i].name.startsWith(prefix + '.') && columns[i].name !== prefix) {
+                            const leftOk = i === 0 || !columns[i - 1].name.startsWith(prefix + '.');
                             if (leftOk) {
                                 let end = i + 1;
                                 while (end < columns.length && columns[end].name !== prefix &&
-                                       columns[end].name.startsWith(prefix + ' ')) end++;
-                                const rightOk = end >= columns.length || !columns[end].name.startsWith(prefix + ' ');
+                                       columns[end].name.startsWith(prefix + '.')) end++;
+                                const rightOk = end >= columns.length || !columns[end].name.startsWith(prefix + '.');
                                 if (rightOk && end - i >= 2) {
                                     const groupCols = columns.slice(i, end);
                                     const suffixCols = groupCols.map(col => ({
@@ -2451,16 +2454,20 @@ class IntegramTable{
                                 ? '<i class="pi pi-sort-amount-up-alt" style="font-size:0.75em;"></i> '
                                 : '<i class="pi pi-sort-amount-down" style="font-size:0.75em;"></i> ';
                         }
+                        // Display name with dots replaced by spaces (issue #1565)
+                        const displayName = col.name.replace(/\./g, ' ');
                         rows[depth].push(`
                             <th data-column-id="${ col.id }" draggable="true"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' }>
-                                <span class="column-header-content" data-column-id="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ col.name }</span>
+                                <span class="column-header-content" data-column-id="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ displayName }</span>
                                 ${ addButtonHtml }
                                 <div class="column-resize-handle" data-column-id="${ col.id }"></div>
                             </th>
                         `);
                     } else {
+                        // Display prefix with dots replaced by spaces (issue #1565)
+                        const displayPrefix = node.prefix.replace(/\./g, ' ');
                         rows[depth].push(`
-                            <th class="smart-header-group" colspan="${ node.span }">${ node.prefix }</th>
+                            <th class="smart-header-group" colspan="${ node.span }">${ displayPrefix }</th>
                         `);
                         visit(node.children, depth + 1);
                     }

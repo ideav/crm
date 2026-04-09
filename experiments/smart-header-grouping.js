@@ -1,25 +1,28 @@
 /**
- * Experiment: Smart header grouping algorithm (v6 - top-down, shortest non-universal prefix)
+ * Experiment: Smart header grouping algorithm (v7 - dot separators, issue #1565)
  * Run with: node experiments/smart-header-grouping.js
  *
  * Algorithm:
- * At each level, find the SHORTEST prefix (fewest words) that:
+ * At each level, find the SHORTEST prefix (fewest dot-separated segments) that:
  *   (a) Is NOT universal (doesn't apply to ALL columns at this level)
  *   (b) Groups at least 2 consecutive columns that all share it
  *   (c) Has proper boundary conditions (neighbors outside group don't share it)
+ *
+ * Column names use dots (".") as word/segment separators for grouping.
+ * Dots are replaced by spaces when displaying header text (issue #1565).
  *
  * Recurse into each group to find sub-groupings with more specific prefixes.
  */
 
 function longestCommonWordPrefix(a, b) {
-    const wa = a.split(' ');
-    const wb = b.split(' ');
+    const wa = a.split('.');
+    const wb = b.split('.');
     let n = 0;
     for (let i = 0; i < Math.min(wa.length, wb.length); i++) {
         if (wa[i] === wb[i]) n = i + 1;
         else break;
     }
-    return wa.slice(0, n).join(' ');
+    return wa.slice(0, n).join('.');
 }
 
 /**
@@ -37,7 +40,7 @@ function buildSmartHeaderTree(columns) {
     const pairPrefixes = [];
     for (let i = 0; i < columns.length - 1; i++) {
         const prefix = longestCommonWordPrefix(columns[i].name, columns[i + 1].name);
-        pairPrefixes.push({ i, prefix, len: prefix.split(' ').filter(Boolean).length });
+        pairPrefixes.push({ i, prefix, len: prefix.split('.').filter(Boolean).length });
     }
 
     // Sort pairs by prefix length ASCENDING (shortest first = most general first)
@@ -55,20 +58,19 @@ function buildSmartHeaderTree(columns) {
         let start = pair.i;
         while (start > 0 &&
                columns[start - 1].name !== prefix &&
-               columns[start - 1].name.startsWith(prefix + ' ')) {
+               columns[start - 1].name.startsWith(prefix + '.')) {
             start--;
         }
         let end = pair.i + 1;
         while (end < columns.length &&
                columns[end].name !== prefix &&
-               columns[end].name.startsWith(prefix + ' ')) {
+               columns[end].name.startsWith(prefix + '.')) {
             end++;
         }
 
         // Check if universal (spans ALL columns)
         if (start === 0 && end === columns.length) {
-            // Universal prefix — check if this is the ONLY option
-            // Skip it and look for non-universal ones
+            // Universal prefix — skip it and look for non-universal ones
             continue;
         }
 
@@ -91,18 +93,18 @@ function buildSmartHeaderTree(columns) {
         let grouped = false;
 
         if (i + 1 < columns.length) {
-            // Get the pair prefix at targetLen words
+            // Get the pair prefix at targetLen segments
             const pairPrefix = longestCommonWordPrefix(columns[i].name, columns[i + 1].name);
-            const pairLen = pairPrefix.split(' ').filter(Boolean).length;
+            const pairLen = pairPrefix.split('.').filter(Boolean).length;
 
             if (pairLen >= targetLen) {
-                // Use exactly targetLen words as the group prefix
-                const prefix = columns[i].name.split(' ').slice(0, targetLen).join(' ');
+                // Use exactly targetLen segments as the group prefix
+                const prefix = columns[i].name.split('.').slice(0, targetLen).join('.');
 
                 // Verify col[i] starts with this prefix and has a suffix
-                if (columns[i].name.startsWith(prefix + ' ') && columns[i].name !== prefix) {
+                if (columns[i].name.startsWith(prefix + '.') && columns[i].name !== prefix) {
                     // Left boundary: previous column must NOT start with prefix
-                    const leftOk = i === 0 || !columns[i - 1].name.startsWith(prefix + ' ');
+                    const leftOk = i === 0 || !columns[i - 1].name.startsWith(prefix + '.');
 
                     if (leftOk) {
                         // Extend right
@@ -110,13 +112,13 @@ function buildSmartHeaderTree(columns) {
                         while (
                             end < columns.length &&
                             columns[end].name !== prefix &&
-                            columns[end].name.startsWith(prefix + ' ')
+                            columns[end].name.startsWith(prefix + '.')
                         ) {
                             end++;
                         }
 
                         // Right boundary
-                        const rightOk = end >= columns.length || !columns[end].name.startsWith(prefix + ' ');
+                        const rightOk = end >= columns.length || !columns[end].name.startsWith(prefix + '.');
 
                         if (rightOk && end - i >= 2) {
                             // Form group
@@ -159,9 +161,13 @@ function renderTreeRows(nodes, totalDepth) {
     function visit(nodes, depth) {
         for (const node of nodes) {
             if (node.type === 'leaf') {
-                rows[depth].push({ text: node.suffix, colspan: 1, rowspan: totalDepth - depth, col: node.col });
+                // Display with dots replaced by spaces (issue #1565)
+                const displayText = node.suffix.replace(/\./g, ' ');
+                rows[depth].push({ text: displayText, colspan: 1, rowspan: totalDepth - depth, col: node.col });
             } else {
-                rows[depth].push({ text: node.prefix, colspan: node.span, rowspan: 1, col: null });
+                // Display prefix with dots replaced by spaces (issue #1565)
+                const displayPrefix = node.prefix.replace(/\./g, ' ');
+                rows[depth].push({ text: displayPrefix, colspan: node.span, rowspan: 1, col: null });
                 visit(node.children, depth + 1);
             }
         }
@@ -176,16 +182,16 @@ function assert(cond, msg) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// TEST 1: Main example from issue screenshots
+// TEST 1: Main example from issue screenshots (using dots as separators)
 // ═══════════════════════════════════════════════════════════════════════════
-console.log('=== TEST 1: Main example ===');
+console.log('=== TEST 1: Main example (dot-separated) ===');
 const t1cols = [
-    { id: 'c1', name: 'информация №2' },
-    { id: 'c2', name: 'информация №3' },
-    { id: 'c3', name: 'информация №4 Критерий' },
-    { id: 'c4', name: 'информация №4 Соответствие' },
-    { id: 'c5', name: 'информация №4 возможность соответствовать можно' },
-    { id: 'c6', name: 'информация №4 возможность соответствовать время' },
+    { id: 'c1', name: 'информация.№2' },
+    { id: 'c2', name: 'информация.№3' },
+    { id: 'c3', name: 'информация.№4.Критерий' },
+    { id: 'c4', name: 'информация.№4.Соответствие' },
+    { id: 'c5', name: 'информация.№4.возможность соответствовать.можно' },
+    { id: 'c6', name: 'информация.№4.возможность соответствовать.время' },
 ];
 const tree1 = buildSmartHeaderTree(t1cols);
 const depth1 = treeDepth(tree1);
@@ -226,9 +232,9 @@ console.log(allOk ? '✓ Test 2 passed' : '✗ Test 2 FAILED');
 console.log('\n=== TEST 3: Universal prefix, all leaves ===');
 allOk = true;
 const t3 = buildSmartHeaderTree([
-    {id:'a', name:'foo A'},
-    {id:'b', name:'foo B'},
-    {id:'c', name:'foo C'},
+    {id:'a', name:'foo.A'},
+    {id:'b', name:'foo.B'},
+    {id:'c', name:'foo.C'},
 ]);
 const rows3 = renderTreeRows(t3, treeDepth(t3));
 console.log('Depth:', treeDepth(t3));
@@ -243,8 +249,8 @@ console.log(allOk ? '✓ Test 3 passed' : '✗ Test 3 FAILED');
 console.log('\n=== TEST 4: Simple two-column group ===');
 allOk = true;
 const t4 = buildSmartHeaderTree([
-    {id:'a', name:'foo bar A'},
-    {id:'b', name:'foo bar B'},
+    {id:'a', name:'foo.bar.A'},
+    {id:'b', name:'foo.bar.B'},
     {id:'c', name:'baz'},
 ]);
 const rows4 = renderTreeRows(t4, treeDepth(t4));
@@ -257,14 +263,14 @@ console.log(allOk ? '✓ Test 4 passed' : '✗ Test 4 FAILED');
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TEST 5: Boundary condition - left neighbor shares shorter prefix
-// "foo baz", "foo bar X", "foo bar Y"
+// "foo.baz", "foo.bar.X", "foo.bar.Y"
 // ═══════════════════════════════════════════════════════════════════════════
 console.log('\n=== TEST 5: Boundary condition ===');
 allOk = true;
 const t5 = buildSmartHeaderTree([
-    {id:'a', name:'foo baz'},
-    {id:'b', name:'foo bar X'},
-    {id:'c', name:'foo bar Y'},
+    {id:'a', name:'foo.baz'},
+    {id:'b', name:'foo.bar.X'},
+    {id:'c', name:'foo.bar.Y'},
 ]);
 const rows5 = renderTreeRows(t5, treeDepth(t5));
 rows5.forEach((r, i) => console.log(`Row ${i}:`, r.map(c => `"${c.text}"[cs=${c.colspan},rs=${c.rowspan}]`).join(', ')));
@@ -273,5 +279,27 @@ assert(rows5[0][0].text === 'foo baz' && rows5[0][0].rowspan === 2, `r0[0]="${ro
 assert(rows5[0][1].text === 'foo bar' && rows5[0][1].colspan === 2, `r0[1]="${rows5[0][1]?.text}"`);
 assert(rows5[1][0].text === 'X' && rows5[1][1].text === 'Y', `r1 fail`);
 console.log(allOk ? '✓ Test 5 passed' : '✗ Test 5 FAILED');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TEST 6: Dots-to-spaces display conversion
+// ═══════════════════════════════════════════════════════════════════════════
+console.log('\n=== TEST 6: Dots replaced by spaces in display ===');
+allOk = true;
+const t6 = buildSmartHeaderTree([
+    {id:'a', name:'group.A'},
+    {id:'b', name:'group.B'},
+    {id:'c', name:'other'},
+]);
+const rows6 = renderTreeRows(t6, treeDepth(t6));
+rows6.forEach((r, i) => console.log(`Row ${i}:`, r.map(c => `"${c.text}"[cs=${c.colspan},rs=${c.rowspan}]`).join(', ')));
+assert(treeDepth(t6) === 2, `depth=2 got ${treeDepth(t6)}`);
+// Group header "group" has no dots, so it stays as "group"
+assert(rows6[0][0].text === 'group' && rows6[0][0].colspan === 2, `r0[0]="${rows6[0][0]?.text}"`);
+// Leaf "other" stays as "other"
+assert(rows6[0][1].text === 'other' && rows6[0][1].rowspan === 2, `r0[1]="${rows6[0][1]?.text}"`);
+// Leaf suffixes "A" and "B" (no dots)
+assert(rows6[1][0].text === 'A', `r1[0]="${rows6[1][0]?.text}"`);
+assert(rows6[1][1].text === 'B', `r1[1]="${rows6[1][1]?.text}"`);
+console.log(allOk ? '✓ Test 6 passed' : '✗ Test 6 FAILED');
 
 console.log('\n=== Done ===');
