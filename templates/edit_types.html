@@ -35,6 +35,12 @@
     right: 0;
     display: none;
 }
+.integram-toast { color: white; }
+.integram-toast-error { background-color: var(--color-danger, #dc3545); }
+.integram-toast-success { background-color: #28a745; }
+.integram-toast-info { background-color: #17a2b8; }
+[data-theme="dark"] .integram-toast-success { background-color: #15803d; }
+[data-theme="dark"] .integram-toast-info { background-color: #0e7490; }
 </style>
 <link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
 <script src="/js/jquery3.1.1.min.js"></script>
@@ -48,7 +54,7 @@ function showNotification(message, type) {
     var toast = document.createElement('div');
     toast.className = 'integram-toast integram-toast-' + type;
     toast.textContent = message;
-    toast.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 24px;border-radius:4px;color:white;z-index:10000;font-family:sans-serif;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.2);cursor:pointer;background-color:' + (type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#17a2b8') + ';';
+    toast.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 24px;border-radius:4px;z-index:10000;font-family:sans-serif;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.2);cursor:pointer;';
     document.body.appendChild(toast);
     var remove = function() { if (toast.parentNode) toast.remove(); };
     setTimeout(remove, 5000);
