@@ -2604,9 +2604,11 @@ class IntegramTable{
                     <div style="margin-top:6px;color:#888;font-size:0.85em;">Текст, разделённый символами табуляции, «;» или «,»</div>
                     <div id="paste-data-progress" style="margin-top:8px;display:none;"></div>
                 </div>
-                <div class="edit-form-footer">
-                    <button class="edit-form-save" id="paste-data-insert-btn">Вставить</button>
-                    <button class="edit-form-cancel" id="paste-data-cancel-btn">Отмена</button>
+                <div class="edit-form-footer" style="justify-content:flex-end;">
+                    <div class="edit-form-footer-buttons">
+                        <button type="button" class="btn btn-primary" id="paste-data-insert-btn">Вставить</button>
+                        <button type="button" class="btn btn-secondary" id="paste-data-cancel-btn">Отмена</button>
+                    </div>
                 </div>
             `;
 
