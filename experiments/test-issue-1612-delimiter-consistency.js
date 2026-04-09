@@ -5,7 +5,17 @@
  * semicolons as part of values.
  */
 
-const countChar = (str, ch) => str.split(ch).length - 1;
+// Count occurrences of ch in str, ignoring escaped instances (preceded by \)
+// (issue #1614: escaped delimiters like \, should not be counted)
+const countChar = (str, ch) => {
+    let count = 0;
+    for (let i = 0; i < str.length; i++) {
+        if (str[i] === ch && (i === 0 || str[i - 1] !== '\\')) {
+            count++;
+        }
+    }
+    return count;
+};
 
 function detectDelimiter(lines) {
     const isConsistentDelimiter = (delim) => {
@@ -15,7 +25,7 @@ function detectDelimiter(lines) {
     if (isConsistentDelimiter('\t')) return '\t';
     if (isConsistentDelimiter(';')) return ';';
     if (isConsistentDelimiter(',')) return ',';
-    return ','; // fallback
+    return '\t'; // fallback: TAB (issue #1614)
 }
 
 function parseData(text) {
@@ -65,8 +75,8 @@ test('Comma delimiter (consistent)',
     // 2 commas vs 3 commas — comma is NOT consistent, semicolon=0, tab=0
     // detectDelimiter should fall back to ','
     const delim = detectDelimiter(lines);
-    const ok = delim === ',';
-    console.log(`[${ok ? 'PASS' : 'FAIL'}] Comma inconsistent: detectDelimiter falls back to ',' (got: ${JSON.stringify(delim)})`);
+    const ok = delim === '\t';
+    console.log(`[${ok ? 'PASS' : 'FAIL'}] Comma inconsistent: detectDelimiter falls back to TAB (got: ${JSON.stringify(delim)})`);
     if (ok) passed++;
 })();
 
