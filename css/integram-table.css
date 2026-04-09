@@ -374,6 +374,17 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 0 !important;
 }
 
+/* Smart header group cells (issue #1540) */
+.integram-table th.smart-header-group {
+    text-align: center;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    max-width: 0;
+    cursor: default;
+    draggable: false;
+}
+
 /* Compact mode */
 .integram-table.compact th {
     padding: 8px 5px;
