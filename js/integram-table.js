@@ -11051,6 +11051,7 @@ class IntegramTable{
             if (!tbody) return;
 
             let dragSrcRow = null;
+            let dragTargetRow = null;
 
             const setHandlesDisabled = (disabled) => {
                 container.querySelectorAll('.subordinate-drag-handle').forEach(h => {
@@ -11092,6 +11093,7 @@ class IntegramTable{
                 }
                 tbody.querySelectorAll('.subordinate-row-drag-over').forEach(r => r.classList.remove('subordinate-row-drag-over'));
                 dragSrcRow = null;
+                dragTargetRow = null;
             });
 
             tbody.addEventListener('dragover', (e) => {
@@ -11101,6 +11103,7 @@ class IntegramTable{
                 if (!row || row === dragSrcRow) return;
                 tbody.querySelectorAll('.subordinate-row-drag-over').forEach(r => r.classList.remove('subordinate-row-drag-over'));
                 row.classList.add('subordinate-row-drag-over');
+                dragTargetRow = row;
             });
 
             tbody.addEventListener('dragleave', (e) => {
@@ -11110,7 +11113,8 @@ class IntegramTable{
 
             tbody.addEventListener('drop', async (e) => {
                 e.preventDefault();
-                const targetRow = e.target.closest('tr[data-row-id]');
+                const targetRow = dragTargetRow;
+                dragTargetRow = null;
                 if (!targetRow || !dragSrcRow || targetRow === dragSrcRow) return;
 
                 targetRow.classList.remove('subordinate-row-drag-over');
