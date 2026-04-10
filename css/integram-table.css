@@ -793,7 +793,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border-radius: 4px;
     box-shadow: var(--md-elevation-2);
     color: var(--md-text-secondary);
-    font-size: 0.8125rem;
+    font-size: 0.75rem;
     font-weight: 500;
     font-family: inherit;
     z-index: 100;
@@ -3524,15 +3524,15 @@ tr.row-selected {
     align-items: center;
     justify-content: center;
     gap: 4px;
-    height: 28px;
-    margin-right: 12px;
-    padding: 0 10px;
+    height: 22px;
+    margin-right: 8px;
+    padding: 0 8px;
     border: none;
-    border-radius: 6px;
+    border-radius: 4px;
     background: var(--button-primary, #3b82f6);
     color: white;
     cursor: pointer;
-    font-size: 0.8125rem;
+    font-size: 0.75rem;
     font-weight: 500;
     transition: background-color 0.2s ease;
     vertical-align: middle;
@@ -3548,7 +3548,7 @@ tr.row-selected {
 }
 
 .add-row-btn i {
-    font-size: 0.875rem;
+    font-size: 0.75rem;
 }
 
 /* Paste data button in scroll counter area (issue #1608) */
@@ -3556,31 +3556,35 @@ tr.row-selected {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    height: 28px;
-    margin-right: 12px;
-    padding: 0 10px;
-    border: none;
-    border-radius: 6px;
-    background: var(--button-secondary, #6b7280);
-    color: white;
+    height: 22px;
+    margin-right: 8px;
+    padding: 0 8px;
+    border: 1px solid var(--button-secondary, #6b7280);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--button-secondary, #6b7280);
     cursor: pointer;
-    font-size: 0.8125rem;
+    font-size: 0.75rem;
     font-weight: 500;
-    transition: background-color 0.2s ease;
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
     vertical-align: middle;
 }
 
 .paste-data-btn:hover {
-    background: var(--button-secondary-hover, #4b5563);
+    background: rgba(107, 114, 128, 0.1);
+    border-color: var(--button-secondary-hover, #4b5563);
+    color: var(--button-secondary-hover, #4b5563);
 }
 
 .paste-data-btn:active {
-    background: var(--button-secondary-hover, #4b5563);
+    background: rgba(107, 114, 128, 0.15);
+    border-color: var(--button-secondary-hover, #4b5563);
+    color: var(--button-secondary-hover, #4b5563);
     transform: scale(0.98);
 }
 
 .paste-data-btn i {
-    font-size: 0.875rem;
+    font-size: 0.75rem;
 }
 #paste-data-textarea {
     padding: 3px;
