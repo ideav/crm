@@ -1330,12 +1330,10 @@ class IntegramTable{
                                 <i class="pi pi-cog"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">вид</span>' : '' }
                             </div>
-                            ${ this.isStructureWritable() ? `
                             <div class="integram-table-settings" onclick="window.${ instanceName }.openColumnSettings()" title="Настройка колонок">
                                 <i class="pi pi-th-large"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">колонки</span>' : '' }
                             </div>
-                            ` : '' }
                         </div>
                     </div>
                     ${ this.renderHiddenFilterBadges() }
@@ -6067,6 +6065,17 @@ class IntegramTable{
 
             document.body.appendChild(overlay);
             document.body.appendChild(modal);
+
+            // Hide structure-modifying elements when user does not have structure write access (issue #1636)
+            if (!this.isStructureWritable()) {
+                modal.querySelectorAll('.col-settings-drag-handle').forEach(el => { el.style.display = 'none'; });
+                modal.querySelectorAll('.btn-col-edit').forEach(el => { el.style.display = 'none'; });
+                const helpBtnNoAccess = modal.querySelector('.btn-col-settings-help');
+                if (helpBtnNoAccess) helpBtnNoAccess.style.display = 'none';
+                const addColBtnNoAccess = modal.querySelector(`#add-column-btn-${instanceName}`);
+                if (addColBtnNoAccess) addColBtnNoAccess.style.display = 'none';
+                modal.querySelectorAll('.column-settings-item').forEach(item => { item.setAttribute('draggable', 'false'); });
+            }
 
             // Attach help button handler (issue #968)
             const helpBtn = modal.querySelector('.btn-col-settings-help');
