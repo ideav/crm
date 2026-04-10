@@ -2286,6 +2286,27 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     min-height: 200px;
 }
 
+/* Infinite scroll spinner shown at the bottom of the subordinate table (issue #1640) */
+.subordinate-infinite-spinner {
+    display: none;
+    justify-content: center;
+    align-items: center;
+    padding: 12px 0;
+}
+
+.subordinate-infinite-spinner-icon {
+    width: 24px;
+    height: 24px;
+    border: 3px solid var(--md-divider, #e0e0e0);
+    border-top-color: var(--md-primary, #1976d2);
+    border-radius: 50%;
+    animation: subordinate-spin 0.7s linear infinite;
+}
+
+@keyframes subordinate-spin {
+    to { transform: rotate(360deg); }
+}
+
 /* Subordinate form modal (stacked on top of main modal) */
 /* z-index is set dynamically in JavaScript for proper stacking */
 .subordinate-form-modal {

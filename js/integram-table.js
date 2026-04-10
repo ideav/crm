@@ -10500,18 +10500,185 @@ class IntegramTable{
                 }
                 const metadata = this.metadataCache[arrId];
 
-                // Fetch data for subordinate table
+                // Fetch first page of data for subordinate table (issue #1640)
+                const pageSize = this.options.pageSize || 20;
                 const apiBase = this.getApiBase();
-                const dataUrl = `${ apiBase }/object/${ arrId }/?JSON_OBJ&F_U=${ parentRecordId }`;
+                const dataUrl = `${ apiBase }/object/${ arrId }/?JSON_OBJ&F_U=${ parentRecordId }&LIMIT=0,${ pageSize + 1 }`;
                 const dataResponse = await fetch(dataUrl);
                 const data = await dataResponse.json();
 
-                // Render the subordinate table
-                this.renderSubordinateTable(container, metadata, data, arrId, parentRecordId);
+                // Determine if there are more records (issue #1640)
+                const rows = Array.isArray(data) ? data : [];
+                const hasMore = rows.length > pageSize;
+                const firstPageRows = hasMore ? rows.slice(0, pageSize) : rows;
+
+                // Render the subordinate table with first page data
+                this.renderSubordinateTable(container, metadata, firstPageRows, arrId, parentRecordId);
+
+                // Store pagination state on container for infinite scroll (issue #1640)
+                container._subordinateHasMore = hasMore;
+                container._subordinateLoadedCount = firstPageRows.length;
+                container._subordinateIsLoading = false;
+                container._subordinateArrIdForScroll = arrId;
+                container._subordinateParentRecordIdForScroll = parentRecordId;
+
+                // Attach infinite scroll listener to the modal's scrollable body (issue #1640)
+                this.attachSubordinateScrollListener(container);
 
             } catch (error) {
                 console.error('Error loading subordinate table:', error);
                 container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${ error.message }</div>`;
+            }
+        }
+
+        /**
+         * Attach scroll listener to the subordinate modal's .edit-form-body for infinite scroll (issue #1640).
+         * Loads next page when user scrolls near the bottom. Shows Ajax spinner while loading.
+         */
+        attachSubordinateScrollListener(container) {
+            // Find the scrollable modal body
+            const modal = container.closest('.edit-form-modal.subordinate-modal');
+            if (!modal) return;
+            const scrollEl = modal.querySelector('.edit-form-body');
+            if (!scrollEl) return;
+
+            // Remove previous listener if re-attached (e.g. after re-render)
+            if (scrollEl._subordinateScrollListener) {
+                scrollEl.removeEventListener('scroll', scrollEl._subordinateScrollListener);
+            }
+
+            const scrollListener = () => {
+                if (container._subordinateIsLoading || !container._subordinateHasMore) return;
+
+                const threshold = 200;
+                const distanceFromBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+                if (distanceFromBottom < threshold) {
+                    this.loadMoreSubordinateRows(container);
+                }
+            };
+
+            scrollEl._subordinateScrollListener = scrollListener;
+            scrollEl.addEventListener('scroll', scrollListener);
+
+            // Check immediately in case the first page already fits the screen (issue #1640)
+            setTimeout(() => scrollListener(), 100);
+        }
+
+        /**
+         * Load the next page of subordinate table rows and append them to the existing table (issue #1640).
+         * Shows an Ajax spinner at the bottom while loading.
+         */
+        async loadMoreSubordinateRows(container) {
+            if (container._subordinateIsLoading || !container._subordinateHasMore) return;
+
+            container._subordinateIsLoading = true;
+
+            // Show spinner at the bottom of the table
+            const wrapper = container.querySelector('.subordinate-table-wrapper');
+            let spinner = container.querySelector('.subordinate-infinite-spinner');
+            if (!spinner) {
+                spinner = document.createElement('div');
+                spinner.className = 'subordinate-infinite-spinner';
+                spinner.innerHTML = '<div class="subordinate-infinite-spinner-icon"></div>';
+                if (wrapper) {
+                    wrapper.after(spinner);
+                } else {
+                    container.appendChild(spinner);
+                }
+            }
+            spinner.style.display = 'flex';
+
+            try {
+                const arrId = container._subordinateArrIdForScroll;
+                const parentRecordId = container._subordinateParentRecordIdForScroll;
+                const pageSize = this.options.pageSize || 20;
+                const offset = container._subordinateLoadedCount;
+                const apiBase = this.getApiBase();
+                const dataUrl = `${ apiBase }/object/${ arrId }/?JSON_OBJ&F_U=${ parentRecordId }&LIMIT=${ offset },${ pageSize + 1 }`;
+
+                const dataResponse = await fetch(dataUrl);
+                const data = await dataResponse.json();
+                const newRows = Array.isArray(data) ? data : [];
+                const hasMore = newRows.length > pageSize;
+                const pageRows = hasMore ? newRows.slice(0, pageSize) : newRows;
+
+                // Append rows to the accumulated data and update loaded count
+                container._subordinateData = (container._subordinateData || []).concat(pageRows);
+                container._subordinateLoadedCount += pageRows.length;
+                container._subordinateHasMore = hasMore;
+
+                // Append new rows to the existing table's tbody
+                const tbody = container.querySelector('.subordinate-table tbody');
+                if (tbody && pageRows.length > 0) {
+                    const metadata = container._subordinateMetadata;
+                    const reqs = metadata ? (metadata.reqs || []) : [];
+                    const instanceName = this.options.instanceName;
+                    const pathParts = window.location.pathname.split('/');
+                    const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+                    const searchTerm = container._subordinateSearchTerm || '';
+
+                    pageRows.forEach(row => {
+                        const rowId = row.i;
+                        const values = row.r || [];
+                        const tr = document.createElement('tr');
+                        tr.dataset.rowId = rowId;
+                        tr.draggable = false;
+
+                        // Drag handle cell (issue #1617)
+                        const dragTd = document.createElement('td');
+                        dragTd.className = 'subordinate-drag-handle-td';
+                        dragTd.innerHTML = '<span class="subordinate-drag-handle" title="Перетащить строку"><i class="pi pi-equals"></i></span>';
+                        tr.appendChild(dragTd);
+
+                        // First column (main value)
+                        const mainValue = values[0] || '';
+                        const mainFieldInfo = { type: metadata ? metadata.type : '' };
+                        let displayMainValue = this.formatSubordinateCellValue(mainValue, mainFieldInfo);
+                        if (searchTerm) {
+                            displayMainValue = this.highlightSearchTerm(displayMainValue, searchTerm);
+                        }
+                        const mainTd = document.createElement('td');
+                        mainTd.className = 'subordinate-cell-clickable';
+                        mainTd.dataset.rowId = rowId;
+                        mainTd.dataset.typeId = arrId;
+                        mainTd.innerHTML = displayMainValue;
+                        mainTd.addEventListener('click', () => {
+                            this.openEditForm(rowId, arrId, 0);
+                        });
+                        tr.appendChild(mainTd);
+
+                        // Requisite columns
+                        reqs.forEach((req, idx) => {
+                            const cellValue = values[idx + 1] !== undefined ? values[idx + 1] : '';
+                            const td = document.createElement('td');
+                            if (req.arr_id) {
+                                const count = typeof cellValue === 'number' ? cellValue : (cellValue || 0);
+                                const nestedTableUrl = `/${dbName}/table/${req.arr_id}?F_U=${rowId}`;
+                                td.className = 'subordinate-nested-count';
+                                td.innerHTML = `<a href="${nestedTableUrl}" class="subordinate-table-icon-link" target="${req.arr_id}" title="Открыть в новом окне" onclick="event.stopPropagation();"><i class="pi pi-table"></i></a><a href="#" class="subordinate-count-link" onclick="window.${instanceName}.openSubordinateTableFromCell(event, ${req.arr_id}, ${rowId}); return false;" title="Открыть подчиненную таблицу">(${count})</a>`;
+                            } else {
+                                let displayValue = this.formatSubordinateCellValue(cellValue, req);
+                                if (searchTerm) {
+                                    displayValue = this.highlightSearchTerm(displayValue, searchTerm);
+                                }
+                                td.innerHTML = displayValue;
+                            }
+                            tr.appendChild(td);
+                        });
+
+                        tbody.appendChild(tr);
+                    });
+
+                    // Re-attach drag handlers for the full table (issue #1617)
+                    this.attachSubordinateRowDragHandlers(container, arrId, parentRecordId);
+                }
+
+            } catch (error) {
+                console.error('Error loading more subordinate rows:', error);
+            } finally {
+                container._subordinateIsLoading = false;
+                // Hide spinner
+                if (spinner) spinner.style.display = 'none';
             }
         }
 
@@ -10830,6 +10997,12 @@ class IntegramTable{
                     const newPos = Math.min(cursorPosition, searchInput.value.length);
                     searchInput.setSelectionRange(newPos, newPos);
                 }
+            }
+
+            // Re-attach infinite scroll listener after re-render (issue #1640)
+            // (re-render happens on sort/search but pagination state is preserved on container)
+            if (container._subordinateHasMore !== undefined) {
+                this.attachSubordinateScrollListener(container);
             }
         }
 
