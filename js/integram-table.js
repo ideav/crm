@@ -2723,6 +2723,62 @@ class IntegramTable{
             insertBtn.disabled = true;
             progressEl.style.display = 'block';
 
+            // Pre-fetch reference options (LIMIT=500) for all REF columns (issue #1648)
+            const refOptionsCache = {};
+            const refColIds = orderedColIds.filter(id => columnMap[id] && (columnMap[id].format || '') === 'REF');
+            for (const colId of refColIds) {
+                try {
+                    const refParams = new URLSearchParams({ JSON: '', LIMIT: '500' });
+                    const refUrl = `${apiBase}/_ref_reqs/${colId}?${refParams}`;
+                    const refResponse = await fetch(refUrl);
+                    if (refResponse.ok) {
+                        const refText = await refResponse.text();
+                        try {
+                            refOptionsCache[colId] = this.parseJsonObjectAsArray(refText);
+                        } catch (e) {
+                            refOptionsCache[colId] = [];
+                        }
+                    } else {
+                        refOptionsCache[colId] = [];
+                    }
+                } catch (e) {
+                    refOptionsCache[colId] = [];
+                }
+            }
+
+            /**
+             * Resolve a text value to its ID for a REF column (issue #1648).
+             * First searches the pre-fetched list of up to 500 options.
+             * If not found and the list has 500 items (server may have more),
+             * performs a targeted search using q={value} to find the exact record.
+             */
+            const resolveRefId = async (colId, textValue) => {
+                const options = refOptionsCache[colId] || [];
+                const lowerValue = textValue.toLowerCase();
+                const found = options.find(([, label]) => String(label).toLowerCase() === lowerValue);
+                if (found) {
+                    return found[0];
+                }
+                // If the cached list is full (500 items), there may be more on the server
+                if (options.length >= 500) {
+                    try {
+                        const searchParams = new URLSearchParams({ JSON: '', LIMIT: '1', q: textValue });
+                        const searchUrl = `${apiBase}/_ref_reqs/${colId}?${searchParams}`;
+                        const searchResponse = await fetch(searchUrl);
+                        if (searchResponse.ok) {
+                            const searchText = await searchResponse.text();
+                            const searchResult = this.parseJsonObjectAsArray(searchText);
+                            if (searchResult.length > 0) {
+                                return searchResult[0][0];
+                            }
+                        }
+                    } catch (e) {
+                        // Fall through: return original text if search fails
+                    }
+                }
+                return null;
+            };
+
             let successCount = 0;
             const total = lines.length;
 
@@ -2739,14 +2795,27 @@ class IntegramTable{
                 }
 
                 // Map each part to the corresponding column id (t{colId} = value)
-                parts.forEach((part, idx) => {
+                // For REF columns, resolve text values to IDs (issue #1648)
+                for (let idx = 0; idx < parts.length; idx++) {
                     if (idx < orderedColIds.length) {
-                        const trimmed = part.trim();
+                        const trimmed = parts[idx].trim();
                         if (trimmed !== '') {
-                            params.append(`t${orderedColIds[idx]}`, trimmed);
+                            const colId = orderedColIds[idx];
+                            const col = columnMap[colId];
+                            if (col && (col.format || '') === 'REF') {
+                                const resolvedId = await resolveRefId(colId, trimmed);
+                                if (resolvedId !== null) {
+                                    params.append(`t${colId}`, resolvedId);
+                                } else {
+                                    // Value not found in reference list; pass as-is (server will handle/reject)
+                                    params.append(`t${colId}`, trimmed);
+                                }
+                            } else {
+                                params.append(`t${colId}`, trimmed);
+                            }
                         }
                     }
-                });
+                }
 
                 try {
                     const response = await fetch(url, {
