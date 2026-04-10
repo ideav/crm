@@ -106,7 +106,6 @@ class IntegramTable{
                 truncateLongValues: true,  // true = truncate to 127 chars (default)
                 wrapHeaders: false,  // false = nowrap (default), true = wrap column headers
                 hideMenuButtonLabels: false,  // false = show labels below toolbar buttons (default)
-                pageFontSize: 'normal'  // 'normal' | 'larger' | 'smaller' — whole-page font size
             };
 
             this.filterTypes = {
@@ -1337,17 +1336,6 @@ class IntegramTable{
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">колонки</span>' : '' }
                             </div>
                             ` : '' }
-                            <div class="integram-table-font-size-group" title="Размер шрифта">
-                                <div class="integram-table-settings integram-font-size-btn${ this.settings.pageFontSize === 'smaller' ? ' active' : '' }" onclick="window.${ instanceName }.setPageFontSize('smaller')" title="Шрифт меньше" style="font-size:12px;">А
-                                    ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">меньше</span>' : '' }
-                                </div>
-                                <div class="integram-table-settings integram-font-size-btn${ !this.settings.pageFontSize || this.settings.pageFontSize === 'normal' ? ' active' : '' }" onclick="window.${ instanceName }.setPageFontSize('normal')" title="Шрифт обычный" style="font-size:14px;">А
-                                    ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">норма</span>' : '' }
-                                </div>
-                                <div class="integram-table-settings integram-font-size-btn${ this.settings.pageFontSize === 'larger' ? ' active' : '' }" onclick="window.${ instanceName }.setPageFontSize('larger')" title="Шрифт больше" style="font-size:16px;">А
-                                    ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">больше</span>' : '' }
-                                </div>
-                            </div>
                         </div>
                     </div>
                     ${ this.renderHiddenFilterBadges() }
@@ -7469,9 +7457,7 @@ class IntegramTable{
                 truncateLongValues: true,
                 wrapHeaders: false,
                 hideMenuButtonLabels: false,
-                pageFontSize: 'normal'
             };
-            this.applyPageFontSize();
             this.options.pageSize = 20;
 
             // Reset column state
@@ -8643,13 +8629,8 @@ class IntegramTable{
                 truncateLongValues: this.settings.truncateLongValues,
                 wrapHeaders: this.settings.wrapHeaders,
                 hideMenuButtonLabels: this.settings.hideMenuButtonLabels,
-                pageFontSize: this.settings.pageFontSize
             };
             document.cookie = `${ this.options.cookiePrefix }-settings=${ JSON.stringify(settings) }; path=/; max-age=31536000`;
-
-            // Save pageFontSize as global setting (applies to whole page)
-            const globalFontSettings = { pageFontSize: this.settings.pageFontSize };
-            document.cookie = `integram-table-font-settings=${ JSON.stringify(globalFontSettings) }; path=/; max-age=31536000`;
 
             // Save global compact setting if "For All" is checked
             if (this.settings.compactForAll) {
@@ -8671,7 +8652,6 @@ class IntegramTable{
                     this.settings.truncateLongValues = settings.truncateLongValues !== undefined ? settings.truncateLongValues : true;
                     this.settings.wrapHeaders = settings.wrapHeaders !== undefined ? settings.wrapHeaders : false;
                     this.settings.hideMenuButtonLabels = settings.hideMenuButtonLabels !== undefined ? settings.hideMenuButtonLabels : false;
-                    this.settings.pageFontSize = settings.pageFontSize || 'normal';
 
                     // Update options.pageSize to match loaded settings
                     this.options.pageSize = this.settings.pageSize;
@@ -8693,41 +8673,26 @@ class IntegramTable{
                 }
             }
 
-            // Always load global font size setting (applies to whole page across all tables)
-            const globalFontCookie = cookies.find(c => c.trim().startsWith('integram-table-font-settings='));
-            if (globalFontCookie) {
-                try {
-                    const fontSettings = JSON.parse(globalFontCookie.split('=').slice(1).join('='));
-                    if (fontSettings.pageFontSize) {
-                        this.settings.pageFontSize = fontSettings.pageFontSize;
-                    }
-                } catch (e) {
-                    console.error('Error loading font settings:', e);
-                }
-            }
         }
 
         /**
-         * Set whole-page font size and re-render controls (issue #1626)
-         * @param {'normal'|'larger'|'smaller'} size
-         */
-        setPageFontSize(size) {
-            this.settings.pageFontSize = size;
-            this.saveSettings();
-            this.applyPageFontSize();
-            this.render();
-        }
-
-        /**
-         * Apply the current pageFontSize setting to the document root (issue #1626)
+         * Apply font size from the global cookie to the document root (issue #1626/#1628).
+         * On pages using main.html this is already applied before DOM render;
+         * this call is a fallback for pages that don't include main.html.
          */
         applyPageFontSize() {
-            const sizeMap = {
-                smaller: '87.5%',  // ~14px base → ~12.25px
-                normal: '',        // remove override, use browser default
-                larger: '112.5%'   // ~14px base → ~15.75px
-            };
-            const value = sizeMap[this.settings.pageFontSize] || '';
+            // If main.html already set up the global handler, skip to avoid double-apply
+            if (typeof window.setPageFontSize === 'function') return;
+            const sizeMap = { smaller: '87.5%', normal: '', larger: '112.5%' };
+            let size = 'normal';
+            try {
+                const match = document.cookie.match(/(?:^|; )integram-table-font-settings=([^;]*)/);
+                if (match) {
+                    const fontSettings = JSON.parse(decodeURIComponent(match[1]));
+                    if (fontSettings.pageFontSize) size = fontSettings.pageFontSize;
+                }
+            } catch (e) { /* ignore */ }
+            const value = sizeMap[size] || '';
             if (value) {
                 document.documentElement.style.fontSize = value;
             } else {

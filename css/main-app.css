@@ -110,6 +110,46 @@
     margin: 0.25rem 0;
 }
 
+/* Font size controls in user menu (issue #1628) */
+.user-menu-font-size-row {
+    cursor: default;
+}
+
+.user-menu-font-size-row:hover {
+    background: none;
+}
+
+.navbar-font-size-group {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+}
+
+.navbar-font-size-btn {
+    font-weight: 700;
+    line-height: 1;
+    padding: 3px 7px;
+    min-width: 28px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color, #dee2e6);
+    background: transparent;
+    color: var(--text-secondary, #6c757d);
+    cursor: pointer;
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.navbar-font-size-btn:hover {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+.navbar-font-size-btn.active {
+    background-color: var(--md-primary, #1976d2);
+    color: #fff;
+    border-color: var(--md-primary, #1976d2);
+}
+
 .user-menu-item-danger {
     color: var(--color-danger, #dc3545);
 }
