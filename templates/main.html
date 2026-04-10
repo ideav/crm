@@ -16,15 +16,11 @@
         // Font size control — global, stored in cookie integram-table-font-settings (issue #1626/#1628)
         (function() {
             var FONT_COOKIE = 'integram-table-font-settings';
-            var SIZE_MAP = { smaller: '87.5%', normal: '', larger: '112.5%' };
+            var SIZE_MAP = { smaller: '.7rem', normal: '.82rem', larger: '.95rem' };
 
             function applyPageFontSize(size) {
-                var value = SIZE_MAP[size] || '';
-                if (value) {
-                    document.documentElement.style.fontSize = value;
-                } else {
-                    document.documentElement.style.removeProperty('font-size');
-                }
+                var value = SIZE_MAP[size] || SIZE_MAP.normal;
+                document.documentElement.style.fontSize = value;
             }
 
             function loadPageFontSize() {
