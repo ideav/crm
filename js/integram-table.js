@@ -1342,16 +1342,29 @@ class IntegramTable{
                         <table class="integram-table${ this.settings.compact ? ' compact' : '' }">
                         <thead>
                             ${ (() => {
-                                // Smart header grouping (issue #1540)
-                                // Only apply when NOT in row-grouping mode (grouping mode has its own header)
-                                const useSmartHeaders = !(this.groupingEnabled && this.groupingColumns.length > 0);
-                                const smartTree = useSmartHeaders ? this.buildSmartHeaderTree(orderedColumns) : null;
-                                const smartDepth = smartTree ? this.smartHeaderTreeDepth(smartTree) : 1;
+                                // Smart header grouping (issue #1540, #1624)
+                                // Works in both normal mode and left-grouping mode.
+                                // In left-grouping mode, grouping columns are placed first (same reordering as renderGroupedHeaders).
+                                const isLeftGrouping = this.groupingEnabled && this.groupingColumns.length > 0;
+                                const groupingColumnSet = isLeftGrouping ? new Set(this.groupingColumns) : null;
+
+                                // In left-grouping mode, reorder columns: grouping cols first, then non-grouping
+                                const headerColumns = isLeftGrouping
+                                    ? [
+                                        ...this.groupingColumns
+                                            .map(colId => this.columns.find(c => c.id === colId))
+                                            .filter(col => col && this.visibleColumns.includes(col.id)),
+                                        ...orderedColumns.filter(col => !groupingColumnSet.has(col.id))
+                                      ]
+                                    : orderedColumns;
+
+                                const smartTree = this.buildSmartHeaderTree(headerColumns);
+                                const smartDepth = this.smartHeaderTreeDepth(smartTree);
                                 const hasSmartGroups = smartDepth > 1;
 
-                                if (useSmartHeaders && hasSmartGroups) {
+                                if (hasSmartGroups) {
                                     // Multi-row smart header
-                                    const rowsOfCells = this.renderSmartHeaderRows(smartTree, smartDepth, 0, instanceName);
+                                    const rowsOfCells = this.renderSmartHeaderRows(smartTree, smartDepth, 0, instanceName, groupingColumnSet);
                                     const checkboxHtml = this.checkboxMode
                                         ? `<th class="checkbox-column-header" rowspan="${ smartDepth }"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.data.length > 0 && this.selectedRows.size === this.data.length ? 'checked' : '' }></th>`
                                         : '';
@@ -1367,16 +1380,18 @@ class IntegramTable{
                                     `).join('') + (this.filtersEnabled ? `
                                     <tr class="filter-row">
                                         ${ this.checkboxMode ? '<td class="checkbox-column-filter"></td>' : '' }
-                                        ${ orderedColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('') }
+                                        ${ isLeftGrouping
+                                            ? this.renderGroupedFilterRow(orderedColumns)
+                                            : headerColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('') }
                                         <td class="add-column-filter-cell"></td>
                                     </tr>
                                     ` : '');
                                 }
 
                                 // Single-row header (original logic)
-                                const singleRowCells = this.groupingEnabled && this.groupingColumns.length > 0
+                                const singleRowCells = isLeftGrouping
                                     ? this.renderGroupedHeaders(orderedColumns, instanceName)
-                                    : orderedColumns.map(col => {
+                                    : headerColumns.map(col => {
                                         const width = this.columnWidths[col.id];
                                         const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
                                         const addButtonHtml = this.shouldShowAddButton(col) ?
@@ -1403,9 +1418,9 @@ class IntegramTable{
                                     ${ this.filtersEnabled ? `
                                     <tr class="filter-row">
                                         ${ this.checkboxMode ? '<td class="checkbox-column-filter"></td>' : '' }
-                                        ${ this.groupingEnabled && this.groupingColumns.length > 0 ?
+                                        ${ isLeftGrouping ?
                                             this.renderGroupedFilterRow(orderedColumns) :
-                                            orderedColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('')
+                                            headerColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('')
                                         }
                                         <td class="add-column-filter-cell"></td>
                                     </tr>
@@ -2436,7 +2451,7 @@ class IntegramTable{
          *
          * Group <th> cells show only the shared prefix text (truncated via CSS).
          */
-        renderSmartHeaderRows(nodes, totalDepth, depth, instanceName) {
+        renderSmartHeaderRows(nodes, totalDepth, depth, instanceName, groupingColumnSet) {
             // rows[i] = array of <th> HTML strings for header row i
             const rows = Array.from({ length: totalDepth }, () => []);
 
@@ -2457,9 +2472,14 @@ class IntegramTable{
                         }
                         // Display name with dots replaced by spaces (issue #1565)
                         const displayName = col.name.replace(/\./g, ' ');
+                        // In left-grouping mode, add grouping styles to grouping column headers (issue #1624)
+                        const isGroupingCol = groupingColumnSet && groupingColumnSet.has(col.id);
+                        const groupingClass = isGroupingCol ? ' group-header' : '';
+                        const groupingOrder = isGroupingCol ? this.groupingColumns.indexOf(col.id) + 1 : '';
+                        const groupingBadge = isGroupingCol ? `<span class="grouping-header-badge">${ groupingOrder }</span>` : '';
                         rows[depth].push(`
-                            <th data-column-id="${ col.id }" draggable="true"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' }>
-                                <span class="column-header-content" data-column-id="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ displayName }</span>
+                            <th data-column-id="${ col.id }" draggable="true"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' } class="${ groupingClass }">
+                                <span class="column-header-content" data-column-id="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ displayName }</span>
                                 ${ addButtonHtml }
                                 <div class="column-resize-handle" data-column-id="${ col.id }"></div>
                             </th>
