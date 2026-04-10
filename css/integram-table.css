@@ -32,7 +32,7 @@
 }
 
 #form-settings-btn {
-    font-size: 16px;
+    font-size: 1rem;
 }
 
 .integram-table-container {
@@ -79,7 +79,7 @@
 }
 
 .integram-table-title {
-    font-size: 20px;
+    font-size: 1.25rem;
     font-weight: 500;
     color: var(--md-text-primary);
     letter-spacing: 0.15px;
@@ -143,7 +143,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border-radius: 6px;
     transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
     font-weight: 500;
-    font-size: 16px;
+    font-size: 1rem;
     color: var(--text-secondary, #6c757d);
     background: transparent;
     border: 1px solid var(--border-color, #dee2e6);
@@ -158,7 +158,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border: none !important;
 }
 .integram-table-settings .btn-label {
-    font-size: 12px;
+    font-size: 0.75rem;
     font-weight: 400;
     line-height: 1;
 }
@@ -248,7 +248,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border-radius: 6px;
     transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
     font-weight: 500;
-    font-size: 13px;
+    font-size: 0.8125rem;
     cursor: pointer;
 }
 
@@ -268,7 +268,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 10px;
     text-align: left;
     font-weight: 500;
-    font-size: 12px;
+    font-size: 0.75rem;
     /* letter-spacing: 0.4px;
     text-transform: uppercase; */
     color: var(--md-text-secondary);
@@ -343,7 +343,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    font-size: 16px;
+    font-size: 1rem;
     font-weight: bold;
     line-height: 1;
     padding: 0;
@@ -415,7 +415,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border-left: none;
     border-right: 1px solid rgba(0, 0, 0, 0.06);
     color: var(--md-text-primary);
-    font-size: 13px;
+    font-size: 0.8125rem;
     letter-spacing: 0.25px;
 }
 
@@ -449,24 +449,24 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .boolean-check {
     color: #4caf50;
     font-weight: bold;
-    font-size: 16px;
+    font-size: 1rem;
 }
 
 .boolean-uncheck {
     color: #9e9e9e;
-    font-size: 14px;
+    font-size: 0.875rem;
 }
 
 /* Subordinate table boolean styles */
 .subordinate-table .boolean-check {
     color: #4caf50;
     font-weight: bold;
-    font-size: 14px;
+    font-size: 0.875rem;
 }
 
 .subordinate-table .boolean-uncheck {
     color: #9e9e9e;
-    font-size: 12px;
+    font-size: 0.75rem;
 }
 
 .integram-table .date-cell,
@@ -509,7 +509,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     background: var(--md-surface);
     border: 1px solid var(--md-divider);
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 0.875rem;
     min-width: 32px;
     text-align: center;
     font-weight: 500;
@@ -531,7 +531,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 8px 12px;
     border: 1px solid var(--md-divider);
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
@@ -564,7 +564,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     top: 50%;
     transform: translateY(-50%);
     cursor: pointer;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 500;
     color: var(--md-text-secondary);
     background: var(--md-surface);
@@ -587,7 +587,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 4px 0px 4px 23px;  /* Extra left padding for icon */
     border: none; /* 1px solid var(--md-divider); */
     /* border-radius: 4px; */
-    font-size: 14px;
+    font-size: 0.875rem;
     font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
@@ -636,7 +636,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     justify-content: space-between;
     padding: 4px 8px 4px 23px;  /* Extra left padding for icon */
     border: none;
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
@@ -671,7 +671,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .filter-ref-trigger-arrow {
     flex-shrink: 0;
-    font-size: 10px;
+    font-size: 0.625rem;
     color: var(--md-text-hint);
     margin-left: 4px;
 }
@@ -702,7 +702,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 8px 12px;
     border: 1px solid var(--md-divider);
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
@@ -725,7 +725,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border: none;
     background: transparent;
     color: var(--md-text-secondary);
-    font-size: 16px;
+    font-size: 1rem;
     cursor: pointer;
     border-radius: 50%;
     display: flex;
@@ -752,7 +752,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     cursor: pointer;
     transition: background-color 0.15s ease;
     gap: 8px;
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--md-text-primary);
 }
 
@@ -793,7 +793,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border-radius: 4px;
     box-shadow: var(--md-elevation-2);
     color: var(--md-text-secondary);
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-weight: 500;
     font-family: inherit;
     z-index: 100;
@@ -830,7 +830,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border-radius: 4px;
     cursor: pointer;
     font-weight: 500;
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--md-text-primary);
     transition: var(--md-transition);
 }
@@ -873,7 +873,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border: 1.5px solid var(--md-text-secondary, #888);
     background: none;
     color: var(--md-text-secondary, #888);
-    font-size: 12px;
+    font-size: 0.75rem;
     font-weight: 700;
     cursor: pointer;
     line-height: 1;
@@ -939,7 +939,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     display: flex;
     align-items: center;
     width: 100%;
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--md-text-primary);
     letter-spacing: 0.25px;
 }
@@ -991,7 +991,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     margin-right: 8px;
     color: var(--md-text-secondary, #666);
     cursor: grab;
-    font-size: 14px;
+    font-size: 0.875rem;
     user-select: none;
     opacity: 0.5;
 }
@@ -1033,7 +1033,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     height: 18px;
     line-height: 18px;
     text-align: center;
-    font-size: 10px;
+    font-size: 0.625rem;
     font-weight: 600;
     color: var(--md-text-secondary, #666);
     background-color: var(--md-surface-variant, rgba(0,0,0,0.07));
@@ -1049,13 +1049,13 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     color: var(--color-error, #d32f2f);
     font-weight: bold;
     margin-left: 4px;
-    font-size: 14px;
+    font-size: 0.875rem;
 }
 
 .col-multi-badge {
     color: var(--md-primary, #1976d2);
     margin-left: 4px;
-    font-size: 12px;
+    font-size: 0.75rem;
 }
 
 /* Column type icon and original name display in column settings list (issue #945) */
@@ -1067,14 +1067,14 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     margin-right: 8px;
     color: var(--md-text-secondary, #666);
     flex: 0 0 auto;
-    font-size: 11px;
+    font-size: 0.6875rem;
     font-weight: 600;
     opacity: 0.65;
 }
 
 .col-original-name {
     color: var(--md-text-secondary, #888);
-    font-size: 12px;
+    font-size: 0.75rem;
     margin-left: 3px;
 }
 
@@ -1096,7 +1096,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .col-edit-label {
     min-width: 130px;
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-weight: 500;
     margin: 0;
     color: var(--md-text-secondary, #555);
@@ -1106,7 +1106,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-weight: 400;
     margin: 0;
     cursor: pointer;
@@ -1115,11 +1115,11 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .col-edit-select,
 .col-edit-input {
     flex: 1;
-    font-size: 13px;
+    font-size: 0.8125rem;
 }
 
 .col-edit-value {
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--md-text-secondary, #666);
     font-style: italic;
 }
@@ -1137,7 +1137,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .col-edit-go-dict-link {
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--md-primary, #1976d2);
     text-decoration: none;
     cursor: pointer;
@@ -1199,14 +1199,14 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .col-edit-del-warn {
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--color-error, #b71c1c);
     flex: 1;
 }
 
 .col-edit-status {
     margin-top: 10px;
-    font-size: 13px;
+    font-size: 0.8125rem;
     padding: 6px 10px;
     border-radius: 4px;
 }
@@ -1255,7 +1255,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 4px 8px;
     cursor: pointer;
     color: var(--text-secondary, #6c757d);
-    font-size: 14px;
+    font-size: 0.875rem;
     line-height: 1;
     transition: color 0.15s, border-color 0.15s;
 }
@@ -1288,7 +1288,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     /* justify-content: space-between; */
     align-items: center;
     transition: background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--md-text-primary);
 }
 
@@ -1405,7 +1405,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .edit-form-header h3 {
     margin: 0;
-    font-size: 20px;
+    font-size: 1.25rem;
     font-weight: 500;
     color: var(--md-text-primary);
     letter-spacing: 0.15px;
@@ -1418,7 +1418,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .edit-form-parent-subtitle {
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 400;
     color: var(--md-text-secondary);
     letter-spacing: 0.1px;
@@ -1427,7 +1427,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .edit-form-close {
     background: none;
     border: none;
-    font-size: 24px;
+    font-size: 1.5rem;
     line-height: 1;
     color: var(--md-text-secondary);
     cursor: pointer;
@@ -1455,7 +1455,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .edit-form-record-id {
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 400;
     color: var(--text-secondary, #999);
     cursor: pointer;
@@ -1519,7 +1519,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 12px 16px;
     border: 1px solid var(--md-divider);
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
@@ -1543,7 +1543,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 8px 12px;
     border: 1px solid var(--input-border, #ced4da);
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 0.875rem;
     background-color: var(--input-bg, white);
     color: var(--text-primary, inherit);
     cursor: pointer;
@@ -1579,7 +1579,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 10px 22px;
     border: none;
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 500;
     cursor: pointer;
     transition: var(--md-transition);
@@ -1674,7 +1674,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     z-index: 3000;
     min-width: 300px;
     max-width: 500px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-family: inherit;
     letter-spacing: 0.25px;
     animation: slideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -1733,7 +1733,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 12px 16px;
     border: 1px solid var(--md-divider);
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
@@ -1769,7 +1769,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     transition: background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
     border-bottom: none;
     color: var(--md-text-primary);
-    font-size: 14px;
+    font-size: 0.875rem;
 }
 
 .searchable-select-option:last-child {
@@ -1793,7 +1793,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     color: var(--md-text-secondary);
     text-align: center;
     font-style: italic;
-    font-size: 14px;
+    font-size: 0.875rem;
 }
 
 .searchable-select-error {
@@ -1882,7 +1882,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .form-field-settings-header h3 {
     margin: 0;
-    font-size: 20px;
+    font-size: 1.25rem;
     font-weight: 500;
     color: var(--md-text-primary);
     letter-spacing: 0.15px;
@@ -1891,7 +1891,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .form-field-settings-close {
     background: none;
     border: none;
-    font-size: 24px;
+    font-size: 1.5rem;
     line-height: 1;
     color: var(--md-text-secondary);
     cursor: pointer;
@@ -1919,7 +1919,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .form-field-settings-info {
     margin-bottom: 15px;
     color: var(--text-secondary, #6c757d);
-    font-size: 14px;
+    font-size: 0.875rem;
 }
 
 .form-field-settings-list {
@@ -1943,7 +1943,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     cursor: pointer;
     margin: 0;
     user-select: none;
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--md-text-primary);
     letter-spacing: 0.25px;
 }
@@ -1971,7 +1971,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 10px 24px;
     border: none;
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 500;
     cursor: pointer;
     transition: var(--md-transition);
@@ -2029,7 +2029,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     margin-right: 8px;
     color: var(--md-text-secondary, #666);
     cursor: grab;
-    font-size: 14px;
+    font-size: 0.875rem;
     user-select: none;
 }
 
@@ -2043,7 +2043,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     align-items: center;
     cursor: pointer;
     margin: 0;
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--md-text-primary);
     user-select: none;
 }
@@ -2071,7 +2071,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .edit-form-tab {
     padding: 12px 24px;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 500;
     color: var(--md-text-secondary);
     border-bottom: 2px solid transparent;
@@ -2108,7 +2108,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 40px 20px;
     text-align: center;
     color: var(--md-text-secondary);
-    font-size: 14px;
+    font-size: 0.875rem;
 }
 
 .subordinate-table-error {
@@ -2130,7 +2130,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .subordinate-add-btn {
     flex: 0 0 auto;
     width: auto;
-    font-size: 13px;
+    font-size: 0.8125rem;
     padding: 6px 16px;
     height: 32px;
     line-height: 1.4;
@@ -2167,7 +2167,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .subordinate-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 13px;
+    font-size: 0.8125rem;
 }
 
 .subordinate-table th {
@@ -2231,11 +2231,11 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .subordinate-table-link .table-icon {
-    font-size: 16px;
+    font-size: 1rem;
 }
 
 .subordinate-table-link .subordinate-count {
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-weight: 500;
 }
 
@@ -2250,7 +2250,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     text-decoration: none !important;
     transition: var(--md-transition);
     vertical-align: middle;
-    font-size: 16px;
+    font-size: 1rem;
 }
 
 .subordinate-table-icon-link:hover {
@@ -2268,7 +2268,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     text-decoration: none !important;
     transition: var(--md-transition);
     vertical-align: middle;
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-weight: 500;
 }
 
@@ -2314,7 +2314,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     width: 16px;
     height: 16px;
     margin-left: 4px;
-    font-size: 10px;
+    font-size: 0.625rem;
     font-weight: 600;
     color: white;
     background-color: var(--md-primary);
@@ -2337,7 +2337,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 6px 32px 6px 12px;
     border: 1px solid var(--md-divider);
     border-radius: 4px;
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
@@ -2366,7 +2366,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border: none;
     background: transparent;
     color: var(--md-text-secondary);
-    font-size: 18px;
+    font-size: 1.125rem;
     line-height: 1;
     cursor: pointer;
     border-radius: 50%;
@@ -2419,7 +2419,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     cursor: grab;
     border-radius: 3px;
     transition: color 0.15s ease, background-color 0.15s ease;
-    font-size: 14px;
+    font-size: 0.875rem;
     opacity: 0;
 }
 
@@ -2478,7 +2478,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 6px 10px;
     /* border: 2px solid var(--md-primary); */
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
@@ -2571,7 +2571,7 @@ td.cell-saving {
 
 .inline-editor-loading {
     padding: 8px 12px;
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--md-text-secondary);
     font-style: italic;
 }
@@ -2597,7 +2597,7 @@ td.cell-saving {
     padding: 8px 12px;
     padding-right: 36px;
     border: none;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
@@ -2615,7 +2615,7 @@ td.cell-saving {
     border: none;
     background: transparent;
     color: var(--md-text-secondary);
-    font-size: 20px;
+    font-size: 1.25rem;
     line-height: 1;
     cursor: pointer;
     border-radius: 50%;
@@ -2647,7 +2647,7 @@ td.cell-saving {
     border: none;
     background: #4caf50;
     color: white;
-    font-size: 18px;
+    font-size: 1.125rem;
     line-height: 1;
     display: flex;
     align-items: center;
@@ -2690,7 +2690,7 @@ td.cell-saving {
     cursor: pointer;
     transition: background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
     color: var(--md-text-primary);
-    font-size: 14px;
+    font-size: 0.875rem;
     border-bottom: 1px solid rgba(0, 0, 0, 0.05);
 }
 
@@ -2712,7 +2712,7 @@ td.cell-saving {
     padding: 20px 12px;
     text-align: center;
     color: var(--md-text-secondary);
-    font-size: 14px;
+    font-size: 0.875rem;
     font-style: italic;
 }
 
@@ -2786,7 +2786,7 @@ td:has(.inline-editor-reference) {
     background-color: rgba(25, 118, 210, 0.12);
     color: var(--md-primary);
     border-radius: 14px;
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-family: inherit;
     max-width: 200px;
     overflow: hidden;
@@ -2812,7 +2812,7 @@ td:has(.inline-editor-reference) {
     flex-shrink: 0;
     opacity: 0.7;
     transition: opacity 0.15s;
-    font-size: 11px;
+    font-size: 0.6875rem;
 }
 
 .multi-ref-tag-remove:hover {
@@ -2821,7 +2821,7 @@ td:has(.inline-editor-reference) {
 }
 
 .multi-ref-tags-placeholder {
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--md-text-hint);
     font-style: italic;
     line-height: 24px;
@@ -2869,7 +2869,7 @@ td:has(.inline-editor-reference) {
     display: block;
     margin-bottom: 10px;
     color: var(--md-text-secondary);
-    font-size: 14px;
+    font-size: 0.875rem;
 }
 
 .file-select-btn {
@@ -2878,7 +2878,7 @@ td:has(.inline-editor-reference) {
     border: none;
     border-radius: 4px;
     padding: 8px 16px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 500;
     cursor: pointer;
     transition: var(--md-transition);
@@ -2908,7 +2908,7 @@ td:has(.inline-editor-reference) {
 .file-name {
     flex: 1;
     color: var(--md-text-primary);
-    font-size: 14px;
+    font-size: 0.875rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2918,7 +2918,7 @@ td:has(.inline-editor-reference) {
     background-color: transparent;
     color: var(--md-text-secondary);
     border: none;
-    font-size: 24px;
+    font-size: 1.5rem;
     line-height: 1;
     cursor: pointer;
     padding: 0;
@@ -3007,7 +3007,7 @@ td:has(.inline-editor-file) {
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
     z-index: 1000;
     min-width: 200px;
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--text-primary, inherit);
 }
 
@@ -3035,7 +3035,7 @@ td:has(.inline-editor-file) {
 
 .export-icon {
     margin-right: 10px;
-    font-size: 16px;
+    font-size: 1rem;
 }
 
 /* Checkbox selection mode */
@@ -3043,7 +3043,7 @@ td:has(.inline-editor-file) {
     cursor: pointer;
     padding: 8px;
     border-radius: 4px;
-    font-size: 16px;
+    font-size: 1rem;
     user-select: none;
     display: inline-flex;
     align-items: center;
@@ -3083,7 +3083,7 @@ tr.row-selected {
 
 .integram-bulk-delete-btn {
     margin-left: 4px;
-    font-size: 12px;
+    font-size: 0.75rem;
 }
 
 .bulk-delete-confirm {
@@ -3095,15 +3095,15 @@ tr.row-selected {
     background: #fff3cd;
     border: 1px solid #ffc107;
     border-radius: 4px;
-    font-size: 13px;
+    font-size: 0.8125rem;
 }
 
 .bulk-delete-confirm-btn {
-    font-size: 12px !important;
+    font-size: 0.75rem !important;
 }
 
 .bulk-delete-cancel-btn {
-    font-size: 12px !important;
+    font-size: 0.75rem !important;
 }
 
 /* Bulk delete progress */
@@ -3125,7 +3125,7 @@ tr.row-selected {
 
 .bulk-delete-progress-text {
     text-align: center;
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--md-text-secondary);
 }
 
@@ -3162,7 +3162,7 @@ tr.row-selected {
 
 .integram-modal-header h3 {
     margin: 0;
-    font-size: 20px;
+    font-size: 1.25rem;
     font-weight: 500;
     color: var(--md-text-primary, rgba(0, 0, 0, 0.87));
     letter-spacing: 0.15px;
@@ -3224,7 +3224,7 @@ tr.row-selected {
     width: 20px;
     height: 20px;
     margin-right: 8px;
-    font-size: 12px;
+    font-size: 0.75rem;
     font-weight: 600;
     color: white;
     background-color: var(--md-primary, #1976d2);
@@ -3246,7 +3246,7 @@ tr.row-selected {
     width: 16px;
     height: 16px;
     margin-right: 6px;
-    font-size: 10px;
+    font-size: 0.625rem;
     font-weight: 600;
     color: white;
     background-color: var(--md-primary, #1976d2);
@@ -3349,7 +3349,7 @@ tr.row-selected {
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: bold;
     line-height: 1;
     padding: 0;
@@ -3394,7 +3394,7 @@ tr.row-selected {
     background-color: rgba(255, 193, 7, 0.2);
     border: 1px solid rgba(255, 193, 7, 0.5);
     border-radius: 4px;
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: rgba(0, 0, 0, 0.87);
 }
 
@@ -3405,7 +3405,7 @@ tr.row-selected {
 
 .hidden-filter-badge-value {
     font-family: monospace;
-    font-size: 12px;
+    font-size: 0.75rem;
     color: rgba(0, 0, 0, 0.87);
     background-color: rgba(255, 255, 255, 0.5);
     padding: 1px 4px;
@@ -3414,7 +3414,7 @@ tr.row-selected {
 
 .hidden-filter-badge-remove {
     cursor: pointer;
-    font-size: 16px;
+    font-size: 1rem;
     font-weight: bold;
     color: rgba(0, 0, 0, 0.5);
     line-height: 1;
@@ -3459,7 +3459,7 @@ tr.row-selected {
 
     /* Edit form header title - smaller font on mobile */
     .edit-form-header h3 {
-        font-size: 18px;
+        font-size: 1.125rem;
     }
 
     /* Edit form header title row - wrap on mobile */
@@ -3482,7 +3482,7 @@ tr.row-selected {
     /* Edit form footer buttons - smaller padding on mobile */
     .edit-form-footer .btn {
         padding: 8px 16px;
-        font-size: 13px;
+        font-size: 0.8125rem;
         min-height: 36px;
     }
 
@@ -3532,7 +3532,7 @@ tr.row-selected {
     background: var(--button-primary, #3b82f6);
     color: white;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-weight: 500;
     transition: background-color 0.2s ease;
     vertical-align: middle;
@@ -3548,7 +3548,7 @@ tr.row-selected {
 }
 
 .add-row-btn i {
-    font-size: 14px;
+    font-size: 0.875rem;
 }
 
 /* Paste data button in scroll counter area (issue #1608) */
@@ -3564,7 +3564,7 @@ tr.row-selected {
     background: var(--button-secondary, #6b7280);
     color: white;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-weight: 500;
     transition: background-color 0.2s ease;
     vertical-align: middle;
@@ -3580,7 +3580,7 @@ tr.row-selected {
 }
 
 .paste-data-btn i {
-    font-size: 14px;
+    font-size: 0.875rem;
 }
 #paste-data-textarea {
     padding: 3px;

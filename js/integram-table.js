@@ -2128,7 +2128,7 @@ class IntegramTable{
                             displayContent = `<a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a>`;
                         }
                     }
-                    const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 14px;"></i></span>`;
+                    const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
                     escapedValue = `<div class="cell-content-wrapper">${ displayContent }${ editIcon }</div>`;
                 }
             }
@@ -5317,7 +5317,7 @@ class IntegramTable{
                 const hasNewValue = newValue !== null && newValue !== undefined && newValue !== '';
                 if (hasNewValue && editTypeId && editRecordId && editRecordId !== '' && editRecordId !== '0' && editRecordId !== 'dynamic') {
                     const instanceName = this.options.instanceName;
-                    const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ editRecordId }', '${ editTypeId }', ${ editRowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 14px;"></i></span>`;
+                    const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ editRecordId }', '${ editTypeId }', ${ editRowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
                     cell.innerHTML = `<div class="cell-content-wrapper">${ escapedValue }${ editIcon }</div>`;
                 } else {
                     cell.innerHTML = escapedValue;
@@ -5994,7 +5994,7 @@ class IntegramTable{
                 'REPORT_COLUMN': { icon: '▾', title: 'Колонка отчёта' },
             };
             const info = typeIconMap[format] || { icon: '?', title: format };
-            return `<span class="col-type-icon" title="${info.title}" style="font-size:11px;font-weight:600;opacity:0.65;min-width:16px;text-align:center;">${info.icon}</span>`;
+            return `<span class="col-type-icon" title="${info.title}" style="font-size: 0.6875rem;font-weight:600;opacity:0.65;min-width:16px;text-align:center;">${info.icon}</span>`;
         }
 
         /**
@@ -6288,7 +6288,7 @@ class IntegramTable{
                 : `<input type="text" id="col-edit-name-${instanceName}" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(currentName) }" placeholder="Введите название колонки" autocomplete="off">`;
 
             colEditModal.innerHTML = `
-                <h3 style="margin: 0 0 16px 0; font-weight: 500; font-size: 18px;">Редактирование колонки: <em style="font-style: normal; color: var(--md-primary, #1976d2);">${ this.escapeHtml(col.name) }</em></h3>
+                <h3 style="margin: 0 0 16px 0; font-weight: 500; font-size: 1.125rem;">Редактирование колонки: <em style="font-style: normal; color: var(--md-primary, #1976d2);">${ this.escapeHtml(col.name) }</em></h3>
                 <div class="col-edit-section">
                     <div class="col-edit-row">
                         <label class="col-edit-label">Название:</label>
@@ -6717,31 +6717,31 @@ class IntegramTable{
             modal.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; padding: 20px; border-radius: 4px; box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22); z-index: 1002; max-width: 450px; width: 90%;';
 
             modal.innerHTML = `
-                <h3 style="margin: 0 0 20px 0; font-weight: 500; font-size: 20px;">Добавить новую колонку</h3>
+                <h3 style="margin: 0 0 20px 0; font-weight: 500; font-size: 1.25rem;">Добавить новую колонку</h3>
                 <div style="margin-bottom: 16px; position: relative;">
-                    <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px;">Имя колонки:</label>
-                    <input type="text" id="new-column-name-${instanceName}" class="form-control" placeholder="Введите имя колонки" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 14px; box-sizing: border-box;" autocomplete="off">
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.875rem;">Имя колонки:</label>
+                    <input type="text" id="new-column-name-${instanceName}" class="form-control" placeholder="Введите имя колонки" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 0.875rem; box-sizing: border-box;" autocomplete="off">
                     <div id="column-name-suggestions-${instanceName}" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #dee2e6; border-radius: 4px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-height: 250px; overflow-y: auto; z-index: 1003;"></div>
                 </div>
                 <div style="margin-bottom: 16px;">
-                    <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px;">Базовый тип:</label>
-                    <select id="new-column-type-${instanceName}" class="form-control" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 14px; box-sizing: border-box;">
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.875rem;">Базовый тип:</label>
+                    <select id="new-column-type-${instanceName}" class="form-control" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 0.875rem; box-sizing: border-box;">
                         ${baseTypes.map(t => `<option value="${t.id}">${t.name}</option>`).join('')}
                     </select>
                 </div>
                 <div style="margin-bottom: 16px;">
-                    <label style="display: flex; align-items: center; cursor: pointer; font-size: 14px;">
+                    <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.875rem;">
                         <input type="checkbox" id="new-column-list-${instanceName}" style="margin-right: 10px; width: 18px; height: 18px;">
                         Списочное значение (справочник)
                     </label>
                 </div>
                 <div style="margin-bottom: 16px; display: none;" id="multiselect-container-${instanceName}">
-                    <label style="display: flex; align-items: center; cursor: pointer; font-size: 14px;">
+                    <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.875rem;">
                         <input type="checkbox" id="new-column-multiselect-${instanceName}" style="margin-right: 10px; width: 18px; height: 18px;">
                         Разрешить мультивыбор (выбор нескольких значений)
                     </label>
                 </div>
-                <div id="add-column-error-${instanceName}" style="color: #dc3545; margin-bottom: 16px; display: none; font-size: 14px;"></div>
+                <div id="add-column-error-${instanceName}" style="color: #dc3545; margin-bottom: 16px; display: none; font-size: 0.875rem;"></div>
                 <div style="display: flex; justify-content: flex-end; gap: 10px;">
                     <button class="btn btn-primary" id="create-column-btn-${instanceName}">Создать</button>
                     <button class="btn btn-secondary" id="cancel-add-column-btn-${instanceName}">Отменить</button>
@@ -6896,7 +6896,7 @@ class IntegramTable{
                 suggestionsDiv.innerHTML = suggestions.map((s, idx) => {
                     const typeName = getBaseTypeName(s.type);
                     const displayName = s.isReference ? `Справочник ${s.name}` : s.name;
-                    return `<div class="column-suggestion-item" data-index="${idx}" style="padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #eee; font-size: 14px;" onmouseover="this.style.backgroundColor='#f5f5f5'" onmouseout="this.style.backgroundColor='transparent'">
+                    return `<div class="column-suggestion-item" data-index="${idx}" style="padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #eee; font-size: 0.875rem;" onmouseover="this.style.backgroundColor='#f5f5f5'" onmouseout="this.style.backgroundColor='transparent'">
                         ${this.escapeHtml(displayName)} <span style="color: #888;">(${this.escapeHtml(typeName)})</span>
                     </div>`;
                 }).join('');
@@ -7563,7 +7563,7 @@ class IntegramTable{
 
             modal.innerHTML = `
                 <h3>Настройка группировки</h3>
-                <p style="color: var(--md-text-secondary); font-size: 14px; margin-bottom: 15px;">
+                <p style="color: var(--md-text-secondary); font-size: 0.875rem; margin-bottom: 15px;">
                     Выберите поля для группировки. Порядок выбора определяет вложенность групп.
                 </p>
                 <div class="column-settings-list grouping-columns-list" style="max-height: 300px; overflow-y: auto;">
@@ -8024,7 +8024,7 @@ class IntegramTable{
                 background-color: ${isError ? '#dc3545' : '#28a745'};
                 color: white;
                 border-radius: 4px;
-                font-size: 14px;
+                font-size: 0.875rem;
                 z-index: 10000;
                 box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
                 animation: fadeInOut ${duration / 1000}s ease-in-out;
@@ -8683,7 +8683,8 @@ class IntegramTable{
         applyPageFontSize() {
             // If main.html already set up the global handler, skip to avoid double-apply
             if (typeof window.setPageFontSize === 'function') return;
-            const sizeMap = { smaller: '87.5%', normal: '', larger: '112.5%' };
+            // Use same rem values as main.html (issue #1632) — must match SIZE_MAP there
+            const sizeMap = { smaller: '.7rem', normal: '.82rem', larger: '.95rem' };
             let size = 'normal';
             try {
                 const match = document.cookie.match(/(?:^|; )integram-table-font-settings=([^;]*)/);
@@ -8692,12 +8693,8 @@ class IntegramTable{
                     if (fontSettings.pageFontSize) size = fontSettings.pageFontSize;
                 }
             } catch (e) { /* ignore */ }
-            const value = sizeMap[size] || '';
-            if (value) {
-                document.documentElement.style.fontSize = value;
-            } else {
-                document.documentElement.style.removeProperty('font-size');
-            }
+            const value = sizeMap[size] || sizeMap.normal;
+            document.documentElement.style.fontSize = value;
         }
 
         // Modal Edit Form functionality
@@ -14241,7 +14238,7 @@ class IntegramTable{
             // Show errors if any
             if (errors.length > 0) {
                 errorsDiv.style.display = 'block';
-                errorsDiv.innerHTML = `<div class="alert alert-warning" style="max-height: 200px; overflow-y: auto; font-size: 12px; margin-top: 10px;">
+                errorsDiv.innerHTML = `<div class="alert alert-warning" style="max-height: 200px; overflow-y: auto; font-size: 0.75rem; margin-top: 10px;">
                     <strong>Предупреждения:</strong><br>
                     ${ errors.map(e => this.escapeHtml(e)).join('<br>') }
                 </div>`;
@@ -15082,7 +15079,7 @@ class IntegramCreateFormHelper {
             color: white;
             z-index: 10000;
             font-family: sans-serif;
-            font-size: 14px;
+            font-size: 0.875rem;
             box-shadow: 0 2px 8px rgba(0,0,0,0.2);
             background-color: ${type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#17a2b8'};
         `;
@@ -16090,7 +16087,7 @@ class IntegramCreateFormHelper {
         const tableUrl = `/${dbName}/table/${typeId}?F_U=${parentId || 1}&F_I=${recordId}`;
 
         const recordIdHtml = `
-            <span class="edit-form-record-id" onclick="navigator.clipboard.writeText('${recordId}').then(() => { this.style.color='#28a745'; setTimeout(() => this.style.color='', 1000); })" title="Скопировать ID" style="cursor:pointer;margin-left:8px;font-size:12px;color:var(--cards-text-secondary);">#${recordId}</span>
+            <span class="edit-form-record-id" onclick="navigator.clipboard.writeText('${recordId}').then(() => { this.style.color='#28a745'; setTimeout(() => this.style.color='', 1000); })" title="Скопировать ID" style="cursor:pointer;margin-left:8px;font-size: 0.75rem;color:var(--cards-text-secondary);">#${recordId}</span>
             <a href="${tableUrl}" class="edit-form-table-link" title="Открыть в таблице" target="_blank" style="margin-left:4px;">
                 <i class="pi pi-table"></i>
             </a>
