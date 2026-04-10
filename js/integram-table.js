@@ -10958,6 +10958,10 @@ class IntegramTable{
                 // Collect new order of row IDs
                 const newOrder = getRows().map(r => r.dataset.rowId);
 
+                // New 1-based position of the moved record
+                const movedRecordId = dragSrcRow.dataset.rowId;
+                const newPosition = newOrder.indexOf(movedRecordId) + 1;
+
                 // Update in-memory data to reflect new order
                 const dataMap = {};
                 (container._subordinateData || []).forEach(row => { dataMap[row.i] = row; });
@@ -10966,25 +10970,26 @@ class IntegramTable{
                 // Disable all handles while saving
                 setHandlesDisabled(true);
 
-                await this.saveSubordinateRowOrder(arrId, parentRecordId, newOrder, container, setHandlesDisabled);
+                await this.saveSubordinateRowOrder(movedRecordId, newPosition, container, setHandlesDisabled);
             });
         }
 
         /**
          * Save the new row order via _m_ord command (issue #1617).
-         * Sends the ordered list of record IDs to the server.
+         * Sends only the moved record's ID and its new 1-based position.
+         * The backend recalculates order for other records automatically.
          * Re-enables handles when done.
          */
-        async saveSubordinateRowOrder(arrId, parentRecordId, orderedIds, container, setHandlesDisabled) {
+        async saveSubordinateRowOrder(movedRecordId, newPosition, container, setHandlesDisabled) {
             const apiBase = this.getApiBase();
             const params = new URLSearchParams();
-            params.append('ids', orderedIds.join(','));
+            params.append('order', newPosition);
             if (typeof xsrf !== 'undefined') {
                 params.append('_xsrf', xsrf);
             }
 
             try {
-                const response = await fetch(`${apiBase}/_m_ord/${arrId}?JSON&up=${parentRecordId}`, {
+                const response = await fetch(`${apiBase}/_m_ord/${movedRecordId}?JSON`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: params.toString()
@@ -11006,7 +11011,7 @@ class IntegramTable{
                 console.error('Error saving row order:', error);
                 this.showToast(`Ошибка сохранения порядка: ${ error.message }`, 'error');
                 // Reload to get correct server order on error
-                await this.loadSubordinateTable(container, arrId, parentRecordId);
+                await this.loadSubordinateTable(container, container._subordinateArrId, container._subordinateParentRecordId);
                 return;
             } finally {
                 setHandlesDisabled(false);
