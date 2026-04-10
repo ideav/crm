@@ -2282,6 +2282,10 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     max-width: 800px;
 }
 
+.subordinate-modal.expanded {
+    max-width: 93%;
+}
+
 .subordinate-modal .subordinate-table-container {
     min-height: 200px;
 }
