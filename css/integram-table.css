@@ -136,21 +136,6 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     display: none; /* Chrome/Safari */
 }
 
-/* Font size button group in top-right menu (issue #1626) */
-.integram-table-font-size-group {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    flex-shrink: 0;
-}
-
-.integram-font-size-btn {
-    padding: 4px 6px !important;
-    font-weight: 700 !important;
-    line-height: 1;
-    min-width: 28px;
-    justify-content: center;
-}
 
 .integram-table-settings {
     cursor: pointer;

@@ -13,6 +13,53 @@
         }
     </style>
     <script>
+        // Font size control — global, stored in cookie integram-table-font-settings (issue #1626/#1628)
+        (function() {
+            var FONT_COOKIE = 'integram-table-font-settings';
+            var SIZE_MAP = { smaller: '87.5%', normal: '', larger: '112.5%' };
+
+            function applyPageFontSize(size) {
+                var value = SIZE_MAP[size] || '';
+                if (value) {
+                    document.documentElement.style.fontSize = value;
+                } else {
+                    document.documentElement.style.removeProperty('font-size');
+                }
+            }
+
+            function loadPageFontSize() {
+                var match = document.cookie.match(new RegExp('(?:^|; )' + FONT_COOKIE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+                if (match) {
+                    try {
+                        var settings = JSON.parse(decodeURIComponent(match[1]));
+                        return settings.pageFontSize || 'normal';
+                    } catch (e) {}
+                }
+                return 'normal';
+            }
+
+            // Apply stored font size immediately (before DOM render)
+            applyPageFontSize(loadPageFontSize());
+
+            window.setPageFontSize = function(size) {
+                document.cookie = FONT_COOKIE + '=' + encodeURIComponent(JSON.stringify({ pageFontSize: size })) + '; path=/; max-age=31536000';
+                applyPageFontSize(size);
+                // Update active state on font size buttons
+                document.querySelectorAll('.navbar-font-size-btn').forEach(function(btn) {
+                    btn.classList.toggle('active', btn.dataset.size === size);
+                });
+            };
+
+            // After DOM ready: mark the correct button as active
+            document.addEventListener('DOMContentLoaded', function() {
+                var current = loadPageFontSize();
+                document.querySelectorAll('.navbar-font-size-btn').forEach(function(btn) {
+                    btn.classList.toggle('active', btn.dataset.size === current);
+                });
+            });
+        })();
+    </script>
+    <script>
         var db = '{_global_.z}',
             xsrf = '{_global_.xsrf}',
             id = '{_global_.id}',
@@ -80,6 +127,16 @@
                         <span>Тема</span>
                         <span class="user-menu-value" id="theme-value">Темная</span>
                     </button>
+                    <div class="user-menu-divider"></div>
+                    <div class="user-menu-item user-menu-font-size-row" title="Размер шрифта">
+                        <i class="user-menu-icon pi pi-sliders-h"></i>
+                        <span>Шрифт</span>
+                        <div class="navbar-font-size-group">
+                            <button type="button" class="navbar-font-size-btn" data-size="smaller" onclick="setPageFontSize('smaller')" title="Шрифт меньше" style="font-size:11px;">А</button>
+                            <button type="button" class="navbar-font-size-btn" data-size="normal" onclick="setPageFontSize('normal')" title="Шрифт обычный" style="font-size:14px;">А</button>
+                            <button type="button" class="navbar-font-size-btn" data-size="larger" onclick="setPageFontSize('larger')" title="Шрифт больше" style="font-size:17px;">А</button>
+                        </div>
+                    </div>
                     <div class="user-menu-divider"></div>
                     <button id="change-password-btn" class="user-menu-item" type="button" onclick="document.querySelector('.cp-form').style.display='block';document.querySelectorAll('.ch-toggle').forEach(function(el){el.style.display='flex';});document.querySelectorAll('.wait-toggle').forEach(function(el){el.style.display='none';});">
                         <i class="user-menu-icon pi pi-lock"></i>
