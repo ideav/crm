@@ -10593,6 +10593,7 @@ class IntegramTable{
                                            id="field-${ req.id }-search"
                                            placeholder="Добавить..."
                                            autocomplete="off">
+                                    <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                                 </div>
                                 <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${ req.id }-dropdown" style="display:none;">
                                     <div class="inline-editor-reference-empty">Загрузка...</div>
@@ -12553,9 +12554,37 @@ class IntegramTable{
                     }
                 };
 
+                // Store callbacks on wrapper so saveRecordForFormReference can update multi-select after creation
+                wrapper._renderTags = renderTags;
+                wrapper._updateHiddenInput = updateHiddenInput;
+
+                // Issue #1688: Add button support for form multi-select reference editors
+                const addButton = wrapper.querySelector('.form-ref-add');
+                const refTypeId = wrapper.dataset.refTypeId;
+
+                const updateAddButtonVisibility = (searchText) => {
+                    if (!addButton) return;
+                    const selectedIds = new Set((wrapper._selectedItems || []).map(s => s.id));
+                    const availableCount = (wrapper._referenceOptions || []).filter(([id]) => !selectedIds.has(id)).length;
+                    // Show add button when user has typed something OR when no options are available (issue #1686)
+                    addButton.style.display = (searchText.length > 0 || availableCount === 0) ? '' : 'none';
+                };
+
+                // Attach add button click handler
+                if (addButton && refTypeId) {
+                    addButton.addEventListener('click', async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const inputValue = searchInput.value.trim();
+                        await this.openCreateFormForFormReference(refTypeId, inputValue, recordId, hiddenInput, searchInput, wrapper, dropdown);
+                    });
+                }
+
                 // Initial render
                 renderTags();
                 updateHiddenInput();
+                // Set initial add button visibility (issue #1686: show immediately when no options available)
+                updateAddButtonVisibility('');
 
                 // Show dropdown on focus (issue #917: use 'block' not '' to override CSS display:none on .form-ref-editor-box)
                 searchInput.addEventListener('focus', () => {
@@ -12566,9 +12595,11 @@ class IntegramTable{
                 // Filter on input
                 let searchTimeout;
                 searchInput.addEventListener('input', (e) => {
+                    const searchText = e.target.value.trim();
+                    updateAddButtonVisibility(searchText);
                     clearTimeout(searchTimeout);
                     searchTimeout = setTimeout(() => {
-                        renderDropdown(e.target.value.trim());
+                        renderDropdown(searchText);
                         dropdown.style.display = 'block';
                     }, 200);
                 });
@@ -12586,6 +12617,8 @@ class IntegramTable{
                     }
                     searchInput.value = '';
                     dropdown.style.display = 'none';
+                    // Update add button visibility after selection (available options may have changed)
+                    updateAddButtonVisibility('');
                 });
 
                 // Handle tag click: remove button removes tag, clicking tag itself opens edit form (issue #871)
@@ -12600,6 +12633,8 @@ class IntegramTable{
                         wrapper._selectedItems = (wrapper._selectedItems || []).filter(s => !(s.id === id && s.text === text));
                         renderTags();
                         updateHiddenInput();
+                        // Update add button visibility after removal (available options may have changed)
+                        updateAddButtonVisibility(searchInput.value.trim());
                         return;
                     }
                     const tag = e.target.closest('.multi-ref-tag');
@@ -12610,7 +12645,6 @@ class IntegramTable{
                     }
                     const id = tag.dataset.id;
                     if (!id) return;
-                    const refTypeId = wrapper.dataset.refTypeId;
                     if (refTypeId) {
                         this.openEditForm(id, refTypeId, 0);
                     }
@@ -13135,9 +13169,21 @@ class IntegramTable{
 
                 // Set the created record in the form reference field
                 if (createdId) {
-                    hiddenInput.value = createdId;
-                    searchInput.value = createdValue;
-                    dropdown.style.display = 'none';
+                    // Issue #1688: Handle multi-select reference fields differently from single-select
+                    if (wrapper.dataset.multi === '1') {
+                        // Add the new record to the multi-select selection
+                        if (!(wrapper._selectedItems || []).find(s => s.id === String(createdId))) {
+                            wrapper._selectedItems = [...(wrapper._selectedItems || []), { id: String(createdId), text: createdValue }];
+                        }
+                        if (wrapper._renderTags) wrapper._renderTags();
+                        if (wrapper._updateHiddenInput) wrapper._updateHiddenInput();
+                        searchInput.value = '';
+                        dropdown.style.display = 'none';
+                    } else {
+                        hiddenInput.value = createdId;
+                        searchInput.value = createdValue;
+                        dropdown.style.display = 'none';
+                    }
 
                     // Re-fetch options to include the new record
                     try {
@@ -15852,6 +15898,7 @@ class IntegramCreateFormHelper {
                                        id="field-${req.id}-search"
                                        placeholder="Добавить..."
                                        autocomplete="off">
+                                <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                             </div>
                             <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${req.id}-dropdown" style="display:none;">
                                 <div class="inline-editor-reference-empty">Загрузка...</div>
@@ -16246,9 +16293,37 @@ class IntegramCreateFormHelper {
                 }
             };
 
+            // Store callbacks on wrapper so saveRecordForFormReference can update multi-select after creation
+            wrapper._renderTags = renderTags;
+            wrapper._updateHiddenInput = updateHiddenInput;
+
+            // Issue #1688: Add button support for form multi-select reference editors
+            const addButton = wrapper.querySelector('.form-ref-add');
+            const refTypeId = wrapper.dataset.refTypeId;
+
+            const updateAddButtonVisibility = (searchText) => {
+                if (!addButton) return;
+                const selectedIds = new Set((wrapper._selectedItems || []).map(s => s.id));
+                const availableCount = (wrapper._referenceOptions || []).filter(([id]) => !selectedIds.has(id)).length;
+                // Show add button when user has typed something OR when no options are available (issue #1686)
+                addButton.style.display = (searchText.length > 0 || availableCount === 0) ? '' : 'none';
+            };
+
+            // Attach add button click handler
+            if (addButton && refTypeId) {
+                addButton.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const inputValue = searchInput.value.trim();
+                    await self.openCreateFormForFormReference(refTypeId, inputValue, null, hiddenInput, searchInput, wrapper, dropdown);
+                });
+            }
+
             // Initial render
             renderTags();
             updateHiddenInput();
+            // Set initial add button visibility (issue #1686: show immediately when no options available)
+            updateAddButtonVisibility('');
 
             // Show dropdown on focus
             searchInput.addEventListener('focus', () => {
@@ -16259,9 +16334,11 @@ class IntegramCreateFormHelper {
             // Filter on input
             let searchTimeout;
             searchInput.addEventListener('input', (e) => {
+                const searchText = e.target.value.trim();
+                updateAddButtonVisibility(searchText);
                 clearTimeout(searchTimeout);
                 searchTimeout = setTimeout(() => {
-                    renderDropdown(e.target.value.trim());
+                    renderDropdown(searchText);
                     dropdown.style.display = 'block';
                 }, 200);
             });
@@ -16279,6 +16356,8 @@ class IntegramCreateFormHelper {
                 }
                 searchInput.value = '';
                 dropdown.style.display = 'none';
+                // Update add button visibility after selection (available options may have changed)
+                updateAddButtonVisibility('');
             });
 
             // Handle tag removal and click
@@ -16292,6 +16371,8 @@ class IntegramCreateFormHelper {
                     wrapper._selectedItems = (wrapper._selectedItems || []).filter(s => !(s.id === id && s.text === text));
                     renderTags();
                     updateHiddenInput();
+                    // Update add button visibility after removal (available options may have changed)
+                    updateAddButtonVisibility(searchInput.value.trim());
                     return;
                 }
                 const tag = e.target.closest('.multi-ref-tag');
@@ -17321,6 +17402,7 @@ class IntegramCreateFormHelper {
                                        id="field-${fieldId}-search"
                                        placeholder="Добавить..."
                                        autocomplete="off">
+                                <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                             </div>
                             <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${fieldId}-dropdown" style="display:none;">
                                 <div class="inline-editor-reference-empty">Загрузка...</div>
