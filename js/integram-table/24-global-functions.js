@@ -125,8 +125,19 @@ async function openCreateRecordForm(tableTypeId, parentId, fieldValues = {}) {
         let parentInfo = null;
         if (String(parentId) !== '1') {
             try {
-                // Get parent type ID from child table metadata (metadata.up = parent type ID for child tables)
-                const parentTypeId = metadata && metadata.up && String(metadata.up) !== '0' ? String(metadata.up) : null;
+                // Find parent type by searching globalMetadata for a type that has
+                // arr_id === tableTypeId in its reqs (metadata.up is 0 for all table types)
+                let parentTypeId = null;
+                const globalMetadata = window._integramTableInstances &&
+                    window._integramTableInstances.find(inst => inst && inst.globalMetadata);
+                const allMeta = globalMetadata ? globalMetadata.globalMetadata : null;
+                if (Array.isArray(allMeta)) {
+                    const parentMeta = allMeta.find(t => t.reqs &&
+                        t.reqs.some(req => String(req.arr_id) === String(tableTypeId)));
+                    if (parentMeta) {
+                        parentTypeId = String(parentMeta.id);
+                    }
+                }
                 if (parentTypeId) {
                     const parentUrl = `${apiBase}/object/${parentTypeId}/?JSON_OBJ&t${parentTypeId}=@${parentId}`;
                     const parentResponse = await fetch(parentUrl);
