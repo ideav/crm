@@ -1,27 +1,3 @@
-        hasActiveFilters() {
-            return Object.values(this.filters).some(filter => {
-                if (!filter) return false;
-                // For Empty (%) and Not Empty (!%) filters, they are active even with empty value
-                if (filter.type === '%' || filter.type === '!%') return true;
-                // For other filters, check if value is not empty
-                return filter.value && filter.value.trim() !== '';
-            });
-        }
-
-        /**
-         * Check if table has any active filters or grouping enabled (issue #510)
-         * Used to determine whether to show the "Share link" button
-         * @returns {boolean} True if there are active filters or grouping
-         */
-        hasActiveFiltersOrGroups() {
-            return this.hasActiveFilters() || (this.groupingEnabled && this.groupingColumns.length > 0);
-        }
-
-        /**
-         * Generate URL with current table configuration (issue #510)
-         * Includes filters and grouping settings that can be shared
-         * @returns {string} URL with configuration parameters
-         */
         getConfigUrl() {
             const url = new URL(window.location.href);
 
@@ -132,8 +108,9 @@
          * Show a notification message (issue #510)
          * @param {string} message - Message to display
          * @param {boolean} isError - Whether this is an error message
+         * @param {number} duration - How long to show the notification in ms (default 2000)
          */
-        showCopyNotification(message, isError = false) {
+        showCopyNotification(message, isError = false, duration = 2000) {
             // Remove any existing notifications
             document.querySelectorAll('.integram-copy-notification').forEach(n => n.remove());
 
@@ -149,10 +126,10 @@
                 background-color: ${isError ? '#dc3545' : '#28a745'};
                 color: white;
                 border-radius: 4px;
-                font-size: 14px;
+                font-size: 0.875rem;
                 z-index: 10000;
                 box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-                animation: fadeInOut 2s ease-in-out;
+                animation: fadeInOut ${duration / 1000}s ease-in-out;
             `;
 
             // Add animation keyframes if not already present
@@ -175,7 +152,7 @@
             // Remove notification after animation completes
             setTimeout(() => {
                 notification.remove();
-            }, 2000);
+            }, duration);
         }
 
         /**

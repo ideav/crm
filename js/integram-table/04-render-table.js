@@ -28,6 +28,9 @@
                     <div class="integram-table-header">
                         ${ this.renderTitleHtml() }
                         <div class="integram-table-controls">
+                            <div class="integram-table-settings integram-table-settings-refresh" onclick="window.${ instanceName }.refreshData()" title="Обновить">
+                                <i class="pi pi-refresh"></i>
+                            </div>
                             ${ this.groupingEnabled ? `
                             <div class="integram-table-settings" onclick="window.${ instanceName }.clearGrouping()" title="Очистить группировку">
                                 <i class="pi pi-undo"></i>
@@ -48,6 +51,7 @@
                                 <i class="pi pi-filter"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">фильтры</span>' : '' }
                             </div>
+                            ${ this.isExportAllowed() ? `
                             <div class="integram-table-export-container">
                                 <div class="integram-table-settings" onclick="window.${ instanceName }.toggleExportMenu(event)" title="Экспорт">
                                     <i class="pi pi-download"></i>
@@ -65,7 +69,8 @@
                                     </div>
                                 </div>
                             </div>
-                            ${ this.checkboxMode && this.selectedRows.size > 0 ? `
+                            ` : '' }
+                            ${ this.checkboxMode && this.selectedRows.size > 0 && this.isTableWritable() ? `
                             <button class="btn btn-sm btn-danger integram-bulk-delete-btn" id="${ instanceName }-bulk-delete-btn" onclick="window.${ instanceName }.showBulkDeleteConfirm(event)">
                                 Удалить (${ this.selectedRows.size })
                             </button>
@@ -88,43 +93,98 @@
                     <div class="integram-table-container">
                         <table class="integram-table${ this.settings.compact ? ' compact' : '' }">
                         <thead>
-                            <tr>
-                                ${ this.checkboxMode ? `<th class="checkbox-column-header"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.data.length > 0 && this.selectedRows.size === this.data.length ? 'checked' : '' }></th>` : '' }
-                                ${ this.groupingEnabled && this.groupingColumns.length > 0 ?
-                                    this.renderGroupedHeaders(orderedColumns, instanceName) :
-                                    orderedColumns.map(col => {
+                            ${ (() => {
+                                // Smart header grouping (issue #1540, #1624)
+                                // Works in both normal mode and left-grouping mode.
+                                // In left-grouping mode, grouping columns are placed first (same reordering as renderGroupedHeaders).
+                                const isLeftGrouping = this.groupingEnabled && this.groupingColumns.length > 0;
+                                const groupingColumnSet = isLeftGrouping ? new Set(this.groupingColumns) : null;
+
+                                // In left-grouping mode, reorder columns: grouping cols first, then non-grouping
+                                const headerColumns = isLeftGrouping
+                                    ? [
+                                        ...this.groupingColumns
+                                            .map(colId => this.columns.find(c => c.id === colId))
+                                            .filter(col => col && this.visibleColumns.includes(col.id)),
+                                        ...orderedColumns.filter(col => !groupingColumnSet.has(col.id))
+                                      ]
+                                    : orderedColumns;
+
+                                const smartTree = this.buildSmartHeaderTree(headerColumns);
+                                const smartDepth = this.smartHeaderTreeDepth(smartTree);
+                                const hasSmartGroups = smartDepth > 1;
+
+                                if (hasSmartGroups) {
+                                    // Multi-row smart header
+                                    const rowsOfCells = this.renderSmartHeaderRows(smartTree, smartDepth, 0, instanceName, groupingColumnSet);
+                                    const checkboxHtml = this.checkboxMode
+                                        ? `<th class="checkbox-column-header" rowspan="${ smartDepth }"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.data.length > 0 && this.selectedRows.size === this.data.length ? 'checked' : '' }></th>`
+                                        : '';
+                                    const addColHtml = this.isStructureWritable()
+                                        ? `<th class="add-column-header-cell" rowspan="${ smartDepth }" style="width: 36px; min-width: 36px;" title="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus"></i></th>`
+                                        : '';
+                                    return rowsOfCells.map((cells, rowIdx) => `
+                                        <tr>
+                                            ${ rowIdx === 0 ? checkboxHtml : '' }
+                                            ${ cells.join('') }
+                                            ${ rowIdx === 0 ? addColHtml : '' }
+                                        </tr>
+                                    `).join('') + (this.filtersEnabled ? `
+                                    <tr class="filter-row">
+                                        ${ this.checkboxMode ? '<td class="checkbox-column-filter"></td>' : '' }
+                                        ${ isLeftGrouping
+                                            ? this.renderGroupedFilterRow(orderedColumns)
+                                            : headerColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('') }
+                                        <td class="add-column-filter-cell"></td>
+                                    </tr>
+                                    ` : '');
+                                }
+
+                                // Single-row header (original logic)
+                                const singleRowCells = isLeftGrouping
+                                    ? this.renderGroupedHeaders(orderedColumns, instanceName)
+                                    : headerColumns.map(col => {
                                         const width = this.columnWidths[col.id];
                                         const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
                                         const addButtonHtml = this.shouldShowAddButton(col) ?
                                             `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
-
-                                        // Add sort indicator if this column is sorted
                                         let sortIndicator = '';
                                         if (this.sortColumn === col.id) {
                                             sortIndicator = this.sortDirection === 'asc' ? '<i class="pi pi-sort-amount-up-alt" style="font-size:0.75em;"></i> ' : '<i class="pi pi-sort-amount-down" style="font-size:0.75em;"></i> ';
                                         }
-
+                                        const refTypeId = col.ref;
+                                        const refIconHtml = refTypeId ? (() => {
+                                            const dbName = window.db || window.location.pathname.split('/')[1];
+                                            return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
+                                        })() : '';
                                         return `
-                                        <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
-                                            <span class="column-header-content" data-column-id="${ col.id }">${ sortIndicator }${ col.name }</span>
-                                            ${ addButtonHtml }
-                                            <div class="column-resize-handle" data-column-id="${ col.id }"></div>
-                                        </th>
-                                    `;
-                                    }).join('')
-                                }
-                                <th class="add-column-header-cell" style="width: 36px; min-width: 36px;" title="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus"></i></th>
-                            </tr>
-                            ${ this.filtersEnabled ? `
-                            <tr class="filter-row">
-                                ${ this.checkboxMode ? '<td class="checkbox-column-filter"></td>' : '' }
-                                ${ this.groupingEnabled && this.groupingColumns.length > 0 ?
-                                    this.renderGroupedFilterRow(orderedColumns) :
-                                    orderedColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('')
-                                }
-                                <td class="add-column-filter-cell"></td>
-                            </tr>
-                            ` : '' }
+                                            <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
+                                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ col.name }</span>
+                                                ${ refIconHtml }
+                                                ${ addButtonHtml }
+                                                <div class="column-resize-handle" data-column-id="${ col.id }"></div>
+                                            </th>
+                                        `;
+                                    }).join('');
+
+                                return `
+                                    <tr>
+                                        ${ this.checkboxMode ? `<th class="checkbox-column-header"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.data.length > 0 && this.selectedRows.size === this.data.length ? 'checked' : '' }></th>` : '' }
+                                        ${ singleRowCells }
+                                        ${ this.isStructureWritable() ? `<th class="add-column-header-cell" style="width: 36px; min-width: 36px;" title="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus"></i></th>` : '' }
+                                    </tr>
+                                    ${ this.filtersEnabled ? `
+                                    <tr class="filter-row">
+                                        ${ this.checkboxMode ? '<td class="checkbox-column-filter"></td>' : '' }
+                                        ${ isLeftGrouping ?
+                                            this.renderGroupedFilterRow(orderedColumns) :
+                                            headerColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('')
+                                        }
+                                        <td class="add-column-filter-cell"></td>
+                                    </tr>
+                                    ` : '' }
+                                `;
+                            })() }
                         </thead>
                         <tbody>
                             ${ this.groupingEnabled && this.groupedData.length > 0 ?
@@ -161,6 +221,7 @@
 
             this.attachEventListeners();
             this.attachScrollListener();
+            this.attachPlusKeyShortcut();
             this.attachStickyScrollbar();
             this.attachColumnResizeHandlers();
             this.attachScrollCounterPositioning();
@@ -211,7 +272,7 @@
                                        data-column-id="${ column.id }"
                                        value="${ displayValue }"
                                        placeholder="${ placeholder }"
-                                       autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                       autocomplete="off">
                             </div>
                         </td>
                     `;
@@ -264,7 +325,7 @@
                                     data-column-id="${ column.id }"
                                     data-selected-ids="${ Array.from(selectedIds).join(',') }"
                                     title="${ escapedDisplayText || 'Выбрать значение...' }">
-                                <span class="filter-ref-trigger-text">${ escapedDisplayText || 'Выбрать...' }</span>
+                                <span class="filter-ref-trigger-text${ escapedDisplayText ? '' : ' filter-ref-trigger-text--placeholder' }">${ escapedDisplayText || 'Выбрать...' }</span>
                                 <span class="filter-ref-trigger-arrow">▼</span>
                             </button>
                         </div>
@@ -308,7 +369,7 @@
                                data-column-id="${ column.id }"
                                value="${ displayValue }"
                                placeholder="${ placeholder }"
-                               autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                               autocomplete="off">
                     </div>
                 </td>
             `;

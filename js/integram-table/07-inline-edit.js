@@ -11,8 +11,8 @@
                 return;
             }
 
-            // Create empty row data with placeholder values
-            const emptyRow = this.columns.map(() => '');
+            // Create row data with default values from column attrs (issue #1498)
+            const emptyRow = this.columns.map(col => this.resolveDefaultValue(col.attrs || '', col.format || this.mapTypeIdToFormat(col.type)));
             const newRowIndex = this.data.length;
 
             // Add empty row to data arrays
@@ -107,8 +107,14 @@
             // Highlight required fields in the row (issue #807)
             this.highlightNewRowRequiredCells(cell);
 
+            // Use pre-filled default value from addNewRow (issue #1500)
+            const colDataIndex = this.columns.findIndex(c => c.id === colId);
+            const defaultValue = (this.data[rowIndex] && colDataIndex !== -1)
+                ? (this.data[rowIndex][colDataIndex] || '')
+                : '';
+
             // Create inline editor
-            this.renderInlineEditor(cell, '', format);
+            this.renderInlineEditor(cell, defaultValue, format);
         }
 
         /**
@@ -778,9 +784,13 @@
                         </select>
                     `;
                     break;
+                case 'PWD':
+                    // Password field - render as type=password input (issue #1441)
+                    editorHtml = `<input type="password" class="inline-editor inline-editor-password" value="${ escapedValue }" autocomplete="new-password">`;
+                    break;
                 default:
                     // SHORT, CHARS, etc. - text input
-                    editorHtml = `<input type="text" class="inline-editor inline-editor-text" value="${ escapedValue }" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">`;
+                    editorHtml = `<input type="text" class="inline-editor inline-editor-text" value="${ escapedValue }" autocomplete="off">`;
             }
 
             cell.innerHTML = editorHtml;
@@ -978,22 +988,25 @@
             // Show loading indicator
             cell.innerHTML = '<div class="inline-editor-loading">Загрузка...</div>';
 
+            // Find the column object to check for granted and orig
+            const column = this.columns.find(c => c.id === colId);
+
             try {
                 // Fetch reference options
-                const options = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId);
+                const options = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, '', {}, column ? column.attrs || '' : '');
 
-                // Find the column object to check for granted and orig
-                const column = this.columns.find(c => c.id === colId);
                 const hasGranted = column && column.granted === 1;
                 const origType = column && column.orig ? column.orig : null;
 
-                // Always show clear button. If granted=1 and orig exists, also show add button (initially hidden)
-                // The "+" button will be shown only when search input has non-zero length
-                // The "×" button will be hidden when search input has text (and add button is shown)
+                // Always show clear button. If granted=1 and orig exists, also show add button.
+                // Issue #1686: show the add button immediately when no options are available
+                // (e.g. the directory is empty) so the user can always create records.
+                // Otherwise keep it hidden until the user types something (issue #875).
                 const showAddButton = hasGranted && origType !== null;
+                const noOptionsAvailable = options.filter(([id, text]) => text !== currentValue).length === 0;
                 let buttonHtml = `<button class="inline-editor-reference-clear" title="Очистить значение" aria-label="Очистить значение"><i class="pi pi-times"></i></button>`;
                 if (showAddButton) {
-                    buttonHtml += `<button class="inline-editor-reference-add" style="display: none;" title="Создать запись" aria-label="Создать запись"><i class="pi pi-plus"></i></button>`;
+                    buttonHtml += `<button class="inline-editor-reference-add" style="${noOptionsAvailable ? '' : 'display: none;'}" title="Создать запись" aria-label="Создать запись"><i class="pi pi-plus"></i></button>`;
                 }
 
                 // Create dropdown with search
@@ -1003,7 +1016,7 @@
                             <input type="text"
                                    class="inline-editor-reference-search"
                                    placeholder="Поиск..."
-                                   autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                   autocomplete="off">
                             ${buttonHtml}
                         </div>
                         <div class="inline-editor-reference-dropdown">
@@ -1031,6 +1044,13 @@
                 // Track if all options have been fetched (50+ means we only got first 50)
                 this.currentEditingCell.allOptionsFetched = options.length < 50;
 
+                // Issue #1518: Pre-fill search input with current value so user can see what is selected.
+                // Select all text so any keystroke immediately replaces it for a new search.
+                if (currentValue) {
+                    searchInput.value = currentValue;
+                    searchInput.select();
+                }
+
                 // Focus the search input
                 searchInput.focus();
 
@@ -1040,13 +1060,17 @@
                     const searchText = e.target.value.trim();
 
                     // Toggle buttons based on search input length (issue #217)
-                    // When search has text: show add button (if available), hide clear button
-                    // When search is empty: hide add button, show clear button
-                    if (searchText.length > 0) {
+                    // When search has text (typed by user): show add button (if available), hide clear button
+                    // When search is empty and options available: hide add button, show clear button
+                    // Issue #1686: also show add button when no options are available (empty directory)
+                    const currentNoOptions = this.currentEditingCell.referenceOptions
+                        ? this.currentEditingCell.referenceOptions.filter(([id, text]) => text !== currentValue).length === 0
+                        : true;
+                    if (searchText.length > 0 || currentNoOptions) {
                         if (addButton) {
                             addButton.style.display = '';
                         }
-                        if (clearButton) {
+                        if (clearButton && searchText.length > 0) {
                             clearButton.style.display = 'none';
                         }
                     } else {
@@ -1071,7 +1095,7 @@
                             // If we have exactly 50 options (not all fetched), re-query from server
                             if (!this.currentEditingCell.allOptionsFetched) {
                                 try {
-                                    const serverOptions = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, searchText);
+                                    const serverOptions = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, searchText, {}, column ? column.attrs || '' : '');
                                     this.currentEditingCell.referenceOptions = serverOptions;
                                     dropdown.innerHTML = this.renderReferenceOptions(serverOptions, currentValue);
                                 } catch (error) {
@@ -1263,7 +1287,7 @@
             cell.innerHTML = '<div class="inline-editor-loading">Загрузка...</div>';
 
             try {
-                const options = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId);
+                const options = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, '', {}, column ? column.attrs || '' : '');
                 this.currentEditingCell.referenceOptions = options;
                 this.currentEditingCell.allOptionsFetched = options.length < 50;
 
@@ -1322,8 +1346,11 @@
                         }).join('')
                         : '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
 
+                    // Issue #1686: show add button immediately when no options are available
+                    // (e.g. the directory is empty), so the user knows they can create the first record.
+                    const addButtonInitiallyVisible = availableOptions.length === 0;
                     const addButtonHtml = showAddButton
-                        ? `<button class="inline-editor-reference-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>`
+                        ? `<button class="inline-editor-reference-add" style="${addButtonInitiallyVisible ? '' : 'display: none;'}" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>`
                         : '';
 
                     cell.innerHTML = `
@@ -1333,7 +1360,7 @@
                                 <input type="text"
                                        class="inline-editor-reference-search"
                                        placeholder="Добавить..."
-                                       autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                       autocomplete="off">
                                 ${addButtonHtml}
                             </div>
                             <div class="inline-editor-reference-dropdown" style="display:none;">
@@ -1384,8 +1411,11 @@
                         const searchText = e.target.value.trim();
 
                         // Toggle add button visibility based on search input (issue #875)
+                        // Also show when no options are available so user can always create records (issue #1686)
                         if (addButton) {
-                            addButton.style.display = searchText.length > 0 ? '' : 'none';
+                            const currentAvailable = (this.currentEditingCell.referenceOptions || [])
+                                .filter(([id]) => !new Set(this.currentEditingCell.selectedItems.map(s => s.id)).has(id));
+                            addButton.style.display = (searchText.length > 0 || currentAvailable.length === 0) ? '' : 'none';
                         }
 
                         clearTimeout(searchTimeout);
@@ -1396,7 +1426,7 @@
 
                             if (!this.currentEditingCell.allOptionsFetched && searchText) {
                                 try {
-                                    const serverOptions = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, searchText);
+                                    const serverOptions = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, searchText, {}, column ? column.attrs || '' : '');
                                     const serverFiltered = serverOptions.filter(([id]) => !currentSelected.has(id));
                                     dropdown.innerHTML = serverFiltered.length > 0
                                         ? serverFiltered.map(([id, text]) => {
@@ -1551,8 +1581,9 @@
                     throw new Error(`Невалидный JSON ответ: ${responseText}`);
                 }
 
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 // Update cell display with comma-separated text of selected items
@@ -1602,6 +1633,44 @@
 
             const { cell, colType, parentInfo } = this.currentEditingCell;
 
+            // --- Issue #1431: Immediately release the editor ---
+
+            // Snapshot state before clearing
+            const format = this.currentEditingCell.format;
+            const originalContent = cell.dataset.originalContent;
+            const originalRefValueId = cell.dataset.refValueId;
+
+            // Issue #1496: Set refValueId before updateCellDisplay so that reference-type
+            // cells (e.g. User) are immediately rendered as links rather than plain text.
+            // Previously this was only set after the API response, causing the link to be
+            // missing until the page was refreshed.
+            cell.dataset.refValueId = selectedId;
+
+            // Optimistically update cell display
+            this.updateCellDisplay(cell, selectedText, format);
+
+            // Mark the cell as "saving" with a pale pink highlight (issue #1431)
+            cell.classList.add('cell-saving');
+
+            // Clean up editor state so the next cell can be edited immediately
+            this.clearRequiredCellHighlights(cell);
+            if (this.currentEditingCell.outsideClickHandler) {
+                document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
+            }
+            // Issue #1384: Remove fixed dropdown overlay from body if present
+            if (this.currentEditingCell.fixedDropdown && this.currentEditingCell.fixedDropdown.parentNode) {
+                this.currentEditingCell.fixedDropdown.parentNode.removeChild(this.currentEditingCell.fixedDropdown);
+            }
+            this.currentEditingCell = null;
+
+            // Navigate to the pending cell immediately (issue #1431)
+            if (this.pendingCellClick) {
+                const targetCell = this.pendingCellClick;
+                this.pendingCellClick = null;
+                this.navigateToCell(targetCell);
+            }
+
+            // --- Perform the actual API save in the background ---
             try {
                 const apiBase = this.getApiBase();
                 const params = new URLSearchParams();
@@ -1638,45 +1707,29 @@
                 }
 
                 // Check if response has error key anywhere in the JSON
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
-                // Issue #921: Update data-ref-value-id so the edit icon uses the correct
-                // reference record ID (not the parent row's record ID) when the cell was
-                // previously empty and gets its first value via a reference selection
-                cell.dataset.refValueId = selectedId;
-
-                // Update the cell display with the selected text
-                this.updateCellDisplay(cell, selectedText, this.currentEditingCell.format);
+                // Save confirmed — remove the saving highlight
+                cell.classList.remove('cell-saving');
 
                 this.showToast('Изменения сохранены', 'success');
 
             } catch (error) {
                 console.error('Error saving reference edit:', error);
                 this.showToast(`Ошибка сохранения: ${error.message}`, 'error');
-                // Restore original content on error (cancelInlineEdit also clears required highlights)
-                this.cancelInlineEdit(cell.dataset.originalContent);
-            } finally {
-                // Clean up
-                if (this.currentEditingCell) {
-                    // Remove required field highlighting (issue #779)
-                    this.clearRequiredCellHighlights(this.currentEditingCell.cell);
-                    if (this.currentEditingCell.outsideClickHandler) {
-                        document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
-                    }
-                    // Issue #1384: Remove fixed dropdown overlay from body if present
-                    if (this.currentEditingCell.fixedDropdown && this.currentEditingCell.fixedDropdown.parentNode) {
-                        this.currentEditingCell.fixedDropdown.parentNode.removeChild(this.currentEditingCell.fixedDropdown);
-                    }
-                    this.currentEditingCell = null;
+                // Restore original content on error and remove saving highlight
+                cell.classList.remove('cell-saving');
+                if (typeof originalContent === 'string') {
+                    cell.innerHTML = originalContent;
                 }
-
-                // Navigate to pending cell if set (issue #518)
-                if (this.pendingCellClick) {
-                    const targetCell = this.pendingCellClick;
-                    this.pendingCellClick = null;
-                    this.navigateToCell(targetCell);
+                // Issue #1496: Also restore the original refValueId that was set optimistically
+                if (originalRefValueId !== undefined) {
+                    cell.dataset.refValueId = originalRefValueId;
+                } else {
+                    delete cell.dataset.refValueId;
                 }
             }
         }
@@ -1770,6 +1823,9 @@
                 mainFieldHtml = `<input type="number" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required step="0.01">`;
             } else if (mainFieldType === 'MEMO') {
                 mainFieldHtml = `<textarea class="form-control memo-field" id="field-main-ref-create" name="main" rows="4" required>${ this.escapeHtml(initialValue) }</textarea>`;
+            } else if (mainFieldType === 'PWD') {
+                // Password field - render as type=password input (issue #1441)
+                mainFieldHtml = `<input type="password" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required autocomplete="new-password">`;
             } else {
                 // Default: text input (SHORT, CHARS, etc.)
                 mainFieldHtml = `<input type="text" class="form-control" id="field-main-ref-create" name="main" value="${this.escapeHtml(initialValue)}" required>`;
@@ -1808,7 +1864,7 @@
                                            class="inline-editor-reference-search form-ref-search"
                                            id="field-ref-${req.id}-search"
                                            placeholder="Поиск..."
-                                           autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                           autocomplete="off">
                                     <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
                                     <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                                 </div>
@@ -1825,8 +1881,14 @@
                         </div>
                     `;
                 } else {
-                    // Render as simple text input
-                    attributesHtml += `<input type="text" class="form-control" id="field-ref-${req.id}" name="t${req.id}"${isRequired ? ' required' : ''}>`;
+                    const reqBaseFormat = this.normalizeFormat(req.type);
+                    if (reqBaseFormat === 'PWD') {
+                        // Password field - render as type=password input (issue #1441)
+                        attributesHtml += `<input type="password" class="form-control" id="field-ref-${req.id}" name="t${req.id}"${isRequired ? ' required' : ''} autocomplete="new-password">`;
+                    } else {
+                        // Render as simple text input
+                        attributesHtml += `<input type="text" class="form-control" id="field-ref-${req.id}" name="t${req.id}"${isRequired ? ' required' : ''}>`;
+                    }
                 }
 
                 attributesHtml += `</div>`;
@@ -1953,9 +2015,9 @@
             }
 
             const apiBase = this.getApiBase();
-            // Issue #616: Use F_U from URL as parent (up) when F_U > 1
-            const parentIdForNew = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
-            const url = `${apiBase}/_m_new/${typeId}?JSON&up=${parentIdForNew}`;
+            // Issue #1690: Reference directory values always belong to the root (up=1),
+            // not to the current form's parent record
+            const url = `${apiBase}/_m_new/${typeId}?JSON&up=1`;
 
             try {
                 const response = await fetch(url, {
@@ -1980,8 +2042,9 @@
                     result = { success: true };
                 }
 
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 // Extract created record ID and value from response
@@ -2044,6 +2107,44 @@
                 return;
             }
 
+            // --- Issue #1431: Immediately release the editor so the user can move on ---
+
+            // Snapshot everything we need for the async save before clearing state
+            const format = this.currentEditingCell.format;
+            const displayText = this.currentEditingCell.displayText;
+            const originalContent = cell.dataset.originalContent;
+            const editorEl = cell.querySelector('.inline-editor');
+            // For FILE type: grab the pending file before we clear the editor from the DOM
+            const fileToUpload = (format === 'FILE' && editorEl && editorEl._fileToUpload) ? editorEl._fileToUpload : null;
+
+            // Compute the optimistic display value and immediately show it in the cell
+            const optimisticDisplay = (format === 'GRANT' || format === 'REPORT_COLUMN')
+                ? (displayText || newValue)
+                : newValue;
+            this.updateCellDisplay(cell, optimisticDisplay, format);
+
+            // Mark the cell as "saving" with a pale pink highlight (issue #1431)
+            cell.classList.add('cell-saving');
+
+            // Clean up the editor state so the next cell can be edited immediately
+            this.clearRequiredCellHighlights(cell);
+            if (this.currentEditingCell.outsideClickHandler) {
+                document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
+            }
+            // Issue #1384: Remove fixed dropdown overlay from body if present
+            if (this.currentEditingCell.fixedDropdown && this.currentEditingCell.fixedDropdown.parentNode) {
+                this.currentEditingCell.fixedDropdown.parentNode.removeChild(this.currentEditingCell.fixedDropdown);
+            }
+            this.currentEditingCell = null;
+
+            // Navigate to the pending cell immediately, without waiting for the save (issue #1431)
+            if (this.pendingCellClick) {
+                const targetCell = this.pendingCellClick;
+                this.pendingCellClick = null;
+                this.navigateToCell(targetCell);
+            }
+
+            // --- Perform the actual API save in the background ---
             try {
                 // Determine API endpoint and parameters
                 const apiBase = this.getApiBase();
@@ -2073,15 +2174,13 @@
                 }
 
                 // For FILE type with a pending file, send directly as multipart (issue #1310)
-                const format = this.currentEditingCell.format;
-                const editorEl = cell.querySelector('.inline-editor');
                 let response;
-                if (format === 'FILE' && editorEl && editorEl._fileToUpload) {
+                if (format === 'FILE' && fileToUpload) {
                     const formData = new FormData();
                     if (typeof xsrf !== 'undefined') {
                         formData.append('_xsrf', xsrf);
                     }
-                    formData.append(`t${ colType }`, editorEl._fileToUpload);
+                    formData.append(`t${ colType }`, fileToUpload);
                     response = await fetch(url, {
                         method: 'POST',
                         body: formData
@@ -2108,8 +2207,9 @@
                 }
 
                 // Check if response has error key anywhere in the JSON
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 // Check for warnings (plural) - show modal but continue with save (issue #610)
@@ -2118,42 +2218,24 @@
                     this.showWarningsModal(result.warnings);
                 }
 
-                // For FILE type: get saved path from server response (issue #1310)
-                if (format === 'FILE' && editorEl && editorEl._fileToUpload) {
-                    newValue = result.path || result.file || result.filename || editorEl._fileToUpload.name;
-                    editorEl._fileToUpload = null;
+                // For FILE type: update displayed value with server-confirmed path (issue #1310)
+                if (format === 'FILE' && fileToUpload) {
+                    const confirmedValue = result.path || result.file || result.filename || fileToUpload.name;
+                    this.updateCellDisplay(cell, confirmedValue, format);
                 }
 
-                // Update the cell display with the new value
-                // For GRANT/REPORT_COLUMN, use the display text instead of the ID (issue #601)
-                const displayValue = (this.currentEditingCell.format === 'GRANT' || this.currentEditingCell.format === 'REPORT_COLUMN')
-                    ? (this.currentEditingCell.displayText || newValue)
-                    : newValue;
-                this.updateCellDisplay(cell, displayValue, this.currentEditingCell.format);
+                // Save confirmed — remove the saving highlight
+                cell.classList.remove('cell-saving');
 
                 this.showToast('Изменения сохранены', 'success');
 
             } catch (error) {
                 console.error('Error saving inline edit:', error);
                 this.showToast(`Ошибка сохранения: ${ error.message }`, 'error');
-                // Restore original content on error (cancelInlineEdit also clears required highlights)
-                this.cancelInlineEdit(cell.dataset.originalContent);
-            } finally {
-                // Clean up
-                if (this.currentEditingCell) {
-                    // Remove required field highlighting (issue #779)
-                    this.clearRequiredCellHighlights(this.currentEditingCell.cell);
-                    if (this.currentEditingCell.outsideClickHandler) {
-                        document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
-                    }
-                    this.currentEditingCell = null;
-                }
-
-                // Navigate to pending cell if set (issue #518)
-                if (this.pendingCellClick) {
-                    const targetCell = this.pendingCellClick;
-                    this.pendingCellClick = null;
-                    this.navigateToCell(targetCell);
+                // Restore original content on error and remove saving highlight
+                cell.classList.remove('cell-saving');
+                if (typeof originalContent === 'string') {
+                    cell.innerHTML = originalContent;
                 }
             }
         }
@@ -2214,8 +2296,9 @@
                     result = { success: true };
                 }
 
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 // Extract created record ID from response
@@ -2363,6 +2446,12 @@
                     // Fix for issue #684: Store RAW value for editing, not escaped
                     fullValueForEditing = String(displayValue);
                     break;
+                case 'PWD':
+                    // Password field - display as asterisks in the cell (issue #1443)
+                    escapedValue = (newValue !== null && newValue !== undefined && newValue !== '') ? '******' : '';
+                    // Store the actual value for re-editing (so the input can be pre-filled)
+                    fullValueForEditing = String(newValue);
+                    break;
                 case 'GRANT':
                 case 'REPORT_COLUMN':
                     // For GRANT/REPORT_COLUMN: newValue is the display text (issue #601)
@@ -2430,7 +2519,8 @@
             const hasEditIcon = cell.querySelector('.edit-icon');
             if (hasEditIcon) {
                 const editIconHtml = hasEditIcon.outerHTML;
-                cell.innerHTML = `<div class="cell-content-wrapper">${ escapedValue }${ editIconHtml }</div>`;
+                const cellRecordId = cell.dataset.refValueId || cell.dataset.recordId || '';
+                cell.innerHTML = `<div class="cell-content-wrapper"><span title="${ cellRecordId }">${ escapedValue }</span>${ editIconHtml }</div>`;
             } else {
                 // Issue #915: If the cell was empty (no edit icon) and now has a value,
                 // add the edit icon using the stored data-edit-type-id attribute
@@ -2443,8 +2533,8 @@
                 const hasNewValue = newValue !== null && newValue !== undefined && newValue !== '';
                 if (hasNewValue && editTypeId && editRecordId && editRecordId !== '' && editRecordId !== '0' && editRecordId !== 'dynamic') {
                     const instanceName = this.options.instanceName;
-                    const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ editRecordId }', '${ editTypeId }', ${ editRowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 14px;"></i></span>`;
-                    cell.innerHTML = `<div class="cell-content-wrapper">${ escapedValue }${ editIcon }</div>`;
+                    const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ editRecordId }', '${ editTypeId }', ${ editRowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
+                    cell.innerHTML = `<div class="cell-content-wrapper"><span title="${ editRecordId }">${ escapedValue }</span>${ editIcon }</div>`;
                 } else {
                     cell.innerHTML = escapedValue;
                 }

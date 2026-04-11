@@ -44,7 +44,8 @@
                 compactForAll: this.settings.compactForAll,
                 pageSize: this.settings.pageSize,
                 truncateLongValues: this.settings.truncateLongValues,
-                hideMenuButtonLabels: this.settings.hideMenuButtonLabels
+                wrapHeaders: this.settings.wrapHeaders,
+                hideMenuButtonLabels: this.settings.hideMenuButtonLabels,
             };
             document.cookie = `${ this.options.cookiePrefix }-settings=${ JSON.stringify(settings) }; path=/; max-age=31536000`;
 
@@ -66,6 +67,7 @@
                     this.settings.compactForAll = settings.compactForAll !== undefined ? settings.compactForAll : true;
                     this.settings.pageSize = settings.pageSize || 20;
                     this.settings.truncateLongValues = settings.truncateLongValues !== undefined ? settings.truncateLongValues : true;
+                    this.settings.wrapHeaders = settings.wrapHeaders !== undefined ? settings.wrapHeaders : false;
                     this.settings.hideMenuButtonLabels = settings.hideMenuButtonLabels !== undefined ? settings.hideMenuButtonLabels : false;
 
                     // Update options.pageSize to match loaded settings
@@ -87,6 +89,29 @@
                     }
                 }
             }
+
+        }
+
+        /**
+         * Apply font size from the global cookie to the document root (issue #1626/#1628).
+         * On pages using main.html this is already applied before DOM render;
+         * this call is a fallback for pages that don't include main.html.
+         */
+        applyPageFontSize() {
+            // If main.html already set up the global handler, skip to avoid double-apply
+            if (typeof window.setPageFontSize === 'function') return;
+            // Use same rem values as main.html (issue #1632) — must match SIZE_MAP there
+            const sizeMap = { smaller: '.7rem', normal: '.82rem', larger: '.95rem' };
+            let size = 'normal';
+            try {
+                const match = document.cookie.match(/(?:^|; )integram-table-font-settings=([^;]*)/);
+                if (match) {
+                    const fontSettings = JSON.parse(decodeURIComponent(match[1]));
+                    if (fontSettings.pageFontSize) size = fontSettings.pageFontSize;
+                }
+            } catch (e) { /* ignore */ }
+            const value = sizeMap[size] || sizeMap.normal;
+            document.documentElement.style.fontSize = value;
         }
 
         // Modal Edit Form functionality
@@ -344,35 +369,53 @@
                 }
             }
 
+            // If metadata is already cached, return it immediately (issue #1455)
+            if (this.metadataCache[typeId]) {
+                return this.metadataCache[typeId];
+            }
+
+            // If a fetch for this typeId is already in progress, await it instead of starting a new one (issue #1455)
+            if (this.metadataFetchPromises[typeId]) {
+                return this.metadataFetchPromises[typeId];
+            }
+
             const apiBase = this.getApiBase();
-            const response = await fetch(`${ apiBase }/metadata/${ typeId }`);
+            const fetchPromise = (async () => {
+                const response = await fetch(`${ apiBase }/metadata/${ typeId }`);
 
-            if (!response.ok) {
-                throw new Error(`Failed to fetch metadata: ${ response.statusText }`);
-            }
-
-            const text = await response.text();
-
-            try {
-                let data = JSON.parse(text);
-
-                // Handle case where API returns an array instead of an object
-                if (Array.isArray(data)) {
-                    data = data[0] || {};
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch metadata: ${ response.statusText }`);
                 }
 
-                // Check for error in response
-                if (data.error) {
-                    throw new Error(data.error);
-                }
+                const text = await response.text();
 
-                return data;
-            } catch (e) {
-                if (e.message && e.message.includes('error')) {
-                    throw e;
+                try {
+                    let data = JSON.parse(text);
+
+                    // Handle case where API returns an array instead of an object
+                    if (Array.isArray(data)) {
+                        data = data[0] || {};
+                    }
+
+                    // Check for error in response
+                    const serverError = this.getServerError(data);
+                    if (serverError) {
+                        throw new Error(serverError);
+                    }
+
+                    this.metadataCache[typeId] = data;
+                    return data;
+                } catch (e) {
+                    if (e.message && e.message.includes('error')) {
+                        throw e;
+                    }
+                    throw new Error(`Invalid JSON response: ${ text }`);
+                } finally {
+                    delete this.metadataFetchPromises[typeId];
                 }
-                throw new Error(`Invalid JSON response: ${ text }`);
-            }
+            })();
+            this.metadataFetchPromises[typeId] = fetchPromise;
+            return fetchPromise;
         }
 
         async fetchRecordData(recordId, typeId, metadata) {
@@ -461,8 +504,10 @@
             return result;
         }
 
-        async fetchReferenceOptions(requisiteId, recordId = 0, searchQuery = '', extraParams = {}) {
+        async fetchReferenceOptions(requisiteId, recordId = 0, searchQuery = '', extraParams = {}, attrs = '') {
             const apiBase = this.getApiBase();
+            // Determine whether to include id parameter: only when attrs contains a query (square bracket expression)
+            const hasQuery = /\[.+\]/.test(attrs || '');
 
             // Check for override URL in integramTableOverrides.ddls
             if (window.integramTableOverrides &&
@@ -517,7 +562,8 @@
                 LIMIT: '50'
             });
 
-            if (recordId && recordId !== 0) {
+            // Only add id parameter when attrs indicates a query (square bracket expression) (issue #1571)
+            if (hasQuery && recordId && recordId !== 0) {
                 params.append('id', recordId);
             }
             if (searchQuery) {
@@ -525,6 +571,13 @@
             }
             for (const [key, value] of Object.entries(extraParams)) {
                 params.set(key, value);
+            }
+
+            // Cache by composite key: requisiteId + recordId (when id is used) + searchQuery (issue #1571)
+            const cacheKey = `${requisiteId}_${hasQuery && recordId ? recordId : ''}_${searchQuery}`;
+            const cachedResult = this.refFetchCache[cacheKey];
+            if (cachedResult !== undefined && Object.keys(extraParams).length === 0) {
+                return cachedResult;
             }
 
             const url = `${ apiBase }/_ref_reqs/${ requisiteId }?${ params }`;
@@ -540,13 +593,19 @@
                 const data = JSON.parse(text);
 
                 // Check for error in response
-                if (data.error) {
-                    throw new Error(data.error);
+                const serverError = this.getServerError(data);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 // Parse JSON text to extract key-value pairs in original server order
                 // (JavaScript objects with numeric string keys iterate in numeric order, not insertion order)
-                return this.parseJsonObjectAsArray(text);
+                const result = this.parseJsonObjectAsArray(text);
+                // Cache result for subsequent calls with same requisiteId + recordId + searchQuery (issue #1571)
+                if (Object.keys(extraParams).length === 0) {
+                    this.refFetchCache[cacheKey] = result;
+                }
+                return result;
             } catch (e) {
                 if (e.message && e.message.includes('error')) {
                     throw e;

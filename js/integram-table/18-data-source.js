@@ -1,3 +1,10 @@
+        getServerError(result) {
+            if (Array.isArray(result)) {
+                return (result[0] && result[0].error) || null;
+            }
+            return result.error || null;
+        }
+
         getApiBase() {
             // Extract base URL from apiUrl by removing query parameters and path after /report/, /type/, /metadata/, or /object/
             const url = this.options.apiUrl;
@@ -15,6 +22,21 @@
             }
             // Fallback: remove everything after ? or last /
             return url.split('?')[0].replace(/\/[^\/]*$/, '');
+        }
+
+        /**
+         * Determine whether the export button should be shown (issue #1469).
+         * For report sources: always allowed.
+         * For table/object sources: only when metadata has export="1".
+         * @returns {boolean}
+         */
+        isExportAllowed() {
+            const sourceType = this.getDataSourceType();
+            if (sourceType === 'report') {
+                return true;
+            }
+            // For table/object sources, only allow if metadata export flag is set
+            return this.tableExportAllowed === true;
         }
 
         /**
@@ -117,7 +139,8 @@
             const result = {
                 required: false,
                 multi: false,
-                alias: null
+                alias: null,
+                defaultValue: null
             };
 
             if (!attrs) return result;
@@ -125,12 +148,94 @@
             result.required = attrs.includes(':!NULL:');
             result.multi = attrs.includes(':MULTI:');
 
-            const aliasMatch = attrs.match(/:ALIAS=(.*?):/);
+            const aliasMatch = attrs.match(/:ALIAS=(.*?):/u);
             if (aliasMatch) {
                 result.alias = aliasMatch[1];
             }
 
+            // Extract default value: strip all known flags and use the remainder
+            let stripped = attrs
+                .replace(/:!NULL:/g, '')
+                .replace(/:MULTI:/g, '')
+                .replace(/:ALIAS=(.*?):/gu, '')
+                .trim();
+            if (stripped.length > 0) {
+                result.defaultValue = stripped;
+            }
+
             return result;
+        }
+
+        /**
+         * Resolve a default value for a field based on attrs and field format (issue #1498)
+         * Supports built-in tokens like [NOW], [TODAY], [USER_ID], etc.
+         * For DATE/DATETIME formats with no attrs default, returns current date/time.
+         * @param {string|null} rawAttrs - The raw attrs string from column metadata
+         * @param {string} format - The field format (DATE, DATETIME, SHORT, etc.)
+         * @returns {string} Resolved default value, or empty string if none
+         */
+        resolveDefaultValue(rawAttrs, format) {
+            const now = new Date();
+
+            // Helper to format date as DD.MM.YYYY
+            const formatDate = (d) => {
+                const dd = String(d.getDate()).padStart(2, '0');
+                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const yyyy = d.getFullYear();
+                return `${dd}.${mm}.${yyyy}`;
+            };
+
+            // Helper to format datetime as DD.MM.YYYY HH:MM:SS
+            const formatDateTime = (d) => {
+                const date = formatDate(d);
+                const hh = String(d.getHours()).padStart(2, '0');
+                const min = String(d.getMinutes()).padStart(2, '0');
+                const ss = String(d.getSeconds()).padStart(2, '0');
+                return `${date} ${hh}:${min}:${ss}`;
+            };
+
+            // Helper for date arithmetic
+            const addDays = (d, days) => new Date(d.getTime() + days * 86400000);
+            const addMonths = (d, months) => {
+                const r = new Date(d);
+                r.setMonth(r.getMonth() + months);
+                return r;
+            };
+
+            // If attrs has a default value token, try to resolve it
+            if (rawAttrs && rawAttrs.trim().length > 0) {
+                const parsed = this.parseAttrs(rawAttrs);
+                const token = parsed.defaultValue;
+                if (token) {
+                    switch (token) {
+                        case '[NOW]':      return formatDateTime(now);
+                        case '[TODAY]':    return formatDate(now);
+                        case '[YESTERDAY]': return formatDate(addDays(now, -1));
+                        case '[TOMORROW]':  return formatDate(addDays(now, 1));
+                        case '[MONTH_AGO]': return formatDate(addMonths(now, -1));
+                        case '[WEEK_AGO]':  return formatDate(addDays(now, -7));
+                        case '[MONTH_PLUS]': return formatDate(addMonths(now, 1));
+                        case '[USER]':     return (typeof name !== 'undefined' ? name : '');
+                        case '[USER_ID]':  return (typeof uid !== 'undefined' ? String(uid) : '');
+                        case '[ROLE]':     return (typeof role !== 'undefined' ? role : '');
+                        case '[ROLE_ID]':  return (typeof roleId !== 'undefined' ? String(roleId) : '');
+                        case '[HTTP_HOST]':    return window.location.hostname || '';
+                        case '[REQUEST_URI]':  return window.location.pathname + window.location.search || '';
+                        default:
+                            // Unknown token or literal value — return as-is
+                            return token;
+                    }
+                }
+            }
+
+            // No attrs default — apply current date/time for date/datetime fields
+            if (format === 'DATE') {
+                return formatDate(now);
+            } else if (format === 'DATETIME') {
+                return formatDateTime(now);
+            }
+
+            return '';
         }
 
         getFormatById(typeId) {

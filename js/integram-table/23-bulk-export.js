@@ -145,7 +145,7 @@
             // Show errors if any
             if (errors.length > 0) {
                 errorsDiv.style.display = 'block';
-                errorsDiv.innerHTML = `<div class="alert alert-warning" style="max-height: 200px; overflow-y: auto; font-size: 12px; margin-top: 10px;">
+                errorsDiv.innerHTML = `<div class="alert alert-warning" style="max-height: 200px; overflow-y: auto; font-size: 0.75rem; margin-top: 10px;">
                     <strong>Предупреждения:</strong><br>
                     ${ errors.map(e => this.escapeHtml(e)).join('<br>') }
                 </div>`;
@@ -179,7 +179,11 @@
         }
 
         /**
-         * Toggle export menu visibility
+         * Toggle export menu visibility.
+         * Issue #1652: the menu is appended to document.body with position:fixed so it
+         * escapes the overflow:hidden / overflow-y:hidden clipping of ancestor containers
+         * (.integram-table-header, .integram-table-controls).  The same technique is used
+         * by _attachFixedDropdown (issue #1384).
          * @param {Event} event - Click event
          */
         toggleExportMenu(event) {
@@ -200,6 +204,24 @@
             });
 
             if (!isVisible) {
+                // Issue #1652: move menu to document.body so it is not clipped by
+                // overflow:hidden on .integram-table-header / .integram-table-controls.
+                if (menu.parentNode !== document.body) {
+                    document.body.appendChild(menu);
+                }
+
+                // Position the menu below the button using fixed coordinates.
+                const btn = event && event.currentTarget
+                    ? event.currentTarget
+                    : document.querySelector(`#${ menuId }`)?.previousElementSibling;
+                if (btn) {
+                    const rect = btn.getBoundingClientRect();
+                    menu.style.position = 'fixed';
+                    menu.style.top = `${ rect.bottom + 4 }px`;
+                    menu.style.left = `${ rect.left }px`;
+                    menu.style.right = 'auto';
+                }
+
                 menu.style.display = 'block';
 
                 // Close menu when clicking outside

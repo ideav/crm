@@ -106,7 +106,7 @@
                                            class="inline-editor-reference-search form-ref-search"
                                            id="sub-field-${ req.id }-search"
                                            placeholder="Поиск..."
-                                           autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                           autocomplete="off">
                                     <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
                                     <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                                 </div>
@@ -220,6 +220,17 @@
             };
             document.addEventListener('keydown', handleEscape);
 
+            // Enter in input/textarea triggers Save (issue #1467)
+            const saveBtn = modal.querySelector('#subordinate-save-btn');
+            modal.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+                    if (!saveBtn.disabled) {
+                        e.preventDefault();
+                        saveBtn.click();
+                    }
+                }
+            });
+
             // Save handler
             modal.querySelector('#subordinate-save-btn').addEventListener('click', async () => {
                 const form = modal.querySelector('#subordinate-edit-form');
@@ -273,8 +284,9 @@
                         throw new Error(`Невалидный JSON ответ: ${responseText}`);
                     }
 
-                    if (result.error) {
-                        throw new Error(result.error);
+                    const serverError = this.getServerError(result);
+                    if (serverError) {
+                        throw new Error(serverError);
                     }
 
                     closeModal();
@@ -310,6 +322,73 @@
                     console.error('Error creating subordinate record:', error);
                     this.showToast(`Ошибка: ${ error.message }`, 'error');
                 }
+            });
+        }
+
+        attachPasswordResetHandlers(modal) {
+            // Attach reset password button handlers for field id=20 (issue #1471)
+            const resetBtns = modal.querySelectorAll('.pwd-reset-btn');
+            const resetMailBtns = modal.querySelectorAll('.pwd-reset-mail-btn');
+
+            const generatePassword = () => (Math.random().toString(36) + Math.random().toString(36)).replace(/\./g, '').substr(1, 8);
+
+            const copyToClipboard = (text) => {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text);
+                } else {
+                    const el = document.createElement('textarea');
+                    el.value = text;
+                    document.body.appendChild(el);
+                    el.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(el);
+                }
+            };
+
+            const showCopied = (fieldId) => {
+                const copiedSpan = modal.querySelector(`#field-${ fieldId }-copied`);
+                if (copiedSpan) {
+                    copiedSpan.style.display = '';
+                    setTimeout(() => { copiedSpan.style.display = 'none'; }, 2500);
+                }
+            };
+
+            resetBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const fieldId = btn.dataset.fieldId;
+                    const pwdInput = modal.querySelector(`#field-${ fieldId }`);
+                    if (!pwdInput) return;
+                    const pwd = generatePassword();
+                    pwdInput.value = pwd;
+                    copyToClipboard(pwd);
+                    showCopied(fieldId);
+                    // Warn user to save the generated password (issue #1481)
+                    this.showCopyNotification('Пароль сгенерирован и скопирован в буфер. Обязательно сохраните эту форму!', false, 7000);
+                });
+            });
+
+            resetMailBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const fieldId = btn.dataset.fieldId;
+                    const pwdInput = modal.querySelector(`#field-${ fieldId }`);
+                    if (!pwdInput) return;
+                    // Copy login link (username from first column of the table, issue #1479)
+                    // Do not allow copying invitation before the record is saved (issue #1591)
+                    const username = modal.dataset.firstColumnValue || '';
+                    if (!username) {
+                        this.showCopyNotification('Сохраните запись перед копированием приглашения', true, 5000);
+                        return;
+                    }
+                    const pwd = generatePassword();
+                    pwdInput.value = pwd;
+                    const db = window.location.pathname.split('/')[1] || '';
+                    // Build login link without prepending username as a separate line (issue #1591)
+                    const loginLink = `Ссылка для входа: https://${ location.host }/start.html?db=${ db }&u=${ encodeURIComponent(username) }\nПароль: ${ pwd }`;
+                    copyToClipboard(loginLink);
+                    showCopied(fieldId);
+                    // Warn user to save the generated password (issue #1481)
+                    this.showCopyNotification('Пароль сгенерирован и скопирован в буфер. Обязательно сохраните эту форму!', false, 7000);
+                });
             });
         }
 
@@ -476,14 +555,18 @@
 
                 if (!searchInput || !dropdown || !hiddenInput) continue;
 
+                // Look up attrs from reqs metadata to determine if id parameter should be included (issue #1571)
+                const reqMeta = reqs && Array.isArray(reqs) ? reqs.find(r => String(r.id) === String(refReqId)) : null;
+                const refAttrs = (reqMeta && reqMeta.attrs) || wrapper.dataset.attrs || '';
+
                 // Issue #853: Handle multi-select reference editors separately
                 if (wrapper.dataset.multi === '1') {
-                    this.initFormMultiReferenceEditor(wrapper, refReqId, recordId);
+                    this.initFormMultiReferenceEditor(wrapper, refReqId, recordId, refAttrs);
                     continue;
                 }
 
                 try {
-                    const options = await this.fetchReferenceOptions(refReqId, recordId);
+                    const options = await this.fetchReferenceOptions(refReqId, recordId, '', {}, refAttrs);
 
                     // Store options data on the wrapper (array of [id, text] tuples)
                     wrapper._referenceOptions = options;
@@ -534,7 +617,7 @@
                                 // If not all fetched, re-query from server
                                 if (!wrapper._allOptionsFetched) {
                                     try {
-                                        const serverOptions = await this.fetchReferenceOptions(refReqId, recordId, searchText, wrapper._extraParams || {});
+                                        const serverOptions = await this.fetchReferenceOptions(refReqId, recordId, searchText, wrapper._extraParams || {}, refAttrs);
                                         wrapper._referenceOptions = serverOptions;
                                         this.renderFormReferenceOptions(dropdown, serverOptions, hiddenInput, searchInput);
                                     } catch (error) {
@@ -656,8 +739,9 @@
                     const applyHook = async () => {
                         const isEmpty = !watchedHiddenInput.value;
                         targetWrapper._extraParams = isEmpty ? (hook.onEmpty || {}) : (hook.onFilled || {});
+                        const targetAttrs = (reqs && Array.isArray(reqs) ? (reqs.find(r => String(r.id) === String(refReqId)) || {}).attrs : '') || targetWrapper.dataset.attrs || '';
                         try {
-                            const options = await this.fetchReferenceOptions(refReqId, recordId, '', targetWrapper._extraParams);
+                            const options = await this.fetchReferenceOptions(refReqId, recordId, '', targetWrapper._extraParams, targetAttrs);
                             targetWrapper._referenceOptions = options;
                             targetWrapper._allOptionsFetched = options.length < 50;
                             this.renderFormReferenceOptions(targetDropdown, options, targetHiddenInput, targetSearchInput);
@@ -679,7 +763,7 @@
          * Shows selected values as removable tags and a search input to add more.
          * Updates the hidden input with comma-separated selected IDs.
          */
-        async initFormMultiReferenceEditor(wrapper, refReqId, recordId) {
+        async initFormMultiReferenceEditor(wrapper, refReqId, recordId, attrs = '') {
             const searchInput = wrapper.querySelector('.form-ref-search');
             const dropdown = wrapper.querySelector('.form-ref-dropdown');
             const hiddenInput = wrapper.querySelector('.form-multi-ref-value');
@@ -688,7 +772,7 @@
             if (!searchInput || !dropdown || !hiddenInput || !tagsContainer) return;
 
             try {
-                const options = await this.fetchReferenceOptions(refReqId, recordId);
+                const options = await this.fetchReferenceOptions(refReqId, recordId, '', {}, attrs);
                 wrapper._referenceOptions = options;
                 wrapper._allOptionsFetched = options.length < 50;
 
@@ -759,9 +843,37 @@
                     }
                 };
 
+                // Store callbacks on wrapper so saveRecordForFormReference can update multi-select after creation
+                wrapper._renderTags = renderTags;
+                wrapper._updateHiddenInput = updateHiddenInput;
+
+                // Issue #1688: Add button support for form multi-select reference editors
+                const addButton = wrapper.querySelector('.form-ref-add');
+                const refTypeId = wrapper.dataset.refTypeId;
+
+                const updateAddButtonVisibility = (searchText) => {
+                    if (!addButton) return;
+                    const selectedIds = new Set((wrapper._selectedItems || []).map(s => s.id));
+                    const availableCount = (wrapper._referenceOptions || []).filter(([id]) => !selectedIds.has(id)).length;
+                    // Show add button when user has typed something OR when no options are available (issue #1686)
+                    addButton.style.display = (searchText.length > 0 || availableCount === 0) ? '' : 'none';
+                };
+
+                // Attach add button click handler
+                if (addButton && refTypeId) {
+                    addButton.addEventListener('click', async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const inputValue = searchInput.value.trim();
+                        await this.openCreateFormForFormReference(refTypeId, inputValue, recordId, hiddenInput, searchInput, wrapper, dropdown);
+                    });
+                }
+
                 // Initial render
                 renderTags();
                 updateHiddenInput();
+                // Set initial add button visibility (issue #1686: show immediately when no options available)
+                updateAddButtonVisibility('');
 
                 // Show dropdown on focus (issue #917: use 'block' not '' to override CSS display:none on .form-ref-editor-box)
                 searchInput.addEventListener('focus', () => {
@@ -772,9 +884,11 @@
                 // Filter on input
                 let searchTimeout;
                 searchInput.addEventListener('input', (e) => {
+                    const searchText = e.target.value.trim();
+                    updateAddButtonVisibility(searchText);
                     clearTimeout(searchTimeout);
                     searchTimeout = setTimeout(() => {
-                        renderDropdown(e.target.value.trim());
+                        renderDropdown(searchText);
                         dropdown.style.display = 'block';
                     }, 200);
                 });
@@ -792,6 +906,8 @@
                     }
                     searchInput.value = '';
                     dropdown.style.display = 'none';
+                    // Update add button visibility after selection (available options may have changed)
+                    updateAddButtonVisibility('');
                 });
 
                 // Handle tag click: remove button removes tag, clicking tag itself opens edit form (issue #871)
@@ -806,6 +922,8 @@
                         wrapper._selectedItems = (wrapper._selectedItems || []).filter(s => !(s.id === id && s.text === text));
                         renderTags();
                         updateHiddenInput();
+                        // Update add button visibility after removal (available options may have changed)
+                        updateAddButtonVisibility(searchInput.value.trim());
                         return;
                     }
                     const tag = e.target.closest('.multi-ref-tag');
@@ -816,7 +934,6 @@
                     }
                     const id = tag.dataset.id;
                     if (!id) return;
-                    const refTypeId = wrapper.dataset.refTypeId;
                     if (refTypeId) {
                         this.openEditForm(id, refTypeId, 0);
                     }
@@ -1165,7 +1282,7 @@
                                            class="inline-editor-reference-search form-ref-search"
                                            id="field-form-ref-${req.id}-search"
                                            placeholder="Поиск..."
-                                           autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                           autocomplete="off">
                                     <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
                                     <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                                 </div>
@@ -1298,9 +1415,9 @@
             }
 
             const apiBase = this.getApiBase();
-            // Issue #616: Use F_U from URL as parent (up) when F_U > 1
-            const parentIdForNew = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
-            const url = `${apiBase}/_m_new/${typeId}?JSON&up=${parentIdForNew}`;
+            // Issue #1690: Reference directory values always belong to the root (up=1),
+            // not to the current form's parent record
+            const url = `${apiBase}/_m_new/${typeId}?JSON&up=1`;
 
             try {
                 const response = await fetch(url, {
@@ -1323,8 +1440,9 @@
                     result = { success: true };
                 }
 
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 const createdId = result.obj || result.id || result.i;
@@ -1340,9 +1458,21 @@
 
                 // Set the created record in the form reference field
                 if (createdId) {
-                    hiddenInput.value = createdId;
-                    searchInput.value = createdValue;
-                    dropdown.style.display = 'none';
+                    // Issue #1688: Handle multi-select reference fields differently from single-select
+                    if (wrapper.dataset.multi === '1') {
+                        // Add the new record to the multi-select selection
+                        if (!(wrapper._selectedItems || []).find(s => s.id === String(createdId))) {
+                            wrapper._selectedItems = [...(wrapper._selectedItems || []), { id: String(createdId), text: createdValue }];
+                        }
+                        if (wrapper._renderTags) wrapper._renderTags();
+                        if (wrapper._updateHiddenInput) wrapper._updateHiddenInput();
+                        searchInput.value = '';
+                        dropdown.style.display = 'none';
+                    } else {
+                        hiddenInput.value = createdId;
+                        searchInput.value = createdValue;
+                        dropdown.style.display = 'none';
+                    }
 
                     // Re-fetch options to include the new record
                     try {

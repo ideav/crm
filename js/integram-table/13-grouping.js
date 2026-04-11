@@ -13,7 +13,7 @@
 
             modal.innerHTML = `
                 <h3>Настройка группировки</h3>
-                <p style="color: var(--md-text-secondary); font-size: 14px; margin-bottom: 15px;">
+                <p style="color: var(--md-text-secondary); font-size: 0.875rem; margin-bottom: 15px;">
                     Выберите поля для группировки. Порядок выбора определяет вложенность групп.
                 </p>
                 <div class="column-settings-list grouping-columns-list" style="max-height: 300px; overflow-y: auto;">
@@ -127,6 +127,18 @@
             this.groupedData = [];
 
             // Reload data with normal pagination
+            this.data = [];
+            this.loadedRecords = 0;
+            this.hasMore = true;
+            this.totalRows = null;
+            this.loadData(false);
+        }
+
+        /**
+         * Refresh table data from scratch, clearing existing records (issue #1514).
+         * If the server returns empty or null result, the table is cleared.
+         */
+        refreshData() {
             this.data = [];
             this.loadedRecords = 0;
             this.hasMore = true;
@@ -310,3 +322,27 @@
             this.data = sortedData;
         }
 
+        hasActiveFilters() {
+            return Object.values(this.filters).some(filter => {
+                if (!filter) return false;
+                // For Empty (%) and Not Empty (!%) filters, they are active even with empty value
+                if (filter.type === '%' || filter.type === '!%') return true;
+                // For other filters, check if value is not empty
+                return filter.value && filter.value.trim() !== '';
+            });
+        }
+
+        /**
+         * Check if table has any active filters or grouping enabled (issue #510)
+         * Used to determine whether to show the "Share link" button
+         * @returns {boolean} True if there are active filters or grouping
+         */
+        hasActiveFiltersOrGroups() {
+            return this.hasActiveFilters() || (this.groupingEnabled && this.groupingColumns.length > 0);
+        }
+
+        /**
+         * Generate URL with current table configuration (issue #510)
+         * Includes filters and grouping settings that can be shared
+         * @returns {string} URL with configuration parameters
+         */

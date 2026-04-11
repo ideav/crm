@@ -215,8 +215,9 @@
 
             const result = await response.json();
 
-            if (result.error) {
-                throw new Error(result.error);
+            const serverError = this.getServerError(result);
+            if (serverError) {
+                throw new Error(serverError);
             }
 
             // Return the file path from server response

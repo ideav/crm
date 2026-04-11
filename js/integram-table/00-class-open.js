@@ -1,4 +1,4 @@
-/** 
+/**
  * IntegramTable Component
  * Standalone JS module for displaying Integram API data tables with infinite scroll
  *

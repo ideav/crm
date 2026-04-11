@@ -1,5 +1,5 @@
 // AUTO-GENERATED — DO NOT EDIT. Edit files in js/integram-table/ and run: bash build.sh
-/** 
+/**
  * IntegramTable Component
  * Standalone JS module for displaying Integram API data tables with infinite scroll
  *
@@ -55,14 +55,17 @@ class IntegramTable{
             this.visibleColumns = [];
             this.filtersEnabled = false;
             this.objectTableId = null;  // Table ID when data is in object/JSON_OBJ format (for _count=1 queries)
+            this.tableGranted = null;  // 'WRITE' = full access, other value = read-only (issue #1508)
             this.rawObjectData = [];  // Raw data array with {i, u, o, r} for object format (preserves record IDs)
             this.styleColumns = {};  // Map of column IDs to their style column values
             this.idColumns = new Set();  // Set of hidden ID column IDs
             this.columnWidths = {};  // Map of column IDs to their widths in pixels
             this.metadataCache = {};  // Cache for metadata by type ID
+            this.metadataFetchPromises = {};  // In-progress fetch promises by type ID (issue #1455)
             this.grantOptionsCache = null;  // Cache for GRANT dropdown options (issue #607)
             this.reportColumnOptionsCache = null;  // Cache for REPORT_COLUMN dropdown options (issue #607)
             this.refOptionsCache = {};  // Cache for reference field filter dropdown options by column ID (issue #795)
+            this.refFetchCache = {};  // Cache for fetchReferenceOptions results by composite key (issue #1571)
             this.editableColumns = new Map();  // Map of column IDs to their corresponding ID column IDs
             this.checkboxMode = false;  // Whether checkbox selection column is visible
             this.selectedRows = new Set();  // Set of selected row indices
@@ -102,7 +105,8 @@ class IntegramTable{
                 compactForAll: true,  // true = apply compact setting to all tables without explicit setting (default)
                 pageSize: this.options.pageSize,  // Current page size
                 truncateLongValues: true,  // true = truncate to 127 chars (default)
-                hideMenuButtonLabels: false  // false = show labels below toolbar buttons (default)
+                wrapHeaders: false,  // false = nowrap (default), true = wrap column headers
+                hideMenuButtonLabels: false,  // false = show labels below toolbar buttons (default)
             };
 
             this.filterTypes = {
@@ -199,6 +203,23 @@ class IntegramTable{
         }
 
         /**
+         * Check if the table has WRITE access (issue #1508)
+         * Returns true when tableGranted is null (not set) or equals "WRITE"
+         * Returns false for any other granted value (e.g. "READ")
+         */
+        isTableWritable() {
+            return this.tableGranted === null || this.tableGranted === 'WRITE';
+        }
+
+        /**
+         * Check if the user has permission to modify table structure (issue #1536)
+         * Returns true when window.grants["1"] equals "WRITE"
+         */
+        isStructureWritable() {
+            return window.grants && window.grants['1'] === 'WRITE';
+        }
+
+        /**
          * Check if a type ID is a base (primitive) type (issue #708)
          * Base types (2-17) don't have metadata and cannot be used for edit forms
          * @param {string|number} typeId - Type ID to check
@@ -217,6 +238,7 @@ class IntegramTable{
             }
             this.loadColumnState();
             this.loadSettings();
+            this.applyPageFontSize();  // Apply stored font size to the page on load (issue #1626)
             this.loadConfigFromUrl();  // Load filters, groups, sorting from URL (issue #510)
             this.globalMetadataPromise = this.loadGlobalMetadata();  // Store promise so fetchMetadata() can await it (issue #789)
             this.loadParentInfo();  // Load parent info for breadcrumb title (issue #571)
@@ -224,6 +246,16 @@ class IntegramTable{
         }
 
         async loadGlobalMetadata() {
+            // If already loaded, return immediately (issue #1455)
+            if (this.globalMetadata) {
+                return;
+            }
+
+            // If loading is already in progress, wait for it instead of starting a new fetch (issue #1455)
+            if (this.globalMetadataPromise) {
+                return this.globalMetadataPromise;
+            }
+
             try {
                 const apiBase = this.getApiBase();
                 const response = await fetch(`${ apiBase }/metadata`);
@@ -293,8 +325,8 @@ class IntegramTable{
 
             const instanceName = this.options.instanceName;
 
-            // Show create record button next to title when data source is a table (issue #693, #697)
-            const createBtnHtml = this.getDataSourceType() === 'table'
+            // Show create record button next to title when data source is a table and write access is granted (issue #693, #697, #1508)
+            const createBtnHtml = this.getDataSourceType() === 'table' && this.isTableWritable()
                 ? `<button class="column-add-btn title-create-btn" onclick="window.${ instanceName }.openTitleCreateForm()" title="Создать запись"><i class="pi pi-plus"></i></button>`
                 : '';
 
@@ -365,7 +397,9 @@ class IntegramTable{
         }
 
         async loadData(append = false) {
-            if (this.isLoading || (!append && !this.hasMore && this.loadedRecords > 0)) {
+            // Block concurrent loads; block appending when there are no more records.
+            // Allow non-append (refresh) calls unconditionally so the refresh button works (issue #1516).
+            if (this.isLoading || (append && !this.hasMore)) {
                 return;
             }
 
@@ -378,17 +412,26 @@ class IntegramTable{
                 if (this.getDataSourceType() === 'table') {
                     // Load data from table format (object/{typeId}/?JSON_OBJ&F_U={parentId}) (issue #697)
                     json = await this.loadDataFromTable(append);
-                    newRows = json.rows || [];
                 } else {
                     // Load data from report format (default behavior) (issue #697)
                     json = await this.loadDataFromReport(append);
-                    newRows = json.rows || [];
                     // Auto-set table title from report header if not explicitly provided (issue #537)
-                    if (!this.options.title && json.header) {
+                    if (json && !this.options.title && json.header) {
                         this.options.title = json.header;
                     }
                 }
 
+                // If server returned null or empty result, treat as empty (issue #1514)
+                if (!json) {
+                    this.data = [];
+                    this.loadedRecords = 0;
+                    this.hasMore = false;
+                    this.totalRows = 0;
+                    this.render();
+                    return;
+                }
+
+                newRows = json.rows || [];
                 this.columns = json.columns || [];
 
                 // In grouping mode, disable infinite scroll and use all data (up to 1000)
@@ -623,8 +666,17 @@ class IntegramTable{
                     this.options.title = metadata.val || metadata.value || metadata.name;
                 }
 
+                // Store export flag from metadata (issue #1469)
+                this.tableExportAllowed = metadata.export === '1' || metadata.export === 1;
+
+                // Store table-level granted value for access control (issue #1508)
+                this.tableGranted = metadata.granted !== undefined ? metadata.granted : null;
+
                 // Convert metadata to columns format
                 const columns = [];
+
+                // Determine main column editability: WRITE if table is writable (issue #1508)
+                const mainColGranted = this.isTableWritable() ? 1 : 0;
 
                 // Add main value column (use metadata.id as column id for correct FR_{id} filter params - issue #793)
                 columns.push({
@@ -632,7 +684,7 @@ class IntegramTable{
                     type: metadata.type || 'SHORT',
                     format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
                     name: metadata.val || metadata.name || 'Значение',
-                    granted: 1,
+                    granted: mainColGranted,
                     ref: 0,
                     orig: metadata.id,
                     unique: metadata.unique, // Store unique flag for column edit form (issue #1026)
@@ -644,6 +696,8 @@ class IntegramTable{
                     metadata.reqs.forEach((req, idx) => {
                         const attrs = this.parseAttrs(req.attrs);
                         const isReference = req.hasOwnProperty('ref_id');
+                        // Use req.granted if table is not fully writable; otherwise treat as writable (issue #1508)
+                        const reqGranted = this.isTableWritable() ? 1 : (req.granted === 'WRITE' ? 1 : 0);
                         columns.push({
                             id: String(req.id),
                             type: req.type || 'SHORT',
@@ -651,7 +705,7 @@ class IntegramTable{
                             format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
                             name: attrs.alias || req.val,
                             val: req.val, // Store original name for alias display (issue #945)
-                            granted: 1,  // In object format, allow editing all cells
+                            granted: reqGranted,  // Use metadata granted for access control (issue #1508)
                             ref: isReference ? req.orig : 0,
                             ref_id: req.ref_id || null,
                             orig: req.orig || null,
@@ -764,8 +818,14 @@ class IntegramTable{
                 this.options.title = metadata.val || metadata.value;
             }
 
+            // Store table-level granted value for access control (issue #1508)
+            this.tableGranted = metadata.granted !== undefined ? metadata.granted : null;
+
             // Convert metadata to columns format
             const columns = [];
+
+            // Determine main column editability: WRITE if table is writable (issue #1508)
+            const mainColGranted = this.isTableWritable() ? 1 : 0;
 
             // First column: use metadata.id as column id (not sequential index)
             columns.push({
@@ -773,7 +833,7 @@ class IntegramTable{
                 type: metadata.type || 'SHORT',
                 format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
                 name: metadata.val || 'Значение',
-                granted: 1,
+                granted: mainColGranted,
                 ref: 0,
                 orig: metadata.id, // Store the original table id
                 unique: metadata.unique, // Store unique flag for column edit form (issue #1026)
@@ -785,6 +845,8 @@ class IntegramTable{
                 metadata.reqs.forEach((req, idx) => {
                     const attrs = this.parseAttrs(req.attrs);
                     const isReference = req.hasOwnProperty('ref_id');
+                    // Use req.granted if table is not fully writable; otherwise treat as writable (issue #1508)
+                    const reqGranted = this.isTableWritable() ? 1 : (req.granted === 'WRITE' ? 1 : 0);
 
                     columns.push({
                         id: String(req.id),
@@ -793,7 +855,7 @@ class IntegramTable{
                         format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
                         name: attrs.alias || req.val,
                         val: req.val, // Store original name for alias display (issue #945)
-                        granted: 1,  // In object format, allow editing all cells
+                        granted: reqGranted,  // Use metadata granted for access control (issue #1508)
                         ref: isReference ? req.orig : 0,
                         ref_id: req.ref_id || null,
                         orig: req.orig || null,
@@ -950,8 +1012,14 @@ class IntegramTable{
                     this.options.title = metadata.val || metadata.value;
                 }
 
+                // Store table-level granted value for access control (issue #1508)
+                this.tableGranted = metadata.granted !== undefined ? metadata.granted : null;
+
                 // Convert metadata to columns format
                 const columns = [];
+
+                // Determine main column editability: WRITE if table is writable (issue #1508)
+                const mainColGranted = this.isTableWritable() ? 1 : 0;
 
                 // Add main value column (use metadata.id as column id for correct FR_{id} filter params - issue #793)
                 columns.push({
@@ -959,7 +1027,7 @@ class IntegramTable{
                     type: metadata.type || 'SHORT',
                     format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
                     name: metadata.val || metadata.name || 'Значение',
-                    granted: 1,
+                    granted: mainColGranted,
                     ref: 0,
                     orig: metadata.id,
                     unique: metadata.unique, // Store unique flag for column edit form (issue #1026)
@@ -971,6 +1039,8 @@ class IntegramTable{
                     metadata.reqs.forEach((req, idx) => {
                         const attrs = this.parseAttrs(req.attrs);
                         const isReference = req.hasOwnProperty('ref_id');
+                        // Use req.granted if table is not fully writable; otherwise treat as writable (issue #1508)
+                        const reqGranted = this.isTableWritable() ? 1 : (req.granted === 'WRITE' ? 1 : 0);
 
                         columns.push({
                             id: String(req.id),
@@ -979,7 +1049,7 @@ class IntegramTable{
                             format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
                             name: attrs.alias || req.val,
                             val: req.val, // Store original name for alias display (issue #945)
-                            granted: 1,  // In object format, allow editing all cells
+                            granted: reqGranted,  // Use metadata granted for access control (issue #1508)
                             ref: isReference ? req.orig : 0,
                             ref_id: req.ref_id || null,
                             orig: req.orig || null,
@@ -1206,6 +1276,9 @@ class IntegramTable{
                     <div class="integram-table-header">
                         ${ this.renderTitleHtml() }
                         <div class="integram-table-controls">
+                            <div class="integram-table-settings integram-table-settings-refresh" onclick="window.${ instanceName }.refreshData()" title="Обновить">
+                                <i class="pi pi-refresh"></i>
+                            </div>
                             ${ this.groupingEnabled ? `
                             <div class="integram-table-settings" onclick="window.${ instanceName }.clearGrouping()" title="Очистить группировку">
                                 <i class="pi pi-undo"></i>
@@ -1226,6 +1299,7 @@ class IntegramTable{
                                 <i class="pi pi-filter"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">фильтры</span>' : '' }
                             </div>
+                            ${ this.isExportAllowed() ? `
                             <div class="integram-table-export-container">
                                 <div class="integram-table-settings" onclick="window.${ instanceName }.toggleExportMenu(event)" title="Экспорт">
                                     <i class="pi pi-download"></i>
@@ -1243,7 +1317,8 @@ class IntegramTable{
                                     </div>
                                 </div>
                             </div>
-                            ${ this.checkboxMode && this.selectedRows.size > 0 ? `
+                            ` : '' }
+                            ${ this.checkboxMode && this.selectedRows.size > 0 && this.isTableWritable() ? `
                             <button class="btn btn-sm btn-danger integram-bulk-delete-btn" id="${ instanceName }-bulk-delete-btn" onclick="window.${ instanceName }.showBulkDeleteConfirm(event)">
                                 Удалить (${ this.selectedRows.size })
                             </button>
@@ -1266,43 +1341,98 @@ class IntegramTable{
                     <div class="integram-table-container">
                         <table class="integram-table${ this.settings.compact ? ' compact' : '' }">
                         <thead>
-                            <tr>
-                                ${ this.checkboxMode ? `<th class="checkbox-column-header"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.data.length > 0 && this.selectedRows.size === this.data.length ? 'checked' : '' }></th>` : '' }
-                                ${ this.groupingEnabled && this.groupingColumns.length > 0 ?
-                                    this.renderGroupedHeaders(orderedColumns, instanceName) :
-                                    orderedColumns.map(col => {
+                            ${ (() => {
+                                // Smart header grouping (issue #1540, #1624)
+                                // Works in both normal mode and left-grouping mode.
+                                // In left-grouping mode, grouping columns are placed first (same reordering as renderGroupedHeaders).
+                                const isLeftGrouping = this.groupingEnabled && this.groupingColumns.length > 0;
+                                const groupingColumnSet = isLeftGrouping ? new Set(this.groupingColumns) : null;
+
+                                // In left-grouping mode, reorder columns: grouping cols first, then non-grouping
+                                const headerColumns = isLeftGrouping
+                                    ? [
+                                        ...this.groupingColumns
+                                            .map(colId => this.columns.find(c => c.id === colId))
+                                            .filter(col => col && this.visibleColumns.includes(col.id)),
+                                        ...orderedColumns.filter(col => !groupingColumnSet.has(col.id))
+                                      ]
+                                    : orderedColumns;
+
+                                const smartTree = this.buildSmartHeaderTree(headerColumns);
+                                const smartDepth = this.smartHeaderTreeDepth(smartTree);
+                                const hasSmartGroups = smartDepth > 1;
+
+                                if (hasSmartGroups) {
+                                    // Multi-row smart header
+                                    const rowsOfCells = this.renderSmartHeaderRows(smartTree, smartDepth, 0, instanceName, groupingColumnSet);
+                                    const checkboxHtml = this.checkboxMode
+                                        ? `<th class="checkbox-column-header" rowspan="${ smartDepth }"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.data.length > 0 && this.selectedRows.size === this.data.length ? 'checked' : '' }></th>`
+                                        : '';
+                                    const addColHtml = this.isStructureWritable()
+                                        ? `<th class="add-column-header-cell" rowspan="${ smartDepth }" style="width: 36px; min-width: 36px;" title="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus"></i></th>`
+                                        : '';
+                                    return rowsOfCells.map((cells, rowIdx) => `
+                                        <tr>
+                                            ${ rowIdx === 0 ? checkboxHtml : '' }
+                                            ${ cells.join('') }
+                                            ${ rowIdx === 0 ? addColHtml : '' }
+                                        </tr>
+                                    `).join('') + (this.filtersEnabled ? `
+                                    <tr class="filter-row">
+                                        ${ this.checkboxMode ? '<td class="checkbox-column-filter"></td>' : '' }
+                                        ${ isLeftGrouping
+                                            ? this.renderGroupedFilterRow(orderedColumns)
+                                            : headerColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('') }
+                                        <td class="add-column-filter-cell"></td>
+                                    </tr>
+                                    ` : '');
+                                }
+
+                                // Single-row header (original logic)
+                                const singleRowCells = isLeftGrouping
+                                    ? this.renderGroupedHeaders(orderedColumns, instanceName)
+                                    : headerColumns.map(col => {
                                         const width = this.columnWidths[col.id];
                                         const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
                                         const addButtonHtml = this.shouldShowAddButton(col) ?
                                             `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
-
-                                        // Add sort indicator if this column is sorted
                                         let sortIndicator = '';
                                         if (this.sortColumn === col.id) {
                                             sortIndicator = this.sortDirection === 'asc' ? '<i class="pi pi-sort-amount-up-alt" style="font-size:0.75em;"></i> ' : '<i class="pi pi-sort-amount-down" style="font-size:0.75em;"></i> ';
                                         }
-
+                                        const refTypeId = col.ref;
+                                        const refIconHtml = refTypeId ? (() => {
+                                            const dbName = window.db || window.location.pathname.split('/')[1];
+                                            return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
+                                        })() : '';
                                         return `
-                                        <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
-                                            <span class="column-header-content" data-column-id="${ col.id }">${ sortIndicator }${ col.name }</span>
-                                            ${ addButtonHtml }
-                                            <div class="column-resize-handle" data-column-id="${ col.id }"></div>
-                                        </th>
-                                    `;
-                                    }).join('')
-                                }
-                                <th class="add-column-header-cell" style="width: 36px; min-width: 36px;" title="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus"></i></th>
-                            </tr>
-                            ${ this.filtersEnabled ? `
-                            <tr class="filter-row">
-                                ${ this.checkboxMode ? '<td class="checkbox-column-filter"></td>' : '' }
-                                ${ this.groupingEnabled && this.groupingColumns.length > 0 ?
-                                    this.renderGroupedFilterRow(orderedColumns) :
-                                    orderedColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('')
-                                }
-                                <td class="add-column-filter-cell"></td>
-                            </tr>
-                            ` : '' }
+                                            <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
+                                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ col.name }</span>
+                                                ${ refIconHtml }
+                                                ${ addButtonHtml }
+                                                <div class="column-resize-handle" data-column-id="${ col.id }"></div>
+                                            </th>
+                                        `;
+                                    }).join('');
+
+                                return `
+                                    <tr>
+                                        ${ this.checkboxMode ? `<th class="checkbox-column-header"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.data.length > 0 && this.selectedRows.size === this.data.length ? 'checked' : '' }></th>` : '' }
+                                        ${ singleRowCells }
+                                        ${ this.isStructureWritable() ? `<th class="add-column-header-cell" style="width: 36px; min-width: 36px;" title="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus"></i></th>` : '' }
+                                    </tr>
+                                    ${ this.filtersEnabled ? `
+                                    <tr class="filter-row">
+                                        ${ this.checkboxMode ? '<td class="checkbox-column-filter"></td>' : '' }
+                                        ${ isLeftGrouping ?
+                                            this.renderGroupedFilterRow(orderedColumns) :
+                                            headerColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('')
+                                        }
+                                        <td class="add-column-filter-cell"></td>
+                                    </tr>
+                                    ` : '' }
+                                `;
+                            })() }
                         </thead>
                         <tbody>
                             ${ this.groupingEnabled && this.groupedData.length > 0 ?
@@ -1339,6 +1469,7 @@ class IntegramTable{
 
             this.attachEventListeners();
             this.attachScrollListener();
+            this.attachPlusKeyShortcut();
             this.attachStickyScrollbar();
             this.attachColumnResizeHandlers();
             this.attachScrollCounterPositioning();
@@ -1389,7 +1520,7 @@ class IntegramTable{
                                        data-column-id="${ column.id }"
                                        value="${ displayValue }"
                                        placeholder="${ placeholder }"
-                                       autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                       autocomplete="off">
                             </div>
                         </td>
                     `;
@@ -1442,7 +1573,7 @@ class IntegramTable{
                                     data-column-id="${ column.id }"
                                     data-selected-ids="${ Array.from(selectedIds).join(',') }"
                                     title="${ escapedDisplayText || 'Выбрать значение...' }">
-                                <span class="filter-ref-trigger-text">${ escapedDisplayText || 'Выбрать...' }</span>
+                                <span class="filter-ref-trigger-text${ escapedDisplayText ? '' : ' filter-ref-trigger-text--placeholder' }">${ escapedDisplayText || 'Выбрать...' }</span>
                                 <span class="filter-ref-trigger-arrow">▼</span>
                             </button>
                         </div>
@@ -1486,7 +1617,7 @@ class IntegramTable{
                                data-column-id="${ column.id }"
                                value="${ displayValue }"
                                placeholder="${ placeholder }"
-                               autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                               autocomplete="off">
                     </div>
                 </td>
             `;
@@ -1773,15 +1904,20 @@ class IntegramTable{
                         recordId = this.rawObjectData[rowIndex].i;
                     }
                     const btnValue = value !== null && value !== undefined ? String(value) : '';
-                    let btnHref, btnTarget;
+                    let btnHref, btnTarget, btnOnclick;
                     if (btnValue.match(/^https?:\/\//i)) {
                         btnHref = btnValue;
                         btnTarget = recordId !== null ? String(recordId) : '_blank';
+                    } else if (btnValue.match(/^\w[\w.]*\s*\([\s\S]*\)\s*;?\s*$/)) {
+                        // Value is a JS function call (e.g. newApi('POST','...','','reloadAllIntegramTables'))
+                        btnOnclick = btnValue.replace(/;?\s*$/, '') + '; event.stopPropagation();';
                     } else if (btnValue) {
                         btnHref = `/${dbName}/${btnValue.replace(/^\//, '')}`;
                         btnTarget = '_blank';
                     }
-                    if (btnHref) {
+                    if (btnOnclick) {
+                        displayValue = `<button class="btn btn-sm btn-primary" onclick="${ btnOnclick.replace(/"/g, '&quot;') }"><i class="pi pi-play"></i></button>`;
+                    } else if (btnHref) {
                         displayValue = `<a href="${ btnHref }" target="${ btnTarget }" onclick="event.stopPropagation();"><button class="btn btn-sm btn-primary"><i class="pi pi-play"></i></button></a>`;
                     } else {
                         displayValue = `<button class="btn btn-sm btn-primary"><i class="pi pi-play"></i></button>`;
@@ -1997,8 +2133,8 @@ class IntegramTable{
                             displayContent = `<a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a>`;
                         }
                     }
-                    const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 14px;"></i></span>`;
-                    escapedValue = `<div class="cell-content-wrapper">${ displayContent }${ editIcon }</div>`;
+                    const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
+                    escapedValue = `<div class="cell-content-wrapper"><span title="${ recordId }">${ displayContent }</span>${ editIcon }</div>`;
                 }
             }
 
@@ -2010,7 +2146,7 @@ class IntegramTable{
                     const pathParts = window.location.pathname.split('/');
                     const dbName = pathParts.length >= 2 ? pathParts[1] : '';
                     const refUrl = `/${ dbName }/table/${ refTypeId }?F_I=${ refValueId }`;
-                    escapedValue = `<div class="cell-content-wrapper"><a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a></div>`;
+                    escapedValue = `<div class="cell-content-wrapper"><span title="${ refValueId }"><a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a></span></div>`;
                 }
             }
 
@@ -2188,6 +2324,194 @@ class IntegramTable{
         }
 
         /**
+         * Smart header grouping (issue #1540, #1565)
+         * Find the longest common whole-word prefix of two column name strings.
+         * Words are separated by dots (".").
+         */
+        _smartHeaderLCP(a, b) {
+            const wa = a.split('.');
+            const wb = b.split('.');
+            let n = 0;
+            for (let i = 0; i < Math.min(wa.length, wb.length); i++) {
+                if (wa[i] === wb[i]) n = i + 1;
+                else break;
+            }
+            return wa.slice(0, n).join('.');
+        }
+
+        /**
+         * Build smart header grouping tree from an ordered list of columns.
+         *
+         * Column names use dots (".") as word separators for grouping (issue #1565).
+         *
+         * A group [start..end) with prefix P is valid only if:
+         *   - ≥2 consecutive columns all start with P+"." (non-empty suffix)
+         *   - The column before start (if any) does NOT start with P+"."
+         *   - The column after end (if any) does NOT start with P+"."
+         *   - The group is NOT universal (does not span ALL columns at this level)
+         *
+         * Finds the SHORTEST non-universal prefix first (top-down approach so that
+         * broader groupings like "foo.bar" contain narrower ones like "foo.bar.baz").
+         *
+         * Returns array of nodes:
+         *   { type:'leaf', col, suffix }
+         *   { type:'group', prefix, span, children }
+         */
+        buildSmartHeaderTree(columns) {
+            if (columns.length === 0) return [];
+            if (columns.length === 1) {
+                return [{ type: 'leaf', col: columns[0], suffix: columns[0].name }];
+            }
+
+            // Compute pair-prefix for each adjacent pair
+            const pairPrefixes = [];
+            for (let i = 0; i < columns.length - 1; i++) {
+                const prefix = this._smartHeaderLCP(columns[i].name, columns[i + 1].name);
+                const len = prefix.split('.').filter(Boolean).length;
+                pairPrefixes.push({ i, prefix, len });
+            }
+
+            // Sort ascending by length to find the SHORTEST non-universal prefix
+            const sorted = [...pairPrefixes].sort((a, b) => a.len - b.len || a.i - b.i);
+
+            let targetLen = -1;
+            for (const pair of sorted) {
+                if (pair.len === 0) continue;
+                const prefix = pair.prefix;
+                // Find the full extent of this prefix among consecutive columns
+                let start = pair.i;
+                while (start > 0 && columns[start - 1].name !== prefix &&
+                       columns[start - 1].name.startsWith(prefix + '.')) start--;
+                let end = pair.i + 1;
+                while (end < columns.length && columns[end].name !== prefix &&
+                       columns[end].name.startsWith(prefix + '.')) end++;
+                // Skip if universal (spans ALL columns at this level)
+                if (start === 0 && end === columns.length) continue;
+                targetLen = pair.len;
+                break;
+            }
+
+            if (targetLen === -1) {
+                // No valid non-universal group — all leaves
+                return columns.map(col => ({ type: 'leaf', col, suffix: col.name }));
+            }
+
+            // Build result: form all groups at targetLen, leaves elsewhere
+            const result = [];
+            let i = 0;
+            while (i < columns.length) {
+                let grouped = false;
+                if (i + 1 < columns.length) {
+                    const pairPrefix = this._smartHeaderLCP(columns[i].name, columns[i + 1].name);
+                    const pairLen = pairPrefix.split('.').filter(Boolean).length;
+                    if (pairLen >= targetLen) {
+                        const prefix = columns[i].name.split('.').slice(0, targetLen).join('.');
+                        if (columns[i].name.startsWith(prefix + '.') && columns[i].name !== prefix) {
+                            const leftOk = i === 0 || !columns[i - 1].name.startsWith(prefix + '.');
+                            if (leftOk) {
+                                let end = i + 1;
+                                while (end < columns.length && columns[end].name !== prefix &&
+                                       columns[end].name.startsWith(prefix + '.')) end++;
+                                const rightOk = end >= columns.length || !columns[end].name.startsWith(prefix + '.');
+                                if (rightOk && end - i >= 2) {
+                                    const groupCols = columns.slice(i, end);
+                                    const suffixCols = groupCols.map(col => ({
+                                        ...col, name: col.name.slice(prefix.length + 1)
+                                    }));
+                                    result.push({
+                                        type: 'group',
+                                        prefix,
+                                        span: end - i,
+                                        children: this.buildSmartHeaderTree(suffixCols)
+                                    });
+                                    i = end;
+                                    grouped = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (!grouped) {
+                    result.push({ type: 'leaf', col: columns[i], suffix: columns[i].name });
+                    i++;
+                }
+            }
+            return result;
+        }
+
+        /**
+         * Compute the depth (number of header rows) of a smart header tree.
+         */
+        smartHeaderTreeDepth(nodes) {
+            return nodes.reduce((max, n) =>
+                Math.max(max, n.type === 'group' ? 1 + this.smartHeaderTreeDepth(n.children) : 1), 0);
+        }
+
+        /**
+         * Render the smart header tree into an array of row HTML strings.
+         * Returns an array of length totalDepth, each element is the inner HTML
+         * of one <tr> (excluding the tr tags themselves).
+         *
+         * Each leaf <th> has data-column-id, draggable, width style, sort indicator,
+         * add button, and resize handle — the full decoration needed for interaction.
+         *
+         * Group <th> cells show only the shared prefix text (truncated via CSS).
+         */
+        renderSmartHeaderRows(nodes, totalDepth, depth, instanceName, groupingColumnSet) {
+            // rows[i] = array of <th> HTML strings for header row i
+            const rows = Array.from({ length: totalDepth }, () => []);
+
+            const visit = (nodes, depth) => {
+                for (const node of nodes) {
+                    if (node.type === 'leaf') {
+                        const col = node.col;
+                        const rowspan = totalDepth - depth;
+                        const width = this.columnWidths[col.id];
+                        const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
+                        const addButtonHtml = this.shouldShowAddButton(col) ?
+                            `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
+                        let sortIndicator = '';
+                        if (this.sortColumn === col.id) {
+                            sortIndicator = this.sortDirection === 'asc'
+                                ? '<i class="pi pi-sort-amount-up-alt" style="font-size:0.75em;"></i> '
+                                : '<i class="pi pi-sort-amount-down" style="font-size:0.75em;"></i> ';
+                        }
+                        // Display name with dots replaced by spaces (issue #1565)
+                        const displayName = col.name.replace(/\./g, ' ');
+                        // In left-grouping mode, add grouping styles to grouping column headers (issue #1624)
+                        const isGroupingCol = groupingColumnSet && groupingColumnSet.has(col.id);
+                        const groupingClass = isGroupingCol ? ' group-header' : '';
+                        const groupingOrder = isGroupingCol ? this.groupingColumns.indexOf(col.id) + 1 : '';
+                        const groupingBadge = isGroupingCol ? `<span class="grouping-header-badge">${ groupingOrder }</span>` : '';
+                        const refTypeId = col.ref_id;
+                        const refIconHtml = refTypeId ? (() => {
+                            const dbName = window.db || window.location.pathname.split('/')[1];
+                            return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
+                        })() : '';
+                        rows[depth].push(`
+                            <th data-column-id="${ col.id }" draggable="true"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' } class="${ groupingClass }">
+                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ displayName }</span>
+                                ${ refIconHtml }
+                                ${ addButtonHtml }
+                                <div class="column-resize-handle" data-column-id="${ col.id }"></div>
+                            </th>
+                        `);
+                    } else {
+                        // Display prefix with dots replaced by spaces (issue #1565)
+                        const displayPrefix = node.prefix.replace(/\./g, ' ');
+                        rows[depth].push(`
+                            <th class="smart-header-group" colspan="${ node.span }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ displayPrefix }</th>
+                        `);
+                        visit(node.children, depth + 1);
+                    }
+                }
+            };
+
+            visit(nodes, depth || 0);
+            return rows;
+        }
+
+        /**
          * Render table headers in grouped mode (issue #502)
          * Shows grouping columns first, then non-grouping columns
          */
@@ -2223,9 +2547,16 @@ class IntegramTable{
                 const groupingOrder = isGroupingCol ? this.groupingColumns.indexOf(col.id) + 1 : '';
                 const groupingBadge = isGroupingCol ? `<span class="grouping-header-badge">${ groupingOrder }</span>` : '';
 
+                const refTypeId = col.ref_id;
+                const refIconHtml = refTypeId ? (() => {
+                    const dbName = window.db || window.location.pathname.split('/')[1];
+                    return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
+                })() : '';
+
                 return `
                     <th data-column-id="${ col.id }" draggable="true"${ widthStyle } class="${ groupingClass }">
-                        <span class="column-header-content" data-column-id="${ col.id }">${ groupingBadge }${ sortIndicator }${ col.name }</span>
+                        <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ col.name }</span>
+                        ${ refIconHtml }
                         ${ addButtonHtml }
                         <div class="column-resize-handle" data-column-id="${ col.id }"></div>
                     </th>
@@ -2260,18 +2591,479 @@ class IntegramTable{
                 ? `<span class="total-count-unknown" onclick="window.${ instanceName }.fetchTotalCount()" title="Нажмите, чтобы узнать общее количество">?</span>`
                 : this.totalRows;
 
-            // Show add row button only for object-source tables (issue #807)
+            // Show add row button only for object-source tables with write access (issue #807, #1508)
             const isObjectSource = this.objectTableId || this.getDataSourceType() === 'table';
-            const addRowBtnHtml = isObjectSource
+            const canWrite = isObjectSource && this.isTableWritable();
+            const addRowBtnHtml = canWrite
                 ? `<button class="add-row-btn" onclick="window.${ instanceName }.addNewRow()" title="Добавить строку в таблицу"><i class="pi pi-plus"></i></button>`
+                : '';
+            // Show paste-data icon button next to add-row button for writable tables (issue #1606)
+            const pasteDataBtnHtml = canWrite
+                ? `<button class="paste-data-btn" onclick="window.${ instanceName }.openPasteDataDialog()" title="Вставить данные из буфера"><i class="pi pi-clipboard"></i></button>`
                 : '';
 
             return `
                 <div class="scroll-counter">
-                    ${ addRowBtnHtml }
+                    ${ addRowBtnHtml }${ pasteDataBtnHtml }
                     Показано ${ this.loadedRecords } из ${ totalDisplay }
                 </div>
             `;
+        }
+
+        /**
+         * Open a dialog to paste data from clipboard and insert into the table (issue #1606).
+         * Splits the pasted text by lines, then splits each line by TAB, ";" or ","
+         * and calls _m_new for each line using visible column IDs as field keys.
+         */
+        openPasteDataDialog() {
+            const instanceName = this.options.instanceName;
+            const modalDepth = (window._integramModalDepth || 0) + 1;
+            window._integramModalDepth = modalDepth;
+            const baseZIndex = 1000 + (modalDepth * 10);
+            const cascadeOffset = (modalDepth - 1) * 20;
+
+            const overlay = document.createElement('div');
+            overlay.className = 'edit-form-overlay';
+            overlay.style.zIndex = baseZIndex;
+
+            const modal = document.createElement('div');
+            modal.className = 'edit-form-modal';
+            modal.style.zIndex = baseZIndex + 1;
+            modal.style.transform = `translate(calc(-50% + ${cascadeOffset}px), calc(-50% + ${cascadeOffset}px))`;
+            modal._overlayElement = overlay;
+
+            modal.innerHTML = `
+                <div class="edit-form-header">
+                    <span class="edit-form-title" style="font-weight:500;">Вставить данные из буфера</span>
+                    <button class="edit-form-close" data-close-modal-ref="true"><i class="pi pi-times"></i></button>
+                </div>
+                <div class="edit-form-body">
+                    <textarea id="paste-data-textarea" rows="10" style="width:100%;box-sizing:border-box;resize:vertical;font-family:inherit;"
+                        placeholder="Вставьте данные, и я постараюсь распознать и вставить их в таблицу"></textarea>
+                    <div style="margin-top:6px;color:#888;font-size:0.9em;">Текст, разделённый символами табуляции, «;» или «,»</div>
+                    <div id="paste-data-progress" style="margin-top:8px;display:none;"></div>
+                </div>
+                <div class="edit-form-footer">
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">
+                        <input type="checkbox" id="paste-data-create-refs" title="Если значения не будут найдены в справочнике, то я создам их на лету">
+                        <span>Создавать справочные значения</span>
+                    </label>
+                    <div class="edit-form-footer-buttons">
+                        <button type="button" class="btn btn-preview" id="paste-data-preview-btn">Просмотр</button>
+                        <button type="button" class="btn btn-primary" id="paste-data-insert-btn">Вставить</button>
+                        <button type="button" class="btn btn-secondary" id="paste-data-cancel-btn">Отменить</button>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(overlay);
+            document.body.appendChild(modal);
+
+            const closeModal = () => {
+                modal.remove();
+                overlay.remove();
+                window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+            };
+
+            modal.querySelector('.edit-form-close').addEventListener('click', closeModal);
+            modal.querySelector('#paste-data-cancel-btn').addEventListener('click', closeModal);
+            overlay.addEventListener('click', closeModal);
+
+            modal.querySelector('#paste-data-insert-btn').addEventListener('click', () => {
+                window[instanceName].insertPastedData(modal, closeModal);
+            });
+
+            modal.querySelector('#paste-data-preview-btn').addEventListener('click', () => {
+                window[instanceName].previewPastedData(modal, closeModal);
+            });
+
+            // Focus textarea
+            setTimeout(() => modal.querySelector('#paste-data-textarea').focus(), 50);
+        }
+
+        /**
+         * Show a preview table of the data parsed from the paste-data textarea (issue #1684).
+         * Opens a new modal with an editable table showing the rows to be inserted.
+         * The preview has "Загрузить" (Load) and "Отменить" (Cancel) buttons.
+         */
+        previewPastedData(pasteModal, closePasteModal) {
+            const textarea = pasteModal.querySelector('#paste-data-textarea');
+            const text = textarea.value;
+
+            if (!text || !text.trim()) {
+                this.showToast('Поле ввода пустое', 'error');
+                return;
+            }
+
+            // Split into lines, skip empty lines
+            const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
+            if (lines.length === 0) {
+                this.showToast('Нет данных для просмотра', 'error');
+                return;
+            }
+
+            // Detect delimiter (same logic as insertPastedData)
+            const countChar = (str, ch) => {
+                let count = 0;
+                for (let i = 0; i < str.length; i++) {
+                    if (str[i] === ch && (i === 0 || str[i - 1] !== '\\')) {
+                        count++;
+                    }
+                }
+                return count;
+            };
+            const isConsistentDelimiter = (delim) => {
+                const counts = lines.map(l => countChar(l, delim));
+                return counts[0] > 0 && counts.every(c => c === counts[0]);
+            };
+            let delimiter = '\t';
+            if (isConsistentDelimiter('\t')) {
+                delimiter = '\t';
+            } else if (isConsistentDelimiter(';')) {
+                delimiter = ';';
+            } else if (isConsistentDelimiter(',')) {
+                delimiter = ',';
+            }
+
+            // Parse rows
+            const parsedRows = lines.map(line => line.split(delimiter));
+
+            // Get ordered visible non-id columns for header
+            const columnMap = {};
+            this.columns.forEach(col => { columnMap[col.id] = col; });
+            const orderedColIds = (this.columnOrder || this.columns.map(c => c.id))
+                .filter(id => columnMap[id] && !this.idColumns.has(id));
+            const colHeaders = orderedColIds.map(id => (columnMap[id] && columnMap[id].name) || id);
+
+            // Build the preview modal
+            const instanceName = this.options.instanceName;
+            const modalDepth = (window._integramModalDepth || 0) + 1;
+            window._integramModalDepth = modalDepth;
+            const baseZIndex = 1000 + (modalDepth * 10);
+            const cascadeOffset = (modalDepth - 1) * 20;
+
+            const previewOverlay = document.createElement('div');
+            previewOverlay.className = 'edit-form-overlay';
+            previewOverlay.style.zIndex = baseZIndex;
+
+            const previewModal = document.createElement('div');
+            previewModal.className = 'edit-form-modal paste-data-preview-modal';
+            previewModal.style.zIndex = baseZIndex + 1;
+            previewModal.style.transform = `translate(calc(-50% + ${cascadeOffset}px), calc(-50% + ${cascadeOffset}px))`;
+            previewModal._overlayElement = previewOverlay;
+
+            // Build table HTML with editable cells
+            const theadCols = colHeaders.map(h => `<th>${h}</th>`).join('');
+            const tbodyRows = parsedRows.map((row, rowIdx) => {
+                const cells = orderedColIds.map((colId, colIdx) => {
+                    const val = row[colIdx] !== undefined ? row[colIdx] : '';
+                    return `<td><input class="paste-preview-cell" data-row="${rowIdx}" data-col="${colIdx}" value="${val.replace(/"/g, '&quot;')}"></td>`;
+                });
+                return `<tr>${cells.join('')}</tr>`;
+            }).join('');
+
+            previewModal.innerHTML = `
+                <div class="edit-form-header">
+                    <span class="edit-form-title" style="font-weight:500;">Просмотр данных для вставки (${parsedRows.length} строк)</span>
+                    <button class="edit-form-close" data-close-preview-ref="true"><i class="pi pi-times"></i></button>
+                </div>
+                <div class="edit-form-body paste-data-preview-body">
+                    <div class="paste-data-preview-table-wrap">
+                        <table class="paste-data-preview-table">
+                            <thead><tr>${theadCols}</tr></thead>
+                            <tbody>${tbodyRows}</tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="edit-form-footer">
+                    <div style="color:#888;font-size:0.85em;">Вы можете отредактировать ячейки перед загрузкой</div>
+                    <div class="edit-form-footer-buttons">
+                        <button type="button" class="btn btn-primary" id="paste-preview-load-btn">Загрузить</button>
+                        <button type="button" class="btn btn-secondary" id="paste-preview-cancel-btn">Отменить</button>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(previewOverlay);
+            document.body.appendChild(previewModal);
+
+            const closePreview = () => {
+                previewModal.remove();
+                previewOverlay.remove();
+                window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+            };
+
+            previewModal.querySelector('.edit-form-close').addEventListener('click', closePreview);
+            previewModal.querySelector('#paste-preview-cancel-btn').addEventListener('click', closePreview);
+            previewOverlay.addEventListener('click', closePreview);
+
+            previewModal.querySelector('#paste-preview-load-btn').addEventListener('click', () => {
+                // Collect edited cell values back into rows
+                const cells = previewModal.querySelectorAll('.paste-preview-cell');
+                const editedRows = parsedRows.map(row => [...row]);
+                cells.forEach(cell => {
+                    const rowIdx = parseInt(cell.dataset.row, 10);
+                    const colIdx = parseInt(cell.dataset.col, 10);
+                    editedRows[rowIdx][colIdx] = cell.value;
+                });
+
+                // Rebuild text from edited rows using original delimiter and update textarea
+                const newText = editedRows.map(row => row.join(delimiter)).join('\n');
+                textarea.value = newText;
+
+                closePreview();
+                // Trigger insert using the updated textarea content
+                window[instanceName].insertPastedData(pasteModal, closePasteModal);
+            });
+        }
+
+        /**
+         * Parse and insert pasted data into the table (issue #1606).
+         * Each line becomes one record; fields within a line are split by the detected
+         * delimiter (TAB, ";" or ","). A delimiter is only used if it appears the same
+         * number of times in every non-empty line, preventing false splits when text
+         * contains commas or semicolons as part of values (issue #1612).
+         * Uses visible columns (in order) as field mapping.
+         * Stops on first insert error.
+         */
+        async insertPastedData(modal, closeModal) {
+            const textarea = modal.querySelector('#paste-data-textarea');
+            const progressEl = modal.querySelector('#paste-data-progress');
+            const insertBtn = modal.querySelector('#paste-data-insert-btn');
+            const createRefsCheckbox = modal.querySelector('#paste-data-create-refs');
+            const createRefValues = createRefsCheckbox ? createRefsCheckbox.checked : false;
+            const text = textarea.value;
+
+            if (!text || !text.trim()) {
+                this.showToast('Поле ввода пустое', 'error');
+                return;
+            }
+
+            // Split into lines, skip empty lines
+            const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
+            if (lines.length === 0) {
+                this.showToast('Нет данных для вставки', 'error');
+                return;
+            }
+
+            // Determine delimiter: a candidate is valid only if it appears the same
+            // number of times (> 0) in every non-empty line (issue #1612).
+            // Escaped occurrences (preceded by \) are not counted (issue #1614).
+            const countChar = (str, ch) => {
+                let count = 0;
+                for (let i = 0; i < str.length; i++) {
+                    if (str[i] === ch && (i === 0 || str[i - 1] !== '\\')) {
+                        count++;
+                    }
+                }
+                return count;
+            };
+            const isConsistentDelimiter = (delim) => {
+                const counts = lines.map(l => countChar(l, delim));
+                return counts[0] > 0 && counts.every(c => c === counts[0]);
+            };
+            let delimiter = '\t'; // fallback: TAB (issue #1614)
+            if (isConsistentDelimiter('\t')) {
+                delimiter = '\t';
+            } else if (isConsistentDelimiter(';')) {
+                delimiter = ';';
+            } else if (isConsistentDelimiter(',')) {
+                delimiter = ',';
+            }
+
+            // Get the ordered list of visible, non-id, editable columns
+            const columnMap = {};
+            this.columns.forEach(col => { columnMap[col.id] = col; });
+            const orderedColIds = (this.columnOrder || this.columns.map(c => c.id))
+                .filter(id => columnMap[id] && !this.idColumns.has(id));
+
+            const typeId = this.options.tableTypeId || this.objectTableId;
+            if (!typeId) {
+                this.showToast('Ошибка: не найден тип таблицы', 'error');
+                return;
+            }
+
+            const apiBase = this.getApiBase();
+            const parentIdForNew = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
+            const url = `${apiBase}/_m_new/${typeId}?JSON&up=${parentIdForNew}`;
+
+            insertBtn.disabled = true;
+            progressEl.style.display = 'block';
+
+            // Pre-fetch reference options (LIMIT=500) for all REF columns (issue #1648)
+            const refOptionsCache = {};
+            const refColIds = orderedColIds.filter(id => columnMap[id] && (columnMap[id].format || '') === 'REF');
+            for (const colId of refColIds) {
+                try {
+                    const refParams = new URLSearchParams({ JSON: '', LIMIT: '500' });
+                    const refUrl = `${apiBase}/_ref_reqs/${colId}?${refParams}`;
+                    const refResponse = await fetch(refUrl);
+                    if (refResponse.ok) {
+                        const refText = await refResponse.text();
+                        try {
+                            refOptionsCache[colId] = this.parseJsonObjectAsArray(refText);
+                        } catch (e) {
+                            refOptionsCache[colId] = [];
+                        }
+                    } else {
+                        refOptionsCache[colId] = [];
+                    }
+                } catch (e) {
+                    refOptionsCache[colId] = [];
+                }
+            }
+
+            /**
+             * Resolve a text value to its ID for a REF column (issue #1648).
+             * First searches the pre-fetched list of up to 500 options.
+             * If not found and the list has 500 items (server may have more),
+             * performs a targeted search using q={value} to find the exact record.
+             * If still not found and createRefValues is true, creates the reference
+             * value via POST _m_new/{refTypeId}?JSON&up=1 (issue #1658).
+             */
+            const resolveRefId = async (colId, textValue) => {
+                const options = refOptionsCache[colId] || [];
+                const lowerValue = textValue.toLowerCase();
+                const found = options.find(([, label]) => String(label).toLowerCase() === lowerValue);
+                if (found) {
+                    return found[0];
+                }
+                // If the cached list is full (500 items), there may be more on the server
+                if (options.length >= 500) {
+                    try {
+                        const searchParams = new URLSearchParams({ JSON: '', LIMIT: '1', q: textValue });
+                        const searchUrl = `${apiBase}/_ref_reqs/${colId}?${searchParams}`;
+                        const searchResponse = await fetch(searchUrl);
+                        if (searchResponse.ok) {
+                            const searchText = await searchResponse.text();
+                            const searchResult = this.parseJsonObjectAsArray(searchText);
+                            if (searchResult.length > 0) {
+                                return searchResult[0][0];
+                            }
+                        }
+                    } catch (e) {
+                        // Fall through: return original text if search fails
+                    }
+                }
+                // If checkbox is checked and value not found, create it as a new reference record (issue #1658)
+                if (createRefValues) {
+                    const col = columnMap[colId];
+                    const refTypeId = col && (col.ref || col.orig || col.ref_id);
+                    if (refTypeId) {
+                        try {
+                            const createParams = new URLSearchParams();
+                            if (typeof xsrf !== 'undefined') {
+                                createParams.append('_xsrf', xsrf);
+                            }
+                            createParams.append(`t${refTypeId}`, textValue);
+                            const createUrl = `${apiBase}/_m_new/${refTypeId}?JSON&up=1`;
+                            const createResponse = await fetch(createUrl, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                                body: createParams.toString()
+                            });
+                            if (createResponse.ok) {
+                                const createText = await createResponse.text();
+                                let createResult;
+                                try {
+                                    createResult = JSON.parse(createText);
+                                } catch (e) {
+                                    createResult = null;
+                                }
+                                if (createResult && createResult.obj) {
+                                    const newId = createResult.obj;
+                                    // Cache the new value so it is reused if it appears again
+                                    if (!refOptionsCache[colId]) {
+                                        refOptionsCache[colId] = [];
+                                    }
+                                    refOptionsCache[colId].push([newId, textValue]);
+                                    return newId;
+                                }
+                            }
+                        } catch (e) {
+                            // Fall through: return null if creation fails
+                        }
+                    }
+                }
+                return null;
+            };
+
+            let successCount = 0;
+            const total = lines.length;
+
+            for (let i = 0; i < lines.length; i++) {
+                progressEl.textContent = `Вставлено ${successCount} из ${total}`;
+
+                // Split using the pre-determined consistent delimiter
+                let parts;
+                parts = lines[i].split(delimiter);
+
+                const params = new URLSearchParams();
+                if (typeof xsrf !== 'undefined') {
+                    params.append('_xsrf', xsrf);
+                }
+
+                // Map each part to the corresponding column id (t{colId} = value)
+                // For REF columns, resolve text values to IDs (issue #1648)
+                for (let idx = 0; idx < parts.length; idx++) {
+                    if (idx < orderedColIds.length) {
+                        const trimmed = parts[idx].trim();
+                        if (trimmed !== '') {
+                            const colId = orderedColIds[idx];
+                            const col = columnMap[colId];
+                            if (col && (col.format || '') === 'REF') {
+                                const resolvedId = await resolveRefId(colId, trimmed);
+                                if (resolvedId !== null) {
+                                    params.append(`t${colId}`, resolvedId);
+                                } else if (/^\d+$/.test(trimmed)) {
+                                    // ID could not be resolved; send as-is only if numeric (IDs are always numeric)
+                                    params.append(`t${colId}`, trimmed);
+                                }
+                            } else {
+                                params.append(`t${colId}`, trimmed);
+                            }
+                        }
+                    }
+                }
+
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: params.toString()
+                    });
+
+                    const responseText = await response.text();
+                    let result;
+                    try {
+                        result = JSON.parse(responseText);
+                    } catch (e) {
+                        if (responseText.includes('error') || !response.ok) {
+                            throw new Error(responseText);
+                        }
+                        result = { success: true };
+                    }
+
+                    const serverError = this.getServerError(result);
+                    if (serverError) {
+                        throw new Error(serverError);
+                    }
+
+                    successCount++;
+                } catch (err) {
+                    progressEl.textContent = `Вставлено ${successCount} из ${total}. Ошибка на строке ${i + 1}: ${err.message}`;
+                    insertBtn.disabled = false;
+                    this.showToast(`Ошибка вставки строки ${i + 1}: ${err.message}`, 'error');
+                    return;
+                }
+            }
+
+            progressEl.textContent = `Вставлено ${successCount} из ${total}`;
+            this.showToast(`Вставлено записей: ${successCount}`, 'success');
+
+            closeModal();
+            // Refresh the table after insertion
+            this.loadData();
         }
 
         /**
@@ -2292,8 +3084,8 @@ class IntegramTable{
                 return;
             }
 
-            // Create empty row data with placeholder values
-            const emptyRow = this.columns.map(() => '');
+            // Create row data with default values from column attrs (issue #1498)
+            const emptyRow = this.columns.map(col => this.resolveDefaultValue(col.attrs || '', col.format || this.mapTypeIdToFormat(col.type)));
             const newRowIndex = this.data.length;
 
             // Add empty row to data arrays
@@ -2388,8 +3180,14 @@ class IntegramTable{
             // Highlight required fields in the row (issue #807)
             this.highlightNewRowRequiredCells(cell);
 
+            // Use pre-filled default value from addNewRow (issue #1500)
+            const colDataIndex = this.columns.findIndex(c => c.id === colId);
+            const defaultValue = (this.data[rowIndex] && colDataIndex !== -1)
+                ? (this.data[rowIndex][colDataIndex] || '')
+                : '';
+
             // Create inline editor
-            this.renderInlineEditor(cell, '', format);
+            this.renderInlineEditor(cell, defaultValue, format);
         }
 
         /**
@@ -3059,9 +3857,13 @@ class IntegramTable{
                         </select>
                     `;
                     break;
+                case 'PWD':
+                    // Password field - render as type=password input (issue #1441)
+                    editorHtml = `<input type="password" class="inline-editor inline-editor-password" value="${ escapedValue }" autocomplete="new-password">`;
+                    break;
                 default:
                     // SHORT, CHARS, etc. - text input
-                    editorHtml = `<input type="text" class="inline-editor inline-editor-text" value="${ escapedValue }" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">`;
+                    editorHtml = `<input type="text" class="inline-editor inline-editor-text" value="${ escapedValue }" autocomplete="off">`;
             }
 
             cell.innerHTML = editorHtml;
@@ -3259,22 +4061,25 @@ class IntegramTable{
             // Show loading indicator
             cell.innerHTML = '<div class="inline-editor-loading">Загрузка...</div>';
 
+            // Find the column object to check for granted and orig
+            const column = this.columns.find(c => c.id === colId);
+
             try {
                 // Fetch reference options
-                const options = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId);
+                const options = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, '', {}, column ? column.attrs || '' : '');
 
-                // Find the column object to check for granted and orig
-                const column = this.columns.find(c => c.id === colId);
                 const hasGranted = column && column.granted === 1;
                 const origType = column && column.orig ? column.orig : null;
 
-                // Always show clear button. If granted=1 and orig exists, also show add button (initially hidden)
-                // The "+" button will be shown only when search input has non-zero length
-                // The "×" button will be hidden when search input has text (and add button is shown)
+                // Always show clear button. If granted=1 and orig exists, also show add button.
+                // Issue #1686: show the add button immediately when no options are available
+                // (e.g. the directory is empty) so the user can always create records.
+                // Otherwise keep it hidden until the user types something (issue #875).
                 const showAddButton = hasGranted && origType !== null;
+                const noOptionsAvailable = options.filter(([id, text]) => text !== currentValue).length === 0;
                 let buttonHtml = `<button class="inline-editor-reference-clear" title="Очистить значение" aria-label="Очистить значение"><i class="pi pi-times"></i></button>`;
                 if (showAddButton) {
-                    buttonHtml += `<button class="inline-editor-reference-add" style="display: none;" title="Создать запись" aria-label="Создать запись"><i class="pi pi-plus"></i></button>`;
+                    buttonHtml += `<button class="inline-editor-reference-add" style="${noOptionsAvailable ? '' : 'display: none;'}" title="Создать запись" aria-label="Создать запись"><i class="pi pi-plus"></i></button>`;
                 }
 
                 // Create dropdown with search
@@ -3284,7 +4089,7 @@ class IntegramTable{
                             <input type="text"
                                    class="inline-editor-reference-search"
                                    placeholder="Поиск..."
-                                   autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                   autocomplete="off">
                             ${buttonHtml}
                         </div>
                         <div class="inline-editor-reference-dropdown">
@@ -3312,6 +4117,13 @@ class IntegramTable{
                 // Track if all options have been fetched (50+ means we only got first 50)
                 this.currentEditingCell.allOptionsFetched = options.length < 50;
 
+                // Issue #1518: Pre-fill search input with current value so user can see what is selected.
+                // Select all text so any keystroke immediately replaces it for a new search.
+                if (currentValue) {
+                    searchInput.value = currentValue;
+                    searchInput.select();
+                }
+
                 // Focus the search input
                 searchInput.focus();
 
@@ -3321,13 +4133,17 @@ class IntegramTable{
                     const searchText = e.target.value.trim();
 
                     // Toggle buttons based on search input length (issue #217)
-                    // When search has text: show add button (if available), hide clear button
-                    // When search is empty: hide add button, show clear button
-                    if (searchText.length > 0) {
+                    // When search has text (typed by user): show add button (if available), hide clear button
+                    // When search is empty and options available: hide add button, show clear button
+                    // Issue #1686: also show add button when no options are available (empty directory)
+                    const currentNoOptions = this.currentEditingCell.referenceOptions
+                        ? this.currentEditingCell.referenceOptions.filter(([id, text]) => text !== currentValue).length === 0
+                        : true;
+                    if (searchText.length > 0 || currentNoOptions) {
                         if (addButton) {
                             addButton.style.display = '';
                         }
-                        if (clearButton) {
+                        if (clearButton && searchText.length > 0) {
                             clearButton.style.display = 'none';
                         }
                     } else {
@@ -3352,7 +4168,7 @@ class IntegramTable{
                             // If we have exactly 50 options (not all fetched), re-query from server
                             if (!this.currentEditingCell.allOptionsFetched) {
                                 try {
-                                    const serverOptions = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, searchText);
+                                    const serverOptions = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, searchText, {}, column ? column.attrs || '' : '');
                                     this.currentEditingCell.referenceOptions = serverOptions;
                                     dropdown.innerHTML = this.renderReferenceOptions(serverOptions, currentValue);
                                 } catch (error) {
@@ -3544,7 +4360,7 @@ class IntegramTable{
             cell.innerHTML = '<div class="inline-editor-loading">Загрузка...</div>';
 
             try {
-                const options = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId);
+                const options = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, '', {}, column ? column.attrs || '' : '');
                 this.currentEditingCell.referenceOptions = options;
                 this.currentEditingCell.allOptionsFetched = options.length < 50;
 
@@ -3603,8 +4419,11 @@ class IntegramTable{
                         }).join('')
                         : '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
 
+                    // Issue #1686: show add button immediately when no options are available
+                    // (e.g. the directory is empty), so the user knows they can create the first record.
+                    const addButtonInitiallyVisible = availableOptions.length === 0;
                     const addButtonHtml = showAddButton
-                        ? `<button class="inline-editor-reference-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>`
+                        ? `<button class="inline-editor-reference-add" style="${addButtonInitiallyVisible ? '' : 'display: none;'}" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>`
                         : '';
 
                     cell.innerHTML = `
@@ -3614,7 +4433,7 @@ class IntegramTable{
                                 <input type="text"
                                        class="inline-editor-reference-search"
                                        placeholder="Добавить..."
-                                       autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                       autocomplete="off">
                                 ${addButtonHtml}
                             </div>
                             <div class="inline-editor-reference-dropdown" style="display:none;">
@@ -3665,8 +4484,11 @@ class IntegramTable{
                         const searchText = e.target.value.trim();
 
                         // Toggle add button visibility based on search input (issue #875)
+                        // Also show when no options are available so user can always create records (issue #1686)
                         if (addButton) {
-                            addButton.style.display = searchText.length > 0 ? '' : 'none';
+                            const currentAvailable = (this.currentEditingCell.referenceOptions || [])
+                                .filter(([id]) => !new Set(this.currentEditingCell.selectedItems.map(s => s.id)).has(id));
+                            addButton.style.display = (searchText.length > 0 || currentAvailable.length === 0) ? '' : 'none';
                         }
 
                         clearTimeout(searchTimeout);
@@ -3677,7 +4499,7 @@ class IntegramTable{
 
                             if (!this.currentEditingCell.allOptionsFetched && searchText) {
                                 try {
-                                    const serverOptions = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, searchText);
+                                    const serverOptions = await this.fetchReferenceOptions(colType, parentInfo.parentRecordId, searchText, {}, column ? column.attrs || '' : '');
                                     const serverFiltered = serverOptions.filter(([id]) => !currentSelected.has(id));
                                     dropdown.innerHTML = serverFiltered.length > 0
                                         ? serverFiltered.map(([id, text]) => {
@@ -3832,8 +4654,9 @@ class IntegramTable{
                     throw new Error(`Невалидный JSON ответ: ${responseText}`);
                 }
 
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 // Update cell display with comma-separated text of selected items
@@ -3883,6 +4706,44 @@ class IntegramTable{
 
             const { cell, colType, parentInfo } = this.currentEditingCell;
 
+            // --- Issue #1431: Immediately release the editor ---
+
+            // Snapshot state before clearing
+            const format = this.currentEditingCell.format;
+            const originalContent = cell.dataset.originalContent;
+            const originalRefValueId = cell.dataset.refValueId;
+
+            // Issue #1496: Set refValueId before updateCellDisplay so that reference-type
+            // cells (e.g. User) are immediately rendered as links rather than plain text.
+            // Previously this was only set after the API response, causing the link to be
+            // missing until the page was refreshed.
+            cell.dataset.refValueId = selectedId;
+
+            // Optimistically update cell display
+            this.updateCellDisplay(cell, selectedText, format);
+
+            // Mark the cell as "saving" with a pale pink highlight (issue #1431)
+            cell.classList.add('cell-saving');
+
+            // Clean up editor state so the next cell can be edited immediately
+            this.clearRequiredCellHighlights(cell);
+            if (this.currentEditingCell.outsideClickHandler) {
+                document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
+            }
+            // Issue #1384: Remove fixed dropdown overlay from body if present
+            if (this.currentEditingCell.fixedDropdown && this.currentEditingCell.fixedDropdown.parentNode) {
+                this.currentEditingCell.fixedDropdown.parentNode.removeChild(this.currentEditingCell.fixedDropdown);
+            }
+            this.currentEditingCell = null;
+
+            // Navigate to the pending cell immediately (issue #1431)
+            if (this.pendingCellClick) {
+                const targetCell = this.pendingCellClick;
+                this.pendingCellClick = null;
+                this.navigateToCell(targetCell);
+            }
+
+            // --- Perform the actual API save in the background ---
             try {
                 const apiBase = this.getApiBase();
                 const params = new URLSearchParams();
@@ -3919,45 +4780,29 @@ class IntegramTable{
                 }
 
                 // Check if response has error key anywhere in the JSON
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
-                // Issue #921: Update data-ref-value-id so the edit icon uses the correct
-                // reference record ID (not the parent row's record ID) when the cell was
-                // previously empty and gets its first value via a reference selection
-                cell.dataset.refValueId = selectedId;
-
-                // Update the cell display with the selected text
-                this.updateCellDisplay(cell, selectedText, this.currentEditingCell.format);
+                // Save confirmed — remove the saving highlight
+                cell.classList.remove('cell-saving');
 
                 this.showToast('Изменения сохранены', 'success');
 
             } catch (error) {
                 console.error('Error saving reference edit:', error);
                 this.showToast(`Ошибка сохранения: ${error.message}`, 'error');
-                // Restore original content on error (cancelInlineEdit also clears required highlights)
-                this.cancelInlineEdit(cell.dataset.originalContent);
-            } finally {
-                // Clean up
-                if (this.currentEditingCell) {
-                    // Remove required field highlighting (issue #779)
-                    this.clearRequiredCellHighlights(this.currentEditingCell.cell);
-                    if (this.currentEditingCell.outsideClickHandler) {
-                        document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
-                    }
-                    // Issue #1384: Remove fixed dropdown overlay from body if present
-                    if (this.currentEditingCell.fixedDropdown && this.currentEditingCell.fixedDropdown.parentNode) {
-                        this.currentEditingCell.fixedDropdown.parentNode.removeChild(this.currentEditingCell.fixedDropdown);
-                    }
-                    this.currentEditingCell = null;
+                // Restore original content on error and remove saving highlight
+                cell.classList.remove('cell-saving');
+                if (typeof originalContent === 'string') {
+                    cell.innerHTML = originalContent;
                 }
-
-                // Navigate to pending cell if set (issue #518)
-                if (this.pendingCellClick) {
-                    const targetCell = this.pendingCellClick;
-                    this.pendingCellClick = null;
-                    this.navigateToCell(targetCell);
+                // Issue #1496: Also restore the original refValueId that was set optimistically
+                if (originalRefValueId !== undefined) {
+                    cell.dataset.refValueId = originalRefValueId;
+                } else {
+                    delete cell.dataset.refValueId;
                 }
             }
         }
@@ -4051,6 +4896,9 @@ class IntegramTable{
                 mainFieldHtml = `<input type="number" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required step="0.01">`;
             } else if (mainFieldType === 'MEMO') {
                 mainFieldHtml = `<textarea class="form-control memo-field" id="field-main-ref-create" name="main" rows="4" required>${ this.escapeHtml(initialValue) }</textarea>`;
+            } else if (mainFieldType === 'PWD') {
+                // Password field - render as type=password input (issue #1441)
+                mainFieldHtml = `<input type="password" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required autocomplete="new-password">`;
             } else {
                 // Default: text input (SHORT, CHARS, etc.)
                 mainFieldHtml = `<input type="text" class="form-control" id="field-main-ref-create" name="main" value="${this.escapeHtml(initialValue)}" required>`;
@@ -4089,7 +4937,7 @@ class IntegramTable{
                                            class="inline-editor-reference-search form-ref-search"
                                            id="field-ref-${req.id}-search"
                                            placeholder="Поиск..."
-                                           autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                           autocomplete="off">
                                     <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
                                     <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                                 </div>
@@ -4106,8 +4954,14 @@ class IntegramTable{
                         </div>
                     `;
                 } else {
-                    // Render as simple text input
-                    attributesHtml += `<input type="text" class="form-control" id="field-ref-${req.id}" name="t${req.id}"${isRequired ? ' required' : ''}>`;
+                    const reqBaseFormat = this.normalizeFormat(req.type);
+                    if (reqBaseFormat === 'PWD') {
+                        // Password field - render as type=password input (issue #1441)
+                        attributesHtml += `<input type="password" class="form-control" id="field-ref-${req.id}" name="t${req.id}"${isRequired ? ' required' : ''} autocomplete="new-password">`;
+                    } else {
+                        // Render as simple text input
+                        attributesHtml += `<input type="text" class="form-control" id="field-ref-${req.id}" name="t${req.id}"${isRequired ? ' required' : ''}>`;
+                    }
                 }
 
                 attributesHtml += `</div>`;
@@ -4234,9 +5088,9 @@ class IntegramTable{
             }
 
             const apiBase = this.getApiBase();
-            // Issue #616: Use F_U from URL as parent (up) when F_U > 1
-            const parentIdForNew = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
-            const url = `${apiBase}/_m_new/${typeId}?JSON&up=${parentIdForNew}`;
+            // Issue #1690: Reference directory values always belong to the root (up=1),
+            // not to the current form's parent record
+            const url = `${apiBase}/_m_new/${typeId}?JSON&up=1`;
 
             try {
                 const response = await fetch(url, {
@@ -4261,8 +5115,9 @@ class IntegramTable{
                     result = { success: true };
                 }
 
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 // Extract created record ID and value from response
@@ -4325,6 +5180,44 @@ class IntegramTable{
                 return;
             }
 
+            // --- Issue #1431: Immediately release the editor so the user can move on ---
+
+            // Snapshot everything we need for the async save before clearing state
+            const format = this.currentEditingCell.format;
+            const displayText = this.currentEditingCell.displayText;
+            const originalContent = cell.dataset.originalContent;
+            const editorEl = cell.querySelector('.inline-editor');
+            // For FILE type: grab the pending file before we clear the editor from the DOM
+            const fileToUpload = (format === 'FILE' && editorEl && editorEl._fileToUpload) ? editorEl._fileToUpload : null;
+
+            // Compute the optimistic display value and immediately show it in the cell
+            const optimisticDisplay = (format === 'GRANT' || format === 'REPORT_COLUMN')
+                ? (displayText || newValue)
+                : newValue;
+            this.updateCellDisplay(cell, optimisticDisplay, format);
+
+            // Mark the cell as "saving" with a pale pink highlight (issue #1431)
+            cell.classList.add('cell-saving');
+
+            // Clean up the editor state so the next cell can be edited immediately
+            this.clearRequiredCellHighlights(cell);
+            if (this.currentEditingCell.outsideClickHandler) {
+                document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
+            }
+            // Issue #1384: Remove fixed dropdown overlay from body if present
+            if (this.currentEditingCell.fixedDropdown && this.currentEditingCell.fixedDropdown.parentNode) {
+                this.currentEditingCell.fixedDropdown.parentNode.removeChild(this.currentEditingCell.fixedDropdown);
+            }
+            this.currentEditingCell = null;
+
+            // Navigate to the pending cell immediately, without waiting for the save (issue #1431)
+            if (this.pendingCellClick) {
+                const targetCell = this.pendingCellClick;
+                this.pendingCellClick = null;
+                this.navigateToCell(targetCell);
+            }
+
+            // --- Perform the actual API save in the background ---
             try {
                 // Determine API endpoint and parameters
                 const apiBase = this.getApiBase();
@@ -4354,15 +5247,13 @@ class IntegramTable{
                 }
 
                 // For FILE type with a pending file, send directly as multipart (issue #1310)
-                const format = this.currentEditingCell.format;
-                const editorEl = cell.querySelector('.inline-editor');
                 let response;
-                if (format === 'FILE' && editorEl && editorEl._fileToUpload) {
+                if (format === 'FILE' && fileToUpload) {
                     const formData = new FormData();
                     if (typeof xsrf !== 'undefined') {
                         formData.append('_xsrf', xsrf);
                     }
-                    formData.append(`t${ colType }`, editorEl._fileToUpload);
+                    formData.append(`t${ colType }`, fileToUpload);
                     response = await fetch(url, {
                         method: 'POST',
                         body: formData
@@ -4389,8 +5280,9 @@ class IntegramTable{
                 }
 
                 // Check if response has error key anywhere in the JSON
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 // Check for warnings (plural) - show modal but continue with save (issue #610)
@@ -4399,42 +5291,24 @@ class IntegramTable{
                     this.showWarningsModal(result.warnings);
                 }
 
-                // For FILE type: get saved path from server response (issue #1310)
-                if (format === 'FILE' && editorEl && editorEl._fileToUpload) {
-                    newValue = result.path || result.file || result.filename || editorEl._fileToUpload.name;
-                    editorEl._fileToUpload = null;
+                // For FILE type: update displayed value with server-confirmed path (issue #1310)
+                if (format === 'FILE' && fileToUpload) {
+                    const confirmedValue = result.path || result.file || result.filename || fileToUpload.name;
+                    this.updateCellDisplay(cell, confirmedValue, format);
                 }
 
-                // Update the cell display with the new value
-                // For GRANT/REPORT_COLUMN, use the display text instead of the ID (issue #601)
-                const displayValue = (this.currentEditingCell.format === 'GRANT' || this.currentEditingCell.format === 'REPORT_COLUMN')
-                    ? (this.currentEditingCell.displayText || newValue)
-                    : newValue;
-                this.updateCellDisplay(cell, displayValue, this.currentEditingCell.format);
+                // Save confirmed — remove the saving highlight
+                cell.classList.remove('cell-saving');
 
                 this.showToast('Изменения сохранены', 'success');
 
             } catch (error) {
                 console.error('Error saving inline edit:', error);
                 this.showToast(`Ошибка сохранения: ${ error.message }`, 'error');
-                // Restore original content on error (cancelInlineEdit also clears required highlights)
-                this.cancelInlineEdit(cell.dataset.originalContent);
-            } finally {
-                // Clean up
-                if (this.currentEditingCell) {
-                    // Remove required field highlighting (issue #779)
-                    this.clearRequiredCellHighlights(this.currentEditingCell.cell);
-                    if (this.currentEditingCell.outsideClickHandler) {
-                        document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
-                    }
-                    this.currentEditingCell = null;
-                }
-
-                // Navigate to pending cell if set (issue #518)
-                if (this.pendingCellClick) {
-                    const targetCell = this.pendingCellClick;
-                    this.pendingCellClick = null;
-                    this.navigateToCell(targetCell);
+                // Restore original content on error and remove saving highlight
+                cell.classList.remove('cell-saving');
+                if (typeof originalContent === 'string') {
+                    cell.innerHTML = originalContent;
                 }
             }
         }
@@ -4495,8 +5369,9 @@ class IntegramTable{
                     result = { success: true };
                 }
 
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 // Extract created record ID from response
@@ -4644,6 +5519,12 @@ class IntegramTable{
                     // Fix for issue #684: Store RAW value for editing, not escaped
                     fullValueForEditing = String(displayValue);
                     break;
+                case 'PWD':
+                    // Password field - display as asterisks in the cell (issue #1443)
+                    escapedValue = (newValue !== null && newValue !== undefined && newValue !== '') ? '******' : '';
+                    // Store the actual value for re-editing (so the input can be pre-filled)
+                    fullValueForEditing = String(newValue);
+                    break;
                 case 'GRANT':
                 case 'REPORT_COLUMN':
                     // For GRANT/REPORT_COLUMN: newValue is the display text (issue #601)
@@ -4711,7 +5592,8 @@ class IntegramTable{
             const hasEditIcon = cell.querySelector('.edit-icon');
             if (hasEditIcon) {
                 const editIconHtml = hasEditIcon.outerHTML;
-                cell.innerHTML = `<div class="cell-content-wrapper">${ escapedValue }${ editIconHtml }</div>`;
+                const cellRecordId = cell.dataset.refValueId || cell.dataset.recordId || '';
+                cell.innerHTML = `<div class="cell-content-wrapper"><span title="${ cellRecordId }">${ escapedValue }</span>${ editIconHtml }</div>`;
             } else {
                 // Issue #915: If the cell was empty (no edit icon) and now has a value,
                 // add the edit icon using the stored data-edit-type-id attribute
@@ -4724,8 +5606,8 @@ class IntegramTable{
                 const hasNewValue = newValue !== null && newValue !== undefined && newValue !== '';
                 if (hasNewValue && editTypeId && editRecordId && editRecordId !== '' && editRecordId !== '0' && editRecordId !== 'dynamic') {
                     const instanceName = this.options.instanceName;
-                    const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ editRecordId }', '${ editTypeId }', ${ editRowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 14px;"></i></span>`;
-                    cell.innerHTML = `<div class="cell-content-wrapper">${ escapedValue }${ editIcon }</div>`;
+                    const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ editRecordId }', '${ editTypeId }', ${ editRowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
+                    cell.innerHTML = `<div class="cell-content-wrapper"><span title="${ editRecordId }">${ escapedValue }</span>${ editIcon }</div>`;
                 } else {
                     cell.innerHTML = escapedValue;
                 }
@@ -4990,6 +5872,31 @@ class IntegramTable{
             };
 
             window.addEventListener('scroll', this.scrollListener);
+        }
+
+        attachPlusKeyShortcut() {
+            // Remove existing listener if any (issue #1532)
+            if (this.plusKeyListener) {
+                document.removeEventListener('keydown', this.plusKeyListener);
+            }
+
+            this.plusKeyListener = (e) => {
+                // Only trigger when '+' is pressed and no input/textarea/select is focused
+                if (e.key !== '+') return;
+                const tag = document.activeElement && document.activeElement.tagName;
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+                if (document.activeElement && document.activeElement.isContentEditable) return;
+
+                // Try .column-add-btn.title-create-btn first, then any .column-add-btn (issue #1532)
+                const btn = this.container.querySelector('.column-add-btn.title-create-btn')
+                    || this.container.querySelector('.column-add-btn');
+                if (btn) {
+                    e.preventDefault();
+                    btn.click();
+                }
+            };
+
+            document.addEventListener('keydown', this.plusKeyListener);
         }
 
         checkAndLoadMore() {
@@ -5376,7 +6283,7 @@ class IntegramTable{
                 'REPORT_COLUMN': { icon: '▾', title: 'Колонка отчёта' },
             };
             const info = typeIconMap[format] || { icon: '?', title: format };
-            return `<span class="col-type-icon" title="${info.title}" style="font-size:11px;font-weight:600;opacity:0.65;min-width:16px;text-align:center;">${info.icon}</span>`;
+            return `<span class="col-type-icon" title="${info.title}" style="font-size: 0.6875rem;font-weight:600;opacity:0.65;min-width:16px;text-align:center;">${info.icon}</span>`;
         }
 
         /**
@@ -5449,6 +6356,17 @@ class IntegramTable{
 
             document.body.appendChild(overlay);
             document.body.appendChild(modal);
+
+            // Hide structure-modifying elements when user does not have structure write access (issue #1636)
+            if (!this.isStructureWritable()) {
+                modal.querySelectorAll('.col-settings-drag-handle').forEach(el => { el.style.display = 'none'; });
+                modal.querySelectorAll('.btn-col-edit').forEach(el => { el.style.display = 'none'; });
+                const helpBtnNoAccess = modal.querySelector('.btn-col-settings-help');
+                if (helpBtnNoAccess) helpBtnNoAccess.style.display = 'none';
+                const addColBtnNoAccess = modal.querySelector(`#add-column-btn-${instanceName}`);
+                if (addColBtnNoAccess) addColBtnNoAccess.style.display = 'none';
+                modal.querySelectorAll('.column-settings-item').forEach(item => { item.setAttribute('draggable', 'false'); });
+            }
 
             // Attach help button handler (issue #968)
             const helpBtn = modal.querySelector('.btn-col-settings-help');
@@ -5637,10 +6555,16 @@ class IntegramTable{
                 { id: 11, name: 'Логическое значение (Да / Нет)' },
                 { id: 12, name: 'Многострочный текст' },
                 { id: 4, name: 'Дата и время' },
-                { id: 10, name: 'Файл' }
+                { id: 10, name: 'Файл' },
+                { id: 7, name: 'Кнопка' }
             ];
 
             const availableTypes = isFirstColumn ? firstColumnTypes : baseTypes;
+
+            // If the column's current type is not in the list, add it so the select shows the correct value
+            if (!isRef && col.type && !availableTypes.find(t => String(t.id) === String(col.type))) {
+                availableTypes.push({ id: parseInt(col.type), name: `Тип #${ col.type }` });
+            }
 
             const colEditOverlay = document.createElement('div');
             colEditOverlay.className = 'column-settings-overlay';
@@ -5655,12 +6579,20 @@ class IntegramTable{
             // Original (base) column name for renaming (issue #1018)
             const currentName = col.val || col.name;
 
+            // For reference columns, build a grey hyperlink to table/{ref} instead of an editable name input (issue #1435)
+            const refTypeId = col.ref || col.orig || col.ref_id;
+            const dbName = window.location.pathname.split('/')[1];
+            const refTableUrl = refTypeId ? `/${ dbName }/table/${ refTypeId }` : '#';
+            const nameFieldHtml = isRef
+                ? `<a href="${ this.escapeHtml(refTableUrl) }" target="${ refTypeId }" style="color: grey;">${ this.escapeHtml(currentName) }</a>`
+                : `<input type="text" id="col-edit-name-${instanceName}" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(currentName) }" placeholder="Введите название колонки" autocomplete="off">`;
+
             colEditModal.innerHTML = `
-                <h3 style="margin: 0 0 16px 0; font-weight: 500; font-size: 18px;">Редактирование колонки: <em style="font-style: normal; color: var(--md-primary, #1976d2);">${ this.escapeHtml(col.name) }</em></h3>
+                <h3 style="margin: 0 0 16px 0; font-weight: 500; font-size: 1.125rem;">Редактирование колонки: <em style="font-style: normal; color: var(--md-primary, #1976d2);">${ this.escapeHtml(col.name) }</em></h3>
                 <div class="col-edit-section">
                     <div class="col-edit-row">
                         <label class="col-edit-label">Название:</label>
-                        <input type="text" id="col-edit-name-${instanceName}" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(currentName) }" placeholder="Введите название колонки" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                        ${ nameFieldHtml }
                     </div>
                     <div class="col-edit-row">
                         <label class="col-edit-label">Базовый тип:</label>
@@ -5683,7 +6615,7 @@ class IntegramTable{
                     ${ isRef ? `
                     <div class="col-edit-row">
                         <label class="col-edit-label">Псевдоним:</label>
-                        <input type="text" id="col-edit-alias-${instanceName}" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(currentAlias) }" placeholder="Введите псевдоним колонки" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                        <input type="text" id="col-edit-alias-${instanceName}" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(currentAlias) }" placeholder="Введите псевдоним колонки" autocomplete="off">
                     </div>
                     <div class="col-edit-row">
                         <label class="col-edit-check-label">
@@ -5729,6 +6661,15 @@ class IntegramTable{
             colEditOverlay.addEventListener('click', closeColEdit);
             colEditModal.querySelector(`#col-edit-cancel-${instanceName}`).addEventListener('click', closeColEdit);
 
+            // Close on Enter key; stop propagation so the parent column-settings-modal is not affected (issue #1568)
+            colEditModal.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    colEditModal.querySelector(`#col-edit-save-${instanceName}`).click();
+                }
+            });
+
             // Save button: save type (non-ref) + required + alias (ref)
             colEditModal.querySelector(`#col-edit-save-${instanceName}`).addEventListener('click', async () => {
                 const saveBtn = colEditModal.querySelector(`#col-edit-save-${instanceName}`);
@@ -5736,7 +6677,9 @@ class IntegramTable{
 
                 try {
                     // 0. Rename column (issue #1018, extended to first column in issue #1026)
-                    const newName = colEditModal.querySelector(`#col-edit-name-${instanceName}`).value.trim();
+                    // For ref columns the name field is a hyperlink (not editable), so the input won't exist (issue #1435)
+                    const nameInput = colEditModal.querySelector(`#col-edit-name-${instanceName}`);
+                    const newName = nameInput ? nameInput.value.trim() : '';
                     if (newName && newName !== currentName) {
                         const result = await this.renameColumn(col.orig || col.id, newName, col.type);
                         if (!result.success) {
@@ -5820,16 +6763,19 @@ class IntegramTable{
                     showStatus('Изменения сохранены', false);
                     // Clear metadata cache so edit/add forms fetch fresh metadata (issue #1386)
                     this.metadataCache = {};
+                    this.metadataFetchPromises = {};  // Clear in-progress fetches (issue #1455)
                     // Clear globalMetadata so fetchMetadata() re-fetches fresh column info (issue #1400)
                     this.globalMetadata = null;
                     this.globalMetadataPromise = null;
                     // Clear columns so loadDataFromTable() re-fetches metadata (issue #1400)
                     this.columns = [];
-                    // Reload column state in the settings list
-                    setTimeout(() => {
+                    // Close only the col-edit modal and reopen the parent column settings so the user
+                    // can continue editing other columns; do not close the parent modal (issue #1568)
+                    setTimeout(async () => {
                         closeColEdit();
                         this.closeColumnSettings();
-                        this.loadData(0);
+                        await this.loadData(0);
+                        this.openColumnSettings();
                     }, 800);
                 } catch (err) {
                     showStatus('Ошибка: ' + err.message, true);
@@ -6071,31 +7017,31 @@ class IntegramTable{
             modal.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; padding: 20px; border-radius: 4px; box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22); z-index: 1002; max-width: 450px; width: 90%;';
 
             modal.innerHTML = `
-                <h3 style="margin: 0 0 20px 0; font-weight: 500; font-size: 20px;">Добавить новую колонку</h3>
+                <h3 style="margin: 0 0 20px 0; font-weight: 500; font-size: 1.25rem;">Добавить новую колонку</h3>
                 <div style="margin-bottom: 16px; position: relative;">
-                    <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px;">Имя колонки:</label>
-                    <input type="text" id="new-column-name-${instanceName}" class="form-control" placeholder="Введите имя колонки" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 14px; box-sizing: border-box;" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.875rem;">Имя колонки:</label>
+                    <input type="text" id="new-column-name-${instanceName}" class="form-control" placeholder="Введите имя колонки" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 0.875rem; box-sizing: border-box;" autocomplete="off">
                     <div id="column-name-suggestions-${instanceName}" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #dee2e6; border-radius: 4px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-height: 250px; overflow-y: auto; z-index: 1003;"></div>
                 </div>
                 <div style="margin-bottom: 16px;">
-                    <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px;">Базовый тип:</label>
-                    <select id="new-column-type-${instanceName}" class="form-control" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 14px; box-sizing: border-box;">
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.875rem;">Базовый тип:</label>
+                    <select id="new-column-type-${instanceName}" class="form-control" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 0.875rem; box-sizing: border-box;">
                         ${baseTypes.map(t => `<option value="${t.id}">${t.name}</option>`).join('')}
                     </select>
                 </div>
                 <div style="margin-bottom: 16px;">
-                    <label style="display: flex; align-items: center; cursor: pointer; font-size: 14px;">
+                    <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.875rem;">
                         <input type="checkbox" id="new-column-list-${instanceName}" style="margin-right: 10px; width: 18px; height: 18px;">
                         Списочное значение (справочник)
                     </label>
                 </div>
                 <div style="margin-bottom: 16px; display: none;" id="multiselect-container-${instanceName}">
-                    <label style="display: flex; align-items: center; cursor: pointer; font-size: 14px;">
+                    <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.875rem;">
                         <input type="checkbox" id="new-column-multiselect-${instanceName}" style="margin-right: 10px; width: 18px; height: 18px;">
                         Разрешить мультивыбор (выбор нескольких значений)
                     </label>
                 </div>
-                <div id="add-column-error-${instanceName}" style="color: #dc3545; margin-bottom: 16px; display: none; font-size: 14px;"></div>
+                <div id="add-column-error-${instanceName}" style="color: #dc3545; margin-bottom: 16px; display: none; font-size: 0.875rem;"></div>
                 <div style="display: flex; justify-content: flex-end; gap: 10px;">
                     <button class="btn btn-primary" id="create-column-btn-${instanceName}">Создать</button>
                     <button class="btn btn-secondary" id="cancel-add-column-btn-${instanceName}">Отменить</button>
@@ -6117,10 +7063,19 @@ class IntegramTable{
             // Show/hide multiselect option based on list checkbox
             const listCheckbox = modal.querySelector(`#new-column-list-${instanceName}`);
             const multiselectContainer = modal.querySelector(`#multiselect-container-${instanceName}`);
+
+            // Track whether the user has manually changed type or reference flag (issue #1494)
+            let typeManuallyChanged = false;
+            let refManuallyChanged = false;
+
             listCheckbox.addEventListener('change', () => {
                 multiselectContainer.style.display = listCheckbox.checked ? 'block' : 'none';
                 if (!listCheckbox.checked) {
                     modal.querySelector(`#new-column-multiselect-${instanceName}`).checked = false;
+                }
+                // Mark as manually changed only if not triggered by auto-detection
+                if (!listCheckbox._autoDetecting) {
+                    refManuallyChanged = true;
                 }
             });
 
@@ -6128,6 +7083,11 @@ class IntegramTable{
             const nameInput = modal.querySelector(`#new-column-name-${instanceName}`);
             const suggestionsDiv = modal.querySelector(`#column-name-suggestions-${instanceName}`);
             const typeSelect = modal.querySelector(`#new-column-type-${instanceName}`);
+
+            // Mark type as manually changed when the user edits it directly (issue #1494)
+            typeSelect.addEventListener('change', () => {
+                typeManuallyChanged = true;
+            });
 
             // Get base type name by id
             const getBaseTypeName = (typeId) => {
@@ -6236,7 +7196,7 @@ class IntegramTable{
                 suggestionsDiv.innerHTML = suggestions.map((s, idx) => {
                     const typeName = getBaseTypeName(s.type);
                     const displayName = s.isReference ? `Справочник ${s.name}` : s.name;
-                    return `<div class="column-suggestion-item" data-index="${idx}" style="padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #eee; font-size: 14px;" onmouseover="this.style.backgroundColor='#f5f5f5'" onmouseout="this.style.backgroundColor='transparent'">
+                    return `<div class="column-suggestion-item" data-index="${idx}" style="padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #eee; font-size: 0.875rem;" onmouseover="this.style.backgroundColor='#f5f5f5'" onmouseout="this.style.backgroundColor='transparent'">
                         ${this.escapeHtml(displayName)} <span style="color: #888;">(${this.escapeHtml(typeName)})</span>
                     </div>`;
                 }).join('');
@@ -6268,12 +7228,31 @@ class IntegramTable{
                 });
             };
 
-            // Input event for search
+            // Input event for search and auto-detection of type/reference (issue #1494)
             nameInput.addEventListener('input', () => {
                 const value = nameInput.value.trim();
                 if (value.length >= 1) {
                     const suggestions = searchMetadata(value);
                     renderSuggestions(suggestions);
+
+                    // Auto-detect base type and reference flag from column name dictionary
+                    if (typeof detectColumnType === 'function') {
+                        const detected = detectColumnType(value);
+                        if (detected) {
+                            if (!typeManuallyChanged) {
+                                typeSelect.value = String(detected.type);
+                            }
+                            if (!refManuallyChanged) {
+                                listCheckbox._autoDetecting = true;
+                                listCheckbox.checked = detected.ref;
+                                listCheckbox._autoDetecting = false;
+                                multiselectContainer.style.display = detected.ref ? 'block' : 'none';
+                                if (!detected.ref) {
+                                    modal.querySelector(`#new-column-multiselect-${instanceName}`).checked = false;
+                                }
+                            }
+                        }
+                    }
                 } else {
                     suggestionsDiv.style.display = 'none';
                 }
@@ -6322,7 +7301,12 @@ class IntegramTable{
                             id: String(result.columnId),
                             name: columnName,
                             type: baseTypeId,
-                            paramId: result.termId
+                            paramId: result.termId,
+                            // For list columns, set ref_id, ref, and orig so showColumnEditForm treats them
+                            // as reference columns immediately (without requiring a page refresh, issue #1678)
+                            ref_id: isListValue ? result.refId : null,
+                            ref: isListValue ? parseInt(result.termId) : 0,
+                            orig: isListValue ? result.termId : null
                         };
                         this.columns.push(newCol);
 
@@ -6393,6 +7377,7 @@ class IntegramTable{
 
                         // Clear metadata cache so edit/add forms fetch fresh metadata (issue #1424)
                         this.metadataCache = {};
+                        this.metadataFetchPromises = {};  // Clear in-progress fetches (issue #1455)
                         // Clear globalMetadata so fetchMetadata() re-fetches fresh column info (issue #1424)
                         this.globalMetadata = null;
                         this.globalMetadataPromise = null;
@@ -6560,7 +7545,8 @@ class IntegramTable{
                 return {
                     success: true,
                     columnId: String(columnId),
-                    termId: String(termId)
+                    termId: String(termId),
+                    refId: isListValue ? String(typeIdToAdd) : null
                 };
             } catch (error) {
                 console.error('Error in createColumn:', error);
@@ -6579,7 +7565,7 @@ class IntegramTable{
             modal.innerHTML = `
                 <h3>Настройка представления</h3>
                 <div class="column-settings-list">
-                    ${ this.getDataSourceType() === 'table' && (this.objectTableId || this.options.tableTypeId) ? `<div class="table-settings-item"><a href="/${window.db}/cards/${ this.objectTableId || this.options.tableTypeId }">В виде карточек</a></div><div class="table-settings-item"><a href="/${window.db}/object/${ this.objectTableId || this.options.tableTypeId }">Перейти в старый интерфейс</a></div>` : '' }
+                    ${ this.getDataSourceType() === 'table' && (this.objectTableId || this.options.tableTypeId) ? (() => { const tableId = this.objectTableId || this.options.tableTypeId; const parentId = this.options.parentId && parseInt(this.options.parentId) > 1 ? this.options.parentId : null; const parentSuffix = parentId ? `?F_U=${parentId}` : ''; return `<div class="table-settings-item"><a href="/${window.db}/cards/${tableId}${parentSuffix}">В виде карточек</a></div><div class="table-settings-item"><a href="/${window.db}/object/${tableId}${parentSuffix}">Перейти в старый интерфейс</a></div>`; })() : '' }
 
                     <div class="table-settings-item">
                         <label>Отступы:</label>
@@ -6609,7 +7595,7 @@ class IntegramTable{
                             <option value="100" ${ this.settings.pageSize === 100 ? 'selected' : '' }>100</option>
                             <option value="custom">Свой вариант</option>
                         </select>
-                        <input type="number" id="custom-page-size" class="form-control form-control-sm" style="display: none; width: 80px; margin-left: 10px;" placeholder="Число" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                        <input type="number" id="custom-page-size" class="form-control form-control-sm" style="display: none; width: 80px; margin-left: 10px;" placeholder="Число" autocomplete="off">
                     </div>
 
                     <div class="table-settings-item">
@@ -6621,6 +7607,20 @@ class IntegramTable{
                             </label>
                             <label style="margin-left: 15px;">
                                 <input type="radio" name="truncate-mode" value="no" ${ !this.settings.truncateLongValues ? 'checked' : '' }>
+                                Нет
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="table-settings-item">
+                        <label>Переносить заголовки:</label>
+                        <div>
+                            <label>
+                                <input type="radio" name="wrap-headers" value="yes" ${ this.settings.wrapHeaders ? 'checked' : '' }>
+                                Да
+                            </label>
+                            <label style="margin-left: 15px;">
+                                <input type="radio" name="wrap-headers" value="no" ${ !this.settings.wrapHeaders ? 'checked' : '' }>
                                 Нет
                             </label>
                         </div>
@@ -6715,6 +7715,15 @@ class IntegramTable{
                 });
             });
 
+            // Handle wrap headers change
+            modal.querySelectorAll('input[name="wrap-headers"]').forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    this.settings.wrapHeaders = e.target.value === 'yes';
+                    this.saveSettings();
+                    this.render();
+                });
+            });
+
             // Handle hide menu button labels change
             const hideMenuButtonLabelsCheckbox = modal.querySelector('#hide-menu-button-labels');
             hideMenuButtonLabelsCheckbox.addEventListener('change', (e) => {
@@ -6752,7 +7761,8 @@ class IntegramTable{
                 compactForAll: true,
                 pageSize: 20,
                 truncateLongValues: true,
-                hideMenuButtonLabels: false
+                wrapHeaders: false,
+                hideMenuButtonLabels: false,
             };
             this.options.pageSize = 20;
 
@@ -6780,14 +7790,41 @@ class IntegramTable{
             modal.className = 'column-settings-modal';
 
             modal.innerHTML = `
-                <h3>Полное значение</h3>
-                <div style="max-height: 400px; overflow-y: auto; margin: 15px 0; padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
+                    <h3 style="margin: 0;">Полное значение</h3>
+                    <button class="full-value-copy-btn" title="Копировать в буфер"><i class="pi pi-copy"></i></button>
+                </div>
+                <div class="full-value-content" style="max-height: 400px; overflow-y: auto; margin: 15px 0; padding: 10px; background: #f8f9fa; border-radius: 4px; cursor: pointer;" title="Нажмите, чтобы скопировать">
                     <pre style="white-space: pre-wrap; word-wrap: break-word; margin: 0;">${ fullValue }</pre>
                 </div>
                 <div style="text-align: right;">
                     <button class="btn btn-secondary" onclick="this.closest('.column-settings-modal').remove(); document.querySelector('.column-settings-overlay').remove();">Закрыть</button>
                 </div>
             `;
+
+            // Extract plain text for clipboard (strip HTML tags from linkified content) - issue #1465
+            const plainText = modal.querySelector('pre').textContent;
+
+            // Copy to clipboard helper - issue #1465
+            const copyToClipboard = (btn) => {
+                navigator.clipboard.writeText(plainText).then(() => {
+                    const originalHTML = btn.innerHTML;
+                    btn.innerHTML = '<i class="pi pi-check"></i>';
+                    setTimeout(() => {
+                        btn.innerHTML = originalHTML;
+                    }, 2000);
+                }).catch(err => {
+                    console.error('[integram-table] Copy failed:', err);
+                });
+            };
+
+            // Copy on clicking the copy button (top right) - issue #1465
+            const copyBtn = modal.querySelector('.full-value-copy-btn');
+            copyBtn.addEventListener('click', () => copyToClipboard(copyBtn));
+
+            // Copy on clicking the value content area - issue #1465
+            const contentArea = modal.querySelector('.full-value-content');
+            contentArea.addEventListener('click', () => copyToClipboard(copyBtn));
 
             document.body.appendChild(overlay);
             document.body.appendChild(modal);
@@ -6832,7 +7869,7 @@ class IntegramTable{
 
             modal.innerHTML = `
                 <h3>Настройка группировки</h3>
-                <p style="color: var(--md-text-secondary); font-size: 14px; margin-bottom: 15px;">
+                <p style="color: var(--md-text-secondary); font-size: 0.875rem; margin-bottom: 15px;">
                     Выберите поля для группировки. Порядок выбора определяет вложенность групп.
                 </p>
                 <div class="column-settings-list grouping-columns-list" style="max-height: 300px; overflow-y: auto;">
@@ -6946,6 +7983,18 @@ class IntegramTable{
             this.groupedData = [];
 
             // Reload data with normal pagination
+            this.data = [];
+            this.loadedRecords = 0;
+            this.hasMore = true;
+            this.totalRows = null;
+            this.loadData(false);
+        }
+
+        /**
+         * Refresh table data from scratch, clearing existing records (issue #1514).
+         * If the server returns empty or null result, the table is cleared.
+         */
+        refreshData() {
             this.data = [];
             this.loadedRecords = 0;
             this.hasMore = true;
@@ -7263,8 +8312,9 @@ class IntegramTable{
          * Show a notification message (issue #510)
          * @param {string} message - Message to display
          * @param {boolean} isError - Whether this is an error message
+         * @param {number} duration - How long to show the notification in ms (default 2000)
          */
-        showCopyNotification(message, isError = false) {
+        showCopyNotification(message, isError = false, duration = 2000) {
             // Remove any existing notifications
             document.querySelectorAll('.integram-copy-notification').forEach(n => n.remove());
 
@@ -7280,10 +8330,10 @@ class IntegramTable{
                 background-color: ${isError ? '#dc3545' : '#28a745'};
                 color: white;
                 border-radius: 4px;
-                font-size: 14px;
+                font-size: 0.875rem;
                 z-index: 10000;
                 box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-                animation: fadeInOut 2s ease-in-out;
+                animation: fadeInOut ${duration / 1000}s ease-in-out;
             `;
 
             // Add animation keyframes if not already present
@@ -7306,7 +8356,7 @@ class IntegramTable{
             // Remove notification after animation completes
             setTimeout(() => {
                 notification.remove();
-            }, 2000);
+            }, duration);
         }
 
         /**
@@ -7883,7 +8933,8 @@ class IntegramTable{
                 compactForAll: this.settings.compactForAll,
                 pageSize: this.settings.pageSize,
                 truncateLongValues: this.settings.truncateLongValues,
-                hideMenuButtonLabels: this.settings.hideMenuButtonLabels
+                wrapHeaders: this.settings.wrapHeaders,
+                hideMenuButtonLabels: this.settings.hideMenuButtonLabels,
             };
             document.cookie = `${ this.options.cookiePrefix }-settings=${ JSON.stringify(settings) }; path=/; max-age=31536000`;
 
@@ -7905,6 +8956,7 @@ class IntegramTable{
                     this.settings.compactForAll = settings.compactForAll !== undefined ? settings.compactForAll : true;
                     this.settings.pageSize = settings.pageSize || 20;
                     this.settings.truncateLongValues = settings.truncateLongValues !== undefined ? settings.truncateLongValues : true;
+                    this.settings.wrapHeaders = settings.wrapHeaders !== undefined ? settings.wrapHeaders : false;
                     this.settings.hideMenuButtonLabels = settings.hideMenuButtonLabels !== undefined ? settings.hideMenuButtonLabels : false;
 
                     // Update options.pageSize to match loaded settings
@@ -7926,6 +8978,29 @@ class IntegramTable{
                     }
                 }
             }
+
+        }
+
+        /**
+         * Apply font size from the global cookie to the document root (issue #1626/#1628).
+         * On pages using main.html this is already applied before DOM render;
+         * this call is a fallback for pages that don't include main.html.
+         */
+        applyPageFontSize() {
+            // If main.html already set up the global handler, skip to avoid double-apply
+            if (typeof window.setPageFontSize === 'function') return;
+            // Use same rem values as main.html (issue #1632) — must match SIZE_MAP there
+            const sizeMap = { smaller: '.7rem', normal: '.82rem', larger: '.95rem' };
+            let size = 'normal';
+            try {
+                const match = document.cookie.match(/(?:^|; )integram-table-font-settings=([^;]*)/);
+                if (match) {
+                    const fontSettings = JSON.parse(decodeURIComponent(match[1]));
+                    if (fontSettings.pageFontSize) size = fontSettings.pageFontSize;
+                }
+            } catch (e) { /* ignore */ }
+            const value = sizeMap[size] || sizeMap.normal;
+            document.documentElement.style.fontSize = value;
         }
 
         // Modal Edit Form functionality
@@ -8183,35 +9258,53 @@ class IntegramTable{
                 }
             }
 
+            // If metadata is already cached, return it immediately (issue #1455)
+            if (this.metadataCache[typeId]) {
+                return this.metadataCache[typeId];
+            }
+
+            // If a fetch for this typeId is already in progress, await it instead of starting a new one (issue #1455)
+            if (this.metadataFetchPromises[typeId]) {
+                return this.metadataFetchPromises[typeId];
+            }
+
             const apiBase = this.getApiBase();
-            const response = await fetch(`${ apiBase }/metadata/${ typeId }`);
+            const fetchPromise = (async () => {
+                const response = await fetch(`${ apiBase }/metadata/${ typeId }`);
 
-            if (!response.ok) {
-                throw new Error(`Failed to fetch metadata: ${ response.statusText }`);
-            }
-
-            const text = await response.text();
-
-            try {
-                let data = JSON.parse(text);
-
-                // Handle case where API returns an array instead of an object
-                if (Array.isArray(data)) {
-                    data = data[0] || {};
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch metadata: ${ response.statusText }`);
                 }
 
-                // Check for error in response
-                if (data.error) {
-                    throw new Error(data.error);
-                }
+                const text = await response.text();
 
-                return data;
-            } catch (e) {
-                if (e.message && e.message.includes('error')) {
-                    throw e;
+                try {
+                    let data = JSON.parse(text);
+
+                    // Handle case where API returns an array instead of an object
+                    if (Array.isArray(data)) {
+                        data = data[0] || {};
+                    }
+
+                    // Check for error in response
+                    const serverError = this.getServerError(data);
+                    if (serverError) {
+                        throw new Error(serverError);
+                    }
+
+                    this.metadataCache[typeId] = data;
+                    return data;
+                } catch (e) {
+                    if (e.message && e.message.includes('error')) {
+                        throw e;
+                    }
+                    throw new Error(`Invalid JSON response: ${ text }`);
+                } finally {
+                    delete this.metadataFetchPromises[typeId];
                 }
-                throw new Error(`Invalid JSON response: ${ text }`);
-            }
+            })();
+            this.metadataFetchPromises[typeId] = fetchPromise;
+            return fetchPromise;
         }
 
         async fetchRecordData(recordId, typeId, metadata) {
@@ -8300,8 +9393,10 @@ class IntegramTable{
             return result;
         }
 
-        async fetchReferenceOptions(requisiteId, recordId = 0, searchQuery = '', extraParams = {}) {
+        async fetchReferenceOptions(requisiteId, recordId = 0, searchQuery = '', extraParams = {}, attrs = '') {
             const apiBase = this.getApiBase();
+            // Determine whether to include id parameter: only when attrs contains a query (square bracket expression)
+            const hasQuery = /\[.+\]/.test(attrs || '');
 
             // Check for override URL in integramTableOverrides.ddls
             if (window.integramTableOverrides &&
@@ -8356,7 +9451,8 @@ class IntegramTable{
                 LIMIT: '50'
             });
 
-            if (recordId && recordId !== 0) {
+            // Only add id parameter when attrs indicates a query (square bracket expression) (issue #1571)
+            if (hasQuery && recordId && recordId !== 0) {
                 params.append('id', recordId);
             }
             if (searchQuery) {
@@ -8364,6 +9460,13 @@ class IntegramTable{
             }
             for (const [key, value] of Object.entries(extraParams)) {
                 params.set(key, value);
+            }
+
+            // Cache by composite key: requisiteId + recordId (when id is used) + searchQuery (issue #1571)
+            const cacheKey = `${requisiteId}_${hasQuery && recordId ? recordId : ''}_${searchQuery}`;
+            const cachedResult = this.refFetchCache[cacheKey];
+            if (cachedResult !== undefined && Object.keys(extraParams).length === 0) {
+                return cachedResult;
             }
 
             const url = `${ apiBase }/_ref_reqs/${ requisiteId }?${ params }`;
@@ -8379,13 +9482,19 @@ class IntegramTable{
                 const data = JSON.parse(text);
 
                 // Check for error in response
-                if (data.error) {
-                    throw new Error(data.error);
+                const serverError = this.getServerError(data);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 // Parse JSON text to extract key-value pairs in original server order
                 // (JavaScript objects with numeric string keys iterate in numeric order, not insertion order)
-                return this.parseJsonObjectAsArray(text);
+                const result = this.parseJsonObjectAsArray(text);
+                // Cache result for subsequent calls with same requisiteId + recordId + searchQuery (issue #1571)
+                if (Object.keys(extraParams).length === 0) {
+                    this.refFetchCache[cacheKey] = result;
+                }
+                return result;
             } catch (e) {
                 if (e.message && e.message.includes('error')) {
                     throw e;
@@ -8466,6 +9575,7 @@ class IntegramTable{
             const textEl = trigger.querySelector('.filter-ref-trigger-text');
             if (textEl) {
                 textEl.textContent = displayText || 'Выбрать...';
+                textEl.classList.toggle('filter-ref-trigger-text--placeholder', !displayText);
             }
             trigger.dataset.selectedIds = Array.from(selectedIds).join(',');
             trigger.title = displayText || 'Выбрать значение...';
@@ -8524,7 +9634,7 @@ class IntegramTable{
                     <input type="text"
                            class="filter-ref-search"
                            placeholder="Поиск..."
-                           autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                           autocomplete="off">
                     <button type="button" class="filter-ref-clear" title="Очистить выбор">✕</button>
                 </div>
                 <div class="filter-ref-options">
@@ -8726,6 +9836,18 @@ class IntegramTable{
             return metadata.val || metadata.name || metadata.title || `Тип #${ metadata.id || '?' }`;
         }
 
+        /**
+         * Extract error message from server response (issue #1506).
+         * The server may return errors as {"error":"..."} or [{"error":"..."}].
+         * Returns the error string if present, otherwise null.
+         */
+        getServerError(result) {
+            if (Array.isArray(result)) {
+                return (result[0] && result[0].error) || null;
+            }
+            return result.error || null;
+        }
+
         getApiBase() {
             // Extract base URL from apiUrl by removing query parameters and path after /report/, /type/, /metadata/, or /object/
             const url = this.options.apiUrl;
@@ -8743,6 +9865,21 @@ class IntegramTable{
             }
             // Fallback: remove everything after ? or last /
             return url.split('?')[0].replace(/\/[^\/]*$/, '');
+        }
+
+        /**
+         * Determine whether the export button should be shown (issue #1469).
+         * For report sources: always allowed.
+         * For table/object sources: only when metadata has export="1".
+         * @returns {boolean}
+         */
+        isExportAllowed() {
+            const sourceType = this.getDataSourceType();
+            if (sourceType === 'report') {
+                return true;
+            }
+            // For table/object sources, only allow if metadata export flag is set
+            return this.tableExportAllowed === true;
         }
 
         /**
@@ -8845,7 +9982,8 @@ class IntegramTable{
             const result = {
                 required: false,
                 multi: false,
-                alias: null
+                alias: null,
+                defaultValue: null
             };
 
             if (!attrs) return result;
@@ -8853,12 +9991,94 @@ class IntegramTable{
             result.required = attrs.includes(':!NULL:');
             result.multi = attrs.includes(':MULTI:');
 
-            const aliasMatch = attrs.match(/:ALIAS=(.*?):/);
+            const aliasMatch = attrs.match(/:ALIAS=(.*?):/u);
             if (aliasMatch) {
                 result.alias = aliasMatch[1];
             }
 
+            // Extract default value: strip all known flags and use the remainder
+            let stripped = attrs
+                .replace(/:!NULL:/g, '')
+                .replace(/:MULTI:/g, '')
+                .replace(/:ALIAS=(.*?):/gu, '')
+                .trim();
+            if (stripped.length > 0) {
+                result.defaultValue = stripped;
+            }
+
             return result;
+        }
+
+        /**
+         * Resolve a default value for a field based on attrs and field format (issue #1498)
+         * Supports built-in tokens like [NOW], [TODAY], [USER_ID], etc.
+         * For DATE/DATETIME formats with no attrs default, returns current date/time.
+         * @param {string|null} rawAttrs - The raw attrs string from column metadata
+         * @param {string} format - The field format (DATE, DATETIME, SHORT, etc.)
+         * @returns {string} Resolved default value, or empty string if none
+         */
+        resolveDefaultValue(rawAttrs, format) {
+            const now = new Date();
+
+            // Helper to format date as DD.MM.YYYY
+            const formatDate = (d) => {
+                const dd = String(d.getDate()).padStart(2, '0');
+                const mm = String(d.getMonth() + 1).padStart(2, '0');
+                const yyyy = d.getFullYear();
+                return `${dd}.${mm}.${yyyy}`;
+            };
+
+            // Helper to format datetime as DD.MM.YYYY HH:MM:SS
+            const formatDateTime = (d) => {
+                const date = formatDate(d);
+                const hh = String(d.getHours()).padStart(2, '0');
+                const min = String(d.getMinutes()).padStart(2, '0');
+                const ss = String(d.getSeconds()).padStart(2, '0');
+                return `${date} ${hh}:${min}:${ss}`;
+            };
+
+            // Helper for date arithmetic
+            const addDays = (d, days) => new Date(d.getTime() + days * 86400000);
+            const addMonths = (d, months) => {
+                const r = new Date(d);
+                r.setMonth(r.getMonth() + months);
+                return r;
+            };
+
+            // If attrs has a default value token, try to resolve it
+            if (rawAttrs && rawAttrs.trim().length > 0) {
+                const parsed = this.parseAttrs(rawAttrs);
+                const token = parsed.defaultValue;
+                if (token) {
+                    switch (token) {
+                        case '[NOW]':      return formatDateTime(now);
+                        case '[TODAY]':    return formatDate(now);
+                        case '[YESTERDAY]': return formatDate(addDays(now, -1));
+                        case '[TOMORROW]':  return formatDate(addDays(now, 1));
+                        case '[MONTH_AGO]': return formatDate(addMonths(now, -1));
+                        case '[WEEK_AGO]':  return formatDate(addDays(now, -7));
+                        case '[MONTH_PLUS]': return formatDate(addMonths(now, 1));
+                        case '[USER]':     return (typeof name !== 'undefined' ? name : '');
+                        case '[USER_ID]':  return (typeof uid !== 'undefined' ? String(uid) : '');
+                        case '[ROLE]':     return (typeof role !== 'undefined' ? role : '');
+                        case '[ROLE_ID]':  return (typeof roleId !== 'undefined' ? String(roleId) : '');
+                        case '[HTTP_HOST]':    return window.location.hostname || '';
+                        case '[REQUEST_URI]':  return window.location.pathname + window.location.search || '';
+                        default:
+                            // Unknown token or literal value — return as-is
+                            return token;
+                    }
+                }
+            }
+
+            // No attrs default — apply current date/time for date/datetime fields
+            if (format === 'DATE') {
+                return formatDate(now);
+            } else if (format === 'DATETIME') {
+                return formatDateTime(now);
+            }
+
+            return '';
         }
 
         getFormatById(typeId) {
@@ -8995,8 +10215,19 @@ class IntegramTable{
                 tabsHtml += `</div>`;
             }
 
+            // Determine edit form write access (issue #1508)
+            // Use the metadata's granted field for this specific form (may differ from table-level for nested forms)
+            const metadataGranted = metadata.granted !== undefined ? metadata.granted : null;
+            const formIsReadOnly = metadataGranted !== null && metadataGranted !== 'WRITE';
+            const formHasSomeWritable = formIsReadOnly
+                ? (reqs.some(req => req.granted === 'WRITE'))
+                : true;
+            const showSaveBtn = !formIsReadOnly || formHasSomeWritable;
+            const showDeleteBtn = !isCreate && !formIsReadOnly;
+            const showDuplicateBtn = !isCreate && !formIsReadOnly;
+
             // Build attributes form HTML
-            let attributesHtml = this.renderAttributesForm(metadata, recordData, regularFields, recordReqs, isCreate, typeId);
+            let attributesHtml = this.renderAttributesForm(metadata, recordData, regularFields, recordReqs, isCreate, typeId, formIsReadOnly);
 
             let formHtml = `
                 <div class="edit-form-header">
@@ -9033,8 +10264,9 @@ class IntegramTable{
                         <i class="pi pi-cog"></i>
                     </button>
                     <div class="edit-form-footer-buttons">
-                        ${ !isCreate ? '<button type="button" class="btn btn-danger" id="delete-record-btn" style="display:none;">Удалить</button>' : '' }
-                        <button type="button" class="btn btn-primary" id="save-record-btn">Сохранить</button>
+                        ${ showDeleteBtn ? '<button type="button" class="btn btn-danger" id="delete-record-btn" style="display:none;">Удалить</button>' : '' }
+                        ${ showDuplicateBtn ? '<button type="button" class="btn btn-secondary" id="duplicate-record-btn">Дублировать</button>' : '' }
+                        ${ showSaveBtn ? '<button type="button" class="btn btn-primary" id="save-record-btn">Сохранить</button>' : '' }
                         <button type="button" class="btn btn-secondary" data-close-modal="true">Отменить</button>
                     </div>
                 </div>
@@ -9046,6 +10278,11 @@ class IntegramTable{
 
             // Store recordId on the modal element for subordinate table loading in nested modals
             modal.dataset.recordId = recordId;
+
+            // Store first column value on the modal element for use in password reset handlers (issue #1479)
+            if (firstColumnValue != null) {
+                modal.dataset.firstColumnValue = firstColumnValue;
+            }
 
             // Store modal context for subordinate tables - ONLY for the first level (parent form)
             // Don't overwrite when opening subordinate record forms (nested modals)
@@ -9066,6 +10303,13 @@ class IntegramTable{
                 this.attachTabHandlers(modal);
             }
 
+            // Disable form elements in read-only form-groups (issue #1508)
+            if (formIsReadOnly) {
+                modal.querySelectorAll('.form-field-readonly input, .form-field-readonly textarea, .form-field-readonly select').forEach(el => {
+                    el.disabled = true;
+                });
+            }
+
             // Load reference options for dropdowns (scoped to this modal)
             this.loadReferenceOptions(metadata.reqs, recordId || 0, modal);
 
@@ -9078,6 +10322,9 @@ class IntegramTable{
             // Attach file upload handlers
             this.attachFormFileUploadHandlers(modal);
 
+            // Attach password reset handlers for field id=20 (issue #1471)
+            this.attachPasswordResetHandlers(modal);
+
             // Attach form field settings handler
             const formSettingsBtn = modal.querySelector('#form-settings-btn');
             formSettingsBtn.addEventListener('click', () => {
@@ -9087,17 +10334,19 @@ class IntegramTable{
             // Apply saved field visibility settings
             this.applyFormFieldSettings(modal, typeId);
 
-            // Attach save handler
+            // Attach save handler (only if save button is present - issue #1508)
             const saveBtn = modal.querySelector('#save-record-btn');
 
-            saveBtn.addEventListener('click', async () => {
-                saveBtn.disabled = true;
-                try {
-                    await this.saveRecord(modal, isCreate, recordId, typeId, parentId, columnId);
-                } finally {
-                    saveBtn.disabled = false;
-                }
-            });
+            if (saveBtn) {
+                saveBtn.addEventListener('click', async () => {
+                    saveBtn.disabled = true;
+                    try {
+                        await this.saveRecord(modal, isCreate, recordId, typeId, parentId, columnId);
+                    } finally {
+                        saveBtn.disabled = false;
+                    }
+                });
+            }
 
             // Attach delete handler (edit mode only)
             if (!isCreate) {
@@ -9110,6 +10359,21 @@ class IntegramTable{
                     }
                     deleteBtn.addEventListener('click', () => {
                         this.deleteRecord(modal, recordId, typeId);
+                    });
+                }
+            }
+
+            // Attach duplicate handler (edit mode only, issue #1575)
+            if (!isCreate) {
+                const duplicateBtn = modal.querySelector('#duplicate-record-btn');
+                if (duplicateBtn) {
+                    duplicateBtn.addEventListener('click', async () => {
+                        duplicateBtn.disabled = true;
+                        try {
+                            await this.duplicateRecord(modal, recordId, typeId, parentId, metadata);
+                        } finally {
+                            duplicateBtn.disabled = false;
+                        }
                     });
                 }
             }
@@ -9149,14 +10413,16 @@ class IntegramTable{
             document.addEventListener('keydown', handleEscape);
 
             // Enter in input/textarea triggers Save (issue #1422)
-            modal.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
-                    if (!saveBtn.disabled) {
-                        e.preventDefault();
-                        saveBtn.click();
+            if (saveBtn) {
+                modal.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+                        if (!saveBtn.disabled) {
+                            e.preventDefault();
+                            saveBtn.click();
+                        }
                     }
-                }
-            });
+                });
+            }
 
             // Focus the first visible, non-hidden input/textarea/select in the form (issue #1420)
             const firstField = modal.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([readonly]), textarea, select');
@@ -9165,7 +10431,7 @@ class IntegramTable{
             }
         }
 
-        renderAttributesForm(metadata, recordData, regularFields, recordReqs, isCreate = false, typeId = null) {
+        renderAttributesForm(metadata, recordData, regularFields, recordReqs, isCreate = false, typeId = null, formIsReadOnly = false) {
             let html = '';
 
             // Get current date/datetime for default values in create mode
@@ -9184,6 +10450,9 @@ class IntegramTable{
                 currentDateDisplay = now.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.'); // DD.MM.YYYY
                 currentDateTimeDisplay = currentDateDisplay + ' ' + now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); // DD.MM.YYYY HH:MM
             }
+
+            // When formIsReadOnly, the main value field is always read-only (issue #1508)
+            const mainFieldReadOnly = formIsReadOnly;
 
             // Main value field - render according to base type
             const typeName = this.getMetadataName(metadata);
@@ -9213,6 +10482,9 @@ class IntegramTable{
                 mainFieldHtml = `<input type="number" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required step="0.01">`;
             } else if (mainFieldType === 'MEMO') {
                 mainFieldHtml = `<textarea class="form-control memo-field" id="field-main" name="main" rows="4" required>${ this.escapeHtml(mainValue) }</textarea>`;
+            } else if (mainFieldType === 'PWD') {
+                // Password field - render as type=password input (issue #1441)
+                mainFieldHtml = `<input type="password" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required autocomplete="new-password">`;
             } else if (mainFieldType === 'GRANT') {
                 // GRANT field (dropdown with options from GET grants API - issue #581)
                 mainFieldHtml = `
@@ -9237,37 +10509,75 @@ class IntegramTable{
             }
 
             html += `
-                <div class="form-group">
+                <div class="form-group${ mainFieldReadOnly ? ' form-field-readonly' : '' }">
                     <label for="field-main">${ typeName } <span class="required">*</span></label>
                     ${ mainFieldHtml }
                 </div>
             `;
 
-            // Sort fields by saved order if available
+            // Sort fields by saved order if available.
+            // Fields not present in the saved order (e.g. newly added fields) are inserted
+            // at their natural metadata position relative to their neighbors, rather than
+            // being appended at the end (issue #1526).
             const savedFieldOrder = this.loadFormFieldOrder(typeId);
             const sortedFields = [...regularFields];
             if (savedFieldOrder.length > 0) {
-                sortedFields.sort((a, b) => {
-                    const idxA = savedFieldOrder.indexOf(String(a.id));
-                    const idxB = savedFieldOrder.indexOf(String(b.id));
-                    if (idxA === -1 && idxB === -1) return 0;
-                    if (idxA === -1) return 1;
-                    if (idxB === -1) return -1;
-                    return idxA - idxB;
+                // Build a numeric sort key for each field.
+                // Saved fields get integer keys: their saved index * scale.
+                // Unsaved fields get a fractional key placed before the next saved neighbor,
+                // so they appear at approximately the right metadata position.
+                const scale = regularFields.length + 1;
+
+                // Compute saved-order index for each field (-1 if not in savedFieldOrder)
+                const savedIndex = new Map();
+                regularFields.forEach(req => {
+                    savedIndex.set(req.id, savedFieldOrder.indexOf(String(req.id)));
                 });
+
+                // Assign sort keys
+                const sortKey = new Map();
+                regularFields.forEach((req, natIdx) => {
+                    const idx = savedIndex.get(req.id);
+                    if (idx !== -1) {
+                        sortKey.set(req.id, idx * scale);
+                    } else {
+                        // Find saved successor: the nearest saved field that comes AFTER
+                        // this field in the original metadata order
+                        let nextSavedIdx = savedFieldOrder.length; // default: after all saved fields
+                        for (let i = natIdx + 1; i < regularFields.length; i++) {
+                            const si = savedIndex.get(regularFields[i].id);
+                            if (si !== -1) { nextSavedIdx = si; break; }
+                        }
+                        // Count how many unsaved fields share the same saved successor
+                        // so they can be ordered by natIdx within the same slot
+                        // Key = nextSaved slot start - 1 + small fractional offset
+                        sortKey.set(req.id, nextSavedIdx * scale - scale + natIdx + 1);
+                    }
+                });
+
+                sortedFields.sort((a, b) => sortKey.get(a.id) - sortKey.get(b.id));
             }
 
             sortedFields.forEach(req => {
                 const attrs = this.parseAttrs(req.attrs);
                 const fieldName = attrs.alias || req.val;
-                const reqValue = recordReqs[req.id] ? recordReqs[req.id].value : '';
+                const storedValue = recordReqs[req.id] ? recordReqs[req.id].value : '';
                 const baseTypeId = recordReqs[req.id] ? recordReqs[req.id].base : req.type;
                 const baseFormat = this.normalizeFormat(baseTypeId);
                 const isRequired = attrs.required;
                 const isMulti = attrs.multi; // Issue #853
+                // Apply default value from attrs when creating a new record (issue #1498)
+                const reqValue = storedValue || (isCreate ? this.resolveDefaultValue(req.attrs, baseFormat) : '');
+                // Field is read-only when form is read-only and req does not have granted: "WRITE" (issue #1508)
+                const isReqReadOnly = formIsReadOnly && req.granted !== 'WRITE';
 
-                html += `<div class="form-group">`;
-                html += `<label for="field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
+                html += `<div class="form-group${ isReqReadOnly ? ' form-field-readonly' : '' }">`;
+                // Password reset buttons in label for field id=20 (issue #1471)
+                if (String(req.id) === '20' && baseFormat === 'PWD') {
+                    html += `<label for="field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }&nbsp;<a class="pwd-reset-btn" data-field-id="${ req.id }" title="Задать пароль и скопировать его в буфер" style="cursor:pointer"><svg width="20" height="20" viewBox="0 1 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.42858 9.28572V6.42858C6.42858 5.48137 6.80486 4.57297 7.47463 3.90319C8.1444 3.23342 9.05281 2.85715 10 2.85715C10.9472 2.85715 11.8556 3.23342 12.5254 3.90319C13.1952 4.57297 13.5714 5.48137 13.5714 6.42858V9.28572M5.00001 9.28572H15C15.789 9.28572 16.4286 9.92531 16.4286 10.7143V15.7143C16.4286 16.5033 15.789 17.1429 15 17.1429H5.00001C4.21103 17.1429 3.57144 16.5033 3.57144 15.7143V10.7143C3.57144 9.92531 4.21103 9.28572 5.00001 9.28572Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>&nbsp;<a class="pwd-reset-mail-btn" data-field-id="${ req.id }" title="Задать пароль и скопировать в буфер приглашение пользователю" style="cursor:pointer"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M17.1429 5.71434C17.1429 4.92862 16.5 4.28577 15.7143 4.28577H4.28571C3.5 4.28577 2.85714 4.92862 2.85714 5.71434M17.1429 5.71434V14.2858C17.1429 15.0715 16.5 15.7143 15.7143 15.7143H4.28571C3.5 15.7143 2.85714 15.0715 2.85714 14.2858V5.71434M17.1429 5.71434L10 10.7143L2.85714 5.71434" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/></svg></a><span class="pwd-reset-copied" id="field-${ req.id }-copied" style="display:none">Ok</span></label>`;
+                } else {
+                    html += `<label for="field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
+                }
 
                 // Multi-select reference field (issue #853)
                 if (req.ref_id && isMulti) {
@@ -9283,7 +10593,8 @@ class IntegramTable{
                                            class="inline-editor-reference-search form-ref-search"
                                            id="field-${ req.id }-search"
                                            placeholder="Добавить..."
-                                           autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                           autocomplete="off">
+                                    <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                                 </div>
                                 <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${ req.id }-dropdown" style="display:none;">
                                     <div class="inline-editor-reference-empty">Загрузка...</div>
@@ -9309,7 +10620,7 @@ class IntegramTable{
                                            class="inline-editor-reference-search form-ref-search"
                                            id="field-${ req.id }-search"
                                            placeholder="Поиск..."
-                                           autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                           autocomplete="off">
                                     <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
                                     <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                                 </div>
@@ -9335,19 +10646,17 @@ class IntegramTable{
                 }
                 // Date field with HTML5 date picker
                 else if (baseFormat === 'DATE') {
-                    // Only apply default value for the first column (where req.id equals typeId)
-                    const isFirstColumn = typeId && String(req.id) === String(typeId);
-                    const dateValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, false) : (isCreate && isFirstColumn ? currentDateHtml5 : '');
-                    const dateValueDisplay = reqValue ? this.formatDateForInput(reqValue, false) : (isCreate && isFirstColumn ? currentDateDisplay : '');
+                    // reqValue already includes the default from attrs/current date (resolved above, issue #1498)
+                    const dateValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, false) : '';
+                    const dateValueDisplay = reqValue ? this.formatDateForInput(reqValue, false) : '';
                     html += `<input type="date" class="form-control date-picker" id="field-${ req.id }-picker" value="${ this.escapeHtml(dateValueHtml5) }" ${ isRequired ? 'required' : '' } data-target="field-${ req.id }">`;
                     html += `<input type="hidden" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(dateValueDisplay) }">`;
                 }
                 // DateTime field with HTML5 datetime-local picker (with time rounded to 5 minutes)
                 else if (baseFormat === 'DATETIME') {
-                    // Only apply default value for the first column (where req.id equals typeId)
-                    const isFirstColumn = typeId && String(req.id) === String(typeId);
-                    const dateTimeValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, true) : (isCreate && isFirstColumn ? currentDateTimeHtml5 : '');
-                    const dateTimeValueDisplay = reqValue ? this.formatDateForInput(reqValue, true) : (isCreate && isFirstColumn ? currentDateTimeDisplay : '');
+                    // reqValue already includes the default from attrs/current datetime (resolved above, issue #1498)
+                    const dateTimeValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, true) : '';
+                    const dateTimeValueDisplay = reqValue ? this.formatDateForInput(reqValue, true) : '';
                     html += `<input type="datetime-local" class="form-control datetime-picker" id="field-${ req.id }-picker" value="${ this.escapeHtml(dateTimeValueHtml5) }" ${ isRequired ? 'required' : '' } data-target="field-${ req.id }">`;
                     html += `<input type="hidden" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(dateTimeValueDisplay) }">`;
                 }
@@ -9413,6 +10722,10 @@ class IntegramTable{
                     // Store current value (ID) for later selection after options load (issue #925)
                     const repColTermValue = recordReqs[req.id] && recordReqs[req.id].term !== undefined ? recordReqs[req.id].term : reqValue;
                     html += `<input type="hidden" id="field-${ req.id }-current-value" value="${ this.escapeHtml(repColTermValue) }">`;
+                }
+                // PWD field - password input (issue #1441)
+                else if (baseFormat === 'PWD') {
+                    html += `<input type="password" class="form-control" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(reqValue) }" ${ isRequired ? 'required' : '' } autocomplete="new-password">`;
                 }
                 // Regular text field
                 else {
@@ -9485,18 +10798,199 @@ class IntegramTable{
                 }
                 const metadata = this.metadataCache[arrId];
 
-                // Fetch data for subordinate table
+                // Fetch first page of data for subordinate table (issue #1640)
+                const pageSize = this.options.pageSize || 20;
                 const apiBase = this.getApiBase();
-                const dataUrl = `${ apiBase }/object/${ arrId }/?JSON_OBJ&F_U=${ parentRecordId }`;
+                const dataUrl = `${ apiBase }/object/${ arrId }/?JSON_OBJ&F_U=${ parentRecordId }&LIMIT=0,${ pageSize + 1 }`;
                 const dataResponse = await fetch(dataUrl);
                 const data = await dataResponse.json();
 
-                // Render the subordinate table
-                this.renderSubordinateTable(container, metadata, data, arrId, parentRecordId);
+                // Determine if there are more records (issue #1640)
+                const rows = Array.isArray(data) ? data : [];
+                const hasMore = rows.length > pageSize;
+                const firstPageRows = hasMore ? rows.slice(0, pageSize) : rows;
+
+                // Render the subordinate table with first page data
+                this.renderSubordinateTable(container, metadata, firstPageRows, arrId, parentRecordId);
+
+                // Store pagination state on container for infinite scroll (issue #1640)
+                container._subordinateHasMore = hasMore;
+                container._subordinateLoadedCount = firstPageRows.length;
+                container._subordinateIsLoading = false;
+                container._subordinateArrIdForScroll = arrId;
+                container._subordinateParentRecordIdForScroll = parentRecordId;
+
+                // Attach infinite scroll listener to the modal's scrollable body (issue #1640)
+                this.attachSubordinateScrollListener(container);
 
             } catch (error) {
                 console.error('Error loading subordinate table:', error);
                 container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${ error.message }</div>`;
+            }
+        }
+
+        /**
+         * Attach scroll listener to the subordinate modal's .edit-form-body for infinite scroll (issue #1640).
+         * Loads next page when user scrolls near the bottom. Shows Ajax spinner while loading.
+         */
+        attachSubordinateScrollListener(container) {
+            // Find the scrollable modal body
+            const modal = container.closest('.edit-form-modal.subordinate-modal');
+            if (!modal) return;
+            const scrollEl = modal.querySelector('.edit-form-body');
+            if (!scrollEl) return;
+
+            // Remove previous listener if re-attached (e.g. after re-render)
+            if (scrollEl._subordinateScrollListener) {
+                scrollEl.removeEventListener('scroll', scrollEl._subordinateScrollListener);
+            }
+
+            const scrollListener = () => {
+                if (container._subordinateIsLoading || !container._subordinateHasMore) return;
+
+                const threshold = 200;
+                const distanceFromBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+                if (distanceFromBottom < threshold) {
+                    this.loadMoreSubordinateRows(container);
+                }
+            };
+
+            scrollEl._subordinateScrollListener = scrollListener;
+            scrollEl.addEventListener('scroll', scrollListener);
+
+            // Check immediately in case the first page already fits the screen (issue #1640)
+            setTimeout(() => scrollListener(), 100);
+        }
+
+        /**
+         * Load the next page of subordinate table rows and append them to the existing table (issue #1640).
+         * Shows an Ajax spinner at the bottom while loading.
+         */
+        async loadMoreSubordinateRows(container) {
+            if (container._subordinateIsLoading || !container._subordinateHasMore) return;
+
+            container._subordinateIsLoading = true;
+
+            // Show spinner at the bottom of the table
+            const wrapper = container.querySelector('.subordinate-table-wrapper');
+            let spinner = container.querySelector('.subordinate-infinite-spinner');
+            if (!spinner) {
+                spinner = document.createElement('div');
+                spinner.className = 'subordinate-infinite-spinner';
+                spinner.innerHTML = '<div class="subordinate-infinite-spinner-icon"></div>';
+                if (wrapper) {
+                    wrapper.after(spinner);
+                } else {
+                    container.appendChild(spinner);
+                }
+            }
+            spinner.style.display = 'flex';
+
+            try {
+                const arrId = container._subordinateArrIdForScroll;
+                const parentRecordId = container._subordinateParentRecordIdForScroll;
+                const pageSize = this.options.pageSize || 20;
+                const offset = container._subordinateLoadedCount;
+                const apiBase = this.getApiBase();
+                const dataUrl = `${ apiBase }/object/${ arrId }/?JSON_OBJ&F_U=${ parentRecordId }&LIMIT=${ offset },${ pageSize + 1 }`;
+
+                const dataResponse = await fetch(dataUrl);
+                const data = await dataResponse.json();
+                const newRows = Array.isArray(data) ? data : [];
+                const hasMore = newRows.length > pageSize;
+                const pageRows = hasMore ? newRows.slice(0, pageSize) : newRows;
+
+                // Append rows to the accumulated data and update loaded count
+                container._subordinateData = (container._subordinateData || []).concat(pageRows);
+                container._subordinateLoadedCount += pageRows.length;
+                container._subordinateHasMore = hasMore;
+
+                // Append new rows to the existing table's tbody
+                const tbody = container.querySelector('.subordinate-table tbody');
+                if (tbody && pageRows.length > 0) {
+                    const metadata = container._subordinateMetadata;
+                    const reqs = metadata ? (metadata.reqs || []) : [];
+                    const instanceName = this.options.instanceName;
+                    const pathParts = window.location.pathname.split('/');
+                    const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+                    const searchTerm = container._subordinateSearchTerm || '';
+
+                    pageRows.forEach(row => {
+                        const rowId = row.i;
+                        const values = row.r || [];
+                        const tr = document.createElement('tr');
+                        tr.dataset.rowId = rowId;
+                        tr.draggable = false;
+
+                        // Drag handle cell (issue #1617)
+                        const dragTd = document.createElement('td');
+                        dragTd.className = 'subordinate-drag-handle-td';
+                        dragTd.innerHTML = '<span class="subordinate-drag-handle" title="Перетащить строку"><i class="pi pi-equals"></i></span>';
+                        tr.appendChild(dragTd);
+
+                        // First column (main value)
+                        const mainValue = values[0] || '';
+                        const mainFieldInfo = { type: metadata ? metadata.type : '' };
+                        let displayMainValue = this.formatSubordinateCellValue(mainValue, mainFieldInfo);
+                        if (searchTerm) {
+                            displayMainValue = this.highlightSearchTerm(displayMainValue, searchTerm);
+                        }
+                        const mainTd = document.createElement('td');
+                        mainTd.className = 'subordinate-cell-clickable';
+                        mainTd.dataset.rowId = rowId;
+                        mainTd.dataset.typeId = arrId;
+                        mainTd.innerHTML = displayMainValue;
+                        mainTd.addEventListener('click', () => {
+                            this.openEditForm(rowId, arrId, 0);
+                        });
+                        tr.appendChild(mainTd);
+
+                        // Requisite columns
+                        reqs.forEach((req, idx) => {
+                            const cellValue = values[idx + 1] !== undefined ? values[idx + 1] : '';
+                            const td = document.createElement('td');
+                            if (req.arr_id) {
+                                const count = typeof cellValue === 'number' ? cellValue : (cellValue || 0);
+                                const nestedTableUrl = `/${dbName}/table/${req.arr_id}?F_U=${rowId}`;
+                                td.className = 'subordinate-nested-count';
+                                td.innerHTML = `<a href="${nestedTableUrl}" class="subordinate-table-icon-link" target="${req.arr_id}" title="Открыть в новом окне" onclick="event.stopPropagation();"><i class="pi pi-table"></i></a><a href="#" class="subordinate-count-link" onclick="window.${instanceName}.openSubordinateTableFromCell(event, ${req.arr_id}, ${rowId}); return false;" title="Посмотреть подчиненную таблицу">(${count})</a>`;
+                            } else {
+                                let displayValue = this.formatSubordinateCellValue(cellValue, req);
+                                if (searchTerm) {
+                                    displayValue = this.highlightSearchTerm(displayValue, searchTerm);
+                                }
+                                td.innerHTML = displayValue;
+                            }
+                            tr.appendChild(td);
+                        });
+
+                        tbody.appendChild(tr);
+
+                        // Attach mousedown/mouseup handlers for the drag handle of the new row (issue #1617).
+                        // The tbody-level drop/dragstart/dragover listeners attached by attachSubordinateRowDragHandlers
+                        // already cover these new rows via event delegation, so we must NOT call
+                        // attachSubordinateRowDragHandlers again (that would add duplicate tbody listeners,
+                        // causing two _m_ord requests on drop — issue #1664).
+                        const handle = tr.querySelector('.subordinate-drag-handle');
+                        if (handle) {
+                            handle.addEventListener('mousedown', () => {
+                                if (!handle.classList.contains('subordinate-drag-handle-disabled')) {
+                                    tr.draggable = true;
+                                }
+                            });
+                            handle.addEventListener('mouseup', () => {
+                                tr.draggable = false;
+                            });
+                        }
+                    });
+                }
+
+            } catch (error) {
+                console.error('Error loading more subordinate rows:', error);
+            } finally {
+                container._subordinateIsLoading = false;
+                // Hide spinner
+                if (spinner) spinner.style.display = 'none';
             }
         }
 
@@ -9656,7 +11150,7 @@ class IntegramTable{
                         + Добавить
                     </button>
                     <div class="subordinate-search-wrapper">
-                        <input type="text" class="subordinate-search-input" placeholder="Поиск..." value="${ this.escapeHtml(searchTerm) }" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                        <input type="text" class="subordinate-search-input" placeholder="Поиск..." value="${ this.escapeHtml(searchTerm) }" autocomplete="off">
                         <button type="button" class="subordinate-search-clear" title="Очистить поиск"${ searchTerm ? '' : ' style="display: none;"' }><i class="pi pi-times"></i></button>
                     </div>
                     <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
@@ -9670,6 +11164,9 @@ class IntegramTable{
                 html += `<div class="subordinate-table-empty">${ emptyMessage }</div>`;
             } else {
                 html += `<div class="subordinate-table-wrapper"><table class="subordinate-table"><thead><tr>`;
+
+                // Drag handle header column (issue #1617)
+                html += `<th class="subordinate-drag-handle-th"></th>`;
 
                 // Header: main value column + requisite columns (with sort indicators)
                 columns.forEach((col, colIdx) => {
@@ -9689,7 +11186,10 @@ class IntegramTable{
                     const rowId = row.i;
                     const values = row.r || [];
 
-                    html += `<tr data-row-id="${ rowId }">`;
+                    html += `<tr data-row-id="${ rowId }" draggable="false">`;
+
+                    // Drag handle cell (issue #1617)
+                    html += `<td class="subordinate-drag-handle-td"><span class="subordinate-drag-handle" title="Перетащить строку"><i class="pi pi-equals"></i></span></td>`;
 
                     // First column (main value) - clickable to edit
                     const mainValue = values[0] || '';
@@ -9758,6 +11258,9 @@ class IntegramTable{
                 });
             });
 
+            // Attach drag-and-drop row reorder handlers (issue #1617)
+            this.attachSubordinateRowDragHandlers(container, arrId, parentRecordId);
+
             // Attach search input handler
             const searchInput = container.querySelector('.subordinate-search-input');
             const searchClear = container.querySelector('.subordinate-search-clear');
@@ -9807,6 +11310,12 @@ class IntegramTable{
                     searchInput.setSelectionRange(newPos, newPos);
                 }
             }
+
+            // Re-attach infinite scroll listener after re-render (issue #1640)
+            // (re-render happens on sort/search but pagination state is preserved on container)
+            if (container._subordinateHasMore !== undefined) {
+                this.attachSubordinateScrollListener(container);
+            }
         }
 
         /**
@@ -9842,6 +11351,166 @@ class IntegramTable{
                 sortState,
                 container._subordinateSearchTerm || ''
             );
+        }
+
+        /**
+         * Attach drag-and-drop handlers to subordinate table rows for reordering (issue #1617).
+         * Uses HTML5 drag-and-drop API. Drag is initiated only via the handle cell.
+         * While _m_ord is in flight, all handles are disabled.
+         */
+        attachSubordinateRowDragHandlers(container, arrId, parentRecordId) {
+            const tbody = container.querySelector('.subordinate-table tbody');
+            if (!tbody) return;
+
+            let dragSrcRow = null;
+            let dragTargetRow = null;
+
+            const setHandlesDisabled = (disabled) => {
+                container.querySelectorAll('.subordinate-drag-handle').forEach(h => {
+                    h.classList.toggle('subordinate-drag-handle-disabled', disabled);
+                    h.closest('tr').draggable = !disabled;
+                });
+            };
+
+            const getRows = () => Array.from(tbody.querySelectorAll('tr[data-row-id]'));
+
+            // Enable draggable on mousedown of handle, disable on mouseup (so normal clicks don't trigger drag)
+            container.querySelectorAll('.subordinate-drag-handle').forEach(handle => {
+                const row = handle.closest('tr');
+
+                handle.addEventListener('mousedown', () => {
+                    if (!handle.classList.contains('subordinate-drag-handle-disabled')) {
+                        row.draggable = true;
+                    }
+                });
+                handle.addEventListener('mouseup', () => {
+                    row.draggable = false;
+                });
+            });
+
+            tbody.addEventListener('dragstart', (e) => {
+                const row = e.target.closest('tr[data-row-id]');
+                if (!row || !row.draggable) { e.preventDefault(); return; }
+                dragSrcRow = row;
+                row.classList.add('subordinate-row-dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', row.dataset.rowId);
+            });
+
+            tbody.addEventListener('dragend', (e) => {
+                const row = e.target.closest('tr[data-row-id]');
+                if (row) {
+                    row.draggable = false;
+                    row.classList.remove('subordinate-row-dragging');
+                }
+                tbody.querySelectorAll('.subordinate-row-drag-over').forEach(r => r.classList.remove('subordinate-row-drag-over'));
+                dragSrcRow = null;
+                dragTargetRow = null;
+            });
+
+            tbody.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                const row = e.target.closest('tr[data-row-id]');
+                if (!row || row === dragSrcRow) return;
+                tbody.querySelectorAll('.subordinate-row-drag-over').forEach(r => r.classList.remove('subordinate-row-drag-over'));
+                row.classList.add('subordinate-row-drag-over');
+                dragTargetRow = row;
+            });
+
+            tbody.addEventListener('dragleave', (e) => {
+                const row = e.target.closest('tr[data-row-id]');
+                if (row) row.classList.remove('subordinate-row-drag-over');
+            });
+
+            tbody.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                const targetRow = dragTargetRow;
+                dragTargetRow = null;
+                if (!targetRow || !dragSrcRow || targetRow === dragSrcRow) return;
+
+                targetRow.classList.remove('subordinate-row-drag-over');
+
+                // Reorder rows in DOM
+                const rows = getRows();
+                const srcIdx = rows.indexOf(dragSrcRow);
+                const tgtIdx = rows.indexOf(targetRow);
+
+                if (srcIdx === -1 || tgtIdx === -1) return;
+
+                // Determine insert position based on cursor Y relative to target row midpoint (issue #1666).
+                // This mirrors main-app.js handleReorder logic: top half → insert before, bottom half → insert after.
+                const rect = targetRow.getBoundingClientRect();
+                const midY = rect.top + rect.height / 2;
+                const insertBeforeTarget = e.clientY < midY;
+
+                if (insertBeforeTarget) {
+                    tbody.insertBefore(dragSrcRow, targetRow);
+                } else {
+                    tbody.insertBefore(dragSrcRow, targetRow.nextSibling);
+                }
+
+                // Collect new order of row IDs
+                const newOrder = getRows().map(r => r.dataset.rowId);
+
+                // New 1-based position of the moved record
+                const movedRecordId = dragSrcRow.dataset.rowId;
+                const newPosition = newOrder.indexOf(movedRecordId) + 1;
+
+                // Update in-memory data to reflect new order
+                const dataMap = {};
+                (container._subordinateData || []).forEach(row => { dataMap[row.i] = row; });
+                container._subordinateData = newOrder.map(id => dataMap[id]).filter(Boolean);
+
+                // Disable all handles while saving
+                setHandlesDisabled(true);
+
+                await this.saveSubordinateRowOrder(movedRecordId, newPosition, container, setHandlesDisabled);
+            });
+        }
+
+        /**
+         * Save the new row order via _m_ord command (issue #1617).
+         * Sends only the moved record's ID and its new 1-based position.
+         * The backend recalculates order for other records automatically.
+         * Re-enables handles when done.
+         */
+        async saveSubordinateRowOrder(movedRecordId, newPosition, container, setHandlesDisabled) {
+            const apiBase = this.getApiBase();
+            const params = new URLSearchParams();
+            params.append('order', newPosition);
+            if (typeof xsrf !== 'undefined') {
+                params.append('_xsrf', xsrf);
+            }
+
+            try {
+                const response = await fetch(`${apiBase}/_m_ord/${movedRecordId}?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+
+                const responseText = await response.text();
+                let result;
+                try {
+                    result = JSON.parse(responseText);
+                } catch (jsonError) {
+                    throw new Error(`Невалидный JSON ответ: ${responseText}`);
+                }
+
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
+                }
+            } catch (error) {
+                console.error('Error saving row order:', error);
+                this.showToast(`Ошибка сохранения порядка: ${ error.message }`, 'error');
+                // Reload to get correct server order on error
+                await this.loadSubordinateTable(container, container._subordinateArrId, container._subordinateParentRecordId);
+                return;
+            } finally {
+                setHandlesDisabled(false);
+            }
         }
 
         /**
@@ -10149,7 +11818,7 @@ class IntegramTable{
                                            class="inline-editor-reference-search form-ref-search"
                                            id="sub-field-${ req.id }-search"
                                            placeholder="Поиск..."
-                                           autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                           autocomplete="off">
                                     <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
                                     <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                                 </div>
@@ -10263,6 +11932,17 @@ class IntegramTable{
             };
             document.addEventListener('keydown', handleEscape);
 
+            // Enter in input/textarea triggers Save (issue #1467)
+            const saveBtn = modal.querySelector('#subordinate-save-btn');
+            modal.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+                    if (!saveBtn.disabled) {
+                        e.preventDefault();
+                        saveBtn.click();
+                    }
+                }
+            });
+
             // Save handler
             modal.querySelector('#subordinate-save-btn').addEventListener('click', async () => {
                 const form = modal.querySelector('#subordinate-edit-form');
@@ -10316,8 +11996,9 @@ class IntegramTable{
                         throw new Error(`Невалидный JSON ответ: ${responseText}`);
                     }
 
-                    if (result.error) {
-                        throw new Error(result.error);
+                    const serverError = this.getServerError(result);
+                    if (serverError) {
+                        throw new Error(serverError);
                     }
 
                     closeModal();
@@ -10353,6 +12034,73 @@ class IntegramTable{
                     console.error('Error creating subordinate record:', error);
                     this.showToast(`Ошибка: ${ error.message }`, 'error');
                 }
+            });
+        }
+
+        attachPasswordResetHandlers(modal) {
+            // Attach reset password button handlers for field id=20 (issue #1471)
+            const resetBtns = modal.querySelectorAll('.pwd-reset-btn');
+            const resetMailBtns = modal.querySelectorAll('.pwd-reset-mail-btn');
+
+            const generatePassword = () => (Math.random().toString(36) + Math.random().toString(36)).replace(/\./g, '').substr(1, 8);
+
+            const copyToClipboard = (text) => {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text);
+                } else {
+                    const el = document.createElement('textarea');
+                    el.value = text;
+                    document.body.appendChild(el);
+                    el.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(el);
+                }
+            };
+
+            const showCopied = (fieldId) => {
+                const copiedSpan = modal.querySelector(`#field-${ fieldId }-copied`);
+                if (copiedSpan) {
+                    copiedSpan.style.display = '';
+                    setTimeout(() => { copiedSpan.style.display = 'none'; }, 2500);
+                }
+            };
+
+            resetBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const fieldId = btn.dataset.fieldId;
+                    const pwdInput = modal.querySelector(`#field-${ fieldId }`);
+                    if (!pwdInput) return;
+                    const pwd = generatePassword();
+                    pwdInput.value = pwd;
+                    copyToClipboard(pwd);
+                    showCopied(fieldId);
+                    // Warn user to save the generated password (issue #1481)
+                    this.showCopyNotification('Пароль сгенерирован и скопирован в буфер. Обязательно сохраните эту форму!', false, 7000);
+                });
+            });
+
+            resetMailBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const fieldId = btn.dataset.fieldId;
+                    const pwdInput = modal.querySelector(`#field-${ fieldId }`);
+                    if (!pwdInput) return;
+                    // Copy login link (username from first column of the table, issue #1479)
+                    // Do not allow copying invitation before the record is saved (issue #1591)
+                    const username = modal.dataset.firstColumnValue || '';
+                    if (!username) {
+                        this.showCopyNotification('Сохраните запись перед копированием приглашения', true, 5000);
+                        return;
+                    }
+                    const pwd = generatePassword();
+                    pwdInput.value = pwd;
+                    const db = window.location.pathname.split('/')[1] || '';
+                    // Build login link without prepending username as a separate line (issue #1591)
+                    const loginLink = `Ссылка для входа: https://${ location.host }/start.html?db=${ db }&u=${ encodeURIComponent(username) }\nПароль: ${ pwd }`;
+                    copyToClipboard(loginLink);
+                    showCopied(fieldId);
+                    // Warn user to save the generated password (issue #1481)
+                    this.showCopyNotification('Пароль сгенерирован и скопирован в буфер. Обязательно сохраните эту форму!', false, 7000);
+                });
             });
         }
 
@@ -10519,14 +12267,18 @@ class IntegramTable{
 
                 if (!searchInput || !dropdown || !hiddenInput) continue;
 
+                // Look up attrs from reqs metadata to determine if id parameter should be included (issue #1571)
+                const reqMeta = reqs && Array.isArray(reqs) ? reqs.find(r => String(r.id) === String(refReqId)) : null;
+                const refAttrs = (reqMeta && reqMeta.attrs) || wrapper.dataset.attrs || '';
+
                 // Issue #853: Handle multi-select reference editors separately
                 if (wrapper.dataset.multi === '1') {
-                    this.initFormMultiReferenceEditor(wrapper, refReqId, recordId);
+                    this.initFormMultiReferenceEditor(wrapper, refReqId, recordId, refAttrs);
                     continue;
                 }
 
                 try {
-                    const options = await this.fetchReferenceOptions(refReqId, recordId);
+                    const options = await this.fetchReferenceOptions(refReqId, recordId, '', {}, refAttrs);
 
                     // Store options data on the wrapper (array of [id, text] tuples)
                     wrapper._referenceOptions = options;
@@ -10577,7 +12329,7 @@ class IntegramTable{
                                 // If not all fetched, re-query from server
                                 if (!wrapper._allOptionsFetched) {
                                     try {
-                                        const serverOptions = await this.fetchReferenceOptions(refReqId, recordId, searchText, wrapper._extraParams || {});
+                                        const serverOptions = await this.fetchReferenceOptions(refReqId, recordId, searchText, wrapper._extraParams || {}, refAttrs);
                                         wrapper._referenceOptions = serverOptions;
                                         this.renderFormReferenceOptions(dropdown, serverOptions, hiddenInput, searchInput);
                                     } catch (error) {
@@ -10699,8 +12451,9 @@ class IntegramTable{
                     const applyHook = async () => {
                         const isEmpty = !watchedHiddenInput.value;
                         targetWrapper._extraParams = isEmpty ? (hook.onEmpty || {}) : (hook.onFilled || {});
+                        const targetAttrs = (reqs && Array.isArray(reqs) ? (reqs.find(r => String(r.id) === String(refReqId)) || {}).attrs : '') || targetWrapper.dataset.attrs || '';
                         try {
-                            const options = await this.fetchReferenceOptions(refReqId, recordId, '', targetWrapper._extraParams);
+                            const options = await this.fetchReferenceOptions(refReqId, recordId, '', targetWrapper._extraParams, targetAttrs);
                             targetWrapper._referenceOptions = options;
                             targetWrapper._allOptionsFetched = options.length < 50;
                             this.renderFormReferenceOptions(targetDropdown, options, targetHiddenInput, targetSearchInput);
@@ -10722,7 +12475,7 @@ class IntegramTable{
          * Shows selected values as removable tags and a search input to add more.
          * Updates the hidden input with comma-separated selected IDs.
          */
-        async initFormMultiReferenceEditor(wrapper, refReqId, recordId) {
+        async initFormMultiReferenceEditor(wrapper, refReqId, recordId, attrs = '') {
             const searchInput = wrapper.querySelector('.form-ref-search');
             const dropdown = wrapper.querySelector('.form-ref-dropdown');
             const hiddenInput = wrapper.querySelector('.form-multi-ref-value');
@@ -10731,7 +12484,7 @@ class IntegramTable{
             if (!searchInput || !dropdown || !hiddenInput || !tagsContainer) return;
 
             try {
-                const options = await this.fetchReferenceOptions(refReqId, recordId);
+                const options = await this.fetchReferenceOptions(refReqId, recordId, '', {}, attrs);
                 wrapper._referenceOptions = options;
                 wrapper._allOptionsFetched = options.length < 50;
 
@@ -10802,9 +12555,37 @@ class IntegramTable{
                     }
                 };
 
+                // Store callbacks on wrapper so saveRecordForFormReference can update multi-select after creation
+                wrapper._renderTags = renderTags;
+                wrapper._updateHiddenInput = updateHiddenInput;
+
+                // Issue #1688: Add button support for form multi-select reference editors
+                const addButton = wrapper.querySelector('.form-ref-add');
+                const refTypeId = wrapper.dataset.refTypeId;
+
+                const updateAddButtonVisibility = (searchText) => {
+                    if (!addButton) return;
+                    const selectedIds = new Set((wrapper._selectedItems || []).map(s => s.id));
+                    const availableCount = (wrapper._referenceOptions || []).filter(([id]) => !selectedIds.has(id)).length;
+                    // Show add button when user has typed something OR when no options are available (issue #1686)
+                    addButton.style.display = (searchText.length > 0 || availableCount === 0) ? '' : 'none';
+                };
+
+                // Attach add button click handler
+                if (addButton && refTypeId) {
+                    addButton.addEventListener('click', async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const inputValue = searchInput.value.trim();
+                        await this.openCreateFormForFormReference(refTypeId, inputValue, recordId, hiddenInput, searchInput, wrapper, dropdown);
+                    });
+                }
+
                 // Initial render
                 renderTags();
                 updateHiddenInput();
+                // Set initial add button visibility (issue #1686: show immediately when no options available)
+                updateAddButtonVisibility('');
 
                 // Show dropdown on focus (issue #917: use 'block' not '' to override CSS display:none on .form-ref-editor-box)
                 searchInput.addEventListener('focus', () => {
@@ -10815,9 +12596,11 @@ class IntegramTable{
                 // Filter on input
                 let searchTimeout;
                 searchInput.addEventListener('input', (e) => {
+                    const searchText = e.target.value.trim();
+                    updateAddButtonVisibility(searchText);
                     clearTimeout(searchTimeout);
                     searchTimeout = setTimeout(() => {
-                        renderDropdown(e.target.value.trim());
+                        renderDropdown(searchText);
                         dropdown.style.display = 'block';
                     }, 200);
                 });
@@ -10835,6 +12618,8 @@ class IntegramTable{
                     }
                     searchInput.value = '';
                     dropdown.style.display = 'none';
+                    // Update add button visibility after selection (available options may have changed)
+                    updateAddButtonVisibility('');
                 });
 
                 // Handle tag click: remove button removes tag, clicking tag itself opens edit form (issue #871)
@@ -10849,6 +12634,8 @@ class IntegramTable{
                         wrapper._selectedItems = (wrapper._selectedItems || []).filter(s => !(s.id === id && s.text === text));
                         renderTags();
                         updateHiddenInput();
+                        // Update add button visibility after removal (available options may have changed)
+                        updateAddButtonVisibility(searchInput.value.trim());
                         return;
                     }
                     const tag = e.target.closest('.multi-ref-tag');
@@ -10859,7 +12646,6 @@ class IntegramTable{
                     }
                     const id = tag.dataset.id;
                     if (!id) return;
-                    const refTypeId = wrapper.dataset.refTypeId;
                     if (refTypeId) {
                         this.openEditForm(id, refTypeId, 0);
                     }
@@ -11208,7 +12994,7 @@ class IntegramTable{
                                            class="inline-editor-reference-search form-ref-search"
                                            id="field-form-ref-${req.id}-search"
                                            placeholder="Поиск..."
-                                           autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                           autocomplete="off">
                                     <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
                                     <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                                 </div>
@@ -11341,9 +13127,9 @@ class IntegramTable{
             }
 
             const apiBase = this.getApiBase();
-            // Issue #616: Use F_U from URL as parent (up) when F_U > 1
-            const parentIdForNew = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
-            const url = `${apiBase}/_m_new/${typeId}?JSON&up=${parentIdForNew}`;
+            // Issue #1690: Reference directory values always belong to the root (up=1),
+            // not to the current form's parent record
+            const url = `${apiBase}/_m_new/${typeId}?JSON&up=1`;
 
             try {
                 const response = await fetch(url, {
@@ -11366,8 +13152,9 @@ class IntegramTable{
                     result = { success: true };
                 }
 
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 const createdId = result.obj || result.id || result.i;
@@ -11383,9 +13170,21 @@ class IntegramTable{
 
                 // Set the created record in the form reference field
                 if (createdId) {
-                    hiddenInput.value = createdId;
-                    searchInput.value = createdValue;
-                    dropdown.style.display = 'none';
+                    // Issue #1688: Handle multi-select reference fields differently from single-select
+                    if (wrapper.dataset.multi === '1') {
+                        // Add the new record to the multi-select selection
+                        if (!(wrapper._selectedItems || []).find(s => s.id === String(createdId))) {
+                            wrapper._selectedItems = [...(wrapper._selectedItems || []), { id: String(createdId), text: createdValue }];
+                        }
+                        if (wrapper._renderTags) wrapper._renderTags();
+                        if (wrapper._updateHiddenInput) wrapper._updateHiddenInput();
+                        searchInput.value = '';
+                        dropdown.style.display = 'none';
+                    } else {
+                        hiddenInput.value = createdId;
+                        searchInput.value = createdValue;
+                        dropdown.style.display = 'none';
+                    }
 
                     // Re-fetch options to include the new record
                     try {
@@ -11641,41 +13440,83 @@ class IntegramTable{
                     // Build a map of fieldId -> form-group element
                     const groupMap = {};
                     formGroups.forEach(group => {
-                        // Find the field input inside to get its ID
-                        const input = group.querySelector('[id^="field-"]');
+                        // Find the field input inside to get its ID.
+                        // Prefer hidden inputs (name^="t") which carry the canonical field ID,
+                        // because FILE-type fields have a type="file" input with id="field-{id}-file"
+                        // that appears before the hidden input id="field-{id}" (issue #1526).
+                        let input = group.querySelector('input[type="hidden"][id^="field-"], input[id^="field-"]:not([type="file"])');
+                        if (!input) {
+                            input = group.querySelector('[id^="field-"]');
+                        }
                         if (input) {
-                            const match = input.id.match(/^field-(.+?)(-search|-picker)?$/);
+                            const match = input.id.match(/^field-(.+?)(-search|-picker|-file)?$/);
                             if (match) {
                                 groupMap[match[1]] = group;
                             }
                         }
                     });
 
-                    // Ensure the first column (main field) is always at the top
+                    // Ensure the first column (main field) is always at the top.
                     const mainGroup = groupMap['main'];
                     const orderedGroups = [];
-                    const usedIds = new Set();
                     if (mainGroup) {
                         orderedGroups.push(mainGroup);
-                        usedIds.add('main');
                     }
 
-                    // Reorder: append groups in the saved order, then append any remaining
-                    order.forEach(fieldId => {
-                        if (groupMap[fieldId] && !usedIds.has(fieldId)) {
-                            orderedGroups.push(groupMap[fieldId]);
-                            usedIds.add(fieldId);
+                    // Build the natural DOM order of non-main groups (the order produced by
+                    // renderAttributesForm, which already interpolates unsaved fields at their
+                    // correct metadata positions - issue #1526).
+                    const nonMainGroups = formGroups.filter(g => g !== mainGroup);
+                    const nonMainKeys = nonMainGroups.map(group => {
+                        let input = group.querySelector('input[type="hidden"][id^="field-"], input[id^="field-"]:not([type="file"])');
+                        if (!input) input = group.querySelector('[id^="field-"]');
+                        if (input) {
+                            const match = input.id.match(/^field-(.+?)(-search|-picker|-file)?$/);
+                            return match ? match[1] : null;
+                        }
+                        return null;
+                    });
+
+                    // Assign sort keys to non-main groups using the same interpolation logic as
+                    // renderAttributesForm (issue #1531): saved fields get integer keys, unsaved
+                    // fields get fractional keys placing them before their next saved neighbor in
+                    // natural DOM order, so they appear at approximately the right position.
+                    const scale = nonMainGroups.length + 1;
+                    const savedIndex = new Map();
+                    nonMainKeys.forEach(key => {
+                        if (key !== null) savedIndex.set(key, order.indexOf(key));
+                    });
+
+                    const sortKey = new Map();
+                    nonMainGroups.forEach((group, natIdx) => {
+                        const key = nonMainKeys[natIdx];
+                        if (key === null) {
+                            sortKey.set(group, natIdx + 1);  // fallback: preserve original position
+                            return;
+                        }
+                        const idx = savedIndex.get(key);
+                        if (idx !== -1) {
+                            sortKey.set(group, idx * scale);
+                        } else {
+                            // Find nearest saved successor in natural DOM order
+                            let nextSavedIdx = order.length;
+                            for (let i = natIdx + 1; i < nonMainGroups.length; i++) {
+                                const k = nonMainKeys[i];
+                                if (k !== null) {
+                                    const si = savedIndex.get(k);
+                                    if (si !== -1) { nextSavedIdx = si; break; }
+                                }
+                            }
+                            sortKey.set(group, nextSavedIdx * scale - scale + natIdx + 1);
                         }
                     });
-                    // Append remaining groups that weren't in the saved order
+
+                    nonMainGroups.sort((a, b) => sortKey.get(a) - sortKey.get(b));
+                    nonMainGroups.forEach(g => orderedGroups.push(g));
+
+                    // Also append any groups that had no field input at all (no key)
                     formGroups.forEach(group => {
-                        const input = group.querySelector('[id^="field-"]');
-                        if (input) {
-                            const match = input.id.match(/^field-(.+?)(-search|-picker)?$/);
-                            if (match && !usedIds.has(match[1])) {
-                                orderedGroups.push(group);
-                            }
-                        } else if (!orderedGroups.includes(group)) {
+                        if (!orderedGroups.includes(group)) {
                             orderedGroups.push(group);
                         }
                     });
@@ -11864,8 +13705,9 @@ class IntegramTable{
                     result = { success: true };
                 }
 
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 // Check for warning - show modal and stay in edit mode
@@ -12026,6 +13868,182 @@ class IntegramTable{
                 console.error('Error deleting record:', error);
                 this.showToast(`Ошибка удаления: ${ error.message }`, 'error');
             }
+        }
+
+        /**
+         * Duplicate the current record: collect form data, optionally prompt for unique first-column value,
+         * call _m_new with the same parent, then reopen the edit form for the newly created record.
+         * Issue #1575
+         */
+        async duplicateRecord(modal, recordId, typeId, parentId, metadata) {
+            // Check if this type has unique:"1" on the first column
+            const isUnique = metadata && (metadata.unique === '1' || metadata.unique === 1 || metadata.unique === true);
+
+            // Get current first-column value from form
+            const form = modal.querySelector('#edit-form');
+            if (!form) return;
+
+            const formData = new FormData(form);
+            const mainValue = formData.get('main');
+
+            let newFirstColumnValue = mainValue;
+
+            if (isUnique) {
+                // Prompt user to enter a new value for the first (unique) column
+                const prompted = await this.showDuplicateUniqueValueModal(mainValue);
+                if (prompted === null) {
+                    // User cancelled
+                    return;
+                }
+                newFirstColumnValue = prompted;
+            }
+
+            const apiBase = this.getApiBase();
+
+            try {
+                // Build request body same as saveRecord (non-file variant)
+                const params = new URLSearchParams();
+
+                if (typeof xsrf !== 'undefined') {
+                    params.append('_xsrf', xsrf);
+                }
+
+                // Add main value as t{typeId}
+                if (newFirstColumnValue !== '' && newFirstColumnValue !== null && newFirstColumnValue !== undefined) {
+                    params.append(`t${ typeId }`, newFirstColumnValue);
+                }
+
+                // Add all other form fields
+                for (const [key, value] of formData.entries()) {
+                    if (key === 'main') continue;
+                    // Skip file fields (don't duplicate files by reference)
+                    const fieldMatch = key.match(/^t(\d+)$/);
+                    if (fieldMatch) {
+                        const reqId = fieldMatch[1];
+                        const uploadContainer = modal.querySelector(`.form-file-upload[data-req-id="${ reqId }"]`);
+                        if (uploadContainer) continue; // skip file fields
+                    }
+                    if (value !== '' && value !== null && value !== undefined) {
+                        params.append(key, value);
+                    }
+                }
+
+                const url = `${ apiBase }/_m_new/${ typeId }?JSON&up=${ parentId || 1 }`;
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+
+                const text = await response.text();
+                let result;
+                try {
+                    result = JSON.parse(text);
+                } catch (e) {
+                    if (!response.ok) throw new Error(text);
+                    result = { success: true };
+                }
+
+                const serverError = this.getServerError(result);
+                if (serverError) throw new Error(serverError);
+
+                const newId = result.id || result.i || null;
+                if (!newId) throw new Error('Сервер не вернул ID новой записи');
+
+                // Close the current modal
+                modal.remove();
+                if (modal._overlayElement) {
+                    modal._overlayElement.remove();
+                }
+                window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+                if (this.currentEditModal && this.currentEditModal.modal === modal) {
+                    this.currentEditModal = null;
+                }
+
+                this.showToast('Запись дублирована', 'success');
+
+                // Reload table data
+                this.data = [];
+                this.loadedRecords = 0;
+                this.hasMore = true;
+                this.totalRows = null;
+                await this.loadData(false);
+
+                // Open edit form for the newly created record
+                await this.openEditForm(newId, typeId, 0);
+
+            } catch (error) {
+                console.error('Error duplicating record:', error);
+                this.showToast(`Ошибка дублирования: ${ error.message }`, 'error');
+            }
+        }
+
+        /**
+         * Show a modal dialog asking user to enter a new value for the unique first column before duplicating.
+         * @param {string} currentValue - current value of the first column
+         * @returns {Promise<string|null>} - new value entered by user, or null if cancelled
+         */
+        showDuplicateUniqueValueModal(currentValue) {
+            return new Promise((resolve) => {
+                const modalId = `duplicate-unique-${ Date.now() }`;
+                const escapedValue = String(currentValue || '').replace(/"/g, '&quot;');
+                const modalHtml = `
+                    <div class="integram-modal-overlay" id="${ modalId }">
+                        <div class="integram-modal" style="max-width: 440px;">
+                            <div class="integram-modal-header">
+                                <h3>Дублирование записи</h3>
+                            </div>
+                            <div class="integram-modal-body">
+                                <p style="margin: 0 0 12px 0;">Поле первой колонки должно быть уникальным. Введите новое значение:</p>
+                                <input type="text" id="duplicate-unique-input" class="form-control" value="${ escapedValue }" style="width:100%;">
+                            </div>
+                            <div class="integram-modal-footer">
+                                <button type="button" class="btn btn-primary duplicate-unique-ok-btn" style="margin-right: 8px;">Дублировать</button>
+                                <button type="button" class="btn btn-secondary duplicate-unique-cancel-btn">Отменить</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+                const confirmModal = document.getElementById(modalId);
+                const input = confirmModal.querySelector('#duplicate-unique-input');
+
+                // Select all text for easy replacement
+                input.focus();
+                input.select();
+
+                const cleanup = (result) => {
+                    confirmModal.remove();
+                    resolve(result);
+                };
+
+                confirmModal.querySelector('.duplicate-unique-ok-btn').addEventListener('click', () => {
+                    cleanup(input.value);
+                });
+                confirmModal.querySelector('.duplicate-unique-cancel-btn').addEventListener('click', () => cleanup(null));
+
+                // Enter key confirms
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') cleanup(input.value);
+                    if (e.key === 'Escape') cleanup(null);
+                });
+
+                // Close on overlay click
+                confirmModal.addEventListener('click', (e) => {
+                    if (e.target === confirmModal) cleanup(null);
+                });
+
+                // Close on Escape key
+                const handleEscape = (e) => {
+                    if (e.key === 'Escape') {
+                        document.removeEventListener('keydown', handleEscape);
+                        cleanup(null);
+                    }
+                };
+                document.addEventListener('keydown', handleEscape);
+            });
         }
 
         /**
@@ -12378,8 +14396,9 @@ class IntegramTable{
 
             const result = await response.json();
 
-            if (result.error) {
-                throw new Error(result.error);
+            const serverError = this.getServerError(result);
+            if (serverError) {
+                throw new Error(serverError);
             }
 
             // Return the file path from server response
@@ -12773,7 +14792,7 @@ class IntegramTable{
             // Show errors if any
             if (errors.length > 0) {
                 errorsDiv.style.display = 'block';
-                errorsDiv.innerHTML = `<div class="alert alert-warning" style="max-height: 200px; overflow-y: auto; font-size: 12px; margin-top: 10px;">
+                errorsDiv.innerHTML = `<div class="alert alert-warning" style="max-height: 200px; overflow-y: auto; font-size: 0.75rem; margin-top: 10px;">
                     <strong>Предупреждения:</strong><br>
                     ${ errors.map(e => this.escapeHtml(e)).join('<br>') }
                 </div>`;
@@ -12807,7 +14826,11 @@ class IntegramTable{
         }
 
         /**
-         * Toggle export menu visibility
+         * Toggle export menu visibility.
+         * Issue #1652: the menu is appended to document.body with position:fixed so it
+         * escapes the overflow:hidden / overflow-y:hidden clipping of ancestor containers
+         * (.integram-table-header, .integram-table-controls).  The same technique is used
+         * by _attachFixedDropdown (issue #1384).
          * @param {Event} event - Click event
          */
         toggleExportMenu(event) {
@@ -12828,6 +14851,24 @@ class IntegramTable{
             });
 
             if (!isVisible) {
+                // Issue #1652: move menu to document.body so it is not clipped by
+                // overflow:hidden on .integram-table-header / .integram-table-controls.
+                if (menu.parentNode !== document.body) {
+                    document.body.appendChild(menu);
+                }
+
+                // Position the menu below the button using fixed coordinates.
+                const btn = event && event.currentTarget
+                    ? event.currentTarget
+                    : document.querySelector(`#${ menuId }`)?.previousElementSibling;
+                if (btn) {
+                    const rect = btn.getBoundingClientRect();
+                    menu.style.position = 'fixed';
+                    menu.style.top = `${ rect.bottom + 4 }px`;
+                    menu.style.left = `${ rect.left }px`;
+                    menu.style.right = 'auto';
+                }
+
                 menu.style.display = 'block';
 
                 // Close menu when clicking outside
@@ -13469,6 +15510,7 @@ class IntegramCreateFormHelper {
         this.tableTypeId = tableTypeId;
         this.parentId = parentId;
         this.metadataCache = {};
+        this.metadataFetchPromises = {};  // In-progress fetch promises by type ID (issue #1455)
         this.grantOptionsCache = null;  // Cache for GRANT dropdown options (issue #607)
         this.reportColumnOptionsCache = null;  // Cache for REPORT_COLUMN dropdown options (issue #607)
     }
@@ -13491,7 +15533,8 @@ class IntegramCreateFormHelper {
         const result = {
             required: false,
             multi: false,
-            alias: null
+            alias: null,
+            defaultValue: null
         };
 
         if (!attrs) return result;
@@ -13499,9 +15542,19 @@ class IntegramCreateFormHelper {
         result.required = attrs.includes(':!NULL:');
         result.multi = attrs.includes(':MULTI:');
 
-        const aliasMatch = attrs.match(/:ALIAS=(.*?):/);
+        const aliasMatch = attrs.match(/:ALIAS=(.*?):/u);
         if (aliasMatch) {
             result.alias = aliasMatch[1];
+        }
+
+        // Extract default value: strip all known flags and use the remainder
+        let stripped = attrs
+            .replace(/:!NULL:/g, '')
+            .replace(/:MULTI:/g, '')
+            .replace(/:ALIAS=(.*?):/gu, '')
+            .trim();
+        if (stripped.length > 0) {
+            result.defaultValue = stripped;
         }
 
         return result;
@@ -13602,7 +15655,7 @@ class IntegramCreateFormHelper {
             color: white;
             z-index: 10000;
             font-family: sans-serif;
-            font-size: 14px;
+            font-size: 0.875rem;
             box-shadow: 0 2px 8px rgba(0,0,0,0.2);
             background-color: ${type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#17a2b8'};
         `;
@@ -13845,7 +15898,8 @@ class IntegramCreateFormHelper {
                                        class="inline-editor-reference-search form-ref-search"
                                        id="field-${req.id}-search"
                                        placeholder="Добавить..."
-                                       autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                       autocomplete="off">
+                                <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                             </div>
                             <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${req.id}-dropdown" style="display:none;">
                                 <div class="inline-editor-reference-empty">Загрузка...</div>
@@ -13871,7 +15925,7 @@ class IntegramCreateFormHelper {
                                        class="inline-editor-reference-search form-ref-search"
                                        id="field-${req.id}-search"
                                        placeholder="Поиск..."
-                                       autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                       autocomplete="off">
                                 <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
                             </div>
                             <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${req.id}-dropdown">
@@ -14240,9 +16294,37 @@ class IntegramCreateFormHelper {
                 }
             };
 
+            // Store callbacks on wrapper so saveRecordForFormReference can update multi-select after creation
+            wrapper._renderTags = renderTags;
+            wrapper._updateHiddenInput = updateHiddenInput;
+
+            // Issue #1688: Add button support for form multi-select reference editors
+            const addButton = wrapper.querySelector('.form-ref-add');
+            const refTypeId = wrapper.dataset.refTypeId;
+
+            const updateAddButtonVisibility = (searchText) => {
+                if (!addButton) return;
+                const selectedIds = new Set((wrapper._selectedItems || []).map(s => s.id));
+                const availableCount = (wrapper._referenceOptions || []).filter(([id]) => !selectedIds.has(id)).length;
+                // Show add button when user has typed something OR when no options are available (issue #1686)
+                addButton.style.display = (searchText.length > 0 || availableCount === 0) ? '' : 'none';
+            };
+
+            // Attach add button click handler
+            if (addButton && refTypeId) {
+                addButton.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const inputValue = searchInput.value.trim();
+                    await self.openCreateFormForFormReference(refTypeId, inputValue, null, hiddenInput, searchInput, wrapper, dropdown);
+                });
+            }
+
             // Initial render
             renderTags();
             updateHiddenInput();
+            // Set initial add button visibility (issue #1686: show immediately when no options available)
+            updateAddButtonVisibility('');
 
             // Show dropdown on focus
             searchInput.addEventListener('focus', () => {
@@ -14253,9 +16335,11 @@ class IntegramCreateFormHelper {
             // Filter on input
             let searchTimeout;
             searchInput.addEventListener('input', (e) => {
+                const searchText = e.target.value.trim();
+                updateAddButtonVisibility(searchText);
                 clearTimeout(searchTimeout);
                 searchTimeout = setTimeout(() => {
-                    renderDropdown(e.target.value.trim());
+                    renderDropdown(searchText);
                     dropdown.style.display = 'block';
                 }, 200);
             });
@@ -14273,6 +16357,8 @@ class IntegramCreateFormHelper {
                 }
                 searchInput.value = '';
                 dropdown.style.display = 'none';
+                // Update add button visibility after selection (available options may have changed)
+                updateAddButtonVisibility('');
             });
 
             // Handle tag removal and click
@@ -14286,6 +16372,8 @@ class IntegramCreateFormHelper {
                     wrapper._selectedItems = (wrapper._selectedItems || []).filter(s => !(s.id === id && s.text === text));
                     renderTags();
                     updateHiddenInput();
+                    // Update add button visibility after removal (available options may have changed)
+                    updateAddButtonVisibility(searchInput.value.trim());
                     return;
                 }
                 const tag = e.target.closest('.multi-ref-tag');
@@ -14543,8 +16631,9 @@ class IntegramCreateFormHelper {
                 throw new Error(`Invalid response: ${text}`);
             }
 
-            if (result.error) {
-                throw new Error(result.error);
+            const serverError = this.getServerError(result);
+            if (serverError) {
+                throw new Error(serverError);
             }
 
             // Success - close modal
@@ -14609,7 +16698,7 @@ class IntegramCreateFormHelper {
         const tableUrl = `/${dbName}/table/${typeId}?F_U=${parentId || 1}&F_I=${recordId}`;
 
         const recordIdHtml = `
-            <span class="edit-form-record-id" onclick="navigator.clipboard.writeText('${recordId}').then(() => { this.style.color='#28a745'; setTimeout(() => this.style.color='', 1000); })" title="Скопировать ID" style="cursor:pointer;margin-left:8px;font-size:12px;color:var(--cards-text-secondary);">#${recordId}</span>
+            <span class="edit-form-record-id" onclick="navigator.clipboard.writeText('${recordId}').then(() => { this.style.color='#28a745'; setTimeout(() => this.style.color='', 1000); })" title="Скопировать ID" style="cursor:pointer;margin-left:8px;font-size: 0.75rem;color:var(--cards-text-secondary);">#${recordId}</span>
             <a href="${tableUrl}" class="edit-form-table-link" title="Открыть в таблице" target="_blank" style="margin-left:4px;">
                 <i class="pi pi-table"></i>
             </a>
@@ -14870,14 +16959,27 @@ class IntegramCreateFormHelper {
             }
         }
 
-        const response = await fetch(`${this.apiBase}/metadata/${typeId}`);
-        if (!response.ok) {
-            throw new Error(`Failed to fetch metadata: ${response.statusText}`);
+        // If a fetch for this typeId is already in progress, await it instead of starting a new one (issue #1455)
+        if (this.metadataFetchPromises[typeId]) {
+            return this.metadataFetchPromises[typeId];
         }
 
-        const metadata = await response.json();
-        this.metadataCache[typeId] = metadata;
-        return metadata;
+        const fetchPromise = (async () => {
+            try {
+                const response = await fetch(`${this.apiBase}/metadata/${typeId}`);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch metadata: ${response.statusText}`);
+                }
+
+                const metadata = await response.json();
+                this.metadataCache[typeId] = metadata;
+                return metadata;
+            } finally {
+                delete this.metadataFetchPromises[typeId];
+            }
+        })();
+        this.metadataFetchPromises[typeId] = fetchPromise;
+        return fetchPromise;
     }
 
     /**
@@ -15300,7 +17402,8 @@ class IntegramCreateFormHelper {
                                        class="inline-editor-reference-search form-ref-search"
                                        id="field-${fieldId}-search"
                                        placeholder="Добавить..."
-                                       autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                       autocomplete="off">
+                                <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                             </div>
                             <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${fieldId}-dropdown" style="display:none;">
                                 <div class="inline-editor-reference-empty">Загрузка...</div>
@@ -15325,7 +17428,7 @@ class IntegramCreateFormHelper {
                                        class="inline-editor-reference-search form-ref-search"
                                        id="field-${fieldId}-search"
                                        placeholder="Поиск..."
-                                       autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                       autocomplete="off">
                                 <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
                             </div>
                             <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${fieldId}-dropdown">
@@ -15535,8 +17638,9 @@ class IntegramCreateFormHelper {
                 throw new Error(`Invalid response: ${text}`);
             }
 
-            if (result.error) {
-                throw new Error(result.error);
+            const serverError = this.getServerError(result);
+            if (serverError) {
+                throw new Error(serverError);
             }
 
             // Success - close modal
