@@ -312,7 +312,8 @@
                         id: item.i,
                         val: item.r ? (item.r[0] || '') : '',
                         typ: parentTypeId,
-                        typ_name: parentTypeName
+                        typ_name: parentTypeName,
+                        parent: item.u || 1
                     };
                     // Re-render if data is already loaded, so the title updates
                     if (this.columns.length > 0) {
@@ -355,11 +356,15 @@
                 const currentTitle = this.escapeHtml(this.options.title || '');
 
                 // Build links
-                const parentTypeLink = `/${ dbName }/table/${ parentTypeId }`;
+                // If parent's parent is 1, link without filter; otherwise add F_U filter (issue #1699)
+                const parentGrandparentId = this.parentInfo.parent || 1;
+                const parentTypeLink = parentGrandparentId <= 1
+                    ? `/${ dbName }/table/${ parentTypeId }`
+                    : `/${ dbName }/table/${ parentTypeId }?F_U=${ parentGrandparentId }`;
                 // Parent record link is now a clickable span that opens modal edit form (issue #575)
 
-                // Table name shown as plain black text (issue #1345); record value remains clickable (issue #575)
-                return `<div class="integram-table-title-area">${ this.renderCheckboxToggleHtml() }<div class="integram-table-title"><span class="integram-title-link">${ parentTypeName }</span> <span class="integram-title-link integram-parent-record-link" data-parent-record-id="${ parentRecordId }" data-parent-type-id="${ parentTypeId }" style="cursor: pointer;">${ parentVal }</span>${ currentTitle ? ': ' + currentTitle : '' }</div>${ createBtnHtml }</div>`;
+                // Table name is a hyperlink to the parent table (issue #1699); record value remains clickable (issue #575)
+                return `<div class="integram-table-title-area">${ this.renderCheckboxToggleHtml() }<div class="integram-table-title"><a class="integram-title-link" href="${ parentTypeLink }">${ parentTypeName }</a> <span class="integram-title-link integram-parent-record-link" data-parent-record-id="${ parentRecordId }" data-parent-type-id="${ parentTypeId }" style="cursor: pointer;">${ parentVal }</span>${ currentTitle ? ': ' + currentTitle : '' }</div>${ createBtnHtml }</div>`;
             }
 
             // No parent info, just show the title
