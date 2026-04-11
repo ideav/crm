@@ -5087,9 +5087,9 @@ class IntegramTable{
             }
 
             const apiBase = this.getApiBase();
-            // Issue #616: Use F_U from URL as parent (up) when F_U > 1
-            const parentIdForNew = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
-            const url = `${apiBase}/_m_new/${typeId}?JSON&up=${parentIdForNew}`;
+            // Issue #1690: Reference directory values always belong to the root (up=1),
+            // not to the current form's parent record
+            const url = `${apiBase}/_m_new/${typeId}?JSON&up=1`;
 
             try {
                 const response = await fetch(url, {
@@ -13126,9 +13126,9 @@ class IntegramTable{
             }
 
             const apiBase = this.getApiBase();
-            // Issue #616: Use F_U from URL as parent (up) when F_U > 1
-            const parentIdForNew = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
-            const url = `${apiBase}/_m_new/${typeId}?JSON&up=${parentIdForNew}`;
+            // Issue #1690: Reference directory values always belong to the root (up=1),
+            // not to the current form's parent record
+            const url = `${apiBase}/_m_new/${typeId}?JSON&up=1`;
 
             try {
                 const response = await fetch(url, {
