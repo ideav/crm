@@ -92,8 +92,19 @@
                 tabsHtml += `</div>`;
             }
 
+            // Determine edit form write access (issue #1508)
+            // Use the metadata's granted field for this specific form (may differ from table-level for nested forms)
+            const metadataGranted = metadata.granted !== undefined ? metadata.granted : null;
+            const formIsReadOnly = metadataGranted !== null && metadataGranted !== 'WRITE';
+            const formHasSomeWritable = formIsReadOnly
+                ? (reqs.some(req => req.granted === 'WRITE'))
+                : true;
+            const showSaveBtn = !formIsReadOnly || formHasSomeWritable;
+            const showDeleteBtn = !isCreate && !formIsReadOnly;
+            const showDuplicateBtn = !isCreate && !formIsReadOnly;
+
             // Build attributes form HTML
-            let attributesHtml = this.renderAttributesForm(metadata, recordData, regularFields, recordReqs, isCreate, typeId);
+            let attributesHtml = this.renderAttributesForm(metadata, recordData, regularFields, recordReqs, isCreate, typeId, formIsReadOnly);
 
             let formHtml = `
                 <div class="edit-form-header">
@@ -130,8 +141,9 @@
                         <i class="pi pi-cog"></i>
                     </button>
                     <div class="edit-form-footer-buttons">
-                        ${ !isCreate ? '<button type="button" class="btn btn-danger" id="delete-record-btn" style="display:none;">Удалить</button>' : '' }
-                        <button type="button" class="btn btn-primary" id="save-record-btn">Сохранить</button>
+                        ${ showDeleteBtn ? '<button type="button" class="btn btn-danger" id="delete-record-btn" style="display:none;">Удалить</button>' : '' }
+                        ${ showDuplicateBtn ? '<button type="button" class="btn btn-secondary" id="duplicate-record-btn">Дублировать</button>' : '' }
+                        ${ showSaveBtn ? '<button type="button" class="btn btn-primary" id="save-record-btn">Сохранить</button>' : '' }
                         <button type="button" class="btn btn-secondary" data-close-modal="true">Отменить</button>
                     </div>
                 </div>
@@ -143,6 +155,11 @@
 
             // Store recordId on the modal element for subordinate table loading in nested modals
             modal.dataset.recordId = recordId;
+
+            // Store first column value on the modal element for use in password reset handlers (issue #1479)
+            if (firstColumnValue != null) {
+                modal.dataset.firstColumnValue = firstColumnValue;
+            }
 
             // Store modal context for subordinate tables - ONLY for the first level (parent form)
             // Don't overwrite when opening subordinate record forms (nested modals)
@@ -163,6 +180,13 @@
                 this.attachTabHandlers(modal);
             }
 
+            // Disable form elements in read-only form-groups (issue #1508)
+            if (formIsReadOnly) {
+                modal.querySelectorAll('.form-field-readonly input, .form-field-readonly textarea, .form-field-readonly select').forEach(el => {
+                    el.disabled = true;
+                });
+            }
+
             // Load reference options for dropdowns (scoped to this modal)
             this.loadReferenceOptions(metadata.reqs, recordId || 0, modal);
 
@@ -175,6 +199,9 @@
             // Attach file upload handlers
             this.attachFormFileUploadHandlers(modal);
 
+            // Attach password reset handlers for field id=20 (issue #1471)
+            this.attachPasswordResetHandlers(modal);
+
             // Attach form field settings handler
             const formSettingsBtn = modal.querySelector('#form-settings-btn');
             formSettingsBtn.addEventListener('click', () => {
@@ -184,17 +211,19 @@
             // Apply saved field visibility settings
             this.applyFormFieldSettings(modal, typeId);
 
-            // Attach save handler
+            // Attach save handler (only if save button is present - issue #1508)
             const saveBtn = modal.querySelector('#save-record-btn');
 
-            saveBtn.addEventListener('click', async () => {
-                saveBtn.disabled = true;
-                try {
-                    await this.saveRecord(modal, isCreate, recordId, typeId, parentId, columnId);
-                } finally {
-                    saveBtn.disabled = false;
-                }
-            });
+            if (saveBtn) {
+                saveBtn.addEventListener('click', async () => {
+                    saveBtn.disabled = true;
+                    try {
+                        await this.saveRecord(modal, isCreate, recordId, typeId, parentId, columnId);
+                    } finally {
+                        saveBtn.disabled = false;
+                    }
+                });
+            }
 
             // Attach delete handler (edit mode only)
             if (!isCreate) {
@@ -207,6 +236,21 @@
                     }
                     deleteBtn.addEventListener('click', () => {
                         this.deleteRecord(modal, recordId, typeId);
+                    });
+                }
+            }
+
+            // Attach duplicate handler (edit mode only, issue #1575)
+            if (!isCreate) {
+                const duplicateBtn = modal.querySelector('#duplicate-record-btn');
+                if (duplicateBtn) {
+                    duplicateBtn.addEventListener('click', async () => {
+                        duplicateBtn.disabled = true;
+                        try {
+                            await this.duplicateRecord(modal, recordId, typeId, parentId, metadata);
+                        } finally {
+                            duplicateBtn.disabled = false;
+                        }
                     });
                 }
             }
@@ -246,14 +290,16 @@
             document.addEventListener('keydown', handleEscape);
 
             // Enter in input/textarea triggers Save (issue #1422)
-            modal.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
-                    if (!saveBtn.disabled) {
-                        e.preventDefault();
-                        saveBtn.click();
+            if (saveBtn) {
+                modal.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+                        if (!saveBtn.disabled) {
+                            e.preventDefault();
+                            saveBtn.click();
+                        }
                     }
-                }
-            });
+                });
+            }
 
             // Focus the first visible, non-hidden input/textarea/select in the form (issue #1420)
             const firstField = modal.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([readonly]), textarea, select');
@@ -262,7 +308,7 @@
             }
         }
 
-        renderAttributesForm(metadata, recordData, regularFields, recordReqs, isCreate = false, typeId = null) {
+        renderAttributesForm(metadata, recordData, regularFields, recordReqs, isCreate = false, typeId = null, formIsReadOnly = false) {
             let html = '';
 
             // Get current date/datetime for default values in create mode
@@ -281,6 +327,9 @@
                 currentDateDisplay = now.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.'); // DD.MM.YYYY
                 currentDateTimeDisplay = currentDateDisplay + ' ' + now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); // DD.MM.YYYY HH:MM
             }
+
+            // When formIsReadOnly, the main value field is always read-only (issue #1508)
+            const mainFieldReadOnly = formIsReadOnly;
 
             // Main value field - render according to base type
             const typeName = this.getMetadataName(metadata);
@@ -310,6 +359,9 @@
                 mainFieldHtml = `<input type="number" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required step="0.01">`;
             } else if (mainFieldType === 'MEMO') {
                 mainFieldHtml = `<textarea class="form-control memo-field" id="field-main" name="main" rows="4" required>${ this.escapeHtml(mainValue) }</textarea>`;
+            } else if (mainFieldType === 'PWD') {
+                // Password field - render as type=password input (issue #1441)
+                mainFieldHtml = `<input type="password" class="form-control" id="field-main" name="main" value="${ this.escapeHtml(mainValue) }" required autocomplete="new-password">`;
             } else if (mainFieldType === 'GRANT') {
                 // GRANT field (dropdown with options from GET grants API - issue #581)
                 mainFieldHtml = `
@@ -334,37 +386,75 @@
             }
 
             html += `
-                <div class="form-group">
+                <div class="form-group${ mainFieldReadOnly ? ' form-field-readonly' : '' }">
                     <label for="field-main">${ typeName } <span class="required">*</span></label>
                     ${ mainFieldHtml }
                 </div>
             `;
 
-            // Sort fields by saved order if available
+            // Sort fields by saved order if available.
+            // Fields not present in the saved order (e.g. newly added fields) are inserted
+            // at their natural metadata position relative to their neighbors, rather than
+            // being appended at the end (issue #1526).
             const savedFieldOrder = this.loadFormFieldOrder(typeId);
             const sortedFields = [...regularFields];
             if (savedFieldOrder.length > 0) {
-                sortedFields.sort((a, b) => {
-                    const idxA = savedFieldOrder.indexOf(String(a.id));
-                    const idxB = savedFieldOrder.indexOf(String(b.id));
-                    if (idxA === -1 && idxB === -1) return 0;
-                    if (idxA === -1) return 1;
-                    if (idxB === -1) return -1;
-                    return idxA - idxB;
+                // Build a numeric sort key for each field.
+                // Saved fields get integer keys: their saved index * scale.
+                // Unsaved fields get a fractional key placed before the next saved neighbor,
+                // so they appear at approximately the right metadata position.
+                const scale = regularFields.length + 1;
+
+                // Compute saved-order index for each field (-1 if not in savedFieldOrder)
+                const savedIndex = new Map();
+                regularFields.forEach(req => {
+                    savedIndex.set(req.id, savedFieldOrder.indexOf(String(req.id)));
                 });
+
+                // Assign sort keys
+                const sortKey = new Map();
+                regularFields.forEach((req, natIdx) => {
+                    const idx = savedIndex.get(req.id);
+                    if (idx !== -1) {
+                        sortKey.set(req.id, idx * scale);
+                    } else {
+                        // Find saved successor: the nearest saved field that comes AFTER
+                        // this field in the original metadata order
+                        let nextSavedIdx = savedFieldOrder.length; // default: after all saved fields
+                        for (let i = natIdx + 1; i < regularFields.length; i++) {
+                            const si = savedIndex.get(regularFields[i].id);
+                            if (si !== -1) { nextSavedIdx = si; break; }
+                        }
+                        // Count how many unsaved fields share the same saved successor
+                        // so they can be ordered by natIdx within the same slot
+                        // Key = nextSaved slot start - 1 + small fractional offset
+                        sortKey.set(req.id, nextSavedIdx * scale - scale + natIdx + 1);
+                    }
+                });
+
+                sortedFields.sort((a, b) => sortKey.get(a.id) - sortKey.get(b.id));
             }
 
             sortedFields.forEach(req => {
                 const attrs = this.parseAttrs(req.attrs);
                 const fieldName = attrs.alias || req.val;
-                const reqValue = recordReqs[req.id] ? recordReqs[req.id].value : '';
+                const storedValue = recordReqs[req.id] ? recordReqs[req.id].value : '';
                 const baseTypeId = recordReqs[req.id] ? recordReqs[req.id].base : req.type;
                 const baseFormat = this.normalizeFormat(baseTypeId);
                 const isRequired = attrs.required;
                 const isMulti = attrs.multi; // Issue #853
+                // Apply default value from attrs when creating a new record (issue #1498)
+                const reqValue = storedValue || (isCreate ? this.resolveDefaultValue(req.attrs, baseFormat) : '');
+                // Field is read-only when form is read-only and req does not have granted: "WRITE" (issue #1508)
+                const isReqReadOnly = formIsReadOnly && req.granted !== 'WRITE';
 
-                html += `<div class="form-group">`;
-                html += `<label for="field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
+                html += `<div class="form-group${ isReqReadOnly ? ' form-field-readonly' : '' }">`;
+                // Password reset buttons in label for field id=20 (issue #1471)
+                if (String(req.id) === '20' && baseFormat === 'PWD') {
+                    html += `<label for="field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }&nbsp;<a class="pwd-reset-btn" data-field-id="${ req.id }" title="Задать пароль и скопировать его в буфер" style="cursor:pointer"><svg width="20" height="20" viewBox="0 1 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.42858 9.28572V6.42858C6.42858 5.48137 6.80486 4.57297 7.47463 3.90319C8.1444 3.23342 9.05281 2.85715 10 2.85715C10.9472 2.85715 11.8556 3.23342 12.5254 3.90319C13.1952 4.57297 13.5714 5.48137 13.5714 6.42858V9.28572M5.00001 9.28572H15C15.789 9.28572 16.4286 9.92531 16.4286 10.7143V15.7143C16.4286 16.5033 15.789 17.1429 15 17.1429H5.00001C4.21103 17.1429 3.57144 16.5033 3.57144 15.7143V10.7143C3.57144 9.92531 4.21103 9.28572 5.00001 9.28572Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>&nbsp;<a class="pwd-reset-mail-btn" data-field-id="${ req.id }" title="Задать пароль и скопировать в буфер приглашение пользователю" style="cursor:pointer"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M17.1429 5.71434C17.1429 4.92862 16.5 4.28577 15.7143 4.28577H4.28571C3.5 4.28577 2.85714 4.92862 2.85714 5.71434M17.1429 5.71434V14.2858C17.1429 15.0715 16.5 15.7143 15.7143 15.7143H4.28571C3.5 15.7143 2.85714 15.0715 2.85714 14.2858V5.71434M17.1429 5.71434L10 10.7143L2.85714 5.71434" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/></svg></a><span class="pwd-reset-copied" id="field-${ req.id }-copied" style="display:none">Ok</span></label>`;
+                } else {
+                    html += `<label for="field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
+                }
 
                 // Multi-select reference field (issue #853)
                 if (req.ref_id && isMulti) {
@@ -380,7 +470,8 @@
                                            class="inline-editor-reference-search form-ref-search"
                                            id="field-${ req.id }-search"
                                            placeholder="Добавить..."
-                                           autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                           autocomplete="off">
+                                    <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                                 </div>
                                 <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${ req.id }-dropdown" style="display:none;">
                                     <div class="inline-editor-reference-empty">Загрузка...</div>
@@ -406,7 +497,7 @@
                                            class="inline-editor-reference-search form-ref-search"
                                            id="field-${ req.id }-search"
                                            placeholder="Поиск..."
-                                           autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                           autocomplete="off">
                                     <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
                                     <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                                 </div>
@@ -432,19 +523,17 @@
                 }
                 // Date field with HTML5 date picker
                 else if (baseFormat === 'DATE') {
-                    // Only apply default value for the first column (where req.id equals typeId)
-                    const isFirstColumn = typeId && String(req.id) === String(typeId);
-                    const dateValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, false) : (isCreate && isFirstColumn ? currentDateHtml5 : '');
-                    const dateValueDisplay = reqValue ? this.formatDateForInput(reqValue, false) : (isCreate && isFirstColumn ? currentDateDisplay : '');
+                    // reqValue already includes the default from attrs/current date (resolved above, issue #1498)
+                    const dateValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, false) : '';
+                    const dateValueDisplay = reqValue ? this.formatDateForInput(reqValue, false) : '';
                     html += `<input type="date" class="form-control date-picker" id="field-${ req.id }-picker" value="${ this.escapeHtml(dateValueHtml5) }" ${ isRequired ? 'required' : '' } data-target="field-${ req.id }">`;
                     html += `<input type="hidden" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(dateValueDisplay) }">`;
                 }
                 // DateTime field with HTML5 datetime-local picker (with time rounded to 5 minutes)
                 else if (baseFormat === 'DATETIME') {
-                    // Only apply default value for the first column (where req.id equals typeId)
-                    const isFirstColumn = typeId && String(req.id) === String(typeId);
-                    const dateTimeValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, true) : (isCreate && isFirstColumn ? currentDateTimeHtml5 : '');
-                    const dateTimeValueDisplay = reqValue ? this.formatDateForInput(reqValue, true) : (isCreate && isFirstColumn ? currentDateTimeDisplay : '');
+                    // reqValue already includes the default from attrs/current datetime (resolved above, issue #1498)
+                    const dateTimeValueHtml5 = reqValue ? this.formatDateForHtml5(reqValue, true) : '';
+                    const dateTimeValueDisplay = reqValue ? this.formatDateForInput(reqValue, true) : '';
                     html += `<input type="datetime-local" class="form-control datetime-picker" id="field-${ req.id }-picker" value="${ this.escapeHtml(dateTimeValueHtml5) }" ${ isRequired ? 'required' : '' } data-target="field-${ req.id }">`;
                     html += `<input type="hidden" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(dateTimeValueDisplay) }">`;
                 }
@@ -510,6 +599,10 @@
                     // Store current value (ID) for later selection after options load (issue #925)
                     const repColTermValue = recordReqs[req.id] && recordReqs[req.id].term !== undefined ? recordReqs[req.id].term : reqValue;
                     html += `<input type="hidden" id="field-${ req.id }-current-value" value="${ this.escapeHtml(repColTermValue) }">`;
+                }
+                // PWD field - password input (issue #1441)
+                else if (baseFormat === 'PWD') {
+                    html += `<input type="password" class="form-control" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(reqValue) }" ${ isRequired ? 'required' : '' } autocomplete="new-password">`;
                 }
                 // Regular text field
                 else {
@@ -582,18 +675,199 @@
                 }
                 const metadata = this.metadataCache[arrId];
 
-                // Fetch data for subordinate table
+                // Fetch first page of data for subordinate table (issue #1640)
+                const pageSize = this.options.pageSize || 20;
                 const apiBase = this.getApiBase();
-                const dataUrl = `${ apiBase }/object/${ arrId }/?JSON_OBJ&F_U=${ parentRecordId }`;
+                const dataUrl = `${ apiBase }/object/${ arrId }/?JSON_OBJ&F_U=${ parentRecordId }&LIMIT=0,${ pageSize + 1 }`;
                 const dataResponse = await fetch(dataUrl);
                 const data = await dataResponse.json();
 
-                // Render the subordinate table
-                this.renderSubordinateTable(container, metadata, data, arrId, parentRecordId);
+                // Determine if there are more records (issue #1640)
+                const rows = Array.isArray(data) ? data : [];
+                const hasMore = rows.length > pageSize;
+                const firstPageRows = hasMore ? rows.slice(0, pageSize) : rows;
+
+                // Render the subordinate table with first page data
+                this.renderSubordinateTable(container, metadata, firstPageRows, arrId, parentRecordId);
+
+                // Store pagination state on container for infinite scroll (issue #1640)
+                container._subordinateHasMore = hasMore;
+                container._subordinateLoadedCount = firstPageRows.length;
+                container._subordinateIsLoading = false;
+                container._subordinateArrIdForScroll = arrId;
+                container._subordinateParentRecordIdForScroll = parentRecordId;
+
+                // Attach infinite scroll listener to the modal's scrollable body (issue #1640)
+                this.attachSubordinateScrollListener(container);
 
             } catch (error) {
                 console.error('Error loading subordinate table:', error);
                 container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${ error.message }</div>`;
+            }
+        }
+
+        /**
+         * Attach scroll listener to the subordinate modal's .edit-form-body for infinite scroll (issue #1640).
+         * Loads next page when user scrolls near the bottom. Shows Ajax spinner while loading.
+         */
+        attachSubordinateScrollListener(container) {
+            // Find the scrollable modal body
+            const modal = container.closest('.edit-form-modal.subordinate-modal');
+            if (!modal) return;
+            const scrollEl = modal.querySelector('.edit-form-body');
+            if (!scrollEl) return;
+
+            // Remove previous listener if re-attached (e.g. after re-render)
+            if (scrollEl._subordinateScrollListener) {
+                scrollEl.removeEventListener('scroll', scrollEl._subordinateScrollListener);
+            }
+
+            const scrollListener = () => {
+                if (container._subordinateIsLoading || !container._subordinateHasMore) return;
+
+                const threshold = 200;
+                const distanceFromBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+                if (distanceFromBottom < threshold) {
+                    this.loadMoreSubordinateRows(container);
+                }
+            };
+
+            scrollEl._subordinateScrollListener = scrollListener;
+            scrollEl.addEventListener('scroll', scrollListener);
+
+            // Check immediately in case the first page already fits the screen (issue #1640)
+            setTimeout(() => scrollListener(), 100);
+        }
+
+        /**
+         * Load the next page of subordinate table rows and append them to the existing table (issue #1640).
+         * Shows an Ajax spinner at the bottom while loading.
+         */
+        async loadMoreSubordinateRows(container) {
+            if (container._subordinateIsLoading || !container._subordinateHasMore) return;
+
+            container._subordinateIsLoading = true;
+
+            // Show spinner at the bottom of the table
+            const wrapper = container.querySelector('.subordinate-table-wrapper');
+            let spinner = container.querySelector('.subordinate-infinite-spinner');
+            if (!spinner) {
+                spinner = document.createElement('div');
+                spinner.className = 'subordinate-infinite-spinner';
+                spinner.innerHTML = '<div class="subordinate-infinite-spinner-icon"></div>';
+                if (wrapper) {
+                    wrapper.after(spinner);
+                } else {
+                    container.appendChild(spinner);
+                }
+            }
+            spinner.style.display = 'flex';
+
+            try {
+                const arrId = container._subordinateArrIdForScroll;
+                const parentRecordId = container._subordinateParentRecordIdForScroll;
+                const pageSize = this.options.pageSize || 20;
+                const offset = container._subordinateLoadedCount;
+                const apiBase = this.getApiBase();
+                const dataUrl = `${ apiBase }/object/${ arrId }/?JSON_OBJ&F_U=${ parentRecordId }&LIMIT=${ offset },${ pageSize + 1 }`;
+
+                const dataResponse = await fetch(dataUrl);
+                const data = await dataResponse.json();
+                const newRows = Array.isArray(data) ? data : [];
+                const hasMore = newRows.length > pageSize;
+                const pageRows = hasMore ? newRows.slice(0, pageSize) : newRows;
+
+                // Append rows to the accumulated data and update loaded count
+                container._subordinateData = (container._subordinateData || []).concat(pageRows);
+                container._subordinateLoadedCount += pageRows.length;
+                container._subordinateHasMore = hasMore;
+
+                // Append new rows to the existing table's tbody
+                const tbody = container.querySelector('.subordinate-table tbody');
+                if (tbody && pageRows.length > 0) {
+                    const metadata = container._subordinateMetadata;
+                    const reqs = metadata ? (metadata.reqs || []) : [];
+                    const instanceName = this.options.instanceName;
+                    const pathParts = window.location.pathname.split('/');
+                    const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+                    const searchTerm = container._subordinateSearchTerm || '';
+
+                    pageRows.forEach(row => {
+                        const rowId = row.i;
+                        const values = row.r || [];
+                        const tr = document.createElement('tr');
+                        tr.dataset.rowId = rowId;
+                        tr.draggable = false;
+
+                        // Drag handle cell (issue #1617)
+                        const dragTd = document.createElement('td');
+                        dragTd.className = 'subordinate-drag-handle-td';
+                        dragTd.innerHTML = '<span class="subordinate-drag-handle" title="Перетащить строку"><i class="pi pi-equals"></i></span>';
+                        tr.appendChild(dragTd);
+
+                        // First column (main value)
+                        const mainValue = values[0] || '';
+                        const mainFieldInfo = { type: metadata ? metadata.type : '' };
+                        let displayMainValue = this.formatSubordinateCellValue(mainValue, mainFieldInfo);
+                        if (searchTerm) {
+                            displayMainValue = this.highlightSearchTerm(displayMainValue, searchTerm);
+                        }
+                        const mainTd = document.createElement('td');
+                        mainTd.className = 'subordinate-cell-clickable';
+                        mainTd.dataset.rowId = rowId;
+                        mainTd.dataset.typeId = arrId;
+                        mainTd.innerHTML = displayMainValue;
+                        mainTd.addEventListener('click', () => {
+                            this.openEditForm(rowId, arrId, 0);
+                        });
+                        tr.appendChild(mainTd);
+
+                        // Requisite columns
+                        reqs.forEach((req, idx) => {
+                            const cellValue = values[idx + 1] !== undefined ? values[idx + 1] : '';
+                            const td = document.createElement('td');
+                            if (req.arr_id) {
+                                const count = typeof cellValue === 'number' ? cellValue : (cellValue || 0);
+                                const nestedTableUrl = `/${dbName}/table/${req.arr_id}?F_U=${rowId}`;
+                                td.className = 'subordinate-nested-count';
+                                td.innerHTML = `<a href="${nestedTableUrl}" class="subordinate-table-icon-link" target="${req.arr_id}" title="Открыть в новом окне" onclick="event.stopPropagation();"><i class="pi pi-table"></i></a><a href="#" class="subordinate-count-link" onclick="window.${instanceName}.openSubordinateTableFromCell(event, ${req.arr_id}, ${rowId}); return false;" title="Посмотреть подчиненную таблицу">(${count})</a>`;
+                            } else {
+                                let displayValue = this.formatSubordinateCellValue(cellValue, req);
+                                if (searchTerm) {
+                                    displayValue = this.highlightSearchTerm(displayValue, searchTerm);
+                                }
+                                td.innerHTML = displayValue;
+                            }
+                            tr.appendChild(td);
+                        });
+
+                        tbody.appendChild(tr);
+
+                        // Attach mousedown/mouseup handlers for the drag handle of the new row (issue #1617).
+                        // The tbody-level drop/dragstart/dragover listeners attached by attachSubordinateRowDragHandlers
+                        // already cover these new rows via event delegation, so we must NOT call
+                        // attachSubordinateRowDragHandlers again (that would add duplicate tbody listeners,
+                        // causing two _m_ord requests on drop — issue #1664).
+                        const handle = tr.querySelector('.subordinate-drag-handle');
+                        if (handle) {
+                            handle.addEventListener('mousedown', () => {
+                                if (!handle.classList.contains('subordinate-drag-handle-disabled')) {
+                                    tr.draggable = true;
+                                }
+                            });
+                            handle.addEventListener('mouseup', () => {
+                                tr.draggable = false;
+                            });
+                        }
+                    });
+                }
+
+            } catch (error) {
+                console.error('Error loading more subordinate rows:', error);
+            } finally {
+                container._subordinateIsLoading = false;
+                // Hide spinner
+                if (spinner) spinner.style.display = 'none';
             }
         }
 
@@ -753,7 +1027,7 @@
                         + Добавить
                     </button>
                     <div class="subordinate-search-wrapper">
-                        <input type="text" class="subordinate-search-input" placeholder="Поиск..." value="${ this.escapeHtml(searchTerm) }" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                        <input type="text" class="subordinate-search-input" placeholder="Поиск..." value="${ this.escapeHtml(searchTerm) }" autocomplete="off">
                         <button type="button" class="subordinate-search-clear" title="Очистить поиск"${ searchTerm ? '' : ' style="display: none;"' }><i class="pi pi-times"></i></button>
                     </div>
                     <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
@@ -767,6 +1041,9 @@
                 html += `<div class="subordinate-table-empty">${ emptyMessage }</div>`;
             } else {
                 html += `<div class="subordinate-table-wrapper"><table class="subordinate-table"><thead><tr>`;
+
+                // Drag handle header column (issue #1617)
+                html += `<th class="subordinate-drag-handle-th"></th>`;
 
                 // Header: main value column + requisite columns (with sort indicators)
                 columns.forEach((col, colIdx) => {
@@ -786,7 +1063,10 @@
                     const rowId = row.i;
                     const values = row.r || [];
 
-                    html += `<tr data-row-id="${ rowId }">`;
+                    html += `<tr data-row-id="${ rowId }" draggable="false">`;
+
+                    // Drag handle cell (issue #1617)
+                    html += `<td class="subordinate-drag-handle-td"><span class="subordinate-drag-handle" title="Перетащить строку"><i class="pi pi-equals"></i></span></td>`;
 
                     // First column (main value) - clickable to edit
                     const mainValue = values[0] || '';
@@ -855,6 +1135,9 @@
                 });
             });
 
+            // Attach drag-and-drop row reorder handlers (issue #1617)
+            this.attachSubordinateRowDragHandlers(container, arrId, parentRecordId);
+
             // Attach search input handler
             const searchInput = container.querySelector('.subordinate-search-input');
             const searchClear = container.querySelector('.subordinate-search-clear');
@@ -904,6 +1187,12 @@
                     searchInput.setSelectionRange(newPos, newPos);
                 }
             }
+
+            // Re-attach infinite scroll listener after re-render (issue #1640)
+            // (re-render happens on sort/search but pagination state is preserved on container)
+            if (container._subordinateHasMore !== undefined) {
+                this.attachSubordinateScrollListener(container);
+            }
         }
 
         /**
@@ -939,6 +1228,166 @@
                 sortState,
                 container._subordinateSearchTerm || ''
             );
+        }
+
+        /**
+         * Attach drag-and-drop handlers to subordinate table rows for reordering (issue #1617).
+         * Uses HTML5 drag-and-drop API. Drag is initiated only via the handle cell.
+         * While _m_ord is in flight, all handles are disabled.
+         */
+        attachSubordinateRowDragHandlers(container, arrId, parentRecordId) {
+            const tbody = container.querySelector('.subordinate-table tbody');
+            if (!tbody) return;
+
+            let dragSrcRow = null;
+            let dragTargetRow = null;
+
+            const setHandlesDisabled = (disabled) => {
+                container.querySelectorAll('.subordinate-drag-handle').forEach(h => {
+                    h.classList.toggle('subordinate-drag-handle-disabled', disabled);
+                    h.closest('tr').draggable = !disabled;
+                });
+            };
+
+            const getRows = () => Array.from(tbody.querySelectorAll('tr[data-row-id]'));
+
+            // Enable draggable on mousedown of handle, disable on mouseup (so normal clicks don't trigger drag)
+            container.querySelectorAll('.subordinate-drag-handle').forEach(handle => {
+                const row = handle.closest('tr');
+
+                handle.addEventListener('mousedown', () => {
+                    if (!handle.classList.contains('subordinate-drag-handle-disabled')) {
+                        row.draggable = true;
+                    }
+                });
+                handle.addEventListener('mouseup', () => {
+                    row.draggable = false;
+                });
+            });
+
+            tbody.addEventListener('dragstart', (e) => {
+                const row = e.target.closest('tr[data-row-id]');
+                if (!row || !row.draggable) { e.preventDefault(); return; }
+                dragSrcRow = row;
+                row.classList.add('subordinate-row-dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', row.dataset.rowId);
+            });
+
+            tbody.addEventListener('dragend', (e) => {
+                const row = e.target.closest('tr[data-row-id]');
+                if (row) {
+                    row.draggable = false;
+                    row.classList.remove('subordinate-row-dragging');
+                }
+                tbody.querySelectorAll('.subordinate-row-drag-over').forEach(r => r.classList.remove('subordinate-row-drag-over'));
+                dragSrcRow = null;
+                dragTargetRow = null;
+            });
+
+            tbody.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                const row = e.target.closest('tr[data-row-id]');
+                if (!row || row === dragSrcRow) return;
+                tbody.querySelectorAll('.subordinate-row-drag-over').forEach(r => r.classList.remove('subordinate-row-drag-over'));
+                row.classList.add('subordinate-row-drag-over');
+                dragTargetRow = row;
+            });
+
+            tbody.addEventListener('dragleave', (e) => {
+                const row = e.target.closest('tr[data-row-id]');
+                if (row) row.classList.remove('subordinate-row-drag-over');
+            });
+
+            tbody.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                const targetRow = dragTargetRow;
+                dragTargetRow = null;
+                if (!targetRow || !dragSrcRow || targetRow === dragSrcRow) return;
+
+                targetRow.classList.remove('subordinate-row-drag-over');
+
+                // Reorder rows in DOM
+                const rows = getRows();
+                const srcIdx = rows.indexOf(dragSrcRow);
+                const tgtIdx = rows.indexOf(targetRow);
+
+                if (srcIdx === -1 || tgtIdx === -1) return;
+
+                // Determine insert position based on cursor Y relative to target row midpoint (issue #1666).
+                // This mirrors main-app.js handleReorder logic: top half → insert before, bottom half → insert after.
+                const rect = targetRow.getBoundingClientRect();
+                const midY = rect.top + rect.height / 2;
+                const insertBeforeTarget = e.clientY < midY;
+
+                if (insertBeforeTarget) {
+                    tbody.insertBefore(dragSrcRow, targetRow);
+                } else {
+                    tbody.insertBefore(dragSrcRow, targetRow.nextSibling);
+                }
+
+                // Collect new order of row IDs
+                const newOrder = getRows().map(r => r.dataset.rowId);
+
+                // New 1-based position of the moved record
+                const movedRecordId = dragSrcRow.dataset.rowId;
+                const newPosition = newOrder.indexOf(movedRecordId) + 1;
+
+                // Update in-memory data to reflect new order
+                const dataMap = {};
+                (container._subordinateData || []).forEach(row => { dataMap[row.i] = row; });
+                container._subordinateData = newOrder.map(id => dataMap[id]).filter(Boolean);
+
+                // Disable all handles while saving
+                setHandlesDisabled(true);
+
+                await this.saveSubordinateRowOrder(movedRecordId, newPosition, container, setHandlesDisabled);
+            });
+        }
+
+        /**
+         * Save the new row order via _m_ord command (issue #1617).
+         * Sends only the moved record's ID and its new 1-based position.
+         * The backend recalculates order for other records automatically.
+         * Re-enables handles when done.
+         */
+        async saveSubordinateRowOrder(movedRecordId, newPosition, container, setHandlesDisabled) {
+            const apiBase = this.getApiBase();
+            const params = new URLSearchParams();
+            params.append('order', newPosition);
+            if (typeof xsrf !== 'undefined') {
+                params.append('_xsrf', xsrf);
+            }
+
+            try {
+                const response = await fetch(`${apiBase}/_m_ord/${movedRecordId}?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+
+                const responseText = await response.text();
+                let result;
+                try {
+                    result = JSON.parse(responseText);
+                } catch (jsonError) {
+                    throw new Error(`Невалидный JSON ответ: ${responseText}`);
+                }
+
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
+                }
+            } catch (error) {
+                console.error('Error saving row order:', error);
+                this.showToast(`Ошибка сохранения порядка: ${ error.message }`, 'error');
+                // Reload to get correct server order on error
+                await this.loadSubordinateTable(container, container._subordinateArrId, container._subordinateParentRecordId);
+                return;
+            } finally {
+                setHandlesDisabled(false);
+            }
         }
 
         /**

@@ -22,6 +22,31 @@
             window.addEventListener('scroll', this.scrollListener);
         }
 
+        attachPlusKeyShortcut() {
+            // Remove existing listener if any (issue #1532)
+            if (this.plusKeyListener) {
+                document.removeEventListener('keydown', this.plusKeyListener);
+            }
+
+            this.plusKeyListener = (e) => {
+                // Only trigger when '+' is pressed and no input/textarea/select is focused
+                if (e.key !== '+') return;
+                const tag = document.activeElement && document.activeElement.tagName;
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+                if (document.activeElement && document.activeElement.isContentEditable) return;
+
+                // Try .column-add-btn.title-create-btn first, then any .column-add-btn (issue #1532)
+                const btn = this.container.querySelector('.column-add-btn.title-create-btn')
+                    || this.container.querySelector('.column-add-btn');
+                if (btn) {
+                    e.preventDefault();
+                    btn.click();
+                }
+            };
+
+            document.addEventListener('keydown', this.plusKeyListener);
+        }
+
         checkAndLoadMore() {
             // Check if table fits entirely on screen and there are more records
             setTimeout(() => {

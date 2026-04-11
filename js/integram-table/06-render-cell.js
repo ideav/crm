@@ -148,15 +148,20 @@
                         recordId = this.rawObjectData[rowIndex].i;
                     }
                     const btnValue = value !== null && value !== undefined ? String(value) : '';
-                    let btnHref, btnTarget;
+                    let btnHref, btnTarget, btnOnclick;
                     if (btnValue.match(/^https?:\/\//i)) {
                         btnHref = btnValue;
                         btnTarget = recordId !== null ? String(recordId) : '_blank';
+                    } else if (btnValue.match(/^\w[\w.]*\s*\([\s\S]*\)\s*;?\s*$/)) {
+                        // Value is a JS function call (e.g. newApi('POST','...','','reloadAllIntegramTables'))
+                        btnOnclick = btnValue.replace(/;?\s*$/, '') + '; event.stopPropagation();';
                     } else if (btnValue) {
                         btnHref = `/${dbName}/${btnValue.replace(/^\//, '')}`;
                         btnTarget = '_blank';
                     }
-                    if (btnHref) {
+                    if (btnOnclick) {
+                        displayValue = `<button class="btn btn-sm btn-primary" onclick="${ btnOnclick.replace(/"/g, '&quot;') }"><i class="pi pi-play"></i></button>`;
+                    } else if (btnHref) {
                         displayValue = `<a href="${ btnHref }" target="${ btnTarget }" onclick="event.stopPropagation();"><button class="btn btn-sm btn-primary"><i class="pi pi-play"></i></button></a>`;
                     } else {
                         displayValue = `<button class="btn btn-sm btn-primary"><i class="pi pi-play"></i></button>`;
@@ -372,8 +377,8 @@
                             displayContent = `<a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a>`;
                         }
                     }
-                    const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 14px;"></i></span>`;
-                    escapedValue = `<div class="cell-content-wrapper">${ displayContent }${ editIcon }</div>`;
+                    const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
+                    escapedValue = `<div class="cell-content-wrapper"><span title="${ recordId }">${ displayContent }</span>${ editIcon }</div>`;
                 }
             }
 
@@ -385,7 +390,7 @@
                     const pathParts = window.location.pathname.split('/');
                     const dbName = pathParts.length >= 2 ? pathParts[1] : '';
                     const refUrl = `/${ dbName }/table/${ refTypeId }?F_I=${ refValueId }`;
-                    escapedValue = `<div class="cell-content-wrapper"><a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a></div>`;
+                    escapedValue = `<div class="cell-content-wrapper"><span title="${ refValueId }"><a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a></span></div>`;
                 }
             }
 
@@ -563,6 +568,194 @@
         }
 
         /**
+         * Smart header grouping (issue #1540, #1565)
+         * Find the longest common whole-word prefix of two column name strings.
+         * Words are separated by dots (".").
+         */
+        _smartHeaderLCP(a, b) {
+            const wa = a.split('.');
+            const wb = b.split('.');
+            let n = 0;
+            for (let i = 0; i < Math.min(wa.length, wb.length); i++) {
+                if (wa[i] === wb[i]) n = i + 1;
+                else break;
+            }
+            return wa.slice(0, n).join('.');
+        }
+
+        /**
+         * Build smart header grouping tree from an ordered list of columns.
+         *
+         * Column names use dots (".") as word separators for grouping (issue #1565).
+         *
+         * A group [start..end) with prefix P is valid only if:
+         *   - ≥2 consecutive columns all start with P+"." (non-empty suffix)
+         *   - The column before start (if any) does NOT start with P+"."
+         *   - The column after end (if any) does NOT start with P+"."
+         *   - The group is NOT universal (does not span ALL columns at this level)
+         *
+         * Finds the SHORTEST non-universal prefix first (top-down approach so that
+         * broader groupings like "foo.bar" contain narrower ones like "foo.bar.baz").
+         *
+         * Returns array of nodes:
+         *   { type:'leaf', col, suffix }
+         *   { type:'group', prefix, span, children }
+         */
+        buildSmartHeaderTree(columns) {
+            if (columns.length === 0) return [];
+            if (columns.length === 1) {
+                return [{ type: 'leaf', col: columns[0], suffix: columns[0].name }];
+            }
+
+            // Compute pair-prefix for each adjacent pair
+            const pairPrefixes = [];
+            for (let i = 0; i < columns.length - 1; i++) {
+                const prefix = this._smartHeaderLCP(columns[i].name, columns[i + 1].name);
+                const len = prefix.split('.').filter(Boolean).length;
+                pairPrefixes.push({ i, prefix, len });
+            }
+
+            // Sort ascending by length to find the SHORTEST non-universal prefix
+            const sorted = [...pairPrefixes].sort((a, b) => a.len - b.len || a.i - b.i);
+
+            let targetLen = -1;
+            for (const pair of sorted) {
+                if (pair.len === 0) continue;
+                const prefix = pair.prefix;
+                // Find the full extent of this prefix among consecutive columns
+                let start = pair.i;
+                while (start > 0 && columns[start - 1].name !== prefix &&
+                       columns[start - 1].name.startsWith(prefix + '.')) start--;
+                let end = pair.i + 1;
+                while (end < columns.length && columns[end].name !== prefix &&
+                       columns[end].name.startsWith(prefix + '.')) end++;
+                // Skip if universal (spans ALL columns at this level)
+                if (start === 0 && end === columns.length) continue;
+                targetLen = pair.len;
+                break;
+            }
+
+            if (targetLen === -1) {
+                // No valid non-universal group — all leaves
+                return columns.map(col => ({ type: 'leaf', col, suffix: col.name }));
+            }
+
+            // Build result: form all groups at targetLen, leaves elsewhere
+            const result = [];
+            let i = 0;
+            while (i < columns.length) {
+                let grouped = false;
+                if (i + 1 < columns.length) {
+                    const pairPrefix = this._smartHeaderLCP(columns[i].name, columns[i + 1].name);
+                    const pairLen = pairPrefix.split('.').filter(Boolean).length;
+                    if (pairLen >= targetLen) {
+                        const prefix = columns[i].name.split('.').slice(0, targetLen).join('.');
+                        if (columns[i].name.startsWith(prefix + '.') && columns[i].name !== prefix) {
+                            const leftOk = i === 0 || !columns[i - 1].name.startsWith(prefix + '.');
+                            if (leftOk) {
+                                let end = i + 1;
+                                while (end < columns.length && columns[end].name !== prefix &&
+                                       columns[end].name.startsWith(prefix + '.')) end++;
+                                const rightOk = end >= columns.length || !columns[end].name.startsWith(prefix + '.');
+                                if (rightOk && end - i >= 2) {
+                                    const groupCols = columns.slice(i, end);
+                                    const suffixCols = groupCols.map(col => ({
+                                        ...col, name: col.name.slice(prefix.length + 1)
+                                    }));
+                                    result.push({
+                                        type: 'group',
+                                        prefix,
+                                        span: end - i,
+                                        children: this.buildSmartHeaderTree(suffixCols)
+                                    });
+                                    i = end;
+                                    grouped = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (!grouped) {
+                    result.push({ type: 'leaf', col: columns[i], suffix: columns[i].name });
+                    i++;
+                }
+            }
+            return result;
+        }
+
+        /**
+         * Compute the depth (number of header rows) of a smart header tree.
+         */
+        smartHeaderTreeDepth(nodes) {
+            return nodes.reduce((max, n) =>
+                Math.max(max, n.type === 'group' ? 1 + this.smartHeaderTreeDepth(n.children) : 1), 0);
+        }
+
+        /**
+         * Render the smart header tree into an array of row HTML strings.
+         * Returns an array of length totalDepth, each element is the inner HTML
+         * of one <tr> (excluding the tr tags themselves).
+         *
+         * Each leaf <th> has data-column-id, draggable, width style, sort indicator,
+         * add button, and resize handle — the full decoration needed for interaction.
+         *
+         * Group <th> cells show only the shared prefix text (truncated via CSS).
+         */
+        renderSmartHeaderRows(nodes, totalDepth, depth, instanceName, groupingColumnSet) {
+            // rows[i] = array of <th> HTML strings for header row i
+            const rows = Array.from({ length: totalDepth }, () => []);
+
+            const visit = (nodes, depth) => {
+                for (const node of nodes) {
+                    if (node.type === 'leaf') {
+                        const col = node.col;
+                        const rowspan = totalDepth - depth;
+                        const width = this.columnWidths[col.id];
+                        const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
+                        const addButtonHtml = this.shouldShowAddButton(col) ?
+                            `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
+                        let sortIndicator = '';
+                        if (this.sortColumn === col.id) {
+                            sortIndicator = this.sortDirection === 'asc'
+                                ? '<i class="pi pi-sort-amount-up-alt" style="font-size:0.75em;"></i> '
+                                : '<i class="pi pi-sort-amount-down" style="font-size:0.75em;"></i> ';
+                        }
+                        // Display name with dots replaced by spaces (issue #1565)
+                        const displayName = col.name.replace(/\./g, ' ');
+                        // In left-grouping mode, add grouping styles to grouping column headers (issue #1624)
+                        const isGroupingCol = groupingColumnSet && groupingColumnSet.has(col.id);
+                        const groupingClass = isGroupingCol ? ' group-header' : '';
+                        const groupingOrder = isGroupingCol ? this.groupingColumns.indexOf(col.id) + 1 : '';
+                        const groupingBadge = isGroupingCol ? `<span class="grouping-header-badge">${ groupingOrder }</span>` : '';
+                        const refTypeId = col.ref_id;
+                        const refIconHtml = refTypeId ? (() => {
+                            const dbName = window.db || window.location.pathname.split('/')[1];
+                            return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
+                        })() : '';
+                        rows[depth].push(`
+                            <th data-column-id="${ col.id }" draggable="true"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' } class="${ groupingClass }">
+                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ displayName }</span>
+                                ${ refIconHtml }
+                                ${ addButtonHtml }
+                                <div class="column-resize-handle" data-column-id="${ col.id }"></div>
+                            </th>
+                        `);
+                    } else {
+                        // Display prefix with dots replaced by spaces (issue #1565)
+                        const displayPrefix = node.prefix.replace(/\./g, ' ');
+                        rows[depth].push(`
+                            <th class="smart-header-group" colspan="${ node.span }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ displayPrefix }</th>
+                        `);
+                        visit(node.children, depth + 1);
+                    }
+                }
+            };
+
+            visit(nodes, depth || 0);
+            return rows;
+        }
+
+        /**
          * Render table headers in grouped mode (issue #502)
          * Shows grouping columns first, then non-grouping columns
          */
@@ -598,9 +791,16 @@
                 const groupingOrder = isGroupingCol ? this.groupingColumns.indexOf(col.id) + 1 : '';
                 const groupingBadge = isGroupingCol ? `<span class="grouping-header-badge">${ groupingOrder }</span>` : '';
 
+                const refTypeId = col.ref_id;
+                const refIconHtml = refTypeId ? (() => {
+                    const dbName = window.db || window.location.pathname.split('/')[1];
+                    return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
+                })() : '';
+
                 return `
                     <th data-column-id="${ col.id }" draggable="true"${ widthStyle } class="${ groupingClass }">
-                        <span class="column-header-content" data-column-id="${ col.id }">${ groupingBadge }${ sortIndicator }${ col.name }</span>
+                        <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ col.name }</span>
+                        ${ refIconHtml }
                         ${ addButtonHtml }
                         <div class="column-resize-handle" data-column-id="${ col.id }"></div>
                     </th>
@@ -635,18 +835,479 @@
                 ? `<span class="total-count-unknown" onclick="window.${ instanceName }.fetchTotalCount()" title="Нажмите, чтобы узнать общее количество">?</span>`
                 : this.totalRows;
 
-            // Show add row button only for object-source tables (issue #807)
+            // Show add row button only for object-source tables with write access (issue #807, #1508)
             const isObjectSource = this.objectTableId || this.getDataSourceType() === 'table';
-            const addRowBtnHtml = isObjectSource
+            const canWrite = isObjectSource && this.isTableWritable();
+            const addRowBtnHtml = canWrite
                 ? `<button class="add-row-btn" onclick="window.${ instanceName }.addNewRow()" title="Добавить строку в таблицу"><i class="pi pi-plus"></i></button>`
+                : '';
+            // Show paste-data icon button next to add-row button for writable tables (issue #1606)
+            const pasteDataBtnHtml = canWrite
+                ? `<button class="paste-data-btn" onclick="window.${ instanceName }.openPasteDataDialog()" title="Вставить данные из буфера"><i class="pi pi-clipboard"></i></button>`
                 : '';
 
             return `
                 <div class="scroll-counter">
-                    ${ addRowBtnHtml }
+                    ${ addRowBtnHtml }${ pasteDataBtnHtml }
                     Показано ${ this.loadedRecords } из ${ totalDisplay }
                 </div>
             `;
+        }
+
+        /**
+         * Open a dialog to paste data from clipboard and insert into the table (issue #1606).
+         * Splits the pasted text by lines, then splits each line by TAB, ";" or ","
+         * and calls _m_new for each line using visible column IDs as field keys.
+         */
+        openPasteDataDialog() {
+            const instanceName = this.options.instanceName;
+            const modalDepth = (window._integramModalDepth || 0) + 1;
+            window._integramModalDepth = modalDepth;
+            const baseZIndex = 1000 + (modalDepth * 10);
+            const cascadeOffset = (modalDepth - 1) * 20;
+
+            const overlay = document.createElement('div');
+            overlay.className = 'edit-form-overlay';
+            overlay.style.zIndex = baseZIndex;
+
+            const modal = document.createElement('div');
+            modal.className = 'edit-form-modal';
+            modal.style.zIndex = baseZIndex + 1;
+            modal.style.transform = `translate(calc(-50% + ${cascadeOffset}px), calc(-50% + ${cascadeOffset}px))`;
+            modal._overlayElement = overlay;
+
+            modal.innerHTML = `
+                <div class="edit-form-header">
+                    <span class="edit-form-title" style="font-weight:500;">Вставить данные из буфера</span>
+                    <button class="edit-form-close" data-close-modal-ref="true"><i class="pi pi-times"></i></button>
+                </div>
+                <div class="edit-form-body">
+                    <textarea id="paste-data-textarea" rows="10" style="width:100%;box-sizing:border-box;resize:vertical;font-family:inherit;"
+                        placeholder="Вставьте данные, и я постараюсь распознать и вставить их в таблицу"></textarea>
+                    <div style="margin-top:6px;color:#888;font-size:0.9em;">Текст, разделённый символами табуляции, «;» или «,»</div>
+                    <div id="paste-data-progress" style="margin-top:8px;display:none;"></div>
+                </div>
+                <div class="edit-form-footer">
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">
+                        <input type="checkbox" id="paste-data-create-refs" title="Если значения не будут найдены в справочнике, то я создам их на лету">
+                        <span>Создавать справочные значения</span>
+                    </label>
+                    <div class="edit-form-footer-buttons">
+                        <button type="button" class="btn btn-preview" id="paste-data-preview-btn">Просмотр</button>
+                        <button type="button" class="btn btn-primary" id="paste-data-insert-btn">Вставить</button>
+                        <button type="button" class="btn btn-secondary" id="paste-data-cancel-btn">Отменить</button>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(overlay);
+            document.body.appendChild(modal);
+
+            const closeModal = () => {
+                modal.remove();
+                overlay.remove();
+                window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+            };
+
+            modal.querySelector('.edit-form-close').addEventListener('click', closeModal);
+            modal.querySelector('#paste-data-cancel-btn').addEventListener('click', closeModal);
+            overlay.addEventListener('click', closeModal);
+
+            modal.querySelector('#paste-data-insert-btn').addEventListener('click', () => {
+                window[instanceName].insertPastedData(modal, closeModal);
+            });
+
+            modal.querySelector('#paste-data-preview-btn').addEventListener('click', () => {
+                window[instanceName].previewPastedData(modal, closeModal);
+            });
+
+            // Focus textarea
+            setTimeout(() => modal.querySelector('#paste-data-textarea').focus(), 50);
+        }
+
+        /**
+         * Show a preview table of the data parsed from the paste-data textarea (issue #1684).
+         * Opens a new modal with an editable table showing the rows to be inserted.
+         * The preview has "Загрузить" (Load) and "Отменить" (Cancel) buttons.
+         */
+        previewPastedData(pasteModal, closePasteModal) {
+            const textarea = pasteModal.querySelector('#paste-data-textarea');
+            const text = textarea.value;
+
+            if (!text || !text.trim()) {
+                this.showToast('Поле ввода пустое', 'error');
+                return;
+            }
+
+            // Split into lines, skip empty lines
+            const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
+            if (lines.length === 0) {
+                this.showToast('Нет данных для просмотра', 'error');
+                return;
+            }
+
+            // Detect delimiter (same logic as insertPastedData)
+            const countChar = (str, ch) => {
+                let count = 0;
+                for (let i = 0; i < str.length; i++) {
+                    if (str[i] === ch && (i === 0 || str[i - 1] !== '\\')) {
+                        count++;
+                    }
+                }
+                return count;
+            };
+            const isConsistentDelimiter = (delim) => {
+                const counts = lines.map(l => countChar(l, delim));
+                return counts[0] > 0 && counts.every(c => c === counts[0]);
+            };
+            let delimiter = '\t';
+            if (isConsistentDelimiter('\t')) {
+                delimiter = '\t';
+            } else if (isConsistentDelimiter(';')) {
+                delimiter = ';';
+            } else if (isConsistentDelimiter(',')) {
+                delimiter = ',';
+            }
+
+            // Parse rows
+            const parsedRows = lines.map(line => line.split(delimiter));
+
+            // Get ordered visible non-id columns for header
+            const columnMap = {};
+            this.columns.forEach(col => { columnMap[col.id] = col; });
+            const orderedColIds = (this.columnOrder || this.columns.map(c => c.id))
+                .filter(id => columnMap[id] && !this.idColumns.has(id));
+            const colHeaders = orderedColIds.map(id => (columnMap[id] && columnMap[id].name) || id);
+
+            // Build the preview modal
+            const instanceName = this.options.instanceName;
+            const modalDepth = (window._integramModalDepth || 0) + 1;
+            window._integramModalDepth = modalDepth;
+            const baseZIndex = 1000 + (modalDepth * 10);
+            const cascadeOffset = (modalDepth - 1) * 20;
+
+            const previewOverlay = document.createElement('div');
+            previewOverlay.className = 'edit-form-overlay';
+            previewOverlay.style.zIndex = baseZIndex;
+
+            const previewModal = document.createElement('div');
+            previewModal.className = 'edit-form-modal paste-data-preview-modal';
+            previewModal.style.zIndex = baseZIndex + 1;
+            previewModal.style.transform = `translate(calc(-50% + ${cascadeOffset}px), calc(-50% + ${cascadeOffset}px))`;
+            previewModal._overlayElement = previewOverlay;
+
+            // Build table HTML with editable cells
+            const theadCols = colHeaders.map(h => `<th>${h}</th>`).join('');
+            const tbodyRows = parsedRows.map((row, rowIdx) => {
+                const cells = orderedColIds.map((colId, colIdx) => {
+                    const val = row[colIdx] !== undefined ? row[colIdx] : '';
+                    return `<td><input class="paste-preview-cell" data-row="${rowIdx}" data-col="${colIdx}" value="${val.replace(/"/g, '&quot;')}"></td>`;
+                });
+                return `<tr>${cells.join('')}</tr>`;
+            }).join('');
+
+            previewModal.innerHTML = `
+                <div class="edit-form-header">
+                    <span class="edit-form-title" style="font-weight:500;">Просмотр данных для вставки (${parsedRows.length} строк)</span>
+                    <button class="edit-form-close" data-close-preview-ref="true"><i class="pi pi-times"></i></button>
+                </div>
+                <div class="edit-form-body paste-data-preview-body">
+                    <div class="paste-data-preview-table-wrap">
+                        <table class="paste-data-preview-table">
+                            <thead><tr>${theadCols}</tr></thead>
+                            <tbody>${tbodyRows}</tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="edit-form-footer">
+                    <div style="color:#888;font-size:0.85em;">Вы можете отредактировать ячейки перед загрузкой</div>
+                    <div class="edit-form-footer-buttons">
+                        <button type="button" class="btn btn-primary" id="paste-preview-load-btn">Загрузить</button>
+                        <button type="button" class="btn btn-secondary" id="paste-preview-cancel-btn">Отменить</button>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(previewOverlay);
+            document.body.appendChild(previewModal);
+
+            const closePreview = () => {
+                previewModal.remove();
+                previewOverlay.remove();
+                window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+            };
+
+            previewModal.querySelector('.edit-form-close').addEventListener('click', closePreview);
+            previewModal.querySelector('#paste-preview-cancel-btn').addEventListener('click', closePreview);
+            previewOverlay.addEventListener('click', closePreview);
+
+            previewModal.querySelector('#paste-preview-load-btn').addEventListener('click', () => {
+                // Collect edited cell values back into rows
+                const cells = previewModal.querySelectorAll('.paste-preview-cell');
+                const editedRows = parsedRows.map(row => [...row]);
+                cells.forEach(cell => {
+                    const rowIdx = parseInt(cell.dataset.row, 10);
+                    const colIdx = parseInt(cell.dataset.col, 10);
+                    editedRows[rowIdx][colIdx] = cell.value;
+                });
+
+                // Rebuild text from edited rows using original delimiter and update textarea
+                const newText = editedRows.map(row => row.join(delimiter)).join('\n');
+                textarea.value = newText;
+
+                closePreview();
+                // Trigger insert using the updated textarea content
+                window[instanceName].insertPastedData(pasteModal, closePasteModal);
+            });
+        }
+
+        /**
+         * Parse and insert pasted data into the table (issue #1606).
+         * Each line becomes one record; fields within a line are split by the detected
+         * delimiter (TAB, ";" or ","). A delimiter is only used if it appears the same
+         * number of times in every non-empty line, preventing false splits when text
+         * contains commas or semicolons as part of values (issue #1612).
+         * Uses visible columns (in order) as field mapping.
+         * Stops on first insert error.
+         */
+        async insertPastedData(modal, closeModal) {
+            const textarea = modal.querySelector('#paste-data-textarea');
+            const progressEl = modal.querySelector('#paste-data-progress');
+            const insertBtn = modal.querySelector('#paste-data-insert-btn');
+            const createRefsCheckbox = modal.querySelector('#paste-data-create-refs');
+            const createRefValues = createRefsCheckbox ? createRefsCheckbox.checked : false;
+            const text = textarea.value;
+
+            if (!text || !text.trim()) {
+                this.showToast('Поле ввода пустое', 'error');
+                return;
+            }
+
+            // Split into lines, skip empty lines
+            const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
+            if (lines.length === 0) {
+                this.showToast('Нет данных для вставки', 'error');
+                return;
+            }
+
+            // Determine delimiter: a candidate is valid only if it appears the same
+            // number of times (> 0) in every non-empty line (issue #1612).
+            // Escaped occurrences (preceded by \) are not counted (issue #1614).
+            const countChar = (str, ch) => {
+                let count = 0;
+                for (let i = 0; i < str.length; i++) {
+                    if (str[i] === ch && (i === 0 || str[i - 1] !== '\\')) {
+                        count++;
+                    }
+                }
+                return count;
+            };
+            const isConsistentDelimiter = (delim) => {
+                const counts = lines.map(l => countChar(l, delim));
+                return counts[0] > 0 && counts.every(c => c === counts[0]);
+            };
+            let delimiter = '\t'; // fallback: TAB (issue #1614)
+            if (isConsistentDelimiter('\t')) {
+                delimiter = '\t';
+            } else if (isConsistentDelimiter(';')) {
+                delimiter = ';';
+            } else if (isConsistentDelimiter(',')) {
+                delimiter = ',';
+            }
+
+            // Get the ordered list of visible, non-id, editable columns
+            const columnMap = {};
+            this.columns.forEach(col => { columnMap[col.id] = col; });
+            const orderedColIds = (this.columnOrder || this.columns.map(c => c.id))
+                .filter(id => columnMap[id] && !this.idColumns.has(id));
+
+            const typeId = this.options.tableTypeId || this.objectTableId;
+            if (!typeId) {
+                this.showToast('Ошибка: не найден тип таблицы', 'error');
+                return;
+            }
+
+            const apiBase = this.getApiBase();
+            const parentIdForNew = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
+            const url = `${apiBase}/_m_new/${typeId}?JSON&up=${parentIdForNew}`;
+
+            insertBtn.disabled = true;
+            progressEl.style.display = 'block';
+
+            // Pre-fetch reference options (LIMIT=500) for all REF columns (issue #1648)
+            const refOptionsCache = {};
+            const refColIds = orderedColIds.filter(id => columnMap[id] && (columnMap[id].format || '') === 'REF');
+            for (const colId of refColIds) {
+                try {
+                    const refParams = new URLSearchParams({ JSON: '', LIMIT: '500' });
+                    const refUrl = `${apiBase}/_ref_reqs/${colId}?${refParams}`;
+                    const refResponse = await fetch(refUrl);
+                    if (refResponse.ok) {
+                        const refText = await refResponse.text();
+                        try {
+                            refOptionsCache[colId] = this.parseJsonObjectAsArray(refText);
+                        } catch (e) {
+                            refOptionsCache[colId] = [];
+                        }
+                    } else {
+                        refOptionsCache[colId] = [];
+                    }
+                } catch (e) {
+                    refOptionsCache[colId] = [];
+                }
+            }
+
+            /**
+             * Resolve a text value to its ID for a REF column (issue #1648).
+             * First searches the pre-fetched list of up to 500 options.
+             * If not found and the list has 500 items (server may have more),
+             * performs a targeted search using q={value} to find the exact record.
+             * If still not found and createRefValues is true, creates the reference
+             * value via POST _m_new/{refTypeId}?JSON&up=1 (issue #1658).
+             */
+            const resolveRefId = async (colId, textValue) => {
+                const options = refOptionsCache[colId] || [];
+                const lowerValue = textValue.toLowerCase();
+                const found = options.find(([, label]) => String(label).toLowerCase() === lowerValue);
+                if (found) {
+                    return found[0];
+                }
+                // If the cached list is full (500 items), there may be more on the server
+                if (options.length >= 500) {
+                    try {
+                        const searchParams = new URLSearchParams({ JSON: '', LIMIT: '1', q: textValue });
+                        const searchUrl = `${apiBase}/_ref_reqs/${colId}?${searchParams}`;
+                        const searchResponse = await fetch(searchUrl);
+                        if (searchResponse.ok) {
+                            const searchText = await searchResponse.text();
+                            const searchResult = this.parseJsonObjectAsArray(searchText);
+                            if (searchResult.length > 0) {
+                                return searchResult[0][0];
+                            }
+                        }
+                    } catch (e) {
+                        // Fall through: return original text if search fails
+                    }
+                }
+                // If checkbox is checked and value not found, create it as a new reference record (issue #1658)
+                if (createRefValues) {
+                    const col = columnMap[colId];
+                    const refTypeId = col && (col.ref || col.orig || col.ref_id);
+                    if (refTypeId) {
+                        try {
+                            const createParams = new URLSearchParams();
+                            if (typeof xsrf !== 'undefined') {
+                                createParams.append('_xsrf', xsrf);
+                            }
+                            createParams.append(`t${refTypeId}`, textValue);
+                            const createUrl = `${apiBase}/_m_new/${refTypeId}?JSON&up=1`;
+                            const createResponse = await fetch(createUrl, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                                body: createParams.toString()
+                            });
+                            if (createResponse.ok) {
+                                const createText = await createResponse.text();
+                                let createResult;
+                                try {
+                                    createResult = JSON.parse(createText);
+                                } catch (e) {
+                                    createResult = null;
+                                }
+                                if (createResult && createResult.obj) {
+                                    const newId = createResult.obj;
+                                    // Cache the new value so it is reused if it appears again
+                                    if (!refOptionsCache[colId]) {
+                                        refOptionsCache[colId] = [];
+                                    }
+                                    refOptionsCache[colId].push([newId, textValue]);
+                                    return newId;
+                                }
+                            }
+                        } catch (e) {
+                            // Fall through: return null if creation fails
+                        }
+                    }
+                }
+                return null;
+            };
+
+            let successCount = 0;
+            const total = lines.length;
+
+            for (let i = 0; i < lines.length; i++) {
+                progressEl.textContent = `Вставлено ${successCount} из ${total}`;
+
+                // Split using the pre-determined consistent delimiter
+                let parts;
+                parts = lines[i].split(delimiter);
+
+                const params = new URLSearchParams();
+                if (typeof xsrf !== 'undefined') {
+                    params.append('_xsrf', xsrf);
+                }
+
+                // Map each part to the corresponding column id (t{colId} = value)
+                // For REF columns, resolve text values to IDs (issue #1648)
+                for (let idx = 0; idx < parts.length; idx++) {
+                    if (idx < orderedColIds.length) {
+                        const trimmed = parts[idx].trim();
+                        if (trimmed !== '') {
+                            const colId = orderedColIds[idx];
+                            const col = columnMap[colId];
+                            if (col && (col.format || '') === 'REF') {
+                                const resolvedId = await resolveRefId(colId, trimmed);
+                                if (resolvedId !== null) {
+                                    params.append(`t${colId}`, resolvedId);
+                                } else if (/^\d+$/.test(trimmed)) {
+                                    // ID could not be resolved; send as-is only if numeric (IDs are always numeric)
+                                    params.append(`t${colId}`, trimmed);
+                                }
+                            } else {
+                                params.append(`t${colId}`, trimmed);
+                            }
+                        }
+                    }
+                }
+
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: params.toString()
+                    });
+
+                    const responseText = await response.text();
+                    let result;
+                    try {
+                        result = JSON.parse(responseText);
+                    } catch (e) {
+                        if (responseText.includes('error') || !response.ok) {
+                            throw new Error(responseText);
+                        }
+                        result = { success: true };
+                    }
+
+                    const serverError = this.getServerError(result);
+                    if (serverError) {
+                        throw new Error(serverError);
+                    }
+
+                    successCount++;
+                } catch (err) {
+                    progressEl.textContent = `Вставлено ${successCount} из ${total}. Ошибка на строке ${i + 1}: ${err.message}`;
+                    insertBtn.disabled = false;
+                    this.showToast(`Ошибка вставки строки ${i + 1}: ${err.message}`, 'error');
+                    return;
+                }
+            }
+
+            progressEl.textContent = `Вставлено ${successCount} из ${total}`;
+            this.showToast(`Вставлено записей: ${successCount}`, 'success');
+
+            closeModal();
+            // Refresh the table after insertion
+            this.loadData();
         }
 
         /**

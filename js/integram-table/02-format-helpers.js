@@ -29,8 +29,14 @@
                 this.options.title = metadata.val || metadata.value;
             }
 
+            // Store table-level granted value for access control (issue #1508)
+            this.tableGranted = metadata.granted !== undefined ? metadata.granted : null;
+
             // Convert metadata to columns format
             const columns = [];
+
+            // Determine main column editability: WRITE if table is writable (issue #1508)
+            const mainColGranted = this.isTableWritable() ? 1 : 0;
 
             // First column: use metadata.id as column id (not sequential index)
             columns.push({
@@ -38,7 +44,7 @@
                 type: metadata.type || 'SHORT',
                 format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
                 name: metadata.val || 'Значение',
-                granted: 1,
+                granted: mainColGranted,
                 ref: 0,
                 orig: metadata.id, // Store the original table id
                 unique: metadata.unique, // Store unique flag for column edit form (issue #1026)
@@ -50,6 +56,8 @@
                 metadata.reqs.forEach((req, idx) => {
                     const attrs = this.parseAttrs(req.attrs);
                     const isReference = req.hasOwnProperty('ref_id');
+                    // Use req.granted if table is not fully writable; otherwise treat as writable (issue #1508)
+                    const reqGranted = this.isTableWritable() ? 1 : (req.granted === 'WRITE' ? 1 : 0);
 
                     columns.push({
                         id: String(req.id),
@@ -58,7 +66,7 @@
                         format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
                         name: attrs.alias || req.val,
                         val: req.val, // Store original name for alias display (issue #945)
-                        granted: 1,  // In object format, allow editing all cells
+                        granted: reqGranted,  // Use metadata granted for access control (issue #1508)
                         ref: isReference ? req.orig : 0,
                         ref_id: req.ref_id || null,
                         orig: req.orig || null,
@@ -215,8 +223,14 @@
                     this.options.title = metadata.val || metadata.value;
                 }
 
+                // Store table-level granted value for access control (issue #1508)
+                this.tableGranted = metadata.granted !== undefined ? metadata.granted : null;
+
                 // Convert metadata to columns format
                 const columns = [];
+
+                // Determine main column editability: WRITE if table is writable (issue #1508)
+                const mainColGranted = this.isTableWritable() ? 1 : 0;
 
                 // Add main value column (use metadata.id as column id for correct FR_{id} filter params - issue #793)
                 columns.push({
@@ -224,7 +238,7 @@
                     type: metadata.type || 'SHORT',
                     format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
                     name: metadata.val || metadata.name || 'Значение',
-                    granted: 1,
+                    granted: mainColGranted,
                     ref: 0,
                     orig: metadata.id,
                     unique: metadata.unique, // Store unique flag for column edit form (issue #1026)
@@ -236,6 +250,8 @@
                     metadata.reqs.forEach((req, idx) => {
                         const attrs = this.parseAttrs(req.attrs);
                         const isReference = req.hasOwnProperty('ref_id');
+                        // Use req.granted if table is not fully writable; otherwise treat as writable (issue #1508)
+                        const reqGranted = this.isTableWritable() ? 1 : (req.granted === 'WRITE' ? 1 : 0);
 
                         columns.push({
                             id: String(req.id),
@@ -244,7 +260,7 @@
                             format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
                             name: attrs.alias || req.val,
                             val: req.val, // Store original name for alias display (issue #945)
-                            granted: 1,  // In object format, allow editing all cells
+                            granted: reqGranted,  // Use metadata granted for access control (issue #1508)
                             ref: isReference ? req.orig : 0,
                             ref_id: req.ref_id || null,
                             orig: req.orig || null,

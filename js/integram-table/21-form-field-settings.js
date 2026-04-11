@@ -235,41 +235,83 @@
                     // Build a map of fieldId -> form-group element
                     const groupMap = {};
                     formGroups.forEach(group => {
-                        // Find the field input inside to get its ID
-                        const input = group.querySelector('[id^="field-"]');
+                        // Find the field input inside to get its ID.
+                        // Prefer hidden inputs (name^="t") which carry the canonical field ID,
+                        // because FILE-type fields have a type="file" input with id="field-{id}-file"
+                        // that appears before the hidden input id="field-{id}" (issue #1526).
+                        let input = group.querySelector('input[type="hidden"][id^="field-"], input[id^="field-"]:not([type="file"])');
+                        if (!input) {
+                            input = group.querySelector('[id^="field-"]');
+                        }
                         if (input) {
-                            const match = input.id.match(/^field-(.+?)(-search|-picker)?$/);
+                            const match = input.id.match(/^field-(.+?)(-search|-picker|-file)?$/);
                             if (match) {
                                 groupMap[match[1]] = group;
                             }
                         }
                     });
 
-                    // Ensure the first column (main field) is always at the top
+                    // Ensure the first column (main field) is always at the top.
                     const mainGroup = groupMap['main'];
                     const orderedGroups = [];
-                    const usedIds = new Set();
                     if (mainGroup) {
                         orderedGroups.push(mainGroup);
-                        usedIds.add('main');
                     }
 
-                    // Reorder: append groups in the saved order, then append any remaining
-                    order.forEach(fieldId => {
-                        if (groupMap[fieldId] && !usedIds.has(fieldId)) {
-                            orderedGroups.push(groupMap[fieldId]);
-                            usedIds.add(fieldId);
+                    // Build the natural DOM order of non-main groups (the order produced by
+                    // renderAttributesForm, which already interpolates unsaved fields at their
+                    // correct metadata positions - issue #1526).
+                    const nonMainGroups = formGroups.filter(g => g !== mainGroup);
+                    const nonMainKeys = nonMainGroups.map(group => {
+                        let input = group.querySelector('input[type="hidden"][id^="field-"], input[id^="field-"]:not([type="file"])');
+                        if (!input) input = group.querySelector('[id^="field-"]');
+                        if (input) {
+                            const match = input.id.match(/^field-(.+?)(-search|-picker|-file)?$/);
+                            return match ? match[1] : null;
+                        }
+                        return null;
+                    });
+
+                    // Assign sort keys to non-main groups using the same interpolation logic as
+                    // renderAttributesForm (issue #1531): saved fields get integer keys, unsaved
+                    // fields get fractional keys placing them before their next saved neighbor in
+                    // natural DOM order, so they appear at approximately the right position.
+                    const scale = nonMainGroups.length + 1;
+                    const savedIndex = new Map();
+                    nonMainKeys.forEach(key => {
+                        if (key !== null) savedIndex.set(key, order.indexOf(key));
+                    });
+
+                    const sortKey = new Map();
+                    nonMainGroups.forEach((group, natIdx) => {
+                        const key = nonMainKeys[natIdx];
+                        if (key === null) {
+                            sortKey.set(group, natIdx + 1);  // fallback: preserve original position
+                            return;
+                        }
+                        const idx = savedIndex.get(key);
+                        if (idx !== -1) {
+                            sortKey.set(group, idx * scale);
+                        } else {
+                            // Find nearest saved successor in natural DOM order
+                            let nextSavedIdx = order.length;
+                            for (let i = natIdx + 1; i < nonMainGroups.length; i++) {
+                                const k = nonMainKeys[i];
+                                if (k !== null) {
+                                    const si = savedIndex.get(k);
+                                    if (si !== -1) { nextSavedIdx = si; break; }
+                                }
+                            }
+                            sortKey.set(group, nextSavedIdx * scale - scale + natIdx + 1);
                         }
                     });
-                    // Append remaining groups that weren't in the saved order
+
+                    nonMainGroups.sort((a, b) => sortKey.get(a) - sortKey.get(b));
+                    nonMainGroups.forEach(g => orderedGroups.push(g));
+
+                    // Also append any groups that had no field input at all (no key)
                     formGroups.forEach(group => {
-                        const input = group.querySelector('[id^="field-"]');
-                        if (input) {
-                            const match = input.id.match(/^field-(.+?)(-search|-picker)?$/);
-                            if (match && !usedIds.has(match[1])) {
-                                orderedGroups.push(group);
-                            }
-                        } else if (!orderedGroups.includes(group)) {
+                        if (!orderedGroups.includes(group)) {
                             orderedGroups.push(group);
                         }
                     });
@@ -458,8 +500,9 @@
                     result = { success: true };
                 }
 
-                if (result.error) {
-                    throw new Error(result.error);
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
                 }
 
                 // Check for warning - show modal and stay in edit mode
@@ -620,6 +663,182 @@
                 console.error('Error deleting record:', error);
                 this.showToast(`Ошибка удаления: ${ error.message }`, 'error');
             }
+        }
+
+        /**
+         * Duplicate the current record: collect form data, optionally prompt for unique first-column value,
+         * call _m_new with the same parent, then reopen the edit form for the newly created record.
+         * Issue #1575
+         */
+        async duplicateRecord(modal, recordId, typeId, parentId, metadata) {
+            // Check if this type has unique:"1" on the first column
+            const isUnique = metadata && (metadata.unique === '1' || metadata.unique === 1 || metadata.unique === true);
+
+            // Get current first-column value from form
+            const form = modal.querySelector('#edit-form');
+            if (!form) return;
+
+            const formData = new FormData(form);
+            const mainValue = formData.get('main');
+
+            let newFirstColumnValue = mainValue;
+
+            if (isUnique) {
+                // Prompt user to enter a new value for the first (unique) column
+                const prompted = await this.showDuplicateUniqueValueModal(mainValue);
+                if (prompted === null) {
+                    // User cancelled
+                    return;
+                }
+                newFirstColumnValue = prompted;
+            }
+
+            const apiBase = this.getApiBase();
+
+            try {
+                // Build request body same as saveRecord (non-file variant)
+                const params = new URLSearchParams();
+
+                if (typeof xsrf !== 'undefined') {
+                    params.append('_xsrf', xsrf);
+                }
+
+                // Add main value as t{typeId}
+                if (newFirstColumnValue !== '' && newFirstColumnValue !== null && newFirstColumnValue !== undefined) {
+                    params.append(`t${ typeId }`, newFirstColumnValue);
+                }
+
+                // Add all other form fields
+                for (const [key, value] of formData.entries()) {
+                    if (key === 'main') continue;
+                    // Skip file fields (don't duplicate files by reference)
+                    const fieldMatch = key.match(/^t(\d+)$/);
+                    if (fieldMatch) {
+                        const reqId = fieldMatch[1];
+                        const uploadContainer = modal.querySelector(`.form-file-upload[data-req-id="${ reqId }"]`);
+                        if (uploadContainer) continue; // skip file fields
+                    }
+                    if (value !== '' && value !== null && value !== undefined) {
+                        params.append(key, value);
+                    }
+                }
+
+                const url = `${ apiBase }/_m_new/${ typeId }?JSON&up=${ parentId || 1 }`;
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+
+                const text = await response.text();
+                let result;
+                try {
+                    result = JSON.parse(text);
+                } catch (e) {
+                    if (!response.ok) throw new Error(text);
+                    result = { success: true };
+                }
+
+                const serverError = this.getServerError(result);
+                if (serverError) throw new Error(serverError);
+
+                const newId = result.id || result.i || null;
+                if (!newId) throw new Error('Сервер не вернул ID новой записи');
+
+                // Close the current modal
+                modal.remove();
+                if (modal._overlayElement) {
+                    modal._overlayElement.remove();
+                }
+                window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+                if (this.currentEditModal && this.currentEditModal.modal === modal) {
+                    this.currentEditModal = null;
+                }
+
+                this.showToast('Запись дублирована', 'success');
+
+                // Reload table data
+                this.data = [];
+                this.loadedRecords = 0;
+                this.hasMore = true;
+                this.totalRows = null;
+                await this.loadData(false);
+
+                // Open edit form for the newly created record
+                await this.openEditForm(newId, typeId, 0);
+
+            } catch (error) {
+                console.error('Error duplicating record:', error);
+                this.showToast(`Ошибка дублирования: ${ error.message }`, 'error');
+            }
+        }
+
+        /**
+         * Show a modal dialog asking user to enter a new value for the unique first column before duplicating.
+         * @param {string} currentValue - current value of the first column
+         * @returns {Promise<string|null>} - new value entered by user, or null if cancelled
+         */
+        showDuplicateUniqueValueModal(currentValue) {
+            return new Promise((resolve) => {
+                const modalId = `duplicate-unique-${ Date.now() }`;
+                const escapedValue = String(currentValue || '').replace(/"/g, '&quot;');
+                const modalHtml = `
+                    <div class="integram-modal-overlay" id="${ modalId }">
+                        <div class="integram-modal" style="max-width: 440px;">
+                            <div class="integram-modal-header">
+                                <h3>Дублирование записи</h3>
+                            </div>
+                            <div class="integram-modal-body">
+                                <p style="margin: 0 0 12px 0;">Поле первой колонки должно быть уникальным. Введите новое значение:</p>
+                                <input type="text" id="duplicate-unique-input" class="form-control" value="${ escapedValue }" style="width:100%;">
+                            </div>
+                            <div class="integram-modal-footer">
+                                <button type="button" class="btn btn-primary duplicate-unique-ok-btn" style="margin-right: 8px;">Дублировать</button>
+                                <button type="button" class="btn btn-secondary duplicate-unique-cancel-btn">Отменить</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+                const confirmModal = document.getElementById(modalId);
+                const input = confirmModal.querySelector('#duplicate-unique-input');
+
+                // Select all text for easy replacement
+                input.focus();
+                input.select();
+
+                const cleanup = (result) => {
+                    confirmModal.remove();
+                    resolve(result);
+                };
+
+                confirmModal.querySelector('.duplicate-unique-ok-btn').addEventListener('click', () => {
+                    cleanup(input.value);
+                });
+                confirmModal.querySelector('.duplicate-unique-cancel-btn').addEventListener('click', () => cleanup(null));
+
+                // Enter key confirms
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') cleanup(input.value);
+                    if (e.key === 'Escape') cleanup(null);
+                });
+
+                // Close on overlay click
+                confirmModal.addEventListener('click', (e) => {
+                    if (e.target === confirmModal) cleanup(null);
+                });
+
+                // Close on Escape key
+                const handleEscape = (e) => {
+                    if (e.key === 'Escape') {
+                        document.removeEventListener('keydown', handleEscape);
+                        cleanup(null);
+                    }
+                };
+                document.addEventListener('keydown', handleEscape);
+            });
         }
 
         /**

@@ -24,7 +24,7 @@
                 'REPORT_COLUMN': { icon: '▾', title: 'Колонка отчёта' },
             };
             const info = typeIconMap[format] || { icon: '?', title: format };
-            return `<span class="col-type-icon" title="${info.title}" style="font-size:11px;font-weight:600;opacity:0.65;min-width:16px;text-align:center;">${info.icon}</span>`;
+            return `<span class="col-type-icon" title="${info.title}" style="font-size: 0.6875rem;font-weight:600;opacity:0.65;min-width:16px;text-align:center;">${info.icon}</span>`;
         }
 
         /**
@@ -97,6 +97,17 @@
 
             document.body.appendChild(overlay);
             document.body.appendChild(modal);
+
+            // Hide structure-modifying elements when user does not have structure write access (issue #1636)
+            if (!this.isStructureWritable()) {
+                modal.querySelectorAll('.col-settings-drag-handle').forEach(el => { el.style.display = 'none'; });
+                modal.querySelectorAll('.btn-col-edit').forEach(el => { el.style.display = 'none'; });
+                const helpBtnNoAccess = modal.querySelector('.btn-col-settings-help');
+                if (helpBtnNoAccess) helpBtnNoAccess.style.display = 'none';
+                const addColBtnNoAccess = modal.querySelector(`#add-column-btn-${instanceName}`);
+                if (addColBtnNoAccess) addColBtnNoAccess.style.display = 'none';
+                modal.querySelectorAll('.column-settings-item').forEach(item => { item.setAttribute('draggable', 'false'); });
+            }
 
             // Attach help button handler (issue #968)
             const helpBtn = modal.querySelector('.btn-col-settings-help');
@@ -285,10 +296,16 @@
                 { id: 11, name: 'Логическое значение (Да / Нет)' },
                 { id: 12, name: 'Многострочный текст' },
                 { id: 4, name: 'Дата и время' },
-                { id: 10, name: 'Файл' }
+                { id: 10, name: 'Файл' },
+                { id: 7, name: 'Кнопка' }
             ];
 
             const availableTypes = isFirstColumn ? firstColumnTypes : baseTypes;
+
+            // If the column's current type is not in the list, add it so the select shows the correct value
+            if (!isRef && col.type && !availableTypes.find(t => String(t.id) === String(col.type))) {
+                availableTypes.push({ id: parseInt(col.type), name: `Тип #${ col.type }` });
+            }
 
             const colEditOverlay = document.createElement('div');
             colEditOverlay.className = 'column-settings-overlay';
@@ -303,12 +320,20 @@
             // Original (base) column name for renaming (issue #1018)
             const currentName = col.val || col.name;
 
+            // For reference columns, build a grey hyperlink to table/{ref} instead of an editable name input (issue #1435)
+            const refTypeId = col.ref || col.orig || col.ref_id;
+            const dbName = window.location.pathname.split('/')[1];
+            const refTableUrl = refTypeId ? `/${ dbName }/table/${ refTypeId }` : '#';
+            const nameFieldHtml = isRef
+                ? `<a href="${ this.escapeHtml(refTableUrl) }" target="${ refTypeId }" style="color: grey;">${ this.escapeHtml(currentName) }</a>`
+                : `<input type="text" id="col-edit-name-${instanceName}" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(currentName) }" placeholder="Введите название колонки" autocomplete="off">`;
+
             colEditModal.innerHTML = `
-                <h3 style="margin: 0 0 16px 0; font-weight: 500; font-size: 18px;">Редактирование колонки: <em style="font-style: normal; color: var(--md-primary, #1976d2);">${ this.escapeHtml(col.name) }</em></h3>
+                <h3 style="margin: 0 0 16px 0; font-weight: 500; font-size: 1.125rem;">Редактирование колонки: <em style="font-style: normal; color: var(--md-primary, #1976d2);">${ this.escapeHtml(col.name) }</em></h3>
                 <div class="col-edit-section">
                     <div class="col-edit-row">
                         <label class="col-edit-label">Название:</label>
-                        <input type="text" id="col-edit-name-${instanceName}" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(currentName) }" placeholder="Введите название колонки" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                        ${ nameFieldHtml }
                     </div>
                     <div class="col-edit-row">
                         <label class="col-edit-label">Базовый тип:</label>
@@ -331,7 +356,7 @@
                     ${ isRef ? `
                     <div class="col-edit-row">
                         <label class="col-edit-label">Псевдоним:</label>
-                        <input type="text" id="col-edit-alias-${instanceName}" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(currentAlias) }" placeholder="Введите псевдоним колонки" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                        <input type="text" id="col-edit-alias-${instanceName}" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(currentAlias) }" placeholder="Введите псевдоним колонки" autocomplete="off">
                     </div>
                     <div class="col-edit-row">
                         <label class="col-edit-check-label">
@@ -377,6 +402,15 @@
             colEditOverlay.addEventListener('click', closeColEdit);
             colEditModal.querySelector(`#col-edit-cancel-${instanceName}`).addEventListener('click', closeColEdit);
 
+            // Close on Enter key; stop propagation so the parent column-settings-modal is not affected (issue #1568)
+            colEditModal.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    colEditModal.querySelector(`#col-edit-save-${instanceName}`).click();
+                }
+            });
+
             // Save button: save type (non-ref) + required + alias (ref)
             colEditModal.querySelector(`#col-edit-save-${instanceName}`).addEventListener('click', async () => {
                 const saveBtn = colEditModal.querySelector(`#col-edit-save-${instanceName}`);
@@ -384,7 +418,9 @@
 
                 try {
                     // 0. Rename column (issue #1018, extended to first column in issue #1026)
-                    const newName = colEditModal.querySelector(`#col-edit-name-${instanceName}`).value.trim();
+                    // For ref columns the name field is a hyperlink (not editable), so the input won't exist (issue #1435)
+                    const nameInput = colEditModal.querySelector(`#col-edit-name-${instanceName}`);
+                    const newName = nameInput ? nameInput.value.trim() : '';
                     if (newName && newName !== currentName) {
                         const result = await this.renameColumn(col.orig || col.id, newName, col.type);
                         if (!result.success) {
@@ -468,16 +504,19 @@
                     showStatus('Изменения сохранены', false);
                     // Clear metadata cache so edit/add forms fetch fresh metadata (issue #1386)
                     this.metadataCache = {};
+                    this.metadataFetchPromises = {};  // Clear in-progress fetches (issue #1455)
                     // Clear globalMetadata so fetchMetadata() re-fetches fresh column info (issue #1400)
                     this.globalMetadata = null;
                     this.globalMetadataPromise = null;
                     // Clear columns so loadDataFromTable() re-fetches metadata (issue #1400)
                     this.columns = [];
-                    // Reload column state in the settings list
-                    setTimeout(() => {
+                    // Close only the col-edit modal and reopen the parent column settings so the user
+                    // can continue editing other columns; do not close the parent modal (issue #1568)
+                    setTimeout(async () => {
                         closeColEdit();
                         this.closeColumnSettings();
-                        this.loadData(0);
+                        await this.loadData(0);
+                        this.openColumnSettings();
                     }, 800);
                 } catch (err) {
                     showStatus('Ошибка: ' + err.message, true);
@@ -719,31 +758,31 @@
             modal.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #fff; padding: 20px; border-radius: 4px; box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22); z-index: 1002; max-width: 450px; width: 90%;';
 
             modal.innerHTML = `
-                <h3 style="margin: 0 0 20px 0; font-weight: 500; font-size: 20px;">Добавить новую колонку</h3>
+                <h3 style="margin: 0 0 20px 0; font-weight: 500; font-size: 1.25rem;">Добавить новую колонку</h3>
                 <div style="margin-bottom: 16px; position: relative;">
-                    <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px;">Имя колонки:</label>
-                    <input type="text" id="new-column-name-${instanceName}" class="form-control" placeholder="Введите имя колонки" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 14px; box-sizing: border-box;" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.875rem;">Имя колонки:</label>
+                    <input type="text" id="new-column-name-${instanceName}" class="form-control" placeholder="Введите имя колонки" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 0.875rem; box-sizing: border-box;" autocomplete="off">
                     <div id="column-name-suggestions-${instanceName}" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #fff; border: 1px solid #dee2e6; border-radius: 4px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); max-height: 250px; overflow-y: auto; z-index: 1003;"></div>
                 </div>
                 <div style="margin-bottom: 16px;">
-                    <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px;">Базовый тип:</label>
-                    <select id="new-column-type-${instanceName}" class="form-control" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 14px; box-sizing: border-box;">
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.875rem;">Базовый тип:</label>
+                    <select id="new-column-type-${instanceName}" class="form-control" style="width: 100%; padding: 10px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 0.875rem; box-sizing: border-box;">
                         ${baseTypes.map(t => `<option value="${t.id}">${t.name}</option>`).join('')}
                     </select>
                 </div>
                 <div style="margin-bottom: 16px;">
-                    <label style="display: flex; align-items: center; cursor: pointer; font-size: 14px;">
+                    <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.875rem;">
                         <input type="checkbox" id="new-column-list-${instanceName}" style="margin-right: 10px; width: 18px; height: 18px;">
                         Списочное значение (справочник)
                     </label>
                 </div>
                 <div style="margin-bottom: 16px; display: none;" id="multiselect-container-${instanceName}">
-                    <label style="display: flex; align-items: center; cursor: pointer; font-size: 14px;">
+                    <label style="display: flex; align-items: center; cursor: pointer; font-size: 0.875rem;">
                         <input type="checkbox" id="new-column-multiselect-${instanceName}" style="margin-right: 10px; width: 18px; height: 18px;">
                         Разрешить мультивыбор (выбор нескольких значений)
                     </label>
                 </div>
-                <div id="add-column-error-${instanceName}" style="color: #dc3545; margin-bottom: 16px; display: none; font-size: 14px;"></div>
+                <div id="add-column-error-${instanceName}" style="color: #dc3545; margin-bottom: 16px; display: none; font-size: 0.875rem;"></div>
                 <div style="display: flex; justify-content: flex-end; gap: 10px;">
                     <button class="btn btn-primary" id="create-column-btn-${instanceName}">Создать</button>
                     <button class="btn btn-secondary" id="cancel-add-column-btn-${instanceName}">Отменить</button>
@@ -765,10 +804,19 @@
             // Show/hide multiselect option based on list checkbox
             const listCheckbox = modal.querySelector(`#new-column-list-${instanceName}`);
             const multiselectContainer = modal.querySelector(`#multiselect-container-${instanceName}`);
+
+            // Track whether the user has manually changed type or reference flag (issue #1494)
+            let typeManuallyChanged = false;
+            let refManuallyChanged = false;
+
             listCheckbox.addEventListener('change', () => {
                 multiselectContainer.style.display = listCheckbox.checked ? 'block' : 'none';
                 if (!listCheckbox.checked) {
                     modal.querySelector(`#new-column-multiselect-${instanceName}`).checked = false;
+                }
+                // Mark as manually changed only if not triggered by auto-detection
+                if (!listCheckbox._autoDetecting) {
+                    refManuallyChanged = true;
                 }
             });
 
@@ -776,6 +824,11 @@
             const nameInput = modal.querySelector(`#new-column-name-${instanceName}`);
             const suggestionsDiv = modal.querySelector(`#column-name-suggestions-${instanceName}`);
             const typeSelect = modal.querySelector(`#new-column-type-${instanceName}`);
+
+            // Mark type as manually changed when the user edits it directly (issue #1494)
+            typeSelect.addEventListener('change', () => {
+                typeManuallyChanged = true;
+            });
 
             // Get base type name by id
             const getBaseTypeName = (typeId) => {
@@ -884,7 +937,7 @@
                 suggestionsDiv.innerHTML = suggestions.map((s, idx) => {
                     const typeName = getBaseTypeName(s.type);
                     const displayName = s.isReference ? `Справочник ${s.name}` : s.name;
-                    return `<div class="column-suggestion-item" data-index="${idx}" style="padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #eee; font-size: 14px;" onmouseover="this.style.backgroundColor='#f5f5f5'" onmouseout="this.style.backgroundColor='transparent'">
+                    return `<div class="column-suggestion-item" data-index="${idx}" style="padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #eee; font-size: 0.875rem;" onmouseover="this.style.backgroundColor='#f5f5f5'" onmouseout="this.style.backgroundColor='transparent'">
                         ${this.escapeHtml(displayName)} <span style="color: #888;">(${this.escapeHtml(typeName)})</span>
                     </div>`;
                 }).join('');
@@ -916,12 +969,31 @@
                 });
             };
 
-            // Input event for search
+            // Input event for search and auto-detection of type/reference (issue #1494)
             nameInput.addEventListener('input', () => {
                 const value = nameInput.value.trim();
                 if (value.length >= 1) {
                     const suggestions = searchMetadata(value);
                     renderSuggestions(suggestions);
+
+                    // Auto-detect base type and reference flag from column name dictionary
+                    if (typeof detectColumnType === 'function') {
+                        const detected = detectColumnType(value);
+                        if (detected) {
+                            if (!typeManuallyChanged) {
+                                typeSelect.value = String(detected.type);
+                            }
+                            if (!refManuallyChanged) {
+                                listCheckbox._autoDetecting = true;
+                                listCheckbox.checked = detected.ref;
+                                listCheckbox._autoDetecting = false;
+                                multiselectContainer.style.display = detected.ref ? 'block' : 'none';
+                                if (!detected.ref) {
+                                    modal.querySelector(`#new-column-multiselect-${instanceName}`).checked = false;
+                                }
+                            }
+                        }
+                    }
                 } else {
                     suggestionsDiv.style.display = 'none';
                 }
@@ -970,7 +1042,12 @@
                             id: String(result.columnId),
                             name: columnName,
                             type: baseTypeId,
-                            paramId: result.termId
+                            paramId: result.termId,
+                            // For list columns, set ref_id, ref, and orig so showColumnEditForm treats them
+                            // as reference columns immediately (without requiring a page refresh, issue #1678)
+                            ref_id: isListValue ? result.refId : null,
+                            ref: isListValue ? parseInt(result.termId) : 0,
+                            orig: isListValue ? result.termId : null
                         };
                         this.columns.push(newCol);
 
@@ -1041,6 +1118,7 @@
 
                         // Clear metadata cache so edit/add forms fetch fresh metadata (issue #1424)
                         this.metadataCache = {};
+                        this.metadataFetchPromises = {};  // Clear in-progress fetches (issue #1455)
                         // Clear globalMetadata so fetchMetadata() re-fetches fresh column info (issue #1424)
                         this.globalMetadata = null;
                         this.globalMetadataPromise = null;
@@ -1208,7 +1286,8 @@
                 return {
                     success: true,
                     columnId: String(columnId),
-                    termId: String(termId)
+                    termId: String(termId),
+                    refId: isListValue ? String(typeIdToAdd) : null
                 };
             } catch (error) {
                 console.error('Error in createColumn:', error);

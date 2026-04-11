@@ -38,14 +38,17 @@
             this.visibleColumns = [];
             this.filtersEnabled = false;
             this.objectTableId = null;  // Table ID when data is in object/JSON_OBJ format (for _count=1 queries)
+            this.tableGranted = null;  // 'WRITE' = full access, other value = read-only (issue #1508)
             this.rawObjectData = [];  // Raw data array with {i, u, o, r} for object format (preserves record IDs)
             this.styleColumns = {};  // Map of column IDs to their style column values
             this.idColumns = new Set();  // Set of hidden ID column IDs
             this.columnWidths = {};  // Map of column IDs to their widths in pixels
             this.metadataCache = {};  // Cache for metadata by type ID
+            this.metadataFetchPromises = {};  // In-progress fetch promises by type ID (issue #1455)
             this.grantOptionsCache = null;  // Cache for GRANT dropdown options (issue #607)
             this.reportColumnOptionsCache = null;  // Cache for REPORT_COLUMN dropdown options (issue #607)
             this.refOptionsCache = {};  // Cache for reference field filter dropdown options by column ID (issue #795)
+            this.refFetchCache = {};  // Cache for fetchReferenceOptions results by composite key (issue #1571)
             this.editableColumns = new Map();  // Map of column IDs to their corresponding ID column IDs
             this.checkboxMode = false;  // Whether checkbox selection column is visible
             this.selectedRows = new Set();  // Set of selected row indices
@@ -85,7 +88,8 @@
                 compactForAll: true,  // true = apply compact setting to all tables without explicit setting (default)
                 pageSize: this.options.pageSize,  // Current page size
                 truncateLongValues: true,  // true = truncate to 127 chars (default)
-                hideMenuButtonLabels: false  // false = show labels below toolbar buttons (default)
+                wrapHeaders: false,  // false = nowrap (default), true = wrap column headers
+                hideMenuButtonLabels: false,  // false = show labels below toolbar buttons (default)
             };
 
             this.filterTypes = {
@@ -182,6 +186,23 @@
         }
 
         /**
+         * Check if the table has WRITE access (issue #1508)
+         * Returns true when tableGranted is null (not set) or equals "WRITE"
+         * Returns false for any other granted value (e.g. "READ")
+         */
+        isTableWritable() {
+            return this.tableGranted === null || this.tableGranted === 'WRITE';
+        }
+
+        /**
+         * Check if the user has permission to modify table structure (issue #1536)
+         * Returns true when window.grants["1"] equals "WRITE"
+         */
+        isStructureWritable() {
+            return window.grants && window.grants['1'] === 'WRITE';
+        }
+
+        /**
          * Check if a type ID is a base (primitive) type (issue #708)
          * Base types (2-17) don't have metadata and cannot be used for edit forms
          * @param {string|number} typeId - Type ID to check
@@ -200,6 +221,7 @@
             }
             this.loadColumnState();
             this.loadSettings();
+            this.applyPageFontSize();  // Apply stored font size to the page on load (issue #1626)
             this.loadConfigFromUrl();  // Load filters, groups, sorting from URL (issue #510)
             this.globalMetadataPromise = this.loadGlobalMetadata();  // Store promise so fetchMetadata() can await it (issue #789)
             this.loadParentInfo();  // Load parent info for breadcrumb title (issue #571)
@@ -207,6 +229,16 @@
         }
 
         async loadGlobalMetadata() {
+            // If already loaded, return immediately (issue #1455)
+            if (this.globalMetadata) {
+                return;
+            }
+
+            // If loading is already in progress, wait for it instead of starting a new fetch (issue #1455)
+            if (this.globalMetadataPromise) {
+                return this.globalMetadataPromise;
+            }
+
             try {
                 const apiBase = this.getApiBase();
                 const response = await fetch(`${ apiBase }/metadata`);
@@ -276,8 +308,8 @@
 
             const instanceName = this.options.instanceName;
 
-            // Show create record button next to title when data source is a table (issue #693, #697)
-            const createBtnHtml = this.getDataSourceType() === 'table'
+            // Show create record button next to title when data source is a table and write access is granted (issue #693, #697, #1508)
+            const createBtnHtml = this.getDataSourceType() === 'table' && this.isTableWritable()
                 ? `<button class="column-add-btn title-create-btn" onclick="window.${ instanceName }.openTitleCreateForm()" title="Создать запись"><i class="pi pi-plus"></i></button>`
                 : '';
 
@@ -348,7 +380,9 @@
         }
 
         async loadData(append = false) {
-            if (this.isLoading || (!append && !this.hasMore && this.loadedRecords > 0)) {
+            // Block concurrent loads; block appending when there are no more records.
+            // Allow non-append (refresh) calls unconditionally so the refresh button works (issue #1516).
+            if (this.isLoading || (append && !this.hasMore)) {
                 return;
             }
 
@@ -361,17 +395,26 @@
                 if (this.getDataSourceType() === 'table') {
                     // Load data from table format (object/{typeId}/?JSON_OBJ&F_U={parentId}) (issue #697)
                     json = await this.loadDataFromTable(append);
-                    newRows = json.rows || [];
                 } else {
                     // Load data from report format (default behavior) (issue #697)
                     json = await this.loadDataFromReport(append);
-                    newRows = json.rows || [];
                     // Auto-set table title from report header if not explicitly provided (issue #537)
-                    if (!this.options.title && json.header) {
+                    if (json && !this.options.title && json.header) {
                         this.options.title = json.header;
                     }
                 }
 
+                // If server returned null or empty result, treat as empty (issue #1514)
+                if (!json) {
+                    this.data = [];
+                    this.loadedRecords = 0;
+                    this.hasMore = false;
+                    this.totalRows = 0;
+                    this.render();
+                    return;
+                }
+
+                newRows = json.rows || [];
                 this.columns = json.columns || [];
 
                 // In grouping mode, disable infinite scroll and use all data (up to 1000)
@@ -606,8 +649,17 @@
                     this.options.title = metadata.val || metadata.value || metadata.name;
                 }
 
+                // Store export flag from metadata (issue #1469)
+                this.tableExportAllowed = metadata.export === '1' || metadata.export === 1;
+
+                // Store table-level granted value for access control (issue #1508)
+                this.tableGranted = metadata.granted !== undefined ? metadata.granted : null;
+
                 // Convert metadata to columns format
                 const columns = [];
+
+                // Determine main column editability: WRITE if table is writable (issue #1508)
+                const mainColGranted = this.isTableWritable() ? 1 : 0;
 
                 // Add main value column (use metadata.id as column id for correct FR_{id} filter params - issue #793)
                 columns.push({
@@ -615,7 +667,7 @@
                     type: metadata.type || 'SHORT',
                     format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
                     name: metadata.val || metadata.name || 'Значение',
-                    granted: 1,
+                    granted: mainColGranted,
                     ref: 0,
                     orig: metadata.id,
                     unique: metadata.unique, // Store unique flag for column edit form (issue #1026)
@@ -627,6 +679,8 @@
                     metadata.reqs.forEach((req, idx) => {
                         const attrs = this.parseAttrs(req.attrs);
                         const isReference = req.hasOwnProperty('ref_id');
+                        // Use req.granted if table is not fully writable; otherwise treat as writable (issue #1508)
+                        const reqGranted = this.isTableWritable() ? 1 : (req.granted === 'WRITE' ? 1 : 0);
                         columns.push({
                             id: String(req.id),
                             type: req.type || 'SHORT',
@@ -634,7 +688,7 @@
                             format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
                             name: attrs.alias || req.val,
                             val: req.val, // Store original name for alias display (issue #945)
-                            granted: 1,  // In object format, allow editing all cells
+                            granted: reqGranted,  // Use metadata granted for access control (issue #1508)
                             ref: isReference ? req.orig : 0,
                             ref_id: req.ref_id || null,
                             orig: req.orig || null,

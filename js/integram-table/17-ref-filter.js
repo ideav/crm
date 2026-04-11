@@ -39,6 +39,7 @@
             const textEl = trigger.querySelector('.filter-ref-trigger-text');
             if (textEl) {
                 textEl.textContent = displayText || 'Выбрать...';
+                textEl.classList.toggle('filter-ref-trigger-text--placeholder', !displayText);
             }
             trigger.dataset.selectedIds = Array.from(selectedIds).join(',');
             trigger.title = displayText || 'Выбрать значение...';
@@ -97,7 +98,7 @@
                     <input type="text"
                            class="filter-ref-search"
                            placeholder="Поиск..."
-                           autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                           autocomplete="off">
                     <button type="button" class="filter-ref-clear" title="Очистить выбор">✕</button>
                 </div>
                 <div class="filter-ref-options">
@@ -299,3 +300,8 @@
             return metadata.val || metadata.name || metadata.title || `Тип #${ metadata.id || '?' }`;
         }
 
+        /**
+         * Extract error message from server response (issue #1506).
+         * The server may return errors as {"error":"..."} or [{"error":"..."}].
+         * Returns the error string if present, otherwise null.
+         */

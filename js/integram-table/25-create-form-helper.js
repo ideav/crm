@@ -4,6 +4,7 @@ class IntegramCreateFormHelper {
         this.tableTypeId = tableTypeId;
         this.parentId = parentId;
         this.metadataCache = {};
+        this.metadataFetchPromises = {};  // In-progress fetch promises by type ID (issue #1455)
         this.grantOptionsCache = null;  // Cache for GRANT dropdown options (issue #607)
         this.reportColumnOptionsCache = null;  // Cache for REPORT_COLUMN dropdown options (issue #607)
     }
@@ -26,7 +27,8 @@ class IntegramCreateFormHelper {
         const result = {
             required: false,
             multi: false,
-            alias: null
+            alias: null,
+            defaultValue: null
         };
 
         if (!attrs) return result;
@@ -34,9 +36,19 @@ class IntegramCreateFormHelper {
         result.required = attrs.includes(':!NULL:');
         result.multi = attrs.includes(':MULTI:');
 
-        const aliasMatch = attrs.match(/:ALIAS=(.*?):/);
+        const aliasMatch = attrs.match(/:ALIAS=(.*?):/u);
         if (aliasMatch) {
             result.alias = aliasMatch[1];
+        }
+
+        // Extract default value: strip all known flags and use the remainder
+        let stripped = attrs
+            .replace(/:!NULL:/g, '')
+            .replace(/:MULTI:/g, '')
+            .replace(/:ALIAS=(.*?):/gu, '')
+            .trim();
+        if (stripped.length > 0) {
+            result.defaultValue = stripped;
         }
 
         return result;
@@ -137,7 +149,7 @@ class IntegramCreateFormHelper {
             color: white;
             z-index: 10000;
             font-family: sans-serif;
-            font-size: 14px;
+            font-size: 0.875rem;
             box-shadow: 0 2px 8px rgba(0,0,0,0.2);
             background-color: ${type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#17a2b8'};
         `;
@@ -380,7 +392,8 @@ class IntegramCreateFormHelper {
                                        class="inline-editor-reference-search form-ref-search"
                                        id="field-${req.id}-search"
                                        placeholder="Добавить..."
-                                       autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                       autocomplete="off">
+                                <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                             </div>
                             <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${req.id}-dropdown" style="display:none;">
                                 <div class="inline-editor-reference-empty">Загрузка...</div>
@@ -406,7 +419,7 @@ class IntegramCreateFormHelper {
                                        class="inline-editor-reference-search form-ref-search"
                                        id="field-${req.id}-search"
                                        placeholder="Поиск..."
-                                       autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                       autocomplete="off">
                                 <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
                             </div>
                             <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${req.id}-dropdown">
@@ -775,9 +788,37 @@ class IntegramCreateFormHelper {
                 }
             };
 
+            // Store callbacks on wrapper so saveRecordForFormReference can update multi-select after creation
+            wrapper._renderTags = renderTags;
+            wrapper._updateHiddenInput = updateHiddenInput;
+
+            // Issue #1688: Add button support for form multi-select reference editors
+            const addButton = wrapper.querySelector('.form-ref-add');
+            const refTypeId = wrapper.dataset.refTypeId;
+
+            const updateAddButtonVisibility = (searchText) => {
+                if (!addButton) return;
+                const selectedIds = new Set((wrapper._selectedItems || []).map(s => s.id));
+                const availableCount = (wrapper._referenceOptions || []).filter(([id]) => !selectedIds.has(id)).length;
+                // Show add button when user has typed something OR when no options are available (issue #1686)
+                addButton.style.display = (searchText.length > 0 || availableCount === 0) ? '' : 'none';
+            };
+
+            // Attach add button click handler
+            if (addButton && refTypeId) {
+                addButton.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const inputValue = searchInput.value.trim();
+                    await self.openCreateFormForFormReference(refTypeId, inputValue, null, hiddenInput, searchInput, wrapper, dropdown);
+                });
+            }
+
             // Initial render
             renderTags();
             updateHiddenInput();
+            // Set initial add button visibility (issue #1686: show immediately when no options available)
+            updateAddButtonVisibility('');
 
             // Show dropdown on focus
             searchInput.addEventListener('focus', () => {
@@ -788,9 +829,11 @@ class IntegramCreateFormHelper {
             // Filter on input
             let searchTimeout;
             searchInput.addEventListener('input', (e) => {
+                const searchText = e.target.value.trim();
+                updateAddButtonVisibility(searchText);
                 clearTimeout(searchTimeout);
                 searchTimeout = setTimeout(() => {
-                    renderDropdown(e.target.value.trim());
+                    renderDropdown(searchText);
                     dropdown.style.display = 'block';
                 }, 200);
             });
@@ -808,6 +851,8 @@ class IntegramCreateFormHelper {
                 }
                 searchInput.value = '';
                 dropdown.style.display = 'none';
+                // Update add button visibility after selection (available options may have changed)
+                updateAddButtonVisibility('');
             });
 
             // Handle tag removal and click
@@ -821,6 +866,8 @@ class IntegramCreateFormHelper {
                     wrapper._selectedItems = (wrapper._selectedItems || []).filter(s => !(s.id === id && s.text === text));
                     renderTags();
                     updateHiddenInput();
+                    // Update add button visibility after removal (available options may have changed)
+                    updateAddButtonVisibility(searchInput.value.trim());
                     return;
                 }
                 const tag = e.target.closest('.multi-ref-tag');
@@ -1078,8 +1125,9 @@ class IntegramCreateFormHelper {
                 throw new Error(`Invalid response: ${text}`);
             }
 
-            if (result.error) {
-                throw new Error(result.error);
+            const serverError = this.getServerError(result);
+            if (serverError) {
+                throw new Error(serverError);
             }
 
             // Success - close modal
@@ -1144,7 +1192,7 @@ class IntegramCreateFormHelper {
         const tableUrl = `/${dbName}/table/${typeId}?F_U=${parentId || 1}&F_I=${recordId}`;
 
         const recordIdHtml = `
-            <span class="edit-form-record-id" onclick="navigator.clipboard.writeText('${recordId}').then(() => { this.style.color='#28a745'; setTimeout(() => this.style.color='', 1000); })" title="Скопировать ID" style="cursor:pointer;margin-left:8px;font-size:12px;color:var(--cards-text-secondary);">#${recordId}</span>
+            <span class="edit-form-record-id" onclick="navigator.clipboard.writeText('${recordId}').then(() => { this.style.color='#28a745'; setTimeout(() => this.style.color='', 1000); })" title="Скопировать ID" style="cursor:pointer;margin-left:8px;font-size: 0.75rem;color:var(--cards-text-secondary);">#${recordId}</span>
             <a href="${tableUrl}" class="edit-form-table-link" title="Открыть в таблице" target="_blank" style="margin-left:4px;">
                 <i class="pi pi-table"></i>
             </a>
@@ -1405,14 +1453,27 @@ class IntegramCreateFormHelper {
             }
         }
 
-        const response = await fetch(`${this.apiBase}/metadata/${typeId}`);
-        if (!response.ok) {
-            throw new Error(`Failed to fetch metadata: ${response.statusText}`);
+        // If a fetch for this typeId is already in progress, await it instead of starting a new one (issue #1455)
+        if (this.metadataFetchPromises[typeId]) {
+            return this.metadataFetchPromises[typeId];
         }
 
-        const metadata = await response.json();
-        this.metadataCache[typeId] = metadata;
-        return metadata;
+        const fetchPromise = (async () => {
+            try {
+                const response = await fetch(`${this.apiBase}/metadata/${typeId}`);
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch metadata: ${response.statusText}`);
+                }
+
+                const metadata = await response.json();
+                this.metadataCache[typeId] = metadata;
+                return metadata;
+            } finally {
+                delete this.metadataFetchPromises[typeId];
+            }
+        })();
+        this.metadataFetchPromises[typeId] = fetchPromise;
+        return fetchPromise;
     }
 
     /**
@@ -1835,7 +1896,8 @@ class IntegramCreateFormHelper {
                                        class="inline-editor-reference-search form-ref-search"
                                        id="field-${fieldId}-search"
                                        placeholder="Добавить..."
-                                       autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                       autocomplete="off">
+                                <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
                             </div>
                             <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${fieldId}-dropdown" style="display:none;">
                                 <div class="inline-editor-reference-empty">Загрузка...</div>
@@ -1860,7 +1922,7 @@ class IntegramCreateFormHelper {
                                        class="inline-editor-reference-search form-ref-search"
                                        id="field-${fieldId}-search"
                                        placeholder="Поиск..."
-                                       autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                                       autocomplete="off">
                                 <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
                             </div>
                             <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${fieldId}-dropdown">
@@ -2070,8 +2132,9 @@ class IntegramCreateFormHelper {
                 throw new Error(`Invalid response: ${text}`);
             }
 
-            if (result.error) {
-                throw new Error(result.error);
+            const serverError = this.getServerError(result);
+            if (serverError) {
+                throw new Error(serverError);
             }
 
             // Success - close modal

@@ -9,7 +9,7 @@
             modal.innerHTML = `
                 <h3>Настройка представления</h3>
                 <div class="column-settings-list">
-                    ${ this.getDataSourceType() === 'table' && (this.objectTableId || this.options.tableTypeId) ? `<div class="table-settings-item"><a href="/${window.db}/cards/${ this.objectTableId || this.options.tableTypeId }">В виде карточек</a></div><div class="table-settings-item"><a href="/${window.db}/object/${ this.objectTableId || this.options.tableTypeId }">Перейти в старый интерфейс</a></div>` : '' }
+                    ${ this.getDataSourceType() === 'table' && (this.objectTableId || this.options.tableTypeId) ? (() => { const tableId = this.objectTableId || this.options.tableTypeId; const parentId = this.options.parentId && parseInt(this.options.parentId) > 1 ? this.options.parentId : null; const parentSuffix = parentId ? `?F_U=${parentId}` : ''; return `<div class="table-settings-item"><a href="/${window.db}/cards/${tableId}${parentSuffix}">В виде карточек</a></div><div class="table-settings-item"><a href="/${window.db}/object/${tableId}${parentSuffix}">Перейти в старый интерфейс</a></div>`; })() : '' }
 
                     <div class="table-settings-item">
                         <label>Отступы:</label>
@@ -39,7 +39,7 @@
                             <option value="100" ${ this.settings.pageSize === 100 ? 'selected' : '' }>100</option>
                             <option value="custom">Свой вариант</option>
                         </select>
-                        <input type="number" id="custom-page-size" class="form-control form-control-sm" style="display: none; width: 80px; margin-left: 10px;" placeholder="Число" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" onmousedown="this.removeAttribute('readonly')">
+                        <input type="number" id="custom-page-size" class="form-control form-control-sm" style="display: none; width: 80px; margin-left: 10px;" placeholder="Число" autocomplete="off">
                     </div>
 
                     <div class="table-settings-item">
@@ -51,6 +51,20 @@
                             </label>
                             <label style="margin-left: 15px;">
                                 <input type="radio" name="truncate-mode" value="no" ${ !this.settings.truncateLongValues ? 'checked' : '' }>
+                                Нет
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="table-settings-item">
+                        <label>Переносить заголовки:</label>
+                        <div>
+                            <label>
+                                <input type="radio" name="wrap-headers" value="yes" ${ this.settings.wrapHeaders ? 'checked' : '' }>
+                                Да
+                            </label>
+                            <label style="margin-left: 15px;">
+                                <input type="radio" name="wrap-headers" value="no" ${ !this.settings.wrapHeaders ? 'checked' : '' }>
                                 Нет
                             </label>
                         </div>
@@ -145,6 +159,15 @@
                 });
             });
 
+            // Handle wrap headers change
+            modal.querySelectorAll('input[name="wrap-headers"]').forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    this.settings.wrapHeaders = e.target.value === 'yes';
+                    this.saveSettings();
+                    this.render();
+                });
+            });
+
             // Handle hide menu button labels change
             const hideMenuButtonLabelsCheckbox = modal.querySelector('#hide-menu-button-labels');
             hideMenuButtonLabelsCheckbox.addEventListener('change', (e) => {
@@ -182,7 +205,8 @@
                 compactForAll: true,
                 pageSize: 20,
                 truncateLongValues: true,
-                hideMenuButtonLabels: false
+                wrapHeaders: false,
+                hideMenuButtonLabels: false,
             };
             this.options.pageSize = 20;
 
@@ -210,14 +234,41 @@
             modal.className = 'column-settings-modal';
 
             modal.innerHTML = `
-                <h3>Полное значение</h3>
-                <div style="max-height: 400px; overflow-y: auto; margin: 15px 0; padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0;">
+                    <h3 style="margin: 0;">Полное значение</h3>
+                    <button class="full-value-copy-btn" title="Копировать в буфер"><i class="pi pi-copy"></i></button>
+                </div>
+                <div class="full-value-content" style="max-height: 400px; overflow-y: auto; margin: 15px 0; padding: 10px; background: #f8f9fa; border-radius: 4px; cursor: pointer;" title="Нажмите, чтобы скопировать">
                     <pre style="white-space: pre-wrap; word-wrap: break-word; margin: 0;">${ fullValue }</pre>
                 </div>
                 <div style="text-align: right;">
                     <button class="btn btn-secondary" onclick="this.closest('.column-settings-modal').remove(); document.querySelector('.column-settings-overlay').remove();">Закрыть</button>
                 </div>
             `;
+
+            // Extract plain text for clipboard (strip HTML tags from linkified content) - issue #1465
+            const plainText = modal.querySelector('pre').textContent;
+
+            // Copy to clipboard helper - issue #1465
+            const copyToClipboard = (btn) => {
+                navigator.clipboard.writeText(plainText).then(() => {
+                    const originalHTML = btn.innerHTML;
+                    btn.innerHTML = '<i class="pi pi-check"></i>';
+                    setTimeout(() => {
+                        btn.innerHTML = originalHTML;
+                    }, 2000);
+                }).catch(err => {
+                    console.error('[integram-table] Copy failed:', err);
+                });
+            };
+
+            // Copy on clicking the copy button (top right) - issue #1465
+            const copyBtn = modal.querySelector('.full-value-copy-btn');
+            copyBtn.addEventListener('click', () => copyToClipboard(copyBtn));
+
+            // Copy on clicking the value content area - issue #1465
+            const contentArea = modal.querySelector('.full-value-content');
+            contentArea.addEventListener('click', () => copyToClipboard(copyBtn));
 
             document.body.appendChild(overlay);
             document.body.appendChild(modal);
