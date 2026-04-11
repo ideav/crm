@@ -2806,8 +2806,8 @@ class IntegramTable{
                                 const resolvedId = await resolveRefId(colId, trimmed);
                                 if (resolvedId !== null) {
                                     params.append(`t${colId}`, resolvedId);
-                                } else {
-                                    // Value not found in reference list; pass as-is (server will handle/reject)
+                                } else if (/^\d+$/.test(trimmed)) {
+                                    // ID could not be resolved; send as-is only if numeric (IDs are always numeric)
                                     params.append(`t${colId}`, trimmed);
                                 }
                             } else {
