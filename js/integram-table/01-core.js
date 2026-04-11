@@ -276,28 +276,22 @@
                     return;
                 }
 
-                // Find parent type by searching globalMetadata for a type that has
-                // arr_id === tableTypeId in its reqs (child table types have up=0 in metadata,
-                // so metadata.up is not useful for finding the parent type)
+                // Wait for global metadata to determine parent type
                 await this.globalMetadataPromise;
 
                 if (!Array.isArray(this.globalMetadata)) {
                     return;
                 }
 
-                let parentTypeId = null;
-                let parentTypeName = '';
-                for (const typeMeta of this.globalMetadata) {
-                    if (typeMeta.reqs && typeMeta.reqs.some(req => String(req.arr_id) === String(tableTypeId))) {
-                        parentTypeId = String(typeMeta.id);
-                        parentTypeName = typeMeta.val || '';
-                        break;
-                    }
-                }
-
-                if (!parentTypeId) {
+                // Find the child table type in global metadata to get parent type ID
+                const childTypeMeta = this.globalMetadata.find(m => String(m.id) === String(tableTypeId));
+                if (!childTypeMeta || !childTypeMeta.up || String(childTypeMeta.up) === '0') {
                     return;
                 }
+
+                const parentTypeId = childTypeMeta.up;
+                const parentTypeMeta = this.globalMetadata.find(m => String(m.id) === String(parentTypeId));
+                const parentTypeName = parentTypeMeta ? (parentTypeMeta.val || '') : '';
 
                 const apiBase = this.getApiBase();
                 const response = await fetch(`${ apiBase }/object/${ parentTypeId }/?JSON_OBJ&t${ parentTypeId }=@${ parentId }`);
