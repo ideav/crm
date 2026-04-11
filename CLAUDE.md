@@ -1,3 +1,13 @@
+## integram-table.js — ВАЖНО
+
+`js/integram-table.js` генерируется автоматически. **НИКОГДА не редактировать напрямую.**
+
+- Исходники: `js/integram-table/*.js` (26 модулей)
+- Сборка: `bash build.sh` из корня проекта
+- После редактирования модуля — запустить build.sh и закоммитить оба: модуль + `js/integram-table.js`
+
+---
+
 Issue to solve: https://github.com/ideav/crm/issues/78
 Your prepared branch: issue-78-4001031cf921
 Your prepared working directory: /tmp/gh-issue-solver-1769973978122
