@@ -7144,7 +7144,12 @@ class IntegramTable{
                             id: String(result.columnId),
                             name: columnName,
                             type: baseTypeId,
-                            paramId: result.termId
+                            paramId: result.termId,
+                            // For list columns, set ref_id, ref, and orig so showColumnEditForm treats them
+                            // as reference columns immediately (without requiring a page refresh, issue #1678)
+                            ref_id: isListValue ? result.refId : null,
+                            ref: isListValue ? parseInt(result.termId) : 0,
+                            orig: isListValue ? result.termId : null
                         };
                         this.columns.push(newCol);
 
@@ -7383,7 +7388,8 @@ class IntegramTable{
                 return {
                     success: true,
                     columnId: String(columnId),
-                    termId: String(termId)
+                    termId: String(termId),
+                    refId: isListValue ? String(typeIdToAdd) : null
                 };
             } catch (error) {
                 console.error('Error in createColumn:', error);
