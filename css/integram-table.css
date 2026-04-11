@@ -2165,7 +2165,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .subordinate-table {
-    width: 100%;
+    width: auto;
     border-collapse: collapse;
     font-size: 0.8125rem;
 }
@@ -2283,7 +2283,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .subordinate-modal.expanded {
-    width: 93vw;
+    width: fit-content;
     max-width: 93vw;
 }
 
