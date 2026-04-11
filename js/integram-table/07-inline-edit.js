@@ -224,18 +224,7 @@
                 span.style.cursor = 'pointer';
             });
 
-            // Add click handler for parent record link to open modal edit form (issue #575)
-            const parentRecordLink = this.container.querySelector('.integram-parent-record-link');
-            if (parentRecordLink) {
-                parentRecordLink.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    const parentRecordId = parentRecordLink.dataset.parentRecordId;
-                    const parentTypeId = parentRecordLink.dataset.parentTypeId;
-                    if (parentRecordId && parentTypeId) {
-                        this.openEditForm(parentRecordId, parentTypeId, 0);
-                    }
-                });
-            }
+            // Parent record link now navigates to table/{F_U value} via native <a> href (issue #1708)
 
             const filterIcons = this.container.querySelectorAll('.filter-icon-inside');
             filterIcons.forEach(icon => {

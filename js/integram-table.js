@@ -276,8 +276,8 @@ class IntegramTable{
         }
 
         /**
-         * Load parent info when F_U filter is present and > 1 (issue #571)
-         * Fetches parent record data from edit_obj/{parentId}?JSON
+         * Load parent info when F_U filter is present and > 1 (issue #571, #1708)
+         * Fetches parent record data from get_parent/{parentId}
          * Used to display breadcrumb-like title: "{parent table name} {record value}: {current table name}"
          */
         async loadParentInfo() {
@@ -289,18 +289,19 @@ class IntegramTable{
                 }
 
                 const apiBase = this.getApiBase();
-                const response = await fetch(`${ apiBase }/edit_obj/${ parentId }?JSON`);
+                const response = await fetch(`${ apiBase }/get_parent/${ parentId }`);
                 if (!response.ok) {
                     console.error('Failed to fetch parent info:', response.status);
                     return;
                 }
                 const data = await response.json();
-                if (data && data.obj) {
+                if (data && data.id) {
                     this.parentInfo = {
-                        id: data.obj.id,
-                        val: data.obj.val,
-                        typ: data.obj.typ,
-                        typ_name: data.obj.typ_name
+                        id: data.id,
+                        val: data.val,
+                        obj: data.obj,
+                        up: data.up,
+                        type: data.type
                     };
                     // Re-render if data is already loaded, so the title updates
                     if (this.columns.length > 0) {
@@ -336,18 +337,24 @@ class IntegramTable{
 
             // If we have parent info, show breadcrumb-style title
             if (this.parentInfo) {
-                const parentTypeName = this.escapeHtml(this.parentInfo.typ_name || '');
+                const parentTypeName = this.escapeHtml(this.parentInfo.type || '');
                 const parentVal = this.escapeHtml(this.parentInfo.val || '');
-                const parentTypeId = this.parentInfo.typ || '';
-                const parentRecordId = this.parentInfo.id || '';
+                const parentObjId = this.parentInfo.obj || '';
+                const parentUp = parseInt(this.parentInfo.up, 10) || 0;
+                const parentRecordId = this.options.parentId || '';
                 const currentTitle = this.escapeHtml(this.options.title || '');
 
-                // Build links
-                const parentTypeLink = `/${ dbName }/table/${ parentTypeId }`;
-                // Parent record link is now a clickable span that opens modal edit form (issue #575)
+                // Build link for parent table name: table/{obj} with ?F_U={up} if up > 1 (issue #1708)
+                let parentTypeLink = `/${ dbName }/table/${ parentObjId }`;
+                if (parentUp > 1) {
+                    parentTypeLink += `?F_U=${ parentUp }`;
+                }
 
-                // Table name shown as plain black text (issue #1345); record value remains clickable (issue #575)
-                return `<div class="integram-table-title-area">${ this.renderCheckboxToggleHtml() }<div class="integram-table-title"><span class="integram-title-link">${ parentTypeName }</span> <span class="integram-title-link integram-parent-record-link" data-parent-record-id="${ parentRecordId }" data-parent-type-id="${ parentTypeId }" style="cursor: pointer;">${ parentVal }</span>${ currentTitle ? ': ' + currentTitle : '' }</div>${ createBtnHtml }</div>`;
+                // Build link for record value: table/{F_U value} (issue #1708)
+                const parentRecordLink = `/${ dbName }/table/${ parentRecordId }`;
+
+                // Parent table name links to table/{obj}, record value links to table/{F_U value} (issue #1708)
+                return `<div class="integram-table-title-area">${ this.renderCheckboxToggleHtml() }<div class="integram-table-title"><a class="integram-title-link integram-parent-type-link" href="${ parentTypeLink }">${ parentTypeName }</a> <a class="integram-title-link integram-parent-record-link" href="${ parentRecordLink }">${ parentVal }</a>${ currentTitle ? ': ' + currentTitle : '' }</div>${ createBtnHtml }</div>`;
             }
 
             // No parent info, just show the title
@@ -3297,18 +3304,7 @@ class IntegramTable{
                 span.style.cursor = 'pointer';
             });
 
-            // Add click handler for parent record link to open modal edit form (issue #575)
-            const parentRecordLink = this.container.querySelector('.integram-parent-record-link');
-            if (parentRecordLink) {
-                parentRecordLink.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    const parentRecordId = parentRecordLink.dataset.parentRecordId;
-                    const parentTypeId = parentRecordLink.dataset.parentTypeId;
-                    if (parentRecordId && parentTypeId) {
-                        this.openEditForm(parentRecordId, parentTypeId, 0);
-                    }
-                });
-            }
+            // Parent record link now navigates to table/{F_U value} via native <a> href (issue #1708)
 
             const filterIcons = this.container.querySelectorAll('.filter-icon-inside');
             filterIcons.forEach(icon => {
