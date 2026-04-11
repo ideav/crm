@@ -2220,23 +2220,68 @@ async function openEditRecordForm(recordId, typeId) {
             metadata = await metadataResponse.json();
         }
 
-        // Fetch existing record data
-        const recordUrl = `${apiBase}/edit_obj/${recordId}?JSON`;
+        // Fetch existing record data using object/{typeId}/?JSON_OBJ
+        const recordUrl = `${apiBase}/object/${typeId}/?JSON_OBJ&FR_${typeId}=@${recordId}`;
         const recordResponse = await fetch(recordUrl);
 
         if (!recordResponse.ok) {
             throw new Error(`Failed to fetch record data: ${recordResponse.statusText}`);
         }
 
-        const recordData = await recordResponse.json();
+        const dataArray = await recordResponse.json();
 
-        // Check for error in response
-        if (recordData.error) {
-            throw new Error(recordData.error);
+        if (!Array.isArray(dataArray) || dataArray.length === 0) {
+            throw new Error(`Record ${recordId} not found`);
         }
 
-        // Create the modal using a helper instance
-        const helper = new IntegramCreateFormHelper(apiBase, typeId, recordData.obj?.parent || 1);
+        // Convert JSON_OBJ {i, u, o, r} to {obj, reqs} expected by renderEditFormModalStandalone
+        const helper = new IntegramCreateFormHelper(apiBase, typeId, 1);
+        const item = dataArray[0];
+        const rowValues = item.r || [];
+
+        const reqs = metadata.reqs || [];
+        const recordReqs = {};
+        reqs.forEach((req, idx) => {
+            const rawValue = rowValues[idx + 1] !== undefined ? rowValues[idx + 1] : '';
+            const reqFormat = helper.normalizeFormat(req.type);
+            let reqValue = rawValue;
+            let reqTerm = undefined;
+            if ((reqFormat === 'GRANT' || reqFormat === 'REPORT_COLUMN') && typeof rawValue === 'string') {
+                const colonIdx = rawValue.indexOf(':');
+                if (colonIdx > 0) {
+                    reqTerm = rawValue.substring(0, colonIdx);
+                    reqValue = rawValue.substring(colonIdx + 1);
+                }
+            }
+            recordReqs[req.id] = { value: reqValue, base: req.type, order: idx };
+            if (reqTerm !== undefined) {
+                recordReqs[req.id].term = reqTerm;
+            }
+            if (req.arr_id) {
+                recordReqs[req.id].arr = typeof rawValue === 'number' ? rawValue : (parseInt(rawValue, 10) || 0);
+            }
+        });
+
+        const mainFormat = helper.normalizeFormat(metadata.type);
+        let mainVal = rowValues[0] !== undefined ? rowValues[0] : '';
+        let mainTerm = undefined;
+        if ((mainFormat === 'GRANT' || mainFormat === 'REPORT_COLUMN') && typeof mainVal === 'string') {
+            const colonIdx = mainVal.indexOf(':');
+            if (colonIdx > 0) {
+                mainTerm = mainVal.substring(0, colonIdx);
+                mainVal = mainVal.substring(colonIdx + 1);
+            }
+        }
+
+        const recordData = {
+            obj: { id: item.i, val: mainVal, parent: item.u || 1 },
+            reqs: recordReqs
+        };
+        if (mainTerm !== undefined) {
+            recordData.obj.term = mainTerm;
+        }
+
+        helper.parentId = recordData.obj.parent;
         helper.renderEditFormModalStandalone(metadata, recordData, typeId, recordId);
 
     } catch (error) {
