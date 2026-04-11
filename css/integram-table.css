@@ -3022,16 +3022,16 @@ td:has(.inline-editor-file) {
     display: inline-block;
 }
 
+/* Issue #1652: position/top/left are set via JS (toggleExportMenu) after the element
+   is appended to document.body, so it escapes the overflow:hidden clipping of
+   .integram-table-header / .integram-table-controls. */
 .integram-export-menu {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    margin-top: 4px;
+    position: fixed;
     background: var(--card-bg, white);
     border: 1px solid var(--border-color, #dee2e6);
     border-radius: 4px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-    z-index: 1000;
+    z-index: 10050;
     min-width: 200px;
     font-size: 0.8125rem;
     color: var(--text-primary, inherit);
