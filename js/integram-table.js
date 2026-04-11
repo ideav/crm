@@ -1401,7 +1401,7 @@ class IntegramTable{
                                         }
                                         return `
                                             <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
-                                                <span class="column-header-content" data-column-id="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ col.name }</span>
+                                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ col.name }</span>
                                                 ${ addButtonHtml }
                                                 <div class="column-resize-handle" data-column-id="${ col.id }"></div>
                                             </th>
@@ -2127,7 +2127,7 @@ class IntegramTable{
                         }
                     }
                     const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
-                    escapedValue = `<div class="cell-content-wrapper">${ displayContent }${ editIcon }</div>`;
+                    escapedValue = `<div class="cell-content-wrapper"><span title="${ recordId }">${ displayContent }</span>${ editIcon }</div>`;
                 }
             }
 
@@ -2139,7 +2139,7 @@ class IntegramTable{
                     const pathParts = window.location.pathname.split('/');
                     const dbName = pathParts.length >= 2 ? pathParts[1] : '';
                     const refUrl = `/${ dbName }/table/${ refTypeId }?F_I=${ refValueId }`;
-                    escapedValue = `<div class="cell-content-wrapper"><a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a></div>`;
+                    escapedValue = `<div class="cell-content-wrapper"><span title="${ refValueId }"><a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a></span></div>`;
                 }
             }
 
@@ -2478,7 +2478,7 @@ class IntegramTable{
                         const groupingBadge = isGroupingCol ? `<span class="grouping-header-badge">${ groupingOrder }</span>` : '';
                         rows[depth].push(`
                             <th data-column-id="${ col.id }" draggable="true"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' } class="${ groupingClass }">
-                                <span class="column-header-content" data-column-id="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ displayName }</span>
+                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ displayName }</span>
                                 ${ addButtonHtml }
                                 <div class="column-resize-handle" data-column-id="${ col.id }"></div>
                             </th>
@@ -2536,7 +2536,7 @@ class IntegramTable{
 
                 return `
                     <th data-column-id="${ col.id }" draggable="true"${ widthStyle } class="${ groupingClass }">
-                        <span class="column-header-content" data-column-id="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ col.name }</span>
+                        <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ col.name }</span>
                         ${ addButtonHtml }
                         <div class="column-resize-handle" data-column-id="${ col.id }"></div>
                     </th>
@@ -5371,7 +5371,8 @@ class IntegramTable{
             const hasEditIcon = cell.querySelector('.edit-icon');
             if (hasEditIcon) {
                 const editIconHtml = hasEditIcon.outerHTML;
-                cell.innerHTML = `<div class="cell-content-wrapper">${ escapedValue }${ editIconHtml }</div>`;
+                const cellRecordId = cell.dataset.refValueId || cell.dataset.recordId || '';
+                cell.innerHTML = `<div class="cell-content-wrapper"><span title="${ cellRecordId }">${ escapedValue }</span>${ editIconHtml }</div>`;
             } else {
                 // Issue #915: If the cell was empty (no edit icon) and now has a value,
                 // add the edit icon using the stored data-edit-type-id attribute
@@ -5385,7 +5386,7 @@ class IntegramTable{
                 if (hasNewValue && editTypeId && editRecordId && editRecordId !== '' && editRecordId !== '0' && editRecordId !== 'dynamic') {
                     const instanceName = this.options.instanceName;
                     const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ editRecordId }', '${ editTypeId }', ${ editRowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
-                    cell.innerHTML = `<div class="cell-content-wrapper">${ escapedValue }${ editIcon }</div>`;
+                    cell.innerHTML = `<div class="cell-content-wrapper"><span title="${ editRecordId }">${ escapedValue }</span>${ editIcon }</div>`;
                 } else {
                     cell.innerHTML = escapedValue;
                 }
