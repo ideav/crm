@@ -319,6 +319,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .column-header-content {
     display: inline-block;
+    position: relative;
     padding-right: 10px;
     white-space: nowrap;
 }
@@ -369,9 +370,11 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 /* Reference icon link for list/lookup columns (issue #1668) */
 .column-ref-link {
+    position: absolute; /* out of inline flow so it does not affect th height (issue #1676) */
+    top: 50%;
+    transform: translateY(-50%);
     display: inline-flex;
     visibility: hidden; /* hidden but occupies space to avoid layout shift (issue #1672) */
-    vertical-align: middle;
     color: var(--md-on-surface-variant, #666);
     align-items: center;
     justify-content: center;
