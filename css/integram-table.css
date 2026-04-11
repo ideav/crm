@@ -369,12 +369,9 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 /* Reference icon link for list/lookup columns (issue #1668) */
 .column-ref-link {
-    position: absolute;
-    left: 4px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: var(--md-on-surface-variant, #666);
     display: none;
+    vertical-align: middle;
+    color: var(--md-on-surface-variant, #666);
     align-items: center;
     justify-content: center;
     width: 18px;
@@ -383,11 +380,10 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     text-decoration: none;
     opacity: 0.7;
     transition: var(--md-transition);
-    z-index: 1;
 }
 
 .integram-table th:hover .column-ref-link {
-    display: flex;
+    display: inline-flex;
 }
 
 .column-ref-link:hover {

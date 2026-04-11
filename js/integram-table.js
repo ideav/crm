@@ -1406,8 +1406,7 @@ class IntegramTable{
                                         })() : '';
                                         return `
                                             <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
-                                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ col.name }</span>
-                                                ${ refIconHtml }
+                                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ col.name }${ refIconHtml }</span>
                                                 ${ addButtonHtml }
                                                 <div class="column-resize-handle" data-column-id="${ col.id }"></div>
                                             </th>
@@ -2489,8 +2488,7 @@ class IntegramTable{
                         })() : '';
                         rows[depth].push(`
                             <th data-column-id="${ col.id }" draggable="true"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' } class="${ groupingClass }">
-                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ displayName }</span>
-                                ${ refIconHtml }
+                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ displayName }${ refIconHtml }</span>
                                 ${ addButtonHtml }
                                 <div class="column-resize-handle" data-column-id="${ col.id }"></div>
                             </th>
@@ -2554,8 +2552,7 @@ class IntegramTable{
 
                 return `
                     <th data-column-id="${ col.id }" draggable="true"${ widthStyle } class="${ groupingClass }">
-                        <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ col.name }</span>
-                        ${ refIconHtml }
+                        <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ col.name }${ refIconHtml }</span>
                         ${ addButtonHtml }
                         <div class="column-resize-handle" data-column-id="${ col.id }"></div>
                     </th>
