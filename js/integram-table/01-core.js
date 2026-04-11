@@ -260,7 +260,7 @@
 
         /**
          * Load parent info when F_U filter is present and > 1 (issue #571)
-         * Fetches parent record data using object/{parentTypeId}/?JSON_OBJ
+         * Fetches parent record data from edit_obj/{parentId}?JSON
          * Used to display breadcrumb-like title: "{parent table name} {record value}: {current table name}"
          */
         async loadParentInfo() {
@@ -271,42 +271,19 @@
                     return;
                 }
 
-                const tableTypeId = this.options.tableTypeId;
-                if (!tableTypeId) {
-                    return;
-                }
-
-                // Wait for global metadata to determine parent type
-                await this.globalMetadataPromise;
-
-                if (!Array.isArray(this.globalMetadata)) {
-                    return;
-                }
-
-                // Find the child table type in global metadata to get parent type ID
-                const childTypeMeta = this.globalMetadata.find(m => String(m.id) === String(tableTypeId));
-                if (!childTypeMeta || !childTypeMeta.up || String(childTypeMeta.up) === '0') {
-                    return;
-                }
-
-                const parentTypeId = childTypeMeta.up;
-                const parentTypeMeta = this.globalMetadata.find(m => String(m.id) === String(parentTypeId));
-                const parentTypeName = parentTypeMeta ? (parentTypeMeta.val || '') : '';
-
                 const apiBase = this.getApiBase();
-                const response = await fetch(`${ apiBase }/object/${ parentTypeId }/?JSON_OBJ&t${ parentTypeId }=@${ parentId }`);
+                const response = await fetch(`${ apiBase }/edit_obj/${ parentId }?JSON`);
                 if (!response.ok) {
                     console.error('Failed to fetch parent info:', response.status);
                     return;
                 }
                 const data = await response.json();
-                if (Array.isArray(data) && data.length > 0) {
-                    const item = data[0];
+                if (data && data.obj) {
                     this.parentInfo = {
-                        id: item.i,
-                        val: item.r ? (item.r[0] || '') : '',
-                        typ: parentTypeId,
-                        typ_name: parentTypeName
+                        id: data.obj.id,
+                        val: data.obj.val,
+                        typ: data.obj.typ,
+                        typ_name: data.obj.typ_name
                     };
                     // Re-render if data is already loaded, so the title updates
                     if (this.columns.length > 0) {
