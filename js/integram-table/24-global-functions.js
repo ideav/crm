@@ -125,21 +125,16 @@ async function openCreateRecordForm(tableTypeId, parentId, fieldValues = {}) {
         let parentInfo = null;
         if (String(parentId) !== '1') {
             try {
-                // Get parent type ID from child table metadata (metadata.up = parent type ID for child tables)
-                const parentTypeId = metadata && metadata.up && String(metadata.up) !== '0' ? String(metadata.up) : null;
-                if (parentTypeId) {
-                    const parentUrl = `${apiBase}/object/${parentTypeId}/?JSON_OBJ&t${parentTypeId}=@${parentId}`;
-                    const parentResponse = await fetch(parentUrl);
-                    if (parentResponse.ok) {
-                        const parentData = await parentResponse.json();
-                        if (Array.isArray(parentData) && parentData.length > 0) {
-                            const item = parentData[0];
-                            parentInfo = {
-                                id: item.i,
-                                val: item.r ? (item.r[0] || '') : '',
-                                typ_name: ''
-                            };
-                        }
+                const parentUrl = `${apiBase}/edit_obj/${parentId}?JSON`;
+                const parentResponse = await fetch(parentUrl);
+                if (parentResponse.ok) {
+                    const parentData = await parentResponse.json();
+                    if (parentData && parentData.obj && parentData.obj.val) {
+                        parentInfo = {
+                            id: parentData.obj.id,
+                            val: parentData.obj.val,
+                            typ_name: parentData.obj.typ_name
+                        };
                     }
                 }
             } catch (parentError) {
