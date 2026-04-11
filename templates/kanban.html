@@ -11,6 +11,30 @@
         --kanban-text-secondary: #64748b;
         --kanban-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
         --kanban-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        --kanban-drag-over-bg: rgba(37, 99, 235, 0.1);
+        --kanban-icon-active-bg: rgba(25, 118, 210, 0.15);
+        --kanban-icon-active-color: #1976d2;
+        --kanban-icon-active-hover-bg: rgba(25, 118, 210, 0.25);
+        --kanban-icon-inactive-bg: rgba(226, 232, 240, 0.5);
+        --kanban-icon-inactive-color: rgba(148, 163, 184, 0.5);
+        --kanban-error-bg: #fee2e2;
+        --kanban-error-color: #991b1b;
+    }
+
+    [data-theme="dark"] {
+        --kanban-background: #1a1a1a;
+        --kanban-surface: #2d2d2d;
+        --kanban-border-color: #495057;
+        --kanban-text-primary: #e9ecef;
+        --kanban-text-secondary: #adb5bd;
+        --kanban-drag-over-bg: rgba(96, 165, 250, 0.15);
+        --kanban-icon-active-bg: rgba(96, 165, 250, 0.2);
+        --kanban-icon-active-color: #60a5fa;
+        --kanban-icon-active-hover-bg: rgba(96, 165, 250, 0.35);
+        --kanban-icon-inactive-bg: rgba(73, 80, 87, 0.5);
+        --kanban-icon-inactive-color: rgba(173, 181, 189, 0.4);
+        --kanban-error-bg: #7f1d1d;
+        --kanban-error-color: #fca5a5;
     }
 
     /* Kanban Container - fill parent height */
@@ -110,7 +134,7 @@
     }
 
     .kanban-column-body.drag-over {
-        background-color: rgba(37, 99, 235, 0.1);
+        background-color: var(--kanban-drag-over-bg);
         border: 2px dashed var(--kanban-primary-color);
         border-radius: 8px;
     }
@@ -171,19 +195,19 @@
     }
 
     .kanban-card-contact-icon.active {
-        background-color: rgba(25, 118, 210, 0.15);
-        color: #1976d2;
+        background-color: var(--kanban-icon-active-bg);
+        color: var(--kanban-icon-active-color);
         cursor: pointer;
     }
 
     .kanban-card-contact-icon.active:hover {
-        background-color: rgba(25, 118, 210, 0.25);
+        background-color: var(--kanban-icon-active-hover-bg);
         transform: scale(1.1);
     }
 
     .kanban-card-contact-icon.inactive {
-        background-color: rgba(226, 232, 240, 0.5);
-        color: rgba(148, 163, 184, 0.5);
+        background-color: var(--kanban-icon-inactive-bg);
+        color: var(--kanban-icon-inactive-color);
         cursor: not-allowed;
     }
 
@@ -195,11 +219,30 @@
     }
 
     .kanban-error {
-        background-color: #fee2e2;
-        color: #991b1b;
+        background-color: var(--kanban-error-bg);
+        color: var(--kanban-error-color);
         padding: 16px;
         border-radius: 8px;
         margin: 20px;
+    }
+
+    /* Dark theme: softer shadows */
+    [data-theme="dark"] .kanban-column {
+        box-shadow: 0 2px 1px -1px rgba(0,0,0,0.4),
+                    0 1px 1px 0 rgba(0,0,0,0.28),
+                    0 1px 3px 0 rgba(0,0,0,0.24);
+    }
+
+    [data-theme="dark"] .kanban-card {
+        box-shadow: 0 2px 1px -1px rgba(0,0,0,0.4),
+                    0 1px 1px 0 rgba(0,0,0,0.28),
+                    0 1px 3px 0 rgba(0,0,0,0.24);
+    }
+
+    [data-theme="dark"] .kanban-card:hover {
+        box-shadow: 0 3px 5px -1px rgba(0,0,0,0.4),
+                    0 6px 10px 0 rgba(0,0,0,0.28),
+                    0 1px 18px 0 rgba(0,0,0,0.24);
     }
 </style>
 
@@ -320,6 +363,48 @@
     KanbanBoard.prototype.init = function() {
         this._showLoading();
         this._loadData();
+        this._watchTheme();
+    };
+
+    KanbanBoard.prototype._watchTheme = function() {
+        var self = this;
+        if (typeof MutationObserver === 'undefined') return;
+        if (this._themeObserver) return; // already watching
+        this._themeObserver = new MutationObserver(function(mutations) {
+            for (var i = 0; i < mutations.length; i++) {
+                if (mutations[i].attributeName === 'data-theme') {
+                    self._updateColumnHeaderGradients();
+                    break;
+                }
+            }
+        });
+        this._themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    };
+
+    KanbanBoard.prototype._updateColumnHeaderGradients = function() {
+        var self = this;
+        var statusMapping = this.config.statusMapping;
+        var headers = this.container.querySelectorAll('.kanban-column-header[data-status-id]');
+        headers.forEach(function(header) {
+            var statusId = header.dataset.statusId;
+            var status = null;
+            for (var i = 0; i < self.statuses.length; i++) {
+                if (String(self.statuses[i][statusMapping.id]) === String(statusId)) {
+                    status = self.statuses[i];
+                    break;
+                }
+            }
+            if (!status) return;
+            var statusColor = status[statusMapping.color] || status['color'] || null;
+            if (!statusColor) return;
+            var gradientEnd;
+            if (self._isDarkTheme()) {
+                gradientEnd = self._darkenColor(statusColor, 15);
+            } else {
+                gradientEnd = self._lightenColor(statusColor, 8);
+            }
+            header.style.background = 'linear-gradient(135deg, ' + statusColor + ' 0%, ' + gradientEnd + ' 100%)';
+        });
     };
 
     KanbanBoard.prototype._showLoading = function() {
@@ -534,11 +619,16 @@
                 }
             });
 
-            // Build header style
+            // Build header style (adapt gradient direction for dark theme)
             var headerStyle = '';
             if (statusColor) {
-                var lightColor = this._lightenColor(statusColor, 8);
-                headerStyle = ' style="background: linear-gradient(135deg, ' + statusColor + ' 0%, ' + lightColor + ' 100%);"';
+                var gradientEnd;
+                if (this._isDarkTheme()) {
+                    gradientEnd = this._darkenColor(statusColor, 15);
+                } else {
+                    gradientEnd = this._lightenColor(statusColor, 8);
+                }
+                headerStyle = ' style="background: linear-gradient(135deg, ' + statusColor + ' 0%, ' + gradientEnd + ' 100%);"';
             }
 
             html += '<div class="kanban-column">';
@@ -647,6 +737,21 @@
         return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0');
     };
 
+    KanbanBoard.prototype._darkenColor = function(color, percent) {
+        if (!color || !color.startsWith('#')) return color;
+
+        var num = parseInt(color.slice(1), 16);
+        var r = Math.max(0, (num >> 16) - Math.round(2.55 * percent));
+        var g = Math.max(0, ((num >> 8) & 0x00FF) - Math.round(2.55 * percent));
+        var b = Math.max(0, (num & 0x0000FF) - Math.round(2.55 * percent));
+
+        return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0');
+    };
+
+    KanbanBoard.prototype._isDarkTheme = function() {
+        return document.documentElement.getAttribute('data-theme') === 'dark';
+    };
+
     KanbanBoard.prototype._initDragAndDrop = function() {
         var self = this;
         var draggedElement = null;
@@ -735,8 +840,10 @@
         // Visual feedback
         var originalContent = element.innerHTML;
         element.innerHTML = '&#x2713;';
-        element.style.backgroundColor = 'rgba(34, 197, 94, 0.25)';
-        element.style.color = 'rgba(34, 197, 94, 0.9)';
+        var successColor = this._isDarkTheme() ? 'rgba(52, 211, 153, 0.9)' : 'rgba(34, 197, 94, 0.9)';
+        var successBg = this._isDarkTheme() ? 'rgba(52, 211, 153, 0.25)' : 'rgba(34, 197, 94, 0.25)';
+        element.style.backgroundColor = successBg;
+        element.style.color = successColor;
 
         setTimeout(function() {
             element.innerHTML = originalContent;

@@ -40,6 +40,59 @@ class MainAppController {
         this.draggedItem = null;
         this.menuItems = {}; // Map of menu_id to menu item data
         this.menuElements = {}; // Map of menu_id to DOM elements
+        this.globalMetadata = null;  // Cache for global metadata (issue #1459)
+        this.globalMetadataPromise = null;  // In-progress global metadata fetch promise (issue #1459)
+    }
+
+    async loadGlobalMetadata() {
+        // If already loaded, return immediately (issue #1459)
+        if (this.globalMetadata) {
+            return this.globalMetadata;
+        }
+
+        // If loading is already in progress, wait for it instead of starting a new fetch (issue #1459)
+        if (this.globalMetadataPromise) {
+            return this.globalMetadataPromise;
+        }
+
+        // Reuse globalMetadata from an existing IntegramTable instance to avoid a duplicate /metadata request (issue #1463)
+        if (window._integramTableInstances && window._integramTableInstances.length > 0) {
+            for (const inst of window._integramTableInstances) {
+                if (inst && inst.globalMetadata) {
+                    this.globalMetadata = inst.globalMetadata;
+                    return this.globalMetadata;
+                }
+            }
+            // If an IntegramTable instance is currently fetching globalMetadata, piggyback on that promise
+            for (const inst of window._integramTableInstances) {
+                if (inst && inst.globalMetadataPromise) {
+                    this.globalMetadataPromise = inst.globalMetadataPromise.then(() => {
+                        if (inst.globalMetadata) this.globalMetadata = inst.globalMetadata;
+                        this.globalMetadataPromise = null;
+                        return this.globalMetadata;
+                    });
+                    return this.globalMetadataPromise;
+                }
+            }
+        }
+
+        const dbName = typeof db !== 'undefined' ? db : '';
+        this.globalMetadataPromise = (async () => {
+            try {
+                const response = await fetch('/' + dbName + '/metadata');
+                if (!response.ok) return null;
+                const metadata = await response.json();
+                if (!Array.isArray(metadata)) return null;
+                this.globalMetadata = metadata;
+                return metadata;
+            } catch (e) {
+                console.error('Error loading global metadata:', e);
+                return null;
+            } finally {
+                this.globalMetadataPromise = null;
+            }
+        })();
+        return this.globalMetadataPromise;
     }
 
     /**
@@ -303,6 +356,7 @@ class MainAppController {
         menuItem.setAttribute('data-menu-up', item.menu_up || '');
         menuItem.setAttribute('data-level', level);
         menuItem.setAttribute('draggable', 'false'); // Will be enabled in edit mode
+        if (item.name) menuItem.title = item.name;
 
         if (level > 0) {
             menuItem.classList.add('app-menu-item-nested');
@@ -424,21 +478,195 @@ class MainAppController {
         return menuItem;
     }
 
-    setupEditMode() {
+    async setupEditMode() {
         const sidebar = document.getElementById('app-sidebar');
         const settingsBtn = document.getElementById('sidebar-settings');
         if (!sidebar || !settingsBtn) return;
 
-        settingsBtn.addEventListener('click', () => {
-            this.editMode = !this.editMode;
+        // Hide button until we can verify permissions
+        settingsBtn.style.display = 'none';
+
+        // Check menu edit rights on the frontend:
+        // A) user is the database owner (db === user), OR
+        // B) the user's role metadata has WRITE access to the Menu type ('Меню' or 'Menu')
+        const canEditMenu = await this.checkMenuEditRights();
+        if (!canEditMenu) {
+            return;
+        }
+
+        settingsBtn.style.display = '';
+        settingsBtn.addEventListener('click', async () => {
+            // Show role selector panel before entering edit mode
+            await this.showRoleSelector();
+        });
+    }
+
+    async checkMenuEditRights() {
+        // Case A: user is the database owner
+        if (typeof db !== 'undefined' && typeof user !== 'undefined' && db === user) {
+            return true;
+        }
+
+        // Case B: check metadata - find the Role type and see if 'Меню' req has granted: 'WRITE'
+        try {
+            const metadata = await this.loadGlobalMetadata();
+            if (!metadata) return false;
+
+            // Find the Role type entry (val = 'Роль' or 'Role')
+            const roleType = metadata.find(item =>
+                item.val === 'Роль' || item.val === 'Role'
+            );
+            if (!roleType || !Array.isArray(roleType.reqs)) return false;
+
+            // Check if the 'Меню' (or 'Menu') requisite has granted: 'WRITE'
+            return roleType.reqs.some(req =>
+                (req.val === 'Меню' || req.val === 'Menu') && req.granted === 'WRITE'
+            );
+        } catch (e) {
+            console.error('Error checking menu edit rights:', e);
+            return false;
+        }
+    }
+
+    async showRoleSelector() {
+        const sidebar = document.getElementById('app-sidebar');
+        const settingsBtn = document.getElementById('sidebar-settings');
+
+        // Remove existing role panel if any
+        const existingPanel = document.getElementById('sidebar-role-panel');
+        if (existingPanel) {
+            existingPanel.remove();
+            // Also exit edit mode if active
+            if (this.editMode) {
+                this.editMode = false;
+                sidebar.classList.remove('edit-mode');
+                settingsBtn.classList.remove('active');
+                document.querySelectorAll('.app-menu-item').forEach(item => {
+                    item.setAttribute('draggable', 'false');
+                });
+            }
+            return;
+        }
+
+        // Create role selector panel
+        const panel = document.createElement('div');
+        panel.id = 'sidebar-role-panel';
+        panel.className = 'sidebar-role-panel';
+        panel.innerHTML = `
+            <div class="sidebar-role-panel-header">
+                <span class="sidebar-role-panel-title">Настройки меню</span>
+                <button type="button" class="sidebar-role-panel-close" aria-label="Закрыть"><i class="pi pi-times"></i></button>
+            </div>
+            <div class="sidebar-role-panel-body">
+                <label class="sidebar-role-label">Роль</label>
+                <select id="sidebar-role-select" class="sidebar-role-select">
+                    <option value="">Загрузка...</option>
+                </select>
+            </div>
+            <div class="sidebar-role-panel-footer">
+                <label class="sidebar-edit-mode-label">
+                    <input type="checkbox" id="sidebar-edit-mode-checkbox" class="sidebar-edit-mode-checkbox">
+                    Режим редактирования
+                </label>
+            </div>
+        `;
+
+        // Insert panel before settings button
+        sidebar.insertBefore(panel, settingsBtn);
+
+        // Wire up close button
+        panel.querySelector('.sidebar-role-panel-close').addEventListener('click', () => {
+            panel.remove();
+            // Also exit edit mode if active
+            if (this.editMode) {
+                this.editMode = false;
+                sidebar.classList.remove('edit-mode');
+                settingsBtn.classList.remove('active');
+                document.querySelectorAll('.app-menu-item').forEach(item => {
+                    item.setAttribute('draggable', 'false');
+                });
+            }
+        });
+
+        // Wire up edit mode checkbox
+        const editCheckbox = panel.querySelector('#sidebar-edit-mode-checkbox');
+        editCheckbox.checked = this.editMode;
+        editCheckbox.addEventListener('change', () => {
+            this.editMode = editCheckbox.checked;
             sidebar.classList.toggle('edit-mode', this.editMode);
             settingsBtn.classList.toggle('active', this.editMode);
-
-            // Enable/disable dragging on menu items
             document.querySelectorAll('.app-menu-item').forEach(item => {
                 item.setAttribute('draggable', this.editMode ? 'true' : 'false');
             });
         });
+
+        // Fetch roles
+        const dbName = typeof db !== 'undefined' ? db : '';
+        const roleSelect = panel.querySelector('#sidebar-role-select');
+        try {
+            const response = await fetch('/' + dbName + '/object/42?JSON_OBJ');
+            if (response.ok) {
+                const roles = await response.json();
+                roleSelect.innerHTML = '';
+                const currentRoleId = typeof window.roleId !== 'undefined' ? String(window.roleId) : '';
+                roles.forEach(roleObj => {
+                    const id = String(roleObj.i);
+                    const name = Array.isArray(roleObj.r) ? roleObj.r[0] : String(roleObj.r);
+                    const option = document.createElement('option');
+                    option.value = id;
+                    option.textContent = name;
+                    if (id === currentRoleId) {
+                        option.selected = true;
+                    }
+                    roleSelect.appendChild(option);
+                });
+            } else {
+                roleSelect.innerHTML = '<option value="">Ошибка загрузки</option>';
+            }
+        } catch (err) {
+            console.error('Error fetching roles:', err);
+            roleSelect.innerHTML = '<option value="">Ошибка загрузки</option>';
+        }
+
+        // On role change, reload menu for selected role
+        roleSelect.addEventListener('change', async () => {
+            const selectedRoleId = roleSelect.value;
+            if (!selectedRoleId) return;
+            await this.loadMenuForRole(selectedRoleId);
+        });
+    }
+
+    async loadMenuForRole(roleId) {
+        const dbName = typeof db !== 'undefined' ? db : '';
+        try {
+            const url = '/' + dbName + '/report/MyRoleMenu?JSON_KV&FR_ПользовательID=%&FR_RoleID=' + encodeURIComponent(roleId);
+            const response = await fetch(url);
+            if (response.ok) {
+                const newMenuData = await response.json();
+                if (Array.isArray(newMenuData)) {
+                    // Replace global menuData
+                    if (typeof menuData !== 'undefined' && Array.isArray(menuData)) {
+                        menuData.length = 0;
+                        newMenuData.forEach(item => menuData.push(item));
+                    }
+                    // Rebuild menu
+                    this.buildMenu();
+                    this.highlightActiveMenuItem();
+                    // Restore edit mode if active
+                    if (this.editMode) {
+                        const sidebar = document.getElementById('app-sidebar');
+                        if (sidebar) sidebar.classList.add('edit-mode');
+                        document.querySelectorAll('.app-menu-item').forEach(item => {
+                            item.setAttribute('draggable', 'true');
+                        });
+                    }
+                }
+            } else {
+                console.error('Failed to load menu for role:', response.status);
+            }
+        } catch (err) {
+            console.error('Error loading menu for role:', err);
+        }
     }
 
     setupMenuSearch() {
@@ -1005,6 +1233,15 @@ class MainAppController {
             });
         }
 
+        // Enter in input triggers Save
+        const saveBtn = modal.querySelector('.save');
+        modal.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
+                e.preventDefault();
+                saveBtn.click();
+            }
+        });
+
         // Focus name input
         setTimeout(() => {
             modal.querySelector('#modal-name').focus();
@@ -1037,7 +1274,8 @@ class MainAppController {
         // Response: JSON with key 'obj' containing the new menu item ID
 
         const dbName = typeof db !== 'undefined' ? db : '';
-        const upParam = parentId || (typeof window.roleId !== 'undefined' ? window.roleId : '');
+        const sidebarRoleSelect = document.getElementById('sidebar-role-select');
+        const upParam = parentId || (sidebarRoleSelect ? sidebarRoleSelect.value : (typeof window.roleId !== 'undefined' ? window.roleId : ''));
         const url = '/' + dbName + '/_m_new/151?JSON&up=' + encodeURIComponent(upParam);
 
         const params = new URLSearchParams();
@@ -1057,7 +1295,11 @@ class MainAppController {
 
             if (response.ok) {
                 const data = await response.json();
-                if (data && data.obj) {
+                const serverError = Array.isArray(data) ? (data[0] && data[0].error) : data.error;
+                if (serverError) {
+                    console.error('Failed to create menu item: server error', serverError);
+                    this.showErrorModal('Ошибка создания пункта меню: ' + serverError);
+                } else if (data && data.obj) {
                     // Successfully created - add to local data and rebuild menu
                     const newItem = {
                         menu_id: String(data.obj),
@@ -1125,6 +1367,13 @@ class MainAppController {
             });
 
             if (response.ok) {
+                const data = await response.json();
+                const serverError = Array.isArray(data) ? (data[0] && data[0].error) : data.error;
+                if (serverError) {
+                    console.error('Failed to update menu item: server error', serverError);
+                    this.showErrorModal('Ошибка обновления пункта меню: ' + serverError);
+                    return;
+                }
                 // Successfully saved - update local data
                 item.name = name;
                 item.href = href;

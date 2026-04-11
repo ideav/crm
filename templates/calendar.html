@@ -17,6 +17,44 @@
         --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
         --overdue-color: #dc2626;
         --important-color: #f59e0b;
+        --overdue-bg: #fee2e2;
+        --overdue-border: #fca5a5;
+        --overdue-hover-bg: #fecaca;
+        --overdue-task-bg: #ffffff;
+        --error-bg: #fee2e2;
+        --error-color: #991b1b;
+        --search-close-hover-bg: #fee2e2;
+        --search-close-hover-border: #fca5a5;
+        --toast-error-bg: #dc3545;
+        --toast-success-bg: #28a745;
+        --toast-info-bg: #17a2b8;
+    }
+
+    [data-theme="dark"] {
+        --primary-color: #3b82f6;
+        --primary-hover: #2563eb;
+        --primary-light: #60a5fa;
+        --background: #1a1a1a;
+        --surface: #2d2d2d;
+        --border-color: #495057;
+        --text-primary: #e9ecef;
+        --text-secondary: #adb5bd;
+        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+        --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+        --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.4);
+        --overdue-color: #f87171;
+        --important-color: #fbbf24;
+        --overdue-bg: #450a0a;
+        --overdue-border: #7f1d1d;
+        --overdue-hover-bg: #7f1d1d;
+        --overdue-task-bg: #2d2d2d;
+        --error-bg: #7f1d1d;
+        --error-color: #fca5a5;
+        --search-close-hover-bg: #450a0a;
+        --search-close-hover-border: #7f1d1d;
+        --toast-error-bg: #b91c1c;
+        --toast-success-bg: #15803d;
+        --toast-info-bg: #0e7490;
     }
 
     /* Calendar Container */
@@ -112,8 +150,8 @@
 
     /* Overdue Section - Issue #428: Compact inline display */
     .overdue-section {
-        background-color: #fee2e2;
-        border: 1px solid #fca5a5;
+        background-color: var(--overdue-bg);
+        border: 1px solid var(--overdue-border);
         border-radius: 8px;
         padding: 8px 12px;
         transition: all 0.3s ease;
@@ -130,7 +168,7 @@
     }
 
     .overdue-section.collapsed:hover {
-        background-color: #fecaca;
+        background-color: var(--overdue-hover-bg);
     }
 
     /* Expanded State - Issue #428: Full width overlay */
@@ -179,7 +217,7 @@
     }
 
     .overdue-task-item {
-        background-color: white;
+        background-color: var(--overdue-task-bg);
         padding: 8px 12px;
         margin-bottom: 6px;
         border-radius: 4px;
@@ -384,8 +422,8 @@
     }
 
     .fc-search-close:hover {
-        background-color: #fee2e2;
-        border-color: #fca5a5;
+        background-color: var(--search-close-hover-bg);
+        border-color: var(--search-close-hover-border);
         color: var(--overdue-color);
     }
 
@@ -474,8 +512,8 @@
 
     /* Error */
     .error {
-        background-color: #fee2e2;
-        color: #991b1b;
+        background-color: var(--error-bg);
+        color: var(--error-color);
         padding: 16px;
         border-radius: 8px;
         margin: 20px;
@@ -526,6 +564,134 @@
         .fc-event-title {
             font-size: 0.7rem !important;
         }
+    }
+
+    /* Dark theme overrides for FullCalendar */
+    [data-theme="dark"] .fc .fc-view-harness,
+    [data-theme="dark"] .fc-theme-standard td,
+    [data-theme="dark"] .fc-theme-standard th,
+    [data-theme="dark"] .fc-theme-standard .fc-scrollgrid {
+        border-color: var(--border-color);
+    }
+
+    [data-theme="dark"] .fc-theme-standard .fc-scrollgrid {
+        border-color: var(--border-color);
+    }
+
+    [data-theme="dark"] .fc .fc-daygrid-day-frame,
+    [data-theme="dark"] .fc .fc-timegrid-slot,
+    [data-theme="dark"] .fc .fc-col-header-cell {
+        background-color: var(--surface);
+    }
+
+    [data-theme="dark"] .fc .fc-daygrid-day-number,
+    [data-theme="dark"] .fc .fc-col-header-cell-cushion {
+        color: var(--text-primary);
+    }
+
+    [data-theme="dark"] .fc .fc-daygrid-day.fc-day-today {
+        background-color: rgba(59, 130, 246, 0.15) !important;
+    }
+
+    [data-theme="dark"] .fc .fc-daygrid-day.fc-day-other .fc-daygrid-day-number {
+        color: var(--text-secondary);
+    }
+
+    [data-theme="dark"] .fc-col-header {
+        background-color: var(--surface);
+    }
+
+    [data-theme="dark"] .fc-timegrid-axis {
+        background-color: var(--surface);
+    }
+
+    [data-theme="dark"] .fc .fc-timegrid-slot-label-cushion,
+    [data-theme="dark"] .fc .fc-timegrid-axis-cushion {
+        color: var(--text-secondary);
+    }
+
+    [data-theme="dark"] .fc .fc-list-event:hover td {
+        background-color: var(--bg-secondary);
+    }
+
+    [data-theme="dark"] .fc-list-day-cushion {
+        background-color: var(--bg-secondary) !important;
+    }
+
+    [data-theme="dark"] .fc .fc-list-table td,
+    [data-theme="dark"] .fc .fc-list-day-text,
+    [data-theme="dark"] .fc .fc-list-day-side-text {
+        color: var(--text-primary);
+    }
+
+    [data-theme="dark"] .calendar-container {
+        background-color: var(--background);
+    }
+
+    [data-theme="dark"] .calendar-wrapper {
+        background-color: var(--surface);
+    }
+
+    [data-theme="dark"] .calendar-controls {
+        background-color: var(--surface);
+    }
+
+    [data-theme="dark"] .calendar-select {
+        background-color: var(--surface);
+        border-color: var(--border-color);
+        color: var(--text-primary);
+    }
+
+    [data-theme="dark"] .calendar-button {
+        background-color: var(--surface);
+        border-color: var(--border-color);
+        color: var(--text-primary);
+    }
+
+    [data-theme="dark"] .calendar-button:hover {
+        background-color: var(--primary-color);
+        border-color: var(--primary-color);
+        color: #ffffff;
+    }
+
+    [data-theme="dark"] .fc-today-button {
+        background-color: var(--surface) !important;
+        border-color: var(--border-color) !important;
+        color: var(--primary-color) !important;
+    }
+
+    [data-theme="dark"] .fc-today-button:hover {
+        background-color: var(--primary-color) !important;
+        border-color: var(--primary-color) !important;
+        color: #ffffff !important;
+    }
+
+    [data-theme="dark"] .fc-search-icon {
+        background-color: var(--surface) !important;
+        border-color: var(--border-color) !important;
+        color: var(--primary-color) !important;
+    }
+
+    [data-theme="dark"] .fc-search-input {
+        background-color: var(--surface);
+        border-color: var(--border-color);
+        color: var(--text-primary);
+    }
+
+    [data-theme="dark"] .fc-search-close {
+        background-color: var(--surface);
+        border-color: var(--border-color);
+        color: var(--text-secondary);
+    }
+
+    [data-theme="dark"] .overdue-task-item:hover {
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    }
+
+    /* Dark theme for hint box */
+    [data-theme="dark"] #calendar-hint-box {
+        background: var(--card-bg, var(--surface));
+        color: var(--text-primary);
     }
 </style>
 
@@ -602,7 +768,12 @@ function showNotification(message, type) {
     const toast = document.createElement('div');
     toast.className = `integram-toast integram-toast-${type}`;
     toast.textContent = message;
-    toast.style.cssText = `position:fixed;top:20px;right:20px;padding:12px 24px;border-radius:4px;color:white;z-index:10000;font-family:sans-serif;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.2);cursor:pointer;background-color:${type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#17a2b8'};`;
+    const toastBg = type === 'error'
+        ? getComputedStyle(document.documentElement).getPropertyValue('--toast-error-bg').trim() || '#dc3545'
+        : type === 'success'
+            ? getComputedStyle(document.documentElement).getPropertyValue('--toast-success-bg').trim() || '#28a745'
+            : getComputedStyle(document.documentElement).getPropertyValue('--toast-info-bg').trim() || '#17a2b8';
+    toast.style.cssText = `position:fixed;top:20px;right:20px;padding:12px 24px;border-radius:4px;color:white;z-index:10000;font-family:sans-serif;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.2);cursor:pointer;background-color:${toastBg};`;
     document.body.appendChild(toast);
     const remove = () => { if (toast.parentNode) toast.remove(); };
     setTimeout(remove, 5000);

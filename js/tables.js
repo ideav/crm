@@ -679,6 +679,11 @@ class TablesController {
             const result = await response.json();
             console.log('[tables] Config saved:', result);
 
+            const serverError = Array.isArray(result) ? (result[0] && result[0].error) : result.error;
+            if (serverError) {
+                throw new Error(serverError);
+            }
+
             // If created new settings, save the ID
             if (!this.settingsID && result.id) {
                 this.settingsID = result.id;
@@ -686,6 +691,7 @@ class TablesController {
 
         } catch (err) {
             console.error('[tables] Error saving config:', err);
+            this.showErrorModal('Ошибка сохранения настроек: ' + err.message);
         }
     }
 
@@ -868,18 +874,27 @@ class TablesController {
 
             // Add to first folder (result.obj contains the new table ID)
             if (result.obj) {
+                const newTableId = String(result.obj);
                 const firstFolder = Object.keys(this.config)[0];
                 if (firstFolder) {
                     if (!this.config[firstFolder].tabs) {
                         this.config[firstFolder].tabs = [];
                     }
-                    this.config[firstFolder].tabs.unshift(String(result.obj));
+                    this.config[firstFolder].tabs.unshift(newTableId);
                     await this.saveConfig();
                 }
 
-                // Reload tables
+                // Reload tables and render
                 await this.loadTables();
                 this.render();
+
+                // Highlight the newly created table card for 2 seconds
+                const newCard = document.querySelector('.table-card[data-table-id="' + newTableId + '"]');
+                if (newCard) {
+                    newCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    newCard.classList.add('new-table-highlight');
+                    setTimeout(() => newCard.classList.remove('new-table-highlight'), 2000);
+                }
             }
 
             this.hideNewTableModal();

@@ -1,4 +1,4 @@
-/**
+/** 
  * IntegramTable Component Styles
  * Standalone CSS module for table component with Material Design styling
  */
@@ -32,7 +32,7 @@
 }
 
 #form-settings-btn {
-    font-size: 16px;
+    font-size: 1rem;
 }
 
 .integram-table-container {
@@ -51,7 +51,7 @@
     overflow-x: auto;
     overflow-y: hidden;
     z-index: 99;
-    background: rgba(255, 255, 255, 0.95);
+    background: var(--card-bg, rgba(255, 255, 255, 0.95));
     border-top: 1px solid var(--border-color, #dee2e6);
     display: none;
 }
@@ -67,6 +67,7 @@
     gap: 16px;
     margin-bottom: 12px;
     padding: 12px 12px 0;
+    overflow: hidden;
 }
 
 /* Title area wrapper with create button (issue #693) */
@@ -74,10 +75,11 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-shrink: 0;
 }
 
 .integram-table-title {
-    font-size: 20px;
+    font-size: 1.25rem;
     font-weight: 500;
     color: var(--md-text-primary);
     letter-spacing: 0.15px;
@@ -122,7 +124,18 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     display: flex;
     align-items: center;
     gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex-shrink: 1;
+    min-width: 0;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE/Edge */
 }
+
+.integram-table-controls::-webkit-scrollbar {
+    display: none; /* Chrome/Safari */
+}
+
 
 .integram-table-settings {
     cursor: pointer;
@@ -130,7 +143,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border-radius: 6px;
     transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
     font-weight: 500;
-    font-size: 16px;
+    font-size: 1rem;
     color: var(--text-secondary, #6c757d);
     background: transparent;
     border: 1px solid var(--border-color, #dee2e6);
@@ -138,10 +151,14 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     flex-direction: column;
     align-items: center;
     gap: 1px;
+    flex-shrink: 0;
+    white-space: nowrap;
 }
-
+.integram-table-settings-refresh{
+    border: none !important;
+}
 .integram-table-settings .btn-label {
-    font-size: 12px;
+    font-size: 0.75rem;
     font-weight: 400;
     line-height: 1;
 }
@@ -185,8 +202,8 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .btn-outline-secondary:hover {
-    background-color: #f3f3f3 !important;
-    color: #6c757d !important;
+    background-color: var(--bg-secondary, #f3f3f3) !important;
+    color: var(--text-secondary, #6c757d) !important;
 }
 
 .btn-outline-secondary:focus,
@@ -231,7 +248,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border-radius: 6px;
     transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
     font-weight: 500;
-    font-size: 13px;
+    font-size: 0.8125rem;
     cursor: pointer;
 }
 
@@ -247,11 +264,11 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .integram-table th {
-    background-color: #f5f5f5;
+    background-color: var(--bg-secondary, #f5f5f5);
     padding: 10px;
     text-align: left;
     font-weight: 500;
-    font-size: 12px;
+    font-size: 0.75rem;
     /* letter-spacing: 0.4px;
     text-transform: uppercase; */
     color: var(--md-text-secondary);
@@ -302,6 +319,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .column-header-content {
     display: inline-block;
+    position: relative;
     padding-right: 10px;
     white-space: nowrap;
 }
@@ -326,7 +344,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    font-size: 16px;
+    font-size: 1rem;
     font-weight: bold;
     line-height: 1;
     padding: 0;
@@ -348,6 +366,39 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     background: var(--md-primary-dark);
     box-shadow: var(--md-elevation-1);
     transform: translateY(-50%) scale(0.95);
+}
+
+/* Reference icon link for list/lookup columns (issue #1668, #1674, #1676) */
+.column-ref-link {
+    position: absolute; /* out of inline flow so it does not affect th height (issue #1676) */
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: none; /* absolutely positioned so display:none causes no layout shift (issue #1672, #1674) */
+    color: var(--md-on-surface-variant, #666);
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    font-size: 0.75rem;
+    text-decoration: none;
+    opacity: 0.7;
+    transition: var(--md-transition);
+    z-index: 1;
+}
+
+.integram-table th:hover .column-ref-link {
+    display: flex;
+}
+
+/* When both ref icon and add button are present, shift ref icon left so they don't overlap (issue #1682) */
+.integram-table th:hover .column-ref-link:has(~ .column-add-btn) {
+    right: 36px;
+}
+
+.column-ref-link:hover {
+    opacity: 1;
+    color: var(--md-primary, #1976d2);
 }
 
 /* Quick add column header cell (issue #1230) */
@@ -372,6 +423,17 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 0 !important;
 }
 
+/* Smart header group cells (issue #1540) */
+.integram-table th.smart-header-group {
+    text-align: center;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    max-width: 0;
+    cursor: default;
+    draggable: false;
+}
+
 /* Compact mode */
 .integram-table.compact th {
     padding: 8px 5px;
@@ -387,7 +449,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border-left: none;
     border-right: 1px solid rgba(0, 0, 0, 0.06);
     color: var(--md-text-primary);
-    font-size: 13px;
+    font-size: 0.8125rem;
     letter-spacing: 0.25px;
 }
 
@@ -421,24 +483,24 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .boolean-check {
     color: #4caf50;
     font-weight: bold;
-    font-size: 16px;
+    font-size: 1rem;
 }
 
 .boolean-uncheck {
     color: #9e9e9e;
-    font-size: 14px;
+    font-size: 0.875rem;
 }
 
 /* Subordinate table boolean styles */
 .subordinate-table .boolean-check {
     color: #4caf50;
     font-weight: bold;
-    font-size: 14px;
+    font-size: 0.875rem;
 }
 
 .subordinate-table .boolean-uncheck {
     color: #9e9e9e;
-    font-size: 12px;
+    font-size: 0.75rem;
 }
 
 .integram-table .date-cell,
@@ -481,7 +543,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     background: var(--md-surface);
     border: 1px solid var(--md-divider);
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 0.875rem;
     min-width: 32px;
     text-align: center;
     font-weight: 500;
@@ -503,7 +565,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 8px 12px;
     border: 1px solid var(--md-divider);
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
@@ -536,7 +598,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     top: 50%;
     transform: translateY(-50%);
     cursor: pointer;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 500;
     color: var(--md-text-secondary);
     background: var(--md-surface);
@@ -559,7 +621,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 4px 0px 4px 23px;  /* Extra left padding for icon */
     border: none; /* 1px solid var(--md-divider); */
     /* border-radius: 4px; */
-    font-size: 14px;
+    font-size: 0.875rem;
     font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
@@ -594,6 +656,12 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     opacity: 1;
 }
 
+/* Show placeholder date/time text (e.g. "дд.мм.гггг") in hint color when no value is set (issue #1510) */
+.filter-date-picker:not([value])::-webkit-datetime-edit,
+.filter-date-picker[value=""]::-webkit-datetime-edit {
+    color: var(--md-text-hint);
+}
+
 /* Reference field filter dropdown trigger button (issue #795, #797) */
 .filter-ref-trigger {
     flex: 1;
@@ -602,7 +670,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     justify-content: space-between;
     padding: 4px 8px 4px 23px;  /* Extra left padding for icon */
     border: none;
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
@@ -628,16 +696,16 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--md-text-secondary);
+    color: var(--md-text-primary);
 }
 
-.filter-ref-trigger-text:not(:empty) {
-    color: var(--md-text-primary);
+.filter-ref-trigger-text--placeholder {
+    color: var(--md-text-hint);
 }
 
 .filter-ref-trigger-arrow {
     flex-shrink: 0;
-    font-size: 10px;
+    font-size: 0.625rem;
     color: var(--md-text-hint);
     margin-left: 4px;
 }
@@ -668,7 +736,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 8px 12px;
     border: 1px solid var(--md-divider);
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
@@ -691,7 +759,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border: none;
     background: transparent;
     color: var(--md-text-secondary);
-    font-size: 16px;
+    font-size: 1rem;
     cursor: pointer;
     border-radius: 50%;
     display: flex;
@@ -718,7 +786,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     cursor: pointer;
     transition: background-color 0.15s ease;
     gap: 8px;
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--md-text-primary);
 }
 
@@ -759,7 +827,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border-radius: 4px;
     box-shadow: var(--md-elevation-2);
     color: var(--md-text-secondary);
-    font-size: 13px;
+    font-size: 0.75rem;
     font-weight: 500;
     font-family: inherit;
     z-index: 100;
@@ -796,7 +864,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border-radius: 4px;
     cursor: pointer;
     font-weight: 500;
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--md-text-primary);
     transition: var(--md-transition);
 }
@@ -839,7 +907,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border: 1.5px solid var(--md-text-secondary, #888);
     background: none;
     color: var(--md-text-secondary, #888);
-    font-size: 12px;
+    font-size: 0.75rem;
     font-weight: 700;
     cursor: pointer;
     line-height: 1;
@@ -877,7 +945,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     bottom: 0;
     background: rgba(0, 0, 0, 0.32);
     z-index: 999;
-    backdrop-filter: blur(2px);
+    backdrop-filter: blur(1px);
 }
 
 .column-settings-list {
@@ -905,7 +973,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     display: flex;
     align-items: center;
     width: 100%;
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--md-text-primary);
     letter-spacing: 0.25px;
 }
@@ -957,7 +1025,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     margin-right: 8px;
     color: var(--md-text-secondary, #666);
     cursor: grab;
-    font-size: 14px;
+    font-size: 0.875rem;
     user-select: none;
     opacity: 0.5;
 }
@@ -999,7 +1067,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     height: 18px;
     line-height: 18px;
     text-align: center;
-    font-size: 10px;
+    font-size: 0.625rem;
     font-weight: 600;
     color: var(--md-text-secondary, #666);
     background-color: var(--md-surface-variant, rgba(0,0,0,0.07));
@@ -1012,16 +1080,16 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 /* Required / multi badges in column settings list (issue #937) */
 .col-required-badge {
-    color: #d32f2f;
+    color: var(--color-error, #d32f2f);
     font-weight: bold;
     margin-left: 4px;
-    font-size: 14px;
+    font-size: 0.875rem;
 }
 
 .col-multi-badge {
     color: var(--md-primary, #1976d2);
     margin-left: 4px;
-    font-size: 12px;
+    font-size: 0.75rem;
 }
 
 /* Column type icon and original name display in column settings list (issue #945) */
@@ -1033,14 +1101,14 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     margin-right: 8px;
     color: var(--md-text-secondary, #666);
     flex: 0 0 auto;
-    font-size: 11px;
+    font-size: 0.6875rem;
     font-weight: 600;
     opacity: 0.65;
 }
 
 .col-original-name {
     color: var(--md-text-secondary, #888);
-    font-size: 12px;
+    font-size: 0.75rem;
     margin-left: 3px;
 }
 
@@ -1062,7 +1130,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .col-edit-label {
     min-width: 130px;
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-weight: 500;
     margin: 0;
     color: var(--md-text-secondary, #555);
@@ -1072,7 +1140,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-weight: 400;
     margin: 0;
     cursor: pointer;
@@ -1081,11 +1149,11 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .col-edit-select,
 .col-edit-input {
     flex: 1;
-    font-size: 13px;
+    font-size: 0.8125rem;
 }
 
 .col-edit-value {
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--md-text-secondary, #666);
     font-style: italic;
 }
@@ -1103,7 +1171,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .col-edit-go-dict-link {
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--md-primary, #1976d2);
     text-decoration: none;
     cursor: pointer;
@@ -1158,38 +1226,38 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     align-items: center;
     gap: 8px;
     margin-top: 10px;
-    background: #fff3f3;
+    background: var(--color-error-bg, #fff3f3);
     border-radius: 4px;
     padding: 8px 12px;
     flex-wrap: wrap;
 }
 
 .col-edit-del-warn {
-    font-size: 13px;
-    color: #b71c1c;
+    font-size: 0.8125rem;
+    color: var(--color-error, #b71c1c);
     flex: 1;
 }
 
 .col-edit-status {
     margin-top: 10px;
-    font-size: 13px;
+    font-size: 0.8125rem;
     padding: 6px 10px;
     border-radius: 4px;
 }
 
 .col-edit-status-ok {
-    background: #e8f5e9;
-    color: #2e7d32;
+    background: var(--color-success-bg, #e8f5e9);
+    color: var(--color-success, #2e7d32);
 }
 
 .col-edit-status-error {
-    background: #ffebee;
-    color: #b71c1c;
+    background: var(--color-error-bg, #ffebee);
+    color: var(--color-error, #b71c1c);
 }
 
 .table-settings-item {
     padding: 12px 12px 12px 0;
-    border-bottom: 1px solid #f0f0f0;
+    border-bottom: 1px solid var(--border-color, #f0f0f0);
 }
 
 .table-settings-item > label:first-child {
@@ -1203,7 +1271,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .show-full-value {
-    color: #007bff;
+    color: var(--link-color, #007bff);
     text-decoration: none;
     margin-left: 2px;
     font-weight: bold;
@@ -1211,6 +1279,28 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .show-full-value:hover {
     text-decoration: underline;
+}
+
+/* Copy button in Full Value modal - issue #1465 */
+.full-value-copy-btn {
+    background: none;
+    border: 1px solid var(--border-color, #dee2e6);
+    border-radius: 4px;
+    padding: 4px 8px;
+    cursor: pointer;
+    color: var(--text-secondary, #6c757d);
+    font-size: 0.875rem;
+    line-height: 1;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.full-value-copy-btn:hover {
+    color: var(--link-color, #007bff);
+    border-color: var(--link-color, #007bff);
+}
+
+.full-value-content:hover {
+    background: var(--bg-secondary, #e9ecef) !important;
 }
 
 .filter-type-menu {
@@ -1232,7 +1322,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     /* justify-content: space-between; */
     align-items: center;
     transition: background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--md-text-primary);
 }
 
@@ -1272,7 +1362,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     transition: var(--md-transition);
     cursor: pointer;
     padding: 4px;
-    background: rgba(255, 255, 255, 0.95);
+    background: var(--card-bg, rgba(255, 255, 255, 0.95));
     border-radius: 50%;
     color: var(--md-primary);
     display: inline-flex;
@@ -1312,7 +1402,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     right: 0;
     bottom: 0;
     background: rgba(0, 0, 0, 0.32);
-    backdrop-filter: blur(2px);
+    backdrop-filter: blur(1px);
 }
 
 .edit-form-modal {
@@ -1349,7 +1439,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .edit-form-header h3 {
     margin: 0;
-    font-size: 20px;
+    font-size: 1.25rem;
     font-weight: 500;
     color: var(--md-text-primary);
     letter-spacing: 0.15px;
@@ -1362,7 +1452,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .edit-form-parent-subtitle {
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 400;
     color: var(--md-text-secondary);
     letter-spacing: 0.1px;
@@ -1371,7 +1461,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .edit-form-close {
     background: none;
     border: none;
-    font-size: 24px;
+    font-size: 1.5rem;
     line-height: 1;
     color: var(--md-text-secondary);
     cursor: pointer;
@@ -1399,19 +1489,19 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .edit-form-record-id {
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 400;
-    color: #999;
+    color: var(--text-secondary, #999);
     cursor: pointer;
     transition: color 0.2s ease;
 }
 
 .edit-form-record-id:hover {
-    color: #666;
+    color: var(--text-primary, #666);
 }
 
 .edit-form-table-link {
-    color: #999;
+    color: var(--text-secondary, #999);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1422,7 +1512,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .edit-form-table-link:hover {
-    color: #666;
+    color: var(--text-primary, #666);
     background-color: rgba(0, 0, 0, 0.05);
 }
 
@@ -1455,7 +1545,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .edit-form .form-group .required {
-    color: #d32f2f;
+    color: var(--color-error, #d32f2f);
 }
 
 .edit-form .form-control {
@@ -1463,7 +1553,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 12px 16px;
     border: 1px solid var(--md-divider);
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
@@ -1485,18 +1575,19 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .edit-form .datetime-picker {
     width: 100%;
     padding: 8px 12px;
-    border: 1px solid #ced4da;
+    border: 1px solid var(--input-border, #ced4da);
     border-radius: 4px;
-    font-size: 14px;
-    background-color: white;
+    font-size: 0.875rem;
+    background-color: var(--input-bg, white);
+    color: var(--text-primary, inherit);
     cursor: pointer;
 }
 
 .edit-form .date-picker:focus,
 .edit-form .datetime-picker:focus {
     outline: none;
-    border-color: #007bff;
-    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+    border-color: var(--button-primary, #007bff);
+    box-shadow: 0 0 0 0.2rem rgba(59, 130, 246, 0.25);
 }
 
 /* Style for calendar icon in date/datetime inputs */
@@ -1519,10 +1610,10 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 
 .edit-form-footer .btn {
-    padding: 10px 24px;
+    padding: 10px 22px;
     border: none;
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 500;
     cursor: pointer;
     transition: var(--md-transition);
@@ -1562,16 +1653,31 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .edit-form-footer .btn-danger {
-    background-color: #dc3545;
+    background-color: var(--color-danger, #dc3545);
     color: white;
 }
 
 .edit-form-footer .btn-danger:hover {
-    background-color: #c82333;
+    background-color: var(--color-danger-hover, #c82333);
 }
 
 .edit-form-footer .btn-danger:active {
     transform: translateY(1px);
+}
+
+/* Read-only form fields (issue #1508) */
+.edit-form .form-field-readonly input,
+.edit-form .form-field-readonly textarea,
+.edit-form .form-field-readonly select {
+    background-color: var(--bg-secondary, #f0f0f0);
+    color: var(--text-secondary, #888);
+    pointer-events: none;
+}
+
+.edit-form .form-field-readonly .form-reference-editor {
+    background-color: var(--bg-secondary, #f0f0f0);
+    pointer-events: none;
+    opacity: 0.65;
 }
 
 /* Subordinate table indicator */
@@ -1580,10 +1686,10 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     align-items: center;
     gap: 8px;
     padding: 8px 12px;
-    background: #f8f9fa;
-    border: 1px solid #dee2e6;
+    background: var(--bg-secondary, #f8f9fa);
+    border: 1px solid var(--border-color, #dee2e6);
     border-radius: 4px;
-    color: #6c757d;
+    color: var(--text-secondary, #6c757d);
 }
 
 .subordinate-table-indicator svg {
@@ -1602,7 +1708,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     z-index: 3000;
     min-width: 300px;
     max-width: 500px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-family: inherit;
     letter-spacing: 0.25px;
     animation: slideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -1633,14 +1739,14 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .integram-toast-success {
-    background: #e8f5e9;
-    color: #2e7d32;
+    background: var(--color-success-bg, #e8f5e9);
+    color: var(--color-success, #2e7d32);
     border-left: 4px solid #4caf50;
 }
 
 .integram-toast-error {
-    background: #ffebee;
-    color: #c62828;
+    background: var(--color-error-bg, #ffebee);
+    color: var(--color-error, #c62828);
     border-left: 4px solid #f44336;
 }
 
@@ -1661,7 +1767,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 12px 16px;
     border: 1px solid var(--md-divider);
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
@@ -1697,7 +1803,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     transition: background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
     border-bottom: none;
     color: var(--md-text-primary);
-    font-size: 14px;
+    font-size: 0.875rem;
 }
 
 .searchable-select-option:last-child {
@@ -1721,11 +1827,11 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     color: var(--md-text-secondary);
     text-align: center;
     font-style: italic;
-    font-size: 14px;
+    font-size: 0.875rem;
 }
 
 .searchable-select-error {
-    color: #d32f2f;
+    color: var(--color-error, #d32f2f);
 }
 
 /* Form field settings */
@@ -1735,7 +1841,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     align-items: center;
     gap: 10px;
     padding: 15px 20px;
-    border-top: 1px solid #dee2e6;
+    border-top: 1px solid var(--border-color, #dee2e6);
 }
 
 .edit-form-footer-buttons {
@@ -1780,7 +1886,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     bottom: 0;
     background: rgba(0, 0, 0, 0.32);
     z-index: 10001;
-    backdrop-filter: blur(2px);
+    backdrop-filter: blur(1px);
 }
 
 .form-field-settings-modal {
@@ -1810,7 +1916,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .form-field-settings-header h3 {
     margin: 0;
-    font-size: 20px;
+    font-size: 1.25rem;
     font-weight: 500;
     color: var(--md-text-primary);
     letter-spacing: 0.15px;
@@ -1819,7 +1925,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .form-field-settings-close {
     background: none;
     border: none;
-    font-size: 24px;
+    font-size: 1.5rem;
     line-height: 1;
     color: var(--md-text-secondary);
     cursor: pointer;
@@ -1846,8 +1952,8 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .form-field-settings-info {
     margin-bottom: 15px;
-    color: #6c757d;
-    font-size: 14px;
+    color: var(--text-secondary, #6c757d);
+    font-size: 0.875rem;
 }
 
 .form-field-settings-list {
@@ -1871,7 +1977,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     cursor: pointer;
     margin: 0;
     user-select: none;
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--md-text-primary);
     letter-spacing: 0.25px;
 }
@@ -1892,14 +1998,14 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     justify-content: flex-end;
     gap: 10px;
     padding: 15px 20px;
-    border-top: 1px solid #dee2e6;
+    border-top: 1px solid var(--border-color, #dee2e6);
 }
 
 .form-field-settings-footer .btn {
     padding: 10px 24px;
     border: none;
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 500;
     cursor: pointer;
     transition: var(--md-transition);
@@ -1957,7 +2063,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     margin-right: 8px;
     color: var(--md-text-secondary, #666);
     cursor: grab;
-    font-size: 14px;
+    font-size: 0.875rem;
     user-select: none;
 }
 
@@ -1971,7 +2077,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     align-items: center;
     cursor: pointer;
     margin: 0;
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--md-text-primary);
     user-select: none;
 }
@@ -1999,7 +2105,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .edit-form-tab {
     padding: 12px 24px;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 500;
     color: var(--md-text-secondary);
     border-bottom: 2px solid transparent;
@@ -2036,12 +2142,12 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 40px 20px;
     text-align: center;
     color: var(--md-text-secondary);
-    font-size: 14px;
+    font-size: 0.875rem;
 }
 
 .subordinate-table-error {
-    color: #d32f2f;
-    background-color: #ffebee;
+    color: var(--color-error, #d32f2f);
+    background-color: var(--color-error-bg, #ffebee);
     border-radius: 4px;
     margin: 16px;
 }
@@ -2058,7 +2164,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .subordinate-add-btn {
     flex: 0 0 auto;
     width: auto;
-    font-size: 13px;
+    font-size: 0.8125rem;
     padding: 6px 16px;
     height: 32px;
     line-height: 1.4;
@@ -2068,7 +2174,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 /* Subordinate table link icon - positioned on the right side (issue #589) */
 .subordinate-table-link {
     margin-left: auto;
-    color: #999;
+    color: var(--text-secondary, #999);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -2079,7 +2185,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .subordinate-table-link:hover {
-    color: #666;
+    color: var(--text-primary, #666);
     background-color: rgba(0, 0, 0, 0.05);
 }
 
@@ -2093,9 +2199,9 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .subordinate-table {
-    width: 100%;
+    width: auto;
     border-collapse: collapse;
-    font-size: 13px;
+    font-size: 0.8125rem;
 }
 
 .subordinate-table th {
@@ -2159,11 +2265,11 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .subordinate-table-link .table-icon {
-    font-size: 16px;
+    font-size: 1rem;
 }
 
 .subordinate-table-link .subordinate-count {
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-weight: 500;
 }
 
@@ -2178,7 +2284,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     text-decoration: none !important;
     transition: var(--md-transition);
     vertical-align: middle;
-    font-size: 16px;
+    font-size: 1rem;
 }
 
 .subordinate-table-icon-link:hover {
@@ -2196,7 +2302,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     text-decoration: none !important;
     transition: var(--md-transition);
     vertical-align: middle;
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-weight: 500;
 }
 
@@ -2210,8 +2316,34 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     max-width: 800px;
 }
 
+.subordinate-modal.expanded {
+    width: fit-content;
+    max-width: 93vw;
+}
+
 .subordinate-modal .subordinate-table-container {
     min-height: 200px;
+}
+
+/* Infinite scroll spinner shown at the bottom of the subordinate table (issue #1640) */
+.subordinate-infinite-spinner {
+    display: none;
+    justify-content: center;
+    align-items: center;
+    padding: 12px 0;
+}
+
+.subordinate-infinite-spinner-icon {
+    width: 24px;
+    height: 24px;
+    border: 3px solid var(--md-divider, #e0e0e0);
+    border-top-color: var(--md-primary, #1976d2);
+    border-radius: 50%;
+    animation: subordinate-spin 0.7s linear infinite;
+}
+
+@keyframes subordinate-spin {
+    to { transform: rotate(360deg); }
 }
 
 /* Subordinate form modal (stacked on top of main modal) */
@@ -2242,7 +2374,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     width: 16px;
     height: 16px;
     margin-left: 4px;
-    font-size: 10px;
+    font-size: 0.625rem;
     font-weight: 600;
     color: white;
     background-color: var(--md-primary);
@@ -2265,7 +2397,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 6px 32px 6px 12px;
     border: 1px solid var(--md-divider);
     border-radius: 4px;
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
@@ -2294,7 +2426,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border: none;
     background: transparent;
     color: var(--md-text-secondary);
-    font-size: 18px;
+    font-size: 1.125rem;
     line-height: 1;
     cursor: pointer;
     border-radius: 50%;
@@ -2316,6 +2448,69 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     color: inherit;
     padding: 0 2px;
     border-radius: 2px;
+}
+
+/* ========================================
+   Subordinate Table Row Drag-and-Drop (issue #1617)
+   ======================================== */
+
+/* Header cell for drag handle column */
+.subordinate-drag-handle-th {
+    width: 24px;
+    padding: 0 !important;
+}
+
+/* Cell containing the drag handle */
+.subordinate-drag-handle-td {
+    width: 24px;
+    padding: 0 4px !important;
+    text-align: center;
+    vertical-align: middle;
+}
+
+/* The drag handle icon */
+.subordinate-drag-handle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    color: var(--md-text-hint, #aaa);
+    cursor: grab;
+    border-radius: 3px;
+    transition: color 0.15s ease, background-color 0.15s ease;
+    font-size: 0.875rem;
+    opacity: 0;
+}
+
+.subordinate-table tbody tr:hover .subordinate-drag-handle {
+    opacity: 1;
+}
+
+.subordinate-drag-handle:hover {
+    color: var(--md-text-secondary, #555);
+    background-color: var(--md-hover);
+}
+
+.subordinate-drag-handle:active {
+    cursor: grabbing;
+}
+
+/* Disabled state while _m_ord is in flight */
+.subordinate-drag-handle-disabled {
+    cursor: not-allowed !important;
+    opacity: 0.3 !important;
+    pointer-events: none;
+}
+
+/* Row being dragged */
+.subordinate-row-dragging {
+    opacity: 0.4;
+}
+
+/* Drop target indicator */
+.subordinate-row-drag-over {
+    border-top: 2px solid var(--md-primary, #1976d2) !important;
 }
 
 /* ========================================
@@ -2343,7 +2538,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 6px 10px;
     /* border: 2px solid var(--md-primary); */
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
@@ -2402,6 +2597,12 @@ td:has(.inline-editor) {
     padding: 4px !important;
 }
 
+/* Visual feedback for cells that are being saved (issue #1431) */
+td.cell-saving {
+    background-color: rgba(255, 182, 193, 0.45) !important;
+    transition: background-color 0.2s ease;
+}
+
 /* Ensure proper sizing in compact mode */
 .integram-table.compact td:has(.inline-editor) {
     padding: 2px !important;
@@ -2430,7 +2631,7 @@ td:has(.inline-editor) {
 
 .inline-editor-loading {
     padding: 8px 12px;
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--md-text-secondary);
     font-style: italic;
 }
@@ -2456,7 +2657,7 @@ td:has(.inline-editor) {
     padding: 8px 12px;
     padding-right: 36px;
     border: none;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-family: inherit;
     color: var(--md-text-primary);
     background: var(--md-surface);
@@ -2474,7 +2675,7 @@ td:has(.inline-editor) {
     border: none;
     background: transparent;
     color: var(--md-text-secondary);
-    font-size: 20px;
+    font-size: 1.25rem;
     line-height: 1;
     cursor: pointer;
     border-radius: 50%;
@@ -2506,7 +2707,7 @@ td:has(.inline-editor) {
     border: none;
     background: #4caf50;
     color: white;
-    font-size: 18px;
+    font-size: 1.125rem;
     line-height: 1;
     display: flex;
     align-items: center;
@@ -2549,7 +2750,7 @@ td:has(.inline-editor) {
     cursor: pointer;
     transition: background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
     color: var(--md-text-primary);
-    font-size: 14px;
+    font-size: 0.875rem;
     border-bottom: 1px solid rgba(0, 0, 0, 0.05);
 }
 
@@ -2571,14 +2772,17 @@ td:has(.inline-editor) {
     padding: 20px 12px;
     text-align: center;
     color: var(--md-text-secondary);
-    font-size: 14px;
+    font-size: 0.875rem;
     font-style: italic;
 }
 
 /* Visual feedback for reference editing active state */
+/* vertical-align: top ensures the editor sits at the top of a tall (multi-line) row
+   so the fixed-position dropdown is placed directly below the search input (issue #1433) */
 td:has(.inline-editor-reference) {
     background-color: rgba(25, 118, 210, 0.08) !important;
     padding: 4px !important;
+    vertical-align: top !important;
 }
 
 /* ========================================
@@ -2642,7 +2846,7 @@ td:has(.inline-editor-reference) {
     background-color: rgba(25, 118, 210, 0.12);
     color: var(--md-primary);
     border-radius: 14px;
-    font-size: 13px;
+    font-size: 0.8125rem;
     font-family: inherit;
     max-width: 200px;
     overflow: hidden;
@@ -2668,7 +2872,7 @@ td:has(.inline-editor-reference) {
     flex-shrink: 0;
     opacity: 0.7;
     transition: opacity 0.15s;
-    font-size: 11px;
+    font-size: 0.6875rem;
 }
 
 .multi-ref-tag-remove:hover {
@@ -2677,7 +2881,7 @@ td:has(.inline-editor-reference) {
 }
 
 .multi-ref-tags-placeholder {
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: var(--md-text-hint);
     font-style: italic;
     line-height: 24px;
@@ -2725,7 +2929,7 @@ td:has(.inline-editor-reference) {
     display: block;
     margin-bottom: 10px;
     color: var(--md-text-secondary);
-    font-size: 14px;
+    font-size: 0.875rem;
 }
 
 .file-select-btn {
@@ -2734,7 +2938,7 @@ td:has(.inline-editor-reference) {
     border: none;
     border-radius: 4px;
     padding: 8px 16px;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: 500;
     cursor: pointer;
     transition: var(--md-transition);
@@ -2764,7 +2968,7 @@ td:has(.inline-editor-reference) {
 .file-name {
     flex: 1;
     color: var(--md-text-primary);
-    font-size: 14px;
+    font-size: 0.875rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2774,7 +2978,7 @@ td:has(.inline-editor-reference) {
     background-color: transparent;
     color: var(--md-text-secondary);
     border: none;
-    font-size: 24px;
+    font-size: 1.5rem;
     line-height: 1;
     cursor: pointer;
     padding: 0;
@@ -2852,18 +3056,19 @@ td:has(.inline-editor-file) {
     display: inline-block;
 }
 
+/* Issue #1652: position/top/left are set via JS (toggleExportMenu) after the element
+   is appended to document.body, so it escapes the overflow:hidden clipping of
+   .integram-table-header / .integram-table-controls. */
 .integram-export-menu {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    margin-top: 4px;
-    background: white;
-    border: 1px solid #dee2e6;
+    position: fixed;
+    background: var(--card-bg, white);
+    border: 1px solid var(--border-color, #dee2e6);
     border-radius: 4px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-    z-index: 1000;
+    z-index: 10050;
     min-width: 200px;
-    font-size: 13px;
+    font-size: 0.8125rem;
+    color: var(--text-primary, inherit);
 }
 
 .export-menu-item {
@@ -2875,7 +3080,7 @@ td:has(.inline-editor-file) {
 }
 
 .export-menu-item:hover {
-    background-color: #f8f9fa;
+    background-color: var(--bg-secondary, #f8f9fa);
 }
 
 .export-menu-item:first-child {
@@ -2890,7 +3095,7 @@ td:has(.inline-editor-file) {
 
 .export-icon {
     margin-right: 10px;
-    font-size: 16px;
+    font-size: 1rem;
 }
 
 /* Checkbox selection mode */
@@ -2898,12 +3103,12 @@ td:has(.inline-editor-file) {
     cursor: pointer;
     padding: 8px;
     border-radius: 4px;
-    font-size: 16px;
+    font-size: 1rem;
     user-select: none;
     display: inline-flex;
     align-items: center;
     transition: background-color 0.2s;
-    color: #6c757d;
+    color: var(--text-secondary, #6c757d);
 }
 
 .integram-table-checkbox-toggle:hover {
@@ -2938,7 +3143,7 @@ tr.row-selected {
 
 .integram-bulk-delete-btn {
     margin-left: 4px;
-    font-size: 12px;
+    font-size: 0.75rem;
 }
 
 .bulk-delete-confirm {
@@ -2950,22 +3155,22 @@ tr.row-selected {
     background: #fff3cd;
     border: 1px solid #ffc107;
     border-radius: 4px;
-    font-size: 13px;
+    font-size: 0.8125rem;
 }
 
 .bulk-delete-confirm-btn {
-    font-size: 12px !important;
+    font-size: 0.75rem !important;
 }
 
 .bulk-delete-cancel-btn {
-    font-size: 12px !important;
+    font-size: 0.75rem !important;
 }
 
 /* Bulk delete progress */
 .bulk-delete-progress-bar-container {
     width: 100%;
     height: 8px;
-    background: #e0e0e0;
+    background: var(--bg-secondary, #e0e0e0);
     border-radius: 4px;
     overflow: hidden;
     margin-bottom: 8px;
@@ -2980,7 +3185,7 @@ tr.row-selected {
 
 .bulk-delete-progress-text {
     text-align: center;
-    font-size: 14px;
+    font-size: 0.875rem;
     color: var(--md-text-secondary);
 }
 
@@ -3017,7 +3222,7 @@ tr.row-selected {
 
 .integram-modal-header h3 {
     margin: 0;
-    font-size: 20px;
+    font-size: 1.25rem;
     font-weight: 500;
     color: var(--md-text-primary, rgba(0, 0, 0, 0.87));
     letter-spacing: 0.15px;
@@ -3079,7 +3284,7 @@ tr.row-selected {
     width: 20px;
     height: 20px;
     margin-right: 8px;
-    font-size: 12px;
+    font-size: 0.75rem;
     font-weight: 600;
     color: white;
     background-color: var(--md-primary, #1976d2);
@@ -3101,7 +3306,7 @@ tr.row-selected {
     width: 16px;
     height: 16px;
     margin-right: 6px;
-    font-size: 10px;
+    font-size: 0.625rem;
     font-weight: 600;
     color: white;
     background-color: var(--md-primary, #1976d2);
@@ -3204,7 +3409,7 @@ tr.row-selected {
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 0.875rem;
     font-weight: bold;
     line-height: 1;
     padding: 0;
@@ -3249,7 +3454,7 @@ tr.row-selected {
     background-color: rgba(255, 193, 7, 0.2);
     border: 1px solid rgba(255, 193, 7, 0.5);
     border-radius: 4px;
-    font-size: 13px;
+    font-size: 0.8125rem;
     color: rgba(0, 0, 0, 0.87);
 }
 
@@ -3260,7 +3465,7 @@ tr.row-selected {
 
 .hidden-filter-badge-value {
     font-family: monospace;
-    font-size: 12px;
+    font-size: 0.75rem;
     color: rgba(0, 0, 0, 0.87);
     background-color: rgba(255, 255, 255, 0.5);
     padding: 1px 4px;
@@ -3269,7 +3474,7 @@ tr.row-selected {
 
 .hidden-filter-badge-remove {
     cursor: pointer;
-    font-size: 16px;
+    font-size: 1rem;
     font-weight: bold;
     color: rgba(0, 0, 0, 0.5);
     line-height: 1;
@@ -3280,7 +3485,7 @@ tr.row-selected {
 }
 
 .hidden-filter-badge-remove:hover {
-    color: #d32f2f;
+    color: var(--color-error, #d32f2f);
     background-color: rgba(211, 47, 47, 0.1);
 }
 
@@ -3314,7 +3519,7 @@ tr.row-selected {
 
     /* Edit form header title - smaller font on mobile */
     .edit-form-header h3 {
-        font-size: 18px;
+        font-size: 1.125rem;
     }
 
     /* Edit form header title row - wrap on mobile */
@@ -3337,7 +3542,7 @@ tr.row-selected {
     /* Edit form footer buttons - smaller padding on mobile */
     .edit-form-footer .btn {
         padding: 8px 16px;
-        font-size: 13px;
+        font-size: 0.8125rem;
         min-height: 36px;
     }
 
@@ -3379,15 +3584,15 @@ tr.row-selected {
     align-items: center;
     justify-content: center;
     gap: 4px;
-    height: 28px;
-    margin-right: 12px;
-    padding: 0 10px;
+    height: 22px;
+    margin-right: 8px;
+    padding: 0 8px;
     border: none;
-    border-radius: 6px;
+    border-radius: 4px;
     background: var(--button-primary, #3b82f6);
     color: white;
     cursor: pointer;
-    font-size: 13px;
+    font-size: 0.75rem;
     font-weight: 500;
     transition: background-color 0.2s ease;
     vertical-align: middle;
@@ -3403,7 +3608,124 @@ tr.row-selected {
 }
 
 .add-row-btn i {
-    font-size: 14px;
+    font-size: 0.75rem;
+}
+
+/* Paste data button in scroll counter area (issue #1608) */
+.paste-data-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 22px;
+    margin-right: 8px;
+    padding: 0 8px;
+    border: 1px solid var(--button-secondary, #6b7280);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--button-secondary, #6b7280);
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 500;
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+    vertical-align: middle;
+}
+
+.paste-data-btn:hover {
+    background: rgba(107, 114, 128, 0.1);
+    border-color: var(--button-secondary-hover, #4b5563);
+    color: var(--button-secondary-hover, #4b5563);
+}
+
+.paste-data-btn:active {
+    background: rgba(107, 114, 128, 0.15);
+    border-color: var(--button-secondary-hover, #4b5563);
+    color: var(--button-secondary-hover, #4b5563);
+    transform: scale(0.98);
+}
+
+.paste-data-btn i {
+    font-size: 0.75rem;
+}
+#paste-data-textarea {
+    padding: 3px;
+}
+
+/* Preview button in paste data dialog (issue #1684) */
+.btn-preview {
+    background-color: #f97316;
+    border: 1px solid #f97316;
+    border-radius: 4px;
+    color: #fff;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 4px 12px;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.btn-preview:hover {
+    background-color: #ea6d0e;
+    border-color: #ea6d0e;
+}
+
+.btn-preview:active {
+    background-color: #c75d0b;
+    border-color: #c75d0b;
+    transform: scale(0.98);
+}
+
+/* Preview modal wider to show table (issue #1684) */
+.paste-data-preview-modal {
+    min-width: 700px;
+    max-width: 95vw;
+}
+
+.paste-data-preview-body {
+    overflow: auto;
+    max-height: 60vh;
+}
+
+/* Paste data preview table (issue #1684) */
+.paste-data-preview-table-wrap {
+    overflow-x: auto;
+}
+
+.paste-data-preview-table {
+    border-collapse: collapse;
+    width: auto;
+    font-size: 0.85rem;
+}
+
+.paste-data-preview-table thead th {
+    background-color: var(--md-surface-variant, #f3f4f6);
+    border: 1px solid var(--md-outline, #d1d5db);
+    font-weight: 600;
+    padding: 5px 8px;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.paste-data-preview-table tbody td {
+    border: 1px solid var(--md-outline, #d1d5db);
+    padding: 2px 4px;
+}
+
+.paste-preview-cell {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    box-sizing: border-box;
+    font-family: inherit;
+    font-size: 0.85rem;
+    min-width: 80px;
+    outline: none;
+    padding: 2px 4px;
+    width: 100%;
+}
+
+.paste-preview-cell:focus {
+    background: var(--md-surface, #fff);
+    border-color: var(--md-primary, #1976d2);
 }
 
 /* New row editing state */
@@ -3425,4 +3747,107 @@ tr.row-selected {
 
 .new-row-cell-disabled:hover {
     background-color: rgba(0, 0, 0, 0.04) !important;
+}
+
+/* ========================================
+   Dark Theme Overrides for IntegramTable
+   ======================================== */
+
+[data-theme="dark"] {
+    /* Override Material Design variables for dark theme */
+    --md-text-hint: rgba(255, 255, 255, 0.38);
+    --md-hover: rgba(255, 255, 255, 0.06);
+    --md-selected: rgba(96, 165, 250, 0.15);
+}
+
+/* Boolean check/uncheck icons */
+[data-theme="dark"] .boolean-check,
+[data-theme="dark"] .subordinate-table .boolean-check {
+    color: #4ade80;
+}
+
+[data-theme="dark"] .boolean-uncheck,
+[data-theme="dark"] .subordinate-table .boolean-uncheck {
+    color: #6b7280;
+}
+
+/* Toast info - needs dark override since light blue isn't themed via variables */
+[data-theme="dark"] .integram-toast-info {
+    background: #1e3a5f;
+    color: #93c5fd;
+    border-left-color: #3b82f6;
+}
+
+/* Bulk delete warning confirmation */
+[data-theme="dark"] .bulk-delete-confirm {
+    background: rgba(245, 158, 11, 0.15);
+    border-color: rgba(245, 158, 11, 0.5);
+    color: var(--text-primary, #e9ecef);
+}
+
+/* Hidden filter badge warning (unsaved-changes) */
+[data-theme="dark"] .hidden-filter-badge-warning {
+    background-color: rgba(255, 193, 7, 0.2);
+    border: 1px solid rgba(255, 193, 7, 0.5);
+}
+
+[data-theme="dark"] .hidden-filter-badge-warning .hidden-filter-col-name,
+[data-theme="dark"] .hidden-filter-badge-warning .hidden-filter-value {
+    color: var(--text-primary, #e9ecef);
+}
+
+[data-theme="dark"] .hidden-filter-badge-warning .hidden-filter-remove {
+    color: var(--color-error, #f87171);
+}
+
+/* Delete row confirmation area */
+[data-theme="dark"] td.delete-confirm-cell {
+    background: rgba(244, 67, 54, 0.15);
+    color: var(--color-error, #f87171);
+}
+
+/* Quick add column header hover */
+[data-theme="dark"] .add-column-header-cell:hover {
+    background: rgba(96, 165, 250, 0.15);
+    color: var(--md-primary, #60a5fa);
+}
+
+/* Filter clear button hover */
+[data-theme="dark"] .filter-ref-clear:hover {
+    background: rgba(248, 113, 113, 0.15);
+    color: #f87171;
+}
+
+/* Hidden filter badges - text colors need override since they use rgba(0,0,0,...) */
+[data-theme="dark"] .hidden-filter-badge {
+    color: var(--text-primary, #e9ecef);
+}
+
+[data-theme="dark"] .hidden-filter-badge-name {
+    color: var(--text-primary, #e9ecef);
+}
+
+[data-theme="dark"] .hidden-filter-badge-value {
+    color: var(--text-primary, #e9ecef);
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .hidden-filter-badge-remove {
+    color: var(--text-secondary, #adb5bd);
+}
+
+[data-theme="dark"] .hidden-filter-badge-remove:hover {
+    color: var(--color-error, #f87171);
+    background-color: rgba(248, 113, 113, 0.15);
+}
+
+/* Table header (th) — explicit dark background override (issue #1593) */
+[data-theme="dark"] .integram-table th {
+    background-color: var(--bg-secondary, #2d2d2d);
+    border-right-color: rgba(255, 255, 255, 0.06);
+}
+
+/* Filter row — fix column separator color on dark background (issue #1593) */
+[data-theme="dark"] .filter-row td {
+    border-right-color: rgba(255, 255, 255, 0.06);
 }

@@ -8,14 +8,21 @@
 <meta http-equiv="Pragma" content="no-cache">
 <title>{VAL}</title>
 <link rel="stylesheet" href="/css/bootstrap.3.3.7.min.css">
+<link rel="stylesheet" href="/css/styles.css">
 <link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
+<script>
+    (function() {
+        var t = localStorage.getItem('theme');
+        if (t) document.documentElement.setAttribute('data-theme', t);
+    })();
+</script>
 <script>
     var db='{_global_.z}';
 </script>
 <script src="/js/jquery-3.5.1.slim.min.js"></script>
 <script src="/js/js.js"></script>
 </head>
-<body style="font-family:Verdana,Tahoma,sans-serif;font-size:13px;line-height:normal;padding:2px">
+<body style="font-family:Verdana,Tahoma,sans-serif;font-size:13px;line-height:normal;padding:2px;background-color:var(--bg-primary,#fff);color:var(--text-primary,#212529)">
 <FORM method="post" id="report" action="/{_global_.z}/report/{_global_.id}">
 <input type="hidden" name="_xsrf" value="{_global_.xsrf}">
     <TABLE>
@@ -43,14 +50,14 @@
 		<TD align="right" class="t9n" style="padding-right:10px">
 			<a href="#" title="<t9n>[RU]Управление компактностью представления отчета[EN]Switch between compact and loose view</t9n>" onclick="toggle_compact(); return false;"><i class="pi pi-align-left" style="font-size: 1.25rem;"></i></a>&nbsp;
 			&nbsp;<a href="#" title="<t9n>[RU]Для отображения фильтра кликните здесь или на шапке таблицы[EN]To display the filter, click here or on the heading of the table</t9n>" onclick="toggle_filter(); return false;"><i class="pi pi-filter" style="font-size: 1.25rem;"></i></a>
-			&nbsp;<button id="refresh" type="submit" class="btn btn-default btn-xs" title="<t9n>[RU]Перестроить отчет по заданному фильтру[EN]Apply filter</t9n>" style="border:none;"><a href="#"><i class="pi pi-refresh" style="font-size: 1.25rem;"></i></a></button>
+			&nbsp;<a href="#" id="refresh" onclick="byId('report').submit(); return false;" title="<t9n>[RU]Перестроить отчет по заданному фильтру[EN]Apply filter</t9n>"><i class="pi pi-refresh" style="font-size: 1.25rem;"></i></a>
 			&nbsp;<a href="/{_global_.z}/report/{_global_.id}" title="<t9n>[RU]Очистить фильтр и перезапустить отчет[EN]Reset the filter and run the report</t9n>"><i class="pi pi-times-circle" style="font-size: 1.25rem;"></i></a>&nbsp;
 		</TD>
 	</TR>
 	<TR>
 	<TD colspan="3">
 		<TABLE id="report_table" class="table table-bordered">
-			<TR style="background-color:#f9f9f9; position:sticky; top:-1px;" onclick="toggle_filter();">
+			<TR style="background-color:var(--bg-secondary,#f9f9f9); position:sticky; top:-1px;" onclick="toggle_filter();">
 				<!-- Begin:&Uni_Report_Head -->
 				<TD ALIGN="CENTER" ><B>{VAL}</B></TD>
 				<!-- End:&Uni_Report_Head -->
@@ -58,7 +65,7 @@
 			<TR id="filter_row" style="display:none;">
 				<!-- Begin:&Uni_Report_Filter -->
 				<TD style="padding:0px;" align="center">
-				<input type="text" name="FR_{COL}" value="{FR_VAL}" size="2" id="FR_{COL}" oninput="adjust('FR_{COL}')">-<input type="text" name="TO_{COL}" value="{TO_VAL}" size="2" id="TO_{COL}" oninput="adjust('TO_{COL}')">
+				<input type="text" name="FR_{COL}" value="{FR_VAL}" size="2" id="FR_{COL}" oninput="adjust('FR_{COL}')" style="background-color:var(--input-bg,#fff);color:var(--text-primary,#212529);border:1px solid var(--input-border,#ced4da);">-<input type="text" name="TO_{COL}" value="{TO_VAL}" size="2" id="TO_{COL}" oninput="adjust('TO_{COL}')" style="background-color:var(--input-bg,#fff);color:var(--text-primary,#212529);border:1px solid var(--input-border,#ced4da);">
 				</TD>
 				<!-- End:&Uni_Report_Filter -->
 			</TR>
@@ -145,6 +152,14 @@ if(get_cookie("compact") == "compact")
 <script src="/js/hints.js"></script>
 <!-- Workspace hints -->
 <style>
+:root {
+    --report-hint-shadow: 0 8px 40px rgba(0,0,0,0.28);
+    --report-hint-btn-shadow: 0 2px 8px rgba(0,0,0,0.25);
+}
+[data-theme="dark"] {
+    --report-hint-shadow: 0 8px 40px rgba(0,0,0,0.55);
+    --report-hint-btn-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
 #report-hint-box {
     position: fixed;
     top: 50%;
@@ -155,7 +170,7 @@ if(get_cookie("compact") == "compact")
     background: var(--card-bg, #fff);
     border-radius: 12px;
     padding: 1.25rem 1.25rem 1rem;
-    box-shadow: 0 8px 40px rgba(0,0,0,0.28);
+    box-shadow: var(--report-hint-shadow);
     z-index: 2000;
     display: none;
     cursor: default;
@@ -195,7 +210,7 @@ if(get_cookie("compact") == "compact")
     height: 2.4rem;
     font-size: 1.2rem;
     cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    box-shadow: var(--report-hint-btn-shadow);
     align-items: center;
     justify-content: center;
 }

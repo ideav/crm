@@ -20,7 +20,7 @@
     border-bottom: 5px solid green;
 }
 .du {
-    border-bottom: 1px dotted #fff;
+    border-bottom: 1px dotted currentColor;
     text-decoration: none;
 }
 .search-results{
@@ -50,13 +50,50 @@ input[type="checkbox"] {
     cursor: pointer;
 }
 .cell-error {
-    background-color: var(--cell-error-bg, #ffc107);
+    background-color: var(--cell-error-bg, var(--color-warning-bg, #ffc107));
 }
 .cell-success {
-    background-color: var(--cell-success-bg, #d4edda);
+    background-color: var(--cell-success-bg, var(--color-success-bg, #d4edda));
 }
 .cell-empty {
     background-color: var(--bg-secondary);
+}
+.upload-tune-bg {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+}
+.upload-log-bg {
+    background-color: #343a40;
+    color: #fff;
+}
+[data-theme="dark"] .upload-log-bg {
+    background-color: #1a1a1a;
+}
+.upload-progress-bg {
+    background-color: #17a2b8;
+    color: #fff;
+}
+[data-theme="dark"] .upload-progress-bg {
+    background-color: #0e6f81;
+}
+.upload-errors-bg {
+    background-color: var(--color-danger, #dc3545);
+    color: #fff;
+}
+[data-theme="dark"] .upload-errors-bg {
+    background-color: var(--color-error-bg, #7f1d1d);
+    color: var(--color-error, #f87171);
+    border: 1px solid var(--color-error, #f87171);
+}
+[data-theme="dark"] #tune input[type="text"],
+[data-theme="dark"] #tune input[type="number"] {
+    background-color: var(--input-bg, #2d2d2d);
+    border-color: var(--input-border, #495057);
+    color: var(--text-primary, #e9ecef);
+}
+[data-theme="dark"] #tune input[type="text"]::placeholder,
+[data-theme="dark"] #tune input[type="number"]::placeholder {
+    color: var(--text-secondary, #adb5bd);
 }
 </style>
 <script src="/js/jquery3.1.1.min.js"></script>
@@ -91,7 +128,7 @@ input[type="checkbox"] {
         <div class="d-inline-block pb-3" id="try"><button onclick="importParse()" class="btn btn-primary">Проверить</button></div>
         <div class="d-inline-block pb-3"><button onclick="$('#tune').toggle()" id="tune-btn" class="btn btn-outline-secondary">Настроить</button></div>
     </div>
-    <div id="tune" class="bg-light mb-5 pl-1 pl-sm-2 pr-1 pr-sm-2 pb-2 pt-3 shadow" style="display:none; border-top: 1px solid var(--border-color);">
+    <div id="tune" class="upload-tune-bg mb-5 pl-1 pl-sm-2 pr-1 pr-sm-2 pb-2 pt-3 shadow" style="display:none; border-top: 1px solid var(--border-color);">
         <h5>Настройки импорта</h5>
         <div class="d-inline-block pb-1 mr-4 pt-1">
             <label><input id="header" type="checkbox">&nbsp;Первая строка содержит заголовок</label><br />
@@ -139,9 +176,9 @@ input[type="checkbox"] {
             </div>
         </div>
     </div>
-    <div id="log" class="bg-secondary overflow-auto small shadow-sm text-white p-2 mb-2" style="max-height: 100px; display:none"></div>
-    <div id="progress" class="bg-info text-white shadow p-2" style="display:none"></div>
-    <div id="errors" class="bg-danger text-white p-2 mt-1" style="display:none"></div>
+    <div id="log" class="upload-log-bg overflow-auto small shadow-sm p-2 mb-2" style="max-height: 100px; display:none"></div>
+    <div id="progress" class="upload-progress-bg shadow p-2" style="display:none"></div>
+    <div id="errors" class="upload-errors-bg p-2 mt-1" style="display:none"></div>
     <div class="pb-3" id="refresh" style="display:none"><button onclick="importParse();" class="btn btn-outline-secondary">Обновить</button></div>
     <div id="upload" style="display:none">
         <button onclick="$('#do-upload,.confirm').toggle()" class="btn btn-warning" id="do-upload">Загрузить</button>
@@ -179,7 +216,12 @@ function showNotification(message, type) {
     var toast = document.createElement('div');
     toast.className = 'integram-toast integram-toast-' + type;
     toast.textContent = message;
-    toast.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 24px;border-radius:4px;color:white;z-index:10000;font-family:sans-serif;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.2);cursor:pointer;background-color:' + (type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#17a2b8') + ';';
+    var style = getComputedStyle(document.documentElement);
+    var errorColor = style.getPropertyValue('--color-danger').trim() || '#dc3545';
+    var successColor = style.getPropertyValue('--color-success').trim() || '#28a745';
+    var infoColor = '#17a2b8';
+    var bgColor = type === 'error' ? errorColor : type === 'success' ? successColor : infoColor;
+    toast.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 24px;border-radius:4px;color:white;z-index:10000;font-family:sans-serif;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.2);cursor:pointer;background-color:' + bgColor + ';';
     document.body.appendChild(toast);
     var remove = function() { if (toast.parentNode) toast.remove(); };
     setTimeout(remove, 5000);
@@ -774,7 +816,7 @@ function parseType(input){
     gatherSet();
 }
 function chooseBase(i,v){ 
-    var h='<select name="t" id="t'+i+'" onchange="$(\'#upload\').hide();$(\'#refresh\').show();" style="border:none">';
+    var h='<select name="t" id="t'+i+'" onchange="$(\'#upload\').hide();$(\'#refresh\').show();" style="border:none;background:transparent;color:inherit">';
     for(i in bt)
         h+='<option value="'+i+'"'+(v==bt[i]?' selected':'')+'>'+bt[i].toLowerCase()+'</option>';
     return h+'</select>';

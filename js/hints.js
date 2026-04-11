@@ -50,6 +50,7 @@
      * @param {function} [config.onInit] — callback(api), вызывается после инициализации
      */
     window.initHints = function(config) {
+        if (!(window.user && window.db && window.user === window.db)) return;
         var workspace = config.workspace;
         var steps = config.steps;
 
@@ -60,6 +61,7 @@
 
         var api = {
             show: function(n) {
+                if (getCookie('hints_mode') === 'off') return;
                 for (var i = 1; i <= steps; i++) {
                     var el = document.getElementById(workspace + '-hint-' + i);
                     if (el) el.style.display = (i === n) ? '' : 'none';

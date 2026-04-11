@@ -1164,12 +1164,14 @@ function IsOccupied($id)
 	    return true;
 	return false;
 }
-function my_die($msg){
+function my_die($msg, $code=""){
 	if(isset($GLOBALS["TRACE"])){
 		print_r($GLOBALS["GRANTS"]);
 		print_r($GLOBALS["CUR_VARS"]);
 		print($GLOBALS["TRACE"]);
 	}
+	if($code !== "")
+		header("HTTP/1.0 $code");
 	if(isApi())
 	    api_dump(json_encode([["error" => $msg]], JSON_UNESCAPED_UNICODE));
 	else
@@ -1196,7 +1198,7 @@ function Check_Grant($id, $t=0, $grant="WRITE", $fatal=TRUE)	# $fatal stops the 
 			            .") или его родителю ".$id." (".$GLOBALS["GRANTS"][$id]."). Ваш глобальный доступ: '"
 			        ."[EN]The object is not granted  $id, $t (".$GLOBALS["GRANTS"][$t]
 			            .") neither its parent ".$id." (".$GLOBALS["GRANTS"][$id]."). The access level is: '")
-			.$GLOBALS["GRANTS"][1]."'");
+			.$GLOBALS["GRANTS"][1]."'", "403 Forbidden");
 	}
 	elseif(isset($GLOBALS["GRANTS"][$id]))
 	{
@@ -1209,7 +1211,7 @@ function Check_Grant($id, $t=0, $grant="WRITE", $fatal=TRUE)	# $fatal stops the 
 			            .") или его родителю ".$id." (".$GLOBALS["GRANTS"][$id]."). Ваш глобальный доступ: '"
 			        ."[EN]The object is not granted  $id, $t (".$GLOBALS["GRANTS"][$t]
 			            .") neither its parent ".$id." (".$GLOBALS["GRANTS"][$id]."). The access level is: '")
-			.$GLOBALS["GRANTS"][1]."'");
+			.$GLOBALS["GRANTS"][1]."'", "403 Forbidden");
 	}
 	elseif($t == 0)
 		$data_set = Exec_sql("SELECT obj.t, COALESCE(par.t, 1) par_typ, COALESCE(par.id, 1) par_id, COALESCE(arr.id, -1) arr, obj.val ref
@@ -1263,10 +1265,11 @@ function Check_Grant($id, $t=0, $grant="WRITE", $fatal=TRUE)	# $fatal stops the 
 	}
 	if($fatal)
 		my_die(t9n("[RU]У вас нет доступа к реквизиту объекта: $id, $t (".$GLOBALS["GRANTS"][$row["t"]]
-			    .") или его родителю ".$row["par_id"]." (".$GLOBALS["GRANTS"][$row["par_typ"]]
-			    .")! Ваш глобальный доступ: '".$GLOBALS["GRANTS"][1]
-			."'.[EN]The object is not granted: $id, $t (".$GLOBALS["GRANTS"][$row["t"]].")neither its parent "
-			    .$row["par_id"]." (".$GLOBALS["GRANTS"][$row["par_typ"]].")! The access level is: '".$GLOBALS["GRANTS"][1]."'"));
+					    .") или его родителю ".$row["par_id"]." (".$GLOBALS["GRANTS"][$row["par_typ"]]
+					    .")! Ваш глобальный доступ: '".$GLOBALS["GRANTS"][1]
+					."'.[EN]The object is not granted: $id, $t (".$GLOBALS["GRANTS"][$row["t"]].")neither its parent "
+					    .$row["par_id"]." (".$GLOBALS["GRANTS"][$row["par_typ"]].")! The access level is: '".$GLOBALS["GRANTS"][1]."'")
+			   , "403 Forbidden");
 	return FALSE;
 }
 # Check Grants for ROOT's children
@@ -8283,7 +8286,9 @@ if(Validate_Token())
             				if(!in_array($t, array(101, 102, 103, 132, 49)))
             					$val = BuiltIn($val);
         					# Format the value
-        					if(($GLOBALS["REV_BT"][$row["t"]] == "NUMBER") && ($val != 0))
+							if($t == PASSWORD) // Encrypt the password
+        						$val = hash("sha512", Salt($z, $val));
+        					elseif(($GLOBALS["REV_BT"][$row["t"]] == "NUMBER") && ($val != 0))
         						$val = (int)$val;
         					elseif(($GLOBALS["REV_BT"][$row["t"]] == "SIGNED") && ($val != 0))
         						$val = (double)str_replace(",",".",$val);
@@ -8605,7 +8610,7 @@ if(Validate_Token())
 				foreach($GLOBALS["NOT_NULL"] as $key => $value)
 					if(Check_Grant($typ, $key, "WRITE", FALSE)) # The object is NOT_NULL and we have the grant to change it
 					{
-						if((isset($_REQUEST["t$key"]) ? strlen($_REQUEST["t$key"]) : FALSE)
+						if((isset($_REQUEST["t$key"]) ? strlen($_REQUEST["t$key"]) : TRUE) // Skip not received reqs
 						  || (isset($_REQUEST["NEW_$key"]) ? strlen($_REQUEST["NEW_$key"]) : FALSE)
 						  || (isset($GLOBALS["ARR_typs"][$key]) && ($GLOBALS["REQS"][$key] != 0))
 						  || isset($_REQUEST["copybtn"])
@@ -8880,7 +8885,10 @@ if(Validate_Token())
 					$v = (double)$value;
 				else
 */
-				$v = Format_Val($t, BuiltIn($value));
+				if(in_array($t, array(101, 102, 103, 132, 49)))
+					$v = Format_Val($t, $value);
+				else
+					$v = Format_Val($t, BuiltIn($value));
 
 				Check_Grant($i, $t); # Check the grant to change the Req
 				if(strlen($value) != 0){  # Non empty Value
@@ -8982,18 +8990,19 @@ if(Validate_Token())
 		case "_d_save":
 		case "_patchterm":
 			if($val == "")
-				my_die(t9n("[RU]Неверный тип ($val) [EN]Invalid type ($val)"));
-			if($row = mysqli_fetch_array(Exec_sql("SELECT obj.t, obj.val, obj.ord FROM $z obj
+				my_die(t9n("[RU]Неверный тип[EN]Invalid type"));
+			if($row = mysqli_fetch_array(Exec_sql("SELECT obj.t, obj.val, obj.ord, dup.id dup FROM $z obj
 									LEFT JOIN $z dup ON dup.id!=$id AND dup.id!=dup.t AND dup.val='".addslashes($val)
-								."' AND dup.t=$t WHERE obj.id=$id AND dup.id IS NULL", "Get Object and check duplicates"))){
-	
+								."' AND dup.t=$t WHERE obj.id=$id AND obj.up=0", "Get Object and check duplicates"))){
+				if($row["dup"])
+					my_die(t9n("[RU]Тип $val с базовым типом ".$GLOBALS["REV_BT"][$t]." уже существует. [EN]The $val type with the base type ". $GLOBALS ["REV_BT"][$t]. " already exists."));
 				if(($row["t"] != 0) && ($t == 0))
 					my_die(t9n("[RU]Неверный базовый тип ($t) [EN]Invalid base type ($t)"));
 				if(($row["t"] != $t) || ($row["val"] != $val) || ($row["ord"] != $unique))
 					Exec_sql("UPDATE $z SET t=$t, val='".addslashes($val)."', ord='$unique' WHERE id=$id", "Change typ");
 			}
 			else
-				my_die(t9n("[RU]Тип $val с базовым типом ".$GLOBALS["REV_BT"][$t]." уже существует. [EN]The $val type with the base type ". $GLOBALS ["REV_BT"][$t]. " already exists."));
+				my_die(t9n("[RU]Тип не найден. [EN]The type was not found."));
 			$obj=$id;
 			break;
 
@@ -9290,16 +9299,27 @@ if(Validate_Token())
                     continue;
                 if((int)$row["t"] > 17) // Skip refs
                     continue;
-    	        $meta[$row["id"]] = "\"id\":\"".$row["id"]."\",\"up\":\"".$row["up"]."\",\"type\":\"".$row["t"]."\",\"val\":\"".$row["val"]."\",\"unique\":\"".$row["uniq"]."\""
-									.(isset($refs[$row["id"]]) ? ",\"referenced\":\"".$refs[$row["id"]]."\"" : ""); 
+				if(isset($GLOBALS["GRANTS"][$row["id"]]))
+					$granted = ",\"granted\":\"".$GLOBALS["GRANTS"][$row["id"]]."\"";
+				elseif(isset($GLOBALS["GRANTS"][1]))
+					$granted = ",\"granted\":\"".$GLOBALS["GRANTS"][1]."\"";
+				else
+					$granted = "";
+				if(!isset($meta[$row["id"]]))
+					$meta[$row["id"]] = "\"id\":\"".$row["id"]."\",\"up\":\"".$row["up"]."\",\"type\":\"".$row["t"]."\",\"val\":\"".addcslashes($row["val"], "\\\'")."\",\"unique\":\"".$row["uniq"]."\""
+									.$granted . (isset($refs[$row["id"]]) ? ",\"referenced\":\"".$refs[$row["id"]]."\"" : "")
+									.(isset($GLOBALS["GRANTS"]["EXPORT"][$row["id"]]) || isset($GLOBALS["GRANTS"]["EXPORT"][1]) ? ",\"export\":\"1\"" : "")
+									.(isset($GLOBALS["GRANTS"]["DELETE"][$row["id"]]) || isset($GLOBALS["GRANTS"]["DELETE"][1]) ? ",\"delete\":\"1\"" : "");
                 if($row["ord"])
-                    $metaReqs[$row["id"]][] = "{\"num\":".$row["ord"].",\"id\":\"".$row["req_t"]."\""
+					if(!isset($GLOBALS["GRANTS"][$row["req_t"]]) || ($GLOBALS["GRANTS"][$row["req_t"]] !== "BARRED"))
+						$metaReqs[$row["id"]][] = "{\"num\":".$row["ord"].",\"id\":\"".$row["req_t"]."\""
                                 .",\"val\":\"".addcslashes($row["req_val"], "\\\'")."\""
                                 .",\"orig\":\"".($row["ref"]?$row["ref"]:$row["ref_id"])."\""
                                 .",\"type\":\"".$row["base_typ"]."\""
                                 .($row["arr_id"]?",\"arr_id\":\"".$row["arr_id"]."\"":"")
                                 .($row["ref"]?",\"ref\":\"".$row["ref"]."\",\"ref_id\":\"".$row["ref_id"]."\"":"")
-                                .($row["attrs"]?",\"attrs\":\"".$row["attrs"]."\"":"")."}";
+                                .($row["attrs"]?",\"attrs\":\"".$row["attrs"]."\"":"")
+								.(isset($GLOBALS["GRANTS"][$row["req_t"]]) ? ",\"granted\":\"".$GLOBALS["GRANTS"][$row["req_t"]]."\"" : "")."}";
         	}
 	        foreach($meta as $k => $m)
 	            if($metaReqs[$k])
@@ -9669,6 +9689,8 @@ if(Validate_Token())
 
         	if(isset($_REQUEST["TIME"]))
         		set_time_limit(3600);
+			if(isset($GLOBALS["GRANTS"]))
+				$GLOBALS["GLOBAL_VARS"]["grants"] = base64_encode(json_encode($GLOBALS["GRANTS"], JSON_UNESCAPED_UNICODE));
         	Make_tree($text, "&main");
         	$html = Parse_block("&main");
 

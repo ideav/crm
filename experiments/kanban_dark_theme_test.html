@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Kanban Dark Theme Test</title>
+    <style>
+        /* Minimal global CSS from styles.css */
+        :root {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8f9fa;
+            --text-primary: #212529;
+            --text-secondary: #6c757d;
+            --border-color: #dee2e6;
+            --card-bg: #ffffff;
+            --button-primary: #3b82f6;
+        }
+        [data-theme="dark"] {
+            --bg-primary: #1a1a1a;
+            --bg-secondary: #2d2d2d;
+            --text-primary: #e9ecef;
+            --text-secondary: #adb5bd;
+            --border-color: #495057;
+            --card-bg: #2d2d2d;
+            --button-primary: #3b82f6;
+        }
+        body {
+            font-family: sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            margin: 0;
+            padding: 10px;
+            transition: background-color 0.3s, color 0.3s;
+        }
+        .controls {
+            padding: 10px;
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        button {
+            padding: 8px 16px;
+            cursor: pointer;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+        }
+        #kanban-container {
+            height: 500px;
+        }
+    </style>
+</head>
+<body>
+<div class="controls">
+    <button onclick="toggleTheme()">Toggle Dark/Light Theme</button>
+    <span id="theme-label">Light Theme</span>
+</div>
+<div id="kanban-container"></div>
+
+<!-- Include kanban template styles and JS -->
+<style>
+    /* Kanban CSS Variables */
+    :root {
+        --kanban-primary-color: #2563eb;
+        --kanban-primary-hover: #1d4ed8;
+        --kanban-primary-light: #3b82f6;
+        --kanban-background: #f8fafc;
+        --kanban-surface: #ffffff;
+        --kanban-border-color: #e2e8f0;
+        --kanban-text-primary: #1e293b;
+        --kanban-text-secondary: #64748b;
+        --kanban-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        --kanban-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        --kanban-drag-over-bg: rgba(37, 99, 235, 0.1);
+        --kanban-icon-active-bg: rgba(25, 118, 210, 0.15);
+        --kanban-icon-active-color: #1976d2;
+        --kanban-icon-active-hover-bg: rgba(25, 118, 210, 0.25);
+        --kanban-icon-inactive-bg: rgba(226, 232, 240, 0.5);
+        --kanban-icon-inactive-color: rgba(148, 163, 184, 0.5);
+        --kanban-error-bg: #fee2e2;
+        --kanban-error-color: #991b1b;
+    }
+
+    [data-theme="dark"] {
+        --kanban-background: #1a1a1a;
+        --kanban-surface: #2d2d2d;
+        --kanban-border-color: #495057;
+        --kanban-text-primary: #e9ecef;
+        --kanban-text-secondary: #adb5bd;
+        --kanban-drag-over-bg: rgba(96, 165, 250, 0.15);
+        --kanban-icon-active-bg: rgba(96, 165, 250, 0.2);
+        --kanban-icon-active-color: #60a5fa;
+        --kanban-icon-active-hover-bg: rgba(96, 165, 250, 0.35);
+        --kanban-icon-inactive-bg: rgba(73, 80, 87, 0.5);
+        --kanban-icon-inactive-color: rgba(173, 181, 189, 0.4);
+        --kanban-error-bg: #7f1d1d;
+        --kanban-error-color: #fca5a5;
+    }
+
+    #kanban-container { height: 100%; display: flex; flex-direction: column; }
+    .kanban-board { display: flex; gap: 16px; overflow-x: auto; padding: 10px; flex: 1; min-height: 0; align-items: flex-start; }
+    .kanban-column { min-width: 300px; background-color: var(--kanban-surface); border-radius: 4px; box-shadow: 0 2px 1px -1px rgba(0,0,0,0.2), 0 1px 1px 0 rgba(0,0,0,0.14), 0 1px 3px 0 rgba(0,0,0,0.12); flex-shrink: 0; display: flex; flex-direction: column; height: 100%; }
+    .kanban-column-header { padding: 10px; background: linear-gradient(135deg, var(--kanban-primary-color) 0%, var(--kanban-primary-light) 100%); color: white; font-weight: 500; font-size: 1rem; border-radius: 4px 4px 0 0; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; box-shadow: 0 2px 4px -1px rgba(0,0,0,0.2); }
+    .kanban-column-count { background-color: rgba(255,255,255,0.25); padding: 4px 12px; border-radius: 16px; font-size: 0.875rem; font-weight: 500; }
+    .kanban-column-body { padding: 12px; overflow-y: auto; flex: 1; min-height: 0; }
+    .kanban-card { background-color: var(--kanban-surface); border-radius: 4px; padding: 16px; padding-right: 44px; margin-bottom: 12px; cursor: move; transition: all 0.3s; position: relative; box-shadow: 0 2px 1px -1px rgba(0,0,0,0.2), 0 1px 1px 0 rgba(0,0,0,0.14), 0 1px 3px 0 rgba(0,0,0,0.12); }
+    .kanban-card-title { font-weight: 600; font-size: 1rem; color: var(--kanban-text-primary); margin-bottom: 8px; }
+    .kanban-card-description { font-size: 0.875rem; color: var(--kanban-text-secondary); margin-bottom: 4px; }
+    .kanban-card-amount { font-size: 1rem; font-weight: 600; color: var(--kanban-primary-color); margin-top: 8px; }
+    .kanban-card-contacts { position: absolute; bottom: 6px; right: 6px; display: flex; flex-direction: column; gap: 3px; }
+    .kanban-card-contact-icon { width: 28px; height: 28px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+    .kanban-card-contact-icon.active { background-color: var(--kanban-icon-active-bg); color: var(--kanban-icon-active-color); cursor: pointer; }
+    .kanban-card-contact-icon.inactive { background-color: var(--kanban-icon-inactive-bg); color: var(--kanban-icon-inactive-color); }
+    .kanban-loading { text-align: center; padding: 40px; color: var(--kanban-text-secondary); }
+    .kanban-error { background-color: var(--kanban-error-bg); color: var(--kanban-error-color); padding: 16px; border-radius: 8px; margin: 20px; }
+    [data-theme="dark"] .kanban-column { box-shadow: 0 2px 1px -1px rgba(0,0,0,0.4), 0 1px 1px 0 rgba(0,0,0,0.28), 0 1px 3px 0 rgba(0,0,0,0.24); }
+    [data-theme="dark"] .kanban-card { box-shadow: 0 2px 1px -1px rgba(0,0,0,0.4), 0 1px 1px 0 rgba(0,0,0,0.28), 0 1px 3px 0 rgba(0,0,0,0.24); }
+</style>
+
+<script>
+function toggleTheme() {
+    var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    document.documentElement.setAttribute('data-theme', isDark ? 'light' : 'dark');
+    document.getElementById('theme-label').textContent = isDark ? 'Light Theme' : 'Dark Theme';
+}
+
+// Simulate KanbanBoard rendering with mock data
+var statuses = [
+    { 'Статус': 'Новый', 'СтатусID': '1', 'Цвет': '#e74c3c' },
+    { 'Статус': 'В работе', 'СтатусID': '2', 'Цвет': '#3498db' },
+    { 'Статус': 'Завершён', 'СтатусID': '3', 'Цвет': '#27ae60' }
+];
+
+var cards = [
+    { '_cardId': '1', 'Карточка': 'Разработка CRM', 'Описание': 'Интеграция с 1С', 'СтатусID': '1', 'Сумма': '150000', 'Телефон': '+7 999 123 45 67', 'Email': 'client@example.com' },
+    { '_cardId': '2', 'Карточка': 'Маркетинговая кампания', 'Описание': 'Email-рассылка', 'СтатусID': '2', 'Сумма': '80000', 'Телефон': '', 'Email': 'manager@company.ru' },
+    { '_cardId': '3', 'Карточка': 'Аудит системы', 'Описание': 'Проверка безопасности', 'СтатусID': '3', 'Сумма': '50000', 'Телефон': '+7 812 555 00 11', 'Email': '' },
+];
+
+function isDarkTheme() {
+    return document.documentElement.getAttribute('data-theme') === 'dark';
+}
+function lightenColor(color, percent) {
+    if (!color || !color.startsWith('#')) return color;
+    var num = parseInt(color.slice(1), 16);
+    var r = Math.min(255, (num >> 16) + Math.round(2.55 * percent));
+    var g = Math.min(255, ((num >> 8) & 0x00FF) + Math.round(2.55 * percent));
+    var b = Math.min(255, (num & 0x0000FF) + Math.round(2.55 * percent));
+    return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0');
+}
+function darkenColor(color, percent) {
+    if (!color || !color.startsWith('#')) return color;
+    var num = parseInt(color.slice(1), 16);
+    var r = Math.max(0, (num >> 16) - Math.round(2.55 * percent));
+    var g = Math.max(0, ((num >> 8) & 0x00FF) - Math.round(2.55 * percent));
+    var b = Math.max(0, (num & 0x0000FF) - Math.round(2.55 * percent));
+    return '#' + ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0');
+}
+
+function renderKanban() {
+    var container = document.getElementById('kanban-container');
+    var html = '<div class="kanban-board">';
+    statuses.forEach(function(status) {
+        var statusColor = status['Цвет'];
+        var gradientEnd = isDarkTheme() ? darkenColor(statusColor, 15) : lightenColor(statusColor, 8);
+        var headerStyle = 'background: linear-gradient(135deg, ' + statusColor + ' 0%, ' + gradientEnd + ' 100%);';
+        var statusCards = cards.filter(function(c) { return c['СтатусID'] === status['СтатусID']; });
+        html += '<div class="kanban-column">';
+        html += '<div class="kanban-column-header" data-status-id="' + status['СтатусID'] + '" style="' + headerStyle + '">';
+        html += '<span>' + status['Статус'] + '</span>';
+        html += '<span class="kanban-column-count">' + statusCards.length + '</span>';
+        html += '</div>';
+        html += '<div class="kanban-column-body">';
+        statusCards.forEach(function(card) {
+            html += '<div class="kanban-card">';
+            html += '<div class="kanban-card-title">' + card['Карточка'] + '</div>';
+            if (card['Описание']) html += '<div class="kanban-card-description">' + card['Описание'] + '</div>';
+            if (card['Сумма']) html += '<div class="kanban-card-amount">' + card['Сумма'] + ' ₽</div>';
+            html += '<div class="kanban-card-contacts">';
+            if (card['Телефон']) html += '<span class="kanban-card-contact-icon active" title="' + card['Телефон'] + '">📞</span>';
+            else html += '<span class="kanban-card-contact-icon inactive">📞</span>';
+            if (card['Email']) html += '<span class="kanban-card-contact-icon active" title="' + card['Email'] + '">📧</span>';
+            else html += '<span class="kanban-card-contact-icon inactive">📧</span>';
+            html += '</div></div>';
+        });
+        html += '</div></div>';
+    });
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+// Re-render on theme change
+new MutationObserver(function(mutations) {
+    mutations.forEach(function(m) {
+        if (m.attributeName === 'data-theme') renderKanban();
+    });
+}).observe(document.documentElement, { attributes: true });
+
+renderKanban();
+</script>
+</body>
+</html>

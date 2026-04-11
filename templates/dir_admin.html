@@ -5,16 +5,49 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>File manager</title>
-    <style>
-        a{ cursor: pointer; }
-    </style>
     <link rel="stylesheet" href="/css/bootstrap.3.3.7.min.css">
 	<link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="/css/styles.css">
+    <style>
+        a{ cursor: pointer; }
+        [data-theme="dark"] body {
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+        }
+        [data-theme="dark"] .alert-info {
+            background-color: var(--bg-secondary);
+            border-color: var(--border-color);
+            color: var(--text-primary);
+        }
+        [data-theme="dark"] .btn-default {
+            background-color: var(--bg-secondary);
+            border-color: var(--border-color);
+            color: var(--text-primary);
+        }
+        [data-theme="dark"] .btn-default:hover,
+        [data-theme="dark"] .btn-default:focus {
+            background-color: var(--bg-primary);
+            border-color: var(--text-secondary);
+            color: var(--text-primary);
+        }
+        [data-theme="dark"] .table-striped > tbody > tr:nth-of-type(odd) {
+            background-color: var(--bg-secondary);
+        }
+        [data-theme="dark"] .input-group-btn .btn-default {
+            background-color: var(--bg-secondary);
+            border-color: var(--border-color);
+            color: var(--text-primary);
+        }
+        [data-theme="dark"] svg path[stroke="#1A1A1A"],
+        [data-theme="dark"] svg path[stroke="#1a1a1a"] {
+            stroke: var(--text-primary);
+        }
+    </style>
     <script src="/js/jquery-3.5.1.slim.min.js"></script>
 </head>
 <body style="font-family:Verdana,Tahoma,sans-serif;line-height:normal;padding:2px">
 <div>
-    <a href="/{_global_.z}"><i class="pi pi-home" style="font-size: 2rem; color: #333;"></i></a>
+    <a href="/{_global_.z}"><i class="pi pi-home" style="font-size: 2rem; color: var(--text-primary, #333);"></i></a>
     &nbsp; 
     <div style="display: inline; margin-top: 7px"><a href="/{_global_.z}">Вернуться в&nbsp;основное меню</a>
     </div>
@@ -150,6 +183,7 @@
 <!-- End:&Dir_Admin -->
 </div>
 </div>
+<script src="/js/app.js"></script>
 <script src="/js/js.js"></script>
 <script>
     if(search.download)

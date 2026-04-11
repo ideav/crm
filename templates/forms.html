@@ -36,7 +36,7 @@
 .forms-title {
     font-size: 20px;
     font-weight: 500;
-    color: var(--md-text-primary);
+    color: var(--text-primary);
     letter-spacing: 0.15px;
     margin: 0;
 }
@@ -60,33 +60,33 @@
 }
 
 .btn-primary {
-    background: #007bff;
+    background: var(--button-primary);
     color: white;
-    border-color: #007bff;
+    border-color: var(--button-primary);
 }
 
 .btn-primary:hover {
-    background: #0056b3;
+    background: var(--button-primary-hover);
 }
 
 .btn-secondary {
-    background: #f8f9fa;
-    color: #333;
-    border-color: #ddd;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border-color: var(--border-color);
 }
 
 .btn-secondary:hover {
-    background: #e9ecef;
+    background: var(--border-color);
 }
 
 .btn-danger {
-    background: #dc3545;
+    background: var(--color-danger);
     color: white;
-    border-color: #dc3545;
+    border-color: var(--color-danger);
 }
 
 .btn-danger:hover {
-    background: #c82333;
+    background: var(--color-danger-hover);
 }
 
 .btn-sm {
@@ -96,8 +96,8 @@
 
 /* Form List */
 .forms-list {
-    background: #fff;
-    border: 1px solid #e0e0e0;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
     border-radius: 8px;
     padding: 20px;
     margin-bottom: 20px;
@@ -106,7 +106,7 @@
 .forms-list h3 {
     margin: 0 0 15px 0;
     font-size: 1.1rem;
-    color: #555;
+    color: var(--text-secondary);
 }
 
 .form-item {
@@ -114,7 +114,7 @@
     align-items: center;
     gap: 10px;
     padding: 10px;
-    border-bottom: 1px solid #f0f0f0;
+    border-bottom: 1px solid var(--border-color);
 }
 
 .form-item:last-child {
@@ -124,23 +124,25 @@
 .form-item-name {
     flex: 1;
     font-weight: 500;
-    color: var(--text-color, #333);
+    color: var(--text-primary);
     text-decoration: none;
 }
 
 .form-item-name:hover {
     text-decoration: underline;
-    color: #007bff;
+    color: var(--link-color);
 }
 
 .form-item-name-input {
     flex: 1;
     font-weight: 500;
     padding: 2px 6px;
-    border: 1px solid #007bff;
+    border: 1px solid var(--button-primary);
     border-radius: 4px;
     font-size: 14px;
     outline: none;
+    background: var(--input-bg);
+    color: var(--text-primary);
 }
 
 .form-item-actions {
@@ -170,7 +172,7 @@
 
 /* Panel Card - Adaptive sizing based on content */
 .panel-card {
-    background: #fff;
+    background: var(--card-bg);
     border: none;
     border-radius: 8px;
     padding: 15px;
@@ -219,13 +221,13 @@
     align-items: center;
     margin-bottom: 10px;
     padding-bottom: 10px;
-    border-bottom: 1px solid #f0f0f0;
+    border-bottom: 1px solid var(--border-color);
 }
 
 .panel-title {
     font-weight: 600;
     font-size: 1rem;
-    color: #333;
+    color: var(--text-primary);
 }
 
 .panel-actions {
@@ -238,7 +240,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: #6c757d;
+    background: var(--text-secondary);
     color: white;
     font-size: 11px;
     font-weight: 600;
@@ -256,10 +258,10 @@
 
 .panel-meta {
     font-size: 12px;
-    color: #888;
+    color: var(--text-secondary);
     margin-top: 10px;
     padding-top: 10px;
-    border-top: 1px solid #f0f0f0;
+    border-top: 1px solid var(--border-color);
 }
 
 /* Chart Container */
@@ -278,16 +280,17 @@
 .report-table td {
     padding: 8px 12px;
     text-align: left;
-    border: 1px solid #e0e0e0;
+    border: 1px solid var(--border-color);
 }
 
 .report-table th {
-    background: #f8f9fa;
+    background: var(--bg-secondary);
     font-weight: 600;
+    color: var(--text-primary);
 }
 
 .report-table tr:hover {
-    background: #f5f5f5;
+    background: var(--bg-secondary);
 }
 
 /* Data Entry Form */
@@ -305,24 +308,26 @@
 
 .form-field label {
     font-weight: 500;
-    color: #555;
+    color: var(--text-secondary);
 }
 
 .form-field input,
 .form-field select,
 .form-field textarea {
     padding: 8px 12px;
-    border: 1px solid #ddd;
+    border: 1px solid var(--input-border);
     border-radius: 4px;
     font-size: 14px;
+    background: var(--input-bg);
+    color: var(--text-primary);
 }
 
 .form-field input:focus,
 .form-field select:focus,
 .form-field textarea:focus {
     outline: none;
-    border-color: #007bff;
-    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.1);
+    border-color: var(--button-primary);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
 }
 
 /* Add Panel Modal */
@@ -340,7 +345,8 @@
 }
 
 .modal-content {
-    background: white;
+    background: var(--card-bg);
+    color: var(--text-primary);
     border-radius: 8px;
     padding: 20px;
     max-width: 500px;
@@ -355,7 +361,7 @@
     align-items: center;
     margin-bottom: 20px;
     padding-bottom: 15px;
-    border-bottom: 1px solid #e0e0e0;
+    border-bottom: 1px solid var(--border-color);
 }
 
 .modal-header h3 {
@@ -368,13 +374,13 @@
     border: none;
     font-size: 1.5rem;
     cursor: pointer;
-    color: #888;
+    color: var(--text-secondary);
     padding: 0;
     line-height: 1;
 }
 
 .modal-close:hover {
-    color: #333;
+    color: var(--text-primary);
 }
 
 .modal-body {
@@ -396,22 +402,23 @@
 }
 
 .panel-type-option {
-    border: 2px solid #e0e0e0;
+    border: 2px solid var(--border-color);
     border-radius: 8px;
     padding: 15px;
     text-align: center;
     cursor: pointer;
     transition: all 0.2s;
+    color: var(--text-primary);
 }
 
 .panel-type-option:hover {
-    border-color: #007bff;
-    background: #f8f9ff;
+    border-color: var(--button-primary);
+    background: var(--bg-secondary);
 }
 
 .panel-type-option.selected {
-    border-color: #007bff;
-    background: #e6f0ff;
+    border-color: var(--button-primary);
+    background: var(--bg-secondary);
 }
 
 .panel-type-icon {
@@ -434,15 +441,15 @@
     align-items: center;
     justify-content: center;
     min-height: 200px;
-    color: #888;
+    color: var(--text-secondary);
 }
 
 .loading::before {
     content: '';
     width: 20px;
     height: 20px;
-    border: 2px solid #ddd;
-    border-top-color: #007bff;
+    border: 2px solid var(--border-color);
+    border-top-color: var(--button-primary);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
     margin-right: 10px;
@@ -456,7 +463,7 @@
 .empty-state {
     text-align: center;
     padding: 40px;
-    color: #888;
+    color: var(--text-secondary);
 }
 
 .empty-state-icon {
@@ -477,7 +484,7 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    border: 1px dashed #ccc;
+    border: 1px dashed var(--border-color);
     border-radius: 4px;
     padding: 2px 4px;
 }
@@ -501,10 +508,10 @@
 .report-header {
     font-size: 1.2rem;
     font-weight: 600;
-    color: var(--text-color, #333);
+    color: var(--text-primary);
     margin-bottom: 15px;
     padding-bottom: 10px;
-    border-bottom: 1px solid #e0e0e0;
+    border-bottom: 1px solid var(--border-color);
 }
 
 /* Column Config UI */
@@ -514,7 +521,7 @@
     gap: 10px;
     margin-bottom: 10px;
     padding: 8px;
-    background: #f8f9fa;
+    background: var(--bg-secondary);
     border-radius: 4px;
 }
 
@@ -528,20 +535,21 @@
     align-items: center;
     gap: 10px;
     padding: 8px 12px;
-    border: 1px solid #e0e0e0;
+    border: 1px solid var(--border-color);
     border-radius: 4px;
     margin-bottom: 5px;
-    background: #fff;
+    background: var(--bg-primary);
+    color: var(--text-primary);
     cursor: grab;
 }
 
 .column-config-item:hover {
-    background: #f5f5f5;
+    background: var(--bg-secondary);
 }
 
 .column-config-item.dragging {
     opacity: 0.5;
-    background: #e6f0ff;
+    background: var(--bg-secondary);
 }
 
 .column-config-item input[type="checkbox"] {
@@ -549,7 +557,7 @@
 }
 
 .column-config-item .drag-handle {
-    color: #888;
+    color: var(--text-secondary);
     cursor: grab;
 }
 
@@ -621,7 +629,7 @@
             <form id="createFormForm" onsubmit="return createNewForm(event)">
                 <div style="display: flex; gap: 10px;">
                     <input type="text" id="newFormName" placeholder="Имя новой формы"
-                           class="form-control" style="flex: 1; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;">
+                           class="form-control" style="flex: 1; padding: 8px 12px; border-radius: 4px;">
                     <button type="submit" class="btn btn-primary">
                         Создать форму
                     </button>
@@ -896,7 +904,7 @@
         </div>
         <div class="modal-body">
             <input type="hidden" id="columnConfigPanelId">
-            <p style="margin-bottom: 15px; color: #666;">
+            <p style="margin-bottom: 15px; color: var(--text-secondary);">
                 Отметьте видимые колонки и перетащите для изменения порядка
             </p>
             <div class="column-config-list" id="columnConfigList">
@@ -1030,7 +1038,12 @@ function showNotification(message, type) {
     var toast = document.createElement('div');
     toast.className = 'integram-toast integram-toast-' + type;
     toast.textContent = message;
-    toast.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 24px;border-radius:4px;color:white;z-index:10000;font-family:sans-serif;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.2);cursor:pointer;background-color:' + (type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#17a2b8') + ';';
+    var style = getComputedStyle(document.documentElement);
+    var errorColor = style.getPropertyValue('--color-danger').trim() || '#dc3545';
+    var successColor = style.getPropertyValue('--color-success').trim() || '#28a745';
+    var infoColor = '#17a2b8';
+    var bgColor = type === 'error' ? errorColor : type === 'success' ? successColor : infoColor;
+    toast.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 24px;border-radius:4px;color:white;z-index:10000;font-family:sans-serif;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.2);cursor:pointer;background-color:' + bgColor + ';';
     document.body.appendChild(toast);
 
     var remove = function() { if (toast.parentNode) toast.remove(); };
@@ -1043,8 +1056,8 @@ function showConfirmModal(message, onConfirm) {
     overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10001;display:flex;align-items:center;justify-content:center;';
 
     var modal = document.createElement('div');
-    modal.style.cssText = 'background:var(--bg-card,#fff);border-radius:8px;padding:24px;max-width:400px;width:90%;box-shadow:0 4px 16px rgba(0,0,0,0.2);';
-    modal.innerHTML = '<p style="margin:0 0 20px 0;">' + message + '</p><div style="display:flex;gap:8px;justify-content:flex-end;"><button class="btn-cancel" style="padding:8px 16px;border:1px solid #ccc;border-radius:4px;background:transparent;cursor:pointer;">Отмена</button><button class="btn-confirm" style="padding:8px 16px;border:none;border-radius:4px;background:#dc3545;color:white;cursor:pointer;">Удалить</button></div>';
+    modal.style.cssText = 'background:var(--card-bg,#fff);color:var(--text-primary,#212529);border-radius:8px;padding:24px;max-width:400px;width:90%;box-shadow:0 4px 16px rgba(0,0,0,0.2);';
+    modal.innerHTML = '<p style="margin:0 0 20px 0;">' + message + '</p><div style="display:flex;gap:8px;justify-content:flex-end;"><button class="btn-cancel" style="padding:8px 16px;border:1px solid var(--border-color,#dee2e6);border-radius:4px;background:transparent;color:var(--text-primary,#212529);cursor:pointer;">Отмена</button><button class="btn-confirm" style="padding:8px 16px;border:none;border-radius:4px;background:var(--color-danger,#dc3545);color:white;cursor:pointer;">Удалить</button></div>';
 
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
@@ -2782,6 +2795,14 @@ localize();
 <script src="/js/hints.js"></script>
 <!-- Workspace hints -->
 <style>
+:root {
+    --forms-hint-shadow: 0 8px 40px rgba(0,0,0,0.28);
+    --forms-hint-btn-shadow: 0 2px 8px rgba(0,0,0,0.25);
+}
+[data-theme="dark"] {
+    --forms-hint-shadow: 0 8px 40px rgba(0,0,0,0.55);
+    --forms-hint-btn-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
 #forms-hint-box {
     position: fixed;
     top: 50%;
@@ -2789,10 +2810,10 @@ localize();
     transform: translate(-50%, -50%);
     width: 90%;
     max-width: 420px;
-    background: var(--card-bg, #fff);
+    background: var(--card-bg);
     border-radius: 12px;
     padding: 1.25rem 1.25rem 1rem;
-    box-shadow: 0 8px 40px rgba(0,0,0,0.28);
+    box-shadow: var(--forms-hint-shadow);
     z-index: 2000;
     display: none;
     cursor: default;
@@ -2814,7 +2835,7 @@ localize();
 #forms-hint-box .hint-drag-handle:active { cursor: grabbing; }
 #forms-hint-box .hint-drag-handle .hint-drag-icon {
     font-size: 1rem;
-    color: var(--text-secondary, #888);
+    color: var(--text-secondary);
     pointer-events: none;
     line-height: 1;
     letter-spacing: 2px;
@@ -2824,7 +2845,7 @@ localize();
     position: fixed;
     right: 1rem;
     z-index: 2001;
-    background: var(--button-primary, #0d6efd);
+    background: var(--button-primary);
     color: #fff;
     border: none;
     border-radius: 50%;
@@ -2832,7 +2853,7 @@ localize();
     height: 2.4rem;
     font-size: 1.2rem;
     cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    box-shadow: var(--forms-hint-btn-shadow);
     align-items: center;
     justify-content: center;
 }

@@ -10,6 +10,7 @@
     var COOKIE_ACTIVE_TAB = 'info_active_tab';
     var COOKIE_HINTS_MODE = 'hints_mode';
     var COOKIE_HINTS_SEEN = 'hints_seen_workspaces';
+    var COOKIE_FORMS_DESC_HIDDEN = 'info_forms_desc_hidden';
 
     // ── Cookie helpers ──────────────────────────────────────────────────────
 
@@ -220,6 +221,22 @@
         }
     }
 
+    // ── Forms tab description ────────────────────────────────────────────────
+
+    window.infoHideFormsDescription = function() {
+        setCookie(COOKIE_FORMS_DESC_HIDDEN, '1', 365);
+        var el = document.getElementById('forms-description');
+        if (el) el.style.display = 'none';
+    };
+
+    function initFormsDescription() {
+        var el = document.getElementById('forms-description');
+        if (!el) return;
+        if (getCookie(COOKIE_FORMS_DESC_HIDDEN) === '1') {
+            el.style.display = 'none';
+        }
+    }
+
     // ── Quick links ─────────────────────────────────────────────────────────
 
     var quickLinksLoaded = false;
@@ -276,6 +293,7 @@
         updateHintButtons();
         initActionLinkHover();
         initMenuNameHover();
+        initFormsDescription();
     });
 
 })();

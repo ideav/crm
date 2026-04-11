@@ -81,6 +81,10 @@
     box-shadow: 0 2px 8px rgba(0,0,0,0.08);
 }
 
+[data-theme="dark"] .info-action-item:hover {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+
 .info-action-header {
     display: flex;
     align-items: center;
@@ -104,8 +108,12 @@
 }
 
 .info-action-icon-accent {
-    background: rgba(59, 130, 246, 0.1);
+    background: rgba(59, 130, 246, 0.15);
     color: var(--button-primary);
+}
+
+[data-theme="dark"] .info-action-icon-accent {
+    background: rgba(59, 130, 246, 0.25);
 }
 
 .info-action-title {
@@ -368,8 +376,8 @@ strong[data-menu-href] {
     display: inline-block;
     width: 40px;
     height: 40px;
-    border: 4px solid #f3f3f3;
-    border-top: 4px solid #007bff;
+    border: 4px solid var(--border-color);
+    border-top: 4px solid var(--button-primary);
     border-radius: 50%;
     animation: info-spin 1s linear infinite;
 }
@@ -381,4 +389,41 @@ strong[data-menu-href] {
     margin: 0;
     border-radius: 8px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* ── Forms tab description banner ── */
+.info-forms-description {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+}
+
+.info-forms-description-text {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.info-forms-description-hide {
+    flex-shrink: 0;
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 4px 12px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.info-forms-description-hide:hover {
+    background: var(--bg-primary);
+    color: var(--text-primary);
 }

@@ -58,7 +58,7 @@
 
 /* Required field indicator */
 .icon-required {
-    color: #dc3545;
+    color: var(--color-danger, #dc3545);
 }
 
 /* Optional field indicator */
@@ -89,4 +89,44 @@
 
 [data-theme="dark"] .card-header-match {
     background-color: #1e3a5f;
+}
+
+/* Dark theme overrides for form controls */
+[data-theme="dark"] .form-control,
+[data-theme="dark"] .form-control:focus {
+    background-color: var(--input-bg, #2d2d2d);
+    border-color: var(--input-border, #495057);
+    color: var(--text-primary, #e9ecef);
+}
+[data-theme="dark"] .form-control::placeholder {
+    color: var(--text-secondary, #adb5bd);
+}
+[data-theme="dark"] select.form-control option {
+    background-color: var(--input-bg, #2d2d2d);
+    color: var(--text-primary, #e9ecef);
+}
+[data-theme="dark"] .card {
+    background-color: var(--card-bg, #2d2d2d);
+    border-color: var(--border-color, #495057);
+    color: var(--text-primary, #e9ecef);
+}
+[data-theme="dark"] .card-header,
+[data-theme="dark"] .card-footer {
+    background-color: var(--bg-secondary, #2d2d2d);
+    border-color: var(--border-color, #495057);
+    color: var(--text-primary, #e9ecef);
+}
+[data-theme="dark"] .table,
+[data-theme="dark"] .table td,
+[data-theme="dark"] .table th {
+    color: var(--text-primary, #e9ecef);
+    border-color: var(--border-color, #495057);
+}
+[data-theme="dark"] .table-striped tbody tr:nth-of-type(odd) {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+[data-theme="dark"] .input-group-text {
+    background-color: var(--bg-secondary, #2d2d2d);
+    border-color: var(--input-border, #495057);
+    color: var(--text-primary, #e9ecef);
 }

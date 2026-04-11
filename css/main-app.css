@@ -110,6 +110,46 @@
     margin: 0.25rem 0;
 }
 
+/* Font size controls in user menu (issue #1628) */
+.user-menu-font-size-row {
+    cursor: default;
+}
+
+.user-menu-font-size-row:hover {
+    background: none;
+}
+
+.navbar-font-size-group {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+}
+
+.navbar-font-size-btn {
+    font-weight: 700;
+    line-height: 1;
+    padding: 3px 7px;
+    min-width: 28px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color, #dee2e6);
+    background: transparent;
+    color: var(--text-secondary, #6c757d);
+    cursor: pointer;
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.navbar-font-size-btn:hover {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+.navbar-font-size-btn.active {
+    background-color: var(--md-primary, #1976d2);
+    color: #fff;
+    border-color: var(--md-primary, #1976d2);
+}
+
 .user-menu-item-danger {
     color: var(--color-danger, #dc3545);
 }
@@ -318,11 +358,13 @@
 
 .app-menu-item:hover {
     background-color: rgba(0, 0, 0, 0.04);
+    color: var(--text-primary);
     text-decoration: none;
 }
 
 [data-theme="dark"] .app-menu-item:hover {
     background-color: rgba(255, 255, 255, 0.08);
+    color: var(--text-primary);
 }
 
 .app-menu-item.active {
@@ -554,6 +596,119 @@
 
     .app-content {
         padding: 0.75rem;
+    }
+}
+
+/* Role selector panel (shown above settings button) */
+.sidebar-role-panel {
+    margin: 0 0.5rem 0.25rem;
+    background-color: var(--bg-secondary, #f5f5f5);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.sidebar-role-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.sidebar-role-panel-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.sidebar-role-panel-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    transition: background-color 0.2s ease, color 0.2s ease;
+    padding: 0;
+    flex-shrink: 0;
+}
+
+.sidebar-role-panel-close:hover {
+    background-color: rgba(0, 0, 0, 0.08);
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .sidebar-role-panel-close:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+.sidebar-role-panel-body {
+    padding: 0.625rem 0.75rem;
+}
+
+.sidebar-role-label {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.375rem;
+}
+
+.sidebar-role-select {
+    width: 100%;
+    padding: 0.375rem 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background-color: var(--input-bg, var(--card-bg));
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: border-color 0.2s ease;
+}
+
+.sidebar-role-select:focus {
+    outline: none;
+    border-color: var(--button-primary);
+}
+
+.sidebar-role-panel-footer {
+    padding: 0.5rem 0.75rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.sidebar-edit-mode-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    cursor: pointer;
+    user-select: none;
+}
+
+.sidebar-edit-mode-checkbox {
+    width: 1rem;
+    height: 1rem;
+    accent-color: var(--button-primary);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+/* Hide role panel when sidebar is collapsed */
+.app-sidebar.collapsed .sidebar-role-panel {
+    display: none;
+}
+
+/* Hide role panel on mobile */
+@media (max-width: 900px) {
+    .sidebar-role-panel {
+        display: none;
     }
 }
 

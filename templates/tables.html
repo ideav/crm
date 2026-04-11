@@ -5,7 +5,7 @@
             <h1>Таблицы</h1>
             <div class="tables-actions">
                 <div class="search-box">
-                    <input type="text" id="tables-search" placeholder="Поиск таблиц..." class="search-input" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')">
+                    <input type="text" id="tables-search" placeholder="Поиск таблиц..." class="search-input" autocomplete="off">
                     <i class="search-icon pi pi-search"></i>
                 </div>
                 <button type="button" id="add-table-btn" class="btn-primary btn-small">
@@ -13,6 +13,15 @@
                 </button>
             </div>
         </div>
+        <script>
+        // Hide "New Table" button when user lacks structure write permission (issue #1536)
+        (function () {
+            if (!(window.grants && window.grants['1'] === 'WRITE')) {
+                var btn = document.getElementById('add-table-btn');
+                if (btn) btn.style.display = 'none';
+            }
+        }());
+        </script>
 
         <div class="tables-container" id="tables-container">
             <!-- Folders with tables will be rendered here by JavaScript -->
@@ -101,10 +110,79 @@
         myTablesSet['{ID}'] = {'{TYPE}': '{SETTINGS}'.replace(/&quot;/g, '"')};
         <!-- End: &Settings -->
     </script>
+    <script src="/js/column-name-dict.js"></script>
     <script src="/js/tables.js"></script>
+<script>
+// Auto-detect base type and Справочник flag from table name as user types (issue #1494)
+(function () {
+    var typeManuallyChanged = false;
+    var refManuallyChanged = false;
+
+    function initNewTableAutoDetect() {
+        var nameInput = document.getElementById('new-table-name');
+        var typeSelect = document.getElementById('new-table-type');
+        var uniqueCheckbox = document.getElementById('new-table-unique');
+
+        if (!nameInput || !typeSelect || !uniqueCheckbox) return;
+
+        typeSelect.addEventListener('change', function () {
+            typeManuallyChanged = true;
+        });
+
+        uniqueCheckbox.addEventListener('change', function () {
+            if (!uniqueCheckbox._autoDetecting) {
+                refManuallyChanged = true;
+            }
+        });
+
+        nameInput.addEventListener('input', function () {
+            if (typeof detectColumnType !== 'function') return;
+            var value = nameInput.value.trim();
+            if (!value) return;
+            var detected = detectColumnType(value);
+            if (!detected) return;
+
+            if (!typeManuallyChanged) {
+                typeSelect.value = String(detected.type);
+            }
+            if (!refManuallyChanged) {
+                uniqueCheckbox._autoDetecting = true;
+                uniqueCheckbox.checked = detected.ref;
+                uniqueCheckbox._autoDetecting = false;
+            }
+        });
+
+        // Reset manual-change flags when modal is re-opened so each new name starts fresh
+        function resetFlags() {
+            typeManuallyChanged = false;
+            refManuallyChanged = false;
+        }
+        var addTableBtn = document.getElementById('add-table-btn');
+        if (addTableBtn) addTableBtn.addEventListener('click', resetFlags);
+        var cancelBtn = document.getElementById('cancel-new-table');
+        if (cancelBtn) cancelBtn.addEventListener('click', resetFlags);
+        var closeBtn = document.getElementById('close-new-table-modal');
+        if (closeBtn) closeBtn.addEventListener('click', resetFlags);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initNewTableAutoDetect);
+    } else {
+        initNewTableAutoDetect();
+    }
+}());
+</script>
 <script src="/js/hints.js"></script>
 <!-- Workspace hints -->
 <style>
+:root {
+    --tables-hint-shadow: 0 8px 40px rgba(0,0,0,0.28);
+    --tables-hint-btn-shadow: 0 2px 8px rgba(0,0,0,0.25);
+}
+[data-theme="dark"] {
+    --tables-hint-shadow: 0 8px 40px rgba(0,0,0,0.55);
+    --tables-hint-btn-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
 #tables-hint-box {
     position: fixed;
     top: 50%;
@@ -112,10 +190,10 @@
     transform: translate(-50%, -50%);
     width: 90%;
     max-width: 420px;
-    background: var(--card-bg, #fff);
+    background: var(--card-bg);
     border-radius: 12px;
     padding: 1.25rem 1.25rem 1rem;
-    box-shadow: 0 8px 40px rgba(0,0,0,0.28);
+    box-shadow: var(--tables-hint-shadow);
     z-index: 2000;
     display: none;
     cursor: default;
@@ -137,7 +215,7 @@
 #tables-hint-box .hint-drag-handle:active { cursor: grabbing; }
 #tables-hint-box .hint-drag-handle .hint-drag-icon {
     font-size: 1rem;
-    color: var(--text-secondary, #888);
+    color: var(--text-secondary);
     pointer-events: none;
     line-height: 1;
     letter-spacing: 2px;
@@ -147,7 +225,7 @@
     position: fixed;
     right: 1rem;
     z-index: 2001;
-    background: var(--button-primary, #0d6efd);
+    background: var(--button-primary);
     color: #fff;
     border: none;
     border-radius: 50%;
@@ -155,7 +233,7 @@
     height: 2.4rem;
     font-size: 1.2rem;
     cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    box-shadow: var(--tables-hint-btn-shadow);
     align-items: center;
     justify-content: center;
 }
@@ -184,7 +262,7 @@
         <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Открытие таблицы</h3>
         <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Нажмите на название таблицы в списке, чтобы перейти к просмотру и редактированию её данных.</p>
         <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
-            <button onclick="tablesHintClose()" style="padding:0.35rem 0.9rem; border:none; border-radius:6px; background:var(--button-primary,#0d6efd); color:#fff; cursor:pointer; font-size:0.85rem;">Понятно</button>
+            <button onclick="tablesHintClose()" style="padding:0.35rem 0.9rem; border:none; border-radius:6px; background:var(--button-primary); color:#fff; cursor:pointer; font-size:0.85rem;">Понятно</button>
         </div>
     </div>
 </div>
