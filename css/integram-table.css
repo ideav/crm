@@ -391,6 +391,11 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     display: flex;
 }
 
+/* When both ref icon and add button are present, shift ref icon left so they don't overlap (issue #1682) */
+.integram-table th:hover .column-ref-link:has(~ .column-add-btn) {
+    right: 36px;
+}
+
 .column-ref-link:hover {
     opacity: 1;
     color: var(--md-primary, #1976d2);
