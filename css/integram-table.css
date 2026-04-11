@@ -939,7 +939,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     bottom: 0;
     background: rgba(0, 0, 0, 0.32);
     z-index: 999;
-    backdrop-filter: blur(2px);
+    backdrop-filter: blur(1px);
 }
 
 .column-settings-list {
@@ -1396,7 +1396,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     right: 0;
     bottom: 0;
     background: rgba(0, 0, 0, 0.32);
-    backdrop-filter: blur(2px);
+    backdrop-filter: blur(1px);
 }
 
 .edit-form-modal {
@@ -1880,7 +1880,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     bottom: 0;
     background: rgba(0, 0, 0, 0.32);
     z-index: 10001;
-    backdrop-filter: blur(2px);
+    backdrop-filter: blur(1px);
 }
 
 .form-field-settings-modal {
