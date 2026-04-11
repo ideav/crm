@@ -1233,6 +1233,15 @@ class MainAppController {
             });
         }
 
+        // Enter in input triggers Save
+        const saveBtn = modal.querySelector('.save');
+        modal.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
+                e.preventDefault();
+                saveBtn.click();
+            }
+        });
+
         // Focus name input
         setTimeout(() => {
             modal.querySelector('#modal-name').focus();
