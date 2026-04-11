@@ -3929,13 +3929,15 @@ class IntegramTable{
                 const hasGranted = column && column.granted === 1;
                 const origType = column && column.orig ? column.orig : null;
 
-                // Always show clear button. If granted=1 and orig exists, also show add button (initially hidden)
-                // The "+" button will be shown only when search input has non-zero length
-                // The "×" button will be hidden when search input has text (and add button is shown)
+                // Always show clear button. If granted=1 and orig exists, also show add button.
+                // Issue #1686: show the add button immediately when no options are available
+                // (e.g. the directory is empty) so the user can always create records.
+                // Otherwise keep it hidden until the user types something (issue #875).
                 const showAddButton = hasGranted && origType !== null;
+                const noOptionsAvailable = options.filter(([id, text]) => text !== currentValue).length === 0;
                 let buttonHtml = `<button class="inline-editor-reference-clear" title="Очистить значение" aria-label="Очистить значение"><i class="pi pi-times"></i></button>`;
                 if (showAddButton) {
-                    buttonHtml += `<button class="inline-editor-reference-add" style="display: none;" title="Создать запись" aria-label="Создать запись"><i class="pi pi-plus"></i></button>`;
+                    buttonHtml += `<button class="inline-editor-reference-add" style="${noOptionsAvailable ? '' : 'display: none;'}" title="Создать запись" aria-label="Создать запись"><i class="pi pi-plus"></i></button>`;
                 }
 
                 // Create dropdown with search
@@ -3990,12 +3992,16 @@ class IntegramTable{
 
                     // Toggle buttons based on search input length (issue #217)
                     // When search has text (typed by user): show add button (if available), hide clear button
-                    // When search is empty: hide add button, show clear button
-                    if (searchText.length > 0) {
+                    // When search is empty and options available: hide add button, show clear button
+                    // Issue #1686: also show add button when no options are available (empty directory)
+                    const currentNoOptions = this.currentEditingCell.referenceOptions
+                        ? this.currentEditingCell.referenceOptions.filter(([id, text]) => text !== currentValue).length === 0
+                        : true;
+                    if (searchText.length > 0 || currentNoOptions) {
                         if (addButton) {
                             addButton.style.display = '';
                         }
-                        if (clearButton) {
+                        if (clearButton && searchText.length > 0) {
                             clearButton.style.display = 'none';
                         }
                     } else {
@@ -4271,8 +4277,11 @@ class IntegramTable{
                         }).join('')
                         : '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
 
+                    // Issue #1686: show add button immediately when no options are available
+                    // (e.g. the directory is empty), so the user knows they can create the first record.
+                    const addButtonInitiallyVisible = availableOptions.length === 0;
                     const addButtonHtml = showAddButton
-                        ? `<button class="inline-editor-reference-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>`
+                        ? `<button class="inline-editor-reference-add" style="${addButtonInitiallyVisible ? '' : 'display: none;'}" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>`
                         : '';
 
                     cell.innerHTML = `
@@ -4333,8 +4342,11 @@ class IntegramTable{
                         const searchText = e.target.value.trim();
 
                         // Toggle add button visibility based on search input (issue #875)
+                        // Also show when no options are available so user can always create records (issue #1686)
                         if (addButton) {
-                            addButton.style.display = searchText.length > 0 ? '' : 'none';
+                            const currentAvailable = (this.currentEditingCell.referenceOptions || [])
+                                .filter(([id]) => !new Set(this.currentEditingCell.selectedItems.map(s => s.id)).has(id));
+                            addButton.style.display = (searchText.length > 0 || currentAvailable.length === 0) ? '' : 'none';
                         }
 
                         clearTimeout(searchTimeout);
