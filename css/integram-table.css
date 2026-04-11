@@ -368,13 +368,13 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     transform: translateY(-50%) scale(0.95);
 }
 
-/* Reference icon link for list/lookup columns (issue #1668) */
+/* Reference icon link for list/lookup columns (issue #1668, #1674, #1676) */
 .column-ref-link {
     position: absolute; /* out of inline flow so it does not affect th height (issue #1676) */
+    right: 4px;
     top: 50%;
     transform: translateY(-50%);
-    display: inline-flex;
-    visibility: hidden; /* hidden but occupies space to avoid layout shift (issue #1672) */
+    display: none; /* absolutely positioned so display:none causes no layout shift (issue #1672, #1674) */
     color: var(--md-on-surface-variant, #666);
     align-items: center;
     justify-content: center;
@@ -384,10 +384,11 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     text-decoration: none;
     opacity: 0.7;
     transition: var(--md-transition);
+    z-index: 1;
 }
 
 .integram-table th:hover .column-ref-link {
-    visibility: visible;
+    display: flex;
 }
 
 .column-ref-link:hover {
