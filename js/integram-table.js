@@ -2614,7 +2614,7 @@ class IntegramTable{
 
             modal.innerHTML = `
                 <div class="edit-form-header">
-                    <span class="edit-form-title">Вставить данные из буфера</span>
+                    <span class="edit-form-title" style="font-weight:500;">Вставить данные из буфера</span>
                     <button class="edit-form-close" data-close-modal-ref="true"><i class="pi pi-times"></i></button>
                 </div>
                 <div class="edit-form-body">
@@ -2623,7 +2623,11 @@ class IntegramTable{
                     <div style="margin-top:6px;color:#888;font-size:0.9em;">Текст, разделённый символами табуляции, «;» или «,»</div>
                     <div id="paste-data-progress" style="margin-top:8px;display:none;"></div>
                 </div>
-                <div class="edit-form-footer" style="justify-content:flex-end;">
+                <div class="edit-form-footer">
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">
+                        <input type="checkbox" id="paste-data-create-refs">
+                        <span>Создавать справочные значения</span>
+                    </label>
                     <div class="edit-form-footer-buttons">
                         <button type="button" class="btn btn-primary" id="paste-data-insert-btn">Вставить</button>
                         <button type="button" class="btn btn-secondary" id="paste-data-cancel-btn">Отменить</button>
@@ -2665,6 +2669,8 @@ class IntegramTable{
             const textarea = modal.querySelector('#paste-data-textarea');
             const progressEl = modal.querySelector('#paste-data-progress');
             const insertBtn = modal.querySelector('#paste-data-insert-btn');
+            const createRefsCheckbox = modal.querySelector('#paste-data-create-refs');
+            const createRefValues = createRefsCheckbox ? createRefsCheckbox.checked : false;
             const text = textarea.value;
 
             if (!text || !text.trim()) {
@@ -2751,6 +2757,8 @@ class IntegramTable{
              * First searches the pre-fetched list of up to 500 options.
              * If not found and the list has 500 items (server may have more),
              * performs a targeted search using q={value} to find the exact record.
+             * If still not found and createRefValues is true, creates the reference
+             * value via POST _m_new/{refTypeId}?JSON&up=1 (issue #1658).
              */
             const resolveRefId = async (colId, textValue) => {
                 const options = refOptionsCache[colId] || [];
@@ -2774,6 +2782,46 @@ class IntegramTable{
                         }
                     } catch (e) {
                         // Fall through: return original text if search fails
+                    }
+                }
+                // If checkbox is checked and value not found, create it as a new reference record (issue #1658)
+                if (createRefValues) {
+                    const col = columnMap[colId];
+                    const refTypeId = col && (col.ref || col.orig || col.ref_id);
+                    if (refTypeId) {
+                        try {
+                            const createParams = new URLSearchParams();
+                            if (typeof xsrf !== 'undefined') {
+                                createParams.append('_xsrf', xsrf);
+                            }
+                            createParams.append(`t${refTypeId}`, textValue);
+                            const createUrl = `${apiBase}/_m_new/${refTypeId}?JSON&up=1`;
+                            const createResponse = await fetch(createUrl, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                                body: createParams.toString()
+                            });
+                            if (createResponse.ok) {
+                                const createText = await createResponse.text();
+                                let createResult;
+                                try {
+                                    createResult = JSON.parse(createText);
+                                } catch (e) {
+                                    createResult = null;
+                                }
+                                if (createResult && createResult.obj) {
+                                    const newId = createResult.obj;
+                                    // Cache the new value so it is reused if it appears again
+                                    if (!refOptionsCache[colId]) {
+                                        refOptionsCache[colId] = [];
+                                    }
+                                    refOptionsCache[colId].push([newId, textValue]);
+                                    return newId;
+                                }
+                            }
+                        } catch (e) {
+                            // Fall through: return null if creation fails
+                        }
                     }
                 }
                 return null;
