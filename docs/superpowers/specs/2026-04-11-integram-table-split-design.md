@@ -55,11 +55,14 @@ js/
 #!/bin/bash
 # build.sh (в корне проекта)
 set -e
-cat js/integram-table/*.js > js/integram-table.js
+echo "// AUTO-GENERATED — DO NOT EDIT. Edit files in js/integram-table/ and run: bash build.sh" > js/integram-table.js
+cat js/integram-table/*.js >> js/integram-table.js
 echo "Built js/integram-table.js ($(wc -l < js/integram-table.js) lines)"
 ```
 
 Запускается вручную перед коммитом: `bash build.sh`
+
+Первая строка результирующего файла — предупреждение, которое Клод увидит при любом чтении файла.
 
 ## Ориентировочные размеры модулей
 
@@ -78,6 +81,23 @@ echo "Built js/integram-table.js ($(wc -l < js/integram-table.js) lines)"
 | остальные | 100–350 |
 
 `26-create-form-helper.js` (~2 200 строк) — уже отдельный самостоятельный класс, не дробится.
+
+## Защита от прямого редактирования
+
+Два уровня, чтобы Клод не редактировал сгенерированный файл напрямую:
+
+**1. Первая строка `integram-table.js`** (добавляется build.sh автоматически):
+```js
+// AUTO-GENERATED — DO NOT EDIT. Edit files in js/integram-table/ and run: bash build.sh
+```
+
+**2. Запись в `CLAUDE.md`** проекта (читается Клодом при старте каждой сессии):
+```
+## integram-table.js
+Файл генерируется автоматически. НИКОГДА не редактировать напрямую.
+Исходники: js/integram-table/*.js
+Сборка: bash build.sh
+```
 
 ## Что НЕ меняется
 
