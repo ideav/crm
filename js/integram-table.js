@@ -1,4 +1,5 @@
-/**
+// AUTO-GENERATED — DO NOT EDIT. Edit files in js/integram-table/ and run: bash build.sh
+/** 
  * IntegramTable Component
  * Standalone JS module for displaying Integram API data tables with infinite scroll
  *
