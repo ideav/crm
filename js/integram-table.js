@@ -10785,10 +10785,24 @@ class IntegramTable{
                         });
 
                         tbody.appendChild(tr);
-                    });
 
-                    // Re-attach drag handlers for the full table (issue #1617)
-                    this.attachSubordinateRowDragHandlers(container, arrId, parentRecordId);
+                        // Attach mousedown/mouseup handlers for the drag handle of the new row (issue #1617).
+                        // The tbody-level drop/dragstart/dragover listeners attached by attachSubordinateRowDragHandlers
+                        // already cover these new rows via event delegation, so we must NOT call
+                        // attachSubordinateRowDragHandlers again (that would add duplicate tbody listeners,
+                        // causing two _m_ord requests on drop — issue #1664).
+                        const handle = tr.querySelector('.subordinate-drag-handle');
+                        if (handle) {
+                            handle.addEventListener('mousedown', () => {
+                                if (!handle.classList.contains('subordinate-drag-handle-disabled')) {
+                                    tr.draggable = true;
+                                }
+                            });
+                            handle.addEventListener('mouseup', () => {
+                                tr.draggable = false;
+                            });
+                        }
+                    });
                 }
 
             } catch (error) {
