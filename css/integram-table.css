@@ -369,7 +369,8 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 /* Reference icon link for list/lookup columns (issue #1668) */
 .column-ref-link {
-    display: none;
+    display: inline-flex;
+    visibility: hidden; /* hidden but occupies space to avoid layout shift (issue #1672) */
     vertical-align: middle;
     color: var(--md-on-surface-variant, #666);
     align-items: center;
@@ -383,7 +384,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .integram-table th:hover .column-ref-link {
-    display: inline-flex;
+    visibility: visible;
 }
 
 .column-ref-link:hover {
