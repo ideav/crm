@@ -3,6 +3,9 @@
 
 import os
 
+# Always run from project root regardless of working directory
+os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 SRC = 'js/integram-table.js'
 OUT_DIR = 'js/integram-table'
 
