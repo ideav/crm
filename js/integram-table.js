@@ -2648,6 +2648,7 @@ class IntegramTable{
                         <span>Создавать справочные значения</span>
                     </label>
                     <div class="edit-form-footer-buttons">
+                        <button type="button" class="btn btn-preview" id="paste-data-preview-btn">Просмотр</button>
                         <button type="button" class="btn btn-primary" id="paste-data-insert-btn">Вставить</button>
                         <button type="button" class="btn btn-secondary" id="paste-data-cancel-btn">Отменить</button>
                     </div>
@@ -2671,8 +2672,148 @@ class IntegramTable{
                 window[instanceName].insertPastedData(modal, closeModal);
             });
 
+            modal.querySelector('#paste-data-preview-btn').addEventListener('click', () => {
+                window[instanceName].previewPastedData(modal, closeModal);
+            });
+
             // Focus textarea
             setTimeout(() => modal.querySelector('#paste-data-textarea').focus(), 50);
+        }
+
+        /**
+         * Show a preview table of the data parsed from the paste-data textarea (issue #1684).
+         * Opens a new modal with an editable table showing the rows to be inserted.
+         * The preview has "Загрузить" (Load) and "Отменить" (Cancel) buttons.
+         */
+        previewPastedData(pasteModal, closePasteModal) {
+            const textarea = pasteModal.querySelector('#paste-data-textarea');
+            const text = textarea.value;
+
+            if (!text || !text.trim()) {
+                this.showToast('Поле ввода пустое', 'error');
+                return;
+            }
+
+            // Split into lines, skip empty lines
+            const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
+            if (lines.length === 0) {
+                this.showToast('Нет данных для просмотра', 'error');
+                return;
+            }
+
+            // Detect delimiter (same logic as insertPastedData)
+            const countChar = (str, ch) => {
+                let count = 0;
+                for (let i = 0; i < str.length; i++) {
+                    if (str[i] === ch && (i === 0 || str[i - 1] !== '\\')) {
+                        count++;
+                    }
+                }
+                return count;
+            };
+            const isConsistentDelimiter = (delim) => {
+                const counts = lines.map(l => countChar(l, delim));
+                return counts[0] > 0 && counts.every(c => c === counts[0]);
+            };
+            let delimiter = '\t';
+            if (isConsistentDelimiter('\t')) {
+                delimiter = '\t';
+            } else if (isConsistentDelimiter(';')) {
+                delimiter = ';';
+            } else if (isConsistentDelimiter(',')) {
+                delimiter = ',';
+            }
+
+            // Parse rows
+            const parsedRows = lines.map(line => line.split(delimiter));
+
+            // Get ordered visible non-id columns for header
+            const columnMap = {};
+            this.columns.forEach(col => { columnMap[col.id] = col; });
+            const orderedColIds = (this.columnOrder || this.columns.map(c => c.id))
+                .filter(id => columnMap[id] && !this.idColumns.has(id));
+            const colHeaders = orderedColIds.map(id => (columnMap[id] && columnMap[id].name) || id);
+
+            // Build the preview modal
+            const instanceName = this.options.instanceName;
+            const modalDepth = (window._integramModalDepth || 0) + 1;
+            window._integramModalDepth = modalDepth;
+            const baseZIndex = 1000 + (modalDepth * 10);
+            const cascadeOffset = (modalDepth - 1) * 20;
+
+            const previewOverlay = document.createElement('div');
+            previewOverlay.className = 'edit-form-overlay';
+            previewOverlay.style.zIndex = baseZIndex;
+
+            const previewModal = document.createElement('div');
+            previewModal.className = 'edit-form-modal paste-data-preview-modal';
+            previewModal.style.zIndex = baseZIndex + 1;
+            previewModal.style.transform = `translate(calc(-50% + ${cascadeOffset}px), calc(-50% + ${cascadeOffset}px))`;
+            previewModal._overlayElement = previewOverlay;
+
+            // Build table HTML with editable cells
+            const theadCols = colHeaders.map(h => `<th>${h}</th>`).join('');
+            const tbodyRows = parsedRows.map((row, rowIdx) => {
+                const cells = orderedColIds.map((colId, colIdx) => {
+                    const val = row[colIdx] !== undefined ? row[colIdx] : '';
+                    return `<td><input class="paste-preview-cell" data-row="${rowIdx}" data-col="${colIdx}" value="${val.replace(/"/g, '&quot;')}"></td>`;
+                });
+                return `<tr>${cells.join('')}</tr>`;
+            }).join('');
+
+            previewModal.innerHTML = `
+                <div class="edit-form-header">
+                    <span class="edit-form-title" style="font-weight:500;">Просмотр данных для вставки (${parsedRows.length} строк)</span>
+                    <button class="edit-form-close" data-close-preview-ref="true"><i class="pi pi-times"></i></button>
+                </div>
+                <div class="edit-form-body paste-data-preview-body">
+                    <div class="paste-data-preview-table-wrap">
+                        <table class="paste-data-preview-table">
+                            <thead><tr>${theadCols}</tr></thead>
+                            <tbody>${tbodyRows}</tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="edit-form-footer">
+                    <div style="color:#888;font-size:0.85em;">Вы можете отредактировать ячейки перед загрузкой</div>
+                    <div class="edit-form-footer-buttons">
+                        <button type="button" class="btn btn-primary" id="paste-preview-load-btn">Загрузить</button>
+                        <button type="button" class="btn btn-secondary" id="paste-preview-cancel-btn">Отменить</button>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(previewOverlay);
+            document.body.appendChild(previewModal);
+
+            const closePreview = () => {
+                previewModal.remove();
+                previewOverlay.remove();
+                window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+            };
+
+            previewModal.querySelector('.edit-form-close').addEventListener('click', closePreview);
+            previewModal.querySelector('#paste-preview-cancel-btn').addEventListener('click', closePreview);
+            previewOverlay.addEventListener('click', closePreview);
+
+            previewModal.querySelector('#paste-preview-load-btn').addEventListener('click', () => {
+                // Collect edited cell values back into rows
+                const cells = previewModal.querySelectorAll('.paste-preview-cell');
+                const editedRows = parsedRows.map(row => [...row]);
+                cells.forEach(cell => {
+                    const rowIdx = parseInt(cell.dataset.row, 10);
+                    const colIdx = parseInt(cell.dataset.col, 10);
+                    editedRows[rowIdx][colIdx] = cell.value;
+                });
+
+                // Rebuild text from edited rows using original delimiter and update textarea
+                const newText = editedRows.map(row => row.join(delimiter)).join('\n');
+                textarea.value = newText;
+
+                closePreview();
+                // Trigger insert using the updated textarea content
+                window[instanceName].insertPastedData(pasteModal, closePasteModal);
+            });
         }
 
         /**
