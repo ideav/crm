@@ -2625,7 +2625,7 @@ class IntegramTable{
                 </div>
                 <div class="edit-form-footer">
                     <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">
-                        <input type="checkbox" id="paste-data-create-refs">
+                        <input type="checkbox" id="paste-data-create-refs" title="Если значения не будут найдены в справочнике, то я создам их на лету">
                         <span>Создавать справочные значения</span>
                     </label>
                     <div class="edit-form-footer-buttons">
