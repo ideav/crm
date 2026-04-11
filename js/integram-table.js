@@ -11258,10 +11258,16 @@ class IntegramTable{
 
                 if (srcIdx === -1 || tgtIdx === -1) return;
 
-                if (srcIdx < tgtIdx) {
-                    tbody.insertBefore(dragSrcRow, targetRow.nextSibling);
-                } else {
+                // Determine insert position based on cursor Y relative to target row midpoint (issue #1666).
+                // This mirrors main-app.js handleReorder logic: top half → insert before, bottom half → insert after.
+                const rect = targetRow.getBoundingClientRect();
+                const midY = rect.top + rect.height / 2;
+                const insertBeforeTarget = e.clientY < midY;
+
+                if (insertBeforeTarget) {
                     tbody.insertBefore(dragSrcRow, targetRow);
+                } else {
+                    tbody.insertBefore(dragSrcRow, targetRow.nextSibling);
                 }
 
                 // Collect new order of row IDs
