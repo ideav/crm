@@ -1399,9 +1399,15 @@ class IntegramTable{
                                         if (this.sortColumn === col.id) {
                                             sortIndicator = this.sortDirection === 'asc' ? '<i class="pi pi-sort-amount-up-alt" style="font-size:0.75em;"></i> ' : '<i class="pi pi-sort-amount-down" style="font-size:0.75em;"></i> ';
                                         }
+                                        const refTypeId = col.orig || col.ref_id;
+                                        const refIconHtml = refTypeId ? (() => {
+                                            const dbName = window.db || window.location.pathname.split('/')[1];
+                                            return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
+                                        })() : '';
                                         return `
                                             <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
                                                 <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ col.name }</span>
+                                                ${ refIconHtml }
                                                 ${ addButtonHtml }
                                                 <div class="column-resize-handle" data-column-id="${ col.id }"></div>
                                             </th>
@@ -2476,9 +2482,15 @@ class IntegramTable{
                         const groupingClass = isGroupingCol ? ' group-header' : '';
                         const groupingOrder = isGroupingCol ? this.groupingColumns.indexOf(col.id) + 1 : '';
                         const groupingBadge = isGroupingCol ? `<span class="grouping-header-badge">${ groupingOrder }</span>` : '';
+                        const refTypeId = col.orig || col.ref_id;
+                        const refIconHtml = refTypeId ? (() => {
+                            const dbName = window.db || window.location.pathname.split('/')[1];
+                            return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
+                        })() : '';
                         rows[depth].push(`
                             <th data-column-id="${ col.id }" draggable="true"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' } class="${ groupingClass }">
                                 <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ displayName }</span>
+                                ${ refIconHtml }
                                 ${ addButtonHtml }
                                 <div class="column-resize-handle" data-column-id="${ col.id }"></div>
                             </th>
@@ -2534,9 +2546,16 @@ class IntegramTable{
                 const groupingOrder = isGroupingCol ? this.groupingColumns.indexOf(col.id) + 1 : '';
                 const groupingBadge = isGroupingCol ? `<span class="grouping-header-badge">${ groupingOrder }</span>` : '';
 
+                const refTypeId = col.orig || col.ref_id;
+                const refIconHtml = refTypeId ? (() => {
+                    const dbName = window.db || window.location.pathname.split('/')[1];
+                    return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
+                })() : '';
+
                 return `
                     <th data-column-id="${ col.id }" draggable="true"${ widthStyle } class="${ groupingClass }">
                         <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ col.name }</span>
+                        ${ refIconHtml }
                         ${ addButtonHtml }
                         <div class="column-resize-handle" data-column-id="${ col.id }"></div>
                     </th>

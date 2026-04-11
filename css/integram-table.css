@@ -367,6 +367,34 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     transform: translateY(-50%) scale(0.95);
 }
 
+/* Reference icon link for list/lookup columns (issue #1668) */
+.column-ref-link {
+    position: absolute;
+    left: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--md-on-surface-variant, #666);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    font-size: 0.75rem;
+    text-decoration: none;
+    opacity: 0.7;
+    transition: var(--md-transition);
+    z-index: 1;
+}
+
+.integram-table th:hover .column-ref-link {
+    display: flex;
+}
+
+.column-ref-link:hover {
+    opacity: 1;
+    color: var(--md-primary, #1976d2);
+}
+
 /* Quick add column header cell (issue #1230) */
 .add-column-header-cell {
     width: 36px;
