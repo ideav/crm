@@ -3650,6 +3650,84 @@ tr.row-selected {
     padding: 3px;
 }
 
+/* Preview button in paste data dialog (issue #1684) */
+.btn-preview {
+    background-color: #f97316;
+    border: 1px solid #f97316;
+    border-radius: 4px;
+    color: #fff;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 4px 12px;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.btn-preview:hover {
+    background-color: #ea6d0e;
+    border-color: #ea6d0e;
+}
+
+.btn-preview:active {
+    background-color: #c75d0b;
+    border-color: #c75d0b;
+    transform: scale(0.98);
+}
+
+/* Preview modal wider to show table (issue #1684) */
+.paste-data-preview-modal {
+    min-width: 700px;
+    max-width: 95vw;
+}
+
+.paste-data-preview-body {
+    overflow: auto;
+    max-height: 60vh;
+}
+
+/* Paste data preview table (issue #1684) */
+.paste-data-preview-table-wrap {
+    overflow-x: auto;
+}
+
+.paste-data-preview-table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.85rem;
+}
+
+.paste-data-preview-table thead th {
+    background-color: var(--md-surface-variant, #f3f4f6);
+    border: 1px solid var(--md-outline, #d1d5db);
+    font-weight: 600;
+    padding: 5px 8px;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.paste-data-preview-table tbody td {
+    border: 1px solid var(--md-outline, #d1d5db);
+    padding: 2px 4px;
+}
+
+.paste-preview-cell {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    box-sizing: border-box;
+    font-family: inherit;
+    font-size: 0.85rem;
+    min-width: 80px;
+    outline: none;
+    padding: 2px 4px;
+    width: 100%;
+}
+
+.paste-preview-cell:focus {
+    background: var(--md-surface, #fff);
+    border-color: var(--md-primary, #1976d2);
+}
+
 /* New row editing state */
 .new-row-editing {
     background-color: rgba(25, 118, 210, 0.04);
