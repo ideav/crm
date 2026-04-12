@@ -415,19 +415,19 @@ function dashGetModel(json) {
     to = json[i].periodTo;
 
     dashAjaxes++;
-    newApi('GET', 'report/6431?JSON_KV&Fr=' + dashDateYMD(fr) + '&To=' + dashDateYMD(to), 'dashGetSrc');
+    newApi('GET', 'report/Дэшборд.ЗначенияЗаПериод?JSON_KV&Fr=' + dashDateYMD(fr) + '&To=' + dashDateYMD(to), 'dashGetSrc');
 
     if (dashPeriods['Год']) {
         dashAjaxes++;
-        newApi('GET', 'object/794?JSON_DATA&LIMIT=10000&FR_5597=>=' + fr + '&FR_5598=<=' + to, 'dashGetPeriods', '', 'Год');
+        newApi('GET', 'object/Год?JSON_DATA&LIMIT=10000&FR_С=>=' + fr + '&FR_По=<=' + to, 'dashGetPeriods', '', 'Год');
     }
     if (dashPeriods['Квартал']) {
         dashAjaxes++;
-        newApi('GET', 'object/449?JSON_DATA&LIMIT=10000&FR_5769=>=' + fr + '&FR_5770=<=' + to, 'dashGetPeriods', '', 'Квартал');
+        newApi('GET', 'object/Квартал?JSON_DATA&LIMIT=10000&FR_С=>=' + fr + '&FR_По=<=' + to, 'dashGetPeriods', '', 'Квартал');
     }
     if (dashPeriods['Месяц']) {
         dashAjaxes++;
-        newApi('GET', 'object/526?JSON_DATA&LIMIT=10000&FR_5599=>=' + fr + '&FR_5197=<=' + to, 'dashGetPeriods', '', 'Месяц');
+        newApi('GET', 'object/Месяц?JSON_DATA&LIMIT=10000&FR_С=>=' + fr + '&FR_По=<=' + to, 'dashGetPeriods', '', 'Месяц');
     }
 
     var model = document.getElementById('dash-model');
@@ -496,7 +496,7 @@ window.dashLoad = function() {
     }
     dashReset();
     dashSetStatus('Загрузка модели...');
-    newApi('GET', 'report/4905?JSON_KV&FR_modelID=' + modelId, 'dashGetModel');
+    newApi('GET', 'report/Дэшборд?JSON_KV&FR_modelID=' + modelId, 'dashGetModel');
 };
 
 window.dashSetActive = function(el) {
