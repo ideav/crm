@@ -500,7 +500,7 @@ window.dashCopy2Buffer = function(text) {
     document.body.removeChild(temp);
 };
 
-// Auto-load dashboard ID from URL path: dash/{ id }
+// Auto-load dashboard ID from URL path: dash/id
 (function() {
     var pathParts = window.location.pathname.split('/').filter(function(p) { return p !== ''; });
     var dashIdx = -1;
