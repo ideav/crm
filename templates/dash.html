@@ -269,6 +269,7 @@ function dashDrawPeriods() {
             switch (dashModelData[panelId].rgs[rg].type) {
                 case 'rg':
                     for (i in p) {
+                        if (!p[i] || !p[i].r) continue;
                         fr = dashDateYMD(p[i].r[1]);
                         to = dashDateYMD(p[i].r[2]);
                         panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
@@ -436,7 +437,7 @@ function dashDebug() {
 }
 
 function dashGetPeriods(json, period) {
-    dashPeriodData[period] = json;
+    dashPeriodData[period] = (json && typeof json === 'object') ? json : {};
     dashAjaxes--;
     dashDrawPeriods();
 }
