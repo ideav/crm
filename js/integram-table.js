@@ -277,7 +277,7 @@ class IntegramTable{
 
         /**
          * Load parent info when F_U filter is present and > 1 (issue #571, #1708)
-         * Fetches parent record data from get_parent/{parentId}
+         * Fetches parent record data from get_record/{parentId}
          * Used to display breadcrumb-like title: "{parent table name} {record value}: {current table name}"
          */
         async loadParentInfo() {
@@ -289,7 +289,7 @@ class IntegramTable{
                 }
 
                 const apiBase = this.getApiBase();
-                const response = await fetch(`${ apiBase }/get_parent/${ parentId }`);
+                const response = await fetch(`${ apiBase }/get_record/${ parentId }`);
                 if (!response.ok) {
                     console.error('Failed to fetch parent info:', response.status);
                     return;
