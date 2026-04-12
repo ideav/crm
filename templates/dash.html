@@ -445,7 +445,7 @@ function dashGetModel(json) {
         }
         // Add item row
         if (json[i].itemID && !document.getElementById(json[i].itemID)) {
-            document.querySelector('#' + json[i].panelID + ' table tbody').insertAdjacentHTML('beforeend',
+            document.getElementById(json[i].panelID).querySelector('table tbody').insertAdjacentHTML('beforeend',
                 itemTpl.replace(/:id:/g, json[i].itemID)
                     .replace(':pl:', json[i].level - 1)
                     .replace(/:name:/g, json[i].item));
