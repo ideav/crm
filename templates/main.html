@@ -189,6 +189,7 @@
     </script>
     <script src="/js/app.js"></script>
     <script src="/js/main-app.js"></script>
+    <script src="/js/main.js"></script>
     <script>
     function changePwd(){
         var oldPwd=document.getElementById('old-pwd').value,
@@ -272,31 +273,6 @@
         function cookieAccept() {
             localStorage.setItem('cookie_consent', '1');
             document.getElementById('cookie-consent').style.display = 'none';
-        }
-        // Функция для отправки асинхронного запроса по https api с обработкой его результата
-        function newApi(m,u,b,vars,index){ // Параметры: метод, адрес, действие - ветка switch, параметры, ID целевого элемента
-            vars=vars||''; // По умолчанию список параметров пуст
-            var json,obj=new XMLHttpRequest(); // Объявляем переменную под JSON и API по HTTPS
-            obj.open(m,'/'+db+'/'+u,true); // Открываем асинхронное соединение заданным методом по нужному адресу
-            if(m=='POST') // Если это POST запрос, то передаем заданные параметры
-                if(typeof vars=='object')
-                    vars.append('_xsrf',xsrf);
-                else{
-                    obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
-                    vars='_xsrf='+xsrf+'&'+vars; // добавляем токен xsrf, необходимый для POST-запроса
-                }
-            obj.onload=function(e){ // Когда запрос вернет результат - сработает эта функция
-                try{ // в this.responseText лежит ответ от сервера
-                    json=JSON.parse(this.responseText); // Пытаемся разобрать ответ как JSON
-                }
-                catch(e){ // Если произошла ошибка при разборе JSON
-                    changeMsg('alert-danger', this.responseText); // Выводим ошибку
-                }
-                obj.abort(); // Закрываем соединение
-                if(typeof window[b]==='function') // Вызываем функцию-исполнитель переданного действия (callback)
-                    window[b](json,index);
-            };
-            obj.send(vars); // отправили запрос и теперь будем ждать ответ, а пока - выходим
         }
     </script>
     <script>
