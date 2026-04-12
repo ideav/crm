@@ -434,8 +434,14 @@
         if (hasStatusesEndpoint) totalLoads++; // +1 for statuses fetch
         if (this.config.dataSource.type === 'object') totalLoads++; // +1 for metadata fetch
 
+        console.log('[Kanban] _loadData: type=' + this.config.dataSource.type
+            + ', endpoint=' + this.config.dataSource.endpoint
+            + ', hasStatusesEndpoint=' + hasStatusesEndpoint
+            + ', totalLoads=' + totalLoads);
+
         var checkAllLoaded = function() {
             loadedCount++;
+            console.log('[Kanban] _loadData: loaded ' + loadedCount + '/' + totalLoads);
             if (loadedCount === totalLoads) {
                 // If no statuses endpoint, derive statuses from loaded data
                 if (!hasStatusesEndpoint) {
@@ -459,18 +465,24 @@
         if (this.config.dataSource.type === 'object' && this.config.dataSource.tableId) {
             this._fetchJson('metadata/' + this.config.dataSource.tableId, function(data) {
                 self.metadata = data;
+                console.log('[Kanban] metadata loaded: reqs.length='
+                    + (data && data.reqs ? data.reqs.length : 'N/A'));
                 self._extractFieldIds();
                 checkAllLoaded();
             }, function(error) {
+                console.error('[Kanban] metadata fetch error:', error);
                 self._showError('Ошибка загрузки метаданных: ' + error);
             });
         }
 
         // Load main data
         this._fetchJson(this.config.dataSource.endpoint, function(data) {
+            console.log('[Kanban] data loaded: isArray=' + Array.isArray(data)
+                + ', length=' + (Array.isArray(data) ? data.length : 'N/A'));
             self._processData(data);
             checkAllLoaded();
         }, function(error) {
+            console.error('[Kanban] data fetch error:', error);
             self._showError('Ошибка загрузки данных: ' + error);
         });
     };
@@ -481,6 +493,10 @@
         var statusMapping = this.config.statusMapping;
         var seen = {};
         var statuses = [];
+
+        console.log('[Kanban] _deriveStatusesFromData: data.length=' + this.data.length
+            + ', looking for statusId field="' + mapping.statusId
+            + '", status field="' + mapping.status + '"');
 
         for (var i = 0; i < this.data.length; i++) {
             var card = this.data[i];
@@ -500,6 +516,14 @@
         }
 
         this.statuses = statuses;
+        console.log('[Kanban] _deriveStatusesFromData: derived', statuses.length, 'statuses:',
+            statuses.map(function(s) { return s[statusMapping.name] + '(id=' + s[statusMapping.id] + ')'; }).join(', ') || '(none)');
+        if (statuses.length === 0 && this.data.length > 0) {
+            console.warn('[Kanban] No statuses derived from data. Check that fieldMapping.status ("'
+                + mapping.status + '") and fieldMapping.statusId ("' + mapping.statusId
+                + '") match the actual field names in the data. Available card keys: '
+                + Object.keys(this.data[0]).join(', '));
+        }
     };
 
     KanbanBoard.prototype._fetchJson = function(endpoint, onSuccess, onError) {
@@ -583,15 +607,20 @@
             }
         } else if (this.config.dataSource.type === 'object') {
             // Object format: array of objects with 'i' (id), 'r' (row array)
+            // r[0] is the object's own name/value; requisites start at r[1]
             if (Array.isArray(rawData) && this.metadata && this.metadata.reqs) {
                 var reqs = this.metadata.reqs;
+                console.log('[Kanban] _processData object: rawData.length=' + rawData.length
+                    + ', reqs.length=' + reqs.length
+                    + ', reqs fields=' + reqs.map(function(r) { return r.val; }).join(', '));
                 this.data = rawData.map(function(item) {
                     var obj = { '_cardId': item.i };
                     var row = item.r || [];
 
-                    for (var i = 0; i < reqs.length && i < row.length; i++) {
+                    // r[0] is the object name; requisites map to r[i+1]
+                    for (var i = 0; i < reqs.length && (i + 1) < row.length; i++) {
                         var fieldName = reqs[i].val;
-                        var value = row[i];
+                        var value = row[i + 1];
 
                         // Handle reference values (format: "id:value")
                         if (typeof value === 'string' && value.indexOf(':') !== -1) {
@@ -604,6 +633,15 @@
                     }
                     return obj;
                 });
+                console.log('[Kanban] _processData object: parsed', this.data.length, 'cards');
+                if (this.data.length > 0) {
+                    console.log('[Kanban] _processData sample card keys:', Object.keys(this.data[0]).join(', '));
+                }
+            } else {
+                console.warn('[Kanban] _processData object: skipped -'
+                    + ' isArray=' + Array.isArray(rawData)
+                    + ' hasMetadata=' + !!this.metadata
+                    + ' hasReqs=' + !!(this.metadata && this.metadata.reqs));
             }
         } else if (Array.isArray(rawData)) {
             // JSON_KV format: array of objects
@@ -615,6 +653,20 @@
         var self = this;
         var mapping = this.config.fieldMapping;
         var statusMapping = this.config.statusMapping;
+
+        console.log('[Kanban] _render: data.length=' + this.data.length
+            + ', statuses.length=' + this.statuses.length);
+
+        if (this.statuses.length === 0) {
+            if (this.data.length === 0) {
+                this.container.innerHTML = '<div class="kanban-loading">Нет данных для отображения</div>';
+            } else {
+                console.warn('[Kanban] _render: statuses are empty but data has', this.data.length, 'records');
+                this.container.innerHTML = '<div class="kanban-error">Не удалось определить статусы для колонок канбан. '
+                    + 'Убедитесь, что в данных есть поле &laquo;' + this._escapeHtml(mapping.status) + '&raquo;.</div>';
+            }
+            return;
+        }
 
         // Sort data by Activity field (descending)
         this.data.sort(function(a, b) {
