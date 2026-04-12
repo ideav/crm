@@ -940,10 +940,10 @@
 
 })(window);
 
-// Auto-detect kanban source from URL pattern: kanban/{id}
-// If id is an integer, fetch get_record/{id} to determine data source type:
-//   obj == "22" => report type  => report/{id}?JSON
-//   obj != "22" => object type  => object/{obj}?JSON_OBJ + metadata/{obj}
+// Auto-detect kanban source from URL pattern: kanban/N
+// Fetches get_record/N to determine data source type:
+//   obj == "22" => report type  => report/N?JSON
+//   obj != "22" or error => object/table type  => object/N?JSON_OBJ + metadata/N
 // All URL query parameters are forwarded to both get_record and data requests.
 document.addEventListener('DOMContentLoaded', function() {
     var pathParts = window.location.pathname.split('/').filter(function(p) { return p !== ''; });
@@ -970,6 +970,17 @@ document.addEventListener('DOMContentLoaded', function() {
         return base + sep + params;
     }
 
+    // Initialize kanban as object/table type using recordId as fallback
+    function initAsTable() {
+        new KanbanBoard('kanban-container', {
+            dataSource: {
+                type: 'object',
+                endpoint: buildEndpoint('object/' + recordId + '?JSON_OBJ', urlParams),
+                tableId: recordId
+            }
+        });
+    }
+
     // Fetch get_record to determine source type
     var getRecordUrl = apiBase + '/get_record/' + recordId;
     if (urlParams) getRecordUrl += '?' + urlParams;
@@ -977,46 +988,29 @@ document.addEventListener('DOMContentLoaded', function() {
     var xhr = new XMLHttpRequest();
     xhr.open('GET', getRecordUrl, true);
     xhr.onload = function() {
-        if (xhr.status !== 200) {
-            document.getElementById('kanban-container').innerHTML =
-                '<div class="kanban-error">Ошибка загрузки записи: HTTP ' + xhr.status + '</div>';
-            return;
-        }
         var record;
-        try {
-            record = JSON.parse(xhr.responseText);
-        } catch (e) {
-            document.getElementById('kanban-container').innerHTML =
-                '<div class="kanban-error">Ошибка разбора ответа get_record</div>';
-            return;
+        if (xhr.status === 200) {
+            try {
+                record = JSON.parse(xhr.responseText);
+            } catch (e) {
+                record = null;
+            }
         }
 
-        var config;
-        if (String(record.obj) === '22') {
-            // Report type
-            config = {
+        // If record has obj == "22", use report type; otherwise fall back to table
+        if (record && !record.error && String(record.obj) === '22') {
+            new KanbanBoard('kanban-container', {
                 dataSource: {
                     type: 'report',
                     endpoint: buildEndpoint('report/' + recordId + '?JSON', urlParams)
                 }
-            };
+            });
         } else {
-            // Object/table type
-            var tableId = record.obj;
-            config = {
-                dataSource: {
-                    type: 'object',
-                    endpoint: buildEndpoint('object/' + tableId + '?JSON_OBJ', urlParams),
-                    tableId: tableId
-                }
-            };
+            initAsTable();
         }
-
-        new KanbanBoard('kanban-container', config);
     };
     xhr.onerror = function() {
-        document.getElementById('kanban-container').innerHTML =
-            '<div class="kanban-error">Ошибка сети при загрузке get_record</div>';
+        initAsTable();
     };
     xhr.send();
 });
