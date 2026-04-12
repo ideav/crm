@@ -1,0 +1,530 @@
+<style>
+.dash-head {
+    position: sticky;
+    top: 49px;
+    z-index: 1;
+}
+.dash-sheet-tab {
+    display: ;
+}
+.dash-first-cell {
+    position: relative;
+}
+.dash-item:hover {
+    background-color: var(--bg-secondary, #fafafa);
+}
+.dash-first-cell .show-id {
+    display: none;
+}
+.dash-first-cell:hover .show-id {
+    display: block;
+}
+.show-id:hover {
+    color: #000000;
+}
+.show-id {
+    position: absolute;
+    right: 0.5rem;
+    color: lightgray;
+    cursor: pointer;
+}
+.dash-err {
+    background-color: #ffeeee;
+}
+.dash-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--bg-secondary, #f9f9f9);
+    border-bottom: 1px solid var(--border-color, #dee2e6);
+    flex-wrap: wrap;
+}
+.dash-toolbar label {
+    font-size: 0.85rem;
+    color: var(--text-secondary, #6c757d);
+    margin-bottom: 0;
+}
+.dash-toolbar input[type="number"] {
+    width: 80px;
+    padding: 0.2rem 0.4rem;
+    border: 1px solid var(--input-border, #ced4da);
+    border-radius: 4px;
+    background: var(--input-bg, #fff);
+    color: var(--text-primary, #212529);
+    font-size: 0.85rem;
+}
+.dash-toolbar .btn-load {
+    padding: 0.25rem 0.75rem;
+    background: var(--button-primary, #0d6efd);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+.dash-toolbar .btn-load:hover {
+    background: var(--button-primary-hover, #0b5ed7);
+}
+.dash-status {
+    font-size: 0.8rem;
+    color: var(--text-secondary, #6c757d);
+    margin-left: auto;
+}
+#dash-model .sheet-tabs {
+    padding: 0 0.5rem;
+    border-bottom: 1px solid var(--border-color, #dee2e6);
+}
+#dash-model .f-sheet {
+    padding: 0.5rem;
+}
+.f-panel {
+    margin-bottom: 1rem;
+}
+</style>
+
+<div class="dash-toolbar">
+    <label for="dash-model-id"><t9n>[RU]Модель ID[EN]Model ID</t9n>:</label>
+    <input type="number" id="dash-model-id" min="1" placeholder="ID">
+    <button class="btn-load" onclick="dashLoad()"><i class="pi pi-play"></i> <t9n>[RU]Загрузить[EN]Load</t9n></button>
+    <span class="dash-status" id="dash-status"></span>
+</div>
+
+<div id="dash-model" class="f-model m-2">
+    <ul class="nav nav-tabs sheet-tabs"></ul>
+    <div class="sheets"></div>
+</div>
+
+<script>
+(function() {
+
+const repRegex  = /^\[([A-Za-яЁё][A-Za-яЁё0-9]*)(\.[A-Za-яЁё][A-Za-яЁё0-9]*)\]$/
+    , itemRegex = /^\[([A-Za-яЁё][ A-Za-яЁё0-9\(\)-]*)\]$/
+    , exprRegex = /(СУММА)\(\[(.*?)\]:\[(.*?)\]\)/g
+    , itemIdRegex = /\[\d+\]/g;
+
+const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-sheet-tab" onclick="dashSetActive(this)">:name:</a></li>'
+    , sheetTpl    = '<div id="ds:id:" class="f-sheet" style="display:none"></div>'
+    , panelTpl    = '<div id=":id:" f-period=":period:" class="f-panel pt-3"><h4>:name:</h4><table class="table table-sm table-bordered w-auto"><tr class="dash-head f-head"><th>:head:</table></div>'
+    , headTpl     = '<th range=":from:-:to:">:head:'
+    , itemTpl     = '<tr class="dash-item f-item" id=":id:" item-name=":name:"><td class="dash-first-cell f-first-cell" style="padding-left::pl:.2rem"><div class="show-id"><span onclick="dashCopy2Buffer(:id:)">:id:</span>'
+        + ' <a href="/' + db + '/edit_obj/:id:" target="edit-item">'
+        + '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-top:-4px;">'
+        + '<path d="M17.2857 13.09V17.2857C17.2857 17.7025 17.1201 18.1022 16.8254 18.3969C16.5307 18.6916 16.1311 18.8572 15.7143 18.8572H4.71428C4.29751 18.8572 3.89781 18.6916 3.60311 18.3969C3.30841 18.1022 3.14285 17.7025 3.14285 17.2857V6.28574C3.14285 5.86897 3.30841 5.46927 3.60311 5.17457C3.89781 4.87987 4.29751 4.71431 4.71428 4.71431H8.91M15.7143 3.14288L18.8571 6.28574L11 14.1429H7.85714V11L15.7143 3.14288Z" stroke="lightgray" stroke-linecap="round" stroke-linejoin="round"></path>'
+        + '</svg></a></div>'
+        + ':name:'
+    , cellTpl     = '<td range=":from:-:to:" ready=":ready:" class="f-cell :classes:" align="right" title=":title:">:val:';
+
+let dashModelData = {}, dashPeriodData = {}, dashPeriods = {}, dashValues = {}, dashFormulas = {}, dashItems = {}, dashReports = {}, dashAjaxes = 0;
+
+function dashDateYMD(d) {
+    return d.slice(6) + d.slice(3, 5) + d.slice(0, 2);
+}
+
+function dashSetStatus(msg) {
+    var el = document.getElementById('dash-status');
+    if (el) el.textContent = msg;
+}
+
+function dashGetFloat(v) {
+    return parseFloat(String(v).replace(/ /g, '').replace(/,/g, '.'));
+}
+
+function dashNormalizeVal(item, val) {
+    var v = val || '';
+    if (typeof val === 'object' && val !== null)
+        v = val[0].val;
+    return String(v).replace(/ /g, '').replace(/,/g, '.');
+}
+
+function dashGetVal(item, fr, to) {
+    var i, acc = 0, valids = false;
+    if (!dashValues[item]) return;
+    for (i in dashValues[item]) {
+        if (!fr || (dashValues[item][i].date >= fr && dashValues[item][i].date <= to)) {
+            valids = true;
+            acc += dashGetFloat(dashValues[item][i].val);
+        }
+    }
+    if (valids) return dashNormalizeVal(item, acc);
+}
+
+function dashGetColVal(item, col) {
+    var i, acc = 0, valids = false;
+    if (!dashValues[item]) return;
+    for (i in dashValues[item]) {
+        if (dashValues[item][i].col === col) {
+            valids = true;
+            acc += dashGetFloat(dashValues[item][i].val);
+        }
+    }
+    if (valids) return dashNormalizeVal(item, acc);
+}
+
+function dashCalcLineTotals() {
+    document.querySelectorAll('#dash-model .f-line-sum').forEach(function(el) {
+        var valids = false, v = 0;
+        el.title = t9n('[RU]Сумма значений строки[EN]Totals of the line');
+        el.closest('tr').querySelectorAll('.f-rg-cell').forEach(function(cell) {
+            var n = parseFloat(cell.innerHTML);
+            if (!isNaN(n)) { valids = true; v += n; }
+        });
+        if (valids) el.innerHTML = v;
+    });
+}
+
+function dashReplaceItems(match, key) {
+    if (dashItems[key]) return '[' + dashItems[key].name + ']';
+    return '(Not found ' + key + ')';
+}
+
+function dashEvalFormula(el, f) {
+    var val;
+    try {
+        val = parseFloat(eval(f)); // eslint-disable-line no-eval
+        if (isNaN(val)) return false;
+    } catch (e) {
+        val = 'N/A';
+        console.log(e + ': ' + f);
+    }
+    el.innerHTML = val;
+    el.setAttribute('ready', '1');
+    return true;
+}
+
+function dashCalcCells() {
+    var val, progress = true, todo = true, j = 0;
+    while (progress && todo && j++ < 100) {
+        progress = false;
+        todo = false;
+        document.querySelectorAll('#dash-model td[ready="0"]').forEach(function(el) {
+            todo = true;
+            var i, refs, itemEl = el.closest('tr'), itemId = itemEl ? itemEl.id : null
+                , f = itemId ? dashFormulas[itemId] : null;
+            if (!f) return;
+            el.title = f;
+            refs = f.match(itemIdRegex);
+            if (refs) {
+                refs = [...new Set(refs.map(function(s) { return s.replace(/[\[\]]/g, ''); }))];
+                for (i in refs) {
+                    document.querySelectorAll('#' + refs[i] + ' .f-rg-cell[range="' + el.getAttribute('range') + '"],' +
+                        '#' + refs[i] + ' .f-col-cell[range="' + el.getAttribute('range') + '"]').forEach(function(rc) {
+                        if (rc.getAttribute('ready') === '1')
+                            f = f.replace(new RegExp('\\[' + refs[i] + '\\]'), rc.innerHTML || 0);
+                    });
+                    document.querySelectorAll('#' + refs[i] + ' .f-values').forEach(function(fv) {
+                        if (fv.getAttribute('ready') === '1')
+                            f = f.replace(new RegExp('\\[' + refs[i] + '\\]'), fv.innerHTML || 0);
+                    });
+                }
+                refs = f.match(itemIdRegex);
+                if (!refs) progress = dashEvalFormula(el, f);
+                el.title = el.title.replace(/\[(\d+)\]/g, dashReplaceItems) + '=' + f;
+            } else {
+                progress = dashEvalFormula(el, f);
+            }
+        });
+        dashCalcLineTotals();
+    }
+    document.querySelectorAll('#dash-model td[ready="0"]').forEach(function(el) {
+        el.classList.add('dash-err');
+    });
+}
+
+function dashGetRepVals() {
+    var rep, i, j, repField, date;
+    for (rep in dashReports) {
+        for (i in dashReports[rep][0]) { date = i; break; }
+        for (i in dashFormulas) {
+            if (dashFormulas[i].indexOf('[' + rep + '.') === 0) {
+                repField = dashFormulas[i].match(repRegex)[2].substr(1);
+                document.querySelectorAll('#' + i + ' .f-rg-cell').forEach(function(el) {
+                    var val = 0, range = el.getAttribute('range').split('-');
+                    for (j in dashReports[rep])
+                        if (dashReports[rep][j][date] >= range[0] && dashReports[rep][j][date] <= range[1])
+                            val += dashGetFloat(dashReports[rep][j][repField]);
+                    el.innerHTML = dashNormalizeVal(i, val);
+                    el.setAttribute('ready', '1');
+                });
+            }
+        }
+    }
+}
+
+function dashDrawPeriods() {
+    var i, rg, j;
+    if (dashAjaxes > 0) return;
+    dashSetStatus(t9n('[RU]Отрисовка данных...[EN]Rendering data...'));
+    document.querySelectorAll('#dash-model .f-panel').forEach(function(panel) {
+        var panelId = panel.id;
+        var p = dashPeriodData[panel.getAttribute('f-period')];
+        for (rg in dashModelData[panelId].rgs) {
+            var v, rep, fr, to, col;
+            switch (dashModelData[panelId].rgs[rg].type) {
+                case 'rg':
+                    for (i in p) {
+                        fr = dashDateYMD(p[i].r[1]);
+                        to = dashDateYMD(p[i].r[2]);
+                        panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
+                            headTpl.replace(':head:', p[i].r[0]).replace(':from:', fr).replace(':to:', to));
+                        panel.querySelectorAll('.f-item').forEach(function(row) {
+                            if (dashFormulas[row.id]) {
+                                if (dashFormulas[row.id] === '[]')
+                                    v = dashGetVal(row.getAttribute('item-name'), fr, to);
+                                else if (itemRegex.test(dashFormulas[row.id]))
+                                    v = dashGetVal(dashFormulas[row.id].match(itemRegex)[1], fr, to) || '0';
+                            }
+                            row.insertAdjacentHTML('beforeend',
+                                cellTpl.replace(':val:', v || '')
+                                    .replace(':ready:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? '1' : '0')
+                                    .replace(':title:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? v || '' : '')
+                                    .replace(':classes:', 'f-rg-cell')
+                                    .replace(':from:', fr)
+                                    .replace(':to:', to));
+                        });
+                    }
+                    break;
+                case 'value':
+                    panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
+                        headTpl.replace(':head:', dashModelData[panelId].rgs[rg].head || t9n('[RU]Значение[EN]Value'))
+                               .replace(':from:-:to:', '-'));
+                    panel.querySelectorAll('.f-item').forEach(function(row) {
+                        var altName;
+                        if (dashFormulas[row.id] && (altName = dashFormulas[row.id].match(itemRegex)))
+                            v = dashNormalizeVal(row.id, dashValues[row.id] || dashGetVal(altName[1]));
+                        else
+                            v = dashNormalizeVal(row.id, dashValues[row.id] || dashGetVal(dashItems[row.id] ? dashItems[row.id].name : ''));
+                        row.insertAdjacentHTML('beforeend',
+                            cellTpl.replace(':val:', v || '')
+                                .replace(':classes:', 'f-values')
+                                .replace(':from:', '-').replace(':to:', '-')
+                                .replace(':ready:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? '1' : '0')
+                                .replace(':title:', dashFormulas[row.id] || ''));
+                    });
+                    break;
+                case 'mu':
+                    panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
+                        headTpl.replace(':head:', dashModelData[panelId].rgs[rg].head || t9n('[RU]Ед.изм.[EN]Measure unit'))
+                               .replace(':from:-:to:', '-'));
+                    panel.querySelectorAll('.f-item').forEach(function(row) {
+                        row.insertAdjacentHTML('beforeend',
+                            cellTpl.replace(':val:', dashItems[row.id] ? dashItems[row.id].mu || '' : '')
+                                .replace(':classes:', 'f-mus')
+                                .replace(':from:', '-').replace(':to:', '-')
+                                .replace(':ready:', '1')
+                                .replace(':title:', ''));
+                    });
+                    break;
+                case 'line':
+                    panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
+                        headTpl.replace(':head:', dashModelData[panelId].rgs[rg].head || t9n('[RU]Сумма[EN]Total'))
+                               .replace(':from:-:to:', '-'));
+                    panel.querySelectorAll('.f-item').forEach(function(row) {
+                        row.insertAdjacentHTML('beforeend',
+                            cellTpl.replace(':val:', '')
+                                .replace(':classes:', 'f-line-sum')
+                                .replace(':from:', '-').replace(':to:', '-')
+                                .replace(':title:', t9n('[RU]Сумма[EN]Total'))
+                                .replace(':ready:', '1'));
+                    });
+                    break;
+                default:
+                    rep = dashModelData[panelId].rgs[rg].src;
+                    if (rep)
+                        for (i in dashPeriodData[rep])
+                            for (j in dashPeriodData[rep][i]) {
+                                if (col = dashPeriodData[rep][i][j]) {
+                                    panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
+                                        headTpl.replace(':head:', col).replace(':from:-:to:', i));
+                                    panel.querySelectorAll('.f-item').forEach(function(row) {
+                                        var ready = 0;
+                                        v = dashGetColVal(dashItems[row.id] ? dashItems[row.id].name : '', col);
+                                        if (v || dashFormulas[row.id] === '[]') ready = 1;
+                                        row.insertAdjacentHTML('beforeend',
+                                            cellTpl.replace(':val:', dashNormalizeVal(row.id, v || ''))
+                                                .replace(':ready:', ready)
+                                                .replace(':title:', '')
+                                                .replace(':classes:', 'f-col-cell')
+                                                .replace(':from:-:to:', i));
+                                    });
+                                }
+                                break;
+                            }
+                    break;
+            }
+        }
+    });
+    dashGetRepVals();
+    dashCalcCells();
+    dashSetStatus(t9n('[RU]Готово[EN]Done'));
+}
+
+function dashGetPeriods(json, period) {
+    dashPeriodData[period] = json;
+    dashAjaxes--;
+    dashDrawPeriods();
+}
+
+function dashGetRepDone(json, rep) {
+    if (!json) return;
+    dashReports[rep] = json;
+    dashAjaxes--;
+    dashDrawPeriods();
+}
+
+function dashGetRep(rep, fr, to) {
+    dashReports[rep] = {};
+    dashAjaxes++;
+    newApi('GET', 'report/' + rep + '?JSON_KV&FR_Date=' + fr + '&TO_Date=' + to, 'dashGetRepDone', '', rep);
+}
+
+function dashGetSrc(json) {
+    for (var i in json) {
+        if (json[i].value.length > 0) {
+            try {
+                dashValues[json[i].item] = JSON.parse('[' + json[i].value + ']');
+            } catch (e) {
+                dashValues[json[i].item] = 'error ' + e + ' in ' + json[i].value;
+            }
+        }
+    }
+    dashAjaxes--;
+    dashDrawPeriods();
+}
+
+function dashGetModel(json) {
+    if (!json || !json.length) {
+        dashSetStatus(t9n('[RU]Модель не найдена[EN]Model not found'));
+        return;
+    }
+    var i, j, rep, fr, to;
+    dashSetStatus(t9n('[RU]Загрузка данных...[EN]Loading data...'));
+
+    for (i in json) {
+        dashPeriods[json[i].period] = 1;
+        dashItems[json[i].itemID] = { name: json[i].item, format: json[i].format, mu: json[i].MU };
+        if (json[i].RGsourceID && !dashPeriods[json[i].RGsourceID]) {
+            dashPeriods[json[i].RGsourceID] = 1;
+            dashAjaxes++;
+            newApi('GET', 'report/' + json[i].RGsourceID + '?JSON_KV&FR_Date=' + json[i].periodFrom + '&TO_Date=' + json[i].periodTo,
+                'dashGetPeriods', '', json[i].RGsourceID);
+        }
+    }
+
+    fr = json[i].periodFrom;
+    to = json[i].periodTo;
+
+    dashAjaxes++;
+    newApi('GET', 'report/6431?JSON_KV&Fr=' + dashDateYMD(fr) + '&To=' + dashDateYMD(to), 'dashGetSrc');
+
+    if (dashPeriods['Год']) {
+        dashAjaxes++;
+        newApi('GET', 'object/794?JSON_DATA&LIMIT=10000&FR_5597=>=' + fr + '&FR_5598=<=' + to, 'dashGetPeriods', '', 'Год');
+    }
+    if (dashPeriods['Квартал']) {
+        dashAjaxes++;
+        newApi('GET', 'object/449?JSON_DATA&LIMIT=10000&FR_5769=>=' + fr + '&FR_5770=<=' + to, 'dashGetPeriods', '', 'Квартал');
+    }
+    if (dashPeriods['Месяц']) {
+        dashAjaxes++;
+        newApi('GET', 'object/526?JSON_DATA&LIMIT=10000&FR_5599=>=' + fr + '&FR_5197=<=' + to, 'dashGetPeriods', '', 'Месяц');
+    }
+
+    var model = document.getElementById('dash-model');
+
+    for (i in json) {
+        // Add sheet tab
+        if (!document.getElementById(json[i].sheetID)) {
+            model.querySelector('.sheet-tabs').insertAdjacentHTML('beforeend',
+                sheetTabTpl.replace(/:id:/g, json[i].sheetID).replace(':name:', json[i].sheet));
+            model.querySelector('.sheets').insertAdjacentHTML('beforeend',
+                sheetTpl.replace(/:id:/, json[i].sheetID));
+        }
+        // Add panel to sheet
+        if (!document.getElementById(json[i].panelID)) {
+            document.getElementById('ds' + json[i].sheetID).insertAdjacentHTML('beforeend',
+                panelTpl.replace(/:id:/g, json[i].panelID)
+                    .replace(':head:', json[i].itemsHead || json[i].panel)
+                    .replace(':period:', json[i].period)
+                    .replace(':name:', json[i].panel));
+            dashModelData[json[i].panelID] = { items: {}, rgs: {} };
+        }
+        // Add item row
+        if (json[i].itemID && !document.getElementById(json[i].itemID)) {
+            document.querySelector('#' + json[i].panelID + ' table tbody').insertAdjacentHTML('beforeend',
+                itemTpl.replace(/:id:/g, json[i].itemID)
+                    .replace(':pl:', json[i].level - 1)
+                    .replace(/:name:/g, json[i].item));
+        }
+        // Remember RG metadata
+        if (!dashModelData[json[i].panelID].rgs[json[i].RG])
+            dashModelData[json[i].panelID].rgs[json[i].RG] = { type: json[i].RGtype, head: json[i].rgHead, src: json[i].RGsourceID };
+        // Predefined values
+        if (json[i].value.length > 0)
+            dashValues[json[i].itemID] = dashNormalizeVal(json[i].itemID, json[i].value);
+        // Formulas
+        if (json[i].formulas.length > 0) {
+            dashFormulas[json[i].itemID] = json[i].formulas;
+            if (rep = json[i].formulas.match(repRegex))
+                if (!dashReports[rep[1]])
+                    dashGetRep(rep[1], fr, to);
+        }
+    }
+
+    // Activate first tab
+    var firstTab = model.querySelector('.dash-sheet-tab');
+    if (firstTab && !model.querySelector('.dash-sheet-tab.active')) {
+        firstTab.classList.add('active');
+        var firstSheet = model.querySelector('.f-sheet');
+        if (firstSheet) firstSheet.style.display = '';
+    }
+}
+
+function dashReset() {
+    dashModelData = {}; dashPeriodData = {}; dashPeriods = {}; dashValues = {};
+    dashFormulas = {}; dashItems = {}; dashReports = {}; dashAjaxes = 0;
+    var model = document.getElementById('dash-model');
+    model.querySelector('.sheet-tabs').innerHTML = '';
+    model.querySelector('.sheets').innerHTML = '';
+}
+
+window.dashLoad = function() {
+    var modelId = parseInt(document.getElementById('dash-model-id').value, 10);
+    if (!modelId || modelId <= 0) {
+        dashSetStatus(t9n('[RU]Введите корректный ID модели[EN]Enter a valid model ID'));
+        return;
+    }
+    dashReset();
+    dashSetStatus(t9n('[RU]Загрузка модели...[EN]Loading model...'));
+    newApi('GET', 'report/4905?JSON_KV&FR_modelID=' + modelId, 'dashGetModel');
+};
+
+window.dashSetActive = function(el) {
+    document.querySelectorAll('#dash-model .f-sheet').forEach(function(s) { s.style.display = 'none'; });
+    document.querySelectorAll('#dash-model .dash-sheet-tab').forEach(function(t) { t.classList.remove('active'); });
+    el.classList.add('active');
+    var sheet = document.getElementById('ds' + el.id);
+    if (sheet) sheet.style.display = '';
+};
+
+window.dashCopy2Buffer = function(text) {
+    var temp = document.createElement('textarea');
+    document.body.appendChild(temp);
+    temp.value = text;
+    temp.select();
+    document.execCommand('copy');
+    document.body.removeChild(temp);
+};
+
+// Auto-load if URL parameter ?id=N is present
+(function() {
+    var params = new URLSearchParams(window.location.search);
+    var autoId = params.get('id');
+    if (autoId && parseInt(autoId, 10) > 0) {
+        document.getElementById('dash-model-id').value = autoId;
+        dashLoad();
+    }
+})();
+
+})();
+</script>
