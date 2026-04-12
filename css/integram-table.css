@@ -1260,6 +1260,12 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border-bottom: 1px solid var(--border-color, #f0f0f0);
 }
 
+.table-settings-item:has(input[type="checkbox"]) {
+    border-bottom: none;
+    padding-top: 8px;
+    padding-bottom: 8px;
+}
+
 .table-settings-item > label:first-child {
     font-weight: 600;
     margin-bottom: 5px;
