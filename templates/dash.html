@@ -363,6 +363,76 @@ function dashDrawPeriods() {
     dashGetRepVals();
     dashCalcCells();
     dashSetStatus('Готово');
+    dashDebug();
+}
+
+function dashDebug() {
+    var out = [];
+    out.push('=== DASH DEBUG INFO ===');
+    out.push('Timestamp: ' + new Date().toISOString());
+
+    // Viewport and scroll info
+    var navbar = document.querySelector('.navbar') || document.querySelector('nav') || document.querySelector('header');
+    out.push('\n-- Layout info --');
+    out.push('window.innerHeight: ' + window.innerHeight);
+    out.push('document.scrollingElement.scrollTop: ' + (document.scrollingElement ? document.scrollingElement.scrollTop : 'n/a'));
+    if (navbar) {
+        var nr = navbar.getBoundingClientRect();
+        out.push('navbar rect: top=' + nr.top + ' bottom=' + nr.bottom + ' height=' + nr.height);
+    } else {
+        out.push('navbar: not found');
+    }
+
+    // Panel structure
+    out.push('\n-- Panels --');
+    document.querySelectorAll('#dash-model .f-panel').forEach(function(panel) {
+        out.push('\nPanel id=' + panel.id + ' period=' + panel.getAttribute('f-period'));
+        var table = panel.querySelector('table');
+        if (!table) { out.push('  table: NOT FOUND'); return; }
+        var tr = table.getBoundingClientRect();
+        out.push('  table rect: top=' + Math.round(tr.top) + ' height=' + Math.round(tr.height));
+        var thead = table.querySelector('thead');
+        var tbody = table.querySelector('tbody');
+        out.push('  thead present: ' + !!thead);
+        out.push('  tbody present: ' + !!tbody);
+        if (thead) {
+            var theadRows = thead.querySelectorAll('tr');
+            out.push('  thead rows: ' + theadRows.length);
+            theadRows.forEach(function(tr, idx) {
+                var thr = tr.getBoundingClientRect();
+                var cs = window.getComputedStyle(tr);
+                out.push('  thead tr[' + idx + ']: cols=' + tr.querySelectorAll('th,td').length
+                    + ' top=' + Math.round(thr.top) + ' height=' + Math.round(thr.height)
+                    + ' position=' + cs.position + ' top-style=' + cs.top);
+            });
+        }
+        if (tbody) {
+            var tbodyRows = tbody.querySelectorAll('tr');
+            out.push('  tbody rows: ' + tbodyRows.length);
+            if (tbodyRows.length > 0) {
+                var fbr = tbodyRows[0].getBoundingClientRect();
+                out.push('  tbody first tr: top=' + Math.round(fbr.top) + ' height=' + Math.round(fbr.height));
+            }
+        }
+        // Check for stray rows outside thead/tbody
+        var strayRows = [];
+        table.querySelectorAll(':scope > tr').forEach(function(r) { strayRows.push(r); });
+        out.push('  stray rows (direct children of table): ' + strayRows.length);
+    });
+
+    // Raw HTML of first panel for inspection
+    var firstPanel = document.querySelector('#dash-model .f-panel');
+    if (firstPanel) {
+        out.push('\n-- First panel outerHTML --');
+        out.push(firstPanel.outerHTML.slice(0, 2000));
+    }
+
+    var msg = out.join('\n');
+    console.log(msg);
+
+    // Also show brief status
+    var panelCount = document.querySelectorAll('#dash-model .f-panel').length;
+    dashSetStatus('Готово | ' + panelCount + ' панелей (отладка в консоли)');
 }
 
 function dashGetPeriods(json, period) {
@@ -515,6 +585,7 @@ window.dashGetModel   = dashGetModel;
 window.dashGetSrc     = dashGetSrc;
 window.dashGetPeriods = dashGetPeriods;
 window.dashGetRepDone = dashGetRepDone;
+window.dashDebug      = dashDebug;
 
 window.dashLoad = function(dashId) {
     dashReset();
