@@ -84,9 +84,9 @@
 </style>
 
 <div class="dash-toolbar">
-    <label for="dash-model-id"><t9n>[RU]Модель ID[EN]Model ID</t9n>:</label>
+    <label for="dash-model-id">Модель ID:</label>
     <input type="number" id="dash-model-id" min="1" placeholder="ID">
-    <button class="btn-load" onclick="dashLoad()"><i class="pi pi-play"></i> <t9n>[RU]Загрузить[EN]Load</t9n></button>
+    <button class="btn-load" onclick="dashLoad()"><i class="pi pi-play"></i> Загрузить</button>
     <span class="dash-status" id="dash-status"></span>
 </div>
 
@@ -164,7 +164,7 @@ function dashGetColVal(item, col) {
 function dashCalcLineTotals() {
     document.querySelectorAll('#dash-model .f-line-sum').forEach(function(el) {
         var valids = false, v = 0;
-        el.title = t9n('[RU]Сумма значений строки[EN]Totals of the line');
+        el.title = 'Сумма значений строки';
         el.closest('tr').querySelectorAll('.f-rg-cell').forEach(function(cell) {
             var n = parseFloat(cell.innerHTML);
             if (!isNaN(n)) { valids = true; v += n; }
@@ -254,7 +254,7 @@ function dashGetRepVals() {
 function dashDrawPeriods() {
     var i, rg, j;
     if (dashAjaxes > 0) return;
-    dashSetStatus(t9n('[RU]Отрисовка данных...[EN]Rendering data...'));
+    dashSetStatus('Отрисовка данных...');
     document.querySelectorAll('#dash-model .f-panel').forEach(function(panel) {
         var panelId = panel.id;
         var p = dashPeriodData[panel.getAttribute('f-period')];
@@ -286,7 +286,7 @@ function dashDrawPeriods() {
                     break;
                 case 'value':
                     panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
-                        headTpl.replace(':head:', dashModelData[panelId].rgs[rg].head || t9n('[RU]Значение[EN]Value'))
+                        headTpl.replace(':head:', dashModelData[panelId].rgs[rg].head || 'Значение')
                                .replace(':from:-:to:', '-'));
                     panel.querySelectorAll('.f-item').forEach(function(row) {
                         var altName;
@@ -304,7 +304,7 @@ function dashDrawPeriods() {
                     break;
                 case 'mu':
                     panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
-                        headTpl.replace(':head:', dashModelData[panelId].rgs[rg].head || t9n('[RU]Ед.изм.[EN]Measure unit'))
+                        headTpl.replace(':head:', dashModelData[panelId].rgs[rg].head || 'Ед.изм.')
                                .replace(':from:-:to:', '-'));
                     panel.querySelectorAll('.f-item').forEach(function(row) {
                         row.insertAdjacentHTML('beforeend',
@@ -317,14 +317,14 @@ function dashDrawPeriods() {
                     break;
                 case 'line':
                     panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
-                        headTpl.replace(':head:', dashModelData[panelId].rgs[rg].head || t9n('[RU]Сумма[EN]Total'))
+                        headTpl.replace(':head:', dashModelData[panelId].rgs[rg].head || 'Сумма')
                                .replace(':from:-:to:', '-'));
                     panel.querySelectorAll('.f-item').forEach(function(row) {
                         row.insertAdjacentHTML('beforeend',
                             cellTpl.replace(':val:', '')
                                 .replace(':classes:', 'f-line-sum')
                                 .replace(':from:', '-').replace(':to:', '-')
-                                .replace(':title:', t9n('[RU]Сумма[EN]Total'))
+                                .replace(':title:', 'Сумма')
                                 .replace(':ready:', '1'));
                     });
                     break;
@@ -356,7 +356,7 @@ function dashDrawPeriods() {
     });
     dashGetRepVals();
     dashCalcCells();
-    dashSetStatus(t9n('[RU]Готово[EN]Done'));
+    dashSetStatus('Готово');
 }
 
 function dashGetPeriods(json, period) {
@@ -394,11 +394,11 @@ function dashGetSrc(json) {
 
 function dashGetModel(json) {
     if (!json || !json.length) {
-        dashSetStatus(t9n('[RU]Модель не найдена[EN]Model not found'));
+        dashSetStatus('Модель не найдена');
         return;
     }
     var i, j, rep, fr, to;
-    dashSetStatus(t9n('[RU]Загрузка данных...[EN]Loading data...'));
+    dashSetStatus('Загрузка данных...');
 
     for (i in json) {
         dashPeriods[json[i].period] = 1;
@@ -491,11 +491,11 @@ function dashReset() {
 window.dashLoad = function() {
     var modelId = parseInt(document.getElementById('dash-model-id').value, 10);
     if (!modelId || modelId <= 0) {
-        dashSetStatus(t9n('[RU]Введите корректный ID модели[EN]Enter a valid model ID'));
+        dashSetStatus('Введите корректный ID модели');
         return;
     }
     dashReset();
-    dashSetStatus(t9n('[RU]Загрузка модели...[EN]Loading model...'));
+    dashSetStatus('Загрузка модели...');
     newApi('GET', 'report/4905?JSON_KV&FR_modelID=' + modelId, 'dashGetModel');
 };
 
