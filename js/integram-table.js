@@ -350,11 +350,11 @@ class IntegramTable{
                     parentTypeLink += `?F_U=${ parentUp }`;
                 }
 
-                // Build link for record value: table/{F_U value} (issue #1708)
-                const parentRecordLink = `/${ dbName }/table/${ parentRecordId }`;
+                // Build onclick handler for record value: open edit modal for parent record (issue #1710)
+                const parentRecordOnclick = `window.${ instanceName }.openEditForm('${ parentRecordId }', '${ parentObjId }', 0); event.preventDefault();`;
 
-                // Parent table name links to table/{obj}, record value links to table/{F_U value} (issue #1708)
-                return `<div class="integram-table-title-area">${ this.renderCheckboxToggleHtml() }<div class="integram-table-title"><a class="integram-title-link integram-parent-type-link" href="${ parentTypeLink }">${ parentTypeName }</a> <a class="integram-title-link integram-parent-record-link" href="${ parentRecordLink }">${ parentVal }</a>${ currentTitle ? ': ' + currentTitle : '' }</div>${ createBtnHtml }</div>`;
+                // Parent table name links to table/{obj}, record value opens edit modal for parent record (issue #1710)
+                return `<div class="integram-table-title-area">${ this.renderCheckboxToggleHtml() }<div class="integram-table-title"><a class="integram-title-link integram-parent-type-link" href="${ parentTypeLink }">${ parentTypeName }</a> <a class="integram-title-link integram-parent-record-link" href="#" onclick="${ parentRecordOnclick }">${ parentVal }</a>${ currentTitle ? ': ' + currentTitle : '' }</div>${ createBtnHtml }</div>`;
             }
 
             // No parent info, just show the title
