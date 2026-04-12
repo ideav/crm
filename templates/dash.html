@@ -376,6 +376,10 @@ function dashGetRecord(json) {
         dashSetStatus('Дэшборд не найден');
         return;
     }
+    if (json.type !== 'Дэшборд') {
+        dashSetStatus('Объект не является дэшбордом');
+        return;
+    }
     var titleEl = document.getElementById('dash-title');
     if (titleEl) titleEl.textContent = json.val;
     dashSetStatus('Загрузка модели...');
