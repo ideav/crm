@@ -359,7 +359,7 @@ function dashGetRep(rep, fr, to) {
 
 function dashGetSrc(json) {
     for (var i in json) {
-        if (json[i].value.length > 0) {
+        if (json[i].value && json[i].value.length > 0) {
             try {
                 dashValues[json[i].item] = JSON.parse('[' + json[i].value + ']');
             } catch (e) {
