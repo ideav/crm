@@ -40,31 +40,11 @@
     border-bottom: 1px solid var(--border-color, #dee2e6);
     flex-wrap: wrap;
 }
-.dash-toolbar label {
-    font-size: 0.85rem;
-    color: var(--text-secondary, #6c757d);
-    margin-bottom: 0;
-}
-.dash-toolbar input[type="number"] {
-    width: 80px;
-    padding: 0.2rem 0.4rem;
-    border: 1px solid var(--input-border, #ced4da);
-    border-radius: 4px;
-    background: var(--input-bg, #fff);
+.dash-toolbar h5 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 0;
     color: var(--text-primary, #212529);
-    font-size: 0.85rem;
-}
-.dash-toolbar .btn-load {
-    padding: 0.25rem 0.75rem;
-    background: var(--button-primary, #0d6efd);
-    color: #fff;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.85rem;
-}
-.dash-toolbar .btn-load:hover {
-    background: var(--button-primary-hover, #0b5ed7);
 }
 .dash-status {
     font-size: 0.8rem;
@@ -84,9 +64,7 @@
 </style>
 
 <div class="dash-toolbar">
-    <label for="dash-model-id">Модель ID:</label>
-    <input type="number" id="dash-model-id" min="1" placeholder="ID">
-    <button class="btn-load" onclick="dashLoad()"><i class="pi pi-play"></i> Загрузить</button>
+    <h5 id="dash-title"></h5>
     <span class="dash-status" id="dash-status"></span>
 </div>
 
@@ -392,9 +370,20 @@ function dashGetSrc(json) {
     dashDrawPeriods();
 }
 
+function dashGetRecord(json) {
+    if (!json || json.error || !json.val) {
+        dashSetStatus('Дэшборд не найден');
+        return;
+    }
+    var titleEl = document.getElementById('dash-title');
+    if (titleEl) titleEl.textContent = json.val;
+    dashSetStatus('Загрузка модели...');
+    newApi('GET', 'report/Дэшборд?JSON_KV&FR_modelID=' + json.id, 'dashGetModel');
+}
+
 function dashGetModel(json) {
     if (!json || !json.length) {
-        dashSetStatus('Модель не найдена');
+        dashSetStatus('Дэшборд не найден');
         return;
     }
     var i, j, rep, fr, to;
@@ -488,15 +477,10 @@ function dashReset() {
     model.querySelector('.sheets').innerHTML = '';
 }
 
-window.dashLoad = function() {
-    var modelId = parseInt(document.getElementById('dash-model-id').value, 10);
-    if (!modelId || modelId <= 0) {
-        dashSetStatus('Введите корректный ID модели');
-        return;
-    }
+window.dashLoad = function(dashId) {
     dashReset();
-    dashSetStatus('Загрузка модели...');
-    newApi('GET', 'report/Дэшборд?JSON_KV&FR_modelID=' + modelId, 'dashGetModel');
+    dashSetStatus('Загрузка дэшборда...');
+    newApi('GET', 'get_record/' + dashId, 'dashGetRecord');
 };
 
 window.dashSetActive = function(el) {
@@ -516,14 +500,23 @@ window.dashCopy2Buffer = function(text) {
     document.body.removeChild(temp);
 };
 
-// Auto-load if URL parameter ?id=N is present
+// Auto-load dashboard ID from URL path: dash/{id}
 (function() {
-    var params = new URLSearchParams(window.location.search);
-    var autoId = params.get('id');
-    if (autoId && parseInt(autoId, 10) > 0) {
-        document.getElementById('dash-model-id').value = autoId;
-        dashLoad();
+    var pathParts = window.location.pathname.split('/').filter(function(p) { return p !== ''; });
+    var dashIdx = -1;
+    for (var i = 0; i < pathParts.length; i++) {
+        if (pathParts[i] === 'dash') { dashIdx = i; break; }
     }
+    if (dashIdx === -1 || dashIdx + 1 >= pathParts.length) {
+        dashSetStatus('Дэшборд не указан');
+        return;
+    }
+    var rawId = pathParts[dashIdx + 1];
+    if (!/^\d+$/.test(rawId)) {
+        dashSetStatus('Дэшборд не указан');
+        return;
+    }
+    dashLoad(rawId);
 })();
 
 })();
