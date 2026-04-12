@@ -9,12 +9,6 @@
     border-bottom: 1px solid var(--border-color, #dee2e6);
     flex-wrap: wrap;
 }
-.dash-toolbar h5 {
-    font-size: 0.95rem;
-    font-weight: 600;
-    margin: 0;
-    color: var(--text-primary, #212529);
-}
 .dash-status {
     font-size: 0.8rem;
     color: var(--text-secondary, #6c757d);
@@ -116,7 +110,6 @@
 </style>
 
 <div class="dash-toolbar">
-    <h5 id="dash-title"></h5>
     <span class="dash-status" id="dash-status"></span>
 </div>
 
@@ -432,8 +425,9 @@ function dashGetRecord(json) {
         dashSetStatus('Объект не является дэшбордом');
         return;
     }
-    var titleEl = document.getElementById('dash-title');
-    if (titleEl) titleEl.textContent = json.val;
+    document.title = json.val;
+    var navCenter = document.querySelector('.navbar-center .navbar-workspace');
+    if (navCenter) navCenter.textContent = json.val;
     dashSetStatus('Загрузка модели...');
     newApi('GET', 'report/Дэшборд?JSON_KV&FR_modelID=' + json.id, 'dashGetModel');
 }
