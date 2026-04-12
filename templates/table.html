@@ -1,7 +1,5 @@
 <div class="tasks-container">
     <div id="tasks-table"
-         data-integram-table
-         data-api-url="/{_global_.z}/metadata/{_global_.id}"
          data-page-size="20"
          data-cookie-prefix="tasks-object"
          data-title=""
@@ -10,6 +8,83 @@
 <link rel="stylesheet" href="/css/integram-table.css" />
 <script src="/js/column-name-dict.js"></script>
 <script src="/js/integram-table.js"></script>
+<script>
+// Auto-detect table source from URL pattern: table/{id}
+// Fetch get_record/{id} to determine data source type:
+//   obj == "22" => report type  => report/{id}?JSON
+//   obj != "22" or error => object/table type  => metadata/{id}
+document.addEventListener('DOMContentLoaded', function() {
+    var pathParts = window.location.pathname.split('/').filter(function(p) { return p !== ''; });
+    var tableIdx = -1;
+    for (var i = 0; i < pathParts.length; i++) {
+        if (pathParts[i] === 'table') { tableIdx = i; break; }
+    }
+    var element = document.getElementById('tasks-table');
+    if (!element) return;
+
+    var dbName = window.db || pathParts[0];
+    var apiBase = 'https://' + window.location.hostname + '/' + dbName;
+
+    function initTable(apiUrl, dataSource) {
+        element.dataset.apiUrl = apiUrl;
+        element.dataset.dataSource = dataSource || 'report';
+        element.setAttribute('data-integram-table', '');
+        var instance = new IntegramTable('tasks-table', {
+            apiUrl: apiUrl,
+            pageSize: parseInt(element.dataset.pageSize) || 20,
+            cookiePrefix: element.dataset.cookiePrefix || 'integram-table',
+            title: element.dataset.title || '',
+            instanceName: element.dataset.instanceName || 'tasksTable',
+            dataSource: dataSource || 'report'
+        });
+        window.tasksTable = instance;
+        if (typeof window._integramTableInstances !== 'undefined') {
+            window._integramTableInstances.push(instance);
+        }
+    }
+
+    // If no integer id in URL, use default metadata URL
+    if (tableIdx === -1 || tableIdx + 1 >= pathParts.length) {
+        initTable(apiBase + '/metadata/', 'report');
+        return;
+    }
+    var rawId = pathParts[tableIdx + 1];
+    if (!/^\d+$/.test(rawId)) {
+        initTable(apiBase + '/metadata/' + rawId, 'report');
+        return;
+    }
+
+    // Fetch get_record to determine source type
+    var getRecordUrl = apiBase + '/get_record/' + rawId;
+    var urlSearch = window.location.search;
+    if (urlSearch) getRecordUrl += urlSearch;
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', getRecordUrl, true);
+    xhr.onload = function() {
+        if (xhr.status === 200) {
+            try {
+                var record = JSON.parse(xhr.responseText);
+                if (String(record.obj) === '22') {
+                    // Report type
+                    var sep = urlSearch ? '&' : '?';
+                    initTable(apiBase + '/report/' + rawId + '?JSON' + (urlSearch ? sep + urlSearch.slice(1) : ''), 'report');
+                    return;
+                }
+            } catch (e) {
+                // Fall through to table mode on parse error
+            }
+        }
+        // Object/table type (or error)
+        initTable(apiBase + '/metadata/' + rawId + (urlSearch || ''), 'report');
+    };
+    xhr.onerror = function() {
+        // On network error, fall back to table mode
+        initTable(apiBase + '/metadata/' + rawId + (urlSearch || ''), 'report');
+    };
+    xhr.send();
+});
+</script>
 <script src="/js/hints.js"></script>
 <!-- Workspace hints -->
 <style>
