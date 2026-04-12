@@ -6,7 +6,6 @@ The `templates/info.html` has been refactored according to BASIC_RULES.md to fol
 - Minimal template containing only workspace-specific content
 - Styles extracted to separate CSS file
 - Scripts extracted to separate JS file
-- Proper spacing around template variables
 - Versioned asset loading
 
 ## Asset Files
@@ -44,8 +43,8 @@ This file contains:
 
 3. **The template file** `templates/info.html` references these assets with versioning:
    ```html
-   <link rel="stylesheet" href="/css/info.css?{ _global_.version }" />
-   <script src="/js/info.js?{ _global_.version }"></script>
+   <link rel="stylesheet" href="/css/info.css?{_global_.version}" />
+   <script src="/js/info.js?{_global_.version}"></script>
    ```
 
 ## Changes from Previous Version
@@ -54,14 +53,12 @@ This file contains:
 - Full HTML structure duplicating main.html
 - Inline styles (1000+ lines)
 - Inline scripts (500+ lines)
-- No spaces around template variables
 - No asset versioning
 
 ### After (BASIC_RULES compliant):
 - Minimal template with only workspace content
 - Separated CSS file (modular and cacheable)
 - Separated JS file (modular and cacheable)
-- Proper template variable spacing: `{ _global_.version }`
 - Versioned asset loading for cache busting
 
 ## Template Variables
@@ -73,16 +70,13 @@ All files in the `templates` folder are processed by the Integram template engin
 ```
 
 Examples of valid template variables (context variables):
-- `{ _global_.z }` — current user zone
-- `{ _global_.version }` — asset version for cache busting
-- `{ _global_.xsrf }` — XSRF token
+- `{_global_.z}` — current user zone
+- `{_global_.version}` — asset version for cache busting
+- `{_global_.xsrf}` — XSRF token
 
 These are defined in [Integram globals](https://help.integram.io/#globals).
 
-All template variables now use proper spacing:
-- `{_global_.z}` → `{ _global_.z }`
-- `{_global_.version}` → `{ _global_.version }`
-- `{_global_.xsrf}` → `{ _global_.xsrf }`
+> **Important:** Do not add spaces inside these standard insertion points. `{_global_.z}` is the correct form. Writing `{ _global_.z }` (with spaces) would prevent the template engine from recognizing it as an insertion point, and the variable would not be substituted.
 
 ### Curly Braces in JavaScript (ES6 and Other Languages)
 
@@ -101,8 +95,8 @@ If a curly brace expression is not recognized as a known insertion point, the bl
 ## API Endpoints Used
 
 The info.html workspace uses:
-- `GET /{ db }/report/299?JSON_KV` - Quick links data
-- `GET /{ db }/report/4283?JSON` - Tasks table data
+- `GET /{db}/report/299?JSON_KV` - Quick links data
+- `GET /{db}/report/4283?JSON` - Tasks table data
 
 Both follow BASIC_RULES:
 - Use `JSON_KV` for report/ commands
