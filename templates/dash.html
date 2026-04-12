@@ -462,25 +462,25 @@ function dashGetModel(json) {
             model.querySelector('.sheets').insertAdjacentHTML('beforeend',
                 sheetTpl.replace(/:id:/, json[i].sheetID));
         }
-        // Add panel to sheet
-        if (!document.getElementById(json[i].panelID)) {
+        // Add panel to sheet (prefix 'fp' to avoid ID collision with item rows)
+        if (!document.getElementById('fp' + json[i].panelID)) {
             document.getElementById('ds' + json[i].sheetID).insertAdjacentHTML('beforeend',
-                panelTpl.replace(/:id:/g, json[i].panelID)
+                panelTpl.replace(/:id:/g, 'fp' + json[i].panelID)
                     .replace(':head:', json[i].itemsHead || json[i].panel)
                     .replace(':period:', json[i].period)
                     .replace(':name:', json[i].panel));
-            dashModelData[json[i].panelID] = { items: {}, rgs: {} };
+            dashModelData['fp' + json[i].panelID] = { items: {}, rgs: {} };
         }
         // Add item row
         if (json[i].itemID && !document.getElementById(json[i].itemID)) {
-            document.getElementById(json[i].panelID).querySelector('table tbody').insertAdjacentHTML('beforeend',
+            document.getElementById('fp' + json[i].panelID).querySelector('table tbody').insertAdjacentHTML('beforeend',
                 itemTpl.replace(/:id:/g, json[i].itemID)
                     .replace(':pl:', json[i].level - 1)
                     .replace(/:name:/g, json[i].item));
         }
         // Remember RG metadata
-        if (!dashModelData[json[i].panelID].rgs[json[i].RG])
-            dashModelData[json[i].panelID].rgs[json[i].RG] = { type: json[i].RGtype, head: json[i].rgHead, src: json[i].RGsourceID };
+        if (!dashModelData['fp' + json[i].panelID].rgs[json[i].RG])
+            dashModelData['fp' + json[i].panelID].rgs[json[i].RG] = { type: json[i].RGtype, head: json[i].rgHead, src: json[i].RGsourceID };
         // Predefined values
         if (json[i].value.length > 0)
             dashValues[json[i].itemID] = dashNormalizeVal(json[i].itemID, json[i].value);
