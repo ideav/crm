@@ -1262,8 +1262,8 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .table-settings-item:has(input[type="checkbox"]) {
     border-bottom: none;
-    padding-top: 8px;
-    padding-bottom: 8px;
+    padding-top: 12px;
+    padding-bottom: 0;
 }
 
 .table-settings-item > label:first-child {
