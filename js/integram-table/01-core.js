@@ -90,6 +90,7 @@
                 truncateLongValues: true,  // true = truncate to 127 chars (default)
                 wrapHeaders: false,  // false = nowrap (default), true = wrap column headers
                 hideMenuButtonLabels: false,  // false = show labels below toolbar buttons (default)
+                showReferences: false,  // false = hide references column (default), true = show reverse reference links (issue #1732)
             };
 
             this.filterTypes = {

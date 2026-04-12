@@ -43,37 +43,30 @@
                     </div>
 
                     <div class="table-settings-item">
-                        <label>Сокращать длинные значения:</label>
-                        <div>
-                            <label>
-                                <input type="radio" name="truncate-mode" value="yes" ${ this.settings.truncateLongValues ? 'checked' : '' }>
-                                Да
-                            </label>
-                            <label style="margin-left: 15px;">
-                                <input type="radio" name="truncate-mode" value="no" ${ !this.settings.truncateLongValues ? 'checked' : '' }>
-                                Нет
-                            </label>
-                        </div>
+                        <label>
+                            <input type="checkbox" id="truncate-long-values" ${ this.settings.truncateLongValues ? 'checked' : '' }>
+                            Сокращать длинные значения
+                        </label>
                     </div>
 
                     <div class="table-settings-item">
-                        <label>Переносить заголовки:</label>
-                        <div>
-                            <label>
-                                <input type="radio" name="wrap-headers" value="yes" ${ this.settings.wrapHeaders ? 'checked' : '' }>
-                                Да
-                            </label>
-                            <label style="margin-left: 15px;">
-                                <input type="radio" name="wrap-headers" value="no" ${ !this.settings.wrapHeaders ? 'checked' : '' }>
-                                Нет
-                            </label>
-                        </div>
+                        <label>
+                            <input type="checkbox" id="wrap-headers" ${ this.settings.wrapHeaders ? 'checked' : '' }>
+                            Переносить заголовки
+                        </label>
                     </div>
 
                     <div class="table-settings-item">
                         <label>
                             <input type="checkbox" id="hide-menu-button-labels" ${ this.settings.hideMenuButtonLabels ? 'checked' : '' }>
                             Скрыть подписи к кнопкам меню
+                        </label>
+                    </div>
+
+                    <div class="table-settings-item">
+                        <label title="Показать все таблицы, где эта таблица используется как справочник">
+                            <input type="checkbox" id="show-references" ${ this.settings.showReferences ? 'checked' : '' }>
+                            Показывать связи
                         </label>
                     </div>
                 </div>
@@ -150,28 +143,34 @@
                 }
             });
 
-            // Handle truncate mode change
-            modal.querySelectorAll('input[name="truncate-mode"]').forEach(radio => {
-                radio.addEventListener('change', (e) => {
-                    this.settings.truncateLongValues = e.target.value === 'yes';
-                    this.saveSettings();
-                    this.render();
-                });
+            // Handle truncate long values change
+            const truncateLongValuesCheckbox = modal.querySelector('#truncate-long-values');
+            truncateLongValuesCheckbox.addEventListener('change', (e) => {
+                this.settings.truncateLongValues = e.target.checked;
+                this.saveSettings();
+                this.render();
             });
 
             // Handle wrap headers change
-            modal.querySelectorAll('input[name="wrap-headers"]').forEach(radio => {
-                radio.addEventListener('change', (e) => {
-                    this.settings.wrapHeaders = e.target.value === 'yes';
-                    this.saveSettings();
-                    this.render();
-                });
+            const wrapHeadersCheckbox = modal.querySelector('#wrap-headers');
+            wrapHeadersCheckbox.addEventListener('change', (e) => {
+                this.settings.wrapHeaders = e.target.checked;
+                this.saveSettings();
+                this.render();
             });
 
             // Handle hide menu button labels change
             const hideMenuButtonLabelsCheckbox = modal.querySelector('#hide-menu-button-labels');
             hideMenuButtonLabelsCheckbox.addEventListener('change', (e) => {
                 this.settings.hideMenuButtonLabels = e.target.checked;
+                this.saveSettings();
+                this.render();
+            });
+
+            // Handle show references change
+            const showReferencesCheckbox = modal.querySelector('#show-references');
+            showReferencesCheckbox.addEventListener('change', (e) => {
+                this.settings.showReferences = e.target.checked;
                 this.saveSettings();
                 this.render();
             });
@@ -207,6 +206,7 @@
                 truncateLongValues: true,
                 wrapHeaders: false,
                 hideMenuButtonLabels: false,
+                showReferences: false,
             };
             this.options.pageSize = 20;
 
@@ -223,6 +223,66 @@
             this.totalRows = null;
             this.loadData(false);
             this.render();
+        }
+
+        /**
+         * Get back-references: list of all tables in globalMetadata that reference this table (issue #1732).
+         * Scans all tables in globalMetadata for requisites (reqs) where ref == current table's objectTableId.
+         * Returns array of { tableId, tableName, fieldId, fieldName } objects.
+         */
+        getBackReferences() {
+            const currentTableId = String(this.objectTableId || this.options.tableTypeId || '');
+            if (!currentTableId || !this.globalMetadata || !Array.isArray(this.globalMetadata)) {
+                return [];
+            }
+
+            const refs = [];
+            for (const table of this.globalMetadata) {
+                if (!table.reqs || !Array.isArray(table.reqs)) continue;
+                for (const req of table.reqs) {
+                    if (String(req.ref) === currentTableId) {
+                        refs.push({
+                            tableId: String(table.id),
+                            tableName: table.val || String(table.id),
+                            fieldId: String(req.id),
+                            fieldName: req.alias || req.val || String(req.id),
+                        });
+                    }
+                }
+            }
+            return refs;
+        }
+
+        /**
+         * Render the references cell for a given row (issue #1732).
+         * Shows links for all tables that reference the current table as a lookup.
+         * Link format: {TableName}.{FieldName} → table/{foreignTableId}?FR_{fieldId}=@{currentRowId}
+         */
+        renderReferencesCell(rowIndex) {
+            const backRefs = this.getBackReferences();
+            if (backRefs.length === 0) {
+                return `<td class="references-column-cell"></td>`;
+            }
+
+            let recordId = null;
+            if (this.rawObjectData && this.rawObjectData[rowIndex]) {
+                recordId = this.rawObjectData[rowIndex].i;
+            }
+
+            if (!recordId) {
+                return `<td class="references-column-cell"></td>`;
+            }
+
+            const pathParts = window.location.pathname.split('/');
+            const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+
+            const links = backRefs.map(ref => {
+                const href = `/${dbName}/table/${ref.tableId}?FR_${ref.fieldId}=@${recordId}`;
+                const label = `${ref.tableName}.${ref.fieldName}`;
+                return `<a href="${href}" class="reference-link" title="${label}">${label}</a>`;
+            }).join(', ');
+
+            return `<td class="references-column-cell">${links}</td>`;
         }
 
         showFullValue(event, fullValue) {

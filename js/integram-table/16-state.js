@@ -46,6 +46,7 @@
                 truncateLongValues: this.settings.truncateLongValues,
                 wrapHeaders: this.settings.wrapHeaders,
                 hideMenuButtonLabels: this.settings.hideMenuButtonLabels,
+                showReferences: this.settings.showReferences,
             };
             document.cookie = `${ this.options.cookiePrefix }-settings=${ JSON.stringify(settings) }; path=/; max-age=31536000`;
 
@@ -69,6 +70,7 @@
                     this.settings.truncateLongValues = settings.truncateLongValues !== undefined ? settings.truncateLongValues : true;
                     this.settings.wrapHeaders = settings.wrapHeaders !== undefined ? settings.wrapHeaders : false;
                     this.settings.hideMenuButtonLabels = settings.hideMenuButtonLabels !== undefined ? settings.hideMenuButtonLabels : false;
+                    this.settings.showReferences = settings.showReferences !== undefined ? settings.showReferences : false;
 
                     // Update options.pageSize to match loaded settings
                     this.options.pageSize = this.settings.pageSize;
