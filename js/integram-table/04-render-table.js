@@ -171,6 +171,7 @@
                                     <tr>
                                         ${ this.checkboxMode ? `<th class="checkbox-column-header"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.data.length > 0 && this.selectedRows.size === this.data.length ? 'checked' : '' }></th>` : '' }
                                         ${ singleRowCells }
+                                        ${ this.settings.showReferences && (this.objectTableId || this.options.tableTypeId) ? `<th class="references-column-header" title="Таблицы, где эта таблица используется как справочник">Связи</th>` : '' }
                                         ${ this.isStructureWritable() ? `<th class="add-column-header-cell" style="width: 36px; min-width: 36px;" title="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus"></i></th>` : '' }
                                     </tr>
                                     ${ this.filtersEnabled ? `
@@ -180,6 +181,7 @@
                                             this.renderGroupedFilterRow(orderedColumns) :
                                             headerColumns.map((col, idx) => this.renderFilterCell(col, idx)).join('')
                                         }
+                                        ${ this.settings.showReferences && (this.objectTableId || this.options.tableTypeId) ? '<td class="references-column-filter"></td>' : '' }
                                         <td class="add-column-filter-cell"></td>
                                     </tr>
                                     ` : '' }
@@ -196,6 +198,7 @@
                                             const cellValue = row[this.columns.indexOf(col)];
                                             return this.renderCell(col, cellValue, rowIndex, colIndex);
                                         }).join('') }
+                                        ${ this.settings.showReferences && (this.objectTableId || this.options.tableTypeId) ? this.renderReferencesCell(rowIndex) : '' }
                                     </tr>
                                 `).join('')
                             }
