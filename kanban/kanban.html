@@ -344,26 +344,31 @@
     KanbanBoard.prototype._loadData = function() {
         var self = this;
         var loadedCount = 0;
-        var totalLoads = 2; // statuses + data (+ metadata for object type)
-
-        if (this.config.dataSource.type === 'object') {
-            totalLoads = 3;
-        }
+        var hasStatusesEndpoint = !!(this.config.statuses && this.config.statuses.endpoint);
+        var totalLoads = 1; // always: data fetch
+        if (hasStatusesEndpoint) totalLoads++; // +1 for statuses fetch
+        if (this.config.dataSource.type === 'object') totalLoads++; // +1 for metadata fetch
 
         var checkAllLoaded = function() {
             loadedCount++;
             if (loadedCount === totalLoads) {
+                // If no statuses endpoint, derive statuses from loaded data
+                if (!hasStatusesEndpoint) {
+                    self._deriveStatusesFromData();
+                }
                 self._render();
             }
         };
 
-        // Load statuses
-        this._fetchJson(this.config.statuses.endpoint, function(data) {
-            self.statuses = data || [];
-            checkAllLoaded();
-        }, function(error) {
-            self._showError('Ошибка загрузки статусов: ' + error);
-        });
+        // Load statuses (only if endpoint is configured)
+        if (hasStatusesEndpoint) {
+            this._fetchJson(this.config.statuses.endpoint, function(data) {
+                self.statuses = data || [];
+                checkAllLoaded();
+            }, function(error) {
+                self._showError('Ошибка загрузки статусов: ' + error);
+            });
+        }
 
         // Load metadata for object type
         if (this.config.dataSource.type === 'object' && this.config.dataSource.tableId) {
@@ -383,6 +388,33 @@
         }, function(error) {
             self._showError('Ошибка загрузки данных: ' + error);
         });
+    };
+
+    // Derive statuses from loaded data when no statuses endpoint is configured
+    KanbanBoard.prototype._deriveStatusesFromData = function() {
+        var mapping = this.config.fieldMapping;
+        var statusMapping = this.config.statusMapping;
+        var seen = {};
+        var statuses = [];
+
+        for (var i = 0; i < this.data.length; i++) {
+            var card = this.data[i];
+            var statusId = card[mapping.statusId] || card[statusMapping.id] || '';
+            var statusName = card[mapping.status] || card[statusMapping.name] || '';
+
+            if (!statusName) continue;
+            var key = String(statusId) + '||' + statusName;
+            if (!seen[key]) {
+                seen[key] = true;
+                var statusObj = {};
+                statusObj[statusMapping.name] = statusName;
+                statusObj[statusMapping.id] = statusId;
+                statusObj[statusMapping.color] = null;
+                statuses.push(statusObj);
+            }
+        }
+
+        this.statuses = statuses;
     };
 
     KanbanBoard.prototype._fetchJson = function(endpoint, onSuccess, onError) {
@@ -801,37 +833,84 @@
 
 })(window);
 
-// Example initialization (can be overridden by specific page configuration)
-// This example shows how to configure the kanban for use
-/*
+// Auto-detect kanban source from URL pattern: kanban/{id}
+// If id is an integer, fetch get_record/{id} to determine data source type:
+//   obj == "22" => report type  => report/{id}?JSON
+//   obj != "22" => object type  => object/{obj}?JSON_OBJ + metadata/{obj}
+// All URL query parameters are forwarded to both get_record and data requests.
 document.addEventListener('DOMContentLoaded', function() {
-    var kanban = new KanbanBoard('kanban-container', {
-        dataSource: {
-            type: 'report',
-            endpoint: 'report/Мой%20канбан?JSON'
-        },
-        statuses: {
-            endpoint: 'report/Статусы?JSON_KV'
-        },
-        fieldMapping: {
-            title: 'Проект',
-            description: 'Описание',
-            contact: 'Контакт',
-            status: 'Статус',
-            statusId: 'СтатусID',
-            date: 'Дата',
-            phone: 'Телефон',
-            email: 'Email',
-            amount: 'Выручка, млн',
-            activity: 'Activity',
-            cardId: 'ПроектID'
-        },
-        statusMapping: {
-            name: 'Статус',
-            id: 'СтатусID',
-            color: 'Цвет'
+    var pathParts = window.location.pathname.split('/').filter(function(p) { return p !== ''; });
+    // Find 'kanban' segment and get the next integer id
+    var kanbanIdx = -1;
+    for (var i = 0; i < pathParts.length; i++) {
+        if (pathParts[i] === 'kanban') { kanbanIdx = i; break; }
+    }
+    if (kanbanIdx === -1 || kanbanIdx + 1 >= pathParts.length) return;
+    var rawId = pathParts[kanbanIdx + 1];
+    if (!/^\d+$/.test(rawId)) return;
+    var recordId = rawId;
+
+    // Collect URL query parameters to forward with requests
+    var urlSearch = window.location.search; // e.g. "?param1=v1&param2=v2"
+    var urlParams = urlSearch ? urlSearch.slice(1) : ''; // remove leading '?'
+
+    var apiBase = 'https://' + window.location.hostname + '/' + window.db;
+
+    // Build endpoint with optional query params
+    function buildEndpoint(base, params) {
+        if (!params) return base;
+        var sep = base.indexOf('?') !== -1 ? '&' : '?';
+        return base + sep + params;
+    }
+
+    // Fetch get_record to determine source type
+    var getRecordUrl = apiBase + '/get_record/' + recordId;
+    if (urlParams) getRecordUrl += '?' + urlParams;
+
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', getRecordUrl, true);
+    xhr.onload = function() {
+        if (xhr.status !== 200) {
+            document.getElementById('kanban-container').innerHTML =
+                '<div class="kanban-error">Ошибка загрузки записи: HTTP ' + xhr.status + '</div>';
+            return;
         }
-    });
+        var record;
+        try {
+            record = JSON.parse(xhr.responseText);
+        } catch (e) {
+            document.getElementById('kanban-container').innerHTML =
+                '<div class="kanban-error">Ошибка разбора ответа get_record</div>';
+            return;
+        }
+
+        var config;
+        if (String(record.obj) === '22') {
+            // Report type
+            config = {
+                dataSource: {
+                    type: 'report',
+                    endpoint: buildEndpoint('report/' + recordId + '?JSON', urlParams)
+                }
+            };
+        } else {
+            // Object/table type
+            var tableId = record.obj;
+            config = {
+                dataSource: {
+                    type: 'object',
+                    endpoint: buildEndpoint('object/' + tableId + '?JSON_OBJ', urlParams),
+                    tableId: tableId
+                }
+            };
+        }
+
+        new KanbanBoard('kanban-container', config);
+    };
+    xhr.onerror = function() {
+        document.getElementById('kanban-container').innerHTML =
+            '<div class="kanban-error">Ошибка сети при загрузке get_record</div>';
+    };
+    xhr.send();
 });
-*/
 </script>
