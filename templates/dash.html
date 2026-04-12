@@ -482,6 +482,12 @@ function dashReset() {
     model.querySelector('.sheets').innerHTML = '';
 }
 
+window.dashGetRecord  = dashGetRecord;
+window.dashGetModel   = dashGetModel;
+window.dashGetSrc     = dashGetSrc;
+window.dashGetPeriods = dashGetPeriods;
+window.dashGetRepDone = dashGetRepDone;
+
 window.dashLoad = function(dashId) {
     dashReset();
     dashSetStatus('Загрузка дэшборда...');
