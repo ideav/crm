@@ -66,10 +66,37 @@ This file contains:
 
 ## Template Variables
 
+All files in the `templates` folder are processed by the Integram template engine. The engine treats any construction matching this pattern as an insertion point:
+
+```
+\{([A-ZА-Я0-9\.&_ \-]*?[^ ;\r\n])}
+```
+
+Examples of valid template variables (context variables):
+- `{ _global_.z }` — current user zone
+- `{ _global_.version }` — asset version for cache busting
+- `{ _global_.xsrf }` — XSRF token
+
+These are defined in [Integram globals](https://help.integram.io/#globals).
+
 All template variables now use proper spacing:
 - `{_global_.z}` → `{ _global_.z }`
 - `{_global_.version}` → `{ _global_.version }`
 - `{_global_.xsrf}` → `{ _global_.xsrf }`
+
+### Curly Braces in JavaScript (ES6 and Other Languages)
+
+If you use ES6 template literals or other syntax that includes curly braces in JS files referenced from templates (or inline scripts inside templates), **add spaces inside the curly braces** so the template engine does not mistake them for unfilled insertion points:
+
+```js
+// ❌ Wrong — template engine may interpret this as an insertion point
+const hello = `Hello ${name}`;
+
+// ✅ Correct — spaces prevent misinterpretation
+const hello = `Hello ${ name }`;
+```
+
+If a curly brace expression is not recognized as a known insertion point, the block containing it will simply not be rendered.
 
 ## API Endpoints Used
 
