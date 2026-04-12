@@ -658,6 +658,10 @@ function login($z="", $u="", $message="", $details=""){
     // Do not pass auth.asp as a post-login redirect target — it is an OAuth callback
     // URL and must not be replayed after a successful login.
     $uri = $_SERVER["REQUEST_URI"];
+	if($message === "reenter"){
+		header("Location: $uri");
+		die();
+	}
     if(strpos(strtolower($uri), "auth.asp") === FALSE)
         $p .= "uri=".htmlentities($uri)."&";
 	if(strlen($details))
@@ -7133,7 +7137,8 @@ function GetObjectReqs($typ, $id)
     		if(strpos($row["attrs"], MULTI_MASK) !== FALSE){
     			$GLOBALS["MULTI"][$row["t"]] = $row["ref_id"];
 				# Collect comma-separated ref IDs
-				$GLOBALS["REF_typs"][$row["t"]] = isset($GLOBALS["REF_typs"][$row["t"]]) ? $GLOBALS["REF_typs"][$row["t"]].",".$row["ref_id"] : $row["ref_id"];
+				$GLOBALS["REF_typs"][$row["t"]] = $row["ref_id"];
+				# $GLOBALS["REF_typs"][$row["t"]] = isset($GLOBALS["REF_typs"][$row["t"]]) ? $GLOBALS["REF_typs"][$row["t"]].",".$row["ref_id"] : $row["ref_id"];
 			}
 			else
 				$GLOBALS["REF_typs"][$row["t"]] = $row["ref_id"];
@@ -9232,6 +9237,19 @@ if(Validate_Token())
             Insert($id, 1, 283, $template, "Insert new DB template");
             Insert($id, 1, 276, $_POST["descr"], "Insert new DB notes");
 			api_dump(json_encode(array("status"=>"Ok","id"=>$id)), "_new_db.json");
+			break;
+			
+		case "get_record":
+			if($id == 0)
+				die(t9n("[RU]Ошибка: id=0 или не задан[EN]The id is empty or 0"));
+			Check_Grant($id, 0, "READ");
+			$data_set = Exec_sql("SELECT rec.id, rec.val, rec.up, rec.t obj, typs.val type, typs.t base
+									FROM $z rec, $z typs WHERE rec.id=$id AND rec.up!=0 AND typs.id=rec.t AND typs.up=0"
+								, "Get record & type name");
+			if($row = mysqli_fetch_assoc($data_set))
+				api_dump(json_encode($row, JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE), "rec_$id.json");
+			else
+				api_dump(json_encode(array("error"=>t9n("[RU]Запись $id не найдена, вероятно, она была удалена или не является данными[EN]Record #$id not found, it might be deleted or is not a record"))), "rec_$id.json");
 			break;
 			
 		case "obj_meta":
