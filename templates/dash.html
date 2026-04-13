@@ -546,7 +546,7 @@ function dashGetModel(json) {
         if (json[i].itemID && !document.getElementById(json[i].itemID)) {
             document.getElementById('fp' + json[i].panelID).querySelector('table tbody').insertAdjacentHTML('beforeend',
                 itemTpl.replace(/:id:/g, json[i].itemID)
-                    .replace(':pl:', json[i].level - 1)
+                    .replace(':pl:', Math.max(0, (json[i].level || 1) - 1))
                     .replace(/:name:/g, json[i].item));
         }
         // Remember RG metadata
