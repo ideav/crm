@@ -38,7 +38,7 @@
     margin-bottom: 1.5rem;
 }
 .f-panel .f-table-wrap {
-    overflow-x: auto;
+    overflow-x: visible;
 }
 .f-panel h4 {
     font-size: 1rem;
@@ -365,8 +365,21 @@ function dashDrawPeriods() {
     });
     dashGetRepVals();
     dashCalcCells();
+    dashUpdateTableWrapOverflow();
     dashSetStatus('Готово');
     dashDebug();
+}
+
+function dashUpdateTableWrapOverflow() {
+    document.querySelectorAll('#dash-model .f-table-wrap').forEach(function(wrap) {
+        var table = wrap.querySelector('table');
+        if (!table) return;
+        // Enable horizontal scroll only when table overflows the panel width;
+        // keeping overflow-x: visible otherwise allows position:sticky to work
+        // against the page viewport (any non-visible overflow creates a scroll
+        // container that scopes sticky to the container instead of the viewport).
+        wrap.style.overflowX = table.scrollWidth > wrap.offsetWidth ? 'auto' : 'visible';
+    });
 }
 
 function dashDebug() {
@@ -587,8 +600,9 @@ window.dashGetRecord  = dashGetRecord;
 window.dashGetModel   = dashGetModel;
 window.dashGetSrc     = dashGetSrc;
 window.dashGetPeriods = dashGetPeriods;
-window.dashGetRepDone = dashGetRepDone;
-window.dashDebug      = dashDebug;
+window.dashGetRepDone             = dashGetRepDone;
+window.dashDebug                  = dashDebug;
+window.dashUpdateTableWrapOverflow = dashUpdateTableWrapOverflow;
 
 window.dashLoad = function(dashId) {
     dashReset();
@@ -612,6 +626,9 @@ window.dashCopy2Buffer = function(text) {
     document.execCommand('copy');
     document.body.removeChild(temp);
 };
+
+// Re-check table overflow on resize so sticky behaviour stays correct
+window.addEventListener('resize', function() { dashUpdateTableWrapOverflow(); });
 
 // Auto-load dashboard ID from URL path: dash/id
 (function() {
