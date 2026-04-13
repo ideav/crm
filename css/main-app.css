@@ -470,7 +470,7 @@
     padding: 12px;
     background-color: var(--bg-primary);
     overflow-y: auto;
-    overflow-x: hidden;
+    overflow-x: auto;
     height: 100%;
 }
 
