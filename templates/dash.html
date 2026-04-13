@@ -33,9 +33,16 @@
 /* Sheets and panels */
 #dash-model .f-sheet {
     padding: 0.75rem 0.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 1rem;
+}
+.dash-filter-bar {
+    flex-basis: 100%;
 }
 .f-panel {
-    margin-bottom: 1.5rem;
+    margin-bottom: 0;
 }
 .f-panel .f-table-wrap {
     overflow-x: visible;
@@ -154,7 +161,7 @@ const repRegex  = /^\[([A-Za-яЁё][A-Za-яЁё0-9]*)(\.[A-Za-яЁё][A-Za-яЁ
     , exprRegex = /(СУММА)\(\[(.*?)\]:\[(.*?)\]\)/g
     , itemIdRegex = /\[\d+\]/g;
 
-let dashCurrentId = null, dashDateFr = null, dashDateTo = null, dashPeriodVal = 'Месяц';
+let dashCurrentId = null, dashRecordId = null, dashDateFr = null, dashDateTo = null, dashPeriodVal = 'Месяц';
 
 function dashToInputDate(s) {
     if (!s) return '';
@@ -563,6 +570,7 @@ function dashGetRecord(json) {
     document.title = json.val;
     var navCenter = document.querySelector('.navbar-center .navbar-workspace');
     if (navCenter) navCenter.textContent = json.val;
+    dashRecordId = json.id;
     dashSetStatus('Загрузка модели...');
     newApi('GET', 'report/Дэшборд?JSON_KV&FR_modelID=' + json.id + '&period=' + encodeURIComponent(dashPeriodVal), 'dashGetModel');
 }
@@ -673,10 +681,32 @@ window.dashDebug                  = dashDebug;
 window.dashUpdateTableWrapOverflow = dashUpdateTableWrapOverflow;
 
 window.dashApplyFilter = function(sheetEl) {
-    dashDateFr  = dashFromInputDate(sheetEl.querySelector('.dash-fr-input').value);
-    dashDateTo  = dashFromInputDate(sheetEl.querySelector('.dash-to-input').value);
+    dashDateFr    = dashFromInputDate(sheetEl.querySelector('.dash-fr-input').value);
+    dashDateTo    = dashFromInputDate(sheetEl.querySelector('.dash-to-input').value);
     dashPeriodVal = sheetEl.querySelector('.dash-period-sel').value;
-    window.dashLoad(dashCurrentId);
+
+    // Get active sheet name for FR_sheet filter
+    var model = document.getElementById('dash-model');
+    var activeTab = model.querySelector('.dash-sheet-tab.active');
+    var sheetName = activeTab ? activeTab.textContent.trim() : '';
+
+    // Partial reset: remove only this sheet's panels, keep tabs/other sheets intact
+    sheetEl.querySelectorAll('.f-panel').forEach(function(p) {
+        p.querySelectorAll('.f-item').forEach(function(row) {
+            delete dashFormulas[row.id];
+            delete dashItems[row.id];
+        });
+        delete dashModelData[p.id];
+        p.remove();
+    });
+    dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashReports = {}; dashAjaxes = 0;
+
+    // Re-fetch model for this sheet only — skip get_record, use cached dashRecordId
+    dashSetStatus('Загрузка данных...');
+    newApi('GET', 'report/Дэшборд?JSON_KV&FR_modelID=' + dashRecordId
+        + '&period=' + encodeURIComponent(dashPeriodVal)
+        + (sheetName ? '&FR_sheet=' + encodeURIComponent(sheetName) : ''),
+        'dashGetModel');
 };
 
 window.dashApplySearch = function(query, sheetEl) {
