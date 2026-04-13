@@ -505,6 +505,7 @@ define("ALL_OBJECTS", "*** All objects ***");
 define("FILES", "*** Files ***");
 
 $GLOBALS["GLOBAL_VARS"]["version"] = VERSION;
+$GLOBALS["GLOBAL_VARS"]["newapi"] = [];
 
 # ################# FUNCTIONS #################
 function mail2DB($email, $uid){
@@ -635,7 +636,6 @@ function checkDbName($mask, $db){
 }
 function isApi(){
     global $dumpAPI;
-	$GLOBALS["GLOBAL_VARS"]["newapi"] = [];
     return (isset($dumpAPI) || !empty(array_filter(array_merge($_POST, $_GET), function($value, $key) { return strpos($key, 'JSON') === 0;}, ARRAY_FILTER_USE_BOTH)));
 }
 function xsrf($a, $b){
