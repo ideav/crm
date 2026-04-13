@@ -45,7 +45,20 @@
     margin-bottom: 0;
 }
 .f-panel .f-table-wrap {
-    overflow-x: visible;
+    overflow-x: auto;
+}
+/* Sticky first column */
+.f-panel th:first-child,
+.f-panel td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: var(--bg-primary, #fff);
+    border-right: 2px solid var(--border-color, #dee2e6);
+}
+.f-panel th:first-child {
+    z-index: 3;
+    background: var(--bg-secondary, #f8f9fa);
 }
 .f-panel h4 {
     font-size: 1rem;
@@ -106,11 +119,15 @@
 }
 .dash-filter-sep { color: var(--text-secondary, #6c757d); }
 /* Sticky table header */
-.dash-head {
+.dash-head th {
     position: sticky;
-    top: -12px;
-    z-index: 1;
+    top: 0;
+    z-index: 2;
     background: var(--bg-secondary, #f8f9fa);
+}
+/* Corner cell: sticky both vertically and horizontally */
+.dash-head th:first-child {
+    z-index: 4;
 }
 /* Sub-header row for RGcolumns (column group names) */
 .f-subhead th {
@@ -121,13 +138,16 @@
     border-top: none;
 }
 @media (max-width: 900px) {
-    .dash-head { top: -1rem; }
+    .dash-head th { top: 0; }
 }
 @media (max-width: 600px) {
-    .dash-head { top: -0.75rem; }
+    .dash-head th { top: 0; }
 }
 /* Item rows */
 .dash-item:hover {
+    background-color: var(--bg-secondary, #fafafa);
+}
+.dash-item:hover td:first-child {
     background-color: var(--bg-secondary, #fafafa);
 }
 .dash-first-cell {
@@ -150,6 +170,9 @@
 }
 /* Errors */
 .dash-err {
+    background-color: #ffeeee;
+}
+.dash-err td:first-child {
     background-color: #ffeeee;
 }
 </style>
@@ -528,15 +551,7 @@ function dashDrawPeriods() {
 }
 
 function dashUpdateTableWrapOverflow() {
-    document.querySelectorAll('#dash-model .f-table-wrap').forEach(function(wrap) {
-        var table = wrap.querySelector('table');
-        if (!table) return;
-        // Enable horizontal scroll only when table overflows the panel width;
-        // keeping overflow-x: visible otherwise allows position:sticky to work
-        // against the page viewport (any non-visible overflow creates a scroll
-        // container that scopes sticky to the container instead of the viewport).
-        wrap.style.overflowX = table.scrollWidth > wrap.offsetWidth ? 'auto' : 'visible';
-    });
+    // overflow-x: auto is set via CSS; no dynamic toggle needed.
 }
 
 function dashDebug() {
