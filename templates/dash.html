@@ -68,6 +68,14 @@
     z-index: 1;
     background: var(--bg-secondary, #f8f9fa);
 }
+/* Sub-header row for RGcolumns (column group names) */
+.f-subhead th {
+    background: var(--bg-secondary, #f8f9fa);
+    font-weight: 500;
+    text-align: center;
+    font-size: 0.8em;
+    border-top: none;
+}
 /* Item rows */
 .dash-item:hover {
     background-color: var(--bg-secondary, #fafafa);
@@ -270,27 +278,71 @@ function dashDrawPeriods() {
             var v, rep, fr, to, col;
             switch (dashModelData[panelId].rgs[rg].type) {
                 case 'rg':
+                    var rgCols = (dashModelData[panelId].rgs[rg].columns || '')
+                        .split(',').map(function(c) { return c.trim(); }).filter(Boolean);
                     for (i in p) {
                         if (!p[i] || !p[i].r) continue;
                         fr = dashDateYMD(p[i].r[1]);
                         to = dashDateYMD(p[i].r[2]);
-                        panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
-                            headTpl.replace(':head:', p[i].r[0]).replace(':from:', fr).replace(':to:', to));
-                        panel.querySelectorAll('.f-item').forEach(function(row) {
-                            if (dashFormulas[row.id]) {
-                                if (dashFormulas[row.id] === '[]')
-                                    v = dashGetVal(row.getAttribute('item-name'), fr, to);
-                                else if (itemRegex.test(dashFormulas[row.id]))
-                                    v = dashGetVal(dashFormulas[row.id].match(itemRegex)[1], fr, to) || '0';
+                        if (rgCols.length > 0) {
+                            // Period header with colspan spanning all column groups
+                            panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
+                                '<th colspan="' + rgCols.length + '" range="' + fr + '-' + to + '">' + p[i].r[0] + '</th>');
+                            // Ensure sub-header row exists (first time only per panel)
+                            var thead = panel.querySelector('thead');
+                            var subhead = thead.querySelector('.f-subhead');
+                            if (!subhead) {
+                                subhead = document.createElement('tr');
+                                subhead.className = 'f-subhead';
+                                subhead.innerHTML = '<th></th>'; // spacer for item-name column
+                                thead.appendChild(subhead);
                             }
-                            row.insertAdjacentHTML('beforeend',
-                                cellTpl.replace(':val:', v || '')
-                                    .replace(':ready:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? '1' : '0')
-                                    .replace(':title:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? v || '' : '')
-                                    .replace(':classes:', 'f-rg-cell')
-                                    .replace(':from:', fr)
-                                    .replace(':to:', to));
-                        });
+                            // Add one th per column group under this period
+                            rgCols.forEach(function(colName) {
+                                subhead.insertAdjacentHTML('beforeend',
+                                    '<th range="' + fr + '-' + to + '" data-rg-col="' + colName + '">' + colName + '</th>');
+                            });
+                            // Add cells: for each item row, one cell per column group
+                            panel.querySelectorAll('.f-item').forEach(function(row) {
+                                var itemName = row.getAttribute('item-name');
+                                rgCols.forEach(function(colName) {
+                                    v = dashGetVal(itemName + ':' + colName, fr, to);
+                                    if (v === undefined && dashFormulas[row.id]) {
+                                        if (dashFormulas[row.id] === '[]')
+                                            v = dashGetVal(itemName, fr, to);
+                                        else if (itemRegex.test(dashFormulas[row.id]))
+                                            v = dashGetVal(dashFormulas[row.id].match(itemRegex)[1] + ':' + colName, fr, to)
+                                             || dashGetVal(dashFormulas[row.id].match(itemRegex)[1], fr, to) || '0';
+                                    }
+                                    row.insertAdjacentHTML('beforeend',
+                                        cellTpl.replace(':val:', v || '')
+                                            .replace(':ready:', '1')
+                                            .replace(':title:', v || '')
+                                            .replace(':classes:', 'f-rg-cell')
+                                            .replace(':from:', fr)
+                                            .replace(':to:', to));
+                                });
+                            });
+                        } else {
+                            // No RGcolumns — original single-column behaviour
+                            panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
+                                headTpl.replace(':head:', p[i].r[0]).replace(':from:', fr).replace(':to:', to));
+                            panel.querySelectorAll('.f-item').forEach(function(row) {
+                                if (dashFormulas[row.id]) {
+                                    if (dashFormulas[row.id] === '[]')
+                                        v = dashGetVal(row.getAttribute('item-name'), fr, to);
+                                    else if (itemRegex.test(dashFormulas[row.id]))
+                                        v = dashGetVal(dashFormulas[row.id].match(itemRegex)[1], fr, to) || '0';
+                                }
+                                row.insertAdjacentHTML('beforeend',
+                                    cellTpl.replace(':val:', v || '')
+                                        .replace(':ready:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? '1' : '0')
+                                        .replace(':title:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? v || '' : '')
+                                        .replace(':classes:', 'f-rg-cell')
+                                        .replace(':from:', fr)
+                                        .replace(':to:', to));
+                            });
+                        }
                     }
                     break;
                 case 'value':
@@ -474,7 +526,9 @@ function dashGetSrc(json) {
     for (var i in json || []) {
         if (json[i].value.length > 0) {
             try {
-                dashValues[json[i].item] = JSON.parse('[' + json[i].value + ']');
+                var colGroup = json[i]['Колонка группы'] || '';
+                var key = colGroup ? json[i].item + ':' + colGroup : json[i].item;
+                dashValues[key] = JSON.parse('[' + json[i].value + ']');
             } catch (e) {
                 dashValues[json[i].item] = 'error ' + e + ' in ' + json[i].value;
             }
@@ -566,7 +620,7 @@ function dashGetModel(json) {
         }
         // Remember RG metadata
         if (!dashModelData['fp' + json[i].panelID].rgs[json[i].RG])
-            dashModelData['fp' + json[i].panelID].rgs[json[i].RG] = { type: json[i].RGtype, head: json[i].rgHead, src: json[i].RGsourceID };
+            dashModelData['fp' + json[i].panelID].rgs[json[i].RG] = { type: json[i].RGtype, head: json[i].rgHead, src: json[i].RGsourceID, columns: json[i].RGcolumns || '' };
         // Predefined values
         if (json[i].value.length > 0)
             dashValues[json[i].itemID] = dashNormalizeVal(json[i].itemID, json[i].value);
