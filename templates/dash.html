@@ -166,6 +166,15 @@
 
 const repRegex  = /^\[([A-Za-яЁё][A-Za-яЁё0-9]*)(\.[A-Za-яЁё][A-Za-яЁё0-9]*)\]$/
     , itemRegex = /^\[([A-Za-яЁё][ A-Za-яЁё0-9\(\)-]*)\]$/
+
+// Returns { src, extra } for a cell based on row formula and base type ('rg' or 'value').
+// src   — data-src value; extra — optional extra HTML attribute string (data-formula="...")
+function dashCellSrc(rowId, baseType) {
+    var f = dashFormulas[rowId];
+    if (!f || f === '[]') return { src: baseType, extra: '' };
+    if (itemRegex.test(f) || repRegex.test(f)) return { src: 'report', extra: '' };
+    return { src: baseType + '-formula', extra: ' data-formula="' + f.replace(/"/g, '&quot;') + '"' };
+}
     , exprRegex = /(СУММА)\(\[(.*?)\]:\[(.*?)\]\)/g
     , itemIdRegex = /\[\d+\]/g;
 
@@ -203,7 +212,7 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
         + '<path d="M17.2857 13.09V17.2857C17.2857 17.7025 17.1201 18.1022 16.8254 18.3969C16.5307 18.6916 16.1311 18.8572 15.7143 18.8572H4.71428C4.29751 18.8572 3.89781 18.6916 3.60311 18.3969C3.30841 18.1022 3.14285 17.7025 3.14285 17.2857V6.28574C3.14285 5.86897 3.30841 5.46927 3.60311 5.17457C3.89781 4.87987 4.29751 4.71431 4.71428 4.71431H8.91M15.7143 3.14288L18.8571 6.28574L11 14.1429H7.85714V11L15.7143 3.14288Z" stroke="lightgray" stroke-linecap="round" stroke-linejoin="round"></path>'
         + '</svg></a></div>'
         + ':name:'
-    , cellTpl     = '<td range=":from:-:to:" ready=":ready:" class="f-cell :classes:" align="right" title=":title:">:val:';
+    , cellTpl     = '<td range=":from:-:to:" ready=":ready:" class="f-cell :classes:" align="right" title=":title:" data-src=":src:" data-item-id=":item-id:":extra:>:val:';
 
 let dashModelData = {}, dashPeriodData = {}, dashPeriods = {}, dashValues = {}, dashFormulas = {}, dashItems = {}, dashReports = {}, dashAjaxes = 0;
 
@@ -379,6 +388,7 @@ function dashDrawPeriods() {
                             // Add cells: for each item row, one cell per column group
                             panel.querySelectorAll('.f-item').forEach(function(row) {
                                 var itemName = row.getAttribute('item-name');
+                                var s = dashCellSrc(row.id, 'rg');
                                 rgCols.forEach(function(colName) {
                                     v = dashGetVal(itemName + ':' + colName, fr, to);
                                     if (v === undefined && dashFormulas[row.id]) {
@@ -393,6 +403,9 @@ function dashDrawPeriods() {
                                             .replace(':ready:', '1')
                                             .replace(':title:', v || '')
                                             .replace(':classes:', 'f-rg-cell')
+                                            .replace(':src:', s.src)
+                                            .replace(':item-id:', row.id)
+                                            .replace(':extra:', s.extra)
                                             .replace(':from:', fr)
                                             .replace(':to:', to));
                                 });
@@ -402,6 +415,7 @@ function dashDrawPeriods() {
                             panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
                                 headTpl.replace(':head:', p[i].r[0]).replace(':from:', fr).replace(':to:', to));
                             panel.querySelectorAll('.f-item').forEach(function(row) {
+                                var s = dashCellSrc(row.id, 'rg');
                                 if (dashFormulas[row.id]) {
                                     if (dashFormulas[row.id] === '[]')
                                         v = dashGetVal(row.getAttribute('item-name'), fr, to);
@@ -413,6 +427,9 @@ function dashDrawPeriods() {
                                         .replace(':ready:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? '1' : '0')
                                         .replace(':title:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? v || '' : '')
                                         .replace(':classes:', 'f-rg-cell')
+                                        .replace(':src:', s.src)
+                                        .replace(':item-id:', row.id)
+                                        .replace(':extra:', s.extra)
                                         .replace(':from:', fr)
                                         .replace(':to:', to));
                             });
@@ -424,17 +441,22 @@ function dashDrawPeriods() {
                         headTpl.replace(':head:', dashModelData[panelId].rgs[rg].head || 'Значение')
                                .replace(':from:-:to:', '-'));
                     panel.querySelectorAll('.f-item').forEach(function(row) {
-                        var altName;
-                        if (dashFormulas[row.id] && (altName = dashFormulas[row.id].match(itemRegex)))
+                        var altName, s = dashCellSrc(row.id, 'value');
+                        // itemRegex match in value context = alias/fallback, treat as direct value
+                        if (dashFormulas[row.id] && (altName = dashFormulas[row.id].match(itemRegex))) {
                             v = dashNormalizeVal(row.id, dashValues[row.id] || dashGetVal(altName[1]));
-                        else
+                            s = { src: 'value', extra: '' };
+                        } else
                             v = dashNormalizeVal(row.id, dashValues[row.id] || dashGetVal(dashItems[row.id] ? dashItems[row.id].name : ''));
                         row.insertAdjacentHTML('beforeend',
                             cellTpl.replace(':val:', v || '')
                                 .replace(':classes:', 'f-values')
                                 .replace(':from:', '-').replace(':to:', '-')
                                 .replace(':ready:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? '1' : '0')
-                                .replace(':title:', dashFormulas[row.id] || ''));
+                                .replace(':title:', dashFormulas[row.id] || '')
+                                .replace(':src:', s.src)
+                                .replace(':item-id:', row.id)
+                                .replace(':extra:', s.extra));
                     });
                     break;
                 case 'mu':
@@ -447,7 +469,10 @@ function dashDrawPeriods() {
                                 .replace(':classes:', 'f-mus')
                                 .replace(':from:', '-').replace(':to:', '-')
                                 .replace(':ready:', '1')
-                                .replace(':title:', ''));
+                                .replace(':title:', '')
+                                .replace(':src:', 'mu')
+                                .replace(':item-id:', row.id)
+                                .replace(':extra:', ''));
                     });
                     break;
                 case 'line':
@@ -460,7 +485,10 @@ function dashDrawPeriods() {
                                 .replace(':classes:', 'f-line-sum')
                                 .replace(':from:', '-').replace(':to:', '-')
                                 .replace(':title:', 'Сумма')
-                                .replace(':ready:', '1'));
+                                .replace(':ready:', '1')
+                                .replace(':src:', 'linesum')
+                                .replace(':item-id:', row.id)
+                                .replace(':extra:', ''));
                     });
                     break;
                 default:
@@ -480,6 +508,9 @@ function dashDrawPeriods() {
                                                 .replace(':ready:', ready)
                                                 .replace(':title:', '')
                                                 .replace(':classes:', 'f-col-cell')
+                                                .replace(':src:', 'report')
+                                                .replace(':item-id:', row.id)
+                                                .replace(':extra:', '')
                                                 .replace(':from:-:to:', i));
                                     });
                                 }
