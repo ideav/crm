@@ -64,9 +64,15 @@
 /* Sticky table header */
 .dash-head {
     position: sticky;
-    top: 0;
+    top: -12px;
     z-index: 1;
     background: var(--bg-secondary, #f8f9fa);
+}
+@media (max-width: 900px) {
+    .dash-head { top: -1rem; }
+}
+@media (max-width: 600px) {
+    .dash-head { top: -0.75rem; }
 }
 /* Item rows */
 .dash-item:hover {
