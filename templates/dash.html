@@ -166,6 +166,8 @@
 
 const repRegex  = /^\[([A-Za-яЁё][A-Za-яЁё0-9]*)(\.[A-Za-яЁё][A-Za-яЁё0-9]*)\]$/
     , itemRegex = /^\[([A-Za-яЁё][ A-Za-яЁё0-9\(\)-]*)\]$/
+    , exprRegex = /(СУММА)\(\[(.*?)\]:\[(.*?)\]\)/g
+    , itemIdRegex = /\[\d+\]/g;
 
 // Returns { src, extra } for a cell based on row formula and base type ('rg' or 'value').
 // src   — data-src value; extra — optional extra HTML attribute string (data-formula="...")
@@ -175,8 +177,6 @@ function dashCellSrc(rowId, baseType) {
     if (itemRegex.test(f) || repRegex.test(f)) return { src: 'report', extra: '' };
     return { src: baseType + '-formula', extra: ' data-formula="' + f.replace(/"/g, '&quot;') + '"' };
 }
-    , exprRegex = /(СУММА)\(\[(.*?)\]:\[(.*?)\]\)/g
-    , itemIdRegex = /\[\d+\]/g;
 
 let dashCurrentId = null, dashRecordId = null, dashDateFr = null, dashDateTo = null, dashPeriodVal = 'Месяц';
 
