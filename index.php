@@ -2162,9 +2162,12 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     			foreach($GLOBALS["STORED_REPS"][$id]["types"] as $key => $typ){ # Col => Type
         			trace(" Replace the report params with the gotten ones from REQUEST: $key => $typ");
     			    # Fill in the array of conditions for Construct_WHERE()
+    			    $frFromRequest = false; $toFromRequest = false;
     			    if(isset($GLOBALS["STORED_REPS"][$id][REP_COL_NAME][$key])){
         			    $str = str_replace(" ", "_", $GLOBALS["STORED_REPS"][$id][REP_COL_NAME][$key]);
 						$t = $GLOBALS["STORED_REPS"][$id]["columns"][$key];
+    			        $frFromRequest = (isset($_REQUEST["FR_$str"]) && strlen($_REQUEST["FR_$str"])) || (isset($_REQUEST["FR_$t"]) && strlen($_REQUEST["FR_$t"]));
+    			        $toFromRequest = (isset($_REQUEST["TO_$str"]) && strlen($_REQUEST["TO_$str"])) || (isset($_REQUEST["TO_$t"]) && strlen($_REQUEST["TO_$t"]));
     			        if(isset($_REQUEST["FR_$str"]) && strlen($_REQUEST["FR_$str"]))
                 				$GLOBALS["CONDS"][$key]["FR"] = $_REQUEST["FR_$str"];
     			        elseif(isset($_REQUEST["FR_$t"]) && strlen($_REQUEST["FR_$t"]))
@@ -2174,9 +2177,10 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     			        elseif(isset($_REQUEST["TO_$t"]) && strlen($_REQUEST["TO_$t"]))
                 				$GLOBALS["CONDS"][$key]["TO"] = $_REQUEST["TO_$t"];
     			    }
-    				if(!isset($GLOBALS["CONDS"][$key]["FR"]) && isset($GLOBALS["STORED_REPS"][$id][REP_COL_FROM][$key]))
+    				# Apply stored defaults only if the request did not explicitly set the opposite side for this column
+    				if(!isset($GLOBALS["CONDS"][$key]["FR"]) && !$toFromRequest && isset($GLOBALS["STORED_REPS"][$id][REP_COL_FROM][$key]))
                             $GLOBALS["CONDS"][$key]["FR"] = $GLOBALS["STORED_REPS"][$id][REP_COL_FROM][$key];
-    				if(!isset($GLOBALS["CONDS"][$key]["TO"]) && isset($GLOBALS["STORED_REPS"][$id][REP_COL_TO][$key]))
+    				if(!isset($GLOBALS["CONDS"][$key]["TO"]) && !$frFromRequest && isset($GLOBALS["STORED_REPS"][$id][REP_COL_TO][$key]))
                             $GLOBALS["CONDS"][$key]["TO"] = $GLOBALS["STORED_REPS"][$id][REP_COL_TO][$key];
     			}
             $i = 0;
