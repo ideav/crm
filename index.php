@@ -635,6 +635,7 @@ function checkDbName($mask, $db){
 }
 function isApi(){
     global $dumpAPI;
+	$GLOBALS["GLOBAL_VARS"]["newapi"] = [];
     return (isset($dumpAPI) || !empty(array_filter(array_merge($_POST, $_GET), function($value, $key) { return strpos($key, 'JSON') === 0;}, ARRAY_FILTER_USE_BOTH)));
 }
 function xsrf($a, $b){
@@ -687,7 +688,7 @@ function trace($text){
 function Exec_sql($sql, $err_msg, $log=TRUE, $fatal=TRUE){
 	global $connection, $z;
 	$time_start = microtime(TRUE);
-	trace("Try Exec_sql $sql");
+	trace("Try Exec_sql $sql [$err_msg]");
 	if(!$result = mysqli_query($connection, $sql)){
     	if(mysqli_errno($connection)===1146)
     	    login("", "", "dBNotExists", t9n("[RU]База $z не существует[EN]The $z DB does not exist")." [$err_msg]");
@@ -6201,9 +6202,22 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 
 			foreach($_REQUEST as $key => $value)
 				if(($value != "") && (preg_match("/(F\_|FR\_|TO\_)/", $key))){
-					$GLOBALS["CONDS"][substr($key, strpos($key, "_")+1)][substr($key, 0, strpos($key, "_"))] = $value;
+					$pre = substr($key, 0, strpos($key, "_"));
+					$col = substr($key, strpos($key, "_")+1);
+					# Replace field name with its ID and remove the named filter
+					if($tmp = array_search($col, $GLOBALS["REQNAMES"])){ // Reqs names
+						$col = $tmp;
+						$_REQUEST[$pre."_$col"] = $value;
+						unset($_REQUEST[$key]);
+					}
+					elseif($col === $GLOBALS["GLOBAL_VARS"]["api"]["type"]["val"]){ // Object name
+						$col = $id;
+						$_REQUEST[$pre."_$col"] = $value;
+						unset($_REQUEST[$key]);
+					}
+					$GLOBALS["CONDS"][$col][$pre] = $value;
 					if(substr($value, 0, 1) === "@")
-    					$parent_cond = " ";
+						$parent_cond = " ";
 				}
 
 			if(isset($GLOBALS["CONDS"]))
