@@ -11866,12 +11866,42 @@ class IntegramTable{
                 const fieldName = attrs.alias || req.val;
                 const baseFormat = this.normalizeFormat(req.type);
                 const isRequired = attrs.required;
+                const isMulti = attrs.multi;
 
                 formHtml += `<div class="form-group">`;
                 formHtml += `<label for="sub-field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
 
-                // Reference field (searchable dropdown with clear/add buttons - same as inline table editor)
-                if (req.ref_id) {
+                // Multi-select reference field (issue #1772)
+                if (req.ref_id && isMulti) {
+                    formHtml += `
+                        <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-multi="1" data-current-value="">
+                            <div class="inline-editor-reference form-ref-editor-box inline-editor-multi-reference">
+                                <div class="multi-ref-tags-container form-multi-ref-tags-container">
+                                    <span class="multi-ref-tags-placeholder">Загрузка...</span>
+                                </div>
+                                <div class="inline-editor-reference-header">
+                                    <input type="text"
+                                           class="inline-editor-reference-search form-ref-search"
+                                           id="sub-field-${ req.id }-search"
+                                           placeholder="Добавить..."
+                                           autocomplete="off">
+                                    <button class="inline-editor-reference-add form-ref-add" style="display: none;" title="Создать запись" aria-label="Создать запись" type="button"><i class="pi pi-plus"></i></button>
+                                </div>
+                                <div class="inline-editor-reference-dropdown form-ref-dropdown" id="sub-field-${ req.id }-dropdown" style="display:none;">
+                                    <div class="inline-editor-reference-empty">Загрузка...</div>
+                                </div>
+                            </div>
+                            <input type="hidden"
+                                   class="form-ref-value form-multi-ref-value"
+                                   id="sub-field-${ req.id }"
+                                   name="t${ req.id }"
+                                   value=""
+                                   data-ref-id="${ req.id }">
+                        </div>
+                    `;
+                }
+                // Single-select reference field
+                else if (req.ref_id) {
                     formHtml += `
                         <div class="form-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }">
                             <div class="inline-editor-reference form-ref-editor-box">

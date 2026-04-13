@@ -33,9 +33,16 @@
 /* Sheets and panels */
 #dash-model .f-sheet {
     padding: 0.75rem 0.5rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 1rem;
+}
+.dash-filter-bar {
+    flex-basis: 100%;
 }
 .f-panel {
-    margin-bottom: 1.5rem;
+    margin-bottom: 0;
 }
 .f-panel .f-table-wrap {
     overflow-x: visible;
@@ -61,10 +68,47 @@
     font-weight: 600;
     text-align: center;
 }
+/* Filter bar above panels */
+.dash-filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.5rem 0.25rem;
+    flex-wrap: wrap;
+}
+.dash-filter-bar input[type="date"],
+.dash-filter-bar .dash-period-sel {
+    padding: 0.2rem 0.4rem;
+    border: 1px solid var(--input-border, #ced4da);
+    border-radius: 4px;
+    background: var(--input-bg, #fff);
+    color: var(--text-primary, #212529);
+    font-size: 0.85rem;
+}
+.dash-apply-btn {
+    padding: 0.3rem 0.75rem;
+    border: 1px solid var(--border-color, #ced4da);
+    border-radius: 4px;
+    background: var(--bg-secondary, #f8f9fa);
+    color: var(--text-primary, #212529);
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+.dash-apply-btn:hover { background: var(--bg-primary, #e9ecef); }
+.dash-search-input {
+    padding: 0.3rem 0.4rem;
+    border: 1px solid var(--input-border, #ced4da);
+    border-radius: 4px;
+    background: var(--input-bg, #fff);
+    color: var(--text-primary, #212529);
+    font-size: 0.85rem;
+    width: 10rem;
+}
+.dash-filter-sep { color: var(--text-secondary, #6c757d); }
 /* Sticky table header */
 .dash-head {
     position: sticky;
-    top: 0;
+    top: -12px;
     z-index: 1;
     background: var(--bg-secondary, #f8f9fa);
 }
@@ -75,6 +119,12 @@
     text-align: center;
     font-size: 0.8em;
     border-top: none;
+}
+@media (max-width: 900px) {
+    .dash-head { top: -1rem; }
+}
+@media (max-width: 600px) {
+    .dash-head { top: -0.75rem; }
 }
 /* Item rows */
 .dash-item:hover {
@@ -119,8 +169,32 @@ const repRegex  = /^\[([A-Za-яЁё][A-Za-яЁё0-9]*)(\.[A-Za-яЁё][A-Za-яЁ
     , exprRegex = /(СУММА)\(\[(.*?)\]:\[(.*?)\]\)/g
     , itemIdRegex = /\[\d+\]/g;
 
+let dashCurrentId = null, dashRecordId = null, dashDateFr = null, dashDateTo = null, dashPeriodVal = 'Месяц';
+
+function dashToInputDate(s) {
+    if (!s) return '';
+    var p = s.split('.');
+    return p.length === 3 ? p[2] + '-' + String(p[1]).padStart(2,'0') + '-' + String(p[0]).padStart(2,'0') : '';
+}
+function dashFromInputDate(s) {
+    if (!s) return '';
+    var p = s.split('-');
+    return p.length === 3 ? p[2] + '.' + p[1] + '.' + p[0] : '';
+}
+function dashInitFilterBar(sheetEl) {
+    var y = new Date().getFullYear();
+    sheetEl.querySelector('.dash-fr-input').value = dashToInputDate(dashDateFr || '01.01.' + y);
+    sheetEl.querySelector('.dash-to-input').value = dashToInputDate(dashDateTo || '31.12.' + y);
+    sheetEl.querySelector('.dash-period-sel').value = dashPeriodVal;
+}
+
 const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-sheet-tab" onclick="dashSetActive(this)">:name:</a></li>'
-    , sheetTpl    = '<div id="ds:id:" class="f-sheet" style="display:none"></div>'
+    , sheetTpl    = '<div id="ds:id:" class="f-sheet" style="display:none"><div class="dash-filter-bar">'
+        + '<input type="date" class="dash-fr-input"><span class="dash-filter-sep">—</span><input type="date" class="dash-to-input">'
+        + '<select class="dash-period-sel"><option value="Неделя">Неделя</option><option value="Месяц">Месяц</option><option value="Год">Год</option></select>'
+        + '<button class="dash-apply-btn" onclick="dashApplyFilter(this.closest(\'.f-sheet\'))">Применить</button>'
+        + '<input type="text" class="dash-search-input" placeholder="Поиск..." oninput="dashApplySearch(this.value,this.closest(\'.f-sheet\'))">'
+        + '</div></div>'
     , panelTpl    = '<div id=":id:" f-period=":period:" class="f-panel pt-3"><h4>:name:</h4><div class="f-table-wrap"><table class="table table-sm table-bordered w-auto"><thead><tr class="dash-head f-head"><th>:head:</thead><tbody></tbody></table></div></div>'
     , headTpl     = '<th range=":from:-:to:">:head:'
     , itemTpl     = '<tr class="dash-item f-item" id=":id:" item-name=":name:"><td class="dash-first-cell f-first-cell" style="padding-left::pl:.2rem"><div class="show-id"><span onclick="dashCopy2Buffer(:id:)">:id:</span>'
@@ -550,8 +624,9 @@ function dashGetRecord(json) {
     document.title = json.val;
     var navCenter = document.querySelector('.navbar-center .navbar-workspace');
     if (navCenter) navCenter.textContent = json.val;
+    dashRecordId = json.id;
     dashSetStatus('Загрузка модели...');
-    newApi('GET', 'report/Дэшборд?JSON_KV&FR_modelID=' + json.id, 'dashGetModel');
+    newApi('GET', 'report/Дэшборд?JSON_KV&FR_modelID=' + json.id + '&period=' + encodeURIComponent(dashPeriodVal), 'dashGetModel');
 }
 
 function dashGetModel(json) {
@@ -573,8 +648,8 @@ function dashGetModel(json) {
         }
     }
 
-    fr = json[i].periodFrom;
-    to = json[i].periodTo;
+    fr = dashDateFr || json[i].periodFrom;
+    to = dashDateTo || json[i].periodTo;
 
     dashAjaxes++;
     newApi('GET', 'report/Дэшборд.ЗначенияЗаПериод?JSON_KV&Fr=' + dashDateYMD(fr) + '&To=' + dashDateYMD(to), 'dashGetSrc');
@@ -600,7 +675,8 @@ function dashGetModel(json) {
             model.querySelector('.sheet-tabs').insertAdjacentHTML('beforeend',
                 sheetTabTpl.replace(/:id:/g, json[i].sheetID).replace(':name:', json[i].sheet));
             model.querySelector('.sheets').insertAdjacentHTML('beforeend',
-                sheetTpl.replace(/:id:/, json[i].sheetID));
+                sheetTpl.replace(/:id:/g, json[i].sheetID));
+            dashInitFilterBar(document.getElementById('ds' + json[i].sheetID));
         }
         // Add panel to sheet (prefix 'fp' to avoid ID collision with item rows)
         if (!document.getElementById('fp' + json[i].panelID)) {
@@ -658,7 +734,46 @@ window.dashGetRepDone             = dashGetRepDone;
 window.dashDebug                  = dashDebug;
 window.dashUpdateTableWrapOverflow = dashUpdateTableWrapOverflow;
 
+window.dashApplyFilter = function(sheetEl) {
+    dashDateFr    = dashFromInputDate(sheetEl.querySelector('.dash-fr-input').value);
+    dashDateTo    = dashFromInputDate(sheetEl.querySelector('.dash-to-input').value);
+    dashPeriodVal = sheetEl.querySelector('.dash-period-sel').value;
+
+    // Get active sheet name for FR_sheet filter
+    var model = document.getElementById('dash-model');
+    var activeTab = model.querySelector('.dash-sheet-tab.active');
+    var sheetName = activeTab ? activeTab.textContent.trim() : '';
+
+    // Partial reset: remove only this sheet's panels, keep tabs/other sheets intact
+    sheetEl.querySelectorAll('.f-panel').forEach(function(p) {
+        p.querySelectorAll('.f-item').forEach(function(row) {
+            delete dashFormulas[row.id];
+            delete dashItems[row.id];
+        });
+        delete dashModelData[p.id];
+        p.remove();
+    });
+    dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashReports = {}; dashAjaxes = 0;
+
+    // Re-fetch model for this sheet only — skip get_record, use cached dashRecordId
+    dashSetStatus('Загрузка данных...');
+    newApi('GET', 'report/Дэшборд?JSON_KV&FR_modelID=' + dashRecordId
+        + '&period=' + encodeURIComponent(dashPeriodVal)
+        + (sheetName ? '&FR_sheet=' + encodeURIComponent(sheetName) : ''),
+        'dashGetModel');
+};
+
+window.dashApplySearch = function(query, sheetEl) {
+    var q = query.toLowerCase().trim();
+    sheetEl.querySelectorAll('.f-item').forEach(function(row) {
+        var match = !q || row.textContent.toLowerCase().indexOf(q) !== -1;
+        row.style.display = match ? '' : 'none';
+        row.style.backgroundColor = q && match ? 'rgba(255,140,0,0.25)' : '';
+    });
+};
+
 window.dashLoad = function(dashId) {
+    dashCurrentId = dashId;
     dashReset();
     dashSetStatus('Загрузка дэшборда...');
     newApi('GET', 'get_record/' + dashId, 'dashGetRecord');
