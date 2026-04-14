@@ -147,7 +147,7 @@ a[disabled]{
 			    <select id="t{TYP}" name="t{TYP}" {DISABLED} multi="{_parent_.MULTI}" class="form-control select2" i-orig="{_parent_.REF}" i-restrict="{RESTRICT}"
 			            <!-- Begin:&Ref_Create_Granted --> granted="{TYP}"<!-- End:&Ref_Create_Granted -->>
     			    <option value=""></option>
-    				<!-- Begin:&Add_Obj_Ref_Reqs --><option value="{ID}" {SELECTED} i-orig="{_parent_.REF}" r="{R}">{VAL}</option>
+    				<!-- Begin:&Add_Obj_Ref_Reqs --><option value="{ID}" {SELECTED} i-orig="{ORIG}" r="{R}">{VAL}</option>
     				<!-- End:&Add_Obj_Ref_Reqs -->
                 </select>
     		    <!-- Begin:&Seek_Refs --><script>$('#t{_parent_.TYP}').attr('i-more','{MORE}')</script><!-- End:&Seek_Refs -->
