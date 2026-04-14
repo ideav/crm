@@ -1323,6 +1323,9 @@ class IntegramTable{
                                     <div class="export-menu-item" onclick="window.${ instanceName }.exportTable('csv')">
                                         <span class="export-icon"><i class="pi pi-file"></i></span> CSV
                                     </div>
+                                    <div class="export-menu-item" onclick="window.${ instanceName }.copyToBuffer()">
+                                        <span class="export-icon"><i class="pi pi-clipboard"></i></span> В буфер
+                                    </div>
                                 </div>
                             </div>
                             ` : '' }
@@ -11282,6 +11285,7 @@ class IntegramTable{
                         <input type="text" class="subordinate-search-input" placeholder="Поиск..." value="${ this.escapeHtml(searchTerm) }" autocomplete="off">
                         <button type="button" class="subordinate-search-clear" title="Очистить поиск"${ searchTerm ? '' : ' style="display: none;"' }><i class="pi pi-times"></i></button>
                     </div>
+                    <button type="button" class="subordinate-copy-buffer-btn" title="Копировать в буфер"><i class="pi pi-clipboard"></i></button>
                     <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
                         <i class="pi pi-table"></i>
                     </a>
@@ -11378,6 +11382,14 @@ class IntegramTable{
                 });
             }
 
+            // Attach copy-to-buffer button handler (issue #1788)
+            const copyBufferBtn = container.querySelector('.subordinate-copy-buffer-btn');
+            if (copyBufferBtn) {
+                copyBufferBtn.addEventListener('click', () => {
+                    this.copySubordinateToBuffer(container);
+                });
+            }
+
             // Attach sortable column header handlers
             const sortableHeaders = container.querySelectorAll('.subordinate-sortable-header');
             sortableHeaders.forEach(th => {
@@ -11444,6 +11456,64 @@ class IntegramTable{
             // (re-render happens on sort/search but pagination state is preserved on container)
             if (container._subordinateHasMore !== undefined) {
                 this.attachSubordinateScrollListener(container);
+            }
+        }
+
+        /**
+         * Copy subordinate table data to clipboard with TAB delimiters (issue #1788).
+         * Uses the currently displayed rows stored on the container element.
+         */
+        async copySubordinateToBuffer(container) {
+            const data = container._subordinateData;
+            const metadata = container._subordinateMetadata;
+
+            if (!data || !metadata) {
+                this.showToast('Нет данных для копирования', 'error');
+                return;
+            }
+
+            const reqs = metadata.reqs || [];
+            // Build column list (same as renderSubordinateTable): main column + non-nested reqs
+            const columns = [{ name: this.getMetadataName(metadata) }];
+            reqs.forEach(req => {
+                if (!req.arr_id) {
+                    const attrs = this.parseAttrs(req.attrs);
+                    columns.push({ name: attrs.alias || req.val });
+                }
+            });
+
+            const rows = Array.isArray(data) ? data : [];
+            if (rows.length === 0) {
+                this.showToast('Нет данных для копирования', 'error');
+                return;
+            }
+
+            // Build TAB-delimited text from rows (only non-nested columns)
+            const lines = rows.map(row => {
+                const values = row.r || [];
+                const cells = [];
+                let valIdx = 0;
+                // Main value
+                cells.push(String(values[valIdx] || ''));
+                valIdx++;
+                // Requisite columns (skip nested arr_id columns)
+                reqs.forEach(req => {
+                    if (!req.arr_id) {
+                        cells.push(String(values[valIdx] || ''));
+                    }
+                    valIdx++;
+                });
+                return cells.join('\t');
+            });
+
+            const text = lines.join('\n');
+
+            try {
+                await navigator.clipboard.writeText(text);
+                this.showToast(`Скопировано ${ rows.length } записей в буфер`, 'success');
+            } catch (error) {
+                console.error('Copy to buffer error:', error);
+                this.showToast(`Ошибка копирования: ${ error.message }`, 'error');
             }
         }
 
@@ -15501,6 +15571,58 @@ class IntegramTable{
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
         }
+
+        /**
+         * Copy table data to clipboard with TAB delimiters (issue #1788).
+         * Loads all data matching current filters, then formats rows as TAB-separated
+         * lines so they can be pasted back via the paste-data-btn button.
+         */
+        async copyToBuffer() {
+            // Hide export menu
+            const menuId = `${ this.options.instanceName }-export-menu`;
+            const menu = document.getElementById(menuId);
+            if (menu) {
+                menu.style.display = 'none';
+            }
+
+            try {
+                // Get visible columns in current order
+                const orderedColumns = this.columnOrder
+                    .map(id => this.columns.find(c => c.id === id))
+                    .filter(c => c && this.visibleColumns.includes(c.id));
+
+                if (orderedColumns.length === 0) {
+                    this.showToast('Нет видимых колонок для копирования', 'error');
+                    return;
+                }
+
+                // Show loading message
+                this.showToast('Загрузка данных для копирования...', 'info');
+
+                // Load all data matching current filters
+                const allData = await this.loadAllDataForExport();
+
+                if (allData.length === 0) {
+                    this.showToast('Нет данных для копирования', 'error');
+                    return;
+                }
+
+                // Prepare export data (plain text values)
+                const exportData = this.prepareExportDataFromRows(allData, orderedColumns);
+
+                // Build TAB-delimited text (rows separated by newlines, columns by TAB)
+                const lines = exportData.map(row => row.join('\t'));
+                const text = lines.join('\n');
+
+                // Copy to clipboard
+                await navigator.clipboard.writeText(text);
+
+                this.showToast(`Скопировано ${ allData.length } записей в буфер`, 'success');
+            } catch (error) {
+                console.error('Copy to buffer error:', error);
+                this.showToast(`Ошибка копирования: ${ error.message }`, 'error');
+            }
+        }
     }
 
 // Global registry for all IntegramTable instances
@@ -17169,6 +17291,7 @@ class IntegramCreateFormHelper {
                 <button type="button" class="btn btn-sm btn-primary subordinate-add-btn" data-arr-id="${arrId}" data-parent-id="${parentRecordId}">
                     + Добавить
                 </button>
+                <button type="button" class="subordinate-copy-buffer-btn" title="Копировать в буфер"><i class="pi pi-clipboard"></i></button>
                 <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
                     <i class="pi pi-table"></i>
                 </a>
@@ -17219,6 +17342,10 @@ class IntegramCreateFormHelper {
 
         container.innerHTML = html;
 
+        // Store data on container for copy-to-buffer (issue #1788)
+        container._subordinateData = records;
+        container._subordinateMetadata = metadata;
+
         // Attach handlers for add button
         const addBtn = container.querySelector('.subordinate-add-btn');
         if (addBtn) {
@@ -17226,6 +17353,14 @@ class IntegramCreateFormHelper {
                 if (typeof window.openCreateRecordForm === 'function') {
                     window.openCreateRecordForm(arrId, { parentId: parentRecordId });
                 }
+            });
+        }
+
+        // Attach copy-to-buffer button handler (issue #1788)
+        const copyBufferBtn = container.querySelector('.subordinate-copy-buffer-btn');
+        if (copyBufferBtn) {
+            copyBufferBtn.addEventListener('click', () => {
+                this.copySubordinateToBuffer(container);
             });
         }
 
@@ -17239,6 +17374,46 @@ class IntegramCreateFormHelper {
                 }
             });
         });
+    }
+
+    /**
+     * Copy subordinate table data to clipboard with TAB delimiters (issue #1788).
+     * Uses the data stored on the container element.
+     */
+    async copySubordinateToBuffer(container) {
+        const records = container._subordinateData;
+        const metadata = container._subordinateMetadata;
+
+        if (!records || !metadata || records.length === 0) {
+            this.showToast('Нет данных для копирования', 'info');
+            return;
+        }
+
+        const reqs = metadata.reqs || [];
+
+        // Build TAB-delimited text (main column + non-nested req columns)
+        const lines = records.map(record => {
+            const values = record.r || [];
+            const cells = [String(values[0] || '')];
+            let valIdx = 1;
+            reqs.forEach(req => {
+                if (!req.arr_id) {
+                    cells.push(String(values[valIdx] || ''));
+                }
+                valIdx++;
+            });
+            return cells.join('\t');
+        });
+
+        const text = lines.join('\n');
+
+        try {
+            await navigator.clipboard.writeText(text);
+            this.showToast(`Скопировано ${ records.length } записей в буфер`, 'success');
+        } catch (error) {
+            console.error('Copy to buffer error:', error);
+            this.showToast(`Ошибка копирования: ${ error.message }`, 'error');
+        }
     }
 
     /**

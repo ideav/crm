@@ -1500,6 +1500,7 @@ class IntegramCreateFormHelper {
                 <button type="button" class="btn btn-sm btn-primary subordinate-add-btn" data-arr-id="${arrId}" data-parent-id="${parentRecordId}">
                     + Добавить
                 </button>
+                <button type="button" class="subordinate-copy-buffer-btn" title="Копировать в буфер"><i class="pi pi-clipboard"></i></button>
                 <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
                     <i class="pi pi-table"></i>
                 </a>
@@ -1550,6 +1551,10 @@ class IntegramCreateFormHelper {
 
         container.innerHTML = html;
 
+        // Store data on container for copy-to-buffer (issue #1788)
+        container._subordinateData = records;
+        container._subordinateMetadata = metadata;
+
         // Attach handlers for add button
         const addBtn = container.querySelector('.subordinate-add-btn');
         if (addBtn) {
@@ -1557,6 +1562,14 @@ class IntegramCreateFormHelper {
                 if (typeof window.openCreateRecordForm === 'function') {
                     window.openCreateRecordForm(arrId, { parentId: parentRecordId });
                 }
+            });
+        }
+
+        // Attach copy-to-buffer button handler (issue #1788)
+        const copyBufferBtn = container.querySelector('.subordinate-copy-buffer-btn');
+        if (copyBufferBtn) {
+            copyBufferBtn.addEventListener('click', () => {
+                this.copySubordinateToBuffer(container);
             });
         }
 
@@ -1570,6 +1583,46 @@ class IntegramCreateFormHelper {
                 }
             });
         });
+    }
+
+    /**
+     * Copy subordinate table data to clipboard with TAB delimiters (issue #1788).
+     * Uses the data stored on the container element.
+     */
+    async copySubordinateToBuffer(container) {
+        const records = container._subordinateData;
+        const metadata = container._subordinateMetadata;
+
+        if (!records || !metadata || records.length === 0) {
+            this.showToast('Нет данных для копирования', 'info');
+            return;
+        }
+
+        const reqs = metadata.reqs || [];
+
+        // Build TAB-delimited text (main column + non-nested req columns)
+        const lines = records.map(record => {
+            const values = record.r || [];
+            const cells = [String(values[0] || '')];
+            let valIdx = 1;
+            reqs.forEach(req => {
+                if (!req.arr_id) {
+                    cells.push(String(values[valIdx] || ''));
+                }
+                valIdx++;
+            });
+            return cells.join('\t');
+        });
+
+        const text = lines.join('\n');
+
+        try {
+            await navigator.clipboard.writeText(text);
+            this.showToast(`Скопировано ${ records.length } записей в буфер`, 'success');
+        } catch (error) {
+            console.error('Copy to buffer error:', error);
+            this.showToast(`Ошибка копирования: ${ error.message }`, 'error');
+        }
     }
 
     /**

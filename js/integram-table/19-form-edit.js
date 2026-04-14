@@ -1030,6 +1030,7 @@
                         <input type="text" class="subordinate-search-input" placeholder="Поиск..." value="${ this.escapeHtml(searchTerm) }" autocomplete="off">
                         <button type="button" class="subordinate-search-clear" title="Очистить поиск"${ searchTerm ? '' : ' style="display: none;"' }><i class="pi pi-times"></i></button>
                     </div>
+                    <button type="button" class="subordinate-copy-buffer-btn" title="Копировать в буфер"><i class="pi pi-clipboard"></i></button>
                     <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
                         <i class="pi pi-table"></i>
                     </a>
@@ -1126,6 +1127,14 @@
                 });
             }
 
+            // Attach copy-to-buffer button handler (issue #1788)
+            const copyBufferBtn = container.querySelector('.subordinate-copy-buffer-btn');
+            if (copyBufferBtn) {
+                copyBufferBtn.addEventListener('click', () => {
+                    this.copySubordinateToBuffer(container);
+                });
+            }
+
             // Attach sortable column header handlers
             const sortableHeaders = container.querySelectorAll('.subordinate-sortable-header');
             sortableHeaders.forEach(th => {
@@ -1192,6 +1201,64 @@
             // (re-render happens on sort/search but pagination state is preserved on container)
             if (container._subordinateHasMore !== undefined) {
                 this.attachSubordinateScrollListener(container);
+            }
+        }
+
+        /**
+         * Copy subordinate table data to clipboard with TAB delimiters (issue #1788).
+         * Uses the currently displayed rows stored on the container element.
+         */
+        async copySubordinateToBuffer(container) {
+            const data = container._subordinateData;
+            const metadata = container._subordinateMetadata;
+
+            if (!data || !metadata) {
+                this.showToast('Нет данных для копирования', 'error');
+                return;
+            }
+
+            const reqs = metadata.reqs || [];
+            // Build column list (same as renderSubordinateTable): main column + non-nested reqs
+            const columns = [{ name: this.getMetadataName(metadata) }];
+            reqs.forEach(req => {
+                if (!req.arr_id) {
+                    const attrs = this.parseAttrs(req.attrs);
+                    columns.push({ name: attrs.alias || req.val });
+                }
+            });
+
+            const rows = Array.isArray(data) ? data : [];
+            if (rows.length === 0) {
+                this.showToast('Нет данных для копирования', 'error');
+                return;
+            }
+
+            // Build TAB-delimited text from rows (only non-nested columns)
+            const lines = rows.map(row => {
+                const values = row.r || [];
+                const cells = [];
+                let valIdx = 0;
+                // Main value
+                cells.push(String(values[valIdx] || ''));
+                valIdx++;
+                // Requisite columns (skip nested arr_id columns)
+                reqs.forEach(req => {
+                    if (!req.arr_id) {
+                        cells.push(String(values[valIdx] || ''));
+                    }
+                    valIdx++;
+                });
+                return cells.join('\t');
+            });
+
+            const text = lines.join('\n');
+
+            try {
+                await navigator.clipboard.writeText(text);
+                this.showToast(`Скопировано ${ rows.length } записей в буфер`, 'success');
+            } catch (error) {
+                console.error('Copy to buffer error:', error);
+                this.showToast(`Ошибка копирования: ${ error.message }`, 'error');
             }
         }
 
