@@ -6016,10 +6016,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			$GLOBALS["DESC"] = isset($_REQUEST["desc"]) ? "DESC" : "";
 			$GLOBALS["PG"] = isset($_REQUEST["pg"]) ? max($_REQUEST["pg"], 1) : 1;
 			$sql = "SELECT CASE WHEN arrs.id IS NULL THEN a.id ELSE typs.id END t, CASE WHEN refs.id IS NULL THEN typs.t ELSE refs.t END base_typ
-						, CASE WHEN refs.id IS NULL THEN typs.val ELSE refs.val END val, refs.id ref_id, arrs.id arr_id, a.val attrs, a.id
-					FROM $z a, $z typs LEFT JOIN $z refs ON refs.id=typs.t AND refs.t!=refs.id
+						, CASE WHEN refs.id IS NULL THEN typs.val WHEN a.t=1 THEN a.val ELSE refs.val END val
+						, CASE WHEN a.t=1 THEN 1 ELSE refs.id END ref_id, arrs.id arr_id, a.val attrs, a.id
+					FROM $z a LEFT JOIN $z typs ON typs.id=a.t AND a.t!=1 LEFT JOIN $z refs ON refs.id=typs.t AND refs.t!=refs.id
 							LEFT JOIN $z arrs ON refs.id IS NULL AND arrs.up=typs.id AND arrs.ord=1
-					WHERE a.up=$id AND typs.id=a.t ORDER BY a.ord";
+					WHERE a.up=$id ORDER BY a.ord";
 			$data_set = Exec_sql($sql, "Get all Names of Reqs of the Typ");
 			$GLOBALS["no_reqs"] = mysqli_num_rows($data_set) == 0; # Check if the Type has any Reqs
 			$ord = 0;
@@ -6209,7 +6210,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					$pre = substr($key, 0, strpos($key, "_"));
 					$col = substr($key, strpos($key, "_")+1);
 					# Replace field name with its ID and remove the named filter
-					if($tmp = array_search($col, $GLOBALS["REQNAMES"])){ // Reqs names
+					if(is_array($GLOBALS["REQNAMES"]) && ($tmp = array_search($col, $GLOBALS["REQNAMES"]))){ // Reqs names
 						$col = $tmp;
 						$_REQUEST[$pre."_$col"] = $value;
 						unset($_REQUEST[$key]);
@@ -9308,11 +9309,11 @@ if(Validate_Token())
 		    $isOne = $id > 0;
         	$sql = "SELECT obj.id, obj.up, obj.t, obj.ord uniq, obj.val, req.id req_t, req.t ref_id, refs.id ref, req.val attrs, req.ord
         				, CASE WHEN refs.id IS NULL THEN typs.t ELSE refs.t END base_typ
-        				, CASE WHEN refs.id IS NULL THEN typs.val ELSE refs.val END req_val
+        				, CASE WHEN req.t=1 THEN req.val WHEN refs.id IS NULL THEN typs.val ELSE refs.val END req_val
         				, CASE WHEN arrs.id IS NULL THEN NULL ELSE typs.id END arr_id
         			FROM $z obj
                         LEFT JOIN $z req ON req.up=".($isOne ? $id : "obj.id")."
-                        LEFT JOIN $z typs ON typs.id=req.t
+                        LEFT JOIN $z typs ON typs.id=req.t AND req.t!=1
                         LEFT JOIN $z refs ON refs.id=typs.t AND refs.t!=refs.id
                         LEFT JOIN $z arrs ON refs.id IS NULL AND arrs.up=typs.id AND arrs.ord=1
         			WHERE ".($isOne ? "obj.id=$id" : "obj.up=0 AND obj.id!=obj.t AND obj.t!=0")
