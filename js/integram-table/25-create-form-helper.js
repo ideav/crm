@@ -1500,10 +1500,12 @@ class IntegramCreateFormHelper {
                 <button type="button" class="btn btn-sm btn-primary subordinate-add-btn" data-arr-id="${arrId}" data-parent-id="${parentRecordId}">
                     + Добавить
                 </button>
-                <button type="button" class="subordinate-copy-buffer-btn" title="Копировать в буфер"><i class="pi pi-clipboard"></i></button>
-                <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
-                    <i class="pi pi-table"></i>
-                </a>
+                <div class="subordinate-table-actions">
+                    <button type="button" class="subordinate-copy-buffer-btn" title="Копировать в буфер"><i class="pi pi-clipboard"></i></button>
+                    <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
+                        <i class="pi pi-table"></i>
+                    </a>
+                </div>
             </div>
         `;
 
@@ -1586,6 +1588,20 @@ class IntegramCreateFormHelper {
     }
 
     /**
+     * Strip "id:label" reference prefix from a value for plain-text output (issue #1790).
+     * Returns just the label part if the value matches "number:text" format.
+     */
+    stripReferencePrefix(value) {
+        if (typeof value === 'string' && value.includes(':')) {
+            const parts = value.split(':');
+            if (parts.length >= 2 && !isNaN(parseInt(parts[0]))) {
+                return parts.slice(1).join(':');
+            }
+        }
+        return value;
+    }
+
+    /**
      * Copy subordinate table data to clipboard with TAB delimiters (issue #1788).
      * Uses the data stored on the container element.
      */
@@ -1603,11 +1619,11 @@ class IntegramCreateFormHelper {
         // Build TAB-delimited text (main column + non-nested req columns)
         const lines = records.map(record => {
             const values = record.r || [];
-            const cells = [String(values[0] || '')];
+            const cells = [this.stripReferencePrefix(String(values[0] || ''))];
             let valIdx = 1;
             reqs.forEach(req => {
                 if (!req.arr_id) {
-                    cells.push(String(values[valIdx] || ''));
+                    cells.push(this.stripReferencePrefix(String(values[valIdx] || '')));
                 }
                 valIdx++;
             });

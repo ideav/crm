@@ -1030,10 +1030,12 @@
                         <input type="text" class="subordinate-search-input" placeholder="Поиск..." value="${ this.escapeHtml(searchTerm) }" autocomplete="off">
                         <button type="button" class="subordinate-search-clear" title="Очистить поиск"${ searchTerm ? '' : ' style="display: none;"' }><i class="pi pi-times"></i></button>
                     </div>
-                    <button type="button" class="subordinate-copy-buffer-btn" title="Копировать в буфер"><i class="pi pi-clipboard"></i></button>
-                    <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
-                        <i class="pi pi-table"></i>
-                    </a>
+                    <div class="subordinate-table-actions">
+                        <button type="button" class="subordinate-copy-buffer-btn" title="Копировать в буфер"><i class="pi pi-clipboard"></i></button>
+                        <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
+                            <i class="pi pi-table"></i>
+                        </a>
+                    </div>
                 </div>
             `;
 
@@ -1205,6 +1207,20 @@
         }
 
         /**
+         * Strip "id:label" reference prefix from a value for plain-text output (issue #1790).
+         * Returns just the label part if the value matches "number:text" format.
+         */
+        stripReferencePrefix(value) {
+            if (typeof value === 'string' && value.includes(':')) {
+                const parts = value.split(':');
+                if (parts.length >= 2 && !isNaN(parseInt(parts[0]))) {
+                    return parts.slice(1).join(':');
+                }
+            }
+            return value;
+        }
+
+        /**
          * Copy subordinate table data to clipboard with TAB delimiters (issue #1788).
          * Uses the currently displayed rows stored on the container element.
          */
@@ -1238,13 +1254,13 @@
                 const values = row.r || [];
                 const cells = [];
                 let valIdx = 0;
-                // Main value
-                cells.push(String(values[valIdx] || ''));
+                // Main value (strip "id:label" reference prefix)
+                cells.push(this.stripReferencePrefix(String(values[valIdx] || '')));
                 valIdx++;
                 // Requisite columns (skip nested arr_id columns)
                 reqs.forEach(req => {
                     if (!req.arr_id) {
-                        cells.push(String(values[valIdx] || ''));
+                        cells.push(this.stripReferencePrefix(String(values[valIdx] || '')));
                     }
                     valIdx++;
                 });
