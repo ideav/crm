@@ -382,19 +382,19 @@ $(document).ready(function() {
                 if (filterText && records.length < 20) {
                     var q = filterText.toLowerCase();
                     list = records.filter(function(r) {
-                        return (r.u || '').toLowerCase().indexOf(q) !== -1;
+                        return String(r.u || r.o || r.i || '').toLowerCase().indexOf(q) !== -1;
                     });
                 }
                 if (!list.length) {
                     $dropdown.append('<div class="list-group-item list-group-item-action text-muted small">Нет результатов</div>');
                 } else {
                     list.forEach(function(r) {
-                        var $opt = $('<a href="#" class="list-group-item list-group-item-action py-1 px-2 small"></a>').text(r.u || r.o || r.i);
+                        var $opt = $('<a href="#" class="list-group-item list-group-item-action py-1 px-2 small"></a>').text(String(r.u || r.o || r.i || ''));
                         $opt.on('click', function(e) {
                             e.preventDefault();
                             e.stopPropagation();
                             var selId = r.i;
-                            var selText = r.u || r.o || r.i;
+                            var selText = String(r.u || r.o || r.i || '');
                             $search.val(selText);
                             $sel.val(selId);
                             // Update hidden select option if needed
