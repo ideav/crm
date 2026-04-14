@@ -2774,6 +2774,49 @@ td.cell-saving {
     color: var(--md-text-hint);
 }
 
+/* Issue #1804: "link to any record" editor — clear + table-picker buttons in flex row */
+.form-any-ref-editor .inline-editor-reference-header {
+    padding-right: 4px;
+}
+
+.form-any-ref-editor .inline-editor-reference-search {
+    padding-right: 8px;
+}
+
+.form-any-ref-editor .inline-editor-reference-clear {
+    position: static;
+    transform: none;
+    flex-shrink: 0;
+    margin: 0 2px;
+}
+
+.form-any-ref-editor .inline-editor-reference-clear:active {
+    transform: scale(0.9);
+}
+
+.form-any-ref-table-btn {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: transparent;
+    color: var(--md-text-secondary);
+    font-size: 1rem;
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 0;
+    margin-right: 2px;
+}
+
+.form-any-ref-table-btn:hover {
+    background: var(--md-hover);
+    color: var(--md-primary);
+}
+
 /* Issue #1384: dropdown is moved to document.body by JS (_attachFixedDropdown) so it
    escapes the table's overflow clipping. position/top/left/width are set via JS. */
 .inline-editor-reference-dropdown {

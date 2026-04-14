@@ -480,7 +480,7 @@
                                            placeholder="Поиск..."
                                            autocomplete="off"
                                            value="${ this.escapeHtml(currentText) }">
-                                    <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
+                                    <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button" style="${ currentId ? '' : 'display:none;' }"><i class="pi pi-times"></i></button>
                                     <button class="form-any-ref-table-btn" title="Выбрать таблицу" aria-label="Выбрать таблицу" type="button"><i class="pi pi-table"></i></button>
                                 </div>
                                 <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${ req.id }-dropdown" style="display:none;">
