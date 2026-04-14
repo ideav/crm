@@ -383,7 +383,11 @@
                     } else if (isAnyRecordLink && refValueId) {
                         displayContent = `<a href="#" class="any-record-link" data-record-id="${ refValueId }" onmouseover="window.${ instanceName }.resolveAnyRecordLink(this, '${ refValueId }');" onclick="window.${ instanceName }.navigateAnyRecordLink(event, this, '${ refValueId }'); return false;">${ escapedValue }</a>`;
                     }
-                    const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
+                    // Issue #1810: for any-record link, resolve the real table via get_record before opening form
+                    const editIconOnclick = isAnyRecordLink
+                        ? `window.${ instanceName }.openAnyRefEditForm('${ recordId }', ${ rowIndex }); event.stopPropagation();`
+                        : `window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();`;
+                    const editIcon = `<span class="edit-icon" onclick="${ editIconOnclick }" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
                     escapedValue = `<div class="cell-content-wrapper"><span title="${ recordId }">${ displayContent }</span>${ editIcon }</div>`;
                 }
             }

@@ -2153,7 +2153,11 @@ class IntegramTable{
                     } else if (isAnyRecordLink && refValueId) {
                         displayContent = `<a href="#" class="any-record-link" data-record-id="${ refValueId }" onmouseover="window.${ instanceName }.resolveAnyRecordLink(this, '${ refValueId }');" onclick="window.${ instanceName }.navigateAnyRecordLink(event, this, '${ refValueId }'); return false;">${ escapedValue }</a>`;
                     }
-                    const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
+                    // Issue #1810: for any-record link, resolve the real table via get_record before opening form
+                    const editIconOnclick = isAnyRecordLink
+                        ? `window.${ instanceName }.openAnyRefEditForm('${ recordId }', ${ rowIndex }); event.stopPropagation();`
+                        : `window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();`;
+                    const editIcon = `<span class="edit-icon" onclick="${ editIconOnclick }" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
                     escapedValue = `<div class="cell-content-wrapper"><span title="${ recordId }">${ displayContent }</span>${ editIcon }</div>`;
                 }
             }
@@ -4699,6 +4703,27 @@ class IntegramTable{
         }
 
         /**
+         * Issue #1810: Open edit form for an "any record link" cell by first resolving the
+         * real table type ID via get_record/{recordId} (field "obj"), then calling openEditForm.
+         */
+        async openAnyRefEditForm(recordId, rowIndex) {
+            const apiBase = this.getApiBase();
+            try {
+                const resp = await fetch(`${ apiBase }/get_record/${ encodeURIComponent(recordId) }`);
+                if (!resp.ok) throw new Error(`HTTP ${ resp.status }`);
+                const data = await resp.json();
+                if (data && data.obj) {
+                    await this.openEditForm(recordId, data.obj, rowIndex || 0);
+                } else {
+                    this.showToast('Не удалось определить тип записи', 'error');
+                }
+            } catch (err) {
+                console.error('Error opening any-ref edit form:', err);
+                this.showToast(`Ошибка: ${ err.message }`, 'error');
+            }
+        }
+
+        /**
          * Issue #853: Render multi-select reference editor for cells with :MULTI: in attrs.
          * Shows currently selected values as removable tags and a search input to add more.
          */
@@ -5970,7 +5995,12 @@ class IntegramTable{
                 const hasNewValue = newValue !== null && newValue !== undefined && newValue !== '';
                 if (hasNewValue && editTypeId && editRecordId && editRecordId !== '' && editRecordId !== '0' && editRecordId !== 'dynamic') {
                     const instanceName = this.options.instanceName;
-                    const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ editRecordId }', '${ editTypeId }', ${ editRowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
+                    // Issue #1810: any-ref cell — resolve real table via get_record before opening form
+                    const isAnyRefCell = cell.dataset.anyRef === '1';
+                    const editIconOnclick = isAnyRefCell
+                        ? `window.${ instanceName }.openAnyRefEditForm('${ editRecordId }', ${ editRowIndex }); event.stopPropagation();`
+                        : `window.${ instanceName }.openEditForm('${ editRecordId }', '${ editTypeId }', ${ editRowIndex }); event.stopPropagation();`;
+                    const editIcon = `<span class="edit-icon" onclick="${ editIconOnclick }" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
                     cell.innerHTML = `<div class="cell-content-wrapper"><span title="${ editRecordId }">${ escapedValue }</span>${ editIcon }</div>`;
                 } else {
                     cell.innerHTML = escapedValue;
