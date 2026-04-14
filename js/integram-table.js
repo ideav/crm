@@ -11278,8 +11278,8 @@ class IntegramTable{
 
             let html = `
                 <div class="subordinate-table-toolbar">
-                    <button type="button" class="btn btn-sm btn-primary subordinate-add-btn" data-arr-id="${ arrId }" data-parent-id="${ parentRecordId }">
-                        + Добавить
+                    <button type="button" class="btn btn-sm btn-primary subordinate-add-btn" data-arr-id="${ arrId }" data-parent-id="${ parentRecordId }" title="Добавить">
+                        <i class="pi pi-plus"></i>
                     </button>
                     <div class="subordinate-search-wrapper">
                         <input type="text" class="subordinate-search-input" placeholder="Поиск..." value="${ this.escapeHtml(searchTerm) }" autocomplete="off">
@@ -17304,8 +17304,8 @@ class IntegramCreateFormHelper {
 
         let html = `
             <div class="subordinate-table-toolbar">
-                <button type="button" class="btn btn-sm btn-primary subordinate-add-btn" data-arr-id="${arrId}" data-parent-id="${parentRecordId}">
-                    + Добавить
+                <button type="button" class="btn btn-sm btn-primary subordinate-add-btn" data-arr-id="${arrId}" data-parent-id="${parentRecordId}" title="Добавить">
+                    <i class="pi pi-plus"></i>
                 </button>
                 <div class="subordinate-table-actions">
                     <button type="button" class="subordinate-copy-buffer-btn" title="Копировать в буфер"><i class="pi pi-clipboard"></i></button>
