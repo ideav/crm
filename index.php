@@ -6630,7 +6630,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			$data_set = Exec_sql($sql, "Get all Object reqs");
 
 			while($row = mysqli_fetch_array($data_set))
-				if(isset($GLOBALS["NonREF_typs"][$row["t"]])){
+				if($row["t"] == 1){ # "Any link" type - store directly as plain value
+					$rows[1]["id"] = $row["id"];
+					$rows[1]["val"] = $row["val"];
+				}
+				elseif(isset($GLOBALS["NonREF_typs"][$row["t"]])){
 					$rows[$row["t"]]["id"] = $row["id"];
 					$rows[$row["t"]]["val"] = $row["val"];
 					$rows[$row["t"]]["arr_num"] = isset($row["arr_num"]) ? $row["arr_num"] : "";
@@ -6682,6 +6686,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					break;
 				if(isset($rows[$key]))
 					$row = $rows[$key];
+				elseif(isset($GLOBALS["REF_typs"][$key]) && isset($rows[$GLOBALS["REF_typs"][$key]])) # "Any link" or reference fallback
+					$row = $rows[$GLOBALS["REF_typs"][$key]];
 				else
 					$row = array("t" => $key);
 				if(isset($GLOBALS["GRANTS"][$key])) # Skip barred Reqs - hide them
