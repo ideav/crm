@@ -462,5 +462,76 @@
         }
 
         /**
+         * Issue #1794: Resolve "link to any record" href by fetching the table type via get_record API.
+         * Called on hover so the link is ready before the user clicks.
+         * @param {HTMLElement} anchorEl - The <a> element to update
+         * @param {string} recordId - The record ID from the cell value (before the colon)
+         */
+        resolveAnyRecordLink(anchorEl, recordId) {
+            // Skip if already resolved or being resolved
+            if (anchorEl.dataset.anyRefResolved) return;
+            anchorEl.dataset.anyRefResolved = 'pending';
+
+            const apiBase = this.getApiBase();
+            fetch(`${ apiBase }/get_record/${ encodeURIComponent(recordId) }`)
+                .then(res => res.json())
+                .then(data => {
+                    const objId = data && data.obj;
+                    if (!objId) {
+                        anchorEl.dataset.anyRefResolved = 'error';
+                        return;
+                    }
+                    const pathParts = window.location.pathname.split('/');
+                    const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+                    anchorEl.href = `/${ dbName }/table/${ objId }?F_I=${ recordId }`;
+                    anchorEl.dataset.anyRefResolved = 'ok';
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log(`[#1794] resolveAnyRecordLink: recordId=${recordId}, obj=${objId} -> href=${anchorEl.href}`);
+                    }
+                })
+                .catch(err => {
+                    anchorEl.dataset.anyRefResolved = 'error';
+                    if (window.INTEGRAM_DEBUG) {
+                        console.error(`[#1794] resolveAnyRecordLink error for recordId=${recordId}:`, err);
+                    }
+                });
+        }
+
+        /**
+         * Issue #1794: Navigate to "link to any record" target.
+         * If the href has already been resolved, follow it; otherwise fetch and navigate.
+         * @param {Event} event - The click event
+         * @param {HTMLElement} anchorEl - The <a> element
+         * @param {string} recordId - The record ID from the cell value
+         */
+        navigateAnyRecordLink(event, anchorEl, recordId) {
+            event.stopPropagation();
+            // If already resolved, let the browser follow the href
+            if (anchorEl.dataset.anyRefResolved === 'ok') {
+                window.location.href = anchorEl.href;
+                return;
+            }
+            // Fetch and navigate
+            const apiBase = this.getApiBase();
+            fetch(`${ apiBase }/get_record/${ encodeURIComponent(recordId) }`)
+                .then(res => res.json())
+                .then(data => {
+                    const objId = data && data.obj;
+                    if (!objId) return;
+                    const pathParts = window.location.pathname.split('/');
+                    const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+                    const url = `/${ dbName }/table/${ objId }?F_I=${ recordId }`;
+                    anchorEl.href = url;
+                    anchorEl.dataset.anyRefResolved = 'ok';
+                    window.location.href = url;
+                })
+                .catch(err => {
+                    if (window.INTEGRAM_DEBUG) {
+                        console.error(`[#1794] navigateAnyRecordLink error for recordId=${recordId}:`, err);
+                    }
+                });
+        }
+
+        /**
          * Toggle checkbox selection mode
          */

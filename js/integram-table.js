@@ -1790,15 +1790,18 @@ class IntegramTable{
             // data-ref: "1" for reference/lookup fields
             // data-array: "1" for multiselect/array fields
             const isRefField = column.ref_id != null || (column.ref && column.ref !== 0);
+            // Issue #1794: "link to any record" type — orig === "1" with no ref_id and no ref
+            const isAnyRecordLink = column.orig === '1' && column.ref_id == null && !column.ref;
             const isArrayField = column.attrs && column.attrs.includes(':MULTI:');
-            const dataTypeAttrs = ` data-type="${format}"${isRefField ? ' data-ref="1"' : ''}${isArrayField ? ' data-array="1"' : ''}`;
+            const dataTypeAttrs = ` data-type="${format}"${isRefField ? ' data-ref="1"' : ''}${isAnyRecordLink ? ' data-any-ref="1"' : ''}${isArrayField ? ' data-array="1"' : ''}`;
 
             // In object format, reference fields and GRANT/REPORT_COLUMN fields return values as "id:Value"
             // For multi-select fields, value is "id1,id2,...:val1,val2,..." (issue #863)
             // Parse to extract the id(s) and display only the Value part (issue #925)
+            // Issue #1794: also parse "id:Value" for "any record" link type
             let multiRawValue = null;  // Original raw value for multi-select editor (issue #863)
             const isGrantOrReportColumn = format === 'GRANT' || format === 'REPORT_COLUMN';
-            if ((isRefField || isGrantOrReportColumn) && value && typeof value === 'string') {
+            if ((isRefField || isAnyRecordLink || isGrantOrReportColumn) && value && typeof value === 'string') {
                 const colonIndex = value.indexOf(':');
                 if (colonIndex > 0) {
                     refValueId = value.substring(0, colonIndex);
@@ -2137,6 +2140,7 @@ class IntegramTable{
 
                 if (shouldShowEditIcon) {
                     // Issue #1404: For reference fields with a known record ID, wrap value in hyperlink
+                    // Issue #1794: For "any record" link type, also wrap in lazy-resolved hyperlink
                     let displayContent = escapedValue;
                     if (isRefField && refValueId && !isArrayField) {
                         const refTypeId = column.orig || column.ref_id || typeId;
@@ -2146,6 +2150,8 @@ class IntegramTable{
                             const refUrl = `/${ dbName }/table/${ refTypeId }?F_I=${ refValueId }`;
                             displayContent = `<a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a>`;
                         }
+                    } else if (isAnyRecordLink && refValueId) {
+                        displayContent = `<a href="#" class="any-record-link" data-record-id="${ refValueId }" onmouseover="window.${ instanceName }.resolveAnyRecordLink(this, '${ refValueId }');" onclick="window.${ instanceName }.navigateAnyRecordLink(event, this, '${ refValueId }'); return false;">${ escapedValue }</a>`;
                     }
                     const editIcon = `<span class="edit-icon" onclick="window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
                     escapedValue = `<div class="cell-content-wrapper"><span title="${ recordId }">${ displayContent }</span>${ editIcon }</div>`;
@@ -2162,6 +2168,13 @@ class IntegramTable{
                     const refUrl = `/${ dbName }/table/${ refTypeId }?F_I=${ refValueId }`;
                     escapedValue = `<div class="cell-content-wrapper"><span title="${ refValueId }"><a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a></span></div>`;
                 }
+            }
+
+            // Issue #1794: For "link to any record" type (orig === "1"), render as a lazy-resolved link.
+            // The target table type is unknown at render time; it is fetched via get_record/{id} on hover.
+            if (isAnyRecordLink && refValueId && !escapedValue.includes('cell-content-wrapper')) {
+                const instanceName = this.options.instanceName;
+                escapedValue = `<div class="cell-content-wrapper"><span title="${ refValueId }"><a href="#" class="any-record-link" data-record-id="${ refValueId }" onmouseover="window.${ instanceName }.resolveAnyRecordLink(this, '${ refValueId }');" onclick="window.${ instanceName }.navigateAnyRecordLink(event, this, '${ refValueId }'); return false;">${ escapedValue }</a></span></div>`;
             }
 
             // Add inline editing data attributes for editable cells (only when not already showing edit icon)
@@ -14889,6 +14902,77 @@ class IntegramTable{
             str = str.replace(/&lt;br\s*\/?&gt;/gi, '<br>');
 
             return str;
+        }
+
+        /**
+         * Issue #1794: Resolve "link to any record" href by fetching the table type via get_record API.
+         * Called on hover so the link is ready before the user clicks.
+         * @param {HTMLElement} anchorEl - The <a> element to update
+         * @param {string} recordId - The record ID from the cell value (before the colon)
+         */
+        resolveAnyRecordLink(anchorEl, recordId) {
+            // Skip if already resolved or being resolved
+            if (anchorEl.dataset.anyRefResolved) return;
+            anchorEl.dataset.anyRefResolved = 'pending';
+
+            const apiBase = this.getApiBase();
+            fetch(`${ apiBase }/get_record/${ encodeURIComponent(recordId) }`)
+                .then(res => res.json())
+                .then(data => {
+                    const objId = data && data.obj;
+                    if (!objId) {
+                        anchorEl.dataset.anyRefResolved = 'error';
+                        return;
+                    }
+                    const pathParts = window.location.pathname.split('/');
+                    const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+                    anchorEl.href = `/${ dbName }/table/${ objId }?F_I=${ recordId }`;
+                    anchorEl.dataset.anyRefResolved = 'ok';
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log(`[#1794] resolveAnyRecordLink: recordId=${recordId}, obj=${objId} -> href=${anchorEl.href}`);
+                    }
+                })
+                .catch(err => {
+                    anchorEl.dataset.anyRefResolved = 'error';
+                    if (window.INTEGRAM_DEBUG) {
+                        console.error(`[#1794] resolveAnyRecordLink error for recordId=${recordId}:`, err);
+                    }
+                });
+        }
+
+        /**
+         * Issue #1794: Navigate to "link to any record" target.
+         * If the href has already been resolved, follow it; otherwise fetch and navigate.
+         * @param {Event} event - The click event
+         * @param {HTMLElement} anchorEl - The <a> element
+         * @param {string} recordId - The record ID from the cell value
+         */
+        navigateAnyRecordLink(event, anchorEl, recordId) {
+            event.stopPropagation();
+            // If already resolved, let the browser follow the href
+            if (anchorEl.dataset.anyRefResolved === 'ok') {
+                window.location.href = anchorEl.href;
+                return;
+            }
+            // Fetch and navigate
+            const apiBase = this.getApiBase();
+            fetch(`${ apiBase }/get_record/${ encodeURIComponent(recordId) }`)
+                .then(res => res.json())
+                .then(data => {
+                    const objId = data && data.obj;
+                    if (!objId) return;
+                    const pathParts = window.location.pathname.split('/');
+                    const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+                    const url = `/${ dbName }/table/${ objId }?F_I=${ recordId }`;
+                    anchorEl.href = url;
+                    anchorEl.dataset.anyRefResolved = 'ok';
+                    window.location.href = url;
+                })
+                .catch(err => {
+                    if (window.INTEGRAM_DEBUG) {
+                        console.error(`[#1794] navigateAnyRecordLink error for recordId=${recordId}:`, err);
+                    }
+                });
         }
 
         /**
