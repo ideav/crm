@@ -814,13 +814,17 @@
                 if (currentRawValue && rawColonIndex > 0) {
                     // ids:values format — resolve each ID against fetched options
                     const ids = currentRawValue.substring(0, rawColonIndex).split(',').map(v => v.trim()).filter(v => v.length > 0);
-                    for (const id of ids) {
+                    // Issue #1786: Extract labels from the right side of ':' as fallback when ID is not in loaded options
+                    const storedLabels = currentRawValue.substring(rawColonIndex + 1).split(',').map(v => v.trim());
+                    for (let i = 0; i < ids.length; i++) {
+                        const id = ids[i];
                         const match = options.find(([optId]) => String(optId) === id);
                         if (match) {
                             selectedItems.push({ id: match[0], text: match[1] });
                         } else {
-                            // ID not in options – show id as fallback text
-                            selectedItems.push({ id, text: id });
+                            // Use stored label from value string instead of showing raw ID (issue #1786)
+                            const storedLabel = storedLabels[i] || id;
+                            selectedItems.push({ id, text: storedLabel });
                         }
                     }
                 } else {
