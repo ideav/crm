@@ -691,4 +691,56 @@
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
         }
+
+        /**
+         * Copy table data to clipboard with TAB delimiters (issue #1788).
+         * Loads all data matching current filters, then formats rows as TAB-separated
+         * lines so they can be pasted back via the paste-data-btn button.
+         */
+        async copyToBuffer() {
+            // Hide export menu
+            const menuId = `${ this.options.instanceName }-export-menu`;
+            const menu = document.getElementById(menuId);
+            if (menu) {
+                menu.style.display = 'none';
+            }
+
+            try {
+                // Get visible columns in current order
+                const orderedColumns = this.columnOrder
+                    .map(id => this.columns.find(c => c.id === id))
+                    .filter(c => c && this.visibleColumns.includes(c.id));
+
+                if (orderedColumns.length === 0) {
+                    this.showToast('Нет видимых колонок для копирования', 'error');
+                    return;
+                }
+
+                // Show loading message
+                this.showToast('Загрузка данных для копирования...', 'info');
+
+                // Load all data matching current filters
+                const allData = await this.loadAllDataForExport();
+
+                if (allData.length === 0) {
+                    this.showToast('Нет данных для копирования', 'error');
+                    return;
+                }
+
+                // Prepare export data (plain text values)
+                const exportData = this.prepareExportDataFromRows(allData, orderedColumns);
+
+                // Build TAB-delimited text (rows separated by newlines, columns by TAB)
+                const lines = exportData.map(row => row.join('\t'));
+                const text = lines.join('\n');
+
+                // Copy to clipboard
+                await navigator.clipboard.writeText(text);
+
+                this.showToast(`Скопировано ${ allData.length } записей в буфер`, 'success');
+            } catch (error) {
+                console.error('Copy to buffer error:', error);
+                this.showToast(`Ошибка копирования: ${ error.message }`, 'error');
+            }
+        }
     }
