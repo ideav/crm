@@ -267,7 +267,7 @@ a[disabled]{
 </div>
 <script>
 $(document).ready(function() {
-    $('.select2').each(function(){
+    $('.select2:not([i-orig="1"])').each(function(){
         var curEl=this.id;
         $(this).select2({
             tags: $(this).attr('granted')!==undefined,
@@ -321,6 +321,180 @@ $(document).ready(function() {
         } else
             $(e.target).val('');
     });
+
+    // === Any-Record Link editor (i-orig="1") ===
+    initAnyRefEditors();
+
+    function initAnyRefEditors() {
+        $('select.select2[i-orig="1"]').each(function() {
+            var $sel = $(this);
+            var fieldId = $sel.attr('id'); // e.g. "t366"
+            var fieldName = $sel.attr('name') || fieldId;
+
+            // Get current value from selected option
+            var $selected = $sel.find('option:selected');
+            var currentId = $selected.val() || '';
+            var currentText = $selected.text() || '';
+            var currentTableId = $selected.attr('i-orig') || '';
+
+            // Hide original select (keep for form submit)
+            $sel.hide();
+
+            // Build the custom editor UI
+            var $editor = $('<div class="any-ref-editor-wrap"></div>');
+            var $header = $('<div class="any-ref-editor-header d-flex align-items-center" style="border:1px solid #ced4da;border-radius:.25rem;padding:4px 6px;background:#fff;flex-wrap:nowrap;gap:4px;"></div>');
+            var $search = $('<input type="text" class="any-ref-search form-control form-control-sm border-0 p-0 flex-grow-1" placeholder="Поиск..." style="min-width:0;box-shadow:none;" autocomplete="off">');
+            var $clearBtn = $('<button type="button" class="any-ref-clear btn btn-sm p-0" title="Очистить" style="line-height:1;font-size:16px;background:none;border:none;color:#6c757d;' + (currentId ? '' : 'display:none;') + '">×</button>');
+            var $tableBtn = $('<button type="button" class="any-ref-table-btn btn btn-sm p-0" title="Выбрать таблицу" style="line-height:1;font-size:14px;background:none;border:none;color:#6c757d;">⊞</button>');
+            $header.append($search, $clearBtn, $tableBtn);
+
+            var $dropdown = $('<div class="any-ref-dropdown list-group" style="display:none;max-height:200px;overflow-y:auto;border:1px solid #ced4da;border-top:none;border-radius:0 0 .25rem .25rem;position:relative;z-index:9999;"></div>');
+            $editor.append($header, $dropdown);
+
+            // Insert editor before the hidden select
+            $sel.before($editor);
+
+            if (currentId) {
+                $search.val(currentText);
+            }
+
+            var currentTableRecords = [];
+            var activeTableId = currentTableId || '';
+
+            function setCurrentTableId(tableId) {
+                activeTableId = tableId;
+                $sel.attr('data-any-ref-table', tableId);
+            }
+
+            function loadTableRecords(tableId, searchText, callback) {
+                var url = '/' + db + '/object/' + tableId + '?JSON_OBJ';
+                if (searchText) {
+                    url += '&F_' + tableId + '=%25' + encodeURIComponent(searchText) + '%25';
+                }
+                $.get(url, function(data) {
+                    callback(data || []);
+                });
+            }
+
+            function renderDropdownOptions(records, filterText) {
+                $dropdown.empty();
+                var list = records;
+                if (filterText && records.length < 20) {
+                    var q = filterText.toLowerCase();
+                    list = records.filter(function(r) {
+                        return (r.u || '').toLowerCase().indexOf(q) !== -1;
+                    });
+                }
+                if (!list.length) {
+                    $dropdown.append('<div class="list-group-item list-group-item-action text-muted small">Нет результатов</div>');
+                } else {
+                    list.forEach(function(r) {
+                        var $opt = $('<a href="#" class="list-group-item list-group-item-action py-1 px-2 small"></a>').text(r.u || r.o || r.i);
+                        $opt.on('click', function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            var selId = r.i;
+                            var selText = r.u || r.o || r.i;
+                            $search.val(selText);
+                            $sel.val(selId);
+                            // Update hidden select option if needed
+                            if (!$sel.find('option[value="' + selId + '"]').length) {
+                                $sel.append('<option value="' + selId + '" selected i-orig="' + activeTableId + '">' + selText + '</option>');
+                            }
+                            $sel.val(selId);
+                            $clearBtn.show();
+                            $dropdown.hide();
+                        });
+                        $dropdown.append($opt);
+                    });
+                }
+                $dropdown.show();
+            }
+
+            function showTableSelector() {
+                $dropdown.empty();
+                $.get('/' + db + '/dict?JSON', function(tables) {
+                    Object.keys(tables).forEach(function(tableId) {
+                        var $opt = $('<a href="#" class="list-group-item list-group-item-action py-1 px-2 small"></a>').text(tables[tableId]);
+                        $opt.on('click', function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setCurrentTableId(tableId);
+                            $search.val('');
+                            $dropdown.html('<div class="list-group-item text-muted small">Загрузка...</div>');
+                            $dropdown.show();
+                            loadTableRecords(tableId, '', function(records) {
+                                currentTableRecords = records;
+                                renderDropdownOptions(records, '');
+                                $search.focus();
+                            });
+                        });
+                        $dropdown.append($opt);
+                    });
+                    $dropdown.show();
+                    $search.focus();
+                });
+            }
+
+            // Load records for current table on init if value is set
+            if (activeTableId) {
+                setCurrentTableId(activeTableId);
+                loadTableRecords(activeTableId, '', function(records) {
+                    currentTableRecords = records;
+                });
+            }
+
+            // Search input handler
+            var searchTimer;
+            $search.on('input', function() {
+                var q = $(this).val();
+                if (!activeTableId) {
+                    showTableSelector();
+                    return;
+                }
+                clearTimeout(searchTimer);
+                searchTimer = setTimeout(function() {
+                    if (currentTableRecords.length >= 20) {
+                        loadTableRecords(activeTableId, q, function(records) {
+                            renderDropdownOptions(records, '');
+                        });
+                    } else {
+                        renderDropdownOptions(currentTableRecords, q);
+                    }
+                }, 250);
+            });
+
+            $search.on('focus', function() {
+                if (!activeTableId) return;
+                if (currentTableRecords.length) {
+                    renderDropdownOptions(currentTableRecords, $search.val());
+                }
+            });
+
+            $tableBtn.on('click', function(e) {
+                e.stopPropagation();
+                showTableSelector();
+            });
+
+            $clearBtn.on('click', function(e) {
+                e.stopPropagation();
+                $search.val('');
+                $sel.val('');
+                $clearBtn.hide();
+                $dropdown.hide();
+                activeTableId = '';
+                currentTableRecords = [];
+            });
+
+            // Close dropdown on outside click
+            $(document).on('click.anyref-' + fieldId, function(e) {
+                if (!$(e.target).closest($editor).length) {
+                    $dropdown.hide();
+                }
+            });
+        });
+    }
+    // === End Any-Record Link editor ===
     $('select[multi="1"]').each(function(){
         // Remove name from multiselect to prevent double submission
         var selId = $(this).attr('id');
