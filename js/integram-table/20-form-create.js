@@ -855,20 +855,28 @@
                             const escaped = this.escapeHtml(String(tName));
                             return `<div class="inline-editor-reference-option form-any-ref-table-option" data-table-id="${ tId }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
                         }).join('');
-                        // Table selected: load its records
+                        // Table selected: load its records (issue #1807)
                         dropdown.querySelectorAll('.form-any-ref-table-option').forEach(opt => {
-                            opt.addEventListener('click', async () => {
+                            opt.addEventListener('click', async (e) => {
+                                // Stop propagation so the document outside-click handler
+                                // does not close the dropdown when the option element is
+                                // removed from DOM during innerHTML replacement
+                                e.stopPropagation();
                                 const tableId = opt.dataset.tableId;
                                 wrapper._currentTableId = tableId;
                                 searchInput.value = '';
                                 dropdown.innerHTML = '<div class="inline-editor-reference-empty">Загрузка...</div>';
+                                dropdown.style.display = 'block';
                                 try {
                                     const records = await loadTableRecords(tableId);
                                     wrapper._currentRecords = records;
                                     wrapper._serverSearch = records.length >= 20;
                                     renderRecordOptions(records);
+                                    dropdown.style.display = 'block';
+                                    searchInput.focus();
                                 } catch (e) {
                                     dropdown.innerHTML = `<div class="inline-editor-reference-empty">Ошибка: ${ this.escapeHtml(e.message) }</div>`;
+                                    dropdown.style.display = 'block';
                                 }
                             });
                         });
