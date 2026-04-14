@@ -2812,6 +2812,44 @@ td.cell-saving {
     margin-right: 2px;
 }
 
+.inline-editor-any-ref-table-btn {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    color: var(--md-text-secondary);
+    font-size: 0.9rem;
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    padding: 0;
+    margin-right: 2px;
+}
+
+.inline-editor-any-ref-table-btn:hover {
+    background: var(--md-hover);
+    color: var(--md-primary);
+}
+
+/* Override clear button absolute position for any-ref inline editor (issue #1806) */
+.inline-editor-any-ref .inline-editor-reference-clear {
+    position: static;
+    transform: none;
+    flex-shrink: 0;
+}
+
+.inline-editor-any-ref .inline-editor-reference-clear:active {
+    transform: scale(0.9);
+}
+
+.inline-editor-any-ref .inline-editor-reference-search {
+    padding-right: 8px;
+}
+
 .form-any-ref-table-btn:hover {
     background: var(--md-hover);
     color: var(--md-primary);

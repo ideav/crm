@@ -3577,6 +3577,7 @@ class IntegramTable{
             const colType = cell.dataset.colType;
             const format = cell.dataset.colFormat;
             const isRef = cell.dataset.colRef === '1';
+            const isAnyRef = cell.dataset.anyRef === '1'; // Issue #1806: 'link to any record' type
             const isMulti = cell.dataset.array === '1'; // Issue #853: detect multi-select reference fields
             const rowIndex = parseInt(cell.dataset.rowIndex);
 
@@ -3619,6 +3620,7 @@ class IntegramTable{
                 colType,
                 format,
                 isRef,
+                isAnyRef, // Issue #1806: 'link to any record' type
                 isMulti, // Issue #853: multi-select reference flag
                 parentInfo,
                 originalValue: currentValue
@@ -3635,6 +3637,9 @@ class IntegramTable{
                 this.renderMultiReferenceEditor(cell, currentValue);
             } else if (isRef) {
                 this.renderReferenceEditor(cell, currentValue);
+            } else if (isAnyRef) {
+                // Issue #1806: 'link to any record' — dynamic table selector
+                this.renderAnyRefInlineEditor(cell, currentValue);
             } else {
                 this.renderInlineEditor(cell, currentValue, format);
             }
@@ -4415,6 +4420,282 @@ class IntegramTable{
                 this.showToast(`Ошибка загрузки справочника: ${error.message}`, 'error');
                 this.cancelInlineEdit(originalContent);
             }
+        }
+
+        /**
+         * Issue #1806: Render inline editor for "link to any record" cells (data-any-ref="1").
+         * Shows a searchable record list with a table-picker button.
+         * If a value is already set, the source table is resolved via get_record/{id}.
+         * The table-picker button opens dict?JSON to switch to any other table.
+         * Server-side search (F_{tableId}=%q%) is used when a table has >= 20 records.
+         */
+        async renderAnyRefInlineEditor(cell, currentValue) {
+            const originalContent = cell.innerHTML;
+            const { colType, parentInfo } = this.currentEditingCell;
+            const apiBase = this.getApiBase();
+
+            // Current record ID is stored in data-ref-value-id (set by renderCell)
+            const currentId = cell.dataset.refValueId || '';
+
+            cell.innerHTML = `
+                <div class="inline-editor-reference inline-editor-any-ref">
+                    <div class="inline-editor-reference-header">
+                        <input type="text"
+                               class="inline-editor-reference-search"
+                               placeholder="Поиск..."
+                               autocomplete="off"
+                               value="${ this.escapeHtml(currentValue) }">
+                        <button class="inline-editor-reference-clear" title="Очистить значение" aria-label="Очистить значение"${ currentId ? '' : ' style="display:none;"' }><i class="pi pi-times"></i></button>
+                        <button class="inline-editor-any-ref-table-btn" title="Выбрать таблицу" aria-label="Выбрать таблицу"><i class="pi pi-table"></i></button>
+                    </div>
+                    <div class="inline-editor-reference-dropdown">
+                        <div class="inline-editor-reference-empty">Загрузка...</div>
+                    </div>
+                </div>
+            `;
+
+            const searchInput = cell.querySelector('.inline-editor-reference-search');
+            const dropdown = cell.querySelector('.inline-editor-reference-dropdown');
+            const clearButton = cell.querySelector('.inline-editor-reference-clear');
+            const tableButton = cell.querySelector('.inline-editor-any-ref-table-btn');
+            const header = cell.querySelector('.inline-editor-reference-header');
+
+            if (header) {
+                this._attachFixedDropdown(dropdown, header);
+            }
+
+            // State stored on the editor element
+            let currentTableId = null;
+            let currentRecords = [];
+            let useServerSearch = false;
+
+            // Helper: fetch records from a table with optional search
+            const loadTableRecords = async (tableId, searchText = '') => {
+                let url = `${ apiBase }/object/${ tableId }?JSON_OBJ`;
+                if (searchText) url += `&F_${ tableId }=%${ encodeURIComponent(searchText) }%`;
+                const resp = await fetch(url);
+                if (!resp.ok) throw new Error(`HTTP ${ resp.status }`);
+                const data = await resp.json();
+                return Array.isArray(data) ? data : [];
+            };
+
+            // Helper: render records as dropdown options
+            const renderRecordOptions = (records) => {
+                const fixedDrop = this.currentEditingCell && this.currentEditingCell.fixedDropdown;
+                const target = fixedDrop || dropdown;
+                if (!records || records.length === 0) {
+                    target.innerHTML = '<div class="inline-editor-reference-empty">Нет записей</div>';
+                    return;
+                }
+                target.innerHTML = records.map(rec => {
+                    const id = String(rec.i);
+                    const text = (rec.r && rec.r[0] != null) ? String(rec.r[0]) : `#${ id }`;
+                    const escaped = this.escapeHtml(text);
+                    return `<div class="inline-editor-reference-option" data-id="${ id }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
+                }).join('');
+            };
+
+            // Helper: show table selector from dict?JSON
+            const showTableSelector = async () => {
+                const fixedDrop = this.currentEditingCell && this.currentEditingCell.fixedDropdown;
+                const target = fixedDrop || dropdown;
+                target.innerHTML = '<div class="inline-editor-reference-empty">Загрузка таблиц...</div>';
+                try {
+                    const resp = await fetch(`${ apiBase }/dict?JSON`);
+                    if (!resp.ok) throw new Error(`HTTP ${ resp.status }`);
+                    const dict = await resp.json();
+                    const entries = Object.entries(dict || {});
+                    if (!entries.length) {
+                        target.innerHTML = '<div class="inline-editor-reference-empty">Нет доступных таблиц</div>';
+                        return;
+                    }
+                    target.innerHTML = entries.map(([tId, tName]) => {
+                        const escaped = this.escapeHtml(String(tName));
+                        return `<div class="inline-editor-reference-option inline-editor-any-ref-table-option" data-table-id="${ tId }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
+                    }).join('');
+                    target.querySelectorAll('.inline-editor-any-ref-table-option').forEach(opt => {
+                        opt.addEventListener('click', async (e) => {
+                            e.stopPropagation();
+                            const tableId = opt.dataset.tableId;
+                            currentTableId = tableId;
+                            searchInput.value = '';
+                            target.innerHTML = '<div class="inline-editor-reference-empty">Загрузка...</div>';
+                            try {
+                                const records = await loadTableRecords(tableId);
+                                currentRecords = records;
+                                useServerSearch = records.length >= 20;
+                                renderRecordOptions(records);
+                                searchInput.focus();
+                            } catch (err) {
+                                target.innerHTML = `<div class="inline-editor-reference-empty">Ошибка: ${ this.escapeHtml(err.message) }</div>`;
+                            }
+                        });
+                    });
+                } catch (err) {
+                    target.innerHTML = '<div class="inline-editor-reference-empty">Ошибка загрузки таблиц</div>';
+                }
+            };
+
+            // Resolve current table from get_record if there's an existing value
+            if (currentId) {
+                try {
+                    const resp = await fetch(`${ apiBase }/get_record/${ encodeURIComponent(currentId) }`);
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        if (data && data.obj) {
+                            currentTableId = String(data.obj);
+                            const records = await loadTableRecords(currentTableId);
+                            currentRecords = records;
+                            useServerSearch = records.length >= 20;
+                            renderRecordOptions(records);
+                        }
+                    }
+                } catch (err) {
+                    console.warn('Could not resolve any-record link table:', err);
+                }
+            } else {
+                const fixedDrop = this.currentEditingCell && this.currentEditingCell.fixedDropdown;
+                const target = fixedDrop || dropdown;
+                target.innerHTML = '<div class="inline-editor-reference-empty">Выберите таблицу <i class="pi pi-table"></i></div>';
+            }
+
+            searchInput.focus();
+            if (currentValue) searchInput.select();
+
+            // Search input
+            let searchTimeout;
+            searchInput.addEventListener('input', async (e) => {
+                const text = e.target.value.trim();
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(async () => {
+                    const fixedDrop = this.currentEditingCell && this.currentEditingCell.fixedDropdown;
+                    const target = fixedDrop || dropdown;
+                    if (!currentTableId) {
+                        target.innerHTML = '<div class="inline-editor-reference-empty">Выберите таблицу <i class="pi pi-table"></i></div>';
+                        return;
+                    }
+                    if (text === '') {
+                        renderRecordOptions(currentRecords);
+                    } else if (useServerSearch) {
+                        try {
+                            const results = await loadTableRecords(currentTableId, text);
+                            renderRecordOptions(results);
+                        } catch (err) {
+                            target.innerHTML = '<div class="inline-editor-reference-empty">Ошибка поиска</div>';
+                        }
+                    } else {
+                        const lower = text.toLowerCase();
+                        renderRecordOptions(currentRecords.filter(rec => {
+                            const val = (rec.r && rec.r[0] != null) ? String(rec.r[0]) : '';
+                            return val.toLowerCase().includes(lower);
+                        }));
+                    }
+                }, 300);
+            });
+
+            // Keyboard navigation — search input
+            searchInput.addEventListener('keydown', (e) => {
+                const fixedDrop = this.currentEditingCell && this.currentEditingCell.fixedDropdown;
+                const target = fixedDrop || dropdown;
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    this.cancelInlineEdit(originalContent);
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const first = target.querySelector('.inline-editor-reference-option');
+                    if (first && !first.classList.contains('inline-editor-any-ref-table-option')) first.click();
+                } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    const first = target.querySelector('.inline-editor-reference-option');
+                    if (first) first.focus();
+                } else if (e.key === 'Tab') {
+                    e.preventDefault();
+                    const direction = e.shiftKey ? 'prev' : 'next';
+                    this.saveAndNavigate(direction, () => this.cancelInlineEdit(originalContent), () => this.cancelInlineEdit(originalContent));
+                }
+            });
+
+            // Keyboard navigation — dropdown
+            const dropTarget = this.currentEditingCell && this.currentEditingCell.fixedDropdown || dropdown;
+            dropTarget.addEventListener('keydown', (e) => {
+                const cur = document.activeElement;
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    const next = cur.nextElementSibling;
+                    if (next && next.classList.contains('inline-editor-reference-option')) next.focus();
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const prev = cur.previousElementSibling;
+                    if (prev && prev.classList.contains('inline-editor-reference-option')) {
+                        prev.focus();
+                    } else {
+                        searchInput.focus();
+                    }
+                } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    cur.click();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    this.cancelInlineEdit(originalContent);
+                }
+            });
+
+            // Option click — record selection
+            const handleOptionClick = async (e) => {
+                const option = e.target.closest('.inline-editor-reference-option');
+                if (option && !option.classList.contains('inline-editor-any-ref-table-option')) {
+                    const selectedId = option.dataset.id;
+                    const selectedText = option.dataset.text;
+                    await this.saveReferenceEdit(selectedId, selectedText);
+                }
+            };
+            dropdown.addEventListener('click', handleOptionClick);
+            if (this.currentEditingCell && this.currentEditingCell.fixedDropdown) {
+                this.currentEditingCell.fixedDropdown.addEventListener('click', handleOptionClick);
+            }
+
+            // Clear button
+            if (clearButton) {
+                clearButton.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    await this.saveReferenceEdit('', '');
+                });
+            }
+
+            // Table-picker button
+            if (tableButton) {
+                tableButton.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    await showTableSelector();
+                });
+            }
+
+            // Outside-click to cancel
+            const editingCellRef = this.currentEditingCell;
+            setTimeout(() => {
+                const outsideClickHandler = (e) => {
+                    const refOverlay = e.target.closest('.edit-form-overlay');
+                    if (refOverlay) return;
+                    const fixedDrop = this.currentEditingCell && this.currentEditingCell.fixedDropdown;
+                    if (fixedDrop && fixedDrop.contains(e.target)) return;
+                    if (!cell.contains(e.target)) {
+                        document.removeEventListener('click', outsideClickHandler);
+                        const clickedCell = e.target.closest('td[data-editable="true"]');
+                        if (clickedCell && clickedCell !== cell) {
+                            this.pendingCellClick = clickedCell;
+                        }
+                        this.cancelInlineEdit(originalContent);
+                    }
+                };
+                document.addEventListener('click', outsideClickHandler);
+                if (this.currentEditingCell === editingCellRef && this.currentEditingCell !== null) {
+                    this.currentEditingCell.outsideClickHandler = outsideClickHandler;
+                } else {
+                    document.removeEventListener('click', outsideClickHandler);
+                }
+            }, 100);
         }
 
         /**
