@@ -786,6 +786,232 @@
                     applyHook();
                 }
             }
+
+            // Initialize "link to any record" editors (issue #1800)
+            await this.initFormAnyRefEditors(container);
+        }
+
+        /**
+         * Issue #1800: Initialize "link to any record" field editors in a form modal.
+         * Fields with req.orig === '1' (no ref_id, no ref) allow selecting a record from any table.
+         * If a value is already set, the table is resolved via get_record/{id}.
+         * A table-picker button lets the user switch to any available table (dict?JSON).
+         * Server-side search is used when a table has >= 20 records.
+         */
+        async initFormAnyRefEditors(container) {
+            const apiBase = this.getApiBase();
+            const editors = container.querySelectorAll('.form-any-ref-editor');
+
+            for (const wrapper of editors) {
+                const currentId = wrapper.dataset.currentId || '';
+                const searchInput = wrapper.querySelector('.form-ref-search');
+                const dropdown = wrapper.querySelector('.form-ref-dropdown');
+                const hiddenInput = wrapper.querySelector('.form-ref-value');
+                const clearButton = wrapper.querySelector('.form-ref-clear');
+                const tableButton = wrapper.querySelector('.form-any-ref-table-btn');
+
+                if (!searchInput || !dropdown || !hiddenInput) continue;
+
+                // Load records from a table, with optional search text
+                const loadTableRecords = async (tableId, searchText = '') => {
+                    let url = `${ apiBase }/object/${ tableId }?JSON_OBJ`;
+                    if (searchText) {
+                        url += `&F_${ tableId }=%${ encodeURIComponent(searchText) }%`;
+                    }
+                    const resp = await fetch(url);
+                    if (!resp.ok) throw new Error(`HTTP ${ resp.status }`);
+                    const data = await resp.json();
+                    return Array.isArray(data) ? data : [];
+                };
+
+                // Render records from object/?JSON_OBJ as dropdown options
+                const renderRecordOptions = (records) => {
+                    if (!records || records.length === 0) {
+                        dropdown.innerHTML = '<div class="inline-editor-reference-empty">Нет записей</div>';
+                        return;
+                    }
+                    dropdown.innerHTML = records.map(rec => {
+                        const id = String(rec.i);
+                        const text = (rec.r && rec.r[0] != null) ? String(rec.r[0]) : `#${ id }`;
+                        const escaped = this.escapeHtml(text);
+                        return `<div class="inline-editor-reference-option" data-id="${ id }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
+                    }).join('');
+                };
+
+                // Fetch dict?JSON and let user pick a table; then load records from it
+                const showTableSelector = async () => {
+                    dropdown.innerHTML = '<div class="inline-editor-reference-empty">Загрузка таблиц...</div>';
+                    dropdown.style.display = 'block';
+                    try {
+                        const resp = await fetch(`${ apiBase }/dict?JSON`);
+                        if (!resp.ok) throw new Error(`HTTP ${ resp.status }`);
+                        const dict = await resp.json();
+                        const entries = Object.entries(dict || {});
+                        if (entries.length === 0) {
+                            dropdown.innerHTML = '<div class="inline-editor-reference-empty">Нет доступных таблиц</div>';
+                            return;
+                        }
+                        dropdown.innerHTML = entries.map(([tId, tName]) => {
+                            const escaped = this.escapeHtml(String(tName));
+                            return `<div class="inline-editor-reference-option form-any-ref-table-option" data-table-id="${ tId }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
+                        }).join('');
+                        // Table selected: load its records
+                        dropdown.querySelectorAll('.form-any-ref-table-option').forEach(opt => {
+                            opt.addEventListener('click', async () => {
+                                const tableId = opt.dataset.tableId;
+                                wrapper._currentTableId = tableId;
+                                searchInput.value = '';
+                                dropdown.innerHTML = '<div class="inline-editor-reference-empty">Загрузка...</div>';
+                                try {
+                                    const records = await loadTableRecords(tableId);
+                                    wrapper._currentRecords = records;
+                                    wrapper._serverSearch = records.length >= 20;
+                                    renderRecordOptions(records);
+                                } catch (e) {
+                                    dropdown.innerHTML = `<div class="inline-editor-reference-empty">Ошибка: ${ this.escapeHtml(e.message) }</div>`;
+                                }
+                            });
+                        });
+                    } catch (e) {
+                        dropdown.innerHTML = '<div class="inline-editor-reference-empty">Ошибка загрузки таблиц</div>';
+                    }
+                };
+
+                // If current value is set, resolve its table via get_record/{id}
+                if (currentId) {
+                    try {
+                        const recResp = await fetch(`${ apiBase }/get_record/${ encodeURIComponent(currentId) }`);
+                        if (recResp.ok) {
+                            const recData = await recResp.json();
+                            if (recData && recData.obj) {
+                                wrapper._currentTableId = String(recData.obj);
+                                const records = await loadTableRecords(recData.obj);
+                                wrapper._currentRecords = records;
+                                wrapper._serverSearch = records.length >= 20;
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('Could not resolve any-record link table:', e);
+                    }
+                }
+
+                // Show dropdown on focus
+                searchInput.addEventListener('focus', () => {
+                    if (wrapper._currentTableId) {
+                        renderRecordOptions(wrapper._currentRecords || []);
+                    } else {
+                        dropdown.innerHTML = '<div class="inline-editor-reference-empty">Выберите таблицу <i class="pi pi-table"></i></div>';
+                    }
+                    dropdown.style.display = 'block';
+                });
+
+                // Search input with debounce
+                let searchTimeout;
+                searchInput.addEventListener('input', async (e) => {
+                    const text = e.target.value.trim();
+                    clearTimeout(searchTimeout);
+                    searchTimeout = setTimeout(async () => {
+                        if (!wrapper._currentTableId) {
+                            dropdown.innerHTML = '<div class="inline-editor-reference-empty">Выберите таблицу <i class="pi pi-table"></i></div>';
+                            dropdown.style.display = 'block';
+                            return;
+                        }
+                        if (text === '') {
+                            renderRecordOptions(wrapper._currentRecords || []);
+                        } else if (wrapper._serverSearch) {
+                            try {
+                                const results = await loadTableRecords(wrapper._currentTableId, text);
+                                renderRecordOptions(results);
+                            } catch (e) {
+                                dropdown.innerHTML = '<div class="inline-editor-reference-empty">Ошибка поиска</div>';
+                            }
+                        } else {
+                            const lower = text.toLowerCase();
+                            const filtered = (wrapper._currentRecords || []).filter(rec => {
+                                const val = (rec.r && rec.r[0] != null) ? String(rec.r[0]) : '';
+                                return val.toLowerCase().includes(lower);
+                            });
+                            renderRecordOptions(filtered);
+                        }
+                        dropdown.style.display = 'block';
+                    }, 300);
+                });
+
+                // Keyboard navigation — search input
+                searchInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        const first = dropdown.querySelector('.inline-editor-reference-option');
+                        if (first) first.focus();
+                    } else if (e.key === 'Enter') {
+                        e.preventDefault();
+                        const first = dropdown.querySelector('.inline-editor-reference-option');
+                        if (first) first.click();
+                    }
+                });
+
+                // Keyboard navigation — dropdown
+                dropdown.addEventListener('keydown', (e) => {
+                    const cur = document.activeElement;
+                    if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        const next = cur.nextElementSibling;
+                        if (next && next.classList.contains('inline-editor-reference-option')) next.focus();
+                    } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        const prev = cur.previousElementSibling;
+                        if (prev && prev.classList.contains('inline-editor-reference-option')) {
+                            prev.focus();
+                        } else {
+                            searchInput.focus();
+                        }
+                    } else if (e.key === 'Enter') {
+                        e.preventDefault();
+                        cur.click();
+                    }
+                });
+
+                // Option selection (record, not table-picker options)
+                dropdown.addEventListener('click', (e) => {
+                    const option = e.target.closest('.inline-editor-reference-option');
+                    if (option && !option.classList.contains('form-any-ref-table-option')) {
+                        hiddenInput.value = option.dataset.id;
+                        searchInput.value = option.dataset.text;
+                        dropdown.style.display = 'none';
+                        hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                });
+
+                // Clear button
+                if (clearButton) {
+                    clearButton.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        hiddenInput.value = '';
+                        searchInput.value = '';
+                        if (wrapper._currentTableId) {
+                            renderRecordOptions(wrapper._currentRecords || []);
+                        }
+                        dropdown.style.display = 'block';
+                    });
+                }
+
+                // Table switcher button
+                if (tableButton) {
+                    tableButton.addEventListener('click', async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        await showTableSelector();
+                    });
+                }
+
+                // Close dropdown when clicking outside
+                document.addEventListener('click', (e) => {
+                    if (!wrapper.contains(e.target)) {
+                        dropdown.style.display = 'none';
+                    }
+                });
+            }
         }
 
         /**

@@ -456,8 +456,48 @@
                     html += `<label for="field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
                 }
 
+                // "Link to any record" field — single-select with dynamic table (issue #1800)
+                if (req.orig === '1' && !req.ref_id && !req.ref) {
+                    const currentValue = reqValue || '';
+                    let currentId = '';
+                    let currentText = '';
+                    if (currentValue) {
+                        const colonIdx = currentValue.indexOf(':');
+                        if (colonIdx > 0) {
+                            currentId = currentValue.substring(0, colonIdx);
+                            currentText = currentValue.substring(colonIdx + 1);
+                        } else {
+                            currentId = currentValue;
+                        }
+                    }
+                    html += `
+                        <div class="form-any-ref-editor" data-req-id="${ req.id }" data-required="${ isRequired }" data-current-id="${ this.escapeHtml(currentId) }">
+                            <div class="inline-editor-reference form-ref-editor-box">
+                                <div class="inline-editor-reference-header">
+                                    <input type="text"
+                                           class="inline-editor-reference-search form-ref-search"
+                                           id="field-${ req.id }-search"
+                                           placeholder="Поиск..."
+                                           autocomplete="off"
+                                           value="${ this.escapeHtml(currentText) }">
+                                    <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
+                                    <button class="form-any-ref-table-btn" title="Выбрать таблицу" aria-label="Выбрать таблицу" type="button"><i class="pi pi-table"></i></button>
+                                </div>
+                                <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${ req.id }-dropdown" style="display:none;">
+                                    <div class="inline-editor-reference-empty">Нажмите для выбора записи или выберите таблицу</div>
+                                </div>
+                            </div>
+                            <input type="hidden"
+                                   class="form-ref-value"
+                                   id="field-${ req.id }"
+                                   name="t${ req.id }"
+                                   value="${ this.escapeHtml(currentId) }"
+                                   data-req-id="${ req.id }">
+                        </div>
+                    `;
+                }
                 // Multi-select reference field (issue #853)
-                if (req.ref_id && isMulti) {
+                else if (req.ref_id && isMulti) {
                     const currentValue = reqValue || '';
                     html += `
                         <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-multi="1" data-current-value="${ this.escapeHtml(currentValue) }">
