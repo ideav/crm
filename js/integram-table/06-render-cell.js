@@ -1041,6 +1041,69 @@
             previewModal.querySelector('#paste-preview-cancel-btn').addEventListener('click', closePreview);
             previewOverlay.addEventListener('click', closePreview);
 
+            // Keyboard navigation within preview cells (issue #1784)
+            previewModal.addEventListener('keydown', (e) => {
+                const cell = e.target;
+                if (!cell.classList.contains('paste-preview-cell')) return;
+
+                const row = parseInt(cell.dataset.row, 10);
+                const col = parseInt(cell.dataset.col, 10);
+                const numCols = orderedColIds.length;
+                const numRows = parsedRows.length;
+
+                let targetRow = row;
+                let targetCol = col;
+
+                if (e.key === 'Tab') {
+                    e.preventDefault();
+                    if (e.shiftKey) {
+                        // Move to previous cell
+                        if (col > 0) {
+                            targetCol = col - 1;
+                        } else if (row > 0) {
+                            targetRow = row - 1;
+                            targetCol = numCols - 1;
+                        } else {
+                            return; // Already at first cell
+                        }
+                    } else {
+                        // Move to next cell
+                        if (col < numCols - 1) {
+                            targetCol = col + 1;
+                        } else if (row < numRows - 1) {
+                            targetRow = row + 1;
+                            targetCol = 0;
+                        } else {
+                            return; // Already at last cell
+                        }
+                    }
+                } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (row < numRows - 1) {
+                        targetRow = row + 1;
+                    } else {
+                        return; // Already at last row
+                    }
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (row > 0) {
+                        targetRow = row - 1;
+                    } else {
+                        return; // Already at first row
+                    }
+                } else {
+                    return;
+                }
+
+                const target = previewModal.querySelector(
+                    `.paste-preview-cell[data-row="${targetRow}"][data-col="${targetCol}"]`
+                );
+                if (target) {
+                    target.focus();
+                    target.select();
+                }
+            });
+
             previewModal.querySelector('#paste-preview-load-btn').addEventListener('click', () => {
                 // Collect edited cell values back into rows
                 const cells = previewModal.querySelectorAll('.paste-preview-cell');
