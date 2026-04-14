@@ -978,17 +978,20 @@
                         hiddenInput.value = option.dataset.id;
                         searchInput.value = option.dataset.text;
                         dropdown.style.display = 'none';
+                        // Issue #1804: show clear button when a value is selected
+                        if (clearButton) clearButton.style.display = '';
                         hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
                     }
                 });
 
-                // Clear button
+                // Clear button — hidden when no value (issue #1804)
                 if (clearButton) {
                     clearButton.addEventListener('click', (e) => {
                         e.preventDefault();
                         e.stopPropagation();
                         hiddenInput.value = '';
                         searchInput.value = '';
+                        clearButton.style.display = 'none';
                         if (wrapper._currentTableId) {
                             renderRecordOptions(wrapper._currentRecords || []);
                         }

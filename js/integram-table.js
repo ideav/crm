@@ -10748,7 +10748,7 @@ class IntegramTable{
                                            placeholder="Поиск..."
                                            autocomplete="off"
                                            value="${ this.escapeHtml(currentText) }">
-                                    <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button"><i class="pi pi-times"></i></button>
+                                    <button class="inline-editor-reference-clear form-ref-clear" title="Очистить значение" aria-label="Очистить значение" type="button" style="${ currentId ? '' : 'display:none;' }"><i class="pi pi-times"></i></button>
                                     <button class="form-any-ref-table-btn" title="Выбрать таблицу" aria-label="Выбрать таблицу" type="button"><i class="pi pi-table"></i></button>
                                 </div>
                                 <div class="inline-editor-reference-dropdown form-ref-dropdown" id="field-${ req.id }-dropdown" style="display:none;">
@@ -12958,17 +12958,20 @@ class IntegramTable{
                         hiddenInput.value = option.dataset.id;
                         searchInput.value = option.dataset.text;
                         dropdown.style.display = 'none';
+                        // Issue #1804: show clear button when a value is selected
+                        if (clearButton) clearButton.style.display = '';
                         hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
                     }
                 });
 
-                // Clear button
+                // Clear button — hidden when no value (issue #1804)
                 if (clearButton) {
                     clearButton.addEventListener('click', (e) => {
                         e.preventDefault();
                         e.stopPropagation();
                         hiddenInput.value = '';
                         searchInput.value = '';
+                        clearButton.style.display = 'none';
                         if (wrapper._currentTableId) {
                             renderRecordOptions(wrapper._currentRecords || []);
                         }
