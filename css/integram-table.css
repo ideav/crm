@@ -2174,14 +2174,43 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     margin-left: auto;
 }
 
-/* Subordinate table add button - prevent Bootstrap 5.3 from stretching (issue #579) */
+/* Make icons inside .subordinate-table-actions larger (issue #1792) */
+.subordinate-table-actions .pi,
+.subordinate-table-actions i {
+    font-size: 1.125rem;
+}
+
+/* Subordinate copy-buffer button - icon only, no background (issue #1792) */
+.subordinate-copy-buffer-btn {
+    background: none;
+    border: none;
+    padding: 4px;
+    cursor: pointer;
+    color: var(--text-secondary, #999);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+.subordinate-copy-buffer-btn:hover {
+    color: var(--text-primary, #666);
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* Subordinate table add button - blue icon button (issue #1792) */
 .subordinate-add-btn {
     flex: 0 0 auto;
-    width: auto;
-    font-size: 0.8125rem;
-    padding: 6px 16px;
+    width: 32px;
     height: 32px;
-    line-height: 1.4;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    font-size: 1rem;
+    line-height: 1;
     white-space: nowrap;
 }
 
