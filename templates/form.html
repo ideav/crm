@@ -1,12 +1,35 @@
 <style>
+.form-workspace {
+    --form-surface: var(--bg-primary, #ffffff);
+    --form-surface-muted: var(--bg-secondary, #f8f9fa);
+    --form-text: var(--text-primary, #212529);
+    --form-text-muted: var(--text-secondary, #6c757d);
+    --form-border: var(--border-color, #dee2e6);
+    --form-success: var(--color-success, #16a34a);
+    --form-warning: var(--color-warning, #d97706);
+    --form-warning-bg: var(--color-warning-bg, #fef3c7);
+    --form-danger: var(--color-danger, #dc3545);
+    --form-danger-hover: var(--color-danger-hover, #c82333);
+    --form-info: #17a2b8;
+    --form-icon-stroke: var(--form-text-muted);
+    --form-toast-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    color: var(--form-text);
+}
+
+[data-theme="dark"] .form-workspace {
+    --form-info: #0e7490;
+    --form-toast-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
 .list { position: absolute; }
 .list-open {
     z-index: 10000;
-    background-color: #fafafa;
-    border: 1px solid #eeeeee;
+    background-color: var(--form-surface);
+    border: 1px solid var(--form-border);
+    color: var(--form-text);
 }
 .saving {
-    border-color: green;
+    border-color: var(--form-success);
     border-width: 2px;
 }
 .btns, .inline {
@@ -17,15 +40,16 @@
 }
 .alert-default {
     display: inline-block;
-    border-color: lightgray;
-    color: rgb(51, 51, 51);
-    background: white;
+    border-color: var(--form-border);
+    color: var(--form-text);
+    background: var(--form-surface);
 }
 .alert-secondary {
     display: inline-block;
 }
 .f-styles-toggle{
     border-bottom: 1px dashed;
+    color: var(--link-color, #3b82f6);
 }
 .pi{
 	font-size: 14px;
@@ -33,12 +57,33 @@
 .del-panel{
 	color: inherit;
 }
+.form-list-action svg path,
+.form-workspace svg path[stroke="#666666"],
+.form-workspace svg path[stroke="#666"] {
+    stroke: var(--form-icon-stroke);
+}
+.form-report-header {
+    background-color: var(--form-surface-muted);
+}
+.form-confirm {
+    border: 2px solid var(--form-warning);
+    border-radius: 10px;
+    padding: 6px;
+    background: var(--form-surface);
+    color: var(--form-text);
+}
+.form-help-alert {
+    margin: 15px;
+    background: var(--form-warning-bg);
+    border-color: var(--form-warning);
+    color: var(--form-text);
+}
 </style>
 <link rel="stylesheet" href="/css/bootstrap4.5.2.min.css">
 <script src="/js/jquery3.1.1.min.js"></script>
 <script src="/js/jquery-ui1.12.1.min.js"></script>
 <script src="/js/js.js"></script>
-<div>
+<div class="form-workspace">
 <div id="show" class="list hidden">
 <a id="showanchor" onclick="byId('FormsList').classList.remove('hidden');byId('show').classList.add('hidden')"><i class="pi pi-list" title="Список форм" style="padding:8px;"></i></a>
 </div>
@@ -65,8 +110,8 @@
 <div id="list">
     <p class="mb-2">
         <a href="/{_global_.z}/form/:id:">&nbsp;:val:&nbsp;</a>&nbsp;
-        <a href="/{_global_.z}/form/:id:?edit" title="Экспресс-редактор"><svg width="28" height="28" viewBox="0 0 28 28" fill="none"><path d="M15 4L5 16H14L13 24L23 12H14L15 4Z" stroke="#666666" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>&nbsp;
-        <a href="/{_global_.z}/myform/:id:" title="Расширенный редактор"><svg width="28" height="28" viewBox="0 0 28 28" fill="none"><path d="M18 5L23 10L10 23H5V18L18 5Z" stroke="#666666" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>
+        <a class="form-list-action" href="/{_global_.z}/form/:id:?edit" title="Экспресс-редактор"><svg width="28" height="28" viewBox="0 0 28 28" fill="none"><path d="M15 4L5 16H14L13 24L23 12H14L15 4Z" stroke="#666666" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>&nbsp;
+        <a class="form-list-action" href="/{_global_.z}/myform/:id:" title="Расширенный редактор"><svg width="28" height="28" viewBox="0 0 28 28" fill="none"><path d="M18 5L23 10L10 23H5V18L18 5Z" stroke="#666666" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>
     </p>
 </div>
 </div>
@@ -79,7 +124,15 @@ function showNotification(message, type) {
     var toast = document.createElement('div');
     toast.className = 'integram-toast integram-toast-' + type;
     toast.textContent = message;
-    toast.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 24px;border-radius:4px;color:white;z-index:10000;font-family:sans-serif;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.2);cursor:pointer;background-color:' + (type === 'error' ? '#dc3545' : type === 'success' ? '#28a745' : '#17a2b8') + ';';
+    var themeRoot = document.querySelector('.form-workspace') || document.documentElement;
+    var style = getComputedStyle(themeRoot);
+    var backgroundColor = type === 'error'
+        ? (style.getPropertyValue('--color-danger').trim() || '#dc3545')
+        : type === 'success'
+            ? (style.getPropertyValue('--color-success').trim() || '#16a34a')
+            : (style.getPropertyValue('--form-info').trim() || '#17a2b8');
+    var toastShadow = style.getPropertyValue('--form-toast-shadow').trim() || '0 2px 8px rgba(0,0,0,0.2)';
+    toast.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 24px;border-radius:4px;color:white;z-index:10000;font-family:sans-serif;font-size:14px;box-shadow:' + toastShadow + ';cursor:pointer;background-color:' + backgroundColor + ';';
     document.body.appendChild(toast);
     var remove = function() { if (toast.parentNode) toast.remove(); };
     setTimeout(remove, 5000);
@@ -299,7 +352,7 @@ function myApi(m,u,b,prefix,vars){
             break;
 
         case 'ShowReport': // Construct the report table
-            h='<TABLE class="table table-bordered report-table"><TR style="background-color:#f9f9f9;">';
+            h='<TABLE class="table table-bordered report-table"><TR class="form-report-header">';
             // Table header
             var color,colorCol,bgColorCol;
             if(report[prefix]===undefined){ // Do we have specific columns set?
@@ -627,8 +680,8 @@ function myApi(m,u,b,prefix,vars){
                                         .replace(':ctrl:',ctrl);
                     }
 				// Color the panel as requested or with the defaults
-				color=json['&object_reqs'][PanelID][4]==''?'#333333':json['&object_reqs'][PanelID][4];
-				bgcolor=json['&object_reqs'][PanelID][5]==''?'white':json['&object_reqs'][PanelID][5];
+				color=json['&object_reqs'][PanelID][4]==''?'var(--form-text)':json['&object_reqs'][PanelID][4];
+				bgcolor=json['&object_reqs'][PanelID][5]==''?'var(--form-surface)':json['&object_reqs'][PanelID][5];
 				byId(PanelID).style.color=color;
 				byId(PanelID).style.background=bgcolor;
 				// Set NextAction in case it's given
@@ -833,7 +886,7 @@ bt[1]="_array";bt[3]="_short";bt[12]="_memo";bt[2]="_html";bt[8]="_chars";bt[10]
 </center>
 </div>
 <div id="FormPanels" class="row">
-<div id=":id:" class="alert alert-default mr-3 i-panel" source-type=":src:" style="display:inline-block; border-color:lightgray;">
+<div id=":id:" class="alert alert-default mr-3 i-panel" source-type=":src:" style="display:inline-block;">
 <div id="Panel_:id:_Buttons" style="display:none;">
     <a href="/{_global_.z}/:btn_action:"><input type="submit" class="btn :btn_class:" style="margin-right:10px;margin-bottom:10px;" value=":btn_name:"></a>
 </div>
@@ -890,7 +943,7 @@ bt[1]="_array";bt[3]="_short";bt[12]="_memo";bt[2]="_html";bt[8]="_chars";bt[10]
         	</tr>
         	</table>
     	</div>
-        <div id="confirm_:id:" style="display:none; border:2px #f0ad4e solid; -moz-border-radius: 10px; -webkit-border-radius:10px; -khtml-border-radius:10px; border-radius:10px; padding:6px; ">
+        <div id="confirm_:id:" class="form-confirm" style="display:none;">
     	<p><b>Подтвердите удаление записи</b></p>
     	<A onclick="postForm('_m_del/:obj:?next_act={_global_.action}/{_global_.id}%3Fdeleted=:typ:%26up=:parent:')"><button type="button" class="btn btn-warning btn-sm m-3">Да, удалить</button></A>
     	<button type="button" class="btn btn-outline-secondary btn-sm m-3" onclick="byId('controls_:id:').style.display='block';byId('confirm_:id:').style.display='none';">&nbsp;Отменить&nbsp;</button>
@@ -972,7 +1025,7 @@ function pickColor(el,panel){
         el.parentNode.innerHTML+=byId('colors:id:').innerHTML.replace(':id:',panel)
     }
     else if(el==el.parentNode.innerHTML)
-        el.style.backgroundColor='white';
+        el.style.backgroundColor='var(--form-surface)';
     else
         byId(el.id).replaceWith('');
 }
@@ -1017,13 +1070,13 @@ byId('PanelType').innerHTML=h;
 <div id="_number"><input class="form-control form-control-sm type-field" type="text" id=":fid:_number" name="t:typ:" value=":val:"></div>
 <div id="_pwd"><input class="form-control form-control-sm type-field" type="password" name="t:typ:"></div>
 <div id="defaults">
-<div class="alert alert-warning" style="margin:15px">
+<div class="alert alert-warning form-help-alert">
     <p>Вы можете использовать следующие значения по умолчанию:</p>
     :defaults:
 </div>
 </div>
 <div id="panel">
-<div class="alert alert-warning" style="margin:15px">
+<div class="alert alert-warning form-help-alert">
 	<p>Форма состоит из одной или нескольких панелей. При добавлении панели вы выбираете тип и/или запрос, который будет отображен в панели. Если вы одновременно укажете и тип, и запрос, то данные из первой строки отчета будут отображены на форме вместе с выбранными полями типа.</p>
 	<p>При выборе только типа, в панели отобразятся выбранные поля этого типа.</p>
 	<p>Если будет указан только запрос, то в панели будут отображены выбранные из соответствующего запроса поля. Если поля не выбраны, то отчет по этому запросу отобразится целиком.</p>
