@@ -245,6 +245,14 @@
                         const fmt = col ? (col.format || 'SHORT') : 'SHORT';
                         this.filters[colId] = { type: this.getDefaultFilterType(fmt), value: '' };
                     }
+                    // Validate input for ID-based filter types (issue #1819): only digits and commas
+                    const filterType = this.filters[colId] && this.filters[colId].type;
+                    if (filterType === '@' || filterType === '!@') {
+                        const sanitized = input.value.replace(/[^\d,\s]/g, '');
+                        if (sanitized !== input.value) {
+                            input.value = sanitized;
+                        }
+                    }
                     this.filters[colId].value = input.value;
                     // Clear displayValue: user is now entering their own filter, not the resolved label (issue #551)
                     delete this.filters[colId].displayValue;
