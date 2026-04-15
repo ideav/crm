@@ -15403,7 +15403,13 @@ class IntegramTable{
 
             const toast = document.createElement('div');
             toast.className = `integram-toast integram-toast-${ type }`;
-            toast.textContent = message;
+            const sanitizedMessage = this.sanitizeInlineMessageHtml(message);
+            const hasSafeHtml = /<(a|br)\b/i.test(sanitizedMessage);
+            if (hasSafeHtml) {
+                toast.innerHTML = sanitizedMessage;
+            } else {
+                toast.textContent = message;
+            }
 
             document.body.appendChild(toast);
 
@@ -15570,6 +15576,60 @@ class IntegramTable{
             str = str.replace(/&lt;br\s*\/?&gt;/gi, '<br>');
 
             return str;
+        }
+
+        /**
+         * Sanitize inline HTML for toasts and small error messages.
+         * Allows <br> and safe <a href="...">text</a> links only.
+         * All other markup is escaped.
+         * @param {string} html - The HTML string to sanitize
+         * @returns {string} - Sanitized HTML string
+         */
+        sanitizeInlineMessageHtml(html) {
+            if (html === null || html === undefined) return '';
+
+            const str = String(html);
+            const placeholderPrefix = '__SAFE_ANCHOR__';
+            const safeAnchors = [];
+
+            const withAnchorPlaceholders = str.replace(/<a\b[^>]*href\s*=\s*(["'])(.*?)\1[^>]*>(.*?)<\/a>/gi, (match, quote, href, text) => {
+                const trimmedHref = String(href || '').trim();
+                const trimmedText = String(text || '').trim();
+
+                if (!trimmedText) return match;
+                if (!/^(https?:\/\/|\/)/i.test(trimmedHref)) return match;
+                if (/^\s*javascript:/i.test(trimmedHref)) return match;
+
+                const safeHref = trimmedHref.replace(/&/g, '&amp;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;');
+                const safeText = trimmedText.replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#039;');
+
+                const anchorHtml = `<a href="${ safeHref }" target="_blank" rel="noopener noreferrer">${ safeText }</a>`;
+                const placeholder = `${ placeholderPrefix }${ safeAnchors.length }__`;
+                safeAnchors.push(anchorHtml);
+                return placeholder;
+            });
+
+            let escaped = withAnchorPlaceholders.replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+
+            escaped = escaped.replace(/&lt;br\s*\/?&gt;/gi, '<br>');
+
+            safeAnchors.forEach((anchorHtml, index) => {
+                const placeholder = `${ placeholderPrefix }${ index }__`;
+                escaped = escaped.replace(placeholder, anchorHtml);
+            });
+
+            return escaped;
         }
 
         /**
