@@ -119,6 +119,15 @@
     width: 10rem;
 }
 .dash-filter-sep { color: var(--text-secondary, #6c757d); }
+.dash-settings-icon {
+    margin-left: auto;
+    color: var(--text-secondary, #6c757d);
+    cursor: pointer;
+    font-size: 1.1rem;
+    text-decoration: none;
+    padding: 0.2rem 0.4rem;
+}
+.dash-settings-icon:hover { color: var(--text-primary, #212529); }
 /* Sticky table header */
 .dash-head th {
     position: sticky;
@@ -223,11 +232,13 @@ function dashInitFilterBar(sheetEl) {
 }
 
 const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-sheet-tab" onclick="dashSetActive(this)">:name:</a></li>'
+    , dashIsAdmin = (typeof role !== 'undefined' && role === 'admin')
     , sheetTpl    = '<div id="ds:id:" class="f-sheet" style="display:none"><div class="dash-filter-bar">'
         + '<input type="date" class="dash-fr-input"><span class="dash-filter-sep">—</span><input type="date" class="dash-to-input">'
         + '<select class="dash-period-sel"><option value="Неделя">Неделя</option><option value="Месяц">Месяц</option><option value="Год">Год</option></select>'
         + '<button class="dash-apply-btn" onclick="dashApplyFilter(this.closest(\'.f-sheet\'))">Применить</button>'
         + '<input type="text" class="dash-search-input" placeholder="Поиск..." oninput="dashApplySearch(this.value,this.closest(\'.f-sheet\'))">'
+        + (dashIsAdmin ? '<a class="dash-settings-icon" onclick="dashOpenSettings()" title="Настройки дэшборда"><i class="pi pi-cog"></i></a>' : '')
         + '</div></div>'
     , panelTpl    = '<div id=":id:" f-period=":period:" class="f-panel pt-3"><h4>:name:</h4><div class="f-table-wrap"><table class="table table-sm table-bordered w-auto"><thead><tr class="dash-head f-head"><th>:head:</thead><tbody></tbody></table></div></div>'
     , headTpl     = '<th range=":from:-:to:">:head:'
@@ -843,6 +854,10 @@ window.dashSetActive = function(el) {
     if (sheet) sheet.style.display = '';
     // Persist active tab in URL hash so page refresh restores it (issue #1840)
     try { history.replaceState(null, '', '#tab=' + encodeURIComponent(el.id)); } catch(e) {}
+};
+
+window.dashOpenSettings = function() {
+    if (dashRecordId) window.open('/' + db + '/edit_obj/' + dashRecordId, 'dash-settings');
 };
 
 window.dashCopy2Buffer = function(text) {
