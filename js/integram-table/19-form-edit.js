@@ -921,6 +921,9 @@
             event.preventDefault();
             event.stopPropagation();
 
+            // Remember the clicked cell so we can update its count on close (issue #1839)
+            const clickedCountCell = event.target.closest('td');
+
             try {
                 // Fetch metadata for subordinate table (use cache to avoid redundant requests)
                 if (!this.metadataCache[arrId]) {
@@ -981,6 +984,12 @@
 
                 // Close handler
                 const closeModal = () => {
+                    // Update subordinate record count in the parent cell (issue #1839)
+                    if (clickedCountCell) {
+                        const newCount = container.querySelectorAll('table tbody tr').length || 0;
+                        const countLink = clickedCountCell.querySelector('.subordinate-count-link');
+                        if (countLink) countLink.textContent = `(${ newCount })`;
+                    }
                     modal.remove();
                     overlay.remove();
                     window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
