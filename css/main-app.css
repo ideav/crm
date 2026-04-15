@@ -180,6 +180,7 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    position: relative;
 }
 
 [data-theme="dark"] .app-sidebar {
