@@ -1976,8 +1976,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 {
 	global $blocks, $obj, $z, $args;
 #{print_r($GLOBALS);die($id);}
-	if(!isset($GLOBALS["STORED_REPS"][$id]["sql"]))
-	{
+	if(!isset($GLOBALS["STORED_REPS"][$id]["sql"])){
 # Construct the report head
 		$GLOBALS["STORED_REPS"][$id]["params"] = $GLOBALS["STORED_REPS"][$id] = Array();
 		$GLOBALS["STORED_REPS"][$id]["rep_params"] = Array();
@@ -2046,6 +2045,10 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 					$GLOBALS["STORED_REPS"][$id]["refs"][$row["ord"]] = $row["refr"];
 			    #trace("_ check length of '".$row["val"]."' = ".strlen($row["val"]));
 				$GLOBALS["STORED_REPS"][$id][$row["col"]][$row["ord"]] = trim($row["val"]);
+				if($row["base"] === "1"){  // Free links are treated as SHORT
+					$row["base"] = "3";
+					$GLOBALS["FREE_LINKS"][$row["typ"]] = 1;
+				}
 				if(!isset($GLOBALS["REV_BT"][$row["typ"]]) && $row["typ"])
 					$GLOBALS["REV_BT"][$row["typ"]] = $GLOBALS["basics"][$row["base"]];
 			}
@@ -2059,16 +2062,13 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			}
         $GLOBALS["STORED_REPS"][$id]["columns_flip"] = array_flip($GLOBALS["STORED_REPS"][$id]["columns"]);
         # Add dynamically created columns
-		if(isset($_REQUEST["SELECT"]) && $exe)
-		{
+		if(isset($_REQUEST["SELECT"]) && $exe){
 	        $i = count($GLOBALS["STORED_REPS"][$id]["columns"]);
 	        $select = explode(",", str_replace("\,", "%2c", $_REQUEST["SELECT"]));
 			trace("Dynamic select: ".print_r($select, TRUE));
-            foreach($select as $k => $v)
-            {
+            foreach($select as $k => $v){
                 $f = explode(":", str_replace("\:","%3a",$v));
-                if(!isset($GLOBALS["STORED_REPS"][$id]["columns_flip"][$f[0]]))
-                {
+                if(!isset($GLOBALS["STORED_REPS"][$id]["columns_flip"][$f[0]])){
     				$i++;
     				if(strlen($f[0]))
                         $f[0] = str_replace("%2c",",",str_replace("%3a",":",$f[0]));
@@ -2087,13 +2087,11 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			trace("Dynamic columns: ".print_r($GLOBALS["STORED_REPS"][$id], TRUE));
         }
         # Check if we have TOTALS specified
-		if(isset($_REQUEST["TOTALS"]))
-		{
+		if(isset($_REQUEST["TOTALS"])){
 	        $select = explode(",", $_REQUEST["TOTALS"]);
 	        $tmp = Array();
 			trace("custom totals: ".print_r($select, TRUE));
-            foreach($select as $k => $v)
-            {
+            foreach($select as $k => $v){
     			trace("_ field: $k => $v");
                 $f = explode(":", $v);
                 if(isset($GLOBALS["STORED_REPS"][$id]["columns_flip"][$f[0]]) && in_array($f[1], $aggr_funcs))
@@ -2124,29 +2122,26 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 		}
 #print_r($GLOBALS["STORED_REPS"][$id]);die();
 # If we have an UPDATE, reserve a column for its results report
-		if(isset($GLOBALS["STORED_REPS"][$id][REP_COL_SET]))
-		{
+		if(isset($GLOBALS["STORED_REPS"][$id][REP_COL_SET])){
 			if(isset($_REQUEST["confirmed"]) || isset($GLOBALS["STORED_REPS"][$id]["rep_params"]["EXECUTE"]))
 				$GLOBALS["STORED_REPS"][$id]["head"][] = t9n("[RU]Выполнено[EN]Done");
 			else
 				$GLOBALS["STORED_REPS"][$id]["head"][] = "<a href=\"#\" onclick=\"byId('report').action+='?confirmed';byId('report').submit();event.stopPropagation();\">".t9n("[RU]Выполнить[EN]Commit changes")."</a>";
 		}
 # Get the Entities - those having others as requisites
-		if(!isset($GLOBALS["STORED_REPS"][$id]["sql"]))
-		{
+		if(!isset($GLOBALS["STORED_REPS"][$id]["sql"])){
 			$sql = "SELECT distinct CASE WHEN col_def.up=0 THEN col_def.id ELSE col_def.up END typ, reqs.id req, req_refs.t refr, arr_vals.up arr, reqs.val attr
 					FROM $z rep LEFT JOIN $z col_def ON col_def.id=rep.val 
 						LEFT JOIN $z reqs ON reqs.up=CASE WHEN col_def.up=0 THEN col_def.id ELSE col_def.up END
 						LEFT JOIN $z req_refs ON req_refs.id=reqs.t AND length(req_refs.val)=0
-						LEFT JOIN $z arr_vals ON arr_vals.up=reqs.t AND arr_vals.ord=1
+						LEFT JOIN $z arr_vals ON arr_vals.up=reqs.t AND arr_vals.ord=1 AND reqs.t!=1
 					WHERE rep.up=$id AND rep.t=".REP_COLS." AND (req_refs.id IS NOT NULL OR arr_vals.id IS NOT NULL)
 					ORDER BY rep.ord, reqs.ord";
 			$data_set = Exec_sql($sql, "Get all Objects involved in Report along with their Refs");
 # Report data retrieval - Fill in the arrays of Refs and Arrays
 			while($row = mysqli_fetch_array($data_set))
 # Save all the links from and to this Req and its Peers and Parent
-				if($row["refr"])
-				{
+				if($row["refr"]){
             		if(strpos($row["attr"], MULTI_MASK) !== FALSE){
             			$GLOBALS["MULTI"][$row["req"]] = $row["refr"];
 						$distinct = "DISTINCT";	# Multies might return more than one row
@@ -2394,8 +2389,8 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 								$not_all_joined = TRUE;
 								continue;
 							}
-							if($typ != $par)	# We are a requisite
-							{
+							if($typ != $par){	# We are a requisite
+								trace("We are a requisite $typ of $par");
 								if(!isset($tables[$alias]))
 								    $tables[$alias] = "";
 								if($l = isRef($id, $par, $typ)){
@@ -2408,6 +2403,10 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 										$tables[$alias] .= "LEFT JOIN ($z $pr$alias CROSS JOIN $z $p$alias) ON $pr$alias.up=$p$par_alias.id AND $pr$alias.val='$typ' AND $p$alias.id=$pr$alias.t AND $p$alias.t=$l";
 										$joinedJoin["$p$par_alias"][] = "LEFT JOIN ($z $pr$alias CROSS JOIN $z $p$alias) ON $pr$alias.up=$p$par_alias.id AND $pr$alias.val='$typ' AND $p$alias.id=$pr$alias.t AND $p$alias.t=$l";
 									}
+								}
+								elseif(isset($GLOBALS["FREE_LINKS"][$typ])){
+									$tables[$alias] .= "LEFT JOIN $z $pr$alias ON $pr$alias.up=$p$par_alias.id AND $pr$alias.val='$typ' LEFT JOIN $z $p$alias ON $p$alias.id=$pr$alias.t";
+									$joinedJoin["$p$par_alias"][] = "LEFT JOIN $z $pr$alias ON $pr$alias.up=$p$par_alias.id AND $pr$alias.val='$typ' LEFT JOIN $z $p$alias ON $p$alias.id=$pr$alias.t";
 								}
 								else{
 									$tables[$alias] .= "LEFT JOIN $z $p$alias ON $p$alias.up=$p$par_alias.id AND $p$alias.t=$typ";
@@ -4755,11 +4754,13 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					$in = str_replace(":","",substr($refs, 1));  # Cut first comma and remove columns
 #print_r($GLOBALS);die();
 				$data_set = Exec_sql("SELECT pars.id par_id, reqs.id req_id, pars.val par_name, pars.t par_base
-								, req_typs.id req_typ, CASE WHEN req_typs.val='' THEN ref_reqs.val ELSE req_typs.val END req_name
-								, ref_reqs.id ref_typ, reqs.val ref_name, cols.val cols, arr.id arr
+								, CASE WHEN reqs.t=1 THEN 1 ELSE req_typs.id END req_typ
+								, CASE WHEN reqs.t=1 THEN reqs.val WHEN req_typs.val='' THEN ref_reqs.val ELSE req_typs.val END req_name
+								, CASE WHEN reqs.t=1 THEN 1 ELSE ref_reqs.id END ref_typ
+								, reqs.val ref_name, cols.val cols, arr.id arr
 								, CASE WHEN req_typs.val='' THEN ref_reqs.t ELSE req_typs.t END base
 							FROM $z pars LEFT JOIN $z reqs ON reqs.up=pars.id 
-							    LEFT JOIN $z req_typs ON req_typs.id=reqs.t
+							    LEFT JOIN $z req_typs ON req_typs.id=reqs.t AND reqs.t!=1
 								LEFT JOIN $z ref_reqs ON ref_reqs.id=req_typs.t AND ref_reqs.id!=ref_reqs.t
 								LEFT JOIN $z arr ON ref_reqs.id IS NULL AND arr.up=req_typs.id AND arr.ord=1
 								LEFT JOIN (SELECT val FROM $z WHERE up=$parent_id AND val!='$parent_val' LIMIT 1) cols ON cols.val=reqs.id
@@ -4776,17 +4777,18 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
         					if($row["reqs_t"])	# Check if our Reqs are on list of independents and remove them
         						$req[$row["reqs_t"]] = "";	# Remember the Req ID
      			}
-				$data_set = Exec_sql("SELECT pars.id par_id, reqs.id req_id, pars.val par_name, reqs.val ref_name, NULL cols
-				                , req_typs.id req_typ, ref_reqs.id ref_typ
-								, CASE WHEN req_typs.val='' THEN ref_reqs.val ELSE req_typs.val END req_name, arr.id arr
+				$data_set = Exec_sql("SELECT pars.id par_id, reqs.id req_id, pars.val par_name, pars.t par_base
+				                , CASE WHEN reqs.t=1 THEN 1 ELSE req_typs.id END req_typ
+								, CASE WHEN reqs.t=1 THEN reqs.val WHEN req_typs.val='' THEN ref_reqs.val ELSE req_typs.val END req_name
+								, CASE WHEN reqs.t=1 THEN 1 ELSE ref_reqs.id END ref_typ
+								, reqs.val ref_name, NULL cols, arr.id arr
 								, CASE WHEN req_typs.val='' THEN ref_reqs.t ELSE req_typs.t END base
-							FROM $z pars
-							    LEFT JOIN $z reqs ON reqs.up=pars.id
-								LEFT JOIN $z req_typs ON req_typs.id=reqs.t
+							FROM $z pars LEFT JOIN $z reqs ON reqs.up=pars.id
+								LEFT JOIN $z req_typs ON req_typs.id=reqs.t AND reqs.t!=1
 								LEFT JOIN $z ref_reqs ON ref_reqs.id=req_typs.t AND ref_reqs.id!=ref_reqs.t
 								LEFT JOIN $z arr ON ref_reqs.id IS NULL AND arr.up=req_typs.id AND arr.ord=1
 							WHERE pars.up=0 AND pars.val!='' AND pars.t!=pars.id ORDER BY pars.val, reqs.ord"
-							, "Get All Report Columns");
+						, "Get All Report Columns");
 			}
             $i = 0;
 			while($row = mysqli_fetch_array($data_set)){
@@ -4796,9 +4798,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				# Do not allow to create reports including the object forbidden in the role
 			    if(isset($blocks["&main..&uni_obj.&new_req_report_column"]) && !Grant_1level($pid))
 			        continue;
-				if(!isset($on_list[$pid])  # Add a separate record for the Object's Value
-					|| (!isset($parent_listed) && ($pid == $GLOBALS["parent_val"])))
-				{
+				# Add a separate record for the Object's Value
+				if(!isset($on_list[$pid]) || (!isset($parent_listed) && ($pid == $GLOBALS["parent_val"]))){
 					if((!isset($parent_listed) && ($pid == $GLOBALS["parent_val"])))
 						$parent_listed = TRUE;
 					$on_list[$pid] = ""; # Mark it listed
@@ -4821,7 +4822,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 #print_r($blocks);die();
 				if((isset($row["arr"]) && strlen($row["arr"])) || !isset($row["req_id"])) # Skip Array reqs or objects without reqs
 					continue;
-				if(!Check_Grant($pid, $row["req_id"], "READ", FALSE))
+				if(!Check_Grant($pid, $row["req_id"], "READ", FALSE) && ($row["req_typ"] !== "1"))
 					continue;
 				$alias = $row["par_name"]." -> ".$row["req_name"];
 				# Correct the column name in case there is an alias
@@ -4846,11 +4847,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					}
 					else
 						$existing[$pid."_".$row["ref_typ"]] = 0;
-    			if(isApi() && $row["base"]){
+    			if(isApi()){ //  && ($row["base"] || ($row["req_typ"] === "1"))
         		    $GLOBALS["GLOBAL_VARS"]["api"]["rep_col_list"][$i]["id"] = $row["req_id"];
         		    $GLOBALS["GLOBAL_VARS"]["api"]["rep_col_list"][$i]["name"] = $alias;
         		    $GLOBALS["GLOBAL_VARS"]["api"]["rep_col_list"][$i]["type"] = $row["req_typ"];
-        		    $GLOBALS["GLOBAL_VARS"]["api"]["rep_col_list"][$i]["base"] = $GLOBALS["REV_BT"][$row["base"]];
+        		    $GLOBALS["GLOBAL_VARS"]["api"]["rep_col_list"][$i]["base"] = isset($row["base"]) ? $GLOBALS["REV_BT"][$row["base"]] : "";
         		    $GLOBALS["GLOBAL_VARS"]["api"]["rep_col_list"][$i]["table"] = $pid;
     				if(isset($row["ref_typ"]) && strlen($row["ref_name"]))
             		    $GLOBALS["GLOBAL_VARS"]["api"]["rep_col_list"][$i]["ref"] = $row["ref_typ"];
@@ -5221,8 +5222,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				}
 			}
 			# Fetch grants to the Referenced Object itself
-			if(isset($GLOBALS["GRANTS"]["mask"][$cur_ref_req]))
-			{
+			if(isset($GLOBALS["GRANTS"]["mask"][$cur_ref_req])){
 				unset($granted);
 				foreach($GLOBALS["GRANTS"]["mask"][$cur_ref_req] as $mask => $level) # Apply all masks
 				{
@@ -5236,15 +5236,15 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				$reqs_granted .= str_replace("a".$blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["base_typ"].".val", "vals.val", " AND ($granted) ");
 			}
 			if($blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["val"] != 0)
-				$cur_val = " UNION (SELECT vals.id, vals.val $sub_reqs FROM $z vals $joins WHERE vals.id='".$blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["val"]."') ";
+				$cur_val = " UNION (SELECT vals.id, vals.t, vals.val $sub_reqs FROM $z vals $joins WHERE vals.id='".$blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["val"]."') ";
 			elseif(isset($_REQUEST["t".$blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["typ"]]))
-				$cur_val = " UNION (SELECT vals.id, vals.val $sub_reqs FROM $z vals $joins WHERE vals.id='".addslashes($_REQUEST["t".$blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["typ"]])."') ";
+				$cur_val = " UNION (SELECT vals.id, vals.t, vals.val $sub_reqs FROM $z vals $joins WHERE vals.id='".addslashes($_REQUEST["t".$blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["typ"]])."') ";
 			else
 				$cur_val = "";
 
-			$sql = "SELECT vals.id, vals.val ref_val $reqs 
-						FROM (SELECT vals.id, vals.val $sub_reqs FROM $z vals  $join_granted $joins, $z pars
-						WHERE pars.id=vals.up AND pars.up!=0 AND vals.t=$cur_ref_req $search_val $reqs_granted $search_req LIMIT ".DDLIST_ITEMS.") vals
+			$sql = "SELECT vals.id, vals.t, vals.val ref_val $reqs 
+						FROM (SELECT vals.id, vals.t, vals.val $sub_reqs FROM $z vals  $join_granted $joins, $z pars
+						WHERE pars.id=vals.up AND pars.up!=0 AND vals.t!=1 AND vals.t=$cur_ref_req $search_val $reqs_granted $search_req LIMIT ".DDLIST_ITEMS.") vals
 					$cur_val ORDER BY ref_val";
 			$data_set = Exec_sql($sql, "Get Object ref reqs"); # Add_Obj_Ref_Reqs
 			$blocks["ref_count"] = mysqli_num_rows($data_set); # Expand the list in case there are more
@@ -5259,8 +5259,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			        continue;
 				$i = 1; 
 				$reqs = "";
-				while($i <= $req_count)  # Append more identifying info to the dropdown list values
-				{
+				while($i <= $req_count){  # Append more identifying info to the dropdown list values
 					$i++;
 					if(strlen($row[$i]))
 						$reqs .= " / ".$row[$i];
@@ -5269,6 +5268,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				}
 				$blocks[$block]["r"][] = $cur_ref_typ;
 				$blocks[$block]["id"][] = $row["id"];
+				$blocks[$block]["orig"][] = $row["t"];
 				$blocks[$block]["val"][] = Format_Val_View($blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["base_typ"]
 															, htmlspecialchars($row["ref_val"])).$reqs;
 				if(($blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["val"] == 0) # The current value is empty
@@ -6016,7 +6016,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			$GLOBALS["DESC"] = isset($_REQUEST["desc"]) ? "DESC" : "";
 			$GLOBALS["PG"] = isset($_REQUEST["pg"]) ? max($_REQUEST["pg"], 1) : 1;
 			$sql = "SELECT CASE WHEN arrs.id IS NULL THEN a.id ELSE typs.id END t, CASE WHEN refs.id IS NULL THEN typs.t ELSE refs.t END base_typ
-						, CASE WHEN refs.id IS NULL THEN typs.val WHEN a.t=1 THEN a.val ELSE refs.val END val
+						, CASE WHEN a.t=1 THEN a.val WHEN refs.id IS NULL THEN typs.val ELSE refs.val END val
 						, CASE WHEN a.t=1 THEN 1 ELSE refs.id END ref_id, arrs.id arr_id, a.val attrs, a.id
 					FROM $z a LEFT JOIN $z typs ON typs.id=a.t AND a.t!=1 LEFT JOIN $z refs ON refs.id=typs.t AND refs.t!=refs.id
 							LEFT JOIN $z arrs ON refs.id IS NULL AND arrs.up=typs.id AND arrs.ord=1
@@ -6034,7 +6034,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                 $val = isset($row["ref_id"]) ? FetchAlias($row["attrs"], $row["val"]) : $row["val"];
 				$blocks[$block]["val"][] = $val;
 				$blocks[$block]["typ"][] = $row["id"];
-				$blocks[$block]["base_typ"][] = $row["base_typ"];
+				$blocks[$block]["base_typ"][] = $row["base_typ"] ?? "";
 				$blocks[$block]["ref_type"][] = $row["ref_id"] ? "ref-type=\"".$row["ref_id"]."\"" : "";
 				$blocks[$block]["arr_type"][] = $row["arr_id"] ? "arr-type=\"".$row["t"]."\"" : "";
 				$blocks[$block]["id"][] = $id;
@@ -6055,15 +6055,12 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 	    		        $GLOBALS["GLOBAL_VARS"]["api"]["arr_type"][$row["t"]] = $row["arr_id"];
 			        $GLOBALS["GLOBAL_VARS"]["api"]["req_order"][$ord++] = $row["t"];
     			}
-				if($row["arr_id"] != 0) # Remember this to simplify the request for Reqs later
-				{
+				if($row["arr_id"] != 0){ # Remember this to simplify the request for Reqs later
 					$GLOBALS["REV_BT"][$row["t"]] = "ARRAY";
 					$GLOBALS["HAVE_ARR"] = "";
 					$GLOBALS["ARR_typs"][$row["t"]] = $GLOBALS["REV_BT"][$row["base_typ"]];
 				}
-				if($row["ref_id"] != 0)
-				{
-					$GLOBALS["HAVE_REF"] = "";
+				if($row["ref_id"] != 0){
 					$GLOBALS["REF_typs"][$row["t"]] = $row["ref_id"];  # Save the Typ of the referenced Object
             		if(strpos($row["attrs"], MULTI_MASK) !== FALSE){
             			$GLOBALS["MULTI"][$row["t"]] = $row["ref_id"];
@@ -6640,7 +6637,6 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					$rows[$row["t"]]["arr_num"] = isset($row["arr_num"]) ? $row["arr_num"] : "";
 				}
 				else{ # It is a Reference
-				    $ref_id = $row["ref"];
 				    $ref = $row["val"];
 					$rows[$ref]["id"][] = $row["id"];
     				# Check if we got a query for the DDL
@@ -6679,9 +6675,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					$rows[$ref]["val"][] = $row["refr"];
 					$rows[$ref]["ord"][] = $row["ord"];
 					$rows[$ref]["ref_id"][] = $row["t"];
+					$rows[$ref]["ref_t"][] = $row["ref"];
 				}
+			trace("GLOBALS[REQS]: ".print_r($GLOBALS["REQS"], true));
+			trace("GLOBALS[REF_typs]: ".print_r($GLOBALS["REF_typs"], true));
 			foreach($GLOBALS["REQS"] as $key => $value){
-#print_r($GLOBALS);print_r($rows);die();
 				if(($key == $id) && !isset($GLOBALS["ARR_typs"][$key]))	# The last Req is the object itself
 					break;
 				if(isset($rows[$key]))
@@ -6709,7 +6707,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 						$v = isset($row["arr_num"]) ? (int)$row["arr_num"] : "";
 					elseif(isset($row["ref_id"])){  # Reference
 						$v = str_replace(",", "&comma;", $row["val"]);
-						$GLOBALS["GLOBAL_VARS"]["api"]["reqs"][$parent_id]["ref_$key"] = $GLOBALS["REF_typs"][$key].":".(is_array($row["ref_id"])?implode(",", $row["ref_id"]) : $row["ref_id"]);
+						$GLOBALS["GLOBAL_VARS"]["api"]["reqs"][$parent_id]["ref_$key"] = $row["ref_t"][0].":".(is_array($row["ref_id"])?implode(",", $row["ref_id"]) : $row["ref_id"]);
 					}
 					elseif($req_id > 0){ # We got some value
 						if($GLOBALS["REV_BT"][$base_typ] == "FILE")
@@ -6770,7 +6768,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
             		        $blocks["multiselectcell"][$key] = $row;
             		    }
 						elseif(Grant_1level($key)) # Do we have access to this Type
-							$blocks[$block]["val"][] = "<A HREF=\"/$z/object/".$GLOBALS["REF_typs"][$key]."/?F_I=".$row["ref_id"][0]."$flags\">".Format_Val_View($base_typ, htmlspecialchars($val[0]))."</A>";
+							$blocks[$block]["val"][] = "<A HREF=\"/$z/object/".$row["ref_t"][0]."/?F_I=".$row["ref_id"][0]."$flags\">".Format_Val_View($base_typ, htmlspecialchars($val[0]))."</A>";
 						else
 							$blocks[$block]["val"][] = Format_Val_View($base_typ, htmlspecialchars($val[0]));
 					}
@@ -7146,18 +7144,18 @@ function GetObjectReqs($typ, $id)
 {
 	global $z;
 	$GLOBALS["REQS"] = Array();
-	$sql = "SELECT a.id t, refs.id ref_id, a.val attrs, a.ord
+	$sql = "SELECT a.id t, CASE WHEN a.t=1 THEN 1 ELSE refs.id END ref_id, a.val attrs, a.ord
 				, CASE WHEN refs.id IS NULL THEN typs.t ELSE refs.t END base_typ
-				, CASE WHEN refs.id IS NULL THEN typs.val ELSE refs.val END val
+				, CASE WHEN a.t=1 THEN a.val WHEN refs.id IS NULL THEN typs.val ELSE refs.val END val
 				, CASE WHEN arrs.id IS NULL THEN NULL ELSE typs.id END arr_id
 				, CASE WHEN refs.id IS NULL THEN '' ELSE (SELECT reqbase.id FROM $z refreq, $z reqdef, $z reqbase
 				        WHERE refreq.up=refs.id AND reqdef.id=refreq.t AND reqbase.id=reqdef.t  AND reqbase.t!=reqbase.id ORDER BY refreq.ord LIMIT 1) END restr
-			FROM $z a, $z typs LEFT JOIN $z refs ON refs.id=typs.t AND refs.t!=refs.id
-					LEFT JOIN $z arrs ON refs.id IS NULL AND arrs.up=typs.id AND arrs.ord=1
-			WHERE a.up=$typ AND typs.id=a.t ORDER BY a.ord";
+			FROM $z a LEFT JOIN $z typs ON typs.id=a.t AND a.t!=1
+				LEFT JOIN $z refs ON refs.id=typs.t AND refs.t!=refs.id
+				LEFT JOIN $z arrs ON refs.id IS NULL AND arrs.up=typs.id AND arrs.ord=1
+			WHERE a.up=$typ ORDER BY a.ord";
 	$data_set = Exec_sql($sql, "Get the Reqs meta");
-	while($row = mysqli_fetch_array($data_set))
-	{
+	while($row = mysqli_fetch_array($data_set)){
 		if($row["ref_id"]){
     		if(strpos($row["attrs"], MULTI_MASK) !== FALSE){
     			$GLOBALS["MULTI"][$row["t"]] = $row["ref_id"];
@@ -7170,7 +7168,7 @@ function GetObjectReqs($typ, $id)
 		}
 		elseif($row["arr_id"])
 			$GLOBALS["ARR_typs"][$row["t"]] = $row["arr_id"];
-		if(($row["base_typ"] == 0) && !isset($_REQUEST["copybtn"]) && !isApi()){	# Tab met and we're not copying the Object
+		if(($row["base_typ"] === "0") && !isset($_REQUEST["copybtn"]) && !isApi()){	# Tab met and we're not copying the Object
 			if(count($GLOBALS["REQS"]) && !(isset($GLOBALS["TABS"])))	# And there were Reqs already - tab them as 'Reqs'
 			{
 				$GLOBALS["TABS"][0] = t9n("[RU]Реквизиты[EN]Attributes");
@@ -7202,7 +7200,7 @@ function GetObjectReqs($typ, $id)
 		if(isset($tab_to) # We don't need the rest of the Reqs, except Buttons; just keep collecting Tabs
 				&& ($GLOBALS["REV_BT"][$row["base_typ"]] != "BUTTON"))
 			continue;
-		$GLOBALS["REQS"][$row["t"]]["base_typ"] = $row["base_typ"];
+		$GLOBALS["REQS"][$row["t"]]["base_typ"] = $row["base_typ"] ?? "";
 		$GLOBALS["REQS"][$row["t"]]["val"] = isset($row["ref_id"]) ? FetchAlias($row["attrs"], $row["val"]) : $row["val"];
 		$GLOBALS["REQS"][$row["t"]]["ref_id"] = $row["ref_id"];
 		$GLOBALS["REQS"][$row["t"]]["arr_id"] = $row["arr_id"];
@@ -7816,7 +7814,7 @@ function isDbVacant($db){
 }
 function checkNewRef($val, $t, $fatal=true){
     global $z;
-    if(!($row = mysqli_fetch_array(Exec_sql("SELECT 1 FROM $z WHERE id=$val AND t=$t", "Check new Ref"))))
+    if(!($row = mysqli_fetch_array(Exec_sql("SELECT 1 FROM $z WHERE id=$val AND (t=$t OR $t=1)", "Check new Ref"))))
         if($fatal)
             die(t9n("[RU]Неверная ссылка $val:[EN]Wrong Reference $val:").$t);
         else
@@ -8303,7 +8301,6 @@ if(Validate_Token())
             							Delete($row["id"]);
             					}
             					elseif($val){
-			  
             						$id = Insert($obj, 1, $val, "$t", "Insert new Ref Attr"); # A new Value
             						checkDuplicatedReqs($obj, $t);
             					}
@@ -8517,7 +8514,9 @@ if(Validate_Token())
        				            $value = explode(",", $value); # There might be comma separated IDs
 							foreach($value as $ref){
 								if((int)$ref > 0){
-									if($row = mysqli_fetch_array(Exec_sql("SELECT val FROM $z WHERE id=".((int)$ref)." AND t=".$GLOBALS["REF_typs"][$t], "Check Ref's Type"))){
+									if($row = mysqli_fetch_array(Exec_sql("SELECT t, val FROM $z WHERE id=".((int)$ref)." AND (t=".$GLOBALS["REF_typs"][$t]." OR ".$GLOBALS["REF_typs"][$t]."=1)", "Check Ref's Type"))){
+										if($GLOBALS["REF_typs"][$t] === "1") # Link to any table
+											$GLOBALS["REF_typs"][$t] = $row["t"];
 										Check_Val_granted($GLOBALS["REF_typs"][$t], $row["val"], (int)$ref);
 										if(isset($search[$t]))
 											unset($search[$t]); # Clean the search criteria to leave the form
@@ -9435,11 +9434,14 @@ if(Validate_Token())
 #		    if(Grant_1level($id) !== "WRITE")
 #		        my_die("{\"error\":\"No grants to id $id\"}");
 			$data_set = Exec_sql("SELECT dic.t dic, r.val attr, def_reqs.t, req_orig.t base, base.id!=base.t is_ref, req.id req_id
-			                        FROM $z r JOIN $z dic ON dic.id=r.t JOIN $z par ON par.id=r.up AND par.up=0
-			                            LEFT JOIN $z def_reqs ON def_reqs.up=r.t LEFT JOIN $z req_orig ON req_orig.id=def_reqs.t LEFT JOIN $z base ON base.id=req_orig.t
-    									LEFT JOIN $z req ON req.up=dic.t AND req.t=def_reqs.t
-			                        WHERE r.id=$id ORDER BY def_reqs.ord"
-			                    , "Get refs reqs");
+							FROM $z r LEFT JOIN $z dic ON dic.id=r.t
+								LEFT JOIN $z par ON par.id=r.up AND par.up=0
+								LEFT JOIN $z def_reqs ON def_reqs.up=r.t AND r.t!=1
+								LEFT JOIN $z req_orig ON req_orig.id=def_reqs.t
+								LEFT JOIN $z base ON base.id=req_orig.t
+								LEFT JOIN $z req ON req.up=dic.t AND req.t=def_reqs.t
+							WHERE r.id=$id ORDER BY def_reqs.ord"
+						, "Get refs reqs");
 			# Fetch extra fields for the value of the Ref list
 			$ref_reqs = Array();
 			$joins = Array();
