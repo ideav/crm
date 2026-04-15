@@ -441,7 +441,8 @@ function dashDrawPeriods() {
                                 headTpl.replace(':head:', p[i].r[0]).replace(':from:', fr).replace(':to:', to));
                             panel.querySelectorAll('.f-item').forEach(function(row) {
                                 var s = dashCellSrc(row.id, 'rg');
-                                if (dashFormulas[row.id]) {
+                                v = dashGetVal(row.getAttribute('item-name'), fr, to);
+                                if (v === undefined && dashFormulas[row.id]) {
                                     if (dashFormulas[row.id] === '[]')
                                         v = dashGetVal(row.getAttribute('item-name'), fr, to);
                                     else if (itemRegex.test(dashFormulas[row.id]))
