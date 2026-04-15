@@ -14,7 +14,15 @@
 
             if (!filterDef) return;
 
-            if (type === '...') {
+            if (type === '@' || type === '!@') {
+                // ID-based filter: user enters one or more IDs (digits, comma-separated) (issue #1819)
+                const ids = value.split(',').map(v => v.trim()).filter(v => /^\d+$/.test(v));
+                if (ids.length === 0) return;
+                const formatted = ids.length === 1
+                    ? `${type}${ids[0]}`
+                    : `${type}(${ids.join(',')})`;
+                params.append(`FR_${ colId }`, formatted);
+            } else if (type === '...') {
                 const values = value.split(',').map(v => v.trim());
                 if (values.length >= 2) {
                     params.append(`FR_${ colId }`, values[0]);

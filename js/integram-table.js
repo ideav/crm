@@ -160,6 +160,8 @@ class IntegramTable{
             this.filterTypes['REF'] = [
                 { symbol: '=', name: 'равно', format: 'FR_{ T }={ X }' },
                 { symbol: '(,)', name: 'в списке', format: 'FR_{ T }={ X }' },
+                { symbol: '@', name: 'по ID: включая', format: 'FR_{ T }=@{ X }' },
+                { symbol: '!@', name: 'по ID: исключая', format: 'FR_{ T }=!@{ X }' },
                 { symbol: '~', name: 'содержит', format: 'FR_{ T }=%{ X }%' },
                 { symbol: '^', name: 'начинается с...', format: 'FR_{ T }={ X }%' },
                 { symbol: '!', name: 'не содержит', format: 'FR_{ T }=!%{ X }%' },
@@ -167,7 +169,8 @@ class IntegramTable{
                 { symbol: '!%', name: 'пустое', format: 'FR_{ T }=!%' }
             ];
             // Text-based filter types for REF columns - these use text input instead of dropdown (issue #799)
-            this.refTextFilterTypes = new Set(['~', '^', '!']);
+            // '@' and '!@' also use text input - user types IDs directly (issue #1819)
+            this.refTextFilterTypes = new Set(['~', '^', '!', '@', '!@']);
 
             this.init();
         }
@@ -1169,7 +1172,15 @@ class IntegramTable{
 
             if (!filterDef) return;
 
-            if (type === '...') {
+            if (type === '@' || type === '!@') {
+                // ID-based filter: user enters one or more IDs (digits, comma-separated) (issue #1819)
+                const ids = value.split(',').map(v => v.trim()).filter(v => /^\d+$/.test(v));
+                if (ids.length === 0) return;
+                const formatted = ids.length === 1
+                    ? `${type}${ids[0]}`
+                    : `${type}(${ids.join(',')})`;
+                params.append(`FR_${ colId }`, formatted);
+            } else if (type === '...') {
                 const values = value.split(',').map(v => v.trim());
                 if (values.length >= 2) {
                     params.append(`FR_${ colId }`, values[0]);
@@ -3411,6 +3422,14 @@ class IntegramTable{
                         const col = this.columns.find(c => c.id === colId);
                         const fmt = col ? (col.format || 'SHORT') : 'SHORT';
                         this.filters[colId] = { type: this.getDefaultFilterType(fmt), value: '' };
+                    }
+                    // Validate input for ID-based filter types (issue #1819): only digits and commas
+                    const filterType = this.filters[colId] && this.filters[colId].type;
+                    if (filterType === '@' || filterType === '!@') {
+                        const sanitized = input.value.replace(/[^\d,\s]/g, '');
+                        if (sanitized !== input.value) {
+                            input.value = sanitized;
+                        }
                     }
                     this.filters[colId].value = input.value;
                     // Clear displayValue: user is now entering their own filter, not the resolved label (issue #551)
@@ -9035,6 +9054,22 @@ class IntegramTable{
             }
             if (rawValue === '!%') {
                 return { type: '!%', value: '' };
+            }
+
+            // Check for ID-based exclusion filter: !@{id} or !@(id1,id2,...) (issue #1819)
+            const refExclIdMatch = rawValue.match(/^!@(\d+)$/);
+            if (refExclIdMatch) {
+                return { type: '!@', value: refExclIdMatch[1] };
+            }
+            const refExclListMatch = rawValue.match(/^!@\((.+)\)$/);
+            if (refExclListMatch) {
+                return { type: '!@', value: refExclListMatch[1] };
+            }
+
+            // Check for ID-based including-list filter: @(id1,id2,...) (issue #1819)
+            const refInclListMatch = rawValue.match(/^@\((.+)\)$/);
+            if (refInclListMatch) {
+                return { type: '@', value: refInclListMatch[1] };
             }
 
             // Check for ID-based filter: @{id} means filter by record ID, not by text value (issue #551)

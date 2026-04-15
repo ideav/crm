@@ -379,6 +379,22 @@
                 return { type: '!%', value: '' };
             }
 
+            // Check for ID-based exclusion filter: !@{id} or !@(id1,id2,...) (issue #1819)
+            const refExclIdMatch = rawValue.match(/^!@(\d+)$/);
+            if (refExclIdMatch) {
+                return { type: '!@', value: refExclIdMatch[1] };
+            }
+            const refExclListMatch = rawValue.match(/^!@\((.+)\)$/);
+            if (refExclListMatch) {
+                return { type: '!@', value: refExclListMatch[1] };
+            }
+
+            // Check for ID-based including-list filter: @(id1,id2,...) (issue #1819)
+            const refInclListMatch = rawValue.match(/^@\((.+)\)$/);
+            if (refInclListMatch) {
+                return { type: '@', value: refInclListMatch[1] };
+            }
+
             // Check for ID-based filter: @{id} means filter by record ID, not by text value (issue #551)
             // Example: FR_4547=@6753 means filter column 4547 by record ID 6753
             const refIdMatch = rawValue.match(/^@(\d+)$/);

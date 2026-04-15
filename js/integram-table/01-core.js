@@ -143,6 +143,8 @@
             this.filterTypes['REF'] = [
                 { symbol: '=', name: 'равно', format: 'FR_{ T }={ X }' },
                 { symbol: '(,)', name: 'в списке', format: 'FR_{ T }={ X }' },
+                { symbol: '@', name: 'по ID: включая', format: 'FR_{ T }=@{ X }' },
+                { symbol: '!@', name: 'по ID: исключая', format: 'FR_{ T }=!@{ X }' },
                 { symbol: '~', name: 'содержит', format: 'FR_{ T }=%{ X }%' },
                 { symbol: '^', name: 'начинается с...', format: 'FR_{ T }={ X }%' },
                 { symbol: '!', name: 'не содержит', format: 'FR_{ T }=!%{ X }%' },
@@ -150,7 +152,8 @@
                 { symbol: '!%', name: 'пустое', format: 'FR_{ T }=!%' }
             ];
             // Text-based filter types for REF columns - these use text input instead of dropdown (issue #799)
-            this.refTextFilterTypes = new Set(['~', '^', '!']);
+            // '@' and '!@' also use text input - user types IDs directly (issue #1819)
+            this.refTextFilterTypes = new Set(['~', '^', '!', '@', '!@']);
 
             this.init();
         }
