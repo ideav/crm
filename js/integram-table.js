@@ -6939,6 +6939,7 @@ class IntegramTable{
             const apiBase = this.getApiBase();
             const parsedAttrs = this.parseAttrs(col.attrs);
             const isRef = col.ref_id != null || (col.ref && col.ref !== 0);
+            const isFreeLink = String(col.type) === '1';
             const isMulti = parsedAttrs.multi;
             const isRequired = parsedAttrs.required;
             const isFirstColumn = col.id === String(this.objectTableId || this.options.tableTypeId);
@@ -7009,7 +7010,8 @@ class IntegramTable{
                     </div>
                     <div class="col-edit-row">
                         <label class="col-edit-label">Базовый тип:</label>
-                        ${ !isRef ? `<select id="col-edit-type-${instanceName}" class="form-control form-control-sm col-edit-select">
+                        ${ isFreeLink ? `<span class="col-edit-value">Свободная ссылка</span>`
+                            : !isRef ? `<select id="col-edit-type-${instanceName}" class="form-control form-control-sm col-edit-select">
                             ${ availableTypes.map(t => `<option value="${t.id}" ${ String(col.type) === String(t.id) ? 'selected' : '' }>${t.name}</option>`).join('') }
                         </select>` : `<span class="col-edit-value">Ссылочный тип (справочник)</span>` }
                     </div>
@@ -7115,8 +7117,8 @@ class IntegramTable{
                         col.val = newName;
                     }
 
-                    // 1. Change base type (non-ref only)
-                    if (!isRef) {
+                    // 1. Change base type (non-ref, non-free-link only)
+                    if (!isRef && !isFreeLink) {
                         const newTypeId = colEditModal.querySelector(`#col-edit-type-${instanceName}`).value;
                         const currentColName = colEditModal.querySelector(`#col-edit-name-${instanceName}`).value.trim() || col.name;
                         const newUnique = colEditModal.querySelector(`#col-edit-unique-${instanceName}`)?.checked ?? isUnique;
