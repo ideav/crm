@@ -758,12 +758,19 @@ function dashGetModel(json) {
         }
     }
 
-    // Activate first tab
-    var firstTab = model.querySelector('.dash-sheet-tab');
-    if (firstTab && !model.querySelector('.dash-sheet-tab.active')) {
-        firstTab.classList.add('active');
-        var firstSheet = model.querySelector('.f-sheet');
-        if (firstSheet) firstSheet.style.display = '';
+    // Activate tab: restore from URL hash or default to first tab (issue #1840)
+    if (!model.querySelector('.dash-sheet-tab.active')) {
+        var savedTab = null;
+        try {
+            var hashMatch = window.location.hash.match(/^#tab=(.+)/);
+            if (hashMatch) savedTab = model.querySelector('.dash-sheet-tab#' + CSS.escape(decodeURIComponent(hashMatch[1])));
+        } catch(e) {}
+        var targetTab = savedTab || model.querySelector('.dash-sheet-tab');
+        if (targetTab) {
+            targetTab.classList.add('active');
+            var targetSheet = document.getElementById('ds' + targetTab.id);
+            if (targetSheet) targetSheet.style.display = '';
+        }
     }
 }
 
@@ -834,6 +841,8 @@ window.dashSetActive = function(el) {
     el.classList.add('active');
     var sheet = document.getElementById('ds' + el.id);
     if (sheet) sheet.style.display = '';
+    // Persist active tab in URL hash so page refresh restores it (issue #1840)
+    try { history.replaceState(null, '', '#tab=' + encodeURIComponent(el.id)); } catch(e) {}
 };
 
 window.dashCopy2Buffer = function(text) {
