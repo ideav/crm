@@ -895,7 +895,8 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
 					$GLOBALS["distinct"] = "DISTINCT"; # Array might return multiple rows, so we have to remove the dupes
 				if($NOT_flag){
 					if(isset($GLOBALS["REF_typs"][$key])){
-						$joinTable = "LEFT JOIN ($z r$key CROSS JOIN $z a$key) ON r$key.up=vals.id AND a$key.t=".$GLOBALS["REF_typs"][$key];
+						$joinTable = "LEFT JOIN ($z r$key CROSS JOIN $z a$key) ON r$key.up=vals.id "
+											.($GLOBALS["REF_typs"][$key] === "1" ? "" : "AND a$key.t=".$GLOBALS["REF_typs"][$key]);
 						$joinCond = "AND r$key.t=a$key.id AND r$key.val='$join_req'";
 					}
 					else{
@@ -935,8 +936,8 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
         if(isset($GLOBALS["REF_typs"][$key])) # Filter was applied to the Object's Ref Value or ID
         {
     		if($join)
-    			$GLOBALS["join"] .= " LEFT JOIN ($z r$key CROSS JOIN $z a$key) ON r$key.up=vals.id AND r$key.t=a$key.id
-    									 AND r$key.val='$join_req' AND a$key.t=".$GLOBALS["REF_typs"][$key];
+    			$GLOBALS["join"] .= " LEFT JOIN ($z r$key CROSS JOIN $z a$key) ON r$key.up=vals.id AND r$key.t=a$key.id AND r$key.val='$join_req' "
+										.($GLOBALS["REF_typs"][$key] === "1" ? "" : "AND a$key.t=".$GLOBALS["REF_typs"][$key]);
     		if($NOT_flag) # No match or empty
     			$GLOBALS["where"] .= " AND (a$key.val $search_val OR a$key.val IS NULL)";
     		else
@@ -8988,6 +8989,23 @@ if(Validate_Token())
 		case "_attributes":
 			if(($id == 0) || ($t == 0))
 				my_die(t9n("[RU]Неверный реквизит ($t) или ID ($id)[EN] Invalid requisite($t) or ID ($id)"));
+			if(trim($val) == "")
+				my_die(t9n("[RU]Пустой тип[EN]Empty type"));
+			$val = addslashes(trim($val));
+			if($t === 1){ // Add a free link Req
+				if($row = mysqli_fetch_array(Exec_sql("SELECT new.id FROM $z obj"
+													." LEFT JOIN $z new ON new.t=1 AND new.up=obj.id AND new.val='$val'"
+													." WHERE obj.id=$id AND obj.up=0"
+												, "Check the new free link"))){
+					if($row["id"])
+						my_die(t9n("[RU]Реквизит уже сущесвует [EN]Invalid requisite ").$row["id"]);
+					$obj = $id;
+					$id = Insert($id, Get_Ord($id), 1, $val, "Add free link Req");
+				}
+				else
+					my_die(t9n("[RU]Некорректный тип $id[EN]Incorrect term $id"));
+				break;
+			}
 			if($row = mysqli_fetch_array(Exec_sql("SELECT obj.up objup, new.t, obj.val, new.id, new.up, ex.id existing"
 		                                        ." FROM $z obj LEFT JOIN $z new ON new.id=$t"
 		                                        ."  LEFT JOIN ($z ex CROSS JOIN $z ext CROSS JOIN $z exb) ON ex.up=obj.id AND ex.t=$t AND ext.id=ex.t AND exb.id=ext.t AND exb.t=exb.id"
@@ -8996,7 +9014,7 @@ if(Validate_Token())
 				if(($row["id"] == 0) || ($row["up"] != 0))
 					my_die(t9n("[RU]Неверный реквизит $t [EN]Invalid requisite($t)"));
 				if($row["objup"] != 0)
-					my_die(t9n("[RU]Некорректный тип $id - ".$row["val"]." (это не метаданные)[EN]"));
+					my_die(t9n("[RU]Некорректный тип $id - ".$row["val"]." (это не метаданные)[EN]Incorrect term $id, not metadata"));
 				if($row["t"] == $t)
 					my_die(t9n("[RU]Некорректный тип $t - это базовый тип[EN]Invalid type $t is the base type"));
 				if($row["existing"]){
@@ -9039,8 +9057,13 @@ if(Validate_Token())
 		case "_setalias":
 			if(strpos($val, ":") !== false)
 				my_die(t9n("[RU]Недопустимый символ &laquo;:&raquo; в псевдониме $val [EN] Invalid character &laquo;:&raquo; in the alias $val"));
-			if($row = mysqli_fetch_array(Exec_sql("SELECT $z.val, par.up, $z.up myup FROM $z, $z par WHERE $z.id=$id AND par.id=$z.t", "Get Ref alias")))
-			{
+			if($row = mysqli_fetch_array(Exec_sql("SELECT term.val, term.t, par.up, term.up myup FROM $z term, $z par WHERE term.id=$id AND par.id=term.t", "Get Ref alias"))){
+				if($row["t"] === "1"){ // Free link
+					if($val != "")
+						Exec_sql("UPDATE $z SET val='".addslashes($val)."' WHERE id=$id", "Set free link alias");
+					$id = $obj = $up;
+					break;
+				}
 				if($row["up"] != 0)
 					my_die(t9n("[RU]Ошибка подчиненности объекта ссылки [EN]Error in subordination of the link object"));
 				$up = $row["myup"];
@@ -9055,7 +9078,7 @@ if(Validate_Token())
 						$alias[1] = ALIAS_DEF.$val.":".$alias[1];
 					Exec_sql("UPDATE $z SET val='".implode($alias)."' WHERE id=$id", "Update alias");
 				}
-				elseif($val != "")
+				else
 					Exec_sql("UPDATE $z SET val=CONCAT(val,'".ALIAS_DEF.addslashes($val).":') WHERE id=$id", "Set alias");
 			}
 			else
@@ -9357,7 +9380,7 @@ if(Validate_Token())
 						$metaReqs[$row["id"]][] = "{\"num\":".$row["ord"].",\"id\":\"".$row["req_t"]."\""
                                 .",\"val\":\"".addcslashes($row["req_val"], "\\\'")."\""
                                 .",\"orig\":\"".($row["ref"]?$row["ref"]:$row["ref_id"])."\""
-                                .",\"type\":\"".$row["base_typ"]."\""
+                                .",\"type\":\"".($row["base_typ"]??"1")."\""
                                 .($row["arr_id"]?",\"arr_id\":\"".$row["arr_id"]."\"":"")
                                 .($row["ref"]?",\"ref\":\"".$row["ref"]."\",\"ref_id\":\"".$row["ref_id"]."\"":"")
                                 .($row["attrs"]?",\"attrs\":\"".$row["attrs"]."\"":"")
