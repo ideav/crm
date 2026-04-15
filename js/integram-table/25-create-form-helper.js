@@ -1134,6 +1134,7 @@ class IntegramCreateFormHelper {
             if (serverError) {
                 throw new Error(serverError);
             }
+            if (result.warning) this.showToast(result.warning, 'warning');
 
             // Success - close modal
             this.showToast('Запись создана', 'success');
@@ -2210,6 +2211,7 @@ class IntegramCreateFormHelper {
             if (serverError) {
                 throw new Error(serverError);
             }
+            if (result.warning) this.showToast(result.warning, 'warning');
 
             // Success - close modal
             this.showToast('Изменения сохранены', 'success');

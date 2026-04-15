@@ -1762,6 +1762,12 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border-left: 4px solid #2196f3;
 }
 
+.integram-toast-warning {
+    background: #fff8e1;
+    color: #f57f17;
+    border-left: 4px solid #ffc107;
+}
+
 /* Searchable select (dropdown with search) */
 .searchable-select-wrapper {
     position: relative;
