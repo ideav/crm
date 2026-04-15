@@ -7109,7 +7109,7 @@ class IntegramTable{
                     const newName = nameInput ? nameInput.value.trim() : '';
                     if (newName && newName !== currentName) {
                         const result = isFreeLink
-                            ? await this.setColumnAlias(col.orig || col.id, newName)
+                            ? await this.setColumnAlias(col.id, newName)
                             : await this.renameColumn(col.orig || col.id, newName, col.type);
                         if (!result.success) {
                             showStatus('Ошибка переименования: ' + result.error, true);
