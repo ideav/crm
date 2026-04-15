@@ -938,6 +938,14 @@
                 window[instanceName].previewPastedData(modal, closeModal);
             });
 
+            // Ctrl+Enter in textarea triggers "Вставить" (issue #1845)
+            modal.querySelector('#paste-data-textarea').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                    e.preventDefault();
+                    modal.querySelector('#paste-data-insert-btn').click();
+                }
+            });
+
             // Focus textarea
             setTimeout(() => modal.querySelector('#paste-data-textarea').focus(), 50);
         }
