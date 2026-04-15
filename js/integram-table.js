@@ -2911,6 +2911,12 @@ class IntegramTable{
             });
 
             previewModal.querySelector('#paste-preview-load-btn').addEventListener('click', () => {
+                // Disable preview buttons while loading (issue #1848)
+                const loadBtn = previewModal.querySelector('#paste-preview-load-btn');
+                const cancelBtn = previewModal.querySelector('#paste-preview-cancel-btn');
+                if (loadBtn) loadBtn.disabled = true;
+                if (cancelBtn) cancelBtn.disabled = true;
+
                 // Collect edited cell values back into rows
                 const cells = previewModal.querySelectorAll('.paste-preview-cell');
                 const editedRows = parsedRows.map(row => [...row]);
@@ -2943,6 +2949,8 @@ class IntegramTable{
             const textarea = modal.querySelector('#paste-data-textarea');
             const progressEl = modal.querySelector('#paste-data-progress');
             const insertBtn = modal.querySelector('#paste-data-insert-btn');
+            const previewBtn = modal.querySelector('#paste-data-preview-btn');
+            const cancelBtn = modal.querySelector('#paste-data-cancel-btn');
             const createRefsCheckbox = modal.querySelector('#paste-data-create-refs');
             const createRefValues = createRefsCheckbox ? createRefsCheckbox.checked : false;
             const text = textarea.value;
@@ -2951,6 +2959,11 @@ class IntegramTable{
                 this.showToast('Поле ввода пустое', 'error');
                 return;
             }
+
+            // Disable all action buttons while inserting (issue #1848)
+            if (insertBtn) insertBtn.disabled = true;
+            if (previewBtn) previewBtn.disabled = true;
+            if (cancelBtn) cancelBtn.disabled = true;
 
             // Split into lines, skip empty lines
             const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
@@ -3165,7 +3178,9 @@ class IntegramTable{
                     successCount++;
                 } catch (err) {
                     progressEl.textContent = `Вставлено ${successCount} из ${total}. Ошибка на строке ${i + 1}: ${err.message}`;
-                    insertBtn.disabled = false;
+                    if (insertBtn) insertBtn.disabled = false;
+                    if (previewBtn) previewBtn.disabled = false;
+                    if (cancelBtn) cancelBtn.disabled = false;
                     this.showToast(`Ошибка вставки строки ${i + 1}: ${err.message}`, 'error');
                     return;
                 }
