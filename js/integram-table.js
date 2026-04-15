@@ -7416,7 +7416,8 @@ class IntegramTable{
                 { id: 11, name: 'Логическое значение (Да / Нет)' },
                 { id: 12, name: 'Многострочный текст' },
                 { id: 4, name: 'Дата и время' },
-                { id: 10, name: 'Файл' }
+                { id: 10, name: 'Файл' },
+                { id: 1, name: 'Свободная ссылка' }
             ];
 
             // Create modal overlay (issue #567: make the form a modal)
