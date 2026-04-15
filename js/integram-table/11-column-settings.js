@@ -1167,12 +1167,50 @@
         async createColumn(columnName, baseTypeId, isListValue, isMultiselect) {
             const apiBase = this.getApiBase();
             const tableId = this.objectTableId || this.options.tableTypeId;
+            const isFreeLink = Number(baseTypeId) === 1;
 
             if (!tableId) {
                 return { success: false, error: 'Не удалось определить ID таблицы' };
             }
 
             try {
+                if (isFreeLink) {
+                    const reqParams = new URLSearchParams();
+                    reqParams.append('val', columnName);
+                    reqParams.append('t', String(baseTypeId));
+                    if (typeof xsrf !== 'undefined') {
+                        reqParams.append('_xsrf', xsrf);
+                    }
+
+                    const reqResponse = await fetch(`${apiBase}/_d_req/${tableId}?JSON`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: reqParams.toString()
+                    });
+
+                    if (!reqResponse.ok) {
+                        return { success: false, error: `Ошибка добавления колонки: ${reqResponse.status}` };
+                    }
+
+                    const reqResult = await reqResponse.json();
+
+                    if (Array.isArray(reqResult) && reqResult[0]?.error) {
+                        return { success: false, error: reqResult[0].error };
+                    }
+
+                    const columnId = reqResult.id;
+                    if (!columnId) {
+                        return { success: false, error: 'Не получен ID колонки' };
+                    }
+
+                    return {
+                        success: true,
+                        columnId: String(columnId),
+                        termId: null,
+                        refId: null
+                    };
+                }
+
                 // Step 1: Create term with the base type
                 const termParams = new URLSearchParams();
                 termParams.append('val', columnName);
@@ -1295,4 +1333,3 @@
                 return { success: false, error: error.message };
             }
         }
-
