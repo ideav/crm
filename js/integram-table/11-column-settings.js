@@ -399,6 +399,17 @@
                 colEditModal.remove();
             };
 
+            const refreshCurrentTableAfterDelete = async () => {
+                this.metadataCache = {};
+                this.metadataFetchPromises = {};
+                this.globalMetadata = null;
+                this.globalMetadataPromise = null;
+                this.columns = [];
+                this.closeColumnSettings();
+                closeColEdit();
+                await this.loadData(false);
+            };
+
             colEditOverlay.addEventListener('click', closeColEdit);
             colEditModal.querySelector(`#col-edit-cancel-${instanceName}`).addEventListener('click', closeColEdit);
 
@@ -542,9 +553,7 @@
                 delBtn.disabled = true;
                 const result = await this.deleteColumn(col.id, false);
                 if (result.success) {
-                    closeColEdit();
-                    this.closeColumnSettings();
-                    window.location.href = '/' + (window.db || window.location.pathname.split('/')[1]) + '/tables';
+                    await refreshCurrentTableAfterDelete();
                 } else if (result.hasData) {
                     // Show forced delete option
                     delBtn.style.display = 'none';
@@ -553,9 +562,7 @@
                     colEditModal.querySelector(`#col-edit-del-forced-${instanceName}`).addEventListener('click', async () => {
                         const result2 = await this.deleteColumn(col.id, true);
                         if (result2.success) {
-                            closeColEdit();
-                            this.closeColumnSettings();
-                            window.location.href = '/' + (window.db || window.location.pathname.split('/')[1]) + '/tables';
+                            await refreshCurrentTableAfterDelete();
                         } else {
                             showStatus('Ошибка удаления: ' + result2.error, true);
                         }
