@@ -432,10 +432,13 @@
                 try {
                     // 0. Rename column (issue #1018, extended to first column in issue #1026)
                     // For ref columns the name field is a hyperlink (not editable), so the input won't exist (issue #1435)
+                    // For free link columns (type=1) use _d_alias instead of _d_save (issue #1835)
                     const nameInput = colEditModal.querySelector(`#col-edit-name-${instanceName}`);
                     const newName = nameInput ? nameInput.value.trim() : '';
                     if (newName && newName !== currentName) {
-                        const result = await this.renameColumn(col.orig || col.id, newName, col.type);
+                        const result = isFreeLink
+                            ? await this.setColumnAlias(col.orig || col.id, newName)
+                            : await this.renameColumn(col.orig || col.id, newName, col.type);
                         if (!result.success) {
                             showStatus('Ошибка переименования: ' + result.error, true);
                             saveBtn.disabled = false;
