@@ -11630,21 +11630,26 @@ class IntegramTable{
                 }
                 const metadata = this.metadataCache[arrId];
 
-                // Fetch parent record data to display in header (issue #1853)
-                const apiBase = this.getApiBase();
-                const parentTypeId = this.options.typeId;
-                const parentDataUrl = `${ apiBase }/object/${ parentTypeId }/${ parentRecordId }/?JSON_OBJ`;
+                // Extract parent record value from the clicked row (issue #1853, #1857)
+                // Try to get it from the row data structure instead of making a redundant API call
                 let parentRecordValue = '';
-
-                try {
-                    const parentResponse = await fetch(parentDataUrl);
-                    const parentData = await parentResponse.json();
-                    if (parentData && parentData.obj && parentData.obj.val) {
-                        parentRecordValue = parentData.obj.val;
+                const clickedRow = event.target.closest('tr');
+                if (clickedRow) {
+                    const firstCell = clickedRow.querySelector('td:first-child');
+                    if (firstCell) {
+                        // Get the text content from the first cell (parent record value)
+                        const cellText = firstCell.textContent.trim();
+                        // Remove any leading index/ID prefix and icon markup
+                        parentRecordValue = cellText.replace(/^\d+\s*/, '').replace(/<[^>]*>/g, '').trim();
                     }
-                } catch (error) {
-                    // If we can't fetch parent data, just continue without it
-                    console.warn('Could not fetch parent record data:', error);
+                }
+
+                // Fallback: try to find parent value from the clicked element's row in the data structure
+                if (!parentRecordValue && this.cellSubordinateContext && this.cellSubordinateContext.arrId === arrId) {
+                    const rowData = this.cellSubordinateContext.rowData;
+                    if (rowData && rowData.r && rowData.r[0]) {
+                        parentRecordValue = this.stripReferencePrefix(String(rowData.r[0]));
+                    }
                 }
 
                 // Create modal for subordinate table
