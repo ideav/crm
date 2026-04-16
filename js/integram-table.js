@@ -10700,6 +10700,9 @@ class IntegramTable{
                 window._integramModalDepth = 0;
             }
             window._integramModalDepth++;
+
+            // Store original main value for duplicate check (issue #1851)
+            const originalMainValue = recordData && recordData.obj ? recordData.obj.val : '';
             const modalDepth = window._integramModalDepth;
             const baseZIndex = 1000 + (modalDepth * 10);
 
@@ -10813,7 +10816,7 @@ class IntegramTable{
                 ${ tabsHtml }
                 <div class="edit-form-body">
                     <div class="edit-form-tab-content active" data-tab-content="attributes">
-                        <form id="edit-form" class="edit-form" onsubmit="return false;" autocomplete="off">
+                        <form id="edit-form" class="edit-form" onsubmit="return false;" autocomplete="off" data-original-main-value="${ this.escapeHtml(originalMainValue) }">
                             ${ attributesHtml }
                         </form>
                     </div>
@@ -14863,17 +14866,22 @@ class IntegramTable{
 
             const formData = new FormData(form);
             const mainValue = formData.get('main');
+            const originalMainValue = form.getAttribute('data-original-main-value') || '';
 
             let newFirstColumnValue = mainValue;
 
             if (isUnique) {
-                // Prompt user to enter a new value for the first (unique) column
-                const prompted = await this.showDuplicateUniqueValueModal(mainValue);
-                if (prompted === null) {
-                    // User cancelled
-                    return;
+                // Skip confirmation if value has already been changed in the form (issue #1851)
+                if (mainValue === originalMainValue) {
+                    // Prompt user to enter a new value for the first (unique) column
+                    const prompted = await this.showDuplicateUniqueValueModal(mainValue);
+                    if (prompted === null) {
+                        // User cancelled
+                        return;
+                    }
+                    newFirstColumnValue = prompted;
                 }
-                newFirstColumnValue = prompted;
+                // If value was already changed, use the form value directly
             }
 
             const apiBase = this.getApiBase();

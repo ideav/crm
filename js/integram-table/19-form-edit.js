@@ -4,6 +4,9 @@
                 window._integramModalDepth = 0;
             }
             window._integramModalDepth++;
+
+            // Store original main value for duplicate check (issue #1851)
+            const originalMainValue = recordData && recordData.obj ? recordData.obj.val : '';
             const modalDepth = window._integramModalDepth;
             const baseZIndex = 1000 + (modalDepth * 10);
 
@@ -117,7 +120,7 @@
                 ${ tabsHtml }
                 <div class="edit-form-body">
                     <div class="edit-form-tab-content active" data-tab-content="attributes">
-                        <form id="edit-form" class="edit-form" onsubmit="return false;" autocomplete="off">
+                        <form id="edit-form" class="edit-form" onsubmit="return false;" autocomplete="off" data-original-main-value="${ this.escapeHtml(originalMainValue) }">
                             ${ attributesHtml }
                         </form>
                     </div>
