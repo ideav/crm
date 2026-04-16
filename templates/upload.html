@@ -119,6 +119,7 @@ input[type="checkbox"] {
 		</div>
 		<div>
         <label class="btn btn-outline-secondary upload-file-label mb-2"><i class="pi pi-upload"></i> Выберите файл<input type="file" id="selectFiles" style="display:none" /></label>
+        <span id="selectedFileName" style="margin-left: 0.5rem; color: var(--text-secondary);"></span>
 		</div>
         <!--
         можно загрузить этот файл по ссылке:
@@ -1175,6 +1176,21 @@ localize();
 // Workspace-specific hint configuration for 'upload'.
 // Texts and steps are defined here; the display mechanism is in /js/hints.js.
 document.addEventListener('DOMContentLoaded', function() {
+    // Show selected filename when file is chosen
+    var selectFilesInput = document.getElementById('selectFiles');
+    if (selectFilesInput) {
+        selectFilesInput.addEventListener('change', function() {
+            var selectedFileName = document.getElementById('selectedFileName');
+            if (selectedFileName) {
+                if (this.files.length > 0) {
+                    selectedFileName.textContent = this.files[0].name;
+                } else {
+                    selectedFileName.textContent = '';
+                }
+            }
+        });
+    }
+
     window.initHints({
         workspace: 'upload',
         steps: 3,
