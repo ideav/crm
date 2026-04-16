@@ -203,6 +203,17 @@ const repRegex  = /^\[([A-Za-яЁё][A-Za-яЁё0-9]*)(\.[A-Za-яЁё][A-Za-яЁ
     , exprRegex = /(СУММА)\(\[(.*?)\]:\[(.*?)\]\)/g
     , itemIdRegex = /\[\d+\]/g;
 
+let dashTraceEnabled = false;
+try {
+    var dashTraceParams = new URLSearchParams(window.location.search);
+    dashTraceEnabled = dashTraceParams.has('DEBUG') || dashTraceParams.has('debug');
+} catch (e) {}
+
+function dashTrace(stage, data) {
+    if (!dashTraceEnabled && !(typeof window !== 'undefined' && window.DASH_DEBUG)) return;
+    console.log('[Dash Trace] ' + stage, data);
+}
+
 // Returns { src, extra } for a cell based on row formula and base type ('rg' or 'value').
 // src   — data-src value; extra — optional extra HTML attribute string (data-formula="...")
 function dashCellSrc(rowId, baseType) {
@@ -296,6 +307,37 @@ function dashGetColVal(item, col) {
     if (valids) return dashNormalizeVal(item, acc);
 }
 
+function dashResolveValueCell(rowId, groupName) {
+    var formula = dashFormulas[rowId] || ''
+        , itemName = dashItems[rowId] ? dashItems[rowId].name : ''
+        , altName = formula.match(itemRegex)
+        , valueName = altName ? altName[1] : itemName
+        , groupedKey = groupName ? valueName + ':' + groupName : ''
+        , rowValue = dashValues[rowId]
+        , groupedValue = groupedKey ? dashGetVal(groupedKey) : undefined
+        , plainValue = dashGetVal(valueName)
+        , value = rowValue || groupedValue || plainValue;
+
+    dashTrace('value-cell-resolve', {
+        rowId: rowId,
+        itemName: itemName,
+        groupName: groupName,
+        formula: formula,
+        valueName: valueName,
+        groupedKey: groupedKey,
+        hasRowValue: rowValue !== undefined,
+        groupedValue: groupedValue,
+        plainValue: plainValue,
+        resolvedValue: value
+    });
+
+    return {
+        value: value,
+        alias: !!altName,
+        source: rowValue !== undefined ? 'row' : (groupedValue !== undefined ? 'group' : (plainValue !== undefined ? 'plain' : 'empty'))
+    };
+}
+
 function dashCalcLineTotals() {
     document.querySelectorAll('#dash-model .f-line-sum').forEach(function(el) {
         var valids = false, v = 0;
@@ -347,11 +389,21 @@ function dashCalcCells() {
                     var selector = '#' + refs[i] + ' .f-rg-cell[range="' + rangeVal + '"],' +
                         '#' + refs[i] + ' .f-col-cell[range="' + rangeVal + '"]';
                     var cells = document.querySelectorAll(selector);
+                    var fallbackUsed = false;
                     if (cells.length === 0 && rangeVal === '-') {
                         // If no exact match and looking for "-", accept any range
                         cells = document.querySelectorAll('#' + refs[i] + ' .f-rg-cell,' +
                             '#' + refs[i] + ' .f-col-cell');
+                        fallbackUsed = true;
                     }
+                    dashTrace('formula-ref-lookup', {
+                        itemId: itemId,
+                        refId: refs[i],
+                        range: rangeVal,
+                        matches: cells.length,
+                        fallbackUsed: fallbackUsed,
+                        formulaBeforeReplace: f
+                    });
                     cells.forEach(function(rc) {
                         if (rc.getAttribute('ready') === '1')
                             f = f.replace(new RegExp('\\[' + refs[i] + '\\]'), rc.innerHTML || 0);
@@ -484,17 +536,16 @@ function dashDrawPeriods() {
                     }
                     break;
                 case 'value':
+                    var groupName = dashModelData[panelId].rgs[rg].head || '';
                     panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
-                        headTpl.replace(':head:', dashModelData[panelId].rgs[rg].head || 'Значение')
+                        headTpl.replace(':head:', groupName || 'Значение')
                                .replace(':from:-:to:', '-'));
                     panel.querySelectorAll('.f-item').forEach(function(row) {
-                        var altName, s = dashCellSrc(row.id, 'value');
-                        // itemRegex match in value context = alias/fallback, treat as direct value
-                        if (dashFormulas[row.id] && (altName = dashFormulas[row.id].match(itemRegex))) {
-                            v = dashNormalizeVal(row.id, dashValues[row.id] || dashGetVal(altName[1]));
+                        var s = dashCellSrc(row.id, 'value')
+                            , resolved = dashResolveValueCell(row.id, groupName);
+                        if (resolved.alias)
                             s = { src: 'value', extra: '' };
-                        } else
-                            v = dashNormalizeVal(row.id, dashValues[row.id] || dashGetVal(dashItems[row.id] ? dashItems[row.id].name : ''));
+                        v = dashNormalizeVal(row.id, resolved.value);
                         row.insertAdjacentHTML('beforeend',
                             cellTpl.replace(':val:', v || '')
                                 .replace(':classes:', 'f-values')
@@ -672,9 +723,22 @@ function dashGetSrc(json) {
             try {
                 var colGroup = json[i]['Колонка группы'] || '';
                 var key = colGroup ? json[i].item + ':' + colGroup : json[i].item;
-                dashValues[key] = JSON.parse('[' + json[i].value + ']');
+                var parsed = JSON.parse('[' + json[i].value + ']');
+                dashValues[key] = parsed;
+                dashTrace('source-value-parse', {
+                    item: json[i].item,
+                    colGroup: colGroup,
+                    key: key,
+                    count: parsed.length,
+                    first: parsed[0]
+                });
             } catch (e) {
                 dashValues[json[i].item] = 'error ' + e + ' in ' + json[i].value;
+                dashTrace('source-value-parse-error', {
+                    item: json[i].item,
+                    error: String(e),
+                    raw: json[i].value
+                });
             }
         }
     }
