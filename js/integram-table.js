@@ -7169,20 +7169,23 @@ class IntegramTable{
                         }
                     }
 
-                    // 2. Required flag
-                    const newRequired = colEditModal.querySelector(`#col-edit-required-${instanceName}`).checked;
-                    if (newRequired !== isRequired) {
-                        const result = await this.setColumnRequired(col.id);
-                        if (!result.success) {
-                            showStatus('Ошибка изменения обязательности: ' + result.error, true);
-                            saveBtn.disabled = false;
-                            return;
-                        }
-                        // Update attrs
-                        if (newRequired) {
-                            col.attrs = (col.attrs || '') + ':!NULL:';
-                        } else {
-                            col.attrs = (col.attrs || '').replace(/:!NULL:/g, '');
+                    // 2. Required flag (skip for first column - issue #1873)
+                    // First column is always required and cannot have _d_null sent to server
+                    if (!isFirstColumn) {
+                        const newRequired = colEditModal.querySelector(`#col-edit-required-${instanceName}`).checked;
+                        if (newRequired !== isRequired) {
+                            const result = await this.setColumnRequired(col.id);
+                            if (!result.success) {
+                                showStatus('Ошибка изменения обязательности: ' + result.error, true);
+                                saveBtn.disabled = false;
+                                return;
+                            }
+                            // Update attrs
+                            if (newRequired) {
+                                col.attrs = (col.attrs || '') + ':!NULL:';
+                            } else {
+                                col.attrs = (col.attrs || '').replace(/:!NULL:/g, '');
+                            }
                         }
                     }
 
