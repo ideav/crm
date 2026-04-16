@@ -16172,7 +16172,20 @@ class IntegramTable{
                 if (errors.length > 0) {
                     html += `<div class="alert alert-danger" style="max-height: 200px; overflow-y: auto; font-size: 0.75rem; margin-top: 10px;">
                         <strong>Ошибки (блокирующие):</strong><br>
-                        ${ errors.map(e => this.escapeHtml(e)).join('<br>') }
+                        ${ errors.map(e => {
+                            // Parse error format: "#recordId : recordValue : errorMessage"
+                            const parts = e.split(' : ');
+                            if (parts.length >= 3) {
+                                const recordId = this.escapeHtml(parts[0]);
+                                const recordValue = this.escapeHtml(parts[1]);
+                                // Join remaining parts in case error message contains " : "
+                                const errorMsg = parts.slice(2).join(' : ');
+                                // Sanitize the error message to allow safe HTML (links) but prevent XSS
+                                const sanitizedMsg = this.sanitizeInlineMessageHtml(errorMsg);
+                                return `${recordId} : ${recordValue} : ${sanitizedMsg}`;
+                            }
+                            return this.escapeHtml(e);
+                        }).join('<br>') }
                     </div>`;
                 }
                 
