@@ -721,7 +721,7 @@ function findLoop(i,p,depth){
     if(depth++>1000)
         return true;
     for(j in r[i])
-        if(t[r[i][j].t].r==''){ // Check if we have a loop for a plain attribute
+        if(t[r[i][j].t]&&t[r[i][j].t].r==''){ // Check if we have a loop for a plain attribute
             if((r[i][j].t==p) || findLoop(r[i][j].t,p,depth))
                 return true;
         }
