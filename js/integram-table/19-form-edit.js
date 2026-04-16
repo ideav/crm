@@ -1409,6 +1409,7 @@
             document.body.appendChild(overlay);
 
             const closeModal = () => {
+                modal.remove();
                 overlay.remove();
                 window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
             };
