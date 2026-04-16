@@ -680,17 +680,22 @@
 
             const formData = new FormData(form);
             const mainValue = formData.get('main');
+            const originalMainValue = form.getAttribute('data-original-main-value') || '';
 
             let newFirstColumnValue = mainValue;
 
             if (isUnique) {
-                // Prompt user to enter a new value for the first (unique) column
-                const prompted = await this.showDuplicateUniqueValueModal(mainValue);
-                if (prompted === null) {
-                    // User cancelled
-                    return;
+                // Skip confirmation if value has already been changed in the form (issue #1851)
+                if (mainValue === originalMainValue) {
+                    // Prompt user to enter a new value for the first (unique) column
+                    const prompted = await this.showDuplicateUniqueValueModal(mainValue);
+                    if (prompted === null) {
+                        // User cancelled
+                        return;
+                    }
+                    newFirstColumnValue = prompted;
                 }
-                newFirstColumnValue = prompted;
+                // If value was already changed, use the form value directly
             }
 
             const apiBase = this.getApiBase();
