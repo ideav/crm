@@ -68,7 +68,7 @@
                                         <span class="export-icon"><i class="pi pi-file"></i></span> CSV
                                     </div>
                                     <div class="export-menu-item" onclick="window.${ instanceName }.copyToBuffer()">
-                                        <span class="export-icon"><i class="pi pi-clipboard"></i></span> В буфер
+                                        <span class="export-icon"><i class="pi pi-copy"></i></span> В буфер
                                     </div>
                                 </div>
                             </div>
