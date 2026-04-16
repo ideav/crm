@@ -11803,7 +11803,9 @@ class IntegramTable{
                     </div>
                     <div class="subordinate-table-actions">
                         <button type="button" class="subordinate-copy-buffer-btn" title="Копировать в буфер"><i class="pi pi-copy"></i></button>
-                        <button type="button" class="subordinate-paste-buffer-btn" title="Вставить из буфера"><i class="pi pi-clipboard"></i></button>
+                        <a href="#" class="subordinate-paste-buffer-btn" title="Вставить из буфера" onclick="event.preventDefault(); event.stopPropagation();">
+                            <i class="pi pi-clipboard"></i>
+                        </a>
                         <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
                             <i class="pi pi-table"></i>
                         </a>
@@ -18400,7 +18402,9 @@ class IntegramCreateFormHelper {
                 </button>
                 <div class="subordinate-table-actions">
                     <button type="button" class="subordinate-copy-buffer-btn" title="Копировать в буфер"><i class="pi pi-copy"></i></button>
-                    <button type="button" class="subordinate-paste-buffer-btn" title="Вставить из буфера"><i class="pi pi-clipboard"></i></button>
+                    <a href="#" class="subordinate-paste-buffer-btn" title="Вставить из буфера" onclick="event.preventDefault(); event.stopPropagation();">
+                        <i class="pi pi-clipboard"></i>
+                    </a>
                     <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
                         <i class="pi pi-table"></i>
                     </a>
