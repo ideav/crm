@@ -79,6 +79,7 @@
             const total = records.length;
             let completed = 0;
             const errors = [];
+            const warnings = [];
 
             // Create progress modal
             const progressId = `bulk-delete-progress-${ Date.now() }`;
@@ -126,11 +127,26 @@
                     });
 
                     const text = await response.text();
+                    let result;
                     try {
-                        JSON.parse(text);
+                        result = JSON.parse(text);
                     } catch (parseErr) {
                         // Invalid JSON response - report as warning but don't stop
-                        errors.push(`#${ record.id } : ${ record.value } : ${ text }`);
+                        warnings.push(`#${ record.id } : ${ record.value } : ${ text }`);
+                    }
+
+                    // Check for error key in the response
+                    if (result) {
+                        let serverError = null;
+                        if (Array.isArray(result)) {
+                            serverError = (result[0] && result[0].error) || null;
+                        } else {
+                            serverError = result.error || null;
+                        }
+
+                        if (serverError) {
+                            errors.push(`#${ record.id } : ${ record.value } : ${ serverError }`);
+                        }
                     }
                 } catch (err) {
                     errors.push(`#${ record.id } : ${ record.value } : ${ err.message }`);
@@ -142,20 +158,52 @@
 
             await Promise.all(deletePromises);
 
-            // Show errors if any
-            if (errors.length > 0) {
+            // Show errors and warnings if any
+            if (errors.length > 0 || warnings.length > 0) {
                 errorsDiv.style.display = 'block';
-                errorsDiv.innerHTML = `<div class="alert alert-warning" style="max-height: 200px; overflow-y: auto; font-size: 0.75rem; margin-top: 10px;">
-                    <strong>Предупреждения:</strong><br>
-                    ${ errors.map(e => this.escapeHtml(e)).join('<br>') }
-                </div>`;
+                let html = '';
+                
+                // Show blocking errors first (red alert)
+                if (errors.length > 0) {
+                    html += `<div class="alert alert-danger" style="max-height: 200px; overflow-y: auto; font-size: 0.75rem; margin-top: 10px; background-color: #f8d7da; border: 2px solid #f5c6cb; border-radius: 4px; padding: 10px;">
+                        <strong>Ошибки (блокирующие):</strong><br>
+                        ${ errors.map(e => {
+                            // Parse error format: "#recordId : recordValue : errorMessage"
+                            const parts = e.split(' : ');
+                            if (parts.length >= 3) {
+                                const recordId = this.escapeHtml(parts[0]);
+                                const recordValue = this.escapeHtml(parts[1]);
+                                // Join remaining parts in case error message contains " : "
+                                const errorMsg = parts.slice(2).join(' : ');
+                                // Sanitize the error message to allow safe HTML (links) but prevent XSS
+                                const sanitizedMsg = this.sanitizeInlineMessageHtml(errorMsg);
+                                return `${recordId} : ${recordValue} : ${sanitizedMsg}`;
+                            }
+                            return this.escapeHtml(e);
+                        }).join('<br>') }
+                    </div>`;
+                }
+                
+                // Show warnings after errors (yellow alert)
+                if (warnings.length > 0) {
+                    html += `<div class="alert alert-warning" style="max-height: 200px; overflow-y: auto; font-size: 0.75rem; margin-top: 10px;">
+                        <strong>Предупреждения:</strong><br>
+                        ${ warnings.map(w => this.escapeHtml(w)).join('<br>') }
+                    </div>`;
+                }
+                
+                errorsDiv.innerHTML = html;
             }
 
-            // Update progress text
-            progressText.textContent = `Удаление завершено: ${ completed } / ${ total }`;
+            // Update progress text based on errors
+            if (errors.length > 0) {
+                progressText.textContent = `Удаление завершено с ошибками: ${ completed } / ${ total }`;
+            } else {
+                progressText.textContent = `Удаление завершено: ${ completed } / ${ total }`;
+            }
 
             // Auto-close progress after 1.5s if no errors, else add close button
-            if (errors.length === 0) {
+            if (errors.length === 0 && warnings.length === 0) {
                 setTimeout(() => {
                     progressOverlay.remove();
                 }, 1500);

@@ -318,6 +318,7 @@
                     if (serverError) {
                         throw new Error(serverError);
                     }
+                    if (result.warning) this.showToast(result.warning, 'warning');
 
                     closeModal();
                     this.showToast('Запись создана', 'success');
@@ -1715,6 +1716,7 @@
                 if (serverError) {
                     throw new Error(serverError);
                 }
+                if (result.warning) this.showToast(result.warning, 'warning');
 
                 const createdId = result.obj || result.id || result.i;
                 const createdValue = result.val || mainValue;

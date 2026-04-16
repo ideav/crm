@@ -4,6 +4,9 @@
                 window._integramModalDepth = 0;
             }
             window._integramModalDepth++;
+
+            // Store original main value for duplicate check (issue #1851)
+            const originalMainValue = recordData && recordData.obj ? recordData.obj.val : '';
             const modalDepth = window._integramModalDepth;
             const baseZIndex = 1000 + (modalDepth * 10);
 
@@ -117,7 +120,7 @@
                 ${ tabsHtml }
                 <div class="edit-form-body">
                     <div class="edit-form-tab-content active" data-tab-content="attributes">
-                        <form id="edit-form" class="edit-form" onsubmit="return false;" autocomplete="off">
+                        <form id="edit-form" class="edit-form" onsubmit="return false;" autocomplete="off" data-original-main-value="${ this.escapeHtml(originalMainValue) }">
                             ${ attributesHtml }
                         </form>
                     </div>
@@ -931,6 +934,28 @@
                 }
                 const metadata = this.metadataCache[arrId];
 
+                // Extract parent record value from the clicked row (issue #1853, #1857)
+                // Try to get it from the row data structure instead of making a redundant API call
+                let parentRecordValue = '';
+                const clickedRow = event.target.closest('tr');
+                if (clickedRow) {
+                    const firstCell = clickedRow.querySelector('td:first-child');
+                    if (firstCell) {
+                        // Get the text content from the first cell (parent record value)
+                        const cellText = firstCell.textContent.trim();
+                        // Remove any leading index/ID prefix and icon markup
+                        parentRecordValue = cellText.replace(/^\d+\s*/, '').replace(/<[^>]*>/g, '').trim();
+                    }
+                }
+
+                // Fallback: try to find parent value from the clicked element's row in the data structure
+                if (!parentRecordValue && this.cellSubordinateContext && this.cellSubordinateContext.arrId === arrId) {
+                    const rowData = this.cellSubordinateContext.rowData;
+                    if (rowData && rowData.r && rowData.r[0]) {
+                        parentRecordValue = this.stripReferencePrefix(String(rowData.r[0]));
+                    }
+                }
+
                 // Create modal for subordinate table
                 const modalDepth = (window._integramModalDepth || 0) + 1;
                 window._integramModalDepth = modalDepth;
@@ -947,10 +972,11 @@
                 modal.dataset.modalDepth = modalDepth;
 
                 const typeName = this.getMetadataName(metadata);
+                const headerTitle = parentRecordValue ? `${ this.escapeHtml(parentRecordValue) } / ${ typeName }` : typeName;
 
                 modal.innerHTML = `
                     <div class="edit-form-header">
-                        <h3>${ typeName }</h3>
+                        <h3>${ headerTitle }</h3>
                         <button class="edit-form-close subordinate-modal-close"><i class="pi pi-times"></i></button>
                     </div>
                     <div class="edit-form-body">
@@ -1080,7 +1106,10 @@
                         <button type="button" class="subordinate-search-clear" title="Очистить поиск"${ searchTerm ? '' : ' style="display: none;"' }><i class="pi pi-times"></i></button>
                     </div>
                     <div class="subordinate-table-actions">
-                        <button type="button" class="subordinate-copy-buffer-btn" title="Копировать в буфер"><i class="pi pi-clipboard"></i></button>
+                        <button type="button" class="subordinate-copy-buffer-btn" title="Копировать в буфер"><i class="pi pi-copy"></i></button>
+                        <a href="#" class="subordinate-paste-buffer-btn" title="Вставить из буфера" onclick="event.preventDefault(); event.stopPropagation();">
+                            <i class="pi pi-clipboard"></i>
+                        </a>
                         <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
                             <i class="pi pi-table"></i>
                         </a>
@@ -1183,6 +1212,14 @@
             if (copyBufferBtn) {
                 copyBufferBtn.addEventListener('click', () => {
                     this.copySubordinateToBuffer(container);
+                });
+            }
+
+            // Attach paste-from-buffer button handler (issue #1855)
+            const pasteBufferBtn = container.querySelector('.subordinate-paste-buffer-btn');
+            if (pasteBufferBtn) {
+                pasteBufferBtn.addEventListener('click', () => {
+                    this.openSubordinatePasteDataDialog(container, arrId, parentRecordId);
                 });
             }
 
@@ -1324,6 +1361,197 @@
             } catch (error) {
                 console.error('Copy to buffer error:', error);
                 this.showToast(`Ошибка копирования: ${ error.message }`, 'error');
+            }
+        }
+
+        /**
+         * Open dialog to paste subordinate data from clipboard (issue #1855).
+         * Similar to openPasteDataDialog but for subordinate tables with parent context.
+         */
+        openSubordinatePasteDataDialog(container, arrId, parentRecordId) {
+            const instanceName = this.options.instanceName;
+            const metadata = container._subordinateMetadata;
+
+            if (!metadata) {
+                this.showToast('Нет метаданных для вставки', 'error');
+                return;
+            }
+
+            const modalDepth = (window._integramModalDepth || 0) + 1;
+            window._integramModalDepth = modalDepth;
+            const baseZIndex = 1000 + (modalDepth * 10);
+
+            const overlay = document.createElement('div');
+            overlay.className = 'edit-form-overlay';
+            overlay.style.zIndex = baseZIndex;
+
+            const modal = document.createElement('div');
+            modal.className = 'edit-form-modal paste-data-modal';
+            modal.style.zIndex = baseZIndex + 1;
+            modal.dataset.modalDepth = modalDepth;
+
+            modal.innerHTML = `
+                <div class="integram-modal-header">
+                    <h3>Вставить данные из буфера</h3>
+                    <button class="edit-form-close"><i class="pi pi-times"></i></button>
+                </div>
+                <div class="integram-modal-body">
+                    <p>Вставьте данные из буфера обмена:</p>
+                    <textarea id="paste-data-textarea" class="form-control" rows="10" placeholder="Данные должны быть разделены табуляцией (в столбцы) и новыми строками (в строки)"></textarea>
+                </div>
+                <div class="integram-modal-footer">
+                    <button type="button" class="btn btn-primary paste-data-ok-btn">Вставить</button>
+                    <button type="button" class="btn btn-secondary paste-data-cancel-btn">Отменить</button>
+                </div>
+            `;
+
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+
+            const closeModal = () => {
+                modal.remove();
+                overlay.remove();
+                window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+            };
+
+            // Close handlers
+            modal.querySelector('.edit-form-close').addEventListener('click', closeModal);
+            modal.querySelector('.paste-data-cancel-btn').addEventListener('click', closeModal);
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) closeModal();
+            });
+
+            // Paste button handler
+            modal.querySelector('.paste-data-ok-btn').addEventListener('click', async () => {
+                const textarea = modal.querySelector('#paste-data-textarea');
+                const pasteText = textarea.value.trim();
+
+                if (!pasteText) {
+                    this.showToast('Пожалуйста введите данные', 'error');
+                    return;
+                }
+
+                // Disable buttons during paste
+                modal.querySelectorAll('button').forEach(btn => btn.disabled = true);
+
+                try {
+                    await this.insertSubordinatePastedData(container, arrId, parentRecordId, pasteText, metadata);
+                    closeModal();
+                } finally {
+                    modal.querySelectorAll('button').forEach(btn => btn.disabled = false);
+                }
+            });
+
+            // Focus textarea
+            const textarea = modal.querySelector('#paste-data-textarea');
+            textarea.focus();
+        }
+
+        /**
+         * Insert pasted data into subordinate table (issue #1855).
+         * Parses the paste text and creates records with parent context.
+         */
+        async insertSubordinatePastedData(container, arrId, parentRecordId, pasteText, metadata) {
+            const reqs = metadata.reqs || [];
+            const lines = pasteText.split('\n').filter(line => line.trim());
+
+            if (lines.length === 0) {
+                this.showToast('Нет данных для вставки', 'error');
+                return;
+            }
+
+            // Parse column separators (TAB, semicolon, comma)
+            const rows = lines.map(line => {
+                if (line.includes('\t')) {
+                    return line.split('\t');
+                } else if (line.includes(';')) {
+                    return line.split(';');
+                } else {
+                    return [line];
+                }
+            });
+
+            const apiBase = this.getApiBase();
+            let successCount = 0;
+            let errorCount = 0;
+
+            for (const values of rows) {
+                try {
+                    const params = new URLSearchParams();
+
+                    if (typeof xsrf !== 'undefined') {
+                        params.append('_xsrf', xsrf);
+                    }
+
+                    // Add main value (first column)
+                    if (values[0]) {
+                        params.append(`t${arrId}`, values[0]);
+                    }
+
+                    // Add requisite columns
+                    let colIdx = 1;
+                    for (const req of reqs) {
+                        if (!req.arr_id && values[colIdx]) {
+                            const reqId = req.id || req.req_id;
+                            params.append(`t${reqId}`, values[colIdx]);
+                        }
+                        if (!req.arr_id) {
+                            colIdx++;
+                        }
+                    }
+
+                    const url = `${apiBase}/_m_new/${arrId}?JSON&up=${parentRecordId}`;
+
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: params.toString()
+                    });
+
+                    const text = await response.text();
+                    let result;
+                    try {
+                        result = JSON.parse(text);
+                    } catch (e) {
+                        if (!response.ok) throw new Error(text);
+                        result = { success: true };
+                    }
+
+                    const serverError = this.getServerError(result);
+                    if (serverError) {
+                        errorCount++;
+                        console.warn(`Ошибка вставки строки: ${serverError}`);
+                    } else {
+                        successCount++;
+                    }
+                } catch (error) {
+                    errorCount++;
+                    console.error('Error inserting row:', error);
+                }
+            }
+
+            // Reload subordinate table data
+            const metadata_new = this.metadataCache[arrId];
+            const pageSize = this.options.pageSize || 20;
+            const dataUrl = `${apiBase}/object/${arrId}/?JSON_OBJ&F_U=${parentRecordId}&LIMIT=0,${pageSize + 1}`;
+
+            try {
+                const dataResponse = await fetch(dataUrl);
+                const data = await dataResponse.json();
+                const rows = Array.isArray(data) ? data : [];
+                const hasMore = rows.length > pageSize;
+                const firstPageRows = hasMore ? rows.slice(0, pageSize) : rows;
+
+                this.renderSubordinateTable(container, metadata_new, firstPageRows, arrId, parentRecordId);
+
+                container._subordinateHasMore = hasMore;
+                container._subordinateLoadedCount = firstPageRows.length;
+                container._subordinateIsLoading = false;
+
+                this.showToast(`Вставлено ${successCount} записей${errorCount > 0 ? `, ошибок: ${errorCount}` : ''}`, successCount > 0 ? 'success' : 'error');
+            } catch (error) {
+                console.error('Error reloading subordinate table:', error);
+                this.showToast(`Ошибка перезагрузки таблицы: ${error.message}`, 'error');
             }
         }
 

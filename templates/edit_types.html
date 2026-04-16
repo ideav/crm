@@ -2,7 +2,7 @@
 <link rel="stylesheet" href="/css/edit-types.css">
 <style>
 .topm-20 { padding-top: 20px; }
-.table td {
+.table td { 
     border-top: none;
     vertical-align: middle;
     padding: 0;
@@ -44,6 +44,7 @@
 </style>
 <link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
 <script src="/js/jquery3.1.1.min.js"></script>
+<script src="/js/popper1.16.1.min.js"></script>
 <script src="/js/jquery-ui1.12.1.min.js"></script>
 <script src="/js/js.js"></script>
 <script type="text/javascript">
@@ -721,13 +722,14 @@ function findLoop(i,p,depth){
     if(depth++>1000)
         return true;
     for(j in r[i])
-        if(t[r[i][j].t].r==''){ // Check if we have a loop for a plain attribute
-            if((r[i][j].t==p) || findLoop(r[i][j].t,p,depth))
-                return true;
-        }
-        else // or a ref attribute
-            if((t[r[i][j].t].r==p) || findLoop(t[r[i][j].t].r,p,depth))
-                return true;
+		if(t[r[i][j].t]) // Ref type might be 1 - a free link
+	        if(t[r[i][j].t].r==''){ // Check if we have a loop for a plain attribute
+	            if((r[i][j].t==p) || findLoop(r[i][j].t,p,depth))
+	                return true;
+	        }
+	        else // or a ref attribute
+	            if((t[r[i][j].t].r==p) || findLoop(t[r[i][j].t].r,p,depth))
+	                return true;
     return false;
 }
 function drawChart(){

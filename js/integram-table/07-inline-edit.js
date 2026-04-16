@@ -1888,6 +1888,7 @@
                 if (serverError) {
                     throw new Error(serverError);
                 }
+                if (result.warning) this.showToast(result.warning, 'warning');
 
                 // Update cell display with comma-separated text of selected items
                 const displayText = (selectedItems || []).map(s => s.text).join(', ');
@@ -2014,6 +2015,7 @@
                 if (serverError) {
                     throw new Error(serverError);
                 }
+                if (result.warning) this.showToast(result.warning, 'warning');
 
                 // Save confirmed — remove the saving highlight
                 cell.classList.remove('cell-saving');
@@ -2349,6 +2351,7 @@
                 if (serverError) {
                     throw new Error(serverError);
                 }
+                if (result.warning) this.showToast(result.warning, 'warning');
 
                 // Extract created record ID and value from response
                 // According to the issue: "её id приходит в ключе obj JSON в ответ на запрос _m_new"
@@ -2515,6 +2518,11 @@
                     throw new Error(serverError);
                 }
 
+                // Check for warning (singular) - show yellow toast (issue #1847)
+                if (result.warning) {
+                    this.showToast(result.warning, 'warning');
+                }
+
                 // Check for warnings (plural) - show modal but continue with save (issue #610)
                 // These are informational warnings that don't block the save
                 if (result.warnings) {
@@ -2603,6 +2611,7 @@
                 if (serverError) {
                     throw new Error(serverError);
                 }
+                if (result.warning) this.showToast(result.warning, 'warning');
 
                 // Extract created record ID from response
                 // According to the issue: "её id приходит в ключе obj JSON"

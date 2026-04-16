@@ -613,6 +613,22 @@
                     body: params.toString()
                 });
 
+                const responseText = await response.text();
+                let result;
+                try {
+                    result = JSON.parse(responseText);
+                } catch (e) {
+                    if (responseText.includes('error') || !response.ok) {
+                        throw new Error(responseText);
+                    }
+                    result = { success: true };
+                }
+
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
+                }
+
                 if (!response.ok) {
                     throw new Error(`Ошибка удаления: ${ response.statusText }`);
                 }
@@ -680,17 +696,22 @@
 
             const formData = new FormData(form);
             const mainValue = formData.get('main');
+            const originalMainValue = form.getAttribute('data-original-main-value') || '';
 
             let newFirstColumnValue = mainValue;
 
             if (isUnique) {
-                // Prompt user to enter a new value for the first (unique) column
-                const prompted = await this.showDuplicateUniqueValueModal(mainValue);
-                if (prompted === null) {
-                    // User cancelled
-                    return;
+                // Skip confirmation if value has already been changed in the form (issue #1851)
+                if (mainValue === originalMainValue) {
+                    // Prompt user to enter a new value for the first (unique) column
+                    const prompted = await this.showDuplicateUniqueValueModal(mainValue);
+                    if (prompted === null) {
+                        // User cancelled
+                        return;
+                    }
+                    newFirstColumnValue = prompted;
                 }
-                newFirstColumnValue = prompted;
+                // If value was already changed, use the form value directly
             }
 
             const apiBase = this.getApiBase();

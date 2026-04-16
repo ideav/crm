@@ -1335,7 +1335,7 @@ class IntegramTable{
                                         <span class="export-icon"><i class="pi pi-file"></i></span> CSV
                                     </div>
                                     <div class="export-menu-item" onclick="window.${ instanceName }.copyToBuffer()">
-                                        <span class="export-icon"><i class="pi pi-clipboard"></i></span> В буфер
+                                        <span class="export-icon"><i class="pi pi-copy"></i></span> В буфер
                                     </div>
                                 </div>
                             </div>
@@ -2911,6 +2911,12 @@ class IntegramTable{
             });
 
             previewModal.querySelector('#paste-preview-load-btn').addEventListener('click', () => {
+                // Disable preview buttons while loading (issue #1848)
+                const loadBtn = previewModal.querySelector('#paste-preview-load-btn');
+                const cancelBtn = previewModal.querySelector('#paste-preview-cancel-btn');
+                if (loadBtn) loadBtn.disabled = true;
+                if (cancelBtn) cancelBtn.disabled = true;
+
                 // Collect edited cell values back into rows
                 const cells = previewModal.querySelectorAll('.paste-preview-cell');
                 const editedRows = parsedRows.map(row => [...row]);
@@ -2943,6 +2949,8 @@ class IntegramTable{
             const textarea = modal.querySelector('#paste-data-textarea');
             const progressEl = modal.querySelector('#paste-data-progress');
             const insertBtn = modal.querySelector('#paste-data-insert-btn');
+            const previewBtn = modal.querySelector('#paste-data-preview-btn');
+            const cancelBtn = modal.querySelector('#paste-data-cancel-btn');
             const createRefsCheckbox = modal.querySelector('#paste-data-create-refs');
             const createRefValues = createRefsCheckbox ? createRefsCheckbox.checked : false;
             const text = textarea.value;
@@ -2951,6 +2959,11 @@ class IntegramTable{
                 this.showToast('Поле ввода пустое', 'error');
                 return;
             }
+
+            // Disable all action buttons while inserting (issue #1848)
+            if (insertBtn) insertBtn.disabled = true;
+            if (previewBtn) previewBtn.disabled = true;
+            if (cancelBtn) cancelBtn.disabled = true;
 
             // Split into lines, skip empty lines
             const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
@@ -3165,7 +3178,9 @@ class IntegramTable{
                     successCount++;
                 } catch (err) {
                     progressEl.textContent = `Вставлено ${successCount} из ${total}. Ошибка на строке ${i + 1}: ${err.message}`;
-                    insertBtn.disabled = false;
+                    if (insertBtn) insertBtn.disabled = false;
+                    if (previewBtn) previewBtn.disabled = false;
+                    if (cancelBtn) cancelBtn.disabled = false;
                     this.showToast(`Ошибка вставки строки ${i + 1}: ${err.message}`, 'error');
                     return;
                 }
@@ -5074,6 +5089,7 @@ class IntegramTable{
                 if (serverError) {
                     throw new Error(serverError);
                 }
+                if (result.warning) this.showToast(result.warning, 'warning');
 
                 // Update cell display with comma-separated text of selected items
                 const displayText = (selectedItems || []).map(s => s.text).join(', ');
@@ -5200,6 +5216,7 @@ class IntegramTable{
                 if (serverError) {
                     throw new Error(serverError);
                 }
+                if (result.warning) this.showToast(result.warning, 'warning');
 
                 // Save confirmed — remove the saving highlight
                 cell.classList.remove('cell-saving');
@@ -5535,6 +5552,7 @@ class IntegramTable{
                 if (serverError) {
                     throw new Error(serverError);
                 }
+                if (result.warning) this.showToast(result.warning, 'warning');
 
                 // Extract created record ID and value from response
                 // According to the issue: "её id приходит в ключе obj JSON в ответ на запрос _m_new"
@@ -5701,6 +5719,11 @@ class IntegramTable{
                     throw new Error(serverError);
                 }
 
+                // Check for warning (singular) - show yellow toast (issue #1847)
+                if (result.warning) {
+                    this.showToast(result.warning, 'warning');
+                }
+
                 // Check for warnings (plural) - show modal but continue with save (issue #610)
                 // These are informational warnings that don't block the save
                 if (result.warnings) {
@@ -5789,6 +5812,7 @@ class IntegramTable{
                 if (serverError) {
                     throw new Error(serverError);
                 }
+                if (result.warning) this.showToast(result.warning, 'warning');
 
                 // Extract created record ID from response
                 // According to the issue: "её id приходит в ключе obj JSON"
@@ -7145,20 +7169,23 @@ class IntegramTable{
                         }
                     }
 
-                    // 2. Required flag
-                    const newRequired = colEditModal.querySelector(`#col-edit-required-${instanceName}`).checked;
-                    if (newRequired !== isRequired) {
-                        const result = await this.setColumnRequired(col.id);
-                        if (!result.success) {
-                            showStatus('Ошибка изменения обязательности: ' + result.error, true);
-                            saveBtn.disabled = false;
-                            return;
-                        }
-                        // Update attrs
-                        if (newRequired) {
-                            col.attrs = (col.attrs || '') + ':!NULL:';
-                        } else {
-                            col.attrs = (col.attrs || '').replace(/:!NULL:/g, '');
+                    // 2. Required flag (skip for first column - issue #1873)
+                    // First column is always required and cannot have _d_null sent to server
+                    if (!isFirstColumn) {
+                        const newRequired = colEditModal.querySelector(`#col-edit-required-${instanceName}`).checked;
+                        if (newRequired !== isRequired) {
+                            const result = await this.setColumnRequired(col.id);
+                            if (!result.success) {
+                                showStatus('Ошибка изменения обязательности: ' + result.error, true);
+                                saveBtn.disabled = false;
+                                return;
+                            }
+                            // Update attrs
+                            if (newRequired) {
+                                col.attrs = (col.attrs || '') + ':!NULL:';
+                            } else {
+                                col.attrs = (col.attrs || '').replace(/:!NULL:/g, '');
+                            }
                         }
                     }
 
@@ -10676,6 +10703,9 @@ class IntegramTable{
                 window._integramModalDepth = 0;
             }
             window._integramModalDepth++;
+
+            // Store original main value for duplicate check (issue #1851)
+            const originalMainValue = recordData && recordData.obj ? recordData.obj.val : '';
             const modalDepth = window._integramModalDepth;
             const baseZIndex = 1000 + (modalDepth * 10);
 
@@ -10789,7 +10819,7 @@ class IntegramTable{
                 ${ tabsHtml }
                 <div class="edit-form-body">
                     <div class="edit-form-tab-content active" data-tab-content="attributes">
-                        <form id="edit-form" class="edit-form" onsubmit="return false;" autocomplete="off">
+                        <form id="edit-form" class="edit-form" onsubmit="return false;" autocomplete="off" data-original-main-value="${ this.escapeHtml(originalMainValue) }">
                             ${ attributesHtml }
                         </form>
                     </div>
@@ -11603,6 +11633,28 @@ class IntegramTable{
                 }
                 const metadata = this.metadataCache[arrId];
 
+                // Extract parent record value from the clicked row (issue #1853, #1857)
+                // Try to get it from the row data structure instead of making a redundant API call
+                let parentRecordValue = '';
+                const clickedRow = event.target.closest('tr');
+                if (clickedRow) {
+                    const firstCell = clickedRow.querySelector('td:first-child');
+                    if (firstCell) {
+                        // Get the text content from the first cell (parent record value)
+                        const cellText = firstCell.textContent.trim();
+                        // Remove any leading index/ID prefix and icon markup
+                        parentRecordValue = cellText.replace(/^\d+\s*/, '').replace(/<[^>]*>/g, '').trim();
+                    }
+                }
+
+                // Fallback: try to find parent value from the clicked element's row in the data structure
+                if (!parentRecordValue && this.cellSubordinateContext && this.cellSubordinateContext.arrId === arrId) {
+                    const rowData = this.cellSubordinateContext.rowData;
+                    if (rowData && rowData.r && rowData.r[0]) {
+                        parentRecordValue = this.stripReferencePrefix(String(rowData.r[0]));
+                    }
+                }
+
                 // Create modal for subordinate table
                 const modalDepth = (window._integramModalDepth || 0) + 1;
                 window._integramModalDepth = modalDepth;
@@ -11619,10 +11671,11 @@ class IntegramTable{
                 modal.dataset.modalDepth = modalDepth;
 
                 const typeName = this.getMetadataName(metadata);
+                const headerTitle = parentRecordValue ? `${ this.escapeHtml(parentRecordValue) } / ${ typeName }` : typeName;
 
                 modal.innerHTML = `
                     <div class="edit-form-header">
-                        <h3>${ typeName }</h3>
+                        <h3>${ headerTitle }</h3>
                         <button class="edit-form-close subordinate-modal-close"><i class="pi pi-times"></i></button>
                     </div>
                     <div class="edit-form-body">
@@ -11752,7 +11805,10 @@ class IntegramTable{
                         <button type="button" class="subordinate-search-clear" title="Очистить поиск"${ searchTerm ? '' : ' style="display: none;"' }><i class="pi pi-times"></i></button>
                     </div>
                     <div class="subordinate-table-actions">
-                        <button type="button" class="subordinate-copy-buffer-btn" title="Копировать в буфер"><i class="pi pi-clipboard"></i></button>
+                        <button type="button" class="subordinate-copy-buffer-btn" title="Копировать в буфер"><i class="pi pi-copy"></i></button>
+                        <a href="#" class="subordinate-paste-buffer-btn" title="Вставить из буфера" onclick="event.preventDefault(); event.stopPropagation();">
+                            <i class="pi pi-clipboard"></i>
+                        </a>
                         <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
                             <i class="pi pi-table"></i>
                         </a>
@@ -11855,6 +11911,14 @@ class IntegramTable{
             if (copyBufferBtn) {
                 copyBufferBtn.addEventListener('click', () => {
                     this.copySubordinateToBuffer(container);
+                });
+            }
+
+            // Attach paste-from-buffer button handler (issue #1855)
+            const pasteBufferBtn = container.querySelector('.subordinate-paste-buffer-btn');
+            if (pasteBufferBtn) {
+                pasteBufferBtn.addEventListener('click', () => {
+                    this.openSubordinatePasteDataDialog(container, arrId, parentRecordId);
                 });
             }
 
@@ -11996,6 +12060,197 @@ class IntegramTable{
             } catch (error) {
                 console.error('Copy to buffer error:', error);
                 this.showToast(`Ошибка копирования: ${ error.message }`, 'error');
+            }
+        }
+
+        /**
+         * Open dialog to paste subordinate data from clipboard (issue #1855).
+         * Similar to openPasteDataDialog but for subordinate tables with parent context.
+         */
+        openSubordinatePasteDataDialog(container, arrId, parentRecordId) {
+            const instanceName = this.options.instanceName;
+            const metadata = container._subordinateMetadata;
+
+            if (!metadata) {
+                this.showToast('Нет метаданных для вставки', 'error');
+                return;
+            }
+
+            const modalDepth = (window._integramModalDepth || 0) + 1;
+            window._integramModalDepth = modalDepth;
+            const baseZIndex = 1000 + (modalDepth * 10);
+
+            const overlay = document.createElement('div');
+            overlay.className = 'edit-form-overlay';
+            overlay.style.zIndex = baseZIndex;
+
+            const modal = document.createElement('div');
+            modal.className = 'edit-form-modal paste-data-modal';
+            modal.style.zIndex = baseZIndex + 1;
+            modal.dataset.modalDepth = modalDepth;
+
+            modal.innerHTML = `
+                <div class="integram-modal-header">
+                    <h3>Вставить данные из буфера</h3>
+                    <button class="edit-form-close"><i class="pi pi-times"></i></button>
+                </div>
+                <div class="integram-modal-body">
+                    <p>Вставьте данные из буфера обмена:</p>
+                    <textarea id="paste-data-textarea" class="form-control" rows="10" placeholder="Данные должны быть разделены табуляцией (в столбцы) и новыми строками (в строки)"></textarea>
+                </div>
+                <div class="integram-modal-footer">
+                    <button type="button" class="btn btn-primary paste-data-ok-btn">Вставить</button>
+                    <button type="button" class="btn btn-secondary paste-data-cancel-btn">Отменить</button>
+                </div>
+            `;
+
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+
+            const closeModal = () => {
+                modal.remove();
+                overlay.remove();
+                window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+            };
+
+            // Close handlers
+            modal.querySelector('.edit-form-close').addEventListener('click', closeModal);
+            modal.querySelector('.paste-data-cancel-btn').addEventListener('click', closeModal);
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) closeModal();
+            });
+
+            // Paste button handler
+            modal.querySelector('.paste-data-ok-btn').addEventListener('click', async () => {
+                const textarea = modal.querySelector('#paste-data-textarea');
+                const pasteText = textarea.value.trim();
+
+                if (!pasteText) {
+                    this.showToast('Пожалуйста введите данные', 'error');
+                    return;
+                }
+
+                // Disable buttons during paste
+                modal.querySelectorAll('button').forEach(btn => btn.disabled = true);
+
+                try {
+                    await this.insertSubordinatePastedData(container, arrId, parentRecordId, pasteText, metadata);
+                    closeModal();
+                } finally {
+                    modal.querySelectorAll('button').forEach(btn => btn.disabled = false);
+                }
+            });
+
+            // Focus textarea
+            const textarea = modal.querySelector('#paste-data-textarea');
+            textarea.focus();
+        }
+
+        /**
+         * Insert pasted data into subordinate table (issue #1855).
+         * Parses the paste text and creates records with parent context.
+         */
+        async insertSubordinatePastedData(container, arrId, parentRecordId, pasteText, metadata) {
+            const reqs = metadata.reqs || [];
+            const lines = pasteText.split('\n').filter(line => line.trim());
+
+            if (lines.length === 0) {
+                this.showToast('Нет данных для вставки', 'error');
+                return;
+            }
+
+            // Parse column separators (TAB, semicolon, comma)
+            const rows = lines.map(line => {
+                if (line.includes('\t')) {
+                    return line.split('\t');
+                } else if (line.includes(';')) {
+                    return line.split(';');
+                } else {
+                    return [line];
+                }
+            });
+
+            const apiBase = this.getApiBase();
+            let successCount = 0;
+            let errorCount = 0;
+
+            for (const values of rows) {
+                try {
+                    const params = new URLSearchParams();
+
+                    if (typeof xsrf !== 'undefined') {
+                        params.append('_xsrf', xsrf);
+                    }
+
+                    // Add main value (first column)
+                    if (values[0]) {
+                        params.append(`t${arrId}`, values[0]);
+                    }
+
+                    // Add requisite columns
+                    let colIdx = 1;
+                    for (const req of reqs) {
+                        if (!req.arr_id && values[colIdx]) {
+                            const reqId = req.id || req.req_id;
+                            params.append(`t${reqId}`, values[colIdx]);
+                        }
+                        if (!req.arr_id) {
+                            colIdx++;
+                        }
+                    }
+
+                    const url = `${apiBase}/_m_new/${arrId}?JSON&up=${parentRecordId}`;
+
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: params.toString()
+                    });
+
+                    const text = await response.text();
+                    let result;
+                    try {
+                        result = JSON.parse(text);
+                    } catch (e) {
+                        if (!response.ok) throw new Error(text);
+                        result = { success: true };
+                    }
+
+                    const serverError = this.getServerError(result);
+                    if (serverError) {
+                        errorCount++;
+                        console.warn(`Ошибка вставки строки: ${serverError}`);
+                    } else {
+                        successCount++;
+                    }
+                } catch (error) {
+                    errorCount++;
+                    console.error('Error inserting row:', error);
+                }
+            }
+
+            // Reload subordinate table data
+            const metadata_new = this.metadataCache[arrId];
+            const pageSize = this.options.pageSize || 20;
+            const dataUrl = `${apiBase}/object/${arrId}/?JSON_OBJ&F_U=${parentRecordId}&LIMIT=0,${pageSize + 1}`;
+
+            try {
+                const dataResponse = await fetch(dataUrl);
+                const data = await dataResponse.json();
+                const rows = Array.isArray(data) ? data : [];
+                const hasMore = rows.length > pageSize;
+                const firstPageRows = hasMore ? rows.slice(0, pageSize) : rows;
+
+                this.renderSubordinateTable(container, metadata_new, firstPageRows, arrId, parentRecordId);
+
+                container._subordinateHasMore = hasMore;
+                container._subordinateLoadedCount = firstPageRows.length;
+                container._subordinateIsLoading = false;
+
+                this.showToast(`Вставлено ${successCount} записей${errorCount > 0 ? `, ошибок: ${errorCount}` : ''}`, successCount > 0 ? 'success' : 'error');
+            } catch (error) {
+                console.error('Error reloading subordinate table:', error);
+                this.showToast(`Ошибка перезагрузки таблицы: ${error.message}`, 'error');
             }
         }
 
@@ -12711,6 +12966,7 @@ class IntegramTable{
                     if (serverError) {
                         throw new Error(serverError);
                     }
+                    if (result.warning) this.showToast(result.warning, 'warning');
 
                     closeModal();
                     this.showToast('Запись создана', 'success');
@@ -14108,6 +14364,7 @@ class IntegramTable{
                 if (serverError) {
                     throw new Error(serverError);
                 }
+                if (result.warning) this.showToast(result.warning, 'warning');
 
                 const createdId = result.obj || result.id || result.i;
                 const createdValue = result.val || mainValue;
@@ -14770,6 +15027,22 @@ class IntegramTable{
                     body: params.toString()
                 });
 
+                const responseText = await response.text();
+                let result;
+                try {
+                    result = JSON.parse(responseText);
+                } catch (e) {
+                    if (responseText.includes('error') || !response.ok) {
+                        throw new Error(responseText);
+                    }
+                    result = { success: true };
+                }
+
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
+                }
+
                 if (!response.ok) {
                     throw new Error(`Ошибка удаления: ${ response.statusText }`);
                 }
@@ -14837,17 +15110,22 @@ class IntegramTable{
 
             const formData = new FormData(form);
             const mainValue = formData.get('main');
+            const originalMainValue = form.getAttribute('data-original-main-value') || '';
 
             let newFirstColumnValue = mainValue;
 
             if (isUnique) {
-                // Prompt user to enter a new value for the first (unique) column
-                const prompted = await this.showDuplicateUniqueValueModal(mainValue);
-                if (prompted === null) {
-                    // User cancelled
-                    return;
+                // Skip confirmation if value has already been changed in the form (issue #1851)
+                if (mainValue === originalMainValue) {
+                    // Prompt user to enter a new value for the first (unique) column
+                    const prompted = await this.showDuplicateUniqueValueModal(mainValue);
+                    if (prompted === null) {
+                        // User cancelled
+                        return;
+                    }
+                    newFirstColumnValue = prompted;
                 }
-                newFirstColumnValue = prompted;
+                // If value was already changed, use the form value directly
             }
 
             const apiBase = this.getApiBase();
@@ -15809,6 +16087,7 @@ class IntegramTable{
             const total = records.length;
             let completed = 0;
             const errors = [];
+            const warnings = [];
 
             // Create progress modal
             const progressId = `bulk-delete-progress-${ Date.now() }`;
@@ -15856,11 +16135,26 @@ class IntegramTable{
                     });
 
                     const text = await response.text();
+                    let result;
                     try {
-                        JSON.parse(text);
+                        result = JSON.parse(text);
                     } catch (parseErr) {
                         // Invalid JSON response - report as warning but don't stop
-                        errors.push(`#${ record.id } : ${ record.value } : ${ text }`);
+                        warnings.push(`#${ record.id } : ${ record.value } : ${ text }`);
+                    }
+
+                    // Check for error key in the response
+                    if (result) {
+                        let serverError = null;
+                        if (Array.isArray(result)) {
+                            serverError = (result[0] && result[0].error) || null;
+                        } else {
+                            serverError = result.error || null;
+                        }
+
+                        if (serverError) {
+                            errors.push(`#${ record.id } : ${ record.value } : ${ serverError }`);
+                        }
                     }
                 } catch (err) {
                     errors.push(`#${ record.id } : ${ record.value } : ${ err.message }`);
@@ -15872,20 +16166,52 @@ class IntegramTable{
 
             await Promise.all(deletePromises);
 
-            // Show errors if any
-            if (errors.length > 0) {
+            // Show errors and warnings if any
+            if (errors.length > 0 || warnings.length > 0) {
                 errorsDiv.style.display = 'block';
-                errorsDiv.innerHTML = `<div class="alert alert-warning" style="max-height: 200px; overflow-y: auto; font-size: 0.75rem; margin-top: 10px;">
-                    <strong>Предупреждения:</strong><br>
-                    ${ errors.map(e => this.escapeHtml(e)).join('<br>') }
-                </div>`;
+                let html = '';
+                
+                // Show blocking errors first (red alert)
+                if (errors.length > 0) {
+                    html += `<div class="alert alert-danger" style="max-height: 200px; overflow-y: auto; font-size: 0.75rem; margin-top: 10px; background-color: #f8d7da; border: 2px solid #f5c6cb; border-radius: 4px; padding: 10px;">
+                        <strong>Ошибки (блокирующие):</strong><br>
+                        ${ errors.map(e => {
+                            // Parse error format: "#recordId : recordValue : errorMessage"
+                            const parts = e.split(' : ');
+                            if (parts.length >= 3) {
+                                const recordId = this.escapeHtml(parts[0]);
+                                const recordValue = this.escapeHtml(parts[1]);
+                                // Join remaining parts in case error message contains " : "
+                                const errorMsg = parts.slice(2).join(' : ');
+                                // Sanitize the error message to allow safe HTML (links) but prevent XSS
+                                const sanitizedMsg = this.sanitizeInlineMessageHtml(errorMsg);
+                                return `${recordId} : ${recordValue} : ${sanitizedMsg}`;
+                            }
+                            return this.escapeHtml(e);
+                        }).join('<br>') }
+                    </div>`;
+                }
+                
+                // Show warnings after errors (yellow alert)
+                if (warnings.length > 0) {
+                    html += `<div class="alert alert-warning" style="max-height: 200px; overflow-y: auto; font-size: 0.75rem; margin-top: 10px;">
+                        <strong>Предупреждения:</strong><br>
+                        ${ warnings.map(w => this.escapeHtml(w)).join('<br>') }
+                    </div>`;
+                }
+                
+                errorsDiv.innerHTML = html;
             }
 
-            // Update progress text
-            progressText.textContent = `Удаление завершено: ${ completed } / ${ total }`;
+            // Update progress text based on errors
+            if (errors.length > 0) {
+                progressText.textContent = `Удаление завершено с ошибками: ${ completed } / ${ total }`;
+            } else {
+                progressText.textContent = `Удаление завершено: ${ completed } / ${ total }`;
+            }
 
             // Auto-close progress after 1.5s if no errors, else add close button
-            if (errors.length === 0) {
+            if (errors.length === 0 && warnings.length === 0) {
                 setTimeout(() => {
                     progressOverlay.remove();
                 }, 1500);
@@ -17775,6 +18101,7 @@ class IntegramCreateFormHelper {
             if (serverError) {
                 throw new Error(serverError);
             }
+            if (result.warning) this.showToast(result.warning, 'warning');
 
             // Success - close modal
             this.showToast('Запись создана', 'success');
@@ -18142,7 +18469,10 @@ class IntegramCreateFormHelper {
                     <i class="pi pi-plus"></i>
                 </button>
                 <div class="subordinate-table-actions">
-                    <button type="button" class="subordinate-copy-buffer-btn" title="Копировать в буфер"><i class="pi pi-clipboard"></i></button>
+                    <button type="button" class="subordinate-copy-buffer-btn" title="Копировать в буфер"><i class="pi pi-copy"></i></button>
+                    <a href="#" class="subordinate-paste-buffer-btn" title="Вставить из буфера" onclick="event.preventDefault(); event.stopPropagation();">
+                        <i class="pi pi-clipboard"></i>
+                    </a>
                     <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
                         <i class="pi pi-table"></i>
                     </a>
@@ -18216,6 +18546,14 @@ class IntegramCreateFormHelper {
             });
         }
 
+        // Attach paste-from-buffer button handler (issue #1855)
+        const pasteBufferBtn = container.querySelector('.subordinate-paste-buffer-btn');
+        if (pasteBufferBtn) {
+            pasteBufferBtn.addEventListener('click', () => {
+                this.openSubordinatePasteDataDialog(container, arrId, parentRecordId);
+            });
+        }
+
         // Attach handlers for clickable cells (open edit form)
         container.querySelectorAll('.subordinate-cell-clickable').forEach(cell => {
             cell.addEventListener('click', (e) => {
@@ -18279,6 +18617,195 @@ class IntegramCreateFormHelper {
         } catch (error) {
             console.error('Copy to buffer error:', error);
             this.showToast(`Ошибка копирования: ${ error.message }`, 'error');
+        }
+    }
+
+    /**
+     * Open dialog to paste subordinate data from clipboard (issue #1855).
+     */
+    openSubordinatePasteDataDialog(container, arrId, parentRecordId) {
+        const instanceName = this.options.instanceName;
+        const metadata = container._subordinateMetadata;
+
+        if (!metadata) {
+            this.showToast('Нет метаданных для вставки', 'error');
+            return;
+        }
+
+        const modalDepth = (window._integramModalDepth || 0) + 1;
+        window._integramModalDepth = modalDepth;
+        const baseZIndex = 1000 + (modalDepth * 10);
+
+        const overlay = document.createElement('div');
+        overlay.className = 'edit-form-overlay';
+        overlay.style.zIndex = baseZIndex;
+
+        const modal = document.createElement('div');
+        modal.className = 'edit-form-modal paste-data-modal';
+        modal.style.zIndex = baseZIndex + 1;
+        modal.dataset.modalDepth = modalDepth;
+
+        modal.innerHTML = `
+            <div class="integram-modal-header">
+                <h3>Вставить данные из буфера</h3>
+                <button class="edit-form-close"><i class="pi pi-times"></i></button>
+            </div>
+            <div class="integram-modal-body">
+                <p>Вставьте данные из буфера обмена:</p>
+                <textarea id="paste-data-textarea" class="form-control" rows="10" placeholder="Данные должны быть разделены табуляцией (в столбцы) и новыми строками (в строки)"></textarea>
+            </div>
+            <div class="integram-modal-footer">
+                <button type="button" class="btn btn-primary paste-data-ok-btn">Вставить</button>
+                <button type="button" class="btn btn-secondary paste-data-cancel-btn">Отменить</button>
+            </div>
+        `;
+
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        const closeModal = () => {
+            modal.remove();
+            overlay.remove();
+            window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
+        };
+
+        // Close handlers
+        modal.querySelector('.edit-form-close').addEventListener('click', closeModal);
+        modal.querySelector('.paste-data-cancel-btn').addEventListener('click', closeModal);
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) closeModal();
+        });
+
+        // Paste button handler
+        modal.querySelector('.paste-data-ok-btn').addEventListener('click', async () => {
+            const textarea = modal.querySelector('#paste-data-textarea');
+            const pasteText = textarea.value.trim();
+
+            if (!pasteText) {
+                this.showToast('Пожалуйста введите данные', 'error');
+                return;
+            }
+
+            // Disable buttons during paste
+            modal.querySelectorAll('button').forEach(btn => btn.disabled = true);
+
+            try {
+                await this.insertSubordinatePastedData(container, arrId, parentRecordId, pasteText, metadata);
+                closeModal();
+            } finally {
+                modal.querySelectorAll('button').forEach(btn => btn.disabled = false);
+            }
+        });
+
+        // Focus textarea
+        const textarea = modal.querySelector('#paste-data-textarea');
+        textarea.focus();
+    }
+
+    /**
+     * Insert pasted data into subordinate table (issue #1855).
+     */
+    async insertSubordinatePastedData(container, arrId, parentRecordId, pasteText, metadata) {
+        const reqs = metadata.reqs || [];
+        const lines = pasteText.split('\n').filter(line => line.trim());
+
+        if (lines.length === 0) {
+            this.showToast('Нет данных для вставки', 'error');
+            return;
+        }
+
+        // Parse column separators (TAB, semicolon, comma)
+        const rows = lines.map(line => {
+            if (line.includes('\t')) {
+                return line.split('\t');
+            } else if (line.includes(';')) {
+                return line.split(';');
+            } else {
+                return [line];
+            }
+        });
+
+        const apiBase = this.getApiBase();
+        let successCount = 0;
+        let errorCount = 0;
+
+        for (const values of rows) {
+            try {
+                const params = new URLSearchParams();
+
+                if (typeof xsrf !== 'undefined') {
+                    params.append('_xsrf', xsrf);
+                }
+
+                // Add main value (first column)
+                if (values[0]) {
+                    params.append(`t${arrId}`, values[0]);
+                }
+
+                // Add requisite columns
+                let colIdx = 1;
+                for (const req of reqs) {
+                    if (!req.arr_id && values[colIdx]) {
+                        const reqId = req.id || req.req_id;
+                        params.append(`t${reqId}`, values[colIdx]);
+                    }
+                    if (!req.arr_id) {
+                        colIdx++;
+                    }
+                }
+
+                const url = `${apiBase}/_m_new/${arrId}?JSON&up=${parentRecordId}`;
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+
+                const text = await response.text();
+                let result;
+                try {
+                    result = JSON.parse(text);
+                } catch (e) {
+                    if (!response.ok) throw new Error(text);
+                    result = { success: true };
+                }
+
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    errorCount++;
+                    console.warn(`Ошибка вставки строки: ${serverError}`);
+                } else {
+                    successCount++;
+                }
+            } catch (error) {
+                errorCount++;
+                console.error('Error inserting row:', error);
+            }
+        }
+
+        // Reload subordinate table data
+        const metadata_new = this.metadataCache[arrId];
+        const pageSize = this.options.pageSize || 20;
+        const dataUrl = `${apiBase}/object/${arrId}/?JSON_OBJ&F_U=${parentRecordId}&LIMIT=0,${pageSize + 1}`;
+
+        try {
+            const dataResponse = await fetch(dataUrl);
+            const data = await dataResponse.json();
+            const rows = Array.isArray(data) ? data : [];
+            const hasMore = rows.length > pageSize;
+            const firstPageRows = hasMore ? rows.slice(0, pageSize) : rows;
+
+            this.renderSubordinateTable(container, metadata_new, firstPageRows, arrId, parentRecordId);
+
+            container._subordinateHasMore = hasMore;
+            container._subordinateLoadedCount = firstPageRows.length;
+            container._subordinateIsLoading = false;
+
+            this.showToast(`Вставлено ${successCount} записей${errorCount > 0 ? `, ошибок: ${errorCount}` : ''}`, successCount > 0 ? 'success' : 'error');
+        } catch (error) {
+            console.error('Error reloading subordinate table:', error);
+            this.showToast(`Ошибка перезагрузки таблицы: ${error.message}`, 'error');
         }
     }
 
@@ -18851,6 +19378,7 @@ class IntegramCreateFormHelper {
             if (serverError) {
                 throw new Error(serverError);
             }
+            if (result.warning) this.showToast(result.warning, 'warning');
 
             // Success - close modal
             this.showToast('Изменения сохранены', 'success');
