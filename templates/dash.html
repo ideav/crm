@@ -376,7 +376,8 @@ function dashGetRepVals() {
                 document.querySelectorAll('#' + i + ' .f-rg-cell').forEach(function(el) {
                     var val = 0, range = el.getAttribute('range').split('-');
                     for (j in dashReports[rep])
-                        if (dashReports[rep][j][date] >= range[0] && dashReports[rep][j][date] <= range[1])
+                        // If range[0] is empty (range="-"), include all data regardless of date
+                        if (!range[0] || (dashReports[rep][j][date] >= range[0] && dashReports[rep][j][date] <= range[1]))
                             val += dashGetFloat(dashReports[rep][j][repField]);
                     el.innerHTML = dashNormalizeVal(i, val);
                     el.setAttribute('ready', '1');
