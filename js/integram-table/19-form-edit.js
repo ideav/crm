@@ -934,6 +934,23 @@
                 }
                 const metadata = this.metadataCache[arrId];
 
+                // Fetch parent record data to display in header (issue #1853)
+                const apiBase = this.getApiBase();
+                const parentTypeId = this.options.typeId;
+                const parentDataUrl = `${ apiBase }/object/${ parentTypeId }/${ parentRecordId }/?JSON_OBJ`;
+                let parentRecordValue = '';
+
+                try {
+                    const parentResponse = await fetch(parentDataUrl);
+                    const parentData = await parentResponse.json();
+                    if (parentData && parentData.obj && parentData.obj.val) {
+                        parentRecordValue = parentData.obj.val;
+                    }
+                } catch (error) {
+                    // If we can't fetch parent data, just continue without it
+                    console.warn('Could not fetch parent record data:', error);
+                }
+
                 // Create modal for subordinate table
                 const modalDepth = (window._integramModalDepth || 0) + 1;
                 window._integramModalDepth = modalDepth;
@@ -950,10 +967,11 @@
                 modal.dataset.modalDepth = modalDepth;
 
                 const typeName = this.getMetadataName(metadata);
+                const headerTitle = parentRecordValue ? `${ this.escapeHtml(parentRecordValue) } / ${ typeName }` : typeName;
 
                 modal.innerHTML = `
                     <div class="edit-form-header">
-                        <h3>${ typeName }</h3>
+                        <h3>${ headerTitle }</h3>
                         <button class="edit-form-close subordinate-modal-close"><i class="pi pi-times"></i></button>
                     </div>
                     <div class="edit-form-body">
