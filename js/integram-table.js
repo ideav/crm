@@ -15024,6 +15024,22 @@ class IntegramTable{
                     body: params.toString()
                 });
 
+                const responseText = await response.text();
+                let result;
+                try {
+                    result = JSON.parse(responseText);
+                } catch (e) {
+                    if (responseText.includes('error') || !response.ok) {
+                        throw new Error(responseText);
+                    }
+                    result = { success: true };
+                }
+
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
+                }
+
                 if (!response.ok) {
                     throw new Error(`Ошибка удаления: ${ response.statusText }`);
                 }
@@ -16115,11 +16131,26 @@ class IntegramTable{
                     });
 
                     const text = await response.text();
+                    let result;
                     try {
-                        JSON.parse(text);
+                        result = JSON.parse(text);
                     } catch (parseErr) {
                         // Invalid JSON response - report as warning but don't stop
                         errors.push(`#${ record.id } : ${ record.value } : ${ text }`);
+                    }
+
+                    // Check for error key in the response
+                    if (result) {
+                        let serverError = null;
+                        if (Array.isArray(result)) {
+                            serverError = (result[0] && result[0].error) || null;
+                        } else {
+                            serverError = result.error || null;
+                        }
+
+                        if (serverError) {
+                            errors.push(`#${ record.id } : ${ record.value } : ${ serverError }`);
+                        }
                     }
                 } catch (err) {
                     errors.push(`#${ record.id } : ${ record.value } : ${ err.message }`);

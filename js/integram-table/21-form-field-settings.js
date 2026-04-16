@@ -613,6 +613,22 @@
                     body: params.toString()
                 });
 
+                const responseText = await response.text();
+                let result;
+                try {
+                    result = JSON.parse(responseText);
+                } catch (e) {
+                    if (responseText.includes('error') || !response.ok) {
+                        throw new Error(responseText);
+                    }
+                    result = { success: true };
+                }
+
+                const serverError = this.getServerError(result);
+                if (serverError) {
+                    throw new Error(serverError);
+                }
+
                 if (!response.ok) {
                     throw new Error(`Ошибка удаления: ${ response.statusText }`);
                 }
