@@ -165,7 +165,7 @@
                 
                 // Show blocking errors first (red alert)
                 if (errors.length > 0) {
-                    html += `<div class="alert alert-danger" style="max-height: 200px; overflow-y: auto; font-size: 0.75rem; margin-top: 10px;">
+                    html += `<div class="alert alert-danger" style="max-height: 200px; overflow-y: auto; font-size: 0.75rem; margin-top: 10px; background-color: #f8d7da; border: 2px solid #f5c6cb; border-radius: 4px; padding: 10px;">
                         <strong>Ошибки (блокирующие):</strong><br>
                         ${ errors.map(e => {
                             // Parse error format: "#recordId : recordValue : errorMessage"
@@ -195,8 +195,12 @@
                 errorsDiv.innerHTML = html;
             }
 
-            // Update progress text
-            progressText.textContent = `Удаление завершено: ${ completed } / ${ total }`;
+            // Update progress text based on errors
+            if (errors.length > 0) {
+                progressText.textContent = `Удаление завершено с ошибками: ${ completed } / ${ total }`;
+            } else {
+                progressText.textContent = `Удаление завершено: ${ completed } / ${ total }`;
+            }
 
             // Auto-close progress after 1.5s if no errors, else add close button
             if (errors.length === 0 && warnings.length === 0) {
