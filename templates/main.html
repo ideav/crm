@@ -8,8 +8,36 @@
     <link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
     <link rel="stylesheet" href="/css/main-app.css">
     <style>
-        html {
-            font-size: .82rem;
+        html { font-size: .82rem; }
+        /* Brand background */
+        body.brand-bg-on::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            /* Фоновый рисунок можно изменить здась - укажите путь к вашему файлу в меню Файлы - download */
+            background-image: url('/assets/lightness.jpg');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            pointer-events: none;
+            z-index: 0;
+            opacity: var(--brand-bg-opacity, 0.3);
+        }
+        /* Make navbar and sidebar transparent when brand-bg is on */
+        body.brand-bg-on .navbar,
+        body.brand-bg-on .app-sidebar {
+            background-color: transparent !important;
+            backdrop-filter: blur(0px);
+        }
+        /* High-contrast text when brand-bg is on — light theme */
+        body.brand-bg-on {
+            --text-primary: #000000;
+            --text-secondary: #000000;
+        }
+        /* High-contrast text when brand-bg is on — dark theme */
+        [data-theme="dark"] body.brand-bg-on {
+            --text-primary: #ffffff;
+            --text-secondary: #ffffff;
         }
     </style>
     <script>
@@ -52,6 +80,45 @@
                 document.querySelectorAll('.navbar-font-size-btn').forEach(function(btn) {
                     btn.classList.toggle('active', btn.dataset.size === current);
                 });
+            });
+        })();
+    </script>
+    <script>
+        // Brand background opacity — stored in cookie (issue #1897, #1899)
+        (function() {
+            var BG_COOKIE = 'sportzania-brand-bg';
+
+            function applyBrandBg(value) {
+                var opacity = parseFloat(value);
+                if (opacity > 0 && opacity <= 0.9) {
+                    document.documentElement.style.setProperty('--brand-bg-opacity', opacity);
+                    if (document.body) document.body.classList.add('brand-bg-on');
+                } else {
+                    document.documentElement.style.removeProperty('--brand-bg-opacity');
+                    if (document.body) document.body.classList.remove('brand-bg-on');
+                }
+            }
+
+            function loadBrandBg() {
+                var match = document.cookie.match(new RegExp('(?:^|; )' + BG_COOKIE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+                return match ? decodeURIComponent(match[1]) : '0';
+            }
+
+            // Apply immediately before DOM renders
+            applyBrandBg(loadBrandBg());
+
+            window.setBrandBg = function(value) {
+                document.cookie = BG_COOKIE + '=' + encodeURIComponent(value) + '; path=/; max-age=31536000';
+                applyBrandBg(value);
+                var sel = document.getElementById('brand-bg-select');
+                if (sel) sel.value = value;
+            };
+
+            document.addEventListener('DOMContentLoaded', function() {
+                var current = loadBrandBg();
+                applyBrandBg(current);
+                var sel = document.getElementById('brand-bg-select');
+                if (sel) sel.value = current;
             });
         })();
     </script>
@@ -132,6 +199,22 @@
                             <button type="button" class="navbar-font-size-btn" data-size="normal" onclick="setPageFontSize('normal')" title="Шрифт обычный" style="font-size:14px;">А</button>
                             <button type="button" class="navbar-font-size-btn" data-size="larger" onclick="setPageFontSize('larger')" title="Шрифт больше" style="font-size:17px;">А</button>
                         </div>
+                    </div>
+                    <div class="user-menu-item user-menu-font-size-row" title="Фоновый рисунок можно изменить в меню Файлы - в main.html: background-image: url">
+                        <i class="user-menu-icon pi pi-image" title="Фоновый рисунок можно изменить в меню Файлы - в main.html: background-image: url"></i>
+                        <span title="Фоновый рисунок можно изменить в меню Файлы - в main.html: background-image: url">Бренд-фон</span>
+                        <select id="brand-bg-select" onchange="setBrandBg(this.value)" title="Выберите интенсивность фонового рисунка для вашего удобства" style="margin-left:auto;border:1px solid var(--border-color);border-radius:4px;padding:2px 4px;background:var(--input-bg,var(--bg-secondary));color:var(--text-primary);font-size:0.85rem;cursor:pointer;">
+                            <option value="0">—</option>
+                            <option value="0.1">10%</option>
+                            <option value="0.2">20%</option>
+                            <option value="0.3">30%</option>
+                            <option value="0.4">40%</option>
+                            <option value="0.5">50%</option>
+                            <option value="0.6">60%</option>
+                            <option value="0.7">70%</option>
+                            <option value="0.8">80%</option>
+                            <option value="0.9">90%</option>
+                        </select>
                     </div>
                     <div class="user-menu-divider"></div>
                     <button id="change-password-btn" class="user-menu-item" type="button" onclick="document.querySelector('.cp-form').style.display='block';document.querySelectorAll('.ch-toggle').forEach(function(el){el.style.display='flex';});document.querySelectorAll('.wait-toggle').forEach(function(el){el.style.display='none';});">
