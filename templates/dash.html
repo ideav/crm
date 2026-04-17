@@ -196,19 +196,25 @@
     background-color: var(--bg-secondary, #f0f4ff);
     outline: 1px solid var(--border-color, #adb5bd);
 }
-/* Inline editor input */
+/* Inline editor input — styled to match integram-table .inline-editor */
 .dash-cell-input {
     width: 100%;
     min-width: 4rem;
-    border: 1px solid #86b7fe;
-    border-radius: 3px;
-    padding: 0.1rem 0.3rem;
-    font-size: inherit;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 0.875rem;
+    font-family: inherit;
     text-align: right;
-    background: var(--input-bg, #fff);
-    color: var(--text-primary, #212529);
+    background: var(--md-surface, #fff);
+    color: var(--md-text-primary, #212529);
     outline: none;
-    box-shadow: 0 0 0 2px rgba(13,110,253,.15);
+    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.15);
+    box-sizing: border-box;
+    transition: box-shadow 0.15s ease;
+}
+.dash-cell-input:focus {
+    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.25);
 }
 /* Formula modal */
 #dash-formula-modal {
@@ -1221,10 +1227,46 @@ function dashStartInlineEdit(td) {
 
     input.addEventListener('blur', commit);
     input.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') { input.blur(); }
-        if (e.key === 'Escape') {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            input.blur();
+        } else if (e.key === 'Escape') {
             input.removeEventListener('blur', commit);
             td.textContent = currentVal;
+        } else if (e.key === 'Tab' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            input.removeEventListener('blur', commit);
+            commit();
+            var editableCells = Array.from(document.querySelectorAll('td.f-cell[data-src="rg"], td.f-cell[data-src="value"]'));
+            var idx = editableCells.indexOf(td);
+            var target = null;
+            if (e.key === 'Tab') {
+                target = e.shiftKey ? editableCells[idx - 1] : editableCells[idx + 1];
+            } else if (e.key === 'ArrowDown') {
+                // Find cell in same column, next row
+                var colIdx = Array.from(td.parentNode.cells).indexOf(td);
+                var nextRow = td.parentNode.nextElementSibling;
+                while (nextRow) {
+                    var candidate = nextRow.cells[colIdx];
+                    if (candidate && (candidate.dataset.src === 'rg' || candidate.dataset.src === 'value')) {
+                        target = candidate; break;
+                    }
+                    nextRow = nextRow.nextElementSibling;
+                }
+            } else if (e.key === 'ArrowUp') {
+                var colIdx = Array.from(td.parentNode.cells).indexOf(td);
+                var prevRow = td.parentNode.previousElementSibling;
+                while (prevRow) {
+                    var candidate = prevRow.cells[colIdx];
+                    if (candidate && (candidate.dataset.src === 'rg' || candidate.dataset.src === 'value')) {
+                        target = candidate; break;
+                    }
+                    prevRow = prevRow.previousElementSibling;
+                }
+            }
+            if (target) {
+                setTimeout(function() { dashStartInlineEdit(target); }, 0);
+            }
         }
     });
 }
