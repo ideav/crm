@@ -12,8 +12,7 @@
             font-size: .82rem;
         }
         /* Brand background */
-        body.brand-bg-brighter::before,
-        body.brand-bg-dimmer::before {
+        body.brand-bg-on::before {
             content: '';
             position: fixed;
             inset: 0;
@@ -23,9 +22,14 @@
             background-repeat: no-repeat;
             pointer-events: none;
             z-index: 0;
+            opacity: var(--brand-bg-opacity, 0.3);
         }
-        body.brand-bg-brighter::before { opacity: 0.28; }
-        body.brand-bg-dimmer::before   { opacity: 0.15; }
+        /* Make navbar and sidebar transparent when brand-bg is on */
+        body.brand-bg-on .navbar,
+        body.brand-bg-on .app-sidebar {
+            background-color: transparent !important;
+            backdrop-filter: blur(0px);
+        }
     </style>
     <script>
         // Font size control — global, stored in cookie integram-table-font-settings (issue #1626/#1628)
@@ -71,35 +75,41 @@
         })();
     </script>
     <script>
-        // Brand background — stored in cookie (issue #1897)
+        // Brand background opacity — stored in cookie (issue #1897, #1899)
         (function() {
             var BG_COOKIE = 'sportzania-brand-bg';
-            var BG_CLASSES = { brighter: 'brand-bg-brighter', dimmer: 'brand-bg-dimmer' };
 
             function applyBrandBg(value) {
-                document.body.classList.remove('brand-bg-brighter', 'brand-bg-dimmer');
-                if (BG_CLASSES[value]) document.body.classList.add(BG_CLASSES[value]);
+                var opacity = parseFloat(value);
+                if (opacity > 0 && opacity <= 0.9) {
+                    document.documentElement.style.setProperty('--brand-bg-opacity', opacity);
+                    document.body.classList.add('brand-bg-on');
+                } else {
+                    document.documentElement.style.removeProperty('--brand-bg-opacity');
+                    document.body.classList.remove('brand-bg-on');
+                }
             }
 
             function loadBrandBg() {
                 var match = document.cookie.match(new RegExp('(?:^|; )' + BG_COOKIE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
-                return match ? decodeURIComponent(match[1]) : 'off';
+                return match ? decodeURIComponent(match[1]) : '0';
             }
+
+            // Apply immediately before DOM renders
+            applyBrandBg(loadBrandBg());
 
             window.setBrandBg = function(value) {
                 document.cookie = BG_COOKIE + '=' + encodeURIComponent(value) + '; path=/; max-age=31536000';
                 applyBrandBg(value);
-                document.querySelectorAll('.brand-bg-btn').forEach(function(btn) {
-                    btn.classList.toggle('active', btn.dataset.bg === value);
-                });
+                var sel = document.getElementById('brand-bg-select');
+                if (sel) sel.value = value;
             };
 
             document.addEventListener('DOMContentLoaded', function() {
                 var current = loadBrandBg();
                 applyBrandBg(current);
-                document.querySelectorAll('.brand-bg-btn').forEach(function(btn) {
-                    btn.classList.toggle('active', btn.dataset.bg === current);
-                });
+                var sel = document.getElementById('brand-bg-select');
+                if (sel) sel.value = current;
             });
         })();
     </script>
@@ -215,11 +225,18 @@
                     <div class="user-menu-item user-menu-font-size-row" title="Бренд-фон">
                         <i class="user-menu-icon pi pi-image"></i>
                         <span>Бренд-фон</span>
-                        <div class="navbar-font-size-group">
-                            <button type="button" class="navbar-font-size-btn brand-bg-btn" data-bg="off" onclick="setBrandBg('off')" title="Без фона" style="font-size:11px;">—</button>
-                            <button type="button" class="navbar-font-size-btn brand-bg-btn" data-bg="brighter" onclick="setBrandBg('brighter')" title="Ярче" style="font-size:14px;">◑</button>
-                            <button type="button" class="navbar-font-size-btn brand-bg-btn" data-bg="dimmer" onclick="setBrandBg('dimmer')" title="Бледнее" style="font-size:14px;">◔</button>
-                        </div>
+                        <select id="brand-bg-select" onchange="setBrandBg(this.value)" style="margin-left:auto;border:1px solid var(--border-color);border-radius:4px;padding:2px 4px;background:var(--input-bg,var(--bg-secondary));color:var(--text-primary);font-size:0.85rem;cursor:pointer;">
+                            <option value="0">—</option>
+                            <option value="0.1">10%</option>
+                            <option value="0.2">20%</option>
+                            <option value="0.3">30%</option>
+                            <option value="0.4">40%</option>
+                            <option value="0.5">50%</option>
+                            <option value="0.6">60%</option>
+                            <option value="0.7">70%</option>
+                            <option value="0.8">80%</option>
+                            <option value="0.9">90%</option>
+                        </select>
                     </div>
                     <div class="user-menu-divider"></div>
                     <button id="change-password-btn" class="user-menu-item" type="button" onclick="document.querySelector('.cp-form').style.display='block';document.querySelectorAll('.ch-toggle').forEach(function(el){el.style.display='flex';});document.querySelectorAll('.wait-toggle').forEach(function(el){el.style.display='none';});">
