@@ -28,6 +28,16 @@
             background-color: transparent !important;
             backdrop-filter: blur(0px);
         }
+        /* High-contrast text when brand-bg is on — light theme */
+        body.brand-bg-on {
+            --text-primary: #000000;
+            --text-secondary: #000000;
+        }
+        /* High-contrast text when brand-bg is on — dark theme */
+        [data-theme="dark"] body.brand-bg-on {
+            --text-primary: #ffffff;
+            --text-secondary: #ffffff;
+        }
     </style>
     <script>
         // Font size control — global, stored in cookie integram-table-font-settings (issue #1626/#1628)
