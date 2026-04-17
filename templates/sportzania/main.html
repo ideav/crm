@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{_global_.action} - {_global_.z}</title>
+    <link rel="stylesheet" href="/css/styles.css">
+    <link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="/css/main-app.css">
+    <style>
+        html {
+            font-size: .82rem;
+        }
+    </style>
+    <script>
+        // Font size control — global, stored in cookie integram-table-font-settings (issue #1626/#1628)
+        (function() {
+            var FONT_COOKIE = 'integram-table-font-settings';
+            var SIZE_MAP = { smaller: '.7rem', normal: '.82rem', larger: '.95rem' };
+
+            function applyPageFontSize(size) {
+                var value = SIZE_MAP[size] || SIZE_MAP.normal;
+                document.documentElement.style.fontSize = value;
+            }
+
+            function loadPageFontSize() {
+                var match = document.cookie.match(new RegExp('(?:^|; )' + FONT_COOKIE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+                if (match) {
+                    try {
+                        var settings = JSON.parse(decodeURIComponent(match[1]));
+                        return settings.pageFontSize || 'normal';
+                    } catch (e) {}
+                }
+                return 'normal';
+            }
+
+            // Apply stored font size immediately (before DOM render)
+            applyPageFontSize(loadPageFontSize());
+
+            window.setPageFontSize = function(size) {
+                document.cookie = FONT_COOKIE + '=' + encodeURIComponent(JSON.stringify({ pageFontSize: size })) + '; path=/; max-age=31536000';
+                applyPageFontSize(size);
+                // Update active state on font size buttons
+                document.querySelectorAll('.navbar-font-size-btn').forEach(function(btn) {
+                    btn.classList.toggle('active', btn.dataset.size === size);
+                });
+            };
+
+            // After DOM ready: mark the correct button as active
+            document.addEventListener('DOMContentLoaded', function() {
+                var current = loadPageFontSize();
+                document.querySelectorAll('.navbar-font-size-btn').forEach(function(btn) {
+                    btn.classList.toggle('active', btn.dataset.size === current);
+                });
+            });
+        })();
+    </script>
+    <script>
+        var db = '{_global_.z}',
+            xsrf = '{_global_.xsrf}',
+            id = '{_global_.id}',
+            token = '{_global_.token}',
+            uid = '{_global_.user_id}',
+            user = '{_global_.user}',
+            role = '{_global_.role}',
+            roleId = '{_global_.role_id}',
+            grants=JSON.parse(atob('{_global_.grants}')),
+            action = '{_global_.action}';
+    </script>
+    <script>
+        (function() {
+            var dbName = '{_global_.z}' || 'default';
+            var storageKey = 'appSidebarCollapsed_' + dbName;
+            var cookieName = 'sidebarWidth_' + dbName;
+            var isCollapsed = localStorage.getItem(storageKey) === 'true';
+            var savedWidth = null;
+            var match = document.cookie.match(new RegExp('(?:^|; )' + cookieName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+            if (match) savedWidth = decodeURIComponent(match[1]);
+            // Apply sidebar state via CSS before the DOM renders to prevent flash/jump
+            var cssRules = '.app-sidebar{transition:none!important;}';
+            if (isCollapsed) {
+                cssRules += '.app-sidebar{width:56px!important;}';
+            } else if (savedWidth) {
+                cssRules += '.app-sidebar{width:' + parseInt(savedWidth, 10) + 'px!important;}';
+            }
+            var el = document.createElement('style');
+            el.id = 'sidebar-init-style';
+            el.textContent = cssRules;
+            document.head.appendChild(el);
+        })();
+    </script>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+        <div class="navbar-left">
+            <button id="mobile-sidebar-toggle" class="mobile-sidebar-toggle" type="button" aria-label="Открыть меню" title="Открыть меню"><i class="pi pi-bars"></i></button>
+            <a href="/{_global_.z}/" class="navbar-brand">
+                <svg class="sz-header__logo-default" width="133" height="37" viewBox="0 0 121 30" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M10.5482 14.0465L7.49353 8.68072C7.38177 8.49569 7.41902 8.23665 7.60528 8.12564C8.01505 7.82959 8.57383 7.97762 8.83459 8.42168L9.13261 8.93976C10.0266 10.494 12.0755 10.494 12.9695 8.90275L13.1185 8.64371C13.3793 8.16264 13.9381 8.05163 14.3479 8.31066C14.5341 8.42168 14.5714 8.68072 14.4596 8.86575L11.5912 14.0095C11.3305 14.4906 10.7717 14.4906 10.5482 14.0465Z" fill="#64C7ED"></path>
+    <path d="M12.9693 7.23754C12.9693 8.27369 12.1498 9.08781 11.1067 9.08781C10.0637 9.08781 9.24414 8.27369 9.24414 7.23754C9.24414 6.20139 10.0637 5.38727 11.1067 5.38727C12.1125 5.38727 12.9693 6.23839 12.9693 7.23754Z" fill="#64C7ED"></path>
+    <path d="M10.4364 4.46216C10.4364 4.46216 11.0324 5.20227 11.703 5.53531C12.3363 5.83136 10.0266 5.75735 10.0266 5.75735C10.0266 5.75735 9.98939 5.09125 10.4364 4.46216Z" fill="#64C7ED"></path>
+    <path d="M9.8034 5.12817C9.8034 5.12817 10.9582 6.12732 11.666 6.09031C12.3738 6.05331 9.57989 6.42336 9.57989 6.42336C9.57989 6.42336 9.46814 5.79427 9.8034 5.12817Z" fill="#64C7ED"></path>
+    <path d="M12.1873 14.4166L15.3537 9.12483C15.4654 8.9398 15.7262 8.86579 15.9124 8.9398C16.3595 9.16183 16.5457 9.67991 16.2477 10.161L15.9497 10.642C15.0184 12.1963 16.0614 13.9725 17.8868 13.9355H18.1848C18.7063 13.9355 19.1161 14.3426 19.0788 14.8237C19.0788 15.0457 18.8553 15.1937 18.6318 15.2307L12.7088 15.3417C12.1873 15.3417 11.9265 14.8607 12.1873 14.4166Z" fill="#E62D89"></path>
+    <path d="M19.3395 13.1214C18.4455 13.6395 17.328 13.3434 16.8064 12.4553C16.2849 11.5672 16.5829 10.457 17.477 9.93895C18.371 9.42087 19.4886 9.71691 20.0101 10.605C20.5316 11.4562 20.2336 12.6033 19.3395 13.1214Z" fill="#E62D89"></path>
+    <path d="M12.6714 16.0078L18.8552 16.0818C19.0787 16.0818 19.265 16.2669 19.3022 16.4519C19.3395 16.97 18.967 17.34 18.4082 17.34H17.8122C15.9868 17.303 14.981 19.0793 15.9123 20.6335L16.0613 20.8925C16.3221 21.3366 16.1731 21.8917 15.7261 22.1137C15.5398 22.1877 15.2791 22.1137 15.1673 21.9287L12.1126 16.8959C11.8891 16.4889 12.1872 16.0078 12.6714 16.0078Z" fill="#1D458A"></path>
+    <path d="M17.4018 21.5216C16.5077 21.0035 16.2097 19.8933 16.7312 19.0052C17.2528 18.1171 18.3703 17.821 19.2644 18.3391C20.1584 18.8572 20.4564 19.9673 19.9349 20.8555C19.4134 21.7066 18.2958 22.0396 17.4018 21.5216Z" fill="#1D458A"></path>
+    <path d="M21.0896 20.7445C21.0896 20.7445 20.1211 20.8925 19.525 21.2996C18.9663 21.7066 20.1956 19.7454 20.1956 19.7454C20.1956 19.7454 20.7543 20.0414 21.0896 20.7445Z" fill="#1D458A"></path>
+    <path d="M20.8292 19.8564C20.8292 19.8564 19.3764 20.3374 19.0411 20.9665C18.7058 21.5956 19.7861 19.0052 19.7861 19.0052C19.7861 19.0052 20.4194 19.2273 20.8292 19.8564Z" fill="#1D458A"></path>
+    <path d="M11.554 17.229L14.5714 22.5948C14.6832 22.7798 14.6459 23.0388 14.4597 23.1499C14.0499 23.4459 13.4911 23.2979 13.2304 22.8538L12.9323 22.3357C12.0383 20.7815 9.98946 20.7815 9.09541 22.3357L8.94641 22.5948C8.68565 23.0758 8.12687 23.1869 7.7171 22.9278C7.53084 22.8168 7.49359 22.5578 7.60534 22.3727L10.4737 17.229C10.7345 16.8219 11.2933 16.7849 11.554 17.229Z" fill="#EE3225"></path>
+    <path d="M9.09521 24.038C9.09521 23.0018 9.91475 22.1877 10.9578 22.1877C12.0009 22.1877 12.8204 23.0018 12.8204 24.038C12.8204 25.0741 12.0009 25.8882 10.9578 25.8882C9.91475 25.8882 9.09521 25.0741 9.09521 24.038Z" fill="#EE3225"></path>
+    <path d="M9.91444 16.8589L6.74804 22.1507C6.63629 22.3357 6.37552 22.4097 6.18926 22.3357C5.74224 22.1137 5.59324 21.5956 5.854 21.1145L6.15201 20.6335C7.08331 19.0792 6.04026 17.303 4.21492 17.34H3.9169C3.39538 17.34 2.98561 16.9329 3.02286 16.4519C3.02286 16.2298 3.24637 16.0818 3.46988 16.0448L9.39292 15.9338C9.87719 15.9708 10.1752 16.4519 9.91444 16.8589Z" fill="#52A633"></path>
+    <path d="M2.72473 18.154C3.61878 17.636 4.73633 17.969 5.25785 18.8572C5.77938 19.7453 5.44411 20.8554 4.55007 21.3735C3.65603 21.8916 2.53847 21.5585 2.01695 20.6704C1.53267 19.8193 1.86794 18.6721 2.72473 18.154Z" fill="#52A633"></path>
+    <path d="M1.57031 21.7066C1.57031 21.7066 1.94283 20.8185 1.86833 20.0784C1.79382 19.3753 2.87413 21.4476 2.87413 21.4476C2.87413 21.4476 2.31535 21.8176 1.57031 21.7066Z" fill="#52A633"></path>
+    <path d="M2.46392 21.9287C2.46392 21.9287 2.76194 20.4115 2.38942 19.8194C2.0169 19.2273 3.73048 21.4476 3.73048 21.4476C3.73048 21.4476 3.20896 21.8917 2.46392 21.9287Z" fill="#52A633"></path>
+    <path d="M9.39315 15.2677L3.20935 15.1937C2.98584 15.1937 2.79958 15.0087 2.76233 14.7866C2.72508 14.2685 3.09759 13.8985 3.65637 13.8985H4.2524C6.07774 13.9355 7.08354 12.1592 6.15224 10.605L6.00323 10.346C5.74247 9.90191 5.89148 9.34683 6.3385 9.1248C6.52476 9.05079 6.78552 9.1248 6.89728 9.30982L9.95192 14.3426C10.1754 14.7866 9.91467 15.3047 9.39315 15.2677Z" fill="#F6CD0B"></path>
+    <path d="M19.4883 9.30979C19.4883 9.30979 20.4568 9.16177 20.6803 10.531C20.9038 11.9002 21.6489 12.0112 21.6489 12.0112C21.6489 12.0112 19.5628 11.9002 19.3765 10.42C19.2648 9.42081 19.4883 9.30979 19.4883 9.30979Z" fill="#E62D89"></path>
+    <path d="M2.83682 13.0104C3.73087 13.5285 4.84842 13.2324 5.36995 12.3443C5.89147 11.4562 5.59346 10.346 4.69941 9.82792C3.80537 9.30985 2.68782 9.60589 2.16629 10.494C1.64477 11.3821 1.94278 12.5293 2.83682 13.0104Z" fill="#F6CD0B"></path>
+    <path d="M2.68795 9.23588C2.68795 9.23588 1.7194 9.08786 1.49589 10.4571C1.27238 11.8633 0.527344 11.9373 0.527344 11.9373C0.527344 11.9373 2.61344 11.8263 2.7997 10.346C2.91146 9.3469 2.68795 9.23588 2.68795 9.23588Z" fill="#F6CD0B"></path>
+    <path d="M30.5153 18.3021C30.925 18.3021 31.2603 18.2651 31.5211 18.1911C31.7818 18.1171 32.0053 18.0431 32.1543 17.9321C32.3033 17.821 32.4151 17.673 32.4896 17.525C32.5641 17.377 32.5641 17.192 32.5641 17.0069C32.5641 16.5999 32.3778 16.2668 31.9681 15.9708C31.5583 15.7117 30.8878 15.4157 29.9565 15.0826C29.5467 14.9346 29.1369 14.7866 28.6899 14.5646C28.2802 14.3795 27.9076 14.1575 27.5724 13.8615C27.2371 13.5654 26.9763 13.2324 26.7528 12.8253C26.5293 12.4183 26.4548 11.9372 26.4548 11.3451C26.4548 10.753 26.5666 10.2349 26.7901 9.75387C27.0136 9.2728 27.3116 8.90275 27.7214 8.5697C28.1311 8.23665 28.6154 7.97762 29.1742 7.82959C29.733 7.64457 30.4035 7.57056 31.1113 7.57056C31.9681 7.57056 32.7131 7.64457 33.3464 7.82959C33.9797 8.01462 34.5012 8.19965 34.8737 8.42168L34.0542 10.679C33.6817 10.494 33.3091 10.346 32.8621 10.1979C32.4151 10.0499 31.8936 9.97591 31.2975 9.97591C30.627 9.97591 30.1055 10.0869 29.8075 10.2719C29.5095 10.457 29.3605 10.753 29.3605 11.1231C29.3605 11.3451 29.3977 11.5671 29.5095 11.7152C29.6212 11.8632 29.7702 12.0112 29.9937 12.1592C30.2172 12.3072 30.4408 12.4183 30.7015 12.4923C30.9623 12.6033 31.2603 12.7143 31.5583 12.8253C32.2288 13.0844 32.7876 13.3064 33.2719 13.5284C33.7562 13.7505 34.1659 14.0465 34.5012 14.3425C34.8365 14.6756 35.06 15.0456 35.209 15.4527C35.358 15.8968 35.4325 16.3778 35.4325 17.0069C35.4325 18.1911 35.0227 19.1162 34.1659 19.7453C33.4582 20.4114 32.1916 20.7445 30.5153 20.7445C29.9565 20.7445 29.435 20.7075 28.9879 20.6335C28.5409 20.5594 28.1311 20.4854 27.7959 20.3744C27.4606 20.2634 27.1626 20.1894 26.9018 20.0784C26.6411 19.9674 26.4548 19.8563 26.2686 19.7823L27.0881 17.525C27.4606 17.747 27.9449 17.9321 28.5037 18.0801C29.0252 18.2281 29.6957 18.3021 30.5153 18.3021Z" fill="#1D1D1B"></path>
+    <path d="M46.5338 15.6747C46.5338 16.4148 46.4593 17.0809 46.2731 17.71C46.0868 18.3021 45.826 18.8572 45.4535 19.2642C45.081 19.7083 44.6712 20.0413 44.1497 20.3004C43.6282 20.5594 43.0322 20.6704 42.3244 20.6704C41.9519 20.6704 41.5793 20.6334 41.2441 20.5594C40.9088 20.4854 40.6108 20.3744 40.2755 20.2634V23.8899H37.5562V11.197C37.8169 11.123 38.0777 11.049 38.4129 10.975C38.7482 10.901 39.0462 10.864 39.4187 10.79C39.754 10.753 40.1265 10.716 40.499 10.679C40.8716 10.642 41.2068 10.642 41.5421 10.642C42.3244 10.642 43.0322 10.753 43.6654 11.012C44.2987 11.2341 44.8203 11.5671 45.23 12.0112C45.6398 12.4552 45.9751 12.9733 46.1986 13.6024C46.4221 14.2315 46.5338 14.8976 46.5338 15.6747ZM43.7399 15.7487C43.7399 14.8976 43.5537 14.2315 43.1812 13.7504C42.8087 13.2323 42.2499 13.0103 41.5048 13.0103C41.2441 13.0103 41.0206 13.0103 40.8343 13.0473C40.6108 13.0473 40.4618 13.0843 40.3128 13.1213V18.043C40.499 18.1541 40.7226 18.2281 40.9833 18.3021C41.2441 18.3761 41.5421 18.4131 41.8029 18.4131C43.1067 18.3761 43.7399 17.488 43.7399 15.7487Z" fill="#1D1D1B"></path>
+    <path d="M57.6719 15.6748C57.6719 16.4149 57.5602 17.118 57.3366 17.7471C57.1131 18.3762 56.8151 18.8942 56.3681 19.3383C55.9583 19.7824 55.4368 20.1154 54.878 20.3745C54.282 20.6335 53.6487 20.7445 52.9409 20.7445C52.2332 20.7445 51.5999 20.6335 51.0038 20.3745C50.4078 20.1154 49.9235 19.7824 49.5138 19.3383C49.104 18.8942 48.7687 18.3762 48.5452 17.7471C48.3217 17.118 48.21 16.4149 48.21 15.6748C48.21 14.9347 48.3217 14.2316 48.5825 13.6025C48.806 12.9734 49.1413 12.4553 49.5883 12.0112C49.998 11.5672 50.5196 11.2341 51.0783 10.9751C51.6744 10.7161 52.3077 10.605 52.9782 10.605C53.686 10.605 54.3193 10.7161 54.9153 10.9751C55.5113 11.2341 55.9956 11.5672 56.4054 12.0112C56.8151 12.4553 57.1504 12.9734 57.3739 13.6025C57.5602 14.2316 57.6719 14.8977 57.6719 15.6748ZM54.878 15.6748C54.878 14.8237 54.6918 14.1946 54.3565 13.7135C54.0212 13.2324 53.537 13.0104 52.9037 13.0104C52.2704 13.0104 51.7861 13.2324 51.4509 13.7135C51.1156 14.1946 50.9293 14.8607 50.9293 15.6748C50.9293 16.5259 51.1156 17.192 51.4509 17.6731C51.7861 18.1541 52.2704 18.4132 52.9037 18.4132C53.537 18.4132 54.0212 18.1541 54.3565 17.6731C54.729 17.155 54.878 16.4889 54.878 15.6748Z" fill="#1D1D1B"></path>
+    <path d="M65.6063 13.3063C65.3456 13.2323 65.0848 13.1953 64.7496 13.1213C64.4143 13.0473 64.079 13.0103 63.6693 13.0103C63.483 13.0103 63.2967 13.0103 63.036 13.0473C62.8125 13.0843 62.6262 13.1213 62.4772 13.1583V20.4854H59.7578V11.3821C60.2421 11.197 60.8381 11.049 61.5086 10.901C62.1792 10.753 62.9242 10.679 63.7438 10.679C63.8928 10.679 64.079 10.679 64.2653 10.716C64.4888 10.716 64.6751 10.753 64.8986 10.79C65.1221 10.827 65.3083 10.864 65.5318 10.901C65.7554 10.938 65.9044 11.012 66.0534 11.049L65.6063 13.3063Z" fill="#1D1D1B"></path>
+    <path d="M67.4319 8.49576L70.1513 8.0517V10.8641H73.4295V13.1214H70.1886V16.4889C70.1886 17.044 70.3003 17.5251 70.4866 17.8581C70.6728 18.1912 71.0826 18.3762 71.7159 18.3762C72.0139 18.3762 72.3119 18.3392 72.6099 18.3022C72.9079 18.2652 73.206 18.1542 73.4667 18.0802L73.8392 20.1895C73.504 20.3375 73.1315 20.4485 72.7217 20.5225C72.3119 20.6335 71.8276 20.6705 71.2316 20.6705C70.4866 20.6705 69.8533 20.5595 69.369 20.3745C68.8847 20.1895 68.475 19.8934 68.177 19.5234C67.879 19.1533 67.6927 18.7463 67.5437 18.2282C67.4319 17.7101 67.3574 17.155 67.3574 16.5259V8.49576H67.4319Z" fill="#1D1D1B"></path>
+    <path d="M84.8662 9.79088C84.4564 10.1979 84.0094 10.716 83.4879 11.3451C82.9664 11.9742 82.4076 12.6773 81.8116 13.4174C81.2528 14.1575 80.6568 14.9346 80.098 15.7487C79.5392 16.5629 79.0177 17.303 78.6079 18.0431H85.0897V20.4484H75.0317V18.7462C75.367 18.1171 75.7768 17.451 76.2983 16.6739C76.7826 15.8968 77.3041 15.1567 77.8629 14.3795C78.3844 13.6024 78.9432 12.8623 79.502 12.1222C80.0607 11.3821 80.5823 10.753 81.0665 10.1979H75.367V7.82959H84.8662V9.79088Z" fill="#1D1D1B"></path>
+    <path d="M90.5653 10.642C91.3848 10.642 92.0553 10.716 92.5769 10.901C93.0984 11.086 93.5454 11.3451 93.8807 11.6781C94.2159 12.0112 94.4395 12.4182 94.5512 12.9363C94.7002 13.4174 94.7375 13.9725 94.7375 14.5645V20.2264C94.3277 20.3004 93.8062 20.4114 93.0984 20.5224C92.3906 20.6334 91.5711 20.7074 90.5653 20.7074C89.932 20.7074 89.3732 20.6704 88.8517 20.5594C88.3302 20.4484 87.9204 20.2634 87.5479 20.0043C87.1754 19.7453 86.9146 19.4122 86.6911 19.0422C86.5048 18.6351 86.3931 18.1541 86.3931 17.562C86.3931 17.0069 86.5048 16.5258 86.7283 16.1558C86.9518 15.7487 87.2499 15.4527 87.6224 15.2306C87.9949 15.0086 88.4419 14.8236 88.9262 14.7126C89.4105 14.6015 89.932 14.5645 90.4535 14.5645C90.826 14.5645 91.124 14.5645 91.3848 14.6015C91.6456 14.6385 91.8691 14.6756 92.0553 14.7126V14.4535C92.0553 14.0095 91.9063 13.6394 91.6456 13.3434C91.3476 13.0473 90.8633 12.9363 90.1927 12.9363C89.7457 12.9363 89.2615 12.9733 88.8144 13.0473C88.3674 13.1213 87.9576 13.1953 87.6224 13.3434L87.2871 11.16C87.4361 11.123 87.6596 11.049 87.8831 11.012C88.1066 10.975 88.3674 10.901 88.6654 10.864C88.9634 10.827 89.2615 10.79 89.5595 10.753C89.932 10.642 90.23 10.642 90.5653 10.642ZM90.7888 18.5981C91.0495 18.5981 91.3103 18.5981 91.5711 18.5981C91.8318 18.5981 92.0181 18.5611 92.1671 18.5611V16.4888C92.0553 16.4518 91.9063 16.4518 91.6828 16.4148C91.4593 16.3778 91.2731 16.3778 91.0868 16.3778C90.826 16.3778 90.6025 16.3778 90.379 16.4148C90.1555 16.4518 89.9692 16.4888 89.783 16.5998C89.5967 16.6738 89.485 16.7849 89.3732 16.9329C89.2615 17.0809 89.2242 17.2659 89.2242 17.488C89.2242 17.932 89.3732 18.1911 89.6712 18.3761C89.8947 18.4871 90.2673 18.5981 90.7888 18.5981Z" fill="#1D1D1B"></path>
+    <path d="M97.2334 11.197C97.6804 11.049 98.3137 10.938 99.0215 10.827C99.7293 10.716 100.512 10.642 101.331 10.642C102.151 10.642 102.821 10.753 103.38 10.975C103.939 11.197 104.348 11.4931 104.684 11.8631C105.019 12.2702 105.243 12.7143 105.354 13.2323C105.503 13.7504 105.541 14.3795 105.541 15.0086V20.4114H102.821V15.3787C102.821 14.4905 102.709 13.8984 102.486 13.5284C102.262 13.1583 101.815 12.9733 101.182 12.9733C100.996 12.9733 100.772 12.9733 100.549 13.0103C100.325 13.0103 100.139 13.0473 99.9528 13.0843V20.4854H97.2334V11.197Z" fill="#1D1D1B"></path>
+    <path d="M111.054 8.12561C111.054 8.60668 110.905 9.01374 110.569 9.30978C110.234 9.60583 109.861 9.75385 109.414 9.75385C108.967 9.75385 108.595 9.60583 108.26 9.30978C107.924 9.01374 107.775 8.64369 107.775 8.12561C107.775 7.64454 107.924 7.23748 108.26 6.94144C108.595 6.6454 108.967 6.49738 109.414 6.49738C109.861 6.49738 110.234 6.6454 110.569 6.94144C110.905 7.23748 111.054 7.60754 111.054 8.12561ZM110.793 20.4854H108.073V10.901H110.793V20.4854Z" fill="#1D1D1B"></path>
+    <path d="M116.827 10.642C117.647 10.642 118.318 10.716 118.839 10.901C119.361 11.086 119.808 11.3451 120.143 11.6781C120.478 12.0112 120.702 12.4182 120.813 12.9363C120.962 13.4174 121 13.9725 121 14.5645V20.2264C120.59 20.3004 120.068 20.4114 119.361 20.5224C118.653 20.6334 117.833 20.7074 116.827 20.7074C116.194 20.7074 115.635 20.6704 115.114 20.5594C114.592 20.4484 114.183 20.2634 113.81 20.0043C113.438 19.7453 113.177 19.4122 112.953 19.0422C112.767 18.6351 112.655 18.1541 112.655 17.562C112.655 17.0069 112.767 16.5258 112.991 16.1558C113.214 15.7487 113.512 15.4527 113.885 15.2306C114.257 15.0086 114.704 14.8236 115.188 14.7126C115.673 14.6015 116.194 14.5645 116.716 14.5645C117.088 14.5645 117.386 14.5645 117.647 14.6015C117.908 14.6385 118.131 14.6756 118.318 14.7126V14.4535C118.318 14.0095 118.169 13.6394 117.908 13.3434C117.61 13.0473 117.125 12.9363 116.455 12.9363C116.008 12.9363 115.524 12.9733 115.077 13.0473C114.63 13.1213 114.22 13.1953 113.885 13.3434L113.549 11.16C113.698 11.123 113.922 11.049 114.145 11.012C114.369 10.975 114.63 10.901 114.928 10.864C115.226 10.827 115.524 10.79 115.822 10.753C116.194 10.642 116.529 10.642 116.827 10.642ZM117.051 18.5981C117.312 18.5981 117.573 18.5981 117.833 18.5981C118.094 18.5981 118.28 18.5611 118.429 18.5611V16.4888C118.318 16.4518 118.169 16.4518 117.945 16.4148C117.722 16.3778 117.535 16.3778 117.349 16.3778C117.088 16.3778 116.865 16.3778 116.641 16.4148C116.418 16.4518 116.231 16.4888 116.045 16.5998C115.859 16.6738 115.747 16.7849 115.635 16.9329C115.524 17.0809 115.486 17.2659 115.486 17.488C115.486 17.932 115.635 18.1911 115.933 18.3761C116.157 18.4871 116.567 18.5981 117.051 18.5981Z" fill="#1D1D1B"></path>
+</svg>
+            </a>
+        </div>
+        <div class="navbar-center">
+            <div class="navbar-workspace">{_global_.action}</div>
+        </div>
+        <div class="navbar-right">
+            <div class="user-menu-wrapper">
+                <button id="user-menu-toggle" class="account-info" type="button" title="Имя пользователя / роль">
+                    <div id="account-avatar" class="account-avatar">{_global_.user}</div>
+                    <span id="account-email" class="account-email">{_global_.user} / {_global_.role}</span>
+                    <i class="user-menu-arrow pi pi-chevron-down"></i>
+                </button>
+                <div id="user-menu-dropdown" class="user-menu-dropdown" style="display: none;">
+                    <!-- Begin: showCabinet --><!--{_global_.z}-->
+                    <a href="/my" target="my" class="user-menu-item">
+                        <i class="user-menu-icon pi pi-user"></i>
+                        <span>Личный кабинет</span>
+                    </a>
+                    <div class="user-menu-divider"></div>
+                    <!-- End: showCabinet -->
+                    <button id="theme-toggle" class="user-menu-item" type="button">
+                        <i class="user-menu-icon pi pi-moon" id="theme-icon"></i>
+                        <span>Тема</span>
+                        <span class="user-menu-value" id="theme-value">Темная</span>
+                    </button>
+                    <div class="user-menu-divider"></div>
+                    <div class="user-menu-item user-menu-font-size-row" title="Размер шрифта">
+                        <i class="user-menu-icon pi pi-sliders-h"></i>
+                        <span>Шрифт</span>
+                        <div class="navbar-font-size-group">
+                            <button type="button" class="navbar-font-size-btn" data-size="smaller" onclick="setPageFontSize('smaller')" title="Шрифт меньше" style="font-size:11px;">А</button>
+                            <button type="button" class="navbar-font-size-btn" data-size="normal" onclick="setPageFontSize('normal')" title="Шрифт обычный" style="font-size:14px;">А</button>
+                            <button type="button" class="navbar-font-size-btn" data-size="larger" onclick="setPageFontSize('larger')" title="Шрифт больше" style="font-size:17px;">А</button>
+                        </div>
+                    </div>
+                    <div class="user-menu-divider"></div>
+                    <button id="change-password-btn" class="user-menu-item" type="button" onclick="document.querySelector('.cp-form').style.display='block';document.querySelectorAll('.ch-toggle').forEach(function(el){el.style.display='flex';});document.querySelectorAll('.wait-toggle').forEach(function(el){el.style.display='none';});">
+                        <i class="user-menu-icon pi pi-lock"></i>
+                        <span>Сменить пароль</span>
+                    </button>
+                    <div class="user-menu-divider"></div>
+                    <button id="logout-everywhere-btn" class="user-menu-item user-menu-item-danger" type="button" title="Выйти на всех устройствах, где совершен вход">
+                        <i class="user-menu-icon pi pi-sign-out"></i>
+                        <span>Выйти везде</span>
+                    </button>
+                    <button id="logout-btn" class="user-menu-item user-menu-item-danger" type="button">
+                        <i class="user-menu-icon pi pi-sign-out"></i>
+                        <span>Выйти</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Mobile sidebar backdrop overlay -->
+    <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
+
+    <!-- Main Application Layout -->
+    <div class="app-layout">
+        <!-- Left Sidebar Menu -->
+        <aside class="app-sidebar" id="app-sidebar">
+            <div class="sidebar-header">
+                <button id="sidebar-toggle" class="sidebar-toggle" type="button" title="Свернуть/развернуть меню" aria-label="Toggle sidebar"><i class="pi pi-bars"></i></button>
+                <div class="menu-search-wrapper">
+                    <i class="pi pi-search menu-search-icon"></i>
+                    <input type="text" id="menu-search" class="menu-search-input" placeholder="Поиск..." aria-label="Поиск по меню" autocomplete="off">
+                    <button type="button" id="menu-search-clear" class="menu-search-clear" style="display: none;" aria-label="Очистить поиск"><i class="pi pi-times"></i></button>
+                </div>
+            </div>
+            <nav class="app-menu" id="app-menu">
+                <!-- Menu will be built from menuData by JavaScript -->
+            </nav>
+            <button id="sidebar-settings" class="sidebar-settings" type="button" title="Редактировать меню" aria-label="Edit menu"><i class="pi pi-cog"></i></button>
+            <div class="sidebar-resize-handle"></div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="app-content">
+            <!-- File: a -->
+        </main>
+    </div>
+
+    <script>
+        var menuData = [
+        <!-- Begin: MyRoleMenu -->
+        {menu_id:'{menu_id}',menu_up:'{menu_up}',name:'{name}',href:'{href}',icon:'{icon}'},
+        <!-- End: MyRoleMenu -->
+        ];
+    </script>
+    <script src="/js/app.js"></script>
+    <script src="/js/main-app.js"></script>
+    <script src="/js/main.js"></script>
+    <script>
+    function changePwd(){
+        var oldPwd=document.getElementById('old-pwd').value,
+            newPwd=document.getElementById('new-pwd').value,
+            newAgain=document.getElementById('new-again').value;
+        if(oldPwd===''||newPwd===''||newAgain==='')
+            return changeMsg('alert-danger','Заполните все поля');
+        document.querySelectorAll('.ch-toggle').forEach(function(el){el.style.display='none';});
+        document.querySelectorAll('.wait-toggle').forEach(function(el){el.style.display='block';});
+        var obj=new XMLHttpRequest();
+        obj.open('POST','/'+db+'/auth?JSON',true);
+        obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+        obj.onload=function(){
+            document.querySelectorAll('.ch-toggle').forEach(function(el){el.style.display='flex';});
+            document.querySelectorAll('.wait-toggle').forEach(function(el){el.style.display='none';});
+            var json;
+            try{json=JSON.parse(this.responseText);}
+            catch(e){console.log(e);document.getElementById('pwdchangemsg').innerHTML=this.responseText;}
+            if(json&&json.msg){
+                if(json.msg.indexOf('[err')===-1){
+                    changeMsg('alert-success',json.msg);
+                    document.getElementById('old-pwd').value='';
+                    document.getElementById('new-pwd').value='';
+                    document.getElementById('new-again').value='';
+                }else
+                    changeMsg('alert-danger',json.msg.replace(/ ?\[.+\]/,''));
+                if(json.token)token=json.token;
+                if(json.xsrf)xsrf=json.xsrf;
+            }else
+                changeMsg('alert-danger','Неверный пароль');
+        };
+        obj.send('change=1&login='+user+'&pwd='+encodeURIComponent(oldPwd)+'&npw1='+encodeURIComponent(newPwd)+'&npw2='+encodeURIComponent(newAgain));
+    }
+    function changeMsg(cl,msg){
+        var el=document.getElementById('pwdchangemsg');
+        el.className='alert w-100 '+cl;
+        el.innerHTML=msg;
+        el.style.display='block';
+        setTimeout(function(){
+            el.style.transition='opacity 0.4s';
+            el.style.opacity='0';
+            setTimeout(function(){el.style.display='none';el.style.opacity='';el.style.transition='';},400);
+        },4500);
+    }
+    </script>
+
+    <!-- Change Password Modal -->
+    <div class="cp-form" style="display: none; position: fixed; top: 0; left: 0; height: 100%; width: 100%; z-index: 9999; background: rgba(0,0,0,.4);" onclick="this.style.display='none';">
+        <div style="display: flex; align-items: center; justify-content: center; height: 100%;">
+            <div style="border-radius: 8px; background-color: #fff; max-width: 360px; width: 100%; padding: 1.5rem; box-shadow: 0 4px 24px rgba(0,0,0,.18);" onclick="event.stopPropagation();" onkeyup="if(event.keyCode===13)changePwd()">
+                <div style="text-align:center; margin-bottom:1rem;">
+                    <h5 style="margin:0;">Смена пароля</h5>
+                </div>
+                <div id="pwdchangemsg" class="alert w-100" style="display: none;"></div>
+                <label for="old-pwd" style="margin-bottom:0.25rem; display:block;">Действующий пароль</label>
+                <input type="password" id="old-pwd" style="border: 1px solid lightgray; margin-bottom: 0.75rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px; box-sizing:border-box;">
+                <label for="new-pwd" style="margin-bottom:0.25rem; display:block;">Новый пароль</label>
+                <input type="password" id="new-pwd" style="border: 1px solid lightgray; margin-bottom: 0.75rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px; box-sizing:border-box;">
+                <label for="new-again" style="margin-bottom:0.25rem; display:block;">Повторите пароль</label>
+                <input type="password" id="new-again" style="border: 1px solid lightgray; margin-bottom: 1rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px; box-sizing:border-box;">
+                <div style="text-align:center; display:none;" class="wait-toggle"><img src="/i/ajax.gif"></div>
+                <div style="display: flex; gap: 0.5rem;" class="ch-toggle">
+                    <button style="flex:1; padding:0.5rem; background:#3b82f6; color:#fff; border:none; border-radius:6px; cursor:pointer;" type="button" onclick="changePwd()">Сменить</button>
+                    <button style="flex:1; padding:0.5rem; background:#fff; color:#333; border:1px solid #ccc; border-radius:6px; cursor:pointer;" type="button" onclick="document.querySelector('.cp-form').style.display='none';">Отменить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cookie Consent Banner -->
+    <div id="cookie-consent">
+        <span style="font-size:0.9rem;">Мы используем куки для обеспечения работы сайта. Продолжая использовать сайт, вы соглашаетесь с их использованием.</span>
+        <button type="button" onclick="cookieAccept()" style="background:#3b82f6; color:#fff; border:none; border-radius:6px; padding:0.5rem 1.25rem; font-size:0.9rem; cursor:pointer; white-space:nowrap;">Принять</button>
+    </div>
+    <script>
+        (function() {
+            if (!localStorage.getItem('cookie_consent')) {
+                document.getElementById('cookie-consent').style.display = 'flex';
+            }
+        })();
+        function cookieAccept() {
+            localStorage.setItem('cookie_consent', '1');
+            document.getElementById('cookie-consent').style.display = 'none';
+        }
+    </script>
+    <script>
+    (function() {
+        var fake = document.createElement('div');
+        fake.style.cssText = 'position:absolute;left:-9999px;opacity:0;pointer-events:none;';
+        fake.innerHTML = '<input type="text" name="fake_username" value=""><input type="password" name="fake_password" value="">';
+        document.body.appendChild(fake);
+    })();
+    </script>
+</body>
+</html>
