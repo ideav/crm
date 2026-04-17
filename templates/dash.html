@@ -186,6 +186,117 @@
 .dash-err td:first-child {
     background-color: #ffeeee;
 }
+/* Editable cell highlight */
+.f-cell[data-src="rg"],
+.f-cell[data-src="value"] {
+    cursor: pointer;
+}
+.f-cell[data-src="rg"]:hover,
+.f-cell[data-src="value"]:hover {
+    background-color: var(--bg-secondary, #f0f4ff);
+    outline: 1px solid var(--border-color, #adb5bd);
+}
+/* Inline editor input */
+.dash-cell-input {
+    width: 100%;
+    min-width: 4rem;
+    border: 1px solid #86b7fe;
+    border-radius: 3px;
+    padding: 0.1rem 0.3rem;
+    font-size: inherit;
+    text-align: right;
+    background: var(--input-bg, #fff);
+    color: var(--text-primary, #212529);
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(13,110,253,.15);
+}
+/* Formula modal */
+#dash-formula-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(0,0,0,0.4);
+    align-items: center;
+    justify-content: center;
+}
+#dash-formula-modal.open { display: flex; }
+#dash-formula-modal .dash-modal-box {
+    background: var(--bg-primary, #fff);
+    border: 1px solid var(--border-color, #dee2e6);
+    border-radius: 6px;
+    padding: 1.25rem;
+    min-width: 320px;
+    max-width: 90vw;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+}
+#dash-formula-modal h6 {
+    margin: 0 0 0.75rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+#dash-formula-modal textarea {
+    width: 100%;
+    min-height: 80px;
+    border: 1px solid var(--input-border, #ced4da);
+    border-radius: 4px;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.875rem;
+    resize: vertical;
+    background: var(--input-bg, #fff);
+    color: var(--text-primary, #212529);
+}
+#dash-formula-modal .dash-modal-btns {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+    margin-top: 0.75rem;
+}
+/* Multiple-values modal */
+#dash-multival-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(0,0,0,0.4);
+    align-items: center;
+    justify-content: center;
+}
+#dash-multival-modal.open { display: flex; }
+#dash-multival-modal .dash-modal-box {
+    background: var(--bg-primary, #fff);
+    border: 1px solid var(--border-color, #dee2e6);
+    border-radius: 6px;
+    padding: 1.25rem;
+    min-width: 300px;
+    max-width: 90vw;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+}
+#dash-multival-modal h6 {
+    margin: 0 0 0.75rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+#dash-multival-modal ul {
+    padding: 0 0 0 1rem;
+    margin: 0 0 0.75rem;
+    font-size: 0.875rem;
+}
+/* Readonly tooltip */
+.dash-readonly-tip {
+    position: fixed;
+    z-index: 9998;
+    background: #333;
+    color: #fff;
+    font-size: 0.78rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    pointer-events: none;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+.dash-readonly-tip.visible { opacity: 1; }
 </style>
 
 
@@ -193,6 +304,33 @@
     <ul class="nav nav-tabs sheet-tabs"></ul>
     <div class="sheets"></div>
 </div>
+
+<!-- Formula editor modal -->
+<div id="dash-formula-modal" role="dialog" aria-modal="true">
+    <div class="dash-modal-box">
+        <h6>Редактирование формулы</h6>
+        <textarea id="dash-formula-textarea" rows="4"></textarea>
+        <div class="dash-modal-btns">
+            <button class="dash-apply-btn" id="dash-formula-cancel">Отмена</button>
+            <button class="dash-apply-btn" id="dash-formula-save" style="font-weight:600">Сохранить</button>
+        </div>
+    </div>
+</div>
+
+<!-- Multiple values modal -->
+<div id="dash-multival-modal" role="dialog" aria-modal="true">
+    <div class="dash-modal-box">
+        <h6>Найдено несколько значений</h6>
+        <ul id="dash-multival-list"></ul>
+        <a id="dash-multival-link" href="#" target="_blank" style="font-size:0.85rem">Открыть все</a>
+        <div class="dash-modal-btns">
+            <button class="dash-apply-btn" id="dash-multival-close">Закрыть</button>
+        </div>
+    </div>
+</div>
+
+<!-- Readonly tooltip -->
+<div class="dash-readonly-tip" id="dash-readonly-tip">Только чтение</div>
 
 <script src="/js/main.js"></script>
 <script>
@@ -945,6 +1083,252 @@ window.dashCopy2Buffer = function(text) {
 
 // Re-check table overflow on resize so sticky behaviour stays correct
 window.addEventListener('resize', function() { dashUpdateTableWrapOverflow(); });
+
+// ─── Cell editing ────────────────────────────────────────────────────────────
+
+var dashMetadata = null; // cached after first fetch
+
+function dashLoadMetadata(cb) {
+    if (dashMetadata) { cb(); return; }
+    newApi('GET', 'metadata', 'dashMetadataDone', '', cb);
+}
+
+window.dashMetadataDone = function(json, cb) {
+    dashMetadata = json || {};
+    if (typeof cb === 'function') cb();
+};
+
+function dashCellDateFr(td) {
+    var range = td.getAttribute('range') || '-';
+    if (range === '-') return null;
+    return range.split('-')[0] || null;
+}
+function dashCellDateTo(td) {
+    var range = td.getAttribute('range') || '-';
+    if (range === '-') return null;
+    return range.split('-')[1] || null;
+}
+function dashTodayYMD() {
+    var d = new Date();
+    return String(d.getFullYear())
+        + String(d.getMonth() + 1).padStart(2, '0')
+        + String(d.getDate()).padStart(2, '0');
+}
+
+// Build search URL for a Значение record
+function dashValueSearchUrl(td) {
+    var itemId = td.dataset.itemId;
+    var fr = dashCellDateFr(td);
+    var to = dashCellDateTo(td);
+    // rgHead: from data-rg-col attribute on the corresponding thead th
+    var range = td.getAttribute('range') || '-';
+    var panel = td.closest('.f-panel');
+    var rgHead = null;
+    if (panel) {
+        var thSel = range !== '-'
+            ? 'th[data-rg-col][range="' + range + '"]'
+            : 'th[data-rg-col]';
+        var rgTh = panel.querySelector(thSel);
+        if (rgTh) rgHead = rgTh.getAttribute('data-rg-col');
+    }
+    var url = 'object/1010?JSON_OBJ&FR_1042=@' + itemId;
+    if (fr) url += '&FR_1039=' + fr;
+    if (to) url += '&TO_1039=' + to;
+    if (rgHead) url += '&F_1104=' + encodeURIComponent(rgHead);
+    return url;
+}
+
+// Save a Значение: search first, then create or update
+function dashSaveValue(td, newVal) {
+    var searchUrl = dashValueSearchUrl(td);
+    var itemId = td.dataset.itemId;
+    var fr = dashCellDateFr(td);
+    var to = dashCellDateTo(td);
+    var range = td.getAttribute('range') || '-';
+    var panel = td.closest('.f-panel');
+    var rgHead = null, rgHeadId = null;
+    if (panel) {
+        var thSel = range !== '-'
+            ? 'th[data-rg-col][range="' + range + '"]'
+            : 'th[data-rg-col]';
+        var rgTh = panel.querySelector(thSel);
+        if (rgTh) rgHead = rgTh.getAttribute('data-rg-col');
+    }
+
+    newApi('GET', searchUrl, 'dashValueSearchDone', '', { td: td, newVal: newVal, itemId: itemId, fr: fr, to: to, rgHead: rgHead, rgHeadId: rgHeadId });
+}
+
+window.dashValueSearchDone = function(json, ctx) {
+    if (!json) json = [];
+    var td = ctx.td, newVal = ctx.newVal, itemId = ctx.itemId;
+    var fr = ctx.fr, to = ctx.to, rgHead = ctx.rgHead;
+
+    if (json.length === 0) {
+        // Create new record
+        var params = '_xsrf=' + encodeURIComponent(xsrf)
+            + '&t1010=' + encodeURIComponent(newVal)
+            + '&t1042=' + encodeURIComponent(itemId)
+            + '&t1039=' + encodeURIComponent(fr || dashTodayYMD());
+        if (rgHead) {
+            // resolve rgHead name to id: look in json (empty here), use text
+            params += '&t1104=' + encodeURIComponent(rgHead);
+        }
+        newApi('POST', '_m_new/1010', 'dashValueSaveDone', params, { td: td, newVal: newVal });
+    } else if (json.length === 1) {
+        // Update existing record
+        var recId = json[0].i;
+        var params2 = '_xsrf=' + encodeURIComponent(xsrf) + '&t1010=' + encodeURIComponent(newVal);
+        newApi('POST', '_m_save/' + recId, 'dashValueSaveDone', params2, { td: td, newVal: newVal });
+    } else {
+        // Multiple records — show modal with first 5, link to full list
+        dashShowMultivalModal(json, dashValueSearchUrl(td).replace('JSON_OBJ', '').replace(/&&/g, '&'));
+    }
+};
+
+window.dashValueSaveDone = function(json, ctx) {
+    if (!json || json.error) {
+        dashSetStatus('Ошибка сохранения');
+        return;
+    }
+    // Update cell display
+    ctx.td.textContent = ctx.newVal;
+    ctx.td.setAttribute('ready', '1');
+    dashSetStatus('Сохранено');
+    // Recalculate dependent formula cells
+    dashCalcCells();
+};
+
+// Inline input editor
+function dashStartInlineEdit(td) {
+    var currentVal = td.textContent.trim();
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'dash-cell-input';
+    input.value = currentVal;
+    td.textContent = '';
+    td.appendChild(input);
+    input.focus();
+    input.select();
+
+    function commit() {
+        var newVal = input.value.trim();
+        td.textContent = currentVal; // restore while saving
+        if (newVal !== currentVal && newVal !== '') {
+            dashSetStatus('Сохранение...');
+            dashSaveValue(td, newVal);
+        }
+    }
+
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { input.blur(); }
+        if (e.key === 'Escape') {
+            input.removeEventListener('blur', commit);
+            td.textContent = currentVal;
+        }
+    });
+}
+
+// Formula modal
+var dashFormulaCtx = null;
+
+function dashShowFormulaModal(td) {
+    dashFormulaCtx = td;
+    var formula = td.dataset.formula || '';
+    document.getElementById('dash-formula-textarea').value = formula;
+    document.getElementById('dash-formula-modal').classList.add('open');
+    document.getElementById('dash-formula-textarea').focus();
+}
+
+document.getElementById('dash-formula-cancel').addEventListener('click', function() {
+    document.getElementById('dash-formula-modal').classList.remove('open');
+    dashFormulaCtx = null;
+});
+
+document.getElementById('dash-formula-save').addEventListener('click', function() {
+    if (!dashFormulaCtx) return;
+    var newFormula = document.getElementById('dash-formula-textarea').value.trim();
+    var td = dashFormulaCtx;
+    document.getElementById('dash-formula-modal').classList.remove('open');
+    dashFormulaCtx = null;
+
+    // POST new formula to the model indicator, then recalc
+    var itemId = td.dataset.itemId;
+    var params = '_xsrf=' + encodeURIComponent(xsrf) + '&formula=' + encodeURIComponent(newFormula);
+    newApi('POST', '_m_save/' + itemId, 'dashFormulaSaveDone', params, { td: td, newFormula: newFormula });
+});
+
+window.dashFormulaSaveDone = function(json, ctx) {
+    if (!json || json.error) { dashSetStatus('Ошибка сохранения формулы'); return; }
+    // Update formula in memory and recalc
+    var itemId = ctx.td.dataset.itemId;
+    dashFormulas[itemId] = ctx.newFormula;
+    ctx.td.setAttribute('ready', '0');
+    ctx.td.dataset.formula = ctx.newFormula;
+    dashCalcCells();
+    dashSetStatus('Формула сохранена');
+};
+
+// Multiple values modal
+function dashShowMultivalModal(records, baseUrl) {
+    var list = document.getElementById('dash-multival-list');
+    list.innerHTML = '';
+    records.slice(0, 5).forEach(function(rec) {
+        var li = document.createElement('li');
+        li.textContent = rec.r ? rec.r.join(' | ') : String(rec.i);
+        list.appendChild(li);
+    });
+    var link = document.getElementById('dash-multival-link');
+    link.href = '/' + db + '/' + baseUrl;
+    document.getElementById('dash-multival-modal').classList.add('open');
+}
+
+document.getElementById('dash-multival-close').addEventListener('click', function() {
+    document.getElementById('dash-multival-modal').classList.remove('open');
+});
+
+// Readonly tooltip
+var dashReadonlyTip = document.getElementById('dash-readonly-tip');
+var dashReadonlyTimer = null;
+
+function dashShowReadonlyTip(e) {
+    dashReadonlyTip.style.left = (e.clientX + 12) + 'px';
+    dashReadonlyTip.style.top  = (e.clientY + 8) + 'px';
+    dashReadonlyTip.classList.add('visible');
+    clearTimeout(dashReadonlyTimer);
+    dashReadonlyTimer = setTimeout(function() {
+        dashReadonlyTip.classList.remove('visible');
+    }, 1800);
+}
+
+// Main cell click handler (event delegation on #dash-model)
+document.getElementById('dash-model').addEventListener('click', function(e) {
+    var td = e.target.closest('td.f-cell');
+    if (!td) return;
+    // Skip if inline input is already active
+    if (td.querySelector('.dash-cell-input')) return;
+
+    var src = td.dataset.src || '';
+
+    if (src === 'rg' || src === 'value') {
+        dashLoadMetadata(function() {
+            dashStartInlineEdit(td);
+        });
+        return;
+    }
+
+    if (src === 'rg-formula' || src === 'value-formula') {
+        dashLoadMetadata(function() {
+            dashShowFormulaModal(td);
+        });
+        return;
+    }
+
+    if (src === 'report' || src === 'mu' || src === 'linesum') {
+        dashShowReadonlyTip(e);
+        return;
+    }
+});
 
 // Auto-load dashboard ID from URL path: dash/id
 (function() {
