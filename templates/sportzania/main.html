@@ -81,10 +81,10 @@
                 var opacity = parseFloat(value);
                 if (opacity > 0 && opacity <= 0.9) {
                     document.documentElement.style.setProperty('--brand-bg-opacity', opacity);
-                    document.body.classList.add('brand-bg-on');
+                    if (document.body) document.body.classList.add('brand-bg-on');
                 } else {
                     document.documentElement.style.removeProperty('--brand-bg-opacity');
-                    document.body.classList.remove('brand-bg-on');
+                    if (document.body) document.body.classList.remove('brand-bg-on');
                 }
             }
 
@@ -220,10 +220,10 @@
                         </div>
                     </div>
                     <div class="user-menu-divider"></div>
-                    <div class="user-menu-item user-menu-font-size-row" title="Бренд-фон">
-                        <i class="user-menu-icon pi pi-image"></i>
-                        <span>Бренд-фон</span>
-                        <select id="brand-bg-select" onchange="setBrandBg(this.value)" style="margin-left:auto;border:1px solid var(--border-color);border-radius:4px;padding:2px 4px;background:var(--input-bg,var(--bg-secondary));color:var(--text-primary);font-size:0.85rem;cursor:pointer;">
+                    <div class="user-menu-item user-menu-font-size-row" title="Фоновый рисунок можно изменить в меню Файлы - в main.html: background-image: url">
+                        <i class="user-menu-icon pi pi-image" title="Фоновый рисунок можно изменить в меню Файлы - в main.html: background-image: url"></i>
+                        <span title="Фоновый рисунок можно изменить в меню Файлы - в main.html: background-image: url">Бренд-фон</span>
+                        <select id="brand-bg-select" onchange="setBrandBg(this.value)" title="Выберите прозрачность фонового рисунка для вашего удобства" style="margin-left:auto;border:1px solid var(--border-color);border-radius:4px;padding:2px 4px;background:var(--input-bg,var(--bg-secondary));color:var(--text-primary);font-size:0.85rem;cursor:pointer;">
                             <option value="0">—</option>
                             <option value="0.1">10%</option>
                             <option value="0.2">20%</option>
