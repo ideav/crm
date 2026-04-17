@@ -1173,12 +1173,12 @@ window.dashValueSearchDone = function(json, ctx) {
             // resolve rgHead name to id: look in json (empty here), use text
             params += '&t1104=' + encodeURIComponent(rgHead);
         }
-        newApi('POST', '_m_new/1010', 'dashValueSaveDone', params, { td: td, newVal: newVal });
+        newApi('POST', '_m_new/1010?JSON&up=1', 'dashValueSaveDone', params, { td: td, newVal: newVal });
     } else if (json.length === 1) {
         // Update existing record
         var recId = json[0].i;
         var params2 = '_xsrf=' + encodeURIComponent(xsrf) + '&t1010=' + encodeURIComponent(newVal);
-        newApi('POST', '_m_save/' + recId, 'dashValueSaveDone', params2, { td: td, newVal: newVal });
+        newApi('POST', '_m_save/' + recId+'?JSON', 'dashValueSaveDone', params2, { td: td, newVal: newVal });
     } else {
         // Multiple records — show modal with first 5, link to full list
         dashShowMultivalModal(json, dashValueSearchUrl(td).replace('JSON_OBJ', '').replace(/&&/g, '&'));
