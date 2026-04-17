@@ -358,6 +358,11 @@ if(parseInt(id) > 0){
                     <input type="submit" class="btn btn-outline-secondary btn-block" onclick="addNewField()" value="Добавить">
                 </div>
             </div>
+            <div class="row p-0 m-0 mt-2">
+                <div class="col-12">
+                    <button type="button" class="btn btn-info btn-sm" onclick="addPageBreak()" title="Добавить разделитель между страницами">📄 Добавить разделитель страницы</button>
+                </div>
+            </div>
         </div>
         <div class="p-1 p-sm-3 pt-3 edit-panel" style="display:none; max-width:1024px">
             <div class="input-group">
@@ -387,9 +392,9 @@ if(parseInt(id) > 0){
         </center>
         <div id="runFormFields">
         </div>
+        <div id="pageIndicator" class="m-1 m-sm-3"></div>
         <div id="submitResult" class=" m-1 m-sm-3"></div>
         <center>
-            <button class="btn btn-primary m-4" id="runFormSubmit" onclick="submitForm()">Отправить</button>
             <p class="text-muted"><a href="mailto:support@ideav.online">Сообщить о нарушении</a></p>
             <p class="text-muted">Сделано в <a href="https://integram.io?from=iquiz">Интеграм</a></p>
         </center>
@@ -465,6 +470,25 @@ function createTable(t,v){
     }
     else
         createType(v);
+}
+function addPageBreak(){
+    var nextPage = 1;
+    for(var i in iquiz.form)
+        if(iquiz.form[i].page && iquiz.form[i].page >= nextPage)
+            nextPage = parseInt(iquiz.form[i].page) + 1;
+
+    iquiz.form.push({
+        id: 'PAGE_BREAK_' + Date.now(),
+        type: 'PAGE_BREAK',
+        base: 'PAGE_BREAK',
+        name: 'Разделитель страницы',
+        view: 'PAGE_BREAK',
+        page: nextPage,
+        isPageBreak: true
+    });
+    setEdited();
+    drawForm();
+    showMsg('messages', 'Разделитель страницы добавлен (страница ' + nextPage + ')', 'success', 3000);
 }
 function selectField(v){
     $('#addfield').val($('[value='+v+']').attr('name'));
@@ -564,8 +588,29 @@ function shownAndHidden(i,fld,f){
         intApi('GET','object/'+refType(fld.type)+'?JSON','ddl','',{i:fld.id,view:fld.view});
 }
 function drawForm(){
-    var i,j,k,f={flds:'',hiddens:''};
-    for(i=0;i<iquiz.form.length;i++)
+    var i,j,k,f={flds:'',hiddens:''},currentPage=1;
+    // Определить количество страниц
+    var totalPages = 1;
+    for(i in iquiz.form)
+        if(iquiz.form[i].page && iquiz.form[i].page > totalPages)
+            totalPages = iquiz.form[i].page;
+
+    for(i=0;i<iquiz.form.length;i++){
+        // Установить page для полей, у которых её нет
+        if(!iquiz.form[i].page)
+            iquiz.form[i].page = currentPage;
+        else if(iquiz.form[i].isPageBreak)
+            currentPage = iquiz.form[i].page;
+
+        // Отобразить разделитель страницы
+        if(iquiz.form[i].isPageBreak){
+            f.flds+='<div class="page-break-divider p-3 my-3 border-top border-bottom bg-light" style="text-align:center; color:#666; font-weight:bold;">'
+                +'  📄 Страница ' + iquiz.form[i].page + ' из ' + totalPages
+                +'  <a onclick="deleteFld(this)" class="ml-2" style="display:inline-block" title="Удалить разделитель">'+ delSvg +'</a>'
+                +'</div>';
+            continue;
+        }
+
         if(iquiz.form[i].id!==iquiz.form[i].type&&!reqExists(iquiz.form[i].id)&&iquizId){
             k=i--;
             for(j in iquiz.form)
@@ -721,6 +766,117 @@ function grantTable(){
 function grantForm(mode){
     intApi('POST','_m_new/116?JSON&up='+grants.roleId+'&t116=269&t136=53&t49='+(mode||''),'grant','','grantForm');
 }
+function validateCurrentPage(){
+    var e='', valid=true;
+    $('.iq-fld').css('border','');
+    $('.iq-fld').each(function(){
+        var o=$(this).closest('[order]').attr('order');
+        if(o===undefined) return; // пропустить скрытые поля
+        var fld = iquiz.form[o];
+        // Проверять только поля текущей страницы, не скрытые и не PAGE_BREAK
+        if(!fld.hidden && !fld.isPageBreak && (fld.page || 1) === iquiz.currentPage){
+            if(fld.required){
+                if(fld.base==='BOOLEAN' && !this.checked){
+                    e+='Поставьте '+fld.name+'<br />';
+                    $(this).css('border','2px solid red');
+                    valid=false;
+                }
+                else if(fld.base!=='BOOLEAN' && this.value.length===0){
+                    e+=(fld.base==='REFERENCE'?'Выберите ':'Введите ')+fld.name+'<br />';
+                    $(this).css('border','2px solid red');
+                    valid=false;
+                }
+            }
+        }
+    });
+    return {valid:valid, errors:e};
+}
+
+function renderPageIndicator(currentPage, totalPages){
+    if(totalPages <= 1) return; // не показывать если одна страница
+    var html = '<div class="page-indicator mt-4 text-center">';
+    for(var i=1; i<=totalPages; i++){
+        html += '<span class="page-dot '+(i===currentPage?'active':'')+'" style="display:inline-block; width:12px; height:12px; border-radius:50%; background:'+(i===currentPage?'#0066cc':'#ccc')+'; margin:0 6px; cursor:pointer;" onclick="goToPage('+i+')"></span>';
+    }
+    html += '</div>';
+    $('#pageIndicator').html(html);
+}
+
+function goToPage(pageNum){
+    if(pageNum === iquiz.currentPage) return;
+    if(pageNum > iquiz.currentPage){
+        // Переход на следующую страницу - нужна валидация
+        var result = validateCurrentPage();
+        if(!result.valid){
+            showMsg('submitResult',result.errors,'warning',0);
+            return;
+        }
+    }
+    iquiz.currentPage = pageNum;
+    renderFormPage();
+}
+
+function nextPage(){
+    if(iquiz.currentPage >= iquiz.totalPages){
+        // Это последняя страница - отправлять форму
+        submitForm();
+        return;
+    }
+    var result = validateCurrentPage();
+    if(!result.valid){
+        showMsg('submitResult',result.errors,'warning',0);
+        return;
+    }
+    iquiz.currentPage++;
+    renderFormPage();
+}
+
+function prevPage(){
+    if(iquiz.currentPage <= 1) return;
+    iquiz.currentPage--;
+    renderFormPage();
+}
+
+function renderFormPage(){
+    var h='', totalPages = iquiz.totalPages;
+    // Рендеринг только полей текущей страницы
+    for(var i in iquiz.form){
+        var fld = iquiz.form[i];
+        var fieldPage = fld.page || 1;
+
+        // Скрытые поля выводятся на всех страницах
+        if(fld.hidden){
+            h+='<div order="'+i+'"><input id="t'+fld.id+'" type="hidden" class="iq-fld"'
+                +' value="'+(fld.default||search[fld.label||fld.name]||'')+'"></div>';
+        }
+        // Показать поле только если оно на текущей странице и не page break
+        else if(fieldPage === iquiz.currentPage && !fld.isPageBreak){
+            h+='<div class="fld p-1 p-sm-3" id="'+fld.id+'" order="'+i+'">'
+                +'    <label class="mb-1" '+(fld.required?'style="color:#e00" title="Поле обязательно для заполнения" is-mandatory="1"':'')+'>'
+                        +(fld.label||fld.name)
+                +'    </label>'
+                +     inputBox[fld.view].replace(/:t:/g,fld.id)
+                                .replace(':reforig:',fld.ref_type)
+                        .replace(':value:',search[fld.label||fld.name]||(fld.default?defaults(fld.default):''))
+                        .replace(':placeholder:',fld.placeholder||'Введите значение '+fld.name)
+                +'</div>';
+            if(fld.view==='DDL')
+                intApi('GET','object/'+fld.ref_type+'?JSON&LIMIT=1000','ddl','',{i:fld.id,view:fld.view});
+        }
+    }
+
+    // Добавить кнопки навигации
+    h += '<div class="page-navigation mt-4">';
+    if(iquiz.currentPage > 1)
+        h += '<button class="btn btn-secondary mr-2" onclick="prevPage()">← Назад</button>';
+    h += '<button class="btn btn-primary" id="runFormSubmit" onclick="nextPage()">' + (iquiz.currentPage === totalPages ? (iquiz.submit||'Отправить') : 'Далее →') + '</button>';
+    h += '</div>';
+
+    $('#runFormFields').html(h);
+    renderPageIndicator(iquiz.currentPage, totalPages);
+    window.dispatchEvent(new Event('resize'));
+}
+
 function submitForm(){
     var vars=new FormData(),e='',o;
     $('.iq-fld').css('border','');
@@ -934,9 +1090,17 @@ function intApi(m,u,b,vars,index){
 
             case 'runForm':
                 iquiz=JSON.parse(json.reqs[json.object[0].id][273]);
+                iquiz.currentPage = iquiz.currentPage || 1;
+                // Вычислить общее количество страниц
+                var totalPages = 1;
+                for(var ii in iquiz.form)
+                    if(iquiz.form[ii].page && iquiz.form[ii].page > totalPages)
+                        totalPages = iquiz.form[ii].page;
+                iquiz.totalPages = totalPages;
+
                 $('#runFormName').html(iquiz.name||'');
                 $('#runFormDescr').html(iquiz.descr||'');
-                $('#runFormSubmit').html(iquiz.submit||'Отправить');
+                $('#runFormSubmit').html(iquiz.currentPage === totalPages ? (iquiz.submit||'Отправить') : 'Далее →');
                 if(iquiz.cover||iquiz.logo){
                     $('.cover-container').show();
                     if(iquiz.cover){
@@ -956,27 +1120,10 @@ function intApi(m,u,b,vars,index){
                 }
                 if(iquiz['max-width'])
                     $('#runForm').css('max-width',iquiz['max-width']+'px');
-                for(i in iquiz.form){
-                        if(iquiz.form[i].hidden)
-                            h+='<div order="'+i+'"><input id="t'+iquiz.form[i].id+'" type="hidden" class="iq-fld"'
-                                +' value="'+(iquiz.form[i].default||search[iquiz.form[i].label||iquiz.form[i].name]||'')+'"></div>';
-                        else{
-                            h+='<div class="fld p-1 p-sm-3" id="'+iquiz.form[i].id+'" order="'+i+'">'
-                                +'    <label class="mb-1" '+(iquiz.form[i].required?'style="color:#e00" title="Поле обязательно для заполнения" is-mandatory="1"':'')+'>'
-                                        +(iquiz.form[i].label||iquiz.form[i].name)
-                                +'    </label>'
-                                +     inputBox[iquiz.form[i].view].replace(/:t:/g,iquiz.form[i].id)
-                                                .replace(':reforig:',iquiz.form[i].ref_type)
-                                                .replace(':value:',search[iquiz.form[i].label||iquiz.form[i].name]||(iquiz.form[i].default?defaults(iquiz.form[i].default):''))
-                                                .replace(':placeholder:',iquiz.form[i].placeholder||'Введите значение '+iquiz.form[i].name)
-                                +'</div>';
-                            if(iquiz.form[i].view==='DDL')
-                                intApi('GET','object/'+iquiz.form[i].ref_type+'?JSON&LIMIT=1000','ddl','',{i:iquiz.form[i].id,view:iquiz.form[i].view});
-                        }
-                    }
-                    $('#runFormFields').html(h);
-                    $('#runForm').show();
-                    window.dispatchEvent(new Event('resize'));
+
+                // Рендеринг формы с поддержкой многостраничности
+                renderFormPage();
+                $('#runForm').show();
                 break;
 
             case 'submitForm':
