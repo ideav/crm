@@ -862,6 +862,8 @@ function myApi(m,u,b,vars,index){ // Параметры: метод, адрес,
                     var firstColWrapper = document.querySelector('.col-title-wrapper');
                     var firstColAnchor = firstColWrapper && firstColWrapper.querySelector('a');
                     if (firstColAnchor && firstColAnchor.title === 'Пользователь') window.sqlHintAdvance(2);
+                    var interactCheck = document.getElementById('interact');
+                    if (interactCheck && interactCheck.checked && document.querySelector('.col-title-wrapper[ref="120"]')) window.sqlHintAdvance(3);
                 }
                 break;
 
