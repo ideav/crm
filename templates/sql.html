@@ -858,7 +858,11 @@ function myApi(m,u,b,vars,index){ // Параметры: метод, адрес,
                     byId('warning').classList.remove('hidden');
                 }
                 $('#rbody').show();
-                if (window.sqlHintAdvance) window.sqlHintAdvance(2);
+                if (window.sqlHintAdvance) {
+                    var firstColWrapper = document.querySelector('.col-title-wrapper');
+                    var firstColAnchor = firstColWrapper && firstColWrapper.querySelector('a');
+                    if (firstColAnchor && firstColAnchor.title === 'Пользователь') window.sqlHintAdvance(2);
+                }
                 break;
 
         }
