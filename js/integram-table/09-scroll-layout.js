@@ -56,8 +56,18 @@
                 if (!tableWrapper || this.isLoading || !this.hasMore) return;
 
                 const rect = tableWrapper.getBoundingClientRect();
+                const scrollThreshold = 200;
+
                 // If table bottom is above viewport bottom (table fits on screen), load more
                 if (rect.bottom < window.innerHeight - 50) {
+                    this.loadData(true);  // Append mode
+                    return;
+                }
+
+                // Also load more if user is already at the bottom of the page and can't scroll further
+                // This handles the case where previous loads already scrolled user to the bottom (issue #1889)
+                const scrolledToBottom = window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - scrollThreshold;
+                if (scrolledToBottom) {
                     this.loadData(true);  // Append mode
                 }
             }, 100);  // Small delay to ensure DOM is updated
