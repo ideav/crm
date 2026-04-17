@@ -1205,7 +1205,11 @@ document.addEventListener('DOMContentLoaded', function() {
         steps: 3,
         onInit: function(api) {
             var interactCheck = document.getElementById('interact');
-            if (interactCheck) interactCheck.addEventListener('change', function() { api.advance(3); });
+            if (interactCheck) interactCheck.addEventListener('change', function() {
+                if (interactCheck.checked && document.querySelector('.col-title-wrapper[ref="120"]')) {
+                    api.advance(3);
+                }
+            });
         }
     });
 });
