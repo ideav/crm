@@ -3157,6 +3157,18 @@ td:has(.inline-editor-reference) {
     text-decoration: underline;
 }
 
+/* Any-record links — match ref-value-link styling (issue #1887) */
+.any-record-link {
+    color: var(--md-primary);
+    text-decoration: none;
+    transition: var(--md-transition);
+}
+
+.any-record-link:hover {
+    color: var(--md-primary-dark);
+    text-decoration: underline;
+}
+
 /* Hyperlinks in text cells (issue #947) */
 .cell-hyperlink {
     color: var(--md-primary);
