@@ -11,6 +11,21 @@
         html {
             font-size: .82rem;
         }
+        /* Brand background */
+        body.brand-bg-brighter::before,
+        body.brand-bg-dimmer::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background-image: url('/assets/sportzania-bg.png');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            pointer-events: none;
+            z-index: 0;
+        }
+        body.brand-bg-brighter::before { opacity: 0.18; }
+        body.brand-bg-dimmer::before   { opacity: 0.07; }
     </style>
     <script>
         // Font size control — global, stored in cookie integram-table-font-settings (issue #1626/#1628)
@@ -51,6 +66,39 @@
                 var current = loadPageFontSize();
                 document.querySelectorAll('.navbar-font-size-btn').forEach(function(btn) {
                     btn.classList.toggle('active', btn.dataset.size === current);
+                });
+            });
+        })();
+    </script>
+    <script>
+        // Brand background — stored in cookie (issue #1897)
+        (function() {
+            var BG_COOKIE = 'sportzania-brand-bg';
+            var BG_CLASSES = { brighter: 'brand-bg-brighter', dimmer: 'brand-bg-dimmer' };
+
+            function applyBrandBg(value) {
+                document.body.classList.remove('brand-bg-brighter', 'brand-bg-dimmer');
+                if (BG_CLASSES[value]) document.body.classList.add(BG_CLASSES[value]);
+            }
+
+            function loadBrandBg() {
+                var match = document.cookie.match(new RegExp('(?:^|; )' + BG_COOKIE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+                return match ? decodeURIComponent(match[1]) : 'off';
+            }
+
+            window.setBrandBg = function(value) {
+                document.cookie = BG_COOKIE + '=' + encodeURIComponent(value) + '; path=/; max-age=31536000';
+                applyBrandBg(value);
+                document.querySelectorAll('.brand-bg-btn').forEach(function(btn) {
+                    btn.classList.toggle('active', btn.dataset.bg === value);
+                });
+            };
+
+            document.addEventListener('DOMContentLoaded', function() {
+                var current = loadBrandBg();
+                applyBrandBg(current);
+                document.querySelectorAll('.brand-bg-btn').forEach(function(btn) {
+                    btn.classList.toggle('active', btn.dataset.bg === current);
                 });
             });
         })();
@@ -161,6 +209,16 @@
                             <button type="button" class="navbar-font-size-btn" data-size="smaller" onclick="setPageFontSize('smaller')" title="Шрифт меньше" style="font-size:11px;">А</button>
                             <button type="button" class="navbar-font-size-btn" data-size="normal" onclick="setPageFontSize('normal')" title="Шрифт обычный" style="font-size:14px;">А</button>
                             <button type="button" class="navbar-font-size-btn" data-size="larger" onclick="setPageFontSize('larger')" title="Шрифт больше" style="font-size:17px;">А</button>
+                        </div>
+                    </div>
+                    <div class="user-menu-divider"></div>
+                    <div class="user-menu-item user-menu-font-size-row" title="Бренд-фон">
+                        <i class="user-menu-icon pi pi-image"></i>
+                        <span>Бренд-фон</span>
+                        <div class="navbar-font-size-group">
+                            <button type="button" class="navbar-font-size-btn brand-bg-btn" data-bg="off" onclick="setBrandBg('off')" title="Без фона" style="font-size:11px;">—</button>
+                            <button type="button" class="navbar-font-size-btn brand-bg-btn" data-bg="brighter" onclick="setBrandBg('brighter')" title="Ярче" style="font-size:14px;">◑</button>
+                            <button type="button" class="navbar-font-size-btn brand-bg-btn" data-bg="dimmer" onclick="setBrandBg('dimmer')" title="Бледнее" style="font-size:14px;">◔</button>
                         </div>
                     </div>
                     <div class="user-menu-divider"></div>
