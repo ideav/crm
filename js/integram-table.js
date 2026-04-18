@@ -6361,9 +6361,12 @@ class IntegramTable{
                     return;
                 }
 
-                // Also load more if user is already at the bottom of the page and can't scroll further
+                // Also load more if user is already at the bottom of the page and can't scroll further.
+                // Only trigger when the page has scrollable content (scrollHeight > innerHeight),
+                // otherwise this fires on every initial load even without any user scrolling (issue #1928).
                 // This handles the case where previous loads already scrolled user to the bottom (issue #1889)
-                const scrolledToBottom = window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - scrollThreshold;
+                const pageIsScrollable = document.documentElement.scrollHeight > window.innerHeight + scrollThreshold;
+                const scrolledToBottom = pageIsScrollable && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - scrollThreshold;
                 if (scrolledToBottom) {
                     this.loadData(true);  // Append mode
                 }
