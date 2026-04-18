@@ -6353,19 +6353,12 @@ class IntegramTable{
 
                 const rect = tableWrapper.getBoundingClientRect();
 
-                // If table bottom is above viewport bottom (table fits on screen or there's empty space below), load more
-                if (rect.bottom < window.innerHeight) {
-                    this.loadData(true);  // Append mode
-                    return;
-                }
-
-                // Also load more if user is already at the bottom of the page and can't scroll further.
-                // This handles the case where previous loads already scrolled user to the bottom (issue #1889).
-                // We check scrollY > 0 to avoid firing on initial page load before any user interaction (issue #1928).
-                // Threshold: half the viewport height, matching the scroll listener logic (issue #1938).
-                const scrollThreshold = window.innerHeight / 2;
-                const scrolledToBottom = window.scrollY > 0 && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - scrollThreshold;
-                if (scrolledToBottom) {
+                // Use the same threshold as the scroll listener: load when the invisible part
+                // below the fold is less than half the viewport height (issue #1942).
+                // This covers: table fits on screen, table bottom exactly at viewport edge,
+                // and user already scrolled to bottom with no further scroll possible.
+                const belowFold = rect.bottom - window.innerHeight;
+                if (belowFold < window.innerHeight / 2) {
                     this.loadData(true);  // Append mode
                 }
             }, 100);  // Small delay to ensure DOM is updated
