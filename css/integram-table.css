@@ -840,6 +840,10 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     opacity: 0.7;
 }
 
+.scroll-counter.rows-beneath:hover {
+    opacity: 1;
+}
+
 .total-count-unknown {
     cursor: pointer;
     color: var(--md-primary);
