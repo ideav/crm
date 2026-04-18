@@ -7283,34 +7283,47 @@ class IntegramTable{
                 });
             }
 
-            // Delete column button
+            // Delete column/table button (issue #1932: table deletion uses _d_del, column uses _d_del_req)
             colEditModal.querySelector(`#col-edit-del-${instanceName}`).addEventListener('click', async () => {
                 const delBtn = colEditModal.querySelector(`#col-edit-del-${instanceName}`);
                 delBtn.disabled = true;
-                const result = await this.deleteColumn(col.id, false);
-                if (result.success) {
-                    await refreshCurrentTableAfterDelete();
-                } else if (result.hasData) {
-                    // Show forced delete option
-                    delBtn.style.display = 'none';
-                    const confirmEl = colEditModal.querySelector(`#col-edit-del-confirm-${instanceName}`);
-                    confirmEl.style.display = 'flex';
-                    colEditModal.querySelector(`#col-edit-del-forced-${instanceName}`).addEventListener('click', async () => {
-                        const result2 = await this.deleteColumn(col.id, true);
-                        if (result2.success) {
-                            await refreshCurrentTableAfterDelete();
-                        } else {
-                            showStatus('Ошибка удаления: ' + result2.error, true);
-                        }
-                    });
-                    colEditModal.querySelector(`#col-edit-del-cancel-${instanceName}`).addEventListener('click', () => {
-                        confirmEl.style.display = 'none';
-                        delBtn.style.display = '';
+                if (isFirstColumn) {
+                    const tableId = this.objectTableId || this.options.tableTypeId;
+                    const result = await this.deleteTable(tableId);
+                    if (result.success) {
+                        closeColEdit();
+                        const dbName = window.location.pathname.split('/')[1];
+                        window.location.href = `/${dbName}/tables`;
+                    } else {
+                        showStatus('Ошибка удаления таблицы: ' + result.error, true);
                         delBtn.disabled = false;
-                    });
+                    }
                 } else {
-                    showStatus('Ошибка удаления: ' + result.error, true);
-                    delBtn.disabled = false;
+                    const result = await this.deleteColumn(col.id, false);
+                    if (result.success) {
+                        await refreshCurrentTableAfterDelete();
+                    } else if (result.hasData) {
+                        // Show forced delete option
+                        delBtn.style.display = 'none';
+                        const confirmEl = colEditModal.querySelector(`#col-edit-del-confirm-${instanceName}`);
+                        confirmEl.style.display = 'flex';
+                        colEditModal.querySelector(`#col-edit-del-forced-${instanceName}`).addEventListener('click', async () => {
+                            const result2 = await this.deleteColumn(col.id, true);
+                            if (result2.success) {
+                                await refreshCurrentTableAfterDelete();
+                            } else {
+                                showStatus('Ошибка удаления: ' + result2.error, true);
+                            }
+                        });
+                        colEditModal.querySelector(`#col-edit-del-cancel-${instanceName}`).addEventListener('click', () => {
+                            confirmEl.style.display = 'none';
+                            delBtn.style.display = '';
+                            delBtn.disabled = false;
+                        });
+                    } else {
+                        showStatus('Ошибка удаления: ' + result.error, true);
+                        delBtn.disabled = false;
+                    }
                 }
             });
         }
@@ -7427,6 +7440,32 @@ class IntegramTable{
                 });
                 if (!resp.ok) return { success: false, error: `HTTP ${resp.status}` };
                 return { success: true };
+            } catch (err) {
+                return { success: false, error: err.message };
+            }
+        }
+
+        /**
+         * Delete a table via API (issue #1932).
+         * Uses _d_del/{tableId}?JSON. On success returns {id, obj, next_act, args, warnings}.
+         * @returns {Promise<{success: boolean, error?: string}>}
+         */
+        async deleteTable(tableId) {
+            const apiBase = this.getApiBase();
+            try {
+                const params = new URLSearchParams();
+                if (typeof xsrf !== 'undefined') params.append('_xsrf', xsrf);
+
+                const resp = await fetch(`${apiBase}/_d_del/${tableId}?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+                if (!resp.ok) return { success: false, error: `HTTP ${resp.status}` };
+                const result = await resp.json();
+                if (result && result.id) return { success: true };
+                const err = (Array.isArray(result) && result[0]?.error) || result?.error || 'Неизвестная ошибка';
+                return { success: false, error: err };
             } catch (err) {
                 return { success: false, error: err.message };
             }
