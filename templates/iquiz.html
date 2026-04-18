@@ -802,23 +802,30 @@ function renderPageIndicator(currentPage, totalPages){
     $('#pageIndicator').html(html);
 }
 
+function saveCurrentPageValues(){
+    if(!iquiz.userValues) iquiz.userValues={};
+    $('.iq-fld').each(function(){
+        var id=this.id.replace(/^t/,'');
+        iquiz.userValues[id]=this.type==='checkbox'?(this.checked?'1':''):$(this).val();
+    });
+}
+
 function goToPage(pageNum){
     if(pageNum === iquiz.currentPage) return;
     if(pageNum > iquiz.currentPage){
-        // Переход на следующую страницу - нужна валидация
         var result = validateCurrentPage();
         if(!result.valid){
             showMsg('submitResult',result.errors,'warning',0);
             return;
         }
     }
+    saveCurrentPageValues();
     iquiz.currentPage = pageNum;
     renderFormPage();
 }
 
 function nextPage(){
     if(iquiz.currentPage >= iquiz.totalPages){
-        // Это последняя страница - отправлять форму
         submitForm();
         return;
     }
@@ -827,12 +834,14 @@ function nextPage(){
         showMsg('submitResult',result.errors,'warning',0);
         return;
     }
+    saveCurrentPageValues();
     iquiz.currentPage++;
     renderFormPage();
 }
 
 function prevPage(){
     if(iquiz.currentPage <= 1) return;
+    saveCurrentPageValues();
     iquiz.currentPage--;
     renderFormPage();
 }
@@ -857,7 +866,7 @@ function renderFormPage(){
                 +'    </label>'
                 +     inputBox[fld.view].replace(/:t:/g,fld.id)
                                 .replace(':reforig:',fld.ref_type)
-                        .replace(':value:',search[fld.label||fld.name]||(fld.default?defaults(fld.default):''))
+                        .replace(':value:',(iquiz.userValues&&iquiz.userValues[fld.id]!==undefined)?iquiz.userValues[fld.id]:(search[fld.label||fld.name]||(fld.default?defaults(fld.default):'')))
                         .replace(':placeholder:',fld.placeholder||'Введите значение '+fld.name)
                 +'</div>';
             if(fld.view==='DDL')
@@ -1070,7 +1079,7 @@ function intApi(m,u,b,vars,index){
                 break;
 
             case 'ddl':
-                var blank=false,j=iquiz.form[$('#'+index.i).attr('order')].default,template=inputBox[index.view+'-OPTION']
+                var blank=false,j=(iquiz.userValues&&iquiz.userValues[index.i]!==undefined)?iquiz.userValues[index.i]:iquiz.form[$('#'+index.i).attr('order')].default,template=inputBox[index.view+'-OPTION']
                     ,t=$('#t'+index.i).closest('[reforig]').attr(('reforig'));
                 for(i in json.object){
                     if(json.object[i].val.trim()==='')
