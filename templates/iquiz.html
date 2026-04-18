@@ -589,27 +589,26 @@ function shownAndHidden(i,fld,f){
 }
 function drawForm(){
     var i,j,k,f={flds:'',hiddens:''},currentPage=1;
-    // Определить количество страниц
+    // Определить количество страниц (количество разделителей + 1)
     var totalPages = 1;
-    for(i in iquiz.form)
-        if(iquiz.form[i].page && iquiz.form[i].page > totalPages)
-            totalPages = iquiz.form[i].page;
+    for(i=0;i<iquiz.form.length;i++)
+        if(iquiz.form[i].isPageBreak) totalPages++;
 
     for(i=0;i<iquiz.form.length;i++){
-        // Установить page для полей, у которых её нет
-        if(!iquiz.form[i].page)
-            iquiz.form[i].page = currentPage;
-        else if(iquiz.form[i].isPageBreak)
-            currentPage = iquiz.form[i].page;
-
-        // Отобразить разделитель страницы
+        // Пересчитываем page по позиции в массиве, чтобы разделитель всегда делил поля корректно
         if(iquiz.form[i].isPageBreak){
-            f.flds+='<div class="page-break-divider p-3 my-3 border-top border-bottom bg-light" style="text-align:center; color:#666; font-weight:bold;">'
+            currentPage++;
+            iquiz.form[i].page = currentPage;
+            // Отобразить разделитель страницы
+            f.flds+='<div class="page-break-divider p-3 my-3 border-top border-bottom bg-light" order="'+i+'" style="text-align:center; color:#666; font-weight:bold;">'
                 +'  📄 Страница ' + iquiz.form[i].page + ' из ' + totalPages
+                +'  <a onclick="moveFldUp(this)" class="ml-2" style="display:inline-block" title="Переместить разделитель вверх">↑</a>'
+                +'  <a onclick="moveFldDown(this)" class="ml-2" style="display:inline-block" title="Переместить разделитель вниз">↓</a>'
                 +'  <a onclick="deleteFld(this)" class="ml-2" style="display:inline-block" title="Удалить разделитель">'+ delSvg +'</a>'
                 +'</div>';
             continue;
         }
+        iquiz.form[i].page = currentPage;
 
         if(iquiz.form[i].id!==iquiz.form[i].type&&!reqExists(iquiz.form[i].id)&&iquizId){
             k=i--;
@@ -1317,6 +1316,20 @@ function addItem(t){
 function deleteFld(el){
     var i=$(el).closest('[order]').attr('order');
     intApi('POST','_d_del_req/'+iquiz.form[i].id+'?JSON','delFld','',i);
+}
+function moveFldUp(el){
+    var i=parseInt($(el).closest('[order]').attr('order'));
+    if(i<=0) return;
+    var tmp=iquiz.form[i]; iquiz.form[i]=iquiz.form[i-1]; iquiz.form[i-1]=tmp;
+    setEdited();
+    drawForm();
+}
+function moveFldDown(el){
+    var i=parseInt($(el).closest('[order]').attr('order'));
+    if(i>=iquiz.form.length-1) return;
+    var tmp=iquiz.form[i]; iquiz.form[i]=iquiz.form[i+1]; iquiz.form[i+1]=tmp;
+    setEdited();
+    drawForm();
 }
 var timer;
 function showMsg(i,err,mode,timeout){
