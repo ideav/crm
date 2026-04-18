@@ -118,6 +118,7 @@ Body: forced=1&_xsrf={xsrf}&token={token}
 POST https://integram.io/{db}/_d_ord/{id_реквизита}?JSON=1
 Body: order={новый_порядок_с_0}&_xsrf={xsrf}&token={token}
 ```
+При этом колонку 0 перемещать нельзя и на её место нельзя поставить другую колонку
 
 ---
 
@@ -186,7 +187,7 @@ Body: token={token}
 ### Обновить/изменить запись
 ```bash
 POST https://integram.io/{db}/_m_save/{id_записи}?JSON=1
-Body: up=1&t{id_реквизита1}={значение1}&_xsrf={xsrf}&token={token}
+Body: up=1&t{id_записи}={значение первой колонки}&t{id_реквизита1}={значение реквизита1}&_xsrf={xsrf}&token={token}
 ```
 
 ### Удалить запись
