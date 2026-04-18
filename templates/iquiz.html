@@ -504,7 +504,7 @@ function selectQuiz(i){
         $('#deselect').remove();
         for(j in iquiz)
             $('.iq-save[name='+j+']').val(iquiz[j]);
-        $('#iquizName').val($('#'+i).find('span').html());
+        $('#iquizName').val($('#'+i).find('span').html().replace(/^IQUIZ\s+/,''));
         drawForm();
     }
     else
@@ -1293,19 +1293,16 @@ function setNull(t){
     $('#t'+t).val('');
 }
 function reOrderFields(){
-    var i=0,j;
-    $('.fld').each(function(){
-        if(iquiz.form[i].id!==this.id)
-            for(j in iquiz.form)
-                if(iquiz.form[j].id===this.id){
-                    $('#'+this.id+',#h'+this.id).attr('order',i);
-                    $('#'+iquiz.form[i].id+',#h'+iquiz.form[i].id).attr('order',j);
-                    [iquiz.form[i],iquiz.form[j]]=[iquiz.form[j],iquiz.form[i]];
-                    break;
-                }
-        i++;
+    var newForm=[];
+    $('#fields').children('[order]').each(function(){
+        var idx=parseInt($(this).attr('order'));
+        if(!isNaN(idx)&&iquiz.form[idx]!==undefined)
+            newForm.push(iquiz.form[idx]);
     });
+    if(newForm.length===iquiz.form.length)
+        iquiz.form=newForm;
     setEdited();
+    drawForm();
 }
 function addItem(t){
     var val=$('.set'+t+' input').val(),reforig=$('#t'+t).attr('reforig');
