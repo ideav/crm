@@ -5,69 +5,164 @@
 param(
     [string]$Login = "api",
     [string]$Password = "k6cvfvg3",
-    [string]$BaseUrl = "https://ideav.ru",
-    [string]$DbName = "test"
+    [string]$BaseUrl = "https://integram.io",
+    [string]$DbName = "test",
+    [string]$LogPath = "api_log.txt",
+    [switch]$SkipSeedData
 )
 
-# Функция для логирования
+$ErrorActionPreference = "Stop"
+
 function Write-Log {
     param([string]$Message)
+
     $timestamp = Get-Date -Format "dd/MM/yyyy HH:mm:ss"
-    $logMessage = "$timestamp $Message"
-    Add-Content -Path "api_log.txt" -Value $logMessage
+    Add-Content -Path $LogPath -Value "$timestamp $Message"
     Write-Host $Message
 }
 
-# Функция для выполнения запроса к API
 function Invoke-ApiRequest {
     param(
-        [string]$Endpoint,
-        [string]$Method = "POST",
+        [Parameter(Mandatory = $true)][string]$Endpoint,
+        [ValidateSet("GET", "POST")][string]$Method = "POST",
         [hashtable]$FormData = @{},
-        [string]$AuthToken = $null,
-        [string]$XsrfToken = $null
+        [string]$AuthToken = $script:AuthToken,
+        [string]$XsrfToken = $script:XsrfToken
     )
-    
-    # URL: integram.io/{база}/{действие}/{id}?JSON=1
-    $url = "$BaseUrl/$DbName/$Endpoint`?JSON=1"
-    Write-Log "Request: $url"
-    
+
+    $url = "$BaseUrl/$DbName/$Endpoint"
+    if ($url -notmatch "\?") {
+        $url = "$url`?JSON=1"
+    } elseif ($url -notmatch "(^|[?&])JSON=" -and $url -notmatch "(^|[?&])JSON_DATA=" -and $url -notmatch "(^|[?&])JSON_KV=") {
+        $url = "$url&JSON=1"
+    }
+
     $body = @{}
     foreach ($key in $FormData.Keys) {
         $body[$key] = $FormData[$key]
     }
-    
+
     if ($XsrfToken) {
         $body["_xsrf"] = $XsrfToken
     }
-    
     if ($AuthToken) {
         $body["token"] = $AuthToken
     }
-    
-    $bodyString = ($body.Keys | ForEach-Object { "$_=$($body[$_])" }) -join "; "
-    Write-Log "Body: $bodyString"
-    
+
+    Write-Log "Request: $Method $url"
+    if ($body.Count -gt 0) {
+        $bodyString = ($body.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "; "
+        Write-Log "Body: $bodyString"
+    }
+
     try {
         if ($Method -eq "POST") {
             $response = Invoke-RestMethod -Uri $url -Method Post -Body $body -ContentType "application/x-www-form-urlencoded"
         } else {
-            $response = Invoke-RestMethod -Uri $url -Method Get
+            $response = Invoke-RestMethod -Uri $url -Method Get -Body $body
         }
-        Write-Log "Response: $($response | ConvertTo-Json -Compress)"
+        Write-Log "Response: $($response | ConvertTo-Json -Compress -Depth 20)"
         return $response
     } catch {
-        Write-Log "ERROR: $_"
+        Write-Log "ERROR: $($_.Exception.Message)"
         if ($_.Exception.Response) {
             $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
             $reader.BaseStream.Position = 0
             $reader.DiscardBufferedData()
-            $responseBody = $reader.ReadToEnd()
-            Write-Log "Response Body: $responseBody"
+            Write-Log "Response Body: $($reader.ReadToEnd())"
         }
-        return $null
+        throw
     }
 }
+
+function New-IntegramType {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$BaseTypeId
+    )
+
+    $response = Invoke-ApiRequest -Endpoint "_d_new" -FormData @{ t = $BaseTypeId; val = $Name }
+    if (-not $response -or -not $response.obj) {
+        throw "Не удалось создать тип '$Name'"
+    }
+    return [string]$response.obj
+}
+
+function Add-IntegramRequisite {
+    param(
+        [Parameter(Mandatory = $true)][string]$TableId,
+        [Parameter(Mandatory = $true)][string]$TypeId,
+        [string]$Alias
+    )
+
+    $response = Invoke-ApiRequest -Endpoint "_d_req/$TableId" -FormData @{ t = $TypeId }
+    if (-not $response -or -not $response.id) {
+        throw "Не удалось добавить реквизит '$TypeId' в таблицу '$TableId'"
+    }
+
+    $requisiteId = [string]$response.id
+    if ($Alias) {
+        Invoke-ApiRequest -Endpoint "_d_alias/$requisiteId" -FormData @{ val = $Alias } | Out-Null
+    }
+    return $requisiteId
+}
+
+function New-IntegramReferenceType {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetTableId
+    )
+
+    $response = Invoke-ApiRequest -Endpoint "_d_ref/$TargetTableId" -FormData @{}
+    if (-not $response -or -not $response.obj) {
+        throw "Не удалось создать ссылку на таблицу '$TargetTableId'"
+    }
+    return [string]$response.obj
+}
+
+function New-IntegramRecord {
+    param(
+        [Parameter(Mandatory = $true)][string]$TableKey,
+        [Parameter(Mandatory = $true)][hashtable]$Values
+    )
+
+    $table = $script:Tables[$TableKey]
+    $formData = @{ up = "1" }
+
+    foreach ($columnKey in $Values.Keys) {
+        $fieldId = if ($columnKey -eq $table.PrimaryKey) {
+            $table.Id
+        } else {
+            $table.Requisites[$columnKey]
+        }
+
+        if (-not $fieldId) {
+            throw "Для таблицы '$TableKey' не найден ID поля '$columnKey'"
+        }
+
+        $formData["t$fieldId"] = $Values[$columnKey]
+    }
+
+    $response = Invoke-ApiRequest -Endpoint "_m_new/$($table.Id)?full=1" -FormData $formData
+    if (-not $response -or -not $response.obj) {
+        throw "Не удалось создать запись в таблице '$($table.Name)'"
+    }
+    return [string]$response.obj
+}
+
+function Set-IntegramReference {
+    param(
+        [Parameter(Mandatory = $true)][string]$ObjectId,
+        [Parameter(Mandatory = $true)][string]$RequisiteId,
+        [Parameter(Mandatory = $true)][string]$TargetObjectId
+    )
+
+    Invoke-ApiRequest -Endpoint "_m_set/$ObjectId" -FormData @{ "t$RequisiteId" = $TargetObjectId } | Out-Null
+}
+
+Remove-Item -Path $LogPath -ErrorAction SilentlyContinue
+
+$script:AuthToken = $null
+$script:XsrfToken = $null
 
 Write-Log "========================================"
 Write-Log "Starting Perelidoz structure creation"
@@ -75,316 +170,427 @@ Write-Log "Database: $DbName"
 Write-Log "Base URL: $BaseUrl"
 Write-Log "========================================"
 
-# ========== 1. AUTH ==========
 Write-Log ""
 Write-Log "1. Authorization..."
 
-$authResponse = Invoke-ApiRequest -Endpoint "auth" -FormData @{ login = $Login; pwd = $Password }
-
-if ($authResponse -and $authResponse.token) {
-    $xsrfToken = $authResponse._xsrf
-    $authToken = $authResponse.token
-    $userId = $authResponse.id
-    
-    Write-Log "   OK Authorization successful"
-    Write-Log "   XSRF Token: $xsrfToken"
-    Write-Log "   Auth Token: $authToken"
-} else {
-    Write-Log "   ERROR: Authorization failed"
-    exit 1
+$authResponse = Invoke-ApiRequest -Endpoint "auth" -FormData @{ login = $Login; pwd = $Password } -AuthToken $null -XsrfToken $null
+if (-not $authResponse -or -not $authResponse.token -or -not $authResponse._xsrf) {
+    throw "Authorization failed"
 }
 
-# ========== 2. CREATE TABLES ==========
+$script:XsrfToken = $authResponse._xsrf
+$script:AuthToken = $authResponse.token
+Write-Log "   OK Authorization successful"
+Write-Log "   User ID: $($authResponse.id)"
+
+$tableDefinitions = [ordered]@{
+    Project = @{
+        Name = "Проект"
+        PrimaryKey = "ProjectName"
+        Columns = @(
+            @{ Key = "ProjectName"; Name = "Название проекта"; Type = "3" },
+            @{ Key = "Website"; Name = "Сайт"; Type = "8" },
+            @{ Key = "Niche"; Name = "Ниша"; Type = "3" },
+            @{ Key = "Status"; Name = "Статус"; Type = "3" },
+            @{ Key = "CreatedDate"; Name = "Дата создания"; Type = "9" },
+            @{ Key = "Budget"; Name = "Бюджет"; Type = "13" }
+        )
+    }
+    Client = @{
+        Name = "Клиент"
+        PrimaryKey = "ClientName"
+        Columns = @(
+            @{ Key = "ClientName"; Name = "Название клиента"; Type = "3" },
+            @{ Key = "ContactName"; Name = "Контактное лицо"; Type = "3" },
+            @{ Key = "Telegram"; Name = "Telegram"; Type = "3" },
+            @{ Key = "Email"; Name = "Email"; Type = "8" },
+            @{ Key = "Phone"; Name = "Телефон"; Type = "3" },
+            @{ Key = "Position"; Name = "Должность"; Type = "3" }
+        )
+    }
+    Payment = @{
+        Name = "Платёж"
+        PrimaryKey = "PaymentNumber"
+        Columns = @(
+            @{ Key = "PaymentNumber"; Name = "Номер платежа"; Type = "3" },
+            @{ Key = "Amount"; Name = "Сумма"; Type = "13" },
+            @{ Key = "PaymentDate"; Name = "Дата оплаты"; Type = "9" },
+            @{ Key = "PaymentStatus"; Name = "Статус платежа"; Type = "3" }
+        )
+    }
+    Task = @{
+        Name = "Задача"
+        PrimaryKey = "TaskName"
+        Columns = @(
+            @{ Key = "TaskName"; Name = "Название задачи"; Type = "12" },
+            @{ Key = "TaskType"; Name = "Тип задачи"; Type = "3" },
+            @{ Key = "TaskStatus"; Name = "Статус"; Type = "3" },
+            @{ Key = "Deadline"; Name = "Дедлайн"; Type = "9" },
+            @{ Key = "Priority"; Name = "Приоритет"; Type = "3" },
+            @{ Key = "Reward"; Name = "Награда"; Type = "13" }
+        )
+    }
+    AudioFile = @{
+        Name = "Аудиофайл"
+        PrimaryKey = "FileName"
+        Columns = @(
+            @{ Key = "FileName"; Name = "Название файла"; Type = "3" },
+            @{ Key = "MeetingType"; Name = "Тип встречи"; Type = "3" },
+            @{ Key = "ProcessingStatus"; Name = "Статус обработки"; Type = "3" },
+            @{ Key = "Duration"; Name = "Длительность"; Type = "13" },
+            @{ Key = "File"; Name = "Файл"; Type = "10" }
+        )
+    }
+    Transcript = @{
+        Name = "Транскрипт"
+        PrimaryKey = "TranscriptName"
+        Columns = @(
+            @{ Key = "TranscriptName"; Name = "Название транскрипта"; Type = "3" },
+            @{ Key = "Text"; Name = "Текст"; Type = "12" },
+            @{ Key = "CreatedDate"; Name = "Дата создания"; Type = "9" }
+        )
+    }
+    Strategy = @{
+        Name = "Стратегия"
+        PrimaryKey = "StrategyVersion"
+        Columns = @(
+            @{ Key = "StrategyVersion"; Name = "Версия стратегии"; Type = "3" },
+            @{ Key = "GoogleDocUrl"; Name = "Ссылка на Google Doc"; Type = "8" },
+            @{ Key = "Status"; Name = "Статус"; Type = "3" },
+            @{ Key = "GeneratedDate"; Name = "Дата генерации"; Type = "9" }
+        )
+    }
+    OperationalPlan = @{
+        Name = "Операционный план"
+        PrimaryKey = "PlanVersion"
+        Columns = @(
+            @{ Key = "PlanVersion"; Name = "Версия плана"; Type = "3" },
+            @{ Key = "Period"; Name = "Период"; Type = "3" },
+            @{ Key = "Status"; Name = "Статус"; Type = "3" },
+            @{ Key = "CreatedDate"; Name = "Дата создания"; Type = "9" }
+        )
+    }
+    Forecast = @{
+        Name = "Прогноз"
+        PrimaryKey = "ForecastName"
+        Columns = @(
+            @{ Key = "ForecastName"; Name = "Название прогноза"; Type = "3" },
+            @{ Key = "Period"; Name = "Период"; Type = "3" },
+            @{ Key = "Revenue"; Name = "Выручка"; Type = "13" },
+            @{ Key = "Probability"; Name = "Вероятность"; Type = "14" }
+        )
+    }
+    Upsell = @{
+        Name = "Допродажа"
+        PrimaryKey = "UpsellNumber"
+        Columns = @(
+            @{ Key = "UpsellNumber"; Name = "Номер допродажи"; Type = "3" },
+            @{ Key = "Amount"; Name = "Сумма"; Type = "13" },
+            @{ Key = "Status"; Name = "Статус"; Type = "3" },
+            @{ Key = "Date"; Name = "Дата"; Type = "9" }
+        )
+    }
+    HealthScore = @{
+        Name = "Health Score"
+        PrimaryKey = "ScoreKey"
+        Columns = @(
+            @{ Key = "ScoreKey"; Name = "Проект + Дата оценки"; Type = "3" },
+            @{ Key = "ScoreDate"; Name = "Дата оценки"; Type = "9" },
+            @{ Key = "Score"; Name = "Score"; Type = "13" },
+            @{ Key = "OverdueTasks"; Name = "Просроченных задач"; Type = "13" },
+            @{ Key = "Comment"; Name = "Комментарий"; Type = "12" }
+        )
+    }
+    TeamBalance = @{
+        Name = "Баланс сотрудника"
+        PrimaryKey = "EmployeeMonth"
+        Columns = @(
+            @{ Key = "EmployeeMonth"; Name = "Сотрудник + Месяц"; Type = "3" },
+            @{ Key = "Month"; Name = "Месяц"; Type = "3" },
+            @{ Key = "CoinBalance"; Name = "Баланс монеток"; Type = "13" },
+            @{ Key = "PaidRubles"; Name = "Выплачено рублей"; Type = "13" }
+        )
+    }
+    Payout = @{
+        Name = "Выплата"
+        PrimaryKey = "PayoutNumber"
+        Columns = @(
+            @{ Key = "PayoutNumber"; Name = "Номер выплаты"; Type = "3" },
+            @{ Key = "Amount"; Name = "Сумма"; Type = "13" },
+            @{ Key = "PayoutDate"; Name = "Дата выплаты"; Type = "9" },
+            @{ Key = "Status"; Name = "Статус"; Type = "3" }
+        )
+    }
+    Integration = @{
+        Name = "Интеграция"
+        PrimaryKey = "IntegrationName"
+        Columns = @(
+            @{ Key = "IntegrationName"; Name = "Название интеграции"; Type = "3" },
+            @{ Key = "Service"; Name = "Сервис"; Type = "3" },
+            @{ Key = "Status"; Name = "Статус"; Type = "3" },
+            @{ Key = "ApiKey"; Name = "API ключ"; Type = "6" }
+        )
+    }
+    AIPrompt = @{
+        Name = "AI промпт"
+        PrimaryKey = "PromptName"
+        Columns = @(
+            @{ Key = "PromptName"; Name = "Название промпта"; Type = "3" },
+            @{ Key = "PromptText"; Name = "Текст промпта"; Type = "12" },
+            @{ Key = "Purpose"; Name = "Назначение"; Type = "3" },
+            @{ Key = "Active"; Name = "Активен"; Type = "11" }
+        )
+    }
+    SystemLog = @{
+        Name = "Системный лог"
+        PrimaryKey = "EventName"
+        Columns = @(
+            @{ Key = "EventName"; Name = "Событие"; Type = "3" },
+            @{ Key = "EventDate"; Name = "Дата и время"; Type = "4" },
+            @{ Key = "Level"; Name = "Уровень"; Type = "3" },
+            @{ Key = "Message"; Name = "Сообщение"; Type = "12" }
+        )
+    }
+    Competitor = @{
+        Name = "Конкурент"
+        PrimaryKey = "CompetitorName"
+        Columns = @(
+            @{ Key = "CompetitorName"; Name = "Название конкурента"; Type = "3" },
+            @{ Key = "Website"; Name = "Сайт"; Type = "8" },
+            @{ Key = "Weaknesses"; Name = "Слабые места"; Type = "12" },
+            @{ Key = "DiscoveryDate"; Name = "Дата обнаружения"; Type = "9" }
+        )
+    }
+}
+
+$referenceDefinitions = @(
+    @{ Source = "Project"; Target = "Client"; Key = "Client"; Alias = "Клиент" },
+    @{ Source = "Project"; Target = "User"; Key = "Responsible"; Alias = "Ответственный" },
+    @{ Source = "Client"; Target = "Project"; Key = "Project"; Alias = "Проект" },
+    @{ Source = "Payment"; Target = "Project"; Key = "Project"; Alias = "Проект" },
+    @{ Source = "Task"; Target = "Project"; Key = "Project"; Alias = "Проект" },
+    @{ Source = "Task"; Target = "User"; Key = "Executor"; Alias = "Исполнитель" },
+    @{ Source = "AudioFile"; Target = "Project"; Key = "Project"; Alias = "Проект" },
+    @{ Source = "Transcript"; Target = "AudioFile"; Key = "AudioFile"; Alias = "Аудиофайл" },
+    @{ Source = "Strategy"; Target = "Project"; Key = "Project"; Alias = "Проект" },
+    @{ Source = "OperationalPlan"; Target = "Project"; Key = "Project"; Alias = "Проект" },
+    @{ Source = "Forecast"; Target = "Project"; Key = "Project"; Alias = "Проект" },
+    @{ Source = "Upsell"; Target = "Project"; Key = "Project"; Alias = "Проект" },
+    @{ Source = "HealthScore"; Target = "Project"; Key = "Project"; Alias = "Проект" },
+    @{ Source = "TeamBalance"; Target = "User"; Key = "Employee"; Alias = "Сотрудник" },
+    @{ Source = "Payout"; Target = "User"; Key = "Employee"; Alias = "Сотрудник" },
+    @{ Source = "SystemLog"; Target = "User"; Key = "User"; Alias = "Пользователь" },
+    @{ Source = "Competitor"; Target = "Project"; Key = "Project"; Alias = "Проект" }
+)
+
+$script:Tables = @{}
+
 Write-Log ""
-Write-Log "2. Creating tables..."
+Write-Log "2. Creating tables and columns..."
 
-$tables = @(
-    "Users", 
-    "Projects", 
-    "Clients", 
-    "Payments", 
-    "Tasks",
-    "AudioFiles", 
-    "Transcripts", 
-    "Strategies", 
-    "OperationalPlans",
-    "Forecasts", 
-    "Upsells", 
-    "HealthScore", 
-    "TeamBalances",
-    "Payouts", 
-    "Integrations", 
-    "AIPrompts", 
-    "SystemLogs", 
-    "Competitors"
-)
-
-$tableIds = @{}
-
-foreach ($table in $tables) {
-    $response = Invoke-ApiRequest -Endpoint "_d_new" -FormData @{ t = "3"; val = $table } -AuthToken $authToken -XsrfToken $xsrfToken
-    if ($response -and $response.obj) {
-        $tableIds[$table] = $response.obj
-        Write-Log "   OK Created table: $table (ID: $($response.obj))"
-    } else {
-        Write-Log "   ERROR Creating table: $table"
+foreach ($tableKey in $tableDefinitions.Keys) {
+    $definition = $tableDefinitions[$tableKey]
+    $tableId = New-IntegramType -Name $definition.Name -BaseTypeId "3"
+    $script:Tables[$tableKey] = @{
+        Id = $tableId
+        Name = $definition.Name
+        PrimaryKey = $definition.PrimaryKey
+        Requisites = @{}
     }
-    Start-Sleep -Milliseconds 500
+
+    Write-Log "   OK Created table: $($definition.Name) (ID: $tableId)"
+
+    foreach ($column in $definition.Columns) {
+        if ($column.Key -eq $definition.PrimaryKey) {
+            Write-Log "      First column: $($column.Name) uses table ID $tableId"
+            continue
+        }
+
+        $columnTypeId = New-IntegramType -Name $column.Name -BaseTypeId $column.Type
+        $requisiteId = Add-IntegramRequisite -TableId $tableId -TypeId $columnTypeId
+        $script:Tables[$tableKey].Requisites[$column.Key] = $requisiteId
+        Write-Log "      OK Column: $($column.Name) (type $($column.Type), req ID: $requisiteId)"
+    }
 }
 
-# ========== 3. ADD COLUMNS ==========
-Write-Log ""
-Write-Log "3. Adding columns to Users..."
-
-# Columns for Users
-$userColumns = @(
-    @{name="Login"; type="3"},
-    @{name="Role"; type="3"},
-    @{name="Email"; type="8"},
-    @{name="Phone"; type="3"},
-    @{name="FullName"; type="3"},
-    @{name="Photo"; type="10"},
-    @{name="RegDate"; type="9"},
-    @{name="Active"; type="11"}
-)
-
-foreach ($col in $userColumns) {
-    $colResponse = Invoke-ApiRequest -Endpoint "_d_new" -FormData @{ t = $col.type; val = $col.name } -AuthToken $authToken -XsrfToken $xsrfToken
-    if ($colResponse -and $colResponse.obj) {
-        $reqResponse = Invoke-ApiRequest -Endpoint "_d_req/$($tableIds["Users"])" -FormData @{ t = $colResponse.obj } -AuthToken $authToken -XsrfToken $xsrfToken
-        Write-Log "   OK Column: $($col.name) -> Users"
-    }
-    Start-Sleep -Milliseconds 200
+$script:Tables["User"] = @{
+    Id = "18"
+    Name = "Пользователь"
+    PrimaryKey = "Login"
+    Requisites = @{}
 }
 
 Write-Log ""
-Write-Log "3b. Adding columns to Projects..."
+Write-Log "3. Creating reference links..."
 
-# Columns for Projects
-$projectColumns = @(
-    @{name="ProjectName"; type="3"},
-    @{name="Website"; type="3"},
-    @{name="Niche"; type="3"},
-    @{name="Status"; type="3"},
-    @{name="CreatedDate"; type="9"},
-    @{name="Budget"; type="13"}
-)
-
-foreach ($col in $projectColumns) {
-    $colResponse = Invoke-ApiRequest -Endpoint "_d_new" -FormData @{ t = $col.type; val = $col.name } -AuthToken $authToken -XsrfToken $xsrfToken
-    if ($colResponse -and $colResponse.obj) {
-        $reqResponse = Invoke-ApiRequest -Endpoint "_d_req/$($tableIds["Projects"])" -FormData @{ t = $colResponse.obj } -AuthToken $authToken -XsrfToken $xsrfToken
-        Write-Log "   OK Column: $($col.name) -> Projects"
+foreach ($ref in $referenceDefinitions) {
+    if (-not $script:Tables.ContainsKey($ref.Source)) {
+        throw "Не найдена таблица-источник '$($ref.Source)' для ссылки '$($ref.Alias)'"
     }
-    Start-Sleep -Milliseconds 200
-}
-
-Write-Log ""
-Write-Log "3c. Adding columns to Clients..."
-
-# Columns for Clients
-$clientColumns = @(
-    @{name="ContactName"; type="3"},
-    @{name="Telegram"; type="3"},
-    @{name="Email"; type="8"},
-    @{name="Phone"; type="3"},
-    @{name="Position"; type="3"}
-)
-
-foreach ($col in $clientColumns) {
-    $colResponse = Invoke-ApiRequest -Endpoint "_d_new" -FormData @{ t = $col.type; val = $col.name } -AuthToken $authToken -XsrfToken $xsrfToken
-    if ($colResponse -and $colResponse.obj) {
-        $reqResponse = Invoke-ApiRequest -Endpoint "_d_req/$($tableIds["Clients"])" -FormData @{ t = $colResponse.obj } -AuthToken $authToken -XsrfToken $xsrfToken
-        Write-Log "   OK Column: $($col.name) -> Clients"
+    if (-not $script:Tables.ContainsKey($ref.Target)) {
+        throw "Не найдена целевая таблица '$($ref.Target)' для ссылки '$($ref.Alias)'"
     }
-    Start-Sleep -Milliseconds 200
+
+    $refTypeId = New-IntegramReferenceType -TargetTableId $script:Tables[$ref.Target].Id
+    $reqId = Add-IntegramRequisite -TableId $script:Tables[$ref.Source].Id -TypeId $refTypeId -Alias $ref.Alias
+    $script:Tables[$ref.Source].Requisites[$ref.Key] = $reqId
+    Write-Log "   OK Link: $($script:Tables[$ref.Source].Name).$($ref.Alias) -> $($script:Tables[$ref.Target].Name) (req ID: $reqId)"
 }
 
-Write-Log ""
-Write-Log "3d. Adding columns to Payments..."
+if (-not $SkipSeedData) {
+    Write-Log ""
+    Write-Log "4. Adding test data..."
 
-# Columns for Payments
-$paymentColumns = @(
-    @{name="PaymentNumber"; type="3"},
-    @{name="Amount"; type="13"},
-    @{name="PaymentDate"; type="9"},
-    @{name="PaymentStatus"; type="3"}
-)
+    $projectIds = @{}
+    $projectRows = @(
+        @{ ProjectName = "Альфа"; Website = "alfa.ru"; Niche = "B2B услуги"; Status = "active"; CreatedDate = "2026-01-10"; Budget = "1000000" },
+        @{ ProjectName = "Бета"; Website = "beta.store"; Niche = "E-commerce"; Status = "active"; CreatedDate = "2026-02-15"; Budget = "500000" },
+        @{ ProjectName = "ТехноСтрой"; Website = "tehnostroy.ru"; Niche = "Строительство"; Status = "needs_review"; CreatedDate = "2026-03-01"; Budget = "600000" }
+    )
 
-foreach ($col in $paymentColumns) {
-    $colResponse = Invoke-ApiRequest -Endpoint "_d_new" -FormData @{ t = $col.type; val = $col.name } -AuthToken $authToken -XsrfToken $xsrfToken
-    if ($colResponse -and $colResponse.obj) {
-        $reqResponse = Invoke-ApiRequest -Endpoint "_d_req/$($tableIds["Payments"])" -FormData @{ t = $colResponse.obj } -AuthToken $authToken -XsrfToken $xsrfToken
-        Write-Log "   OK Column: $($col.name) -> Payments"
+    foreach ($project in $projectRows) {
+        $projectIds[$project.ProjectName] = New-IntegramRecord -TableKey "Project" -Values $project
+        Write-Log "   OK Project: $($project.ProjectName)"
     }
-    Start-Sleep -Milliseconds 200
-}
 
-Write-Log ""
-Write-Log "3e. Adding columns to Tasks..."
+    $clientIds = @{}
+    $clientRows = @(
+        @{ ClientName = "ООО Альфа"; ContactName = "Иван Иванов"; Telegram = "@ivan_alpha"; Email = "ivan@alfa.ru"; Phone = "+7(999)111-22-33"; Position = "CEO"; ProjectName = "Альфа" },
+        @{ ClientName = "ИП Бета"; ContactName = "Анна Петрова"; Telegram = "@anna_beta"; Email = "anna@beta.store"; Phone = "+7(999)444-55-66"; Position = "Founder"; ProjectName = "Бета" }
+    )
 
-# Columns for Tasks
-$taskColumns = @(
-    @{name="TaskName"; type="3"},
-    @{name="TaskType"; type="3"},
-    @{name="TaskStatus"; type="3"},
-    @{name="Deadline"; type="9"},
-    @{name="Priority"; type="3"},
-    @{name="Reward"; type="13"}
-)
-
-foreach ($col in $taskColumns) {
-    $colResponse = Invoke-ApiRequest -Endpoint "_d_new" -FormData @{ t = $col.type; val = $col.name } -AuthToken $authToken -XsrfToken $xsrfToken
-    if ($colResponse -and $colResponse.obj) {
-        $reqResponse = Invoke-ApiRequest -Endpoint "_d_req/$($tableIds["Tasks"])" -FormData @{ t = $colResponse.obj } -AuthToken $authToken -XsrfToken $xsrfToken
-        Write-Log "   OK Column: $($col.name) -> Tasks"
+    foreach ($client in $clientRows) {
+        $projectName = $client.ProjectName
+        $values = @{
+            ClientName = $client.ClientName
+            ContactName = $client.ContactName
+            Telegram = $client.Telegram
+            Email = $client.Email
+            Phone = $client.Phone
+            Position = $client.Position
+        }
+        $clientId = New-IntegramRecord -TableKey "Client" -Values $values
+        $clientIds[$client.ClientName] = $clientId
+        Set-IntegramReference -ObjectId $clientId -RequisiteId $script:Tables["Client"].Requisites["Project"] -TargetObjectId $projectIds[$projectName]
+        Write-Log "   OK Client: $($client.ClientName)"
     }
-    Start-Sleep -Milliseconds 200
-}
 
-# ========== 4. CREATE LINKS ==========
-Write-Log ""
-Write-Log "4. Creating reference links..."
+    $payments = @(
+        @{ PaymentNumber = "ПЛ-2026-001"; Amount = "50000"; PaymentDate = "2026-01-12"; PaymentStatus = "completed"; ProjectName = "Альфа" },
+        @{ PaymentNumber = "ПЛ-2026-002"; Amount = "100000"; PaymentDate = "2026-02-01"; PaymentStatus = "completed"; ProjectName = "Альфа" },
+        @{ PaymentNumber = "ПЛ-2026-003"; Amount = "30000"; PaymentDate = "2026-02-20"; PaymentStatus = "pending"; ProjectName = "Бета" }
+    )
 
-# Создаём ссылочные термины
-$refs = @(
-    @{name="LinkToProject"; target="Projects"},
-    @{name="LinkToUser"; target="Users"},
-    @{name="LinkToClient"; target="Clients"}
-)
-
-$refIds = @{}
-
-foreach ($ref in $refs) {
-    $refResponse = Invoke-ApiRequest -Endpoint "_d_ref/$($tableIds[$ref.target])" -FormData @{} -AuthToken $authToken -XsrfToken $xsrfToken
-    if ($refResponse -and $refResponse.obj) {
-        $refIds[$ref.name] = $refResponse.obj
-        Write-Log "   OK Created link: $($ref.name) (ID: $($refResponse.obj))"
+    foreach ($payment in $payments) {
+        $projectName = $payment.ProjectName
+        $values = @{
+            PaymentNumber = $payment.PaymentNumber
+            Amount = $payment.Amount
+            PaymentDate = $payment.PaymentDate
+            PaymentStatus = $payment.PaymentStatus
+        }
+        $paymentId = New-IntegramRecord -TableKey "Payment" -Values $values
+        Set-IntegramReference -ObjectId $paymentId -RequisiteId $script:Tables["Payment"].Requisites["Project"] -TargetObjectId $projectIds[$projectName]
+        Write-Log "   OK Payment: $($payment.PaymentNumber)"
     }
-    Start-Sleep -Milliseconds 200
-}
 
-# Добавляем ссылки как колонки
-Write-Log ""
-Write-Log "4b. Adding links as columns..."
+    $tasks = @(
+        @{ TaskName = "Настроить рекламу в Яндекс"; TaskType = "manual"; TaskStatus = "done"; Deadline = "2026-01-15"; Priority = "high"; Reward = "500"; ProjectName = "Альфа" },
+        @{ TaskName = "Собрать семантическое ядро"; TaskType = "manual"; TaskStatus = "in_progress"; Deadline = "2026-01-25"; Priority = "medium"; Reward = "300"; ProjectName = "Альфа" },
+        @{ TaskName = "Подготовить отчёт"; TaskType = "manual"; TaskStatus = "open"; Deadline = "2026-03-01"; Priority = "low"; Reward = "400"; ProjectName = "Бета" }
+    )
 
-if ($refIds["LinkToProject"]) {
-    Invoke-ApiRequest -Endpoint "_d_req/$($tableIds["Clients"])" -FormData @{ t = $refIds["LinkToProject"] } -AuthToken $authToken -XsrfToken $xsrfToken
-    Write-Log "   OK Link to Project -> Clients"
-    
-    Invoke-ApiRequest -Endpoint "_d_req/$($tableIds["Payments"])" -FormData @{ t = $refIds["LinkToProject"] } -AuthToken $authToken -XsrfToken $xsrfToken
-    Write-Log "   OK Link to Project -> Payments"
-    
-    Invoke-ApiRequest -Endpoint "_d_req/$($tableIds["Tasks"])" -FormData @{ t = $refIds["LinkToProject"] } -AuthToken $authToken -XsrfToken $xsrfToken
-    Write-Log "   OK Link to Project -> Tasks"
-    
-    Invoke-ApiRequest -Endpoint "_d_req/$($tableIds["Forecasts"])" -FormData @{ t = $refIds["LinkToProject"] } -AuthToken $authToken -XsrfToken $xsrfToken
-    Write-Log "   OK Link to Project -> Forecasts"
-    
-    Invoke-ApiRequest -Endpoint "_d_req/$($tableIds["Upsells"])" -FormData @{ t = $refIds["LinkToProject"] } -AuthToken $authToken -XsrfToken $xsrfToken
-    Write-Log "   OK Link to Project -> Upsells"
-    
-    Invoke-ApiRequest -Endpoint "_d_req/$($tableIds["HealthScore"])" -FormData @{ t = $refIds["LinkToProject"] } -AuthToken $authToken -XsrfToken $xsrfToken
-    Write-Log "   OK Link to Project -> HealthScore"
-    
-    Invoke-ApiRequest -Endpoint "_d_req/$($tableIds["Competitors"])" -FormData @{ t = $refIds["LinkToProject"] } -AuthToken $authToken -XsrfToken $xsrfToken
-    Write-Log "   OK Link to Project -> Competitors"
-}
-
-if ($refIds["LinkToUser"]) {
-    Invoke-ApiRequest -Endpoint "_d_req/$($tableIds["Projects"])" -FormData @{ t = $refIds["LinkToUser"] } -AuthToken $authToken -XsrfToken $xsrfToken
-    Write-Log "   OK Link to User -> Projects (Responsible)"
-    
-    Invoke-ApiRequest -Endpoint "_d_req/$($tableIds["Tasks"])" -FormData @{ t = $refIds["LinkToUser"] } -AuthToken $authToken -XsrfToken $xsrfToken
-    Write-Log "   OK Link to User -> Tasks (Executor)"
-    
-    Invoke-ApiRequest -Endpoint "_d_req/$($tableIds["TeamBalances"])" -FormData @{ t = $refIds["LinkToUser"] } -AuthToken $authToken -XsrfToken $xsrfToken
-    Write-Log "   OK Link to User -> TeamBalances"
-    
-    Invoke-ApiRequest -Endpoint "_d_req/$($tableIds["Payouts"])" -FormData @{ t = $refIds["LinkToUser"] } -AuthToken $authToken -XsrfToken $xsrfToken
-    Write-Log "   OK Link to User -> Payouts"
-}
-
-if ($refIds["LinkToClient"]) {
-    Invoke-ApiRequest -Endpoint "_d_req/$($tableIds["Projects"])" -FormData @{ t = $refIds["LinkToClient"] } -AuthToken $authToken -XsrfToken $xsrfToken
-    Write-Log "   OK Link to Client -> Projects"
-}
-
-# ========== 5. ADD TEST DATA ==========
-Write-Log ""
-Write-Log "5. Adding test data..."
-
-# Add users
-$users = @(
-    @{Login="victor_g"; Role="founder"; Email="victor@perelidoz.ru"; Phone="+7(999)123-45-01"; FullName="Viktor Glazkov"; RegDate="15.01.2026"; Active="1"},
-    @{Login="vlad_k"; Role="founder"; Email="vlad@perelidoz.ru"; Phone="+7(999)123-45-02"; FullName="Vladislav Kuznetsov"; RegDate="15.01.2026"; Active="1"},
-    @{Login="anna_m"; Role="team"; Email="anna@perelidoz.ru"; Phone="+7(999)123-45-10"; FullName="Anna Marketologova"; RegDate="01.02.2026"; Active="1"},
-    @{Login="petr_t"; Role="team"; Email="petr@perelidoz.ru"; Phone="+7(999)123-45-11"; FullName="Petr Trafficov"; RegDate="10.02.2026"; Active="1"}
-)
-
-foreach ($user in $users) {
-    $formData = @{ up = "1" }
-    $i = 1
-    foreach ($key in $user.Keys) {
-        $formData["t$i"] = $user[$key]
-        $i++
+    foreach ($task in $tasks) {
+        $projectName = $task.ProjectName
+        $values = @{
+            TaskName = $task.TaskName
+            TaskType = $task.TaskType
+            TaskStatus = $task.TaskStatus
+            Deadline = $task.Deadline
+            Priority = $task.Priority
+            Reward = $task.Reward
+        }
+        $taskId = New-IntegramRecord -TableKey "Task" -Values $values
+        Set-IntegramReference -ObjectId $taskId -RequisiteId $script:Tables["Task"].Requisites["Project"] -TargetObjectId $projectIds[$projectName]
+        Write-Log "   OK Task: $($task.TaskName)"
     }
-    $response = Invoke-ApiRequest -Endpoint "_m_new/$($tableIds["Users"])" -FormData $formData -AuthToken $authToken -XsrfToken $xsrfToken
-    Write-Log "   OK Added user: $($user.FullName)"
-    Start-Sleep -Milliseconds 200
-}
 
-# Add projects
-$projects = @(
-    @{ProjectName="Romashka"; Website="romashka.ru"; Niche="B2B services"; Status="success"; CreatedDate="10.02.2026"; Budget="85000"},
-    @{ProjectName="Ivanov"; Website="ivanov.store"; Niche="E-commerce"; Status="artifacts_transferred"; CreatedDate="20.02.2026"; Budget="60000"},
-    @{ProjectName="TekhnoStroy"; Website="tehnostroy.ru"; Niche="Construction"; Status="needs_review"; CreatedDate="01.03.2026"; Budget="60000"}
-)
+    $strategies = @(
+        @{ StrategyVersion = "v1.0 Альфа"; GoogleDocUrl = "https://docs.google.com/document/d/example-alpha-v1"; Status = "approved"; GeneratedDate = "2026-01-20"; ProjectName = "Альфа" },
+        @{ StrategyVersion = "v2.0 Альфа"; GoogleDocUrl = "https://docs.google.com/document/d/example-alpha-v2"; Status = "draft"; GeneratedDate = "2026-03-15"; ProjectName = "Альфа" },
+        @{ StrategyVersion = "v1.0 Бета"; GoogleDocUrl = "https://docs.google.com/document/d/example-beta-v1"; Status = "approved"; GeneratedDate = "2026-02-25"; ProjectName = "Бета" }
+    )
 
-foreach ($project in $projects) {
-    $formData = @{ up = "1" }
-    $i = 1
-    foreach ($key in $project.Keys) {
-        $formData["t$i"] = $project[$key]
-        $i++
+    foreach ($strategy in $strategies) {
+        $projectName = $strategy.ProjectName
+        $values = @{
+            StrategyVersion = $strategy.StrategyVersion
+            GoogleDocUrl = $strategy.GoogleDocUrl
+            Status = $strategy.Status
+            GeneratedDate = $strategy.GeneratedDate
+        }
+        $strategyId = New-IntegramRecord -TableKey "Strategy" -Values $values
+        Set-IntegramReference -ObjectId $strategyId -RequisiteId $script:Tables["Strategy"].Requisites["Project"] -TargetObjectId $projectIds[$projectName]
+        Write-Log "   OK Strategy: $($strategy.StrategyVersion)"
     }
-    $response = Invoke-ApiRequest -Endpoint "_m_new/$($tableIds["Projects"])" -FormData $formData -AuthToken $authToken -XsrfToken $xsrfToken
-    Write-Log "   OK Added project: $($project.ProjectName)"
-    Start-Sleep -Milliseconds 200
-}
 
-# Add tasks
-$tasks = @(
-    @{TaskName="Collect UBT channels of competitors"; TaskType="manual"; TaskStatus="done"; Deadline="15.03.2026"; Priority="high"; Reward="500"},
-    @{TaskName="Set up Telegram newsletter"; TaskType="manual"; TaskStatus="in_progress"; Deadline="20.04.2026"; Priority="medium"; Reward="300"},
-    @{TaskName="Analyze Yandex Metrica"; TaskType="manual"; TaskStatus="review"; Deadline="10.04.2026"; Priority="high"; Reward="400"}
-)
+    $scores = @(
+        @{ ScoreKey = "Альфа - 2026-04-14"; ScoreDate = "2026-04-14"; Score = "85"; OverdueTasks = "1"; Comment = "Хорошая динамика"; ProjectName = "Альфа" },
+        @{ ScoreKey = "Альфа - 2026-04-13"; ScoreDate = "2026-04-13"; Score = "90"; OverdueTasks = "0"; Comment = "Отлично"; ProjectName = "Альфа" },
+        @{ ScoreKey = "Бета - 2026-04-14"; ScoreDate = "2026-04-14"; Score = "50"; OverdueTasks = "2"; Comment = "Требует внимания"; ProjectName = "Бета" }
+    )
 
-foreach ($task in $tasks) {
-    $formData = @{ up = "1" }
-    $i = 1
-    foreach ($key in $task.Keys) {
-        $formData["t$i"] = $task[$key]
-        $i++
+    foreach ($score in $scores) {
+        $projectName = $score.ProjectName
+        $values = @{
+            ScoreKey = $score.ScoreKey
+            ScoreDate = $score.ScoreDate
+            Score = $score.Score
+            OverdueTasks = $score.OverdueTasks
+            Comment = $score.Comment
+        }
+        $scoreId = New-IntegramRecord -TableKey "HealthScore" -Values $values
+        Set-IntegramReference -ObjectId $scoreId -RequisiteId $script:Tables["HealthScore"].Requisites["Project"] -TargetObjectId $projectIds[$projectName]
+        Write-Log "   OK Health Score: $($score.ScoreKey)"
     }
-    $response = Invoke-ApiRequest -Endpoint "_m_new/$($tableIds["Tasks"])" -FormData $formData -AuthToken $authToken -XsrfToken $xsrfToken
-    Write-Log "   OK Added task: $($task.TaskName)"
-    Start-Sleep -Milliseconds 200
+
+    $competitors = @(
+        @{ CompetitorName = "Маркетинг Про"; Website = "marketing-pro.ru"; Weaknesses = "Нет УБТ, дорогой трафик"; DiscoveryDate = "2026-02-20"; ProjectName = "Альфа" },
+        @{ CompetitorName = "Лидоген"; Website = "lider-gen.ru"; Weaknesses = "Слабые кейсы в B2B"; DiscoveryDate = "2026-02-20"; ProjectName = "Альфа" }
+    )
+
+    foreach ($competitor in $competitors) {
+        $projectName = $competitor.ProjectName
+        $values = @{
+            CompetitorName = $competitor.CompetitorName
+            Website = $competitor.Website
+            Weaknesses = $competitor.Weaknesses
+            DiscoveryDate = $competitor.DiscoveryDate
+        }
+        $competitorId = New-IntegramRecord -TableKey "Competitor" -Values $values
+        Set-IntegramReference -ObjectId $competitorId -RequisiteId $script:Tables["Competitor"].Requisites["Project"] -TargetObjectId $projectIds[$projectName]
+        Write-Log "   OK Competitor: $($competitor.CompetitorName)"
+    }
 }
 
-# ========== 6. FINAL INFO ==========
 Write-Log ""
 Write-Log "========================================"
 Write-Log "COMPLETE!"
 Write-Log "========================================"
-Write-Log "Table IDs for further use:"
-foreach ($table in $tables) {
-    if ($tableIds[$table]) {
-        Write-Log "   $table = $($tableIds[$table])"
+Write-Log "Table IDs:"
+foreach ($tableKey in $script:Tables.Keys | Sort-Object) {
+    $table = $script:Tables[$tableKey]
+    Write-Log "   $($table.Name) ($tableKey) = $($table.Id)"
+}
+
+Write-Log ""
+Write-Log "Requisite IDs:"
+foreach ($tableKey in $script:Tables.Keys | Sort-Object) {
+    $table = $script:Tables[$tableKey]
+    foreach ($reqKey in $table.Requisites.Keys | Sort-Object) {
+        Write-Log "   $($table.Name).$reqKey = $($table.Requisites[$reqKey])"
     }
 }
+
 Write-Log ""
-Write-Log "Xsrf Token: $xsrfToken"
-Write-Log "Auth Token: $authToken"
-Write-Log ""
-Write-Log "Log saved to: api_log.txt"
+Write-Log "Log saved to: $LogPath"
