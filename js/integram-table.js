@@ -6353,12 +6353,20 @@ class IntegramTable{
 
                 const rect = tableWrapper.getBoundingClientRect();
 
-                // Use the same threshold as the scroll listener: load when the invisible part
-                // below the fold is less than half the viewport height (issue #1942).
-                // This covers: table fits on screen, table bottom exactly at viewport edge,
-                // and user already scrolled to bottom with no further scroll possible.
                 const belowFold = rect.bottom - window.innerHeight;
-                if (belowFold < window.innerHeight / 2) {
+
+                // Fill genuinely empty space, including the exact viewport edge case from issue #1942.
+                if (belowFold <= 0) {
+                    this.loadData(true);  // Append mode
+                    return;
+                }
+
+                // After user scroll, keep the same preload threshold as the scroll listener.
+                // The scrollY guard prevents initial render from eagerly extending the page
+                // before the user can scroll the current records (issue #1946).
+                const scrollThreshold = window.innerHeight / 2;
+                const scrolledToBottom = window.scrollY > 0 && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - scrollThreshold;
+                if (scrolledToBottom) {
                     this.loadData(true);  // Append mode
                 }
             }, 100);  // Small delay to ensure DOM is updated
@@ -6543,7 +6551,6 @@ class IntegramTable{
                 });
             });
         }
-
         showFilterTypeMenu(target, columnId) {
             const column = this.columns.find(c => c.id === columnId);
             const format = column.format || 'SHORT';
