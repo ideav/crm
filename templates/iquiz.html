@@ -887,25 +887,37 @@ function renderFormPage(){
 }
 
 function submitForm(){
-    var vars=new FormData(),e='',o;
+    saveCurrentPageValues(); // сохранить значения последней страницы перед отправкой
+    var vars=new FormData(),e='',fld,el,val;
     $('.iq-fld').css('border','');
-    $('.iq-fld').each(function(){
-        o=$(this).closest('[order]').attr('order');
-        if(iquiz.form[o].base==='FILE'){
-            if(this.files[0])
-                vars.append(this.id,this.files[0]);
+    for(var o=0;o<iquiz.form.length;o++){
+        fld=iquiz.form[o];
+        if(fld.isPageBreak) continue;
+        el=document.getElementById('t'+fld.id);
+        if(fld.base==='FILE'){
+            if(el&&el.files[0])
+                vars.append('t'+fld.id,el.files[0]);
         }
-        else if(iquiz.form[o].base==='BOOLEAN'&&!iquiz.form[o].hidden&&iquiz.form[o].required&&!this.checked){
-            e+='Поставьте '+iquiz.form[o].name+'<br />';
-            $(this).css('border','2px solid red');
+        else if(fld.base==='BOOLEAN'){
+            if(!fld.hidden&&fld.required){
+                val=el?el.checked:(iquiz.userValues&&iquiz.userValues[fld.id]==='1');
+                if(!val){
+                    e+='Поставьте '+fld.name+'<br />';
+                    if(el) $(el).css('border','2px solid red');
+                }
+            }
         }
-        else if(this.value.length>0)
-            vars.append(this.id,this.value);
-        else if(!iquiz.form[o].hidden&&iquiz.form[o].required){
-            e+=(iquiz.form[o].base==='REFERENCE'?'Выберите ':'Введите ')+iquiz.form[o].name+'<br />';
-            $(this).css('border','2px solid red');
+        else{
+            // берём из DOM если поле сейчас на экране, иначе из userValues (предыдущие страницы)
+            val=(el&&el.value.length>0)?el.value:((iquiz.userValues&&iquiz.userValues[fld.id])||'');
+            if(val.length>0)
+                vars.append('t'+fld.id,val);
+            else if(!fld.hidden&&fld.required){
+                e+=(fld.base==='REFERENCE'?'Выберите ':'Введите ')+fld.name+'<br />';
+                if(el) $(el).css('border','2px solid red');
+            }
         }
-    });
+    }
     if(e===''){
         intApi('POST','_m_new/'+iquiz.type+'?JSON&up=1','submitForm',vars);
         $('#runFormSubmit').attr('disabled',true);
