@@ -29,6 +29,12 @@
             background-color: transparent !important;
             backdrop-filter: blur(0px);
         }
+        /* On mobile the sidebar is a fixed overlay — keep it opaque */
+        @media (max-width: 900px) {
+            body.brand-bg-on .app-sidebar {
+                background-color: var(--bg-primary) !important;
+            }
+        }
         /* High-contrast text when brand-bg is on — light theme */
         body.brand-bg-on {
             --text-primary: #000000;
