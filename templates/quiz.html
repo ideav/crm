@@ -1,4 +1,4 @@
-<script>
+<script> 
 if(parseInt(id) > 0){
     document.querySelector('.navbar')?.remove();
     document.querySelector('.app-sidebar')?.remove();
@@ -6,35 +6,33 @@ if(parseInt(id) > 0){
 </script>
 <link rel="stylesheet" href="/css/bootstrap4.5.2.min.css">
 <style>
-/* Quiz workspace CSS variables */
 :root {
-    --quiz-brand-primary: #4675AC;
-    --quiz-brand-light: #419CE1;
-    --quiz-brand-gradient-start: #419CE1;
-    --quiz-brand-gradient-end: #1283DA;
-    --quiz-item-border: #CCDFFF;
-    --quiz-item-bg: linear-gradient(to right, #f6f6f6, #fafafa);
-    --quiz-item-hover-bg: #eee;
-    --quiz-icon-stroke: #1A1A1A;
+    --iquiz-brand-primary: #4675AC;
+    --iquiz-brand-light: #419CE1;
+    --iquiz-brand-gradient-start: #419CE1;
+    --iquiz-brand-gradient-end: #1283DA;
+    --iquiz-item-border: #CCDFFF;
+    --iquiz-item-bg: linear-gradient(to right, #f6f6f6, #fafafa);
+    --iquiz-item-hover-bg: #eee;
+    --iquiz-icon-stroke: #1A1A1A;
 }
 [data-theme="dark"] {
-    --quiz-brand-primary: #7aabde;
-    --quiz-brand-light: #66b8f0;
-    --quiz-brand-gradient-start: #2c6ea8;
-    --quiz-brand-gradient-end: #1a5490;
-    --quiz-item-border: #2d4a70;
-    --quiz-item-bg: linear-gradient(to right, #2a2a2a, #2d2d2d);
-    --quiz-item-hover-bg: #3a3a3a;
-    --quiz-icon-stroke: #d0d0d0;
+    --iquiz-brand-primary: #7aabde;
+    --iquiz-brand-light: #66b8f0;
+    --iquiz-brand-gradient-start: #2c6ea8;
+    --iquiz-brand-gradient-end: #1a5490;
+    --iquiz-item-border: #2d4a70;
+    --iquiz-item-bg: linear-gradient(to right, #2a2a2a, #2d2d2d);
+    --iquiz-item-hover-bg: #3a3a3a;
+    --iquiz-icon-stroke: #d0d0d0;
 }
-
-.dict-list{
+.iq-list{
     max-width: 900px;
     padding: 3px 3px 3px 0;
     display: flex;
     flex-wrap: wrap;
 }
-.dict-item:hover,.data-item:hover {
+.iq-item:hover,.data-item:hover {
     padding: 9px;
     margin: 5px 10px 5px 0;
 }
@@ -43,39 +41,39 @@ if(parseInt(id) > 0){
     cursor: pointer;
     font-weight: bold;
 }
-.dict-item,.data-item,.dash-bar {
+.iq-item,.data-item,.dash-bar {
     font: 400 14px;
-    color: var(--quiz-brand-primary);
+    color: var(--iquiz-brand-primary);
     margin: 0 5px 0 5px;
     padding: 7px;
     margin: 7px 14px 7px 0;
-    border: 1px solid var(--quiz-item-border);
+    border: 1px solid var(--iquiz-item-border);
     border-radius: 5px;
     transition: all 0.25s;
-    background: var(--quiz-item-bg);
+    background: var(--iquiz-item-bg);
     cursor: pointer;
     text-align: center;
 }
-.dict-new-item,.data-item,.dash-bar {
+.iq-new-item,.data-item,.dash-bar {
     font: 400 14px;
-    color: var(--quiz-brand-primary);
+    color: var(--iquiz-brand-primary);
     margin: 0 5px 0 5px;
     padding: 7px;
     margin: 7px 14px 7px 0;
-    border: 1px solid var(--quiz-item-border);
+    border: 1px solid var(--iquiz-item-border);
     border-radius: 5px;
     transition: all 0.25s;
     cursor: pointer;
     text-align: center;
 }
-.dict-href:hover{
+.iq-href:hover{
     text-decoration: none;
 }
 .ctrls:hover{
-    background: var(--quiz-item-hover-bg);
+    background: var(--iquiz-item-hover-bg);
 }
-.dict-item:hover,.data-item:hover{
-    background: var(--quiz-item-hover-bg);
+.iq-item:hover,.data-item:hover{
+    background: var(--iquiz-item-hover-bg);
     box-shadow: 0px 5px 7px rgba(0, 97, 254, 0.21);
     color: var(--text-primary, #333);
 }
@@ -87,15 +85,15 @@ if(parseInt(id) > 0){
     position: relative;
     text-decoration: inherit;
 }
-#qb-name {
+#iqb-name {
     font-size: 1.8rem;
     text-align: center;
 }
-#qb-descr {
+#iqb-descr {
     font-size: 1.25rem;
     text-align: center;
 }
-.q-no-border {
+.iq-no-border {
     border: none;
 }
 .bg-transparent {
@@ -113,7 +111,7 @@ if(parseInt(id) > 0){
 .logo-container{
     position: absolute;
 }
-.q-logo{
+.iq-logo{
     max-width: 50%;
 }
 #runForm{
@@ -127,19 +125,17 @@ if(parseInt(id) > 0){
     letter-spacing: 0.15px;
     margin: 0;
 }
-/* SVG icon color adapts to theme via currentColor */
 .nav-link-active svg {
     color: var(--text-primary, #1A1A1A);
 }
 [data-theme="dark"] .nav-link-active svg {
     color: var(--text-primary);
 }
-/* Ctrl icons (settings, required, hidden, delete) */
 .ctrls {
-    color: var(--quiz-icon-stroke, #1A1A1A);
+    color: var(--iquiz-icon-stroke, #1A1A1A);
 }
 [data-theme="dark"] .ctrls {
-    color: var(--quiz-icon-stroke);
+    color: var(--iquiz-icon-stroke);
 }
 </style>
 <script src="/js/jquery3.1.1.min.js"></script>
@@ -152,8 +148,8 @@ if(parseInt(id) > 0){
         <h1 class="forms-title" id="formTitle">Конструктор опросов</h1>
     </div>
 	<div class="pt-3"><p>Выберите опрос или создайте новый:</p></div>
-    <div class="dict-list" id="bi">
-        <a class="dict-href"  id=":id:" onclick="selectQuiz(this.id)">
+    <div class="iq-list" id="bi">
+        <a class="iq-href"  id=":id:" onclick="selectQuiz(this.id)">
             <div class="dash-bar">
                 <span class="google-visualization-charteditor-category-label">:name:</span>
             </div>
@@ -162,9 +158,9 @@ if(parseInt(id) > 0){
 </div>
 <div id="dash" class="m-1 m-sm-3 p-1 p-sm-3 shadow" style="display:none">
     <div class="select-type"><h4>Выберите таблицу, в которую будут сохранены данные:</h4>
-        <div class="dict-list" id="sources">
-            <a class="dict-href">
-                <div class="dict-item" onclick="selectTable(':id:')">
+        <div class="iq-list" id="sources">
+            <a class="iq-href">
+                <div class="iq-item" onclick="selectTable(':id:')">
                     <span class="google-visualization-charteditor-category-label chart-type">
                         <i class="pi pi-table mb-1" style="font-size: 1rem;" title="Таблица"></i> &nbsp;:name:
                     </span>
@@ -189,21 +185,21 @@ if(parseInt(id) > 0){
                     <path d="M7 5L21 14L7 23V5Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
             </a>
-            <a onclick="$('.toggle-settings').toggle();if(quizId===undefined)saveQuiz()" class="nav-link-active pl-1 pl-sm-3 pt-2 float-left" title="Общие настройки формы">
+            <a onclick="$('.toggle-settings').toggle();if(iquizId===undefined)saveIquiz()" class="nav-link-active pl-1 pl-sm-3 pt-2 float-left" title="Общие настройки формы">
                 <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
                     <path d="M6 23V16M6 12V5M14 23V14M14 10V5M22 23V18M22 14V5M3 16H9M11 10H17M19 18H25" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
             </a>
             <center>
-                <input type="text" name="name" id="qb-name" is-empty="1" placeholder="Название формы" class="form-control m-2 w-75 q-no-border q-save" onchange="this.setAttribute('is-empty','0')">
+                <input type="text" name="name" id="iqb-name" is-empty="1" placeholder="Название формы" class="form-control m-2 w-75 iq-no-border iq-save" onchange="this.setAttribute('is-empty','0')">
             </center>
             <div class="toggle-settings">
-                <input type="text" name="descr" id="qb-descr" placeholder="Краткое описание или приветствие" class="form-control m-2 q-no-border q-save">
+                <input type="text" name="descr" id="iqb-descr" placeholder="Краткое описание или приветствие" class="form-control m-2 iq-no-border iq-save">
                 <div id="fields">
                 </div>
                 <center>
                     <div class="btn btn-primary m-4">
-                        <input type="text" name="submit" id="qb-submit" class="form-control text-light q-no-border q-save" value="Отправить" style="text-align: center; background-color: transparent;">
+                        <input type="text" name="submit" id="iqb-submit" class="form-control text-light iq-no-border iq-save" value="Отправить" style="text-align: center; background-color: transparent;">
                     </div>
                 </center>
             </div>
@@ -220,22 +216,22 @@ if(parseInt(id) > 0){
                     </div>
                     <div id="collapseOne" class="collapse" aria-labelledby="headingOne" data-parent="#accordion">
                         <div class="card-body">
-                            <p class="font-weight-bold">У вас как администратора есть доступ к этой форме <a class="form-url" target="_form">здесь</a> 
+                            <p class="font-weight-bold">У вас как администратора есть доступ к этой форме <a class="form-url" target="_form">здесь</a>
                                 <a onclick="copyLink($('.form-url').attr('href'))" title="Скопировать ссылку">
                                     <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
                                         <path d="M5.5 13.3571H4.71429C4.29752 13.3571 3.89782 13.1916 3.60312 12.8969C3.30842 12.6022 3.14286 12.2025 3.14286 11.7857V4.71429C3.14286 4.29752 3.30842 3.89782 3.60312 3.60312C3.89782 3.30842 4.29752 3.14286 4.71429 3.14286H11.7857C12.2025 3.14286 12.6022 3.30842 12.8969 3.60312C13.1916 3.89782 13.3571 4.29752 13.3571 4.71429V5.5M10.2143 8.64286H17.2857C18.1536 8.64286 18.8571 9.34641 18.8571 10.2143V17.2857C18.8571 18.1536 18.1536 18.8571 17.2857 18.8571H10.2143C9.34641 18.8571 8.64286 18.1536 8.64286 17.2857V10.2143C8.64286 9.34641 9.34641 8.64286 10.2143 8.64286Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
                                     </svg>
                                 </a>
                             </p>
-                            <p>При отправке формы данные будут записаны <a href="/" onclick="$(this).attr('href','/{_global_.z}/object/'+quiz.type)" target="_blank">в эту таблицу</a>. Вы можете изменить её в меню <a target="_blank" href="/{_global_.z}/edit_types">Структура</a>, добавив или удалив в ней нужные колонки.</p>
-                            <p class="font-weight-bold">Если вы желаете дать доступ к этой форме всем, у кого есть ссылка на неё, то необходимо дать людям права на запись <a href="/{_global_.z}/" onclick="$(this).attr('href','/{_global_.z}/object/'+quiz.type)" target="_blank">в эту таблицу</a> и чтение <a target="_blank" href="/" onclick="$(this).attr('href','/{_global_.z}/object/269?F_269=@'+quizId)">настроек формы</a>.</p>
+                            <p>При отправке формы данные будут записаны <a href="/" onclick="$(this).attr('href','/{_global_.z}/object/'+iquiz.type)" target="_blank">в эту таблицу</a>. Вы можете изменить её в меню <a target="_blank" href="/{_global_.z}/edit_types">Структура</a>, добавив или удалив в ней нужные колонки.</p>
+                            <p class="font-weight-bold">Если вы желаете дать доступ к этой форме всем, у кого есть ссылка на неё, то необходимо дать людям права на запись <a href="/{_global_.z}/" onclick="$(this).attr('href','/{_global_.z}/object/'+iquiz.type)" target="_blank">в эту таблицу</a> и чтение <a target="_blank" href="/" onclick="$(this).attr('href','/{_global_.z}/object/269?F_269=@'+iquizId)">настроек формы</a>.</p>
                             Это делается за 3 клика:<br />
                             <ol>
-                                <li>Создать пользователя <i>quiz</i> и роль <i>Quiz</i> <span id="createUser"></span></li>
+                                <li>Создать пользователя <i>iquiz</i> и роль <i>IQuiz</i> <span id="createUser"></span></li>
                                 <li>Дать права на запись в таблицу<span id="grantTable"></span></li>
                                 <li>Дать права на чтение настроек формы <span id="grantForm"></span></li>
                             </ol>
-                            <p class="font-weight-bold" id="grants" style="display:none;">Дайте пользователю <a class="user-form-url" target="_form">эту ссылку</a> 
+                            <p class="font-weight-bold" id="grants" style="display:none;">Дайте пользователю <a class="user-form-url" target="_form">эту ссылку</a>
                                 <a onclick="copyLink($('.user-form-url').attr('href'))" title="Скопировать ссылку">
                                     <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
                                         <path d="M5.5 13.3571H4.71429C4.29752 13.3571 3.89782 13.1916 3.60312 12.8969C3.30842 12.6022 3.14286 12.2025 3.14286 11.7857V4.71429C3.14286 4.29752 3.30842 3.89782 3.60312 3.60312C3.89782 3.30842 4.29752 3.14286 4.71429 3.14286H11.7857C12.2025 3.14286 12.6022 3.30842 12.8969 3.60312C13.1916 3.89782 13.3571 4.29752 13.3571 4.71429V5.5M10.2143 8.64286H17.2857C18.1536 8.64286 18.8571 9.34641 18.8571 10.2143V17.2857C18.8571 18.1536 18.1536 18.8571 17.2857 18.8571H10.2143C9.34641 18.8571 8.64286 18.1536 8.64286 17.2857V10.2143C8.64286 9.34641 9.34641 8.64286 10.2143 8.64286Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"/>
@@ -263,15 +259,15 @@ if(parseInt(id) > 0){
                             <p class="font-weight-bold">Задайте здесь текст сообщения после отправки формы</p>
                             <label for="token">При успешной отправке:</label>
                             <div class="alert alert-success mb-2" role="alert">
-                                <input type="text" name="success" class="form-control q-no-border bg-transparent q-save" value="Данные успешно отправлены, Спасибо!">
+                                <input type="text" name="success" class="form-control iq-no-border bg-transparent iq-save" value="Данные успешно отправлены, Спасибо!">
                             </div>
 							<p>Используйте макроподстановку :id: для вставки в текст ID созданной записи, например: "Заявка №:id: успешно создана"</p>
                             <label for="redirect-timeout" class="mt-2">Переадресация после успешной отправки по первой ссылке из сообщения об успешной отправке (секунд, 0 — отключено):</label>
-                            <input type="number" id="redirect-timeout" name="redirect-timeout" min="0" class="form-control q-save" placeholder="0" value="0">
+                            <input type="number" id="redirect-timeout" name="redirect-timeout" min="0" class="form-control iq-save" placeholder="0" value="0">
 							<br />
                             <label for="token">При ошибке отправки:</label>
                             <div class="alert alert-danger" role="alert">
-                                <input type="text" name="fail" class="form-control q-no-border bg-transparent q-save" value="Ошибка отправки формы, обратитесь в support@ideav.online">
+                                <input type="text" name="fail" class="form-control iq-no-border bg-transparent iq-save" value="Ошибка отправки формы, обратитесь в support@ideav.online">
                             </div>
                         </div>
                     </div>
@@ -287,11 +283,11 @@ if(parseInt(id) > 0){
                     <div id="collapseThree" class="collapse" aria-labelledby="headingThree" data-parent="#accordion">
                         <div class="card-body">
                             <label for="width" class="mb-1">Максимальная ширина формы (px)</label>
-                            <input type="number" id="max-width" name="max-width" class="form-control mb-3 q-save" placeholder="Число в пикселях">
+                            <input type="number" id="max-width" name="max-width" class="form-control mb-3 iq-save" placeholder="Число в пикселях">
                             <label for="logo" class="mb-1">Логотип (URL)</label>
-                            <input type="text" id="logo" name="logo" class="form-control mb-3 q-save" placeholder="URL к вашему логотипу (будет сверху в центре)">
+                            <input type="text" id="logo" name="logo" class="form-control mb-3 iq-save" placeholder="URL к вашему логотипу (будет сверху в центре)">
                             <label for="cover" class="mb-1">Обложка (URL)</label>
-                            <input type="text" id="cover" name="cover" class="form-control q-save" placeholder="URL к обложке (будет сверху во всю ширину)">
+                            <input type="text" id="cover" name="cover" class="form-control iq-save" placeholder="URL к обложке (будет сверху во всю ширину)">
                         </div>
                     </div>
                   </div>
@@ -311,7 +307,7 @@ if(parseInt(id) > 0){
                 		    </div>
                     	    <p class="confirm-del" style="display:none">Подтвердите удаление</p>
                             <div class="confirm-del input-group mt-3 mb-3" style="display:none">
-                			    <button type="button" class="btn btn-warning mr-2" onclick="edited=false;postForm('_m_del/'+quizId+'?next_act=quiz%3Fdel='+quizId+'#')">Да, удалить</button>
+                			    <button type="button" class="btn btn-warning mr-2" onclick="edited=false;postForm('_m_del/'+iquizId+'?next_act=iquiz%3Fdel='+iquizId+'#')">Да, удалить</button>
                 			    <button type="button" class="btn btn-outline-secondary" onclick="$('.confirm-del').toggle();">Отменить</button>
                         	</div>
 	                    </div>
@@ -362,12 +358,17 @@ if(parseInt(id) > 0){
                     <input type="submit" class="btn btn-outline-secondary btn-block" onclick="addNewField()" value="Добавить">
                 </div>
             </div>
+            <div class="row p-0 m-0 mt-2">
+                <div class="col-12">
+                    <button type="button" class="btn btn-info btn-sm" onclick="addPageBreak()" title="Добавить разделитель между страницами">📄 Добавить разделитель страницы</button>
+                </div>
+            </div>
         </div>
         <div class="p-1 p-sm-3 pt-3 edit-panel" style="display:none; max-width:1024px">
             <div class="input-group">
-                <input type="text" class="form-control" id="quizName" onchange="setEdited()" placeholder="Придумайте имя опроса, его будете видеть только вы">
+                <input type="text" class="form-control" id="iquizName" onchange="setEdited()" placeholder="Придумайте имя опроса, его будете видеть только вы">
                 <div class="input-group-append">
-                    <a class="btn btn-primary save-btn" onclick="saveQuiz()" style="display:none">Сохранить</a>
+                    <a class="btn btn-primary save-btn" onclick="saveIquiz()" style="display:none">Сохранить</a>
                     <a class="btn btn-outline-secondary" id="save-wait" style="display:none"><img src="/i/ajax.gif"></a>
                     <a class="btn btn-outline-secondary save-btn" onclick="document.location.href='/{_global_.z}/{_global_.action}'" style="display:none">Отменить</a>
                 </div>
@@ -378,10 +379,10 @@ if(parseInt(id) > 0){
 <center>
     <div id="runForm" class="shadow m-1 m-sm-3 p-1 p-sm-3" style="text-align:left; max-width:1024px; display:none">
         <div class="cover-container" style="display:none">
-            <img class="w-100 q-cover" src="" style="display:none">
+            <img class="w-100 iq-cover" src="" style="display:none">
             <center>
                 <div class="logo-container" style="display:none">
-                    <img class="q-logo" src="">
+                    <img class="iq-logo" src="">
                 </div>
             </center>
         </div>
@@ -391,11 +392,11 @@ if(parseInt(id) > 0){
         </center>
         <div id="runFormFields">
         </div>
+        <div id="pageIndicator" class="m-1 m-sm-3"></div>
         <div id="submitResult" class=" m-1 m-sm-3"></div>
         <center>
-            <button class="btn btn-primary m-4" id="runFormSubmit" onclick="submitForm()">Отправить</button>
             <p class="text-muted"><a href="mailto:support@ideav.online">Сообщить о нарушении</a></p>
-            <p class="text-muted">Сделано в <a href="https://integram.io?from=quiz">Интеграм</a></p>
+            <p class="text-muted">Сделано в <a href="https://integram.io?from=iquiz">Интеграм</a></p>
         </center>
     </div>
 </center>
@@ -434,11 +435,11 @@ function addNewField(){
     if(v.length===0)
         return;
     var i,base=isRef()?$('#selectreftype').val():$('#selecttype').val(),t=existingType(v,base);
-    if(quiz.type==='0')
+    if(iquiz.type==='0')
         createTable(t,v);
     else if(t){
-        for(i in quiz.form)
-            if(quiz.form[i].type==t||(v.toUpperCase()===quiz.name.toUpperCase()&&quiz.type===t))
+        for(i in iquiz.form)
+            if(iquiz.form[i].type==t||(v.toUpperCase()===iquiz.name.toUpperCase()&&iquiz.type===t))
                 return showMsg('messages','Это поле уже существует: '+v,'warning');
         if(isRef()){
             for(var j in dataItems.id)
@@ -447,7 +448,7 @@ function addNewField(){
             intApi('POST','_d_ref/'+t+'?JSON','createRef','',{req_t:t,val:v,ref_type:t,t:'REFERENCE'});
         }
         else
-            intApi('POST','_d_req/'+quiz.type+'?JSON&t='+t,'createReq','',{req_t:t,val:v,t:dataTypes[reqType(t)]});
+            intApi('POST','_d_req/'+iquiz.type+'?JSON&t='+t,'createReq','',{req_t:t,val:v,t:dataTypes[reqType(t)]});
     }
     else
         createType(v);
@@ -470,23 +471,40 @@ function createTable(t,v){
     else
         createType(v);
 }
+function addPageBreak(){
+    var nextPage = 1;
+    for(var i in iquiz.form)
+        if(iquiz.form[i].page && iquiz.form[i].page >= nextPage)
+            nextPage = parseInt(iquiz.form[i].page) + 1;
+
+    iquiz.form.push({
+        id: 'PAGE_BREAK_' + Date.now(),
+        type: 'PAGE_BREAK',
+        base: 'PAGE_BREAK',
+        name: 'Разделитель страницы',
+        view: 'PAGE_BREAK',
+        page: nextPage,
+        isPageBreak: true
+    });
+    setEdited();
+    drawForm();
+    showMsg('messages', 'Разделитель страницы добавлен (страница ' + nextPage + ')', 'success', 3000);
+}
 function selectField(v){
     $('#addfield').val($('[value='+v+']').attr('name'));
     $('#selecttype').val($('[value='+v+']').attr('type'));
-//    if(!isRef())
-//        $('.list-type').hide();
 }
 function selectQuiz(i){
-    if(i>0&&savedQuiz[i]){
-        quiz=JSON.parse(savedQuiz[quizId=i]);
-        $('#chosen-type').html(typeName(quiz.type)).attr('chosen-type',quiz.type);
-        $('.form-url').attr('href',location.protocol+'//'+location.host+'/{_global_.z}/{_global_.action}/'+quizId).show();
+    if(i>0&&savedIquiz[i]){
+        iquiz=JSON.parse(savedIquiz[iquizId=i]);
+        $('#chosen-type').html(typeName(iquiz.type)).attr('chosen-type',iquiz.type);
+        $('.form-url').attr('href',location.protocol+'//'+location.host+'/{_global_.z}/{_global_.action}/'+iquizId).show();
         $('.select-type,.select-dash').hide();
         $('.selected-type,#dash,.edit-panel').show();
         $('#deselect').remove();
-        for(j in quiz)
-            $('.q-save[name='+j+']').val(quiz[j]);
-        $('#quizName').val($('#'+i).find('span').html());
+        for(j in iquiz)
+            $('.iq-save[name='+j+']').val(iquiz[j]);
+        $('#iquizName').val($('#'+i).find('span').html());
         drawForm();
     }
     else
@@ -494,7 +512,7 @@ function selectQuiz(i){
 }
 function notReq(r,t){
     for(var i in dataItems.id)
-        if(dataItems.id[i]===quiz.type&&dataItems.req_t[i]===r)
+        if(dataItems.id[i]===iquiz.type&&dataItems.req_t[i]===r)
             if(reqType(r)===t)
                 return false;
     return true;
@@ -521,24 +539,24 @@ function fillInDataItems(){
 }
 function composeFormFromTypes(t){
     var j,i=0;
-    while(quiz.form.length>0)
-        quiz.form.shift();
+    while(iquiz.form.length>0)
+        iquiz.form.shift();
     for(j in dataItems.id)
         if(dataItems.id[j]===t){
             if(i===0)
-                quiz.form[i++]={id:t
+                iquiz.form[i++]={id:t
                         ,type:t
                         ,base:dataTypes[dataItems.t[j]]
                         ,name:dataItems.val[j]
                         ,view:$('#selecttype [value='+dataItems.t[j]+'][view]').attr('view')||'DDL'};
             if(dataItems.req_id[j]!==''){
-                quiz.form[i]={id:dataItems.req_id[j]
+                iquiz.form[i]={id:dataItems.req_id[j]
                         ,type:dataItems.req_t[j]
                         ,base:dataTypes[reqType(dataItems.req_t[j])]||'REFERENCE'
                         ,name:reqName(dataItems.req_id[j])
                         ,view:dataTypes[reqType(dataItems.req_t[j])]||'DDL'};
-                if(quiz.form[i].base==='REFERENCE')
-                    quiz.form[i].ref_type=reqType(dataItems.req_t[j]);
+                if(iquiz.form[i].base==='REFERENCE')
+                    iquiz.form[i].ref_type=reqType(dataItems.req_t[j]);
                 i++;
             }
         }
@@ -553,7 +571,7 @@ function shownAndHidden(i,fld,f){
         +'      <a onclick="setHidden(this)" class="short-ctrls ml-2" style="display:none" title="Скрыть поле">'+hidSvg+'</a>'
         +'      <a onclick="$(\'.set'+fld.id+'\').toggle()" class="short-ctrls ml-2" style="display:none" title="Настройки поля">'+setSvg+'</a>'
         +'    </div>'
-        +'    <input name="label" class="form-control form-control-sm pl-0 pb-0 mb-1 w-50 q-no-border q-save q-fld" for="'+i+'" value="'+escapeHtml(fld.label||fld.name)+'"'
+        +'    <input name="label" class="form-control form-control-sm pl-0 pb-0 mb-1 w-50 iq-no-border iq-save iq-fld" for="'+i+'" value="'+escapeHtml(fld.label||fld.name)+'"'
         +'          '+(fld.required?' style="color:#e00"':'')+' placeholder="Введите вопрос или имя поля">'
         +     inputBox[fld.view].replace(/:t:/g,fld.id)
                         .replace('type="password"','type="text"')
@@ -570,40 +588,59 @@ function shownAndHidden(i,fld,f){
         intApi('GET','object/'+refType(fld.type)+'?JSON','ddl','',{i:fld.id,view:fld.view});
 }
 function drawForm(){
-    var i,j,k,f={flds:'',hiddens:''};
-    for(i=0;i<quiz.form.length;i++)
-        if(quiz.form[i].id!==quiz.form[i].type&&!reqExists(quiz.form[i].id)&&quizId){ // The field might be deleted from the object
-            // Remove the field from the array
-            k=i--; // loop back to check the substitute line as well
-            for(j in quiz.form) // Shift it down first
-                if(j>k)
-                    [quiz.form[k],quiz.form[j]]=[quiz.form[j],quiz.form[k]],k++;
-            quiz.form.pop(); // then drop it
+    var i,j,k,f={flds:'',hiddens:''},currentPage=1;
+    // Определить количество страниц (количество разделителей + 1)
+    var totalPages = 1;
+    for(i=0;i<iquiz.form.length;i++)
+        if(iquiz.form[i].isPageBreak) totalPages++;
+
+    for(i=0;i<iquiz.form.length;i++){
+        // Пересчитываем page по позиции в массиве, чтобы разделитель всегда делил поля корректно
+        if(iquiz.form[i].isPageBreak){
+            currentPage++;
+            iquiz.form[i].page = currentPage;
+            // Отобразить разделитель страницы
+            f.flds+='<div class="page-break-divider p-3 my-3 border-top border-bottom bg-light" order="'+i+'" style="text-align:center; color:#666; font-weight:bold;">'
+                +'  📄 Страница ' + iquiz.form[i].page + ' из ' + totalPages
+                +'  <a onclick="moveFldUp(this)" class="ml-2" style="display:inline-block" title="Переместить разделитель вверх">↑</a>'
+                +'  <a onclick="moveFldDown(this)" class="ml-2" style="display:inline-block" title="Переместить разделитель вниз">↓</a>'
+                +'  <a onclick="deleteFld(this)" class="ml-2" style="display:inline-block" title="Удалить разделитель">'+ delSvg +'</a>'
+                +'</div>';
+            continue;
         }
-        else if(inputBox[quiz.form[i].view])
-            shownAndHidden(i,quiz.form[i],f);
-    // Check if new fields were added to the object
+        iquiz.form[i].page = currentPage;
+
+        if(iquiz.form[i].id!==iquiz.form[i].type&&!reqExists(iquiz.form[i].id)&&iquizId){
+            k=i--;
+            for(j in iquiz.form)
+                if(j>k)
+                    [iquiz.form[k],iquiz.form[j]]=[iquiz.form[j],iquiz.form[k]],k++;
+            iquiz.form.pop();
+        }
+        else if(inputBox[iquiz.form[i].view])
+            shownAndHidden(i,iquiz.form[i],f);
+    }
     for(j in dataItems.id)
-        if(dataItems.id[j]===quiz.type&&dataItems.req_id[j]!==''
-                &&f.hiddens.indexOf('id="h'+dataItems.req_id[j]+'"')===-1){ // Seek the id among hiddens
-            quiz.form[i]={id:dataItems.req_id[j].toString() // Add the field in case it's not found
+        if(dataItems.id[j]===iquiz.type&&dataItems.req_id[j]!==''
+                &&f.hiddens.indexOf('id="h'+dataItems.req_id[j]+'"')===-1){
+            iquiz.form[i]={id:dataItems.req_id[j].toString()
                         ,type:dataItems.req_t[j]
                         ,base:reqBase(dataItems.req_t[j])||'REFERENCE'
                         ,name:reqName(dataItems.req_id[j])
                         ,view:reqBase(dataItems.req_t[j])||'DDL'
-                        ,hidden:true // Hide the new field by default
+                        ,hidden:true
             }
-            shownAndHidden(i,quiz.form[i],f);
+            shownAndHidden(i,iquiz.form[i],f);
             i++;
         }
     $('#fields').html(f.flds);
     $('#hiddens').html(f.hiddens);
     $('#form,#addfields').show();
-    $('.q-save').change(qSave);
-    $('.q-save').focus(function(){
+    $('.iq-save').change(iqSave);
+    $('.iq-save').focus(function(){
         $('.assist-'+this.id).show();
     });
-    $('.q-save').focusout(function(){
+    $('.iq-save').focusout(function(){
         $('.assist-'+this.id).hide();
     });
     $('.fld').mouseover(function(){
@@ -624,7 +661,7 @@ function drawForm(){
         $('#selecttype').val('4');
         $('#addfield').attr('placeholder','Название таблицы опросов')
     }
-    if(quizId&&!typeName(quiz.type))
+    if(iquizId&&!typeName(iquiz.type))
         showMsg('messages','Эта таблица больше не существует');
     fillInDataItems();
     if(addRefItems!==''){
@@ -642,13 +679,13 @@ function setEdited(){
 }
 function setRequired(el){
     var o=$(el).closest('[order]').attr('order');
-    if(quiz.form[o].required){
-        delete quiz.form[o].required;
+    if(iquiz.form[o].required){
+        delete iquiz.form[o].required;
         $(el).find('.ctrls-required path').attr('stroke','currentColor');
         $('div[order='+o+']').find('input[name=label]').css('color','').attr('title','');
     }
     else{
-        quiz.form[o].required=true;
+        iquiz.form[o].required=true;
         $(el).find('.ctrls-required path').attr('stroke','#e00');
         $('div[order='+o+']').find('input[name=label]').css('color','red').attr('title','Обязательно для заполнения');
     }
@@ -656,30 +693,30 @@ function setRequired(el){
 }
 function setHidden(el){
     var o=$(el).attr('order')||$(el).closest('[order]').attr('order');
-    if(quiz.form[o].hidden)
-        delete quiz.form[o].hidden;
+    if(iquiz.form[o].hidden)
+        delete iquiz.form[o].hidden;
     else
-        quiz.form[o].hidden=true;
-    $('#h'+quiz.form[o].id+',#'+quiz.form[o].id).toggle(160);
+        iquiz.form[o].hidden=true;
+    $('#h'+iquiz.form[o].id+',#'+iquiz.form[o].id).toggle(160);
     setEdited();
 }
-function qSave(event){
+function iqSave(event){
     setEdited();
-    if($(event.target).hasClass('q-fld'))
-        quiz.form[$(event.target).closest('[order]').attr('order')][$(event.target).attr('name')]=event.target.value;
+    if($(event.target).hasClass('iq-fld'))
+        iquiz.form[$(event.target).closest('[order]').attr('order')][$(event.target).attr('name')]=event.target.value;
     else
-        quiz[$(event.target).attr('name')]=event.target.value;
+        iquiz[$(event.target).attr('name')]=event.target.value;
 }
 function selectTable(i){
-    $('#chosen-type').html(typeName(i)).attr('chosen-type',quiz.type=i);
-    if($('#qb-name').val()==='')
-        $('#qb-name').attr('is-empty','1')
-    if($('#qb-name').attr('is-empty')==='1')
-        $('#qb-name').val(quiz.name=typeName(i));
-    if($('#quizName').val()==='')
-        $('#quizName').attr('is-empty','1')
-    if($('#quizName').attr('is-empty')==='1')
-        $('#quizName').val(quiz.name);
+    $('#chosen-type').html(typeName(i)).attr('chosen-type',iquiz.type=i);
+    if($('#iqb-name').val()==='')
+        $('#iqb-name').attr('is-empty','1')
+    if($('#iqb-name').attr('is-empty')==='1')
+        $('#iqb-name').val(iquiz.name=typeName(i));
+    if($('#iquizName').val()==='')
+        $('#iquizName').attr('is-empty','1')
+    if($('#iquizName').attr('is-empty')==='1')
+        $('#iquizName').val(iquiz.name);
     $('.select-type').hide(50);
     $('.edit-panel,.selected-type').show(50);
     composeFormFromTypes(i);
@@ -691,14 +728,14 @@ function deselectTable(){
     $('.selected-type,.edit-panel,#form,#addfields').hide(50);
     $('#fields').html('');
 }
-var quiz={ form:[] },quizId,dataList=$('#sources').html(),savedQuiz={},dataItems,dataTypes,edited,aliasmask=/:ALIAS=(.+):/i,grants,addRefItems='',view;
-function saveQuiz(){
-    var name=$('#quizName').val();
+var iquiz={ form:[] },iquizId,dataList=$('#sources').html(),savedIquiz={},dataItems,dataTypes,edited,aliasmask=/:ALIAS=(.+):/i,grants,addRefItems='',view;
+function saveIquiz(){
+    var name=$('#iquizName').val();
     if(name.length>0){
         if(name.indexOf('"')===-1){
             $('.save-btn').hide();
             $('#save-wait').show();
-            intApi('GET','object/269?JSON&F_271=QUIZ&F_269='+encodeURIComponent(name),'checkQuiz');
+            intApi('GET','object/269?JSON&F_271=QUIZ&F_269='+encodeURIComponent(name),'checkIquiz');
             edited=false;
         }
         else
@@ -713,84 +750,207 @@ function randomSecret(){
 function checkUser(){
     grants={};
     $('#grants').hide();
-    intApi('GET','object/18?JSON&F_18=quiz','checkUser');
+    intApi('GET','object/18?JSON&F_18=iquiz','checkUser');
 }
 function createUser(){
     var userSecret=randomSecret();
-    intApi('POST','_m_new/18?JSON&up=1&t18=quiz&NEW_115=Quiz&t130='+userSecret,'createUser','',userSecret);
+    intApi('POST','_m_new/18?JSON&up=1&t18=iquiz&NEW_115=IQuiz&t130='+userSecret,'createUser','',userSecret);
 }
 function dropObj(i){
     intApi('POST','_m_del/'+i+'?JSON','dropObj');
     $('#grantTable,#grantForm').html('');
 }
 function grantTable(){
-    intApi('POST','_m_new/116?JSON&up='+grants.roleId+'&t116='+quiz.type+'&t136=54&t49=!%','grant','','grantTable');
+    intApi('POST','_m_new/116?JSON&up='+grants.roleId+'&t116='+iquiz.type+'&t136=54&t49=!%','grant','','grantTable');
 }
 function grantForm(mode){
     intApi('POST','_m_new/116?JSON&up='+grants.roleId+'&t116=269&t136=53&t49='+(mode||''),'grant','','grantForm');
 }
-function submitForm(){
-    var vars=new FormData(),e='',o;
-    $('.q-fld').css('border','');
-    $('.q-fld').each(function(){
-        o=$(this).closest('[order]').attr('order');
-        if(quiz.form[o].base==='FILE'){
-            if(this.files[0])
-                vars.append(this.id,this.files[0]);
-        }
-        else if(quiz.form[o].base==='BOOLEAN'&&!quiz.form[o].hidden&&quiz.form[o].required&&!this.checked){
-            e+='Поставьте '+quiz.form[o].name+'<br />';
-            $(this).css('border','2px solid red');
-        }
-        else if(this.value.length>0)
-            vars.append(this.id,this.value);
-        else if(!quiz.form[o].hidden&&quiz.form[o].required){
-            e+=(quiz.form[o].base==='REFERENCE'?'Выберите ':'Введите ')+quiz.form[o].name+'<br />';
-            $(this).css('border','2px solid red');
+function validateCurrentPage(){
+    var e='', valid=true;
+    $('.iq-fld').css('border','');
+    $('.iq-fld').each(function(){
+        var o=$(this).closest('[order]').attr('order');
+        if(o===undefined) return; // пропустить скрытые поля
+        var fld = iquiz.form[o];
+        // Проверять только поля текущей страницы, не скрытые и не PAGE_BREAK
+        if(!fld.hidden && !fld.isPageBreak && (fld.page || 1) === iquiz.currentPage){
+            if(fld.required){
+                if(fld.base==='BOOLEAN' && !this.checked){
+                    e+='Поставьте '+fld.name+'<br />';
+                    $(this).css('border','2px solid red');
+                    valid=false;
+                }
+                else if(fld.base!=='BOOLEAN' && this.value.length===0){
+                    e+=(fld.base==='REFERENCE'?'Выберите ':'Введите ')+fld.name+'<br />';
+                    $(this).css('border','2px solid red');
+                    valid=false;
+                }
+            }
         }
     });
+    return {valid:valid, errors:e};
+}
+
+function renderPageIndicator(currentPage, totalPages){
+    if(totalPages <= 1) return; // не показывать если одна страница
+    var html = '<div class="page-indicator mt-4 text-center">';
+    for(var i=1; i<=totalPages; i++){
+        html += '<span class="page-dot '+(i===currentPage?'active':'')+'" style="display:inline-block; width:12px; height:12px; border-radius:50%; background:'+(i===currentPage?'#0066cc':'#ccc')+'; margin:0 6px; cursor:pointer;" onclick="goToPage('+i+')"></span>';
+    }
+    html += '</div>';
+    $('#pageIndicator').html(html);
+}
+
+function saveCurrentPageValues(){
+    if(!iquiz.userValues) iquiz.userValues={};
+    $('.iq-fld').each(function(){
+        var id=this.id.replace(/^t/,'');
+        iquiz.userValues[id]=this.type==='checkbox'?(this.checked?'1':''):$(this).val();
+    });
+}
+
+function goToPage(pageNum){
+    if(pageNum === iquiz.currentPage) return;
+    if(pageNum > iquiz.currentPage){
+        var result = validateCurrentPage();
+        if(!result.valid){
+            showMsg('submitResult',result.errors,'warning',0);
+            return;
+        }
+    }
+    saveCurrentPageValues();
+    iquiz.currentPage = pageNum;
+    renderFormPage();
+}
+
+function nextPage(){
+    if(iquiz.currentPage >= iquiz.totalPages){
+        submitForm();
+        return;
+    }
+    var result = validateCurrentPage();
+    if(!result.valid){
+        showMsg('submitResult',result.errors,'warning',0);
+        return;
+    }
+    saveCurrentPageValues();
+    iquiz.currentPage++;
+    renderFormPage();
+}
+
+function prevPage(){
+    if(iquiz.currentPage <= 1) return;
+    saveCurrentPageValues();
+    iquiz.currentPage--;
+    renderFormPage();
+}
+
+function renderFormPage(){
+    var h='', totalPages = iquiz.totalPages;
+    // Рендеринг только полей текущей страницы
+    for(var i in iquiz.form){
+        var fld = iquiz.form[i];
+        var fieldPage = fld.page || 1;
+
+        // Скрытые поля выводятся на всех страницах
+        if(fld.hidden){
+            h+='<div order="'+i+'"><input id="t'+fld.id+'" type="hidden" class="iq-fld"'
+                +' value="'+(fld.default||search[fld.label||fld.name]||'')+'"></div>';
+        }
+        // Показать поле только если оно на текущей странице и не page break
+        else if(fieldPage === iquiz.currentPage && !fld.isPageBreak){
+            h+='<div class="fld p-1 p-sm-3" id="'+fld.id+'" order="'+i+'">'
+                +'    <label class="mb-1" '+(fld.required?'style="color:#e00" title="Поле обязательно для заполнения" is-mandatory="1"':'')+'>'
+                        +(fld.label||fld.name)
+                +'    </label>'
+                +     inputBox[fld.view].replace(/:t:/g,fld.id)
+                                .replace(':reforig:',fld.ref_type)
+                        .replace(':value:',(iquiz.userValues&&iquiz.userValues[fld.id]!==undefined)?iquiz.userValues[fld.id]:(search[fld.label||fld.name]||(fld.default?defaults(fld.default):'')))
+                        .replace(':placeholder:',fld.placeholder||'Введите значение '+fld.name)
+                +'</div>';
+            if(fld.view==='DDL')
+                intApi('GET','object/'+fld.ref_type+'?JSON&LIMIT=1000','ddl','',{i:fld.id,view:fld.view});
+        }
+    }
+
+    // Добавить кнопки навигации
+    h += '<div class="page-navigation mt-4">';
+    if(iquiz.currentPage > 1)
+        h += '<button class="btn btn-secondary mr-2" onclick="prevPage()">← Назад</button>';
+    h += '<button class="btn btn-primary" id="runFormSubmit" onclick="nextPage()">' + (iquiz.currentPage === totalPages ? (iquiz.submit||'Отправить') : 'Далее →') + '</button>';
+    h += '</div>';
+
+    $('#runFormFields').html(h);
+    renderPageIndicator(iquiz.currentPage, totalPages);
+    window.dispatchEvent(new Event('resize'));
+}
+
+function submitForm(){
+    saveCurrentPageValues(); // сохранить значения последней страницы перед отправкой
+    var vars=new FormData(),e='',fld,el,val;
+    $('.iq-fld').css('border','');
+    for(var o=0;o<iquiz.form.length;o++){
+        fld=iquiz.form[o];
+        if(fld.isPageBreak) continue;
+        el=document.getElementById('t'+fld.id);
+        if(fld.base==='FILE'){
+            if(el&&el.files[0])
+                vars.append('t'+fld.id,el.files[0]);
+        }
+        else if(fld.base==='BOOLEAN'){
+            if(!fld.hidden&&fld.required){
+                val=el?el.checked:(iquiz.userValues&&iquiz.userValues[fld.id]==='1');
+                if(!val){
+                    e+='Поставьте '+fld.name+'<br />';
+                    if(el) $(el).css('border','2px solid red');
+                }
+            }
+        }
+        else{
+            // берём из DOM если поле сейчас на экране, иначе из userValues (предыдущие страницы)
+            val=(el&&el.value.length>0)?el.value:((iquiz.userValues&&iquiz.userValues[fld.id])||'');
+            if(val.length>0)
+                vars.append('t'+fld.id,val);
+            else if(!fld.hidden&&fld.required){
+                e+=(fld.base==='REFERENCE'?'Выберите ':'Введите ')+fld.name+'<br />';
+                if(el) $(el).css('border','2px solid red');
+            }
+        }
+    }
     if(e===''){
-        intApi('POST','_m_new/'+quiz.type+'?JSON&up=1','submitForm',vars);
+        intApi('POST','_m_new/'+iquiz.type+'?JSON&up=1','submitForm',vars);
         $('#runFormSubmit').attr('disabled',true);
     }
     else
         showMsg('submitResult',e,'warning',0);
 }
-function intApi(m,u,b,vars,index){ // Параметры: метод, адрес, действие - ветка switch, параметры, ID целевого элемента
-    vars=vars||''; // По умолчанию список параметров пуст
-    var h='',template,i,j,json,obj=new XMLHttpRequest(); // Объявляем переменную под JSON и API по HTTPS
-    obj.open(m,'/'+db+'/'+u,true); // Открываем асинхронное соединение заданным методом по нужному адресу
-    if(m=='POST'){ // Если это POST запрос, то передаем заданные параметры
+function intApi(m,u,b,vars,index){
+    vars=vars||'';
+    var h='',template,i,j,json,obj=new XMLHttpRequest();
+    obj.open(m,'/'+db+'/'+u,true);
+    if(m=='POST'){
         if(typeof vars=='object')
             vars.append('_xsrf',xsrf);
         else{
             obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
-            vars='_xsrf='+xsrf+'&'+vars; // добавляем токен xsrf, необходимый для POST-запроса
+            vars='_xsrf='+xsrf+'&'+vars;
         }
     }
     obj.setRequestHeader('X-Authorization',token);
-    obj.onload=function(e){ // Когда запрос вернет результат - сработает эта функция
-        try{ // в this.responseText лежит ответ от сервера
-            json=JSON.parse(this.responseText); // Пытаемся разобрать ответ как JSON
+    obj.onload=function(e){
+        try{
+            json=JSON.parse(this.responseText);
         }
-        catch(e){ // Если произошла ошибка при разборе JSON
+        catch(e){
             h=this.responseText;
         }
-        obj.abort(); // Закрываем соединение
-        switch(b){ // Отрабатываем заданную команду - переходим в соответствующую ветку case
-            case 'checkName':
-                if(json.object){
-                    errMsg('warning','Такое имя уже существует, выберите другое');
-                    $('#saveBtn').prop('disabled',false);
-                    return;
-                }
-                intApi('POST','_m_new/269?JSON&up=1&t271=QUIZ&t269='+index+'&t273='+encodeURIComponent(JSON.stringify(saveSet)),'save-set');
-                break;
-                
+        obj.abort();
+        switch(b){
             case 'dropObj':
                 checkUser();
                 break;
-                
+
             case 'checkUser':
                 if(json.object===undefined)
                     $('#createUser').html('&nbsp;&mdash; <a class="grant-step" onclick="createUser()">нажмите здесь</a>');
@@ -802,11 +962,11 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                     intApi('GET','object/116?JSON&F_U='+grants.roleId,'checkRole');
                 }
                 break;
-                
+
             case 'checkRole':
                 if(json.reqs)
                     for(i in json.object)
-                        if(json.object[i].ref===quiz.type&&json.reqs[json.object[i].id][136]==='WRITE')
+                        if(json.object[i].ref===iquiz.type&&json.reqs[json.object[i].id][136]==='WRITE')
                             $('#grantTable').html(resultText('Готово','success','object/116/?F_U='+grants.roleId)+grantAction('Удалить',json.object[i].id));
                         else if(json.object[i].ref==='269'&&json.reqs[json.object[i].id][136]==='READ')
                             $('#grantForm').html(resultText('Готово','success','object/116/?F_U='+grants.roleId)+grantAction('Удалить',json.object[i].id));
@@ -815,37 +975,37 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                 if($('#grantForm').html().length==0)
                     return $('#grantForm').html('&nbsp;&mdash; <a class="grant-step" onclick="grantForm()">нажмите здесь</a>');
                 if(grants.secret){
-                    $('.user-form-url').attr('href',document.location.protocol+'//'+document.location.host+'/{_global_.z}/{_global_.action}/'+quizId+'?secret='+grants.secret).show();
+                    $('.user-form-url').attr('href',document.location.protocol+'//'+document.location.host+'/{_global_.z}/{_global_.action}/'+iquizId+'?secret='+grants.secret).show();
                     $('#grants').show();
                 }
                 break;
-                
+
             case 'createUser':
                 if(json.id)
                     checkUser();
                 else
                     $('#createUser').html(resultText('Ошибка','danger','object/18'));
                 break;
-                
+
             case 'grant':
                 if(json.id)
                     checkUser();
                 else
                     $('#'+index).html(resultText('Ошибка','danger','object/18'));
                 break;
-                
+
             case 'addItem':
                 if(json.id)
                     i=$('#t'+index.t).closest('[order]').attr('order');
-                    h=inputBox[quiz.form[i].view+'-OPTION'];
+                    h=inputBox[iquiz.form[i].view+'-OPTION'];
                     $('#t'+index.t).append(h.replace(':value:',json.id)
                                     .replace(':selected:','')
                                     .replace(':t:',index.t)
                                     .replace(':val:',index.val)
                                 );
                 break;
-                
-            case 'delFld':  // Drop the field and its hidden one
+
+            case 'delFld':
                 if(!json.id)
                     return showMsg('messages',JSON.stringify(json));
                 $('.fld[order='+index+'],.badge[order='+index+']').remove();
@@ -855,14 +1015,14 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                 });
                 setEdited();
                 intApi('GET','edit_types?JSON','sources');
-                for(j in quiz.form)
-                    if(j>=index) // Swap array elements to move the one to be deleted to the end
-                        if(quiz.form[j- -1])
-                            [quiz.form[j- -1],quiz.form[j]]=[quiz.form[j],quiz.form[j- -1]];
+                for(j in iquiz.form)
+                    if(j>=index)
+                        if(iquiz.form[j- -1])
+                            [iquiz.form[j- -1],iquiz.form[j]]=[iquiz.form[j],iquiz.form[j- -1]];
                         else
-                            quiz.form.pop(); // Remove the last item
+                            iquiz.form.pop();
                 break;
-                
+
             case 'refreshsources':
             case 'sources':
                 dataItems=json.edit_types;
@@ -874,52 +1034,52 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                 h+=dataList.replace(':name:','Создать...')
                     .replace(':id:','0')
                     .replace('grid.png','plus.png')
-                    .replace('dict-item','dict-new-item');
+                    .replace('iq-item','iq-new-item');
                 $('#sources').html(h);
                 if(id==='0')
                     $('#dash').show();
                 if(b==='refreshsources')
                     drawForm();
                 break;
-                
-            case 'createRef': // Ref is created, add it as Req
-                intApi('POST','_d_req/'+quiz.type+'?JSON&t='+json.obj,'createReq',''
+
+            case 'createRef':
+                intApi('POST','_d_req/'+iquiz.type+'?JSON&t='+json.obj,'createReq',''
                         ,{req_t:json.obj
                             ,ref_type:index.req_t
                             ,val:index.val
                             ,t:index.t});
                 break;
-                
-            case 'createReq': // Req added
-                i=quiz.form.push({id:json.id.toString()
+
+            case 'createReq':
+                i=iquiz.form.push({id:json.id.toString()
                             ,type:index.req_t.toString()
                             ,base:index.t
                             ,name:index.val
                             ,view:index.ref_type?'DDL':index.t});
                 if(index.ref_type){
-                    quiz.form[i-1].ref_type=index.ref_type;
-                    addRefItems=json.id; // Remember to open the field to fill in the new empty list
+                    iquiz.form[i-1].ref_type=index.ref_type;
+                    addRefItems=json.id;
                 }
                 intApi('GET','edit_types?JSON','refreshsources');
                 break;
-                
-            case 'createType': // New type created
-                if(quiz.type==='0'){
-                    quiz.type=json.obj.toString();
-                    quiz.name=index.val;
-                    quiz.form.push({id:json.obj.toString()
+
+            case 'createType':
+                if(iquiz.type==='0'){
+                    iquiz.type=json.obj.toString();
+                    iquiz.name=index.val;
+                    iquiz.form.push({id:json.obj.toString()
                                 ,type:json.obj.toString()
                                 ,base:dataTypes[index.t]
                                 ,name:index.val
                                 ,view:$('#selecttype [value='+index.t+'][view]').attr('view')});
-                    if($('#qb-name').val()==='')
-                        $('#qb-name').val(index.val);
-                    if($('#quizName').val()==='')
-                        $('#quizName').val(index.val);
+                    if($('#iqb-name').val()==='')
+                        $('#iqb-name').val(index.val);
+                    if($('#iquizName').val()==='')
+                        $('#iquizName').val(index.val);
                     if(index.t==='4'){
                         var f={flds:'',hiddens:''};
-                        quiz.form[0].hidden=true;
-                        shownAndHidden(0,quiz.form[0],f);
+                        iquiz.form[0].hidden=true;
+                        shownAndHidden(0,iquiz.form[0],f);
                         $('#hiddens').html(f.hiddens);
                     }
                     intApi('GET','edit_types?JSON','refreshsources');
@@ -927,11 +1087,11 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                 else if(index.isRef)
                     intApi('POST','_d_ref/'+json.obj+'?JSON','createRef','',{req_t:json.obj,val:index.val,t:dataTypes[index.t]});
                 else
-                    intApi('POST','_d_req/'+quiz.type+'?JSON&t='+json.obj,'createReq','',{req_t:json.obj,val:index.val,t:dataTypes[index.t]});
+                    intApi('POST','_d_req/'+iquiz.type+'?JSON&t='+json.obj,'createReq','',{req_t:json.obj,val:index.val,t:dataTypes[index.t]});
                 break;
-                
+
             case 'ddl':
-                var blank=false,j=quiz.form[$('#'+index.i).attr('order')].default,template=inputBox[index.view+'-OPTION']
+                var blank=false,j=(iquiz.userValues&&iquiz.userValues[index.i]!==undefined)?iquiz.userValues[index.i]:iquiz.form[$('#'+index.i).attr('order')].default,template=inputBox[index.view+'-OPTION']
                     ,t=$('#t'+index.i).closest('[reforig]').attr(('reforig'));
                 for(i in json.object){
                     if(json.object[i].val.trim()==='')
@@ -948,59 +1108,50 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                             .replace(':val:','&nbsp;')+h;
                 $('#t'+index.i).html(h);
                 break;
-                
+
             case 'runForm':
-                quiz=JSON.parse(json.reqs[json.object[0].id][273]);
-                $('#runFormName').html(quiz.name||'');
-                $('#runFormDescr').html(quiz.descr||'');
-                $('#runFormSubmit').html(quiz.submit||'Отправить');
-                if(quiz.cover||quiz.logo){
+                iquiz=JSON.parse(json.reqs[json.object[0].id][273]);
+                iquiz.currentPage = iquiz.currentPage || 1;
+                // Вычислить общее количество страниц
+                var totalPages = 1;
+                for(var ii in iquiz.form)
+                    if(iquiz.form[ii].page && iquiz.form[ii].page > totalPages)
+                        totalPages = iquiz.form[ii].page;
+                iquiz.totalPages = totalPages;
+
+                $('#runFormName').html(iquiz.name||'');
+                $('#runFormDescr').html(iquiz.descr||'');
+                $('#runFormSubmit').html(iquiz.currentPage === totalPages ? (iquiz.submit||'Отправить') : 'Далее →');
+                if(iquiz.cover||iquiz.logo){
                     $('.cover-container').show();
-                    if(quiz.cover){
-                        $('.q-cover').attr('src',quiz.cover);
-                        $('.q-cover').show();
+                    if(iquiz.cover){
+                        $('.iq-cover').attr('src',iquiz.cover);
+                        $('.iq-cover').show();
                     }
-                    if(quiz.logo){
-                        $('.q-logo').attr('src',quiz.logo);
+                    if(iquiz.logo){
+                        $('.iq-logo').attr('src',iquiz.logo);
                         $('.logo-container').show();
-                        if(quiz.cover)
+                        if(iquiz.cover)
                             window.addEventListener('resize', function(event) {
-                                $('.q-logo').css('margin-top',-$('.q-cover')[0].height-$('.q-logo')[0].height/2+'px');
+                                $('.iq-logo').css('margin-top',-$('.iq-cover')[0].height-$('.iq-logo')[0].height/2+'px');
                             }, true);
                         else
                             $('.logo-container').css('position','relative');
                     }
                 }
-                if(quiz['max-width'])
-                    $('#runForm').css('max-width',quiz['max-width']+'px');
-                for(i in quiz.form){
-                        if(quiz.form[i].hidden)
-                            h+='<div order="'+i+'"><input id="t'+quiz.form[i].id+'" type="hidden" class="q-fld"'
-                                +' value="'+(quiz.form[i].default||search[quiz.form[i].label||quiz.form[i].name]||'')+'"></div>';
-                        else{
-                            h+='<div class="fld p-1 p-sm-3" id="'+quiz.form[i].id+'" order="'+i+'">'
-                                +'    <label class="mb-1" '+(quiz.form[i].required?'style="color:#e00" title="Поле обязательно для заполнения" is-mandatory="1"':'')+'>'
-                                        +(quiz.form[i].label||quiz.form[i].name)
-                                +'    </label>'
-                                +     inputBox[quiz.form[i].view].replace(/:t:/g,quiz.form[i].id)
-                                                .replace(':reforig:',quiz.form[i].ref_type)
-                                                .replace(':value:',search[quiz.form[i].label||quiz.form[i].name]||(quiz.form[i].default?defaults(quiz.form[i].default):''))
-                                                .replace(':placeholder:',quiz.form[i].placeholder||'Введите значение '+quiz.form[i].name)
-                                +'</div>';
-                            if(quiz.form[i].view==='DDL')
-                                intApi('GET','object/'+quiz.form[i].ref_type+'?JSON&LIMIT=1000','ddl','',{i:quiz.form[i].id,view:quiz.form[i].view});
-                        }
-                    }
-                    $('#runFormFields').html(h);
-                    $('#runForm').show();
-                    window.dispatchEvent(new Event('resize'));
+                if(iquiz['max-width'])
+                    $('#runForm').css('max-width',iquiz['max-width']+'px');
+
+                // Рендеринг формы с поддержкой многостраничности
+                renderFormPage();
+                $('#runForm').show();
                 break;
-                
+
             case 'submitForm':
                 if(json.id){
-                    showMsg('submitResult',(quiz.success||'Данные успешно отправлены, Спасибо!').replace(/:id:/gmu,json.id),'success',0);
+                    showMsg('submitResult',(iquiz.success||'Данные успешно отправлены, Спасибо!').replace(/:id:/gmu,json.id),'success',0);
                     $('#runFormSubmit').remove();
-                    var redirectTimeout=parseInt(quiz['redirect-timeout'])||0;
+                    var redirectTimeout=parseInt(iquiz['redirect-timeout'])||0;
                     if(redirectTimeout>0)
                         setTimeout(function(){var a=document.querySelector('#submitResult a');if(a)a.click();},redirectTimeout*1000);
                 }
@@ -1009,41 +1160,44 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                     $('#submitForm').attr('disabled',false);
                 }
                 break;
-                
+
             case 'dashlist':
                 template=$('#bi').html();
                 for(i in json.object){
                     h+=template.replace(':name:',json.object[i].val)
                             .replace(':id:',json.object[i].id);
-                    savedQuiz[json.object[i].id]=json.reqs[json.object[i].id][273];
+                    savedIquiz[json.object[i].id]=json.reqs[json.object[i].id][273];
                 }
                 h+=template.replace(':name:','Создать...')
                         .replace(':id:','0');
                 $('#bi').html(h);
-                var gradStart=getComputedStyle(document.documentElement).getPropertyValue('--quiz-brand-gradient-start').trim()||'#419CE1';
-                var gradEnd=getComputedStyle(document.documentElement).getPropertyValue('--quiz-brand-gradient-end').trim()||'#1283DA';
+                var gradStart=getComputedStyle(document.documentElement).getPropertyValue('--iquiz-brand-gradient-start').trim()||'#419CE1';
+                var gradEnd=getComputedStyle(document.documentElement).getPropertyValue('--iquiz-brand-gradient-end').trim()||'#1283DA';
                 $('#0').find('.dash-bar').css('background','linear-gradient(92.58deg, '+gradStart+' 4.59%, '+gradEnd+' 90.68%)');
                 $('#0').find('.google-visualization-charteditor-category-label').css('color','#eee');
                 $('#dashlist').show();
                 break;
-                
-            case 'checkQuiz':
+
+            case 'checkIquiz':
                 var fd = new FormData();
-                fd.append('t273',JSON.stringify(quiz));
+                fd.append('t273',JSON.stringify(iquiz));
                 if(json.object)
-                    intApi('POST','_m_set/'+json.object[0].id+'?JSON','saveQuiz',fd);
-                else
-                    intApi('POST','_m_new/269?JSON&up=1&t271=QUIZ&t269='+encodeURIComponent($('#quizName').val()),'saveQuiz',fd);
+                    intApi('POST','_m_set/'+json.object[0].id+'?JSON','saveIquizDone',fd);
+                else{
+                    fd.append('t271','QUIZ');
+                    fd.append('t269',$('#iquizName').val());
+                    intApi('POST','_m_new/269?JSON&up=1','saveIquizDone',fd);
+                }
                 break;
-                
-            case 'saveQuiz':
+
+            case 'saveIquizDone':
                 $('#save-wait').hide();
-                quizId=json.obj;
-                $('.form-url').attr('href','/{_global_.z}/{_global_.action}/'+quizId).show();
+                iquizId=json.obj;
+                $('.form-url').attr('href','/{_global_.z}/{_global_.action}/'+iquizId).show();
                 break;
         }
     }
-    obj.send(vars); // отправили запрос и теперь будем ждать ответ, а пока - выходим
+    obj.send(vars);
 }
 function reqExists(i){
     for(var j in dataItems.id)
@@ -1104,26 +1258,26 @@ var ddlAdd='<div class="input-group pt-2 set:t:" style="display:none;" title="З
             +'    <div class="input-group-append"><button class="btn btn-primary btn-sm" onclick="addItem(:t:)">Сохранить</button></div>'
             +'</div>'
     ,inputBox={
-    'SHORT':'<input type="text" name="placeholder" id="t:t:" value=":value:" class="form-control q-save q-fld" placeholder=":placeholder:">',
-    'SIGNED':'<input type="text" name="placeholder" id="t:t:" value=":value:" class="form-control q-save q-fld" placeholder=":placeholder:">',
-    'NUMBER':'<input type="text" name="placeholder" id="t:t:" value=":value:" class="form-control q-save q-fld" placeholder=":placeholder:">',
-    'DATE':'<input type="date" id="t:t:" value=":value:" class="form-control datepicker q-save q-fld">'
+    'SHORT':'<input type="text" name="placeholder" id="t:t:" value=":value:" class="form-control iq-save iq-fld" placeholder=":placeholder:">',
+    'SIGNED':'<input type="text" name="placeholder" id="t:t:" value=":value:" class="form-control iq-save iq-fld" placeholder=":placeholder:">',
+    'NUMBER':'<input type="text" name="placeholder" id="t:t:" value=":value:" class="form-control iq-save iq-fld" placeholder=":placeholder:">',
+    'DATE':'<input type="date" id="t:t:" value=":value:" class="form-control datepicker iq-save iq-fld">'
             +'<div class="pt-2 assist-t:t:" style="display:none;" title="Значение по умолчанию"><span class="date-def" onclick="setDef(:t:,\'[TODAY]\')">Сегодня</span>'
             +' &nbsp; <span onclick="setDef(:t:)">Очистить</span></div>',
-    'DATETIME':'<input type="datetime-local" id="t:t:" data="DATETIME" value=":value:" class="form-control q-save q-fld">'
+    'DATETIME':'<input type="datetime-local" id="t:t:" data="DATETIME" value=":value:" class="form-control iq-save iq-fld">'
             +'<div class="pt-2 assist-t:t:" style="display:none;" title="Значение по умолчанию"><span class="date-def" onclick="setDef(:t:,\'[NOW]\')">Текущее время</span></div>',
-    'DDL':'<select name="default" id="t:t:" class="form-control q-save q-fld" reforig=":reforig:"></select>'+ddlAdd,
+    'DDL':'<select name="default" id="t:t:" class="form-control iq-save iq-fld" reforig=":reforig:"></select>'+ddlAdd,
     'DDL-OPTION':'<option value=":value:" :selected:>:val:</option>',
     'ONE':'<div id="t:t:" reforig=":reforig:"></div>'+ddlAdd,
     'ONE-OPTION':'<div class="form-check"><label class="form-check-label"><input type="radio" class="form-check-input" value=":value:" name="opt:t:" :selected:>:val:</label></div>',
     'MANY':'<div id="t:t:" reforig=":reforig:"></div>'+ddlAdd,
     'MANY-OPTION':'<div class="form-check"><label class="form-check-label"><input type="checkbox" class="form-check-input" value=":value:" :selected:>:val:</label></div>',
-    'HTML':'<textarea name="placeholder" id="t:t:" class="form-control q-save q-fld" placeholder=":placeholder:">:value:</textarea>',
-    'MEMO':'<textarea name="placeholder" id="t:t:" class="form-control q-save q-fld" placeholder=":placeholder:">:value:</textarea>',
-    'CHARS':'<input type="text" name="placeholder" id="t:t:" value=":value:" class="form-control q-save q-fld" placeholder=":placeholder:">',
-    'FILE':'<input type="file" id="t:t:" value=":value:" class="form-control q-save q-fld">',
-    'BOOLEAN':'<div style="width:40px"><input type="checkbox" name="default" id="t:t:" value="1" class="form-control q-save q-fld"></div>',
-    'PWD':'<input type="password" name="placeholder" id="t:t:" value=":value:" class="form-control q-save q-fld" placeholder=":placeholder:">',
+    'HTML':'<textarea name="placeholder" id="t:t:" class="form-control iq-save iq-fld" placeholder=":placeholder:">:value:</textarea>',
+    'MEMO':'<textarea name="placeholder" id="t:t:" class="form-control iq-save iq-fld" placeholder=":placeholder:">:value:</textarea>',
+    'CHARS':'<input type="text" name="placeholder" id="t:t:" value=":value:" class="form-control iq-save iq-fld" placeholder=":placeholder:">',
+    'FILE':'<input type="file" id="t:t:" value=":value:" class="form-control iq-save iq-fld">',
+    'BOOLEAN':'<div style="width:40px"><input type="checkbox" name="default" id="t:t:" value="1" class="form-control iq-save iq-fld"></div>',
+    'PWD':'<input type="password" name="placeholder" id="t:t:" value=":value:" class="form-control iq-save iq-fld" placeholder=":placeholder:">',
     'CALCULATABLE':'<span>:value:</span>',
 };
 $(function(){
@@ -1146,12 +1300,12 @@ function defaults(v){
 function setDef(t,v){
     var o=$(event.target).closest('[order]').attr('order');
     if(v!==undefined){
-        quiz.form[o].default=v;
+        iquiz.form[o].default=v;
         v=defaults(v);
     }
     else
-        if(quiz.form[o].default)
-            delete quiz.form[o].default;
+        if(iquiz.form[o].default)
+            delete iquiz.form[o].default;
     $('#t'+t).val(v||'');
     setEdited();
 }
@@ -1160,20 +1314,16 @@ function setNull(t){
     $('#t'+t).val('');
 }
 function reOrderFields(){
-    var i=0,j;
-    $('.fld').each(function(){
-        console.log('reorder');
-        if(quiz.form[i].id!==this.id)
-            for(j in quiz.form)
-                if(quiz.form[j].id===this.id){ // Swap these array elements
-                    $('#'+this.id+',#h'+this.id).attr('order',i);
-                    $('#'+quiz.form[i].id+',#h'+quiz.form[i].id).attr('order',j);
-                    [quiz.form[i],quiz.form[j]]=[quiz.form[j],quiz.form[i]];
-                    break;
-                }
-        i++;
+    var newForm=[];
+    $('#fields').children('[order]').each(function(){
+        var idx=parseInt($(this).attr('order'));
+        if(!isNaN(idx)&&iquiz.form[idx]!==undefined)
+            newForm.push(iquiz.form[idx]);
     });
+    if(newForm.length===iquiz.form.length)
+        iquiz.form=newForm;
     setEdited();
+    drawForm();
 }
 function addItem(t){
     var val=$('.set'+t+' input').val(),reforig=$('#t'+t).attr('reforig');
@@ -1183,7 +1333,21 @@ function addItem(t){
 }
 function deleteFld(el){
     var i=$(el).closest('[order]').attr('order');
-    intApi('POST','_d_del_req/'+quiz.form[i].id+'?JSON','delFld','',i);
+    intApi('POST','_d_del_req/'+iquiz.form[i].id+'?JSON','delFld','',i);
+}
+function moveFldUp(el){
+    var i=parseInt($(el).closest('[order]').attr('order'));
+    if(i<=0) return;
+    var tmp=iquiz.form[i]; iquiz.form[i]=iquiz.form[i-1]; iquiz.form[i-1]=tmp;
+    setEdited();
+    drawForm();
+}
+function moveFldDown(el){
+    var i=parseInt($(el).closest('[order]').attr('order'));
+    if(i>=iquiz.form.length-1) return;
+    var tmp=iquiz.form[i]; iquiz.form[i]=iquiz.form[i+1]; iquiz.form[i+1]=tmp;
+    setEdited();
+    drawForm();
 }
 var timer;
 function showMsg(i,err,mode,timeout){
@@ -1218,109 +1382,3 @@ if(search.del)
 <script src="/js/bootstrap4.5.2.min.js"></script>
 <script src="/js/main.js"></script>
 <script src="/js/hints.js"></script>
-<!-- Workspace hints -->
-<style>
-#quiz-hint-box {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 90%;
-    max-width: 420px;
-    background: var(--card-bg, #fff);
-    border-radius: 12px;
-    padding: 1.25rem 1.25rem 1rem;
-    box-shadow: 0 8px 40px rgba(0,0,0,0.28);
-    z-index: 2000;
-    display: none;
-    cursor: default;
-    user-select: none;
-    -webkit-user-select: none;
-}
-#quiz-hint-box .hint-drag-handle {
-    position: absolute;
-    top: 6px;
-    left: 0;
-    right: 12px;
-    height: 2rem;
-    cursor: grab;
-    border-radius: 12px 12px 0 0;
-    display: flex;
-    align-items: center;
-    justify-content: right;
-}
-#quiz-hint-box .hint-drag-handle:active { cursor: grabbing; }
-#quiz-hint-box .hint-drag-handle .hint-drag-icon {
-    font-size: 1rem;
-    color: var(--text-secondary, #888);
-    pointer-events: none;
-    line-height: 1;
-    letter-spacing: 2px;
-}
-#quiz-hint-mobile-toggle {
-    display: none;
-    position: fixed;
-    right: 1rem;
-    z-index: 2001;
-    background: var(--button-primary, #0d6efd);
-    color: #fff;
-    border: none;
-    border-radius: 50%;
-    width: 2.4rem;
-    height: 2.4rem;
-    font-size: 1.2rem;
-    cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-    align-items: center;
-    justify-content: center;
-}
-@media (max-width: 767px) {
-    #quiz-hint-box { width: calc(100% - 2rem); max-width: none; }
-    #quiz-hint-mobile-toggle { display: flex; }
-}
-</style>
-<div id="quiz-hint-box">
-    <div class="hint-drag-handle" id="quiz-hint-drag-handle" title="Это окно можно перетаскивать по экрану"><span class="hint-drag-icon">⠿⠿</span></div>
-    <div id="quiz-hint-1" style="display:none;">
-        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Создание опроса</h3>
-        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Нажмите «Создать опрос», выберите или создайте таблицу для хранения ответов, задайте заголовок и описание. Каждый опрос связан с конкретной таблицей базы данных.</p>
-        <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
-            <button onclick="quizHintClose()" style="padding:0.35rem 0.9rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer; font-size:0.85rem;">Закрыть</button>
-        </div>
-    </div>
-    <div id="quiz-hint-2" style="display:none;">
-        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Добавление вопросов</h3>
-        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Нажмите «Добавить вопрос» и выберите тип: текстовый, выбор из списка, множественный выбор и др. Вопросы можно перетаскивать для изменения порядка.</p>
-        <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
-            <button onclick="quizHintClose()" style="padding:0.35rem 0.9rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer; font-size:0.85rem;">Закрыть</button>
-        </div>
-    </div>
-    <div id="quiz-hint-3" style="display:none;">
-        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Публикация и просмотр ответов</h3>
-        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Скопируйте ссылку на опрос, чтобы поделиться с пользователями. Ответы автоматически сохраняются в выбранную таблицу — откройте её для анализа результатов.</p>
-        <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
-            <button onclick="quizHintClose()" style="padding:0.35rem 0.9rem; border:none; border-radius:6px; background:var(--button-primary,#0d6efd); color:#fff; cursor:pointer; font-size:0.85rem;">Понятно</button>
-        </div>
-    </div>
-</div>
-<button id="quiz-hint-mobile-toggle" title="Переместить подсказку" aria-label="Переместить подсказку вверх/вниз" style="bottom:5rem;"></button>
-<script>
-// Workspace-specific hint configuration for 'quiz'.
-// Texts and steps are defined here; the display mechanism is in /js/hints.js.
-document.addEventListener('DOMContentLoaded', function() {
-    window.initHints({
-        workspace: 'quiz',
-        steps: 3,
-        onInit: function(api) {
-			return;
-            var btns = document.querySelectorAll('button, .btn, [role="button"]');
-            btns.forEach(function(btn) {
-                var txt = btn.textContent || btn.innerText || '';
-                if (txt.toLowerCase().indexOf('создать') !== -1 || txt.toLowerCase().indexOf('добавить') !== -1 || txt.toLowerCase().indexOf('create') !== -1 || txt.toLowerCase().indexOf('add') !== -1) {
-                    btn.addEventListener('click', function() { api.advance(2); });
-                }
-            });
-        }
-    });
-});
-</script>
