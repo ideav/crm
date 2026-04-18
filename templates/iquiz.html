@@ -620,6 +620,7 @@ function drawForm(){
         }
         else if(inputBox[iquiz.form[i].view])
             shownAndHidden(i,iquiz.form[i],f);
+    }
     for(j in dataItems.id)
         if(dataItems.id[j]===iquiz.type&&dataItems.req_id[j]!==''
                 &&f.hiddens.indexOf('id="h'+dataItems.req_id[j]+'"')===-1){
