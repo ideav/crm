@@ -160,6 +160,18 @@
 
             if (!tableWrapper || !scrollCounter) return;
 
+            const updateScrollCounterOpacity = () => {
+                // Make scroll-counter semi-transparent when table rows are beneath it (issue #1922)
+                const tbody = this.container.querySelector('.integram-table tbody');
+                if (!tbody) return;
+                const counterRect = scrollCounter.getBoundingClientRect();
+                const tbodyRect = tbody.getBoundingClientRect();
+                // Rows are beneath the counter if tbody bottom is below counter top
+                // and tbody top is above counter bottom (overlap in vertical axis)
+                const overlaps = tbodyRect.bottom > counterRect.top && tbodyRect.top < counterRect.bottom;
+                scrollCounter.classList.toggle('rows-beneath', overlaps);
+            };
+
             const updateScrollCounterPosition = () => {
                 // Use .app-content left edge instead of tableWrapper, so the counter stays
                 // at a fixed viewport position when the table scrolls horizontally (issue #1010).
@@ -167,6 +179,7 @@
                 const anchorEl = appContent || tableWrapper;
                 const rect = anchorEl.getBoundingClientRect();
                 scrollCounter.style.left = (rect.left + 20) + 'px';
+                updateScrollCounterOpacity();
             };
 
             // Remove existing listeners if any
