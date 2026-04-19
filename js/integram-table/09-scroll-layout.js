@@ -1,36 +1,50 @@
+        getScrollContainer() {
+            return document.querySelector('.app-content') || window;
+        }
+
         attachScrollListener() {
             const tableWrapper = this.container.querySelector('.integram-table-wrapper');
             if (!tableWrapper) return;
 
+            const scrollContainer = this.getScrollContainer();
+
             // Remove existing scroll listener if any
             if (this.scrollListener) {
-                window.removeEventListener('scroll', this.scrollListener);
+                (this._scrollListenerContainer || window).removeEventListener('scroll', this.scrollListener);
             }
 
+            this._scrollListenerContainer = scrollContainer;
+
             this.scrollListener = () => {
-                const decision = this.getScrollLoadDecision(tableWrapper, 'window-scroll');
+                const decision = this.getScrollLoadDecision(tableWrapper, 'scroll');
                 this.traceScrollLoadDecision(decision);
                 if (decision.shouldLoad) {
                     this.loadData(true);  // Append mode
                 }
             };
 
-            window.addEventListener('scroll', this.scrollListener);
+            scrollContainer.addEventListener('scroll', this.scrollListener);
         }
 
         getScrollLoadDecision(tableWrapper, source) {
+            const scrollContainer = this.getScrollContainer();
+            const isWindow = scrollContainer === window;
+            const scrollY = isWindow ? window.scrollY : scrollContainer.scrollTop;
+            const viewportHeight = isWindow ? window.innerHeight : scrollContainer.clientHeight;
+            const scrollHeight = isWindow ? document.documentElement.scrollHeight : scrollContainer.scrollHeight;
+
             const state = {
                 source,
                 isLoading: this.isLoading,
                 hasMore: this.hasMore,
                 loadedRecords: this.loadedRecords,
                 pageSize: this.options.pageSize,
-                scrollY: window.scrollY,
-                viewportHeight: window.innerHeight,
-                scrollHeight: document.documentElement.scrollHeight,
+                scrollY,
+                viewportHeight,
+                scrollHeight,
                 tableBottom: null,
                 belowFold: null,
-                threshold: window.innerHeight / 2,
+                threshold: viewportHeight / 2,
                 reason: '',
                 shouldLoad: false
             };
@@ -49,8 +63,9 @@
             }
 
             const rect = tableWrapper.getBoundingClientRect();
+            const containerBottom = isWindow ? window.innerHeight : scrollContainer.getBoundingClientRect().bottom;
             state.tableBottom = rect.bottom;
-            state.belowFold = rect.bottom - window.innerHeight;
+            state.belowFold = rect.bottom - containerBottom;
 
             if (state.belowFold < state.threshold) {
                 state.reason = 'near-table-bottom';
@@ -152,6 +167,8 @@
                 }
             };
 
+            const scrollContainer = this.getScrollContainer();
+
             // Remove existing listeners if any
             if (this.tableScrollListener) {
                 tableContainer.removeEventListener('scroll', this.tableScrollListener);
@@ -160,9 +177,11 @@
                 stickyScrollbar.removeEventListener('scroll', this.stickyScrollListener);
             }
             if (this.stickyVisibilityListener) {
-                window.removeEventListener('scroll', this.stickyVisibilityListener);
+                (this._stickyScrollContainer || window).removeEventListener('scroll', this.stickyVisibilityListener);
                 window.removeEventListener('resize', this.stickyVisibilityListener);
             }
+
+            this._stickyScrollContainer = scrollContainer;
 
             // Attach listeners
             this.tableScrollListener = syncFromTable;
@@ -174,7 +193,7 @@
 
             tableContainer.addEventListener('scroll', this.tableScrollListener);
             stickyScrollbar.addEventListener('scroll', this.stickyScrollListener);
-            window.addEventListener('scroll', this.stickyVisibilityListener);
+            scrollContainer.addEventListener('scroll', this.stickyVisibilityListener);
             window.addEventListener('resize', this.stickyVisibilityListener);
 
             // Initial setup
