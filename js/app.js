@@ -890,6 +890,13 @@ class App {
             const msg = details ? details : 'Ошибка авторизации';
             showToast(msg, 'error');
             this.showAuthPanel();
+        } else if (urlParams.get('db') && this.auth.allIdbDbs.length === 0) {
+            // Redirected here after logout with ?db=<name> but no auth cookies remain — show login form
+            const dbParam = urlParams.get('db');
+            if (dbParam !== 'my' && !this.auth.validDbs.includes(dbParam)) {
+                this.auth.validDbs.push(dbParam);
+            }
+            this.showAuthPanel(dbParam || undefined);
         } else if (urlParams.get('u')) {
             // Handle login link with pre-filled username: ?db=tgroup&u=username
             const dbParam = urlParams.get('db');
