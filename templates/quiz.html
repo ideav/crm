@@ -1382,3 +1382,93 @@ if(search.del)
 <script src="/js/bootstrap4.5.2.min.js"></script>
 <script src="/js/main.js"></script>
 <script src="/js/hints.js"></script>
+<!-- Workspace hints -->
+<style>
+:root {
+    --quiz-hint-shadow: 0 8px 40px rgba(0,0,0,0.28);
+    --quiz-hint-btn-shadow: 0 2px 8px rgba(0,0,0,0.25);
+}
+[data-theme="dark"] {
+    --quiz-hint-shadow: 0 8px 40px rgba(0,0,0,0.55);
+    --quiz-hint-btn-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
+#quiz-hint-box {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 90%;
+    max-width: 420px;
+    background: var(--card-bg, #fff);
+    border-radius: 12px;
+    padding: 1.25rem 1.25rem 1rem;
+    box-shadow: var(--quiz-hint-shadow);
+    z-index: 2000;
+    display: none;
+    cursor: default;
+    user-select: none;
+    -webkit-user-select: none;
+}
+#quiz-hint-box .hint-drag-handle {
+    position: absolute;
+    top: 6px;
+    left: 0;
+    right: 12px;
+    height: 2rem;
+    cursor: grab;
+    border-radius: 12px 12px 0 0;
+    display: flex;
+    align-items: center;
+    justify-content: right;
+}
+#quiz-hint-box .hint-drag-handle:active { cursor: grabbing; }
+#quiz-hint-box .hint-drag-handle .hint-drag-icon {
+    font-size: 1rem;
+    color: var(--text-secondary, #888);
+    pointer-events: none;
+    line-height: 1;
+    letter-spacing: 2px;
+}
+#quiz-hint-mobile-toggle {
+    display: none;
+    position: fixed;
+    right: 1rem;
+    z-index: 2001;
+    background: var(--button-primary, #0d6efd);
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    width: 2.4rem;
+    height: 2.4rem;
+    font-size: 1.2rem;
+    cursor: pointer;
+    box-shadow: var(--quiz-hint-btn-shadow);
+    align-items: center;
+    justify-content: center;
+}
+@media (max-width: 767px) {
+    #quiz-hint-box { width: calc(100% - 2rem); max-width: none; }
+    #quiz-hint-mobile-toggle { display: flex; }
+}
+</style>
+<div id="quiz-hint-box">
+    <div class="hint-drag-handle" id="quiz-hint-drag-handle" title="Это окно можно перетаскивать по экрану"><span class="hint-drag-icon">⠿⠿</span></div>
+    <div id="quiz-hint-1" style="display:none;">
+        <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Конструктор опросов</h3>
+        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Это рабочее место помогает создавать и настраивать формы опросов, которые сохраняют ответы прямо в выбранную таблицу. Сначала выберите существующий опрос или создайте новый, затем укажите таблицу для записи данных. В редакторе можно задать название, описание, поля формы, текст кнопки отправки и параметры доступа. Готовую форму можно открыть по ссылке, встроить через iframe или передать пользователям с нужными правами.</p>
+        <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
+            <button onclick="quizHintClose()" style="padding:0.35rem 0.9rem; border:none; border-radius:6px; background:var(--button-primary,#0d6efd); color:#fff; cursor:pointer; font-size:0.85rem;">Понятно</button>
+        </div>
+    </div>
+</div>
+<button id="quiz-hint-mobile-toggle" title="Переместить подсказку" aria-label="Переместить подсказку вверх/вниз" style="bottom:5rem;"></button>
+<script>
+// Workspace-specific hint configuration for 'quiz'.
+// Texts and steps are defined here; the display mechanism is in /js/hints.js.
+document.addEventListener('DOMContentLoaded', function() {
+    window.initHints({
+        workspace: 'quiz',
+        steps: 1
+    });
+});
+</script>
