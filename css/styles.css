@@ -918,6 +918,37 @@ body {
 .auth-db-back-link:hover {
     text-decoration: underline;
 }
+
+.otp-code-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+}
+
+.otp-code-row .database-field-input,
+.otp-code-row .btn-primary {
+    height: 46px;
+}
+
+.otp-code-row .database-field-input {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+}
+
+.otp-code-row .btn-primary {
+    width: auto;
+    white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+    .otp-code-row {
+        flex-direction: column;
+    }
+
+    .otp-code-row .btn-primary {
+        width: 100%;
+    }
+}
 #cookie-consent {
     display: none;
     position: fixed;
