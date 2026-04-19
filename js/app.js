@@ -713,6 +713,76 @@ class App {
             });
         }
 
+        // OTP (one-time password to email)
+        const otpBtn = document.getElementById('otp-btn');
+        const otpMessage = document.getElementById('otp-message');
+        if (otpBtn) {
+            otpBtn.addEventListener('click', async () => {
+                const emailVal = loginEmailInput ? loginEmailInput.value.trim() : '';
+                if (!emailVal) {
+                    showToast('Введите email', 'error');
+                    return;
+                }
+                const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!emailRe.test(emailVal)) {
+                    showToast('Введите корректный email', 'error');
+                    return;
+                }
+                const dbSelect = document.getElementById('auth-db-select');
+                const customInput = document.getElementById('auth-db-custom');
+                let selectedDb = dbSelect ? dbSelect.value : 'my';
+                if (selectedDb === '__other__') {
+                    selectedDb = customInput ? customInput.value.trim() : '';
+                    if (!selectedDb) {
+                        showToast('Введите имя базы данных', 'error');
+                        return;
+                    }
+                }
+                otpBtn.disabled = true;
+                try {
+                    const formData = new FormData();
+                    formData.append('email', emailVal);
+                    const response = await fetch(`${encodeURIComponent(selectedDb)}/otp`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const text = await response.text();
+                    let data = null;
+                    try { data = JSON.parse(text); } catch (e) { data = null; }
+                    if (otpMessage) {
+                        otpMessage.style.display = '';
+                        if (data !== null) {
+                            const msg = (data.message || '').toUpperCase();
+                            const isError = msg.includes('WRONG') || msg.includes('ERROR');
+                            if (!isError) {
+                                otpMessage.className = 'success-message';
+                                otpMessage.textContent = data.details || data.message || text;
+                            } else {
+                                otpMessage.className = '';
+                                otpMessage.style.background = 'var(--bg-secondary)';
+                                otpMessage.style.color = 'var(--error-color, #ef4444)';
+                                otpMessage.textContent = Object.entries(data).map(([k, v]) => `${k}: ${v}`).join(', ');
+                            }
+                        } else {
+                            otpMessage.className = '';
+                            otpMessage.style.background = 'var(--bg-secondary)';
+                            otpMessage.style.color = 'var(--text-primary)';
+                            otpMessage.textContent = text;
+                        }
+                    }
+                } catch (err) {
+                    if (otpMessage) {
+                        otpMessage.style.display = '';
+                        otpMessage.className = '';
+                        otpMessage.style.color = 'var(--error-color, #ef4444)';
+                        otpMessage.textContent = err.message || 'Ошибка при отправке кода';
+                    }
+                } finally {
+                    otpBtn.disabled = false;
+                }
+            });
+        }
+
         // Register form
         const registerForm = document.getElementById('register-form');
         if (registerForm) {
