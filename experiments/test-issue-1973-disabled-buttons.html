@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Issue #1973 Disabled Button States</title>
+    <link rel="stylesheet" href="../css/styles.css">
+    <link rel="stylesheet" href="../css/integram-table.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 40px;
+            background: var(--bg-primary, #fff);
+            color: var(--text-primary, #333);
+            font-family: Arial, sans-serif;
+        }
+
+        .test-panel {
+            max-width: 760px;
+            margin: 0 auto;
+        }
+
+        .test-row {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin: 18px 0;
+        }
+
+        .test-row-label {
+            width: 140px;
+            color: var(--text-secondary, #6c757d);
+        }
+
+        .edit-form-footer,
+        .form-field-settings-footer,
+        .integram-modal-footer {
+            margin-top: 16px;
+            text-align: left;
+            border: 1px solid var(--border-color, #dee2e6);
+        }
+
+        .status {
+            margin-top: 24px;
+            padding: 12px;
+            border-radius: 4px;
+            background: #d4edda;
+            color: #155724;
+        }
+    </style>
+</head>
+<body>
+    <main class="test-panel">
+        <h1>Issue #1973: disabled buttons are visually distinct</h1>
+
+        <section class="integram-modal-footer">
+            <h2>Paste modal footer</h2>
+            <div class="test-row">
+                <span class="test-row-label">Enabled</span>
+                <button type="button" class="btn btn-primary">Вставить</button>
+                <button type="button" class="btn btn-secondary">Отменить</button>
+            </div>
+            <div class="test-row">
+                <span class="test-row-label">Disabled</span>
+                <button type="button" class="btn btn-primary" disabled>Вставить</button>
+                <button type="button" class="btn btn-secondary" disabled>Отменить</button>
+            </div>
+        </section>
+
+        <section class="edit-form-footer">
+            <h2>Edit form footer</h2>
+            <div class="test-row">
+                <span class="test-row-label">Disabled</span>
+                <button type="button" class="btn btn-primary" disabled>Сохранить</button>
+                <button type="button" class="btn btn-secondary" disabled>Отменить</button>
+                <button type="button" class="btn btn-danger" disabled>Удалить</button>
+            </div>
+        </section>
+
+        <div class="status" id="status">Testing...</div>
+    </main>
+
+    <script>
+        const disabledButton = document.querySelector('.integram-modal-footer .btn-primary:disabled');
+        const enabledButton = document.querySelector('.integram-modal-footer .btn-primary:not(:disabled)');
+        const disabledStyle = window.getComputedStyle(disabledButton);
+        const enabledStyle = window.getComputedStyle(enabledButton);
+        const visuallyDisabled = disabledStyle.cursor === 'not-allowed'
+            && disabledStyle.opacity !== enabledStyle.opacity
+            && disabledStyle.backgroundColor !== enabledStyle.backgroundColor;
+
+        const status = document.getElementById('status');
+        status.textContent = visuallyDisabled
+            ? 'PASS: disabled buttons use not-allowed cursor, reduced opacity, and muted colors.'
+            : 'FAIL: disabled buttons still look too similar to enabled buttons.';
+        status.style.background = visuallyDisabled ? '#d4edda' : '#f8d7da';
+        status.style.color = visuallyDisabled ? '#155724' : '#721c24';
+    </script>
+</body>
+</html>
