@@ -121,8 +121,13 @@ class MainAppController {
         this.setupMenuSearch();
     }
 
-    static getLogoutStartUrl(dbName) {
-        return '/start.html?db=' + encodeURIComponent(dbName || '');
+    static getLogoutStartUrl(dbName, username) {
+        const params = new URLSearchParams();
+        params.set('db', dbName || '');
+        if (username) {
+            params.set('u', username);
+        }
+        return '/start.html?' + params.toString();
     }
 
     static deleteCurrentDbCookies(dbName) {
@@ -1709,8 +1714,9 @@ class MainAppController {
         if (logoutBtn) {
             logoutBtn.addEventListener('click', () => {
                 const dbName = typeof db !== 'undefined' ? db : '';
+                const username = typeof user !== 'undefined' ? user : '';
                 MainAppController.deleteCurrentDbCookies(dbName);
-                window.location.href = MainAppController.getLogoutStartUrl(dbName);
+                window.location.href = MainAppController.getLogoutStartUrl(dbName, username);
             });
         }
 
