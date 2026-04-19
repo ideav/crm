@@ -179,6 +179,8 @@ if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Registe
     	if(!strlen($_POST["agree"]))
     		$msg .= t9n("[RU]Пожалуйста, поставьте отметку, что ознакомились с&nbsp;Лицензионным соглашением"
     		    ."[EN]Please confirm that you have read the&nbsp;<a href=\"offer.html\">papers to protect you")."<br/><br/>\n";
+        if(!verifyCaptcha(isset($_POST["smart-token"]) ? $_POST["smart-token"] : ""))
+            $msg .= t9n("[RU]Пожалуйста, пройдите проверку капчи.[EN]Please complete the captcha verification.")."<br/><br/>\n";
         # Stage one: Inform of the errors, if any, and let him try again
         if(strlen($msg))
         	my_die($msg);
@@ -508,6 +510,28 @@ $GLOBALS["GLOBAL_VARS"]["version"] = VERSION;
 $GLOBALS["GLOBAL_VARS"]["newapi"] = [];
 
 # ################# FUNCTIONS #################
+function verifyCaptcha($token) {
+    if (empty($token)) return false;
+    $url = 'https://smartcaptcha.yandexcloud.net/validate';
+    $params = http_build_query([
+        'secret' => SMARTCAPTCHA_SERVER_KEY,
+        'token'  => $token,
+        'ip'     => $_SERVER['REMOTE_ADDR'] ?? '',
+    ]);
+    $context = stream_context_create([
+        'http' => [
+            'method'  => 'POST',
+            'header'  => "Content-Type: application/x-www-form-urlencoded\r\n",
+            'content' => $params,
+            'timeout' => 5,
+        ],
+    ]);
+    $result = @file_get_contents($url, false, $context);
+    if ($result === false) return false;
+    $data = json_decode($result, true);
+    return isset($data['status']) && $data['status'] === 'ok';
+}
+
 function mail2DB($email, $uid){
 	# Try converting the user's email into the DB name
     $tmp = explode('@', $email);
@@ -7950,6 +7974,14 @@ switch($a)  # Check actions, which don't require authentication
 		if(isset($_POST["tzone"])){
 			$GLOBALS["tzone"] = round(((int)$_POST["tzone"] - time() - date("Z"))/1800)*1800; # Round the time zone shift to 30 min
 			setcookie("tzone", $GLOBALS["tzone"], time() + COOKIES_EXPIRE, "/"); # 30 days
+		}
+		if(isset($_POST["smart-token"]) && !verifyCaptcha($_POST["smart-token"])){
+			$captchaMsg = t9n("[RU]Проверка капчи не пройдена. Пожалуйста, попробуйте снова.[EN]Captcha verification failed. Please try again.");
+			if(isApi()){
+				header("HTTP/1.0 403 Forbidden");
+				api_dump(json_encode(["error" => $captchaMsg, "msg" => $captchaMsg], JSON_UNESCAPED_UNICODE));
+			}
+			my_die($captchaMsg);
 		}
 		$msg = "";
 		$p = $_POST["pwd"];
