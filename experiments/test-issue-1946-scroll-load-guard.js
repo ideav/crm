@@ -3,49 +3,45 @@
  * scrolled yet and the table already extends below the viewport.
  */
 
-function shouldLoadMore({ tableBottom, viewportHeight, scrollY, scrollHeight, hasMore = true, isLoading = false }) {
+function shouldLoadMore({ tableBottom, viewportHeight, hasMore = true, isLoading = false }) {
     if (isLoading || !hasMore) return false;
 
     const belowFold = tableBottom - viewportHeight;
-
-    if (belowFold <= 0) {
-        return true;
-    }
-
     const scrollThreshold = viewportHeight / 2;
-    return scrollY > 0 && scrollY + viewportHeight >= scrollHeight - scrollThreshold;
+
+    return belowFold < scrollThreshold;
 }
 
 function runTests() {
     const tests = [
         {
             name: 'loads when table fits above viewport bottom',
-            input: { tableBottom: 700, viewportHeight: 800, scrollY: 0, scrollHeight: 800 },
+            input: { tableBottom: 700, viewportHeight: 800 },
             expected: true
         },
         {
             name: 'loads when table bottom exactly matches viewport bottom',
-            input: { tableBottom: 800, viewportHeight: 800, scrollY: 0, scrollHeight: 800 },
+            input: { tableBottom: 800, viewportHeight: 800 },
             expected: true
         },
         {
             name: 'does not eagerly load when table extends below viewport before user scrolls',
-            input: { tableBottom: 1000, viewportHeight: 800, scrollY: 0, scrollHeight: 1000 },
+            input: { tableBottom: 1300, viewportHeight: 800 },
             expected: false
         },
         {
-            name: 'loads near bottom after user scrolls',
-            input: { tableBottom: 1000, viewportHeight: 800, scrollY: 100, scrollHeight: 1000 },
+            name: 'loads near table bottom even when document bottom is farther away (issue #1957)',
+            input: { tableBottom: 1000, viewportHeight: 800 },
             expected: true
         },
         {
             name: 'does not load while already loading',
-            input: { tableBottom: 700, viewportHeight: 800, scrollY: 0, scrollHeight: 800, isLoading: true },
+            input: { tableBottom: 700, viewportHeight: 800, isLoading: true },
             expected: false
         },
         {
             name: 'does not load when there are no more records',
-            input: { tableBottom: 700, viewportHeight: 800, scrollY: 0, scrollHeight: 800, hasMore: false },
+            input: { tableBottom: 700, viewportHeight: 800, hasMore: false },
             expected: false
         }
     ];

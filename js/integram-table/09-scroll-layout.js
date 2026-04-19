@@ -8,17 +8,63 @@
             }
 
             this.scrollListener = () => {
-                if (this.isLoading || !this.hasMore) return;
-
-                const rect = tableWrapper.getBoundingClientRect();
-                // Load more when the invisible part below the fold is less than half the viewport height
-                const belowFold = rect.bottom - window.innerHeight;
-                if (belowFold < window.innerHeight / 2) {
+                const decision = this.getScrollLoadDecision(tableWrapper, 'window-scroll');
+                this.traceScrollLoadDecision(decision);
+                if (decision.shouldLoad) {
                     this.loadData(true);  // Append mode
                 }
             };
 
             window.addEventListener('scroll', this.scrollListener);
+        }
+
+        getScrollLoadDecision(tableWrapper, source) {
+            const state = {
+                source,
+                isLoading: this.isLoading,
+                hasMore: this.hasMore,
+                loadedRecords: this.loadedRecords,
+                pageSize: this.options.pageSize,
+                scrollY: window.scrollY,
+                viewportHeight: window.innerHeight,
+                scrollHeight: document.documentElement.scrollHeight,
+                tableBottom: null,
+                belowFold: null,
+                threshold: window.innerHeight / 2,
+                reason: '',
+                shouldLoad: false
+            };
+
+            if (this.isLoading) {
+                state.reason = 'already-loading';
+                return state;
+            }
+            if (!this.hasMore) {
+                state.reason = 'no-more-records';
+                return state;
+            }
+            if (!tableWrapper) {
+                state.reason = 'missing-table-wrapper';
+                return state;
+            }
+
+            const rect = tableWrapper.getBoundingClientRect();
+            state.tableBottom = rect.bottom;
+            state.belowFold = rect.bottom - window.innerHeight;
+
+            if (state.belowFold < state.threshold) {
+                state.reason = 'near-table-bottom';
+                state.shouldLoad = true;
+                return state;
+            }
+
+            state.reason = 'waiting-for-scroll';
+            return state;
+        }
+
+        traceScrollLoadDecision(decision) {
+            if (!window.INTEGRAM_DEBUG) return;
+            console.log('[TRACE] Infinite scroll decision:', decision);
         }
 
         attachPlusKeyShortcut() {
@@ -52,24 +98,9 @@
                 // First check if container exists
                 if (!this.container) return;
                 const tableWrapper = this.container.querySelector('.integram-table-wrapper');
-                if (!tableWrapper || this.isLoading || !this.hasMore) return;
-
-                const rect = tableWrapper.getBoundingClientRect();
-
-                const belowFold = rect.bottom - window.innerHeight;
-
-                // Fill genuinely empty space, including the exact viewport edge case from issue #1942.
-                if (belowFold <= 0) {
-                    this.loadData(true);  // Append mode
-                    return;
-                }
-
-                // After user scroll, keep the same preload threshold as the scroll listener.
-                // The scrollY guard prevents initial render from eagerly extending the page
-                // before the user can scroll the current records (issue #1946).
-                const scrollThreshold = window.innerHeight / 2;
-                const scrolledToBottom = window.scrollY > 0 && window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - scrollThreshold;
-                if (scrolledToBottom) {
+                const decision = this.getScrollLoadDecision(tableWrapper, 'post-render-check');
+                this.traceScrollLoadDecision(decision);
+                if (decision.shouldLoad) {
                     this.loadData(true);  // Append mode
                 }
             }, 100);  // Small delay to ensure DOM is updated
