@@ -1483,9 +1483,13 @@ mark.search-highlight {
                     </div>
                     <div id="reset-hint" style="display:none; font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.5rem;">Введите имя пользователя или email, мы попробуем найти вашу учетную запись и пришлем новый пароль на вашу почту</div>
                     <br />
-                    <button type="submit" id="login-submit-btn" class="btn-primary">Войти</button>
-                    <button type="button" id="reset-submit-btn" class="btn-primary" style="display:none;">Сбросить пароль</button>
+                    <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+                        <button type="submit" id="login-submit-btn" class="btn-primary">Войти</button>
+                        <button type="button" id="otp-btn" class="btn-secondary" title="Получить одноразовый пароль на зарегистрированную почту">Код на почту</button>
+                        <button type="button" id="reset-submit-btn" class="btn-primary" style="display:none;">Сбросить пароль</button>
+                    </div>
                 </form>
+                <div id="otp-message" style="display:none; margin-top:0.75rem; padding:0.5rem 0.75rem; border-radius:var(--radius-sm); font-size:0.9rem;"></div>
                 <div id="reset-message" style="display:none; margin-top:0.75rem; padding:0.5rem 0.75rem; border-radius:var(--radius-sm); font-size:0.9rem;"></div>
                 <div style="text-align:center; margin-top:0.75rem;">
                     <a href="#" id="reset-link" style="font-size:0.85rem; color:var(--link-color); text-decoration:none;">Сбросить пароль</a>
