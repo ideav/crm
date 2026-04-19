@@ -107,7 +107,7 @@
 
             function loadBrandBg() {
                 var match = document.cookie.match(new RegExp('(?:^|; )' + BG_COOKIE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
-                return match ? decodeURIComponent(match[1]) : '0.2';
+                return match ? decodeURIComponent(match[1]) : '0';
             }
 
             // Apply immediately before DOM renders
