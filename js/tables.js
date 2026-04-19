@@ -6,8 +6,8 @@ class TablesController {
     constructor() {
         // Default folder configuration
         this.defaultConfig = {
-            "Избранное": { "open": true, "tabs": ["18", "42"] },
-            "Справочники": { "open": true, "tabs": [] },
+            "Избранное": { "open": true, "tabs": ["18", "42","440","415"] },
+            "Справочники": { "open": true, "tabs": ["409","422"] },
             "Служебные": { "open": false, "tabs": ["22", "269"] },
             "Скрытые": { "open": false, "tabs": ["47", "65", "137", "29", "63"] }
         };
