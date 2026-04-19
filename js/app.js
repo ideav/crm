@@ -716,69 +716,101 @@ class App {
         // OTP (one-time password to email)
         const otpBtn = document.getElementById('otp-btn');
         const otpMessage = document.getElementById('otp-message');
+        const otpCodeGroup = document.getElementById('otp-code-group');
+        const otpCodeInput = document.getElementById('otp-code-input');
+        const otpSubmitBtn = document.getElementById('otp-submit-btn');
+
+        function getSelectedDb() {
+            const dbSelect = document.getElementById('auth-db-select');
+            const customInput = document.getElementById('auth-db-custom');
+            let db = dbSelect ? dbSelect.value : 'my';
+            if (db === '__other__') {
+                db = customInput ? customInput.value.trim() : '';
+            }
+            return db;
+        }
+
+        function showOtpMessage(text, isError) {
+            if (!otpMessage) return;
+            otpMessage.style.display = '';
+            otpMessage.className = isError ? '' : 'success-message';
+            if (isError) {
+                otpMessage.style.background = 'var(--bg-secondary)';
+                otpMessage.style.color = 'var(--error-color, #ef4444)';
+            }
+            otpMessage.textContent = text;
+        }
+
+        // Step 1: send email → request OTP code
         if (otpBtn) {
             otpBtn.addEventListener('click', async () => {
                 const emailVal = loginEmailInput ? loginEmailInput.value.trim() : '';
-                if (!emailVal) {
-                    showToast('Введите email', 'error');
-                    return;
-                }
+                if (!emailVal) { showToast('Введите email', 'error'); return; }
                 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                if (!emailRe.test(emailVal)) {
-                    showToast('Введите корректный email', 'error');
-                    return;
-                }
-                const dbSelect = document.getElementById('auth-db-select');
-                const customInput = document.getElementById('auth-db-custom');
-                let selectedDb = dbSelect ? dbSelect.value : 'my';
-                if (selectedDb === '__other__') {
-                    selectedDb = customInput ? customInput.value.trim() : '';
-                    if (!selectedDb) {
-                        showToast('Введите имя базы данных', 'error');
-                        return;
-                    }
-                }
+                if (!emailRe.test(emailVal)) { showToast('Введите корректный email', 'error'); return; }
+                const selectedDb = getSelectedDb();
+                if (!selectedDb) { showToast('Введите имя базы данных', 'error'); return; }
                 otpBtn.disabled = true;
                 try {
                     const formData = new FormData();
                     formData.append('email', emailVal);
                     const response = await fetch(`${encodeURIComponent(selectedDb)}/otp`, {
                         method: 'POST',
+                        credentials: 'include',
                         body: formData
                     });
                     const text = await response.text();
                     let data = null;
                     try { data = JSON.parse(text); } catch (e) { data = null; }
-                    if (otpMessage) {
-                        otpMessage.style.display = '';
-                        if (data !== null) {
-                            const msg = (data.message || '').toUpperCase();
-                            const isError = msg.includes('WRONG') || msg.includes('ERROR');
-                            if (!isError) {
-                                otpMessage.className = 'success-message';
-                                otpMessage.textContent = data.details || data.message || text;
-                            } else {
-                                otpMessage.className = '';
-                                otpMessage.style.background = 'var(--bg-secondary)';
-                                otpMessage.style.color = 'var(--error-color, #ef4444)';
-                                otpMessage.textContent = Object.entries(data).map(([k, v]) => `${k}: ${v}`).join(', ');
-                            }
-                        } else {
-                            otpMessage.className = '';
-                            otpMessage.style.background = 'var(--bg-secondary)';
-                            otpMessage.style.color = 'var(--text-primary)';
-                            otpMessage.textContent = text;
-                        }
+                    const isError = !response.ok || (data && (data.msg || '').toUpperCase().includes('ERROR'));
+                    showOtpMessage(
+                        (data && (data.msg || data.message || data.details)) || text,
+                        isError
+                    );
+                    if (!isError && otpCodeGroup) {
+                        otpCodeGroup.style.display = '';
+                        if (otpCodeInput) otpCodeInput.focus();
                     }
                 } catch (err) {
-                    if (otpMessage) {
-                        otpMessage.style.display = '';
-                        otpMessage.className = '';
-                        otpMessage.style.color = 'var(--error-color, #ef4444)';
-                        otpMessage.textContent = err.message || 'Ошибка при отправке кода';
-                    }
+                    showOtpMessage(err.message || 'Ошибка при отправке кода', true);
                 } finally {
                     otpBtn.disabled = false;
+                }
+            });
+        }
+
+        // Step 2: submit OTP code → login
+        if (otpSubmitBtn) {
+            otpSubmitBtn.addEventListener('click', async () => {
+                const emailVal = loginEmailInput ? loginEmailInput.value.trim() : '';
+                const codeVal = otpCodeInput ? otpCodeInput.value.trim() : '';
+                if (!codeVal) { showToast('Введите код из письма', 'error'); return; }
+                const selectedDb = getSelectedDb();
+                if (!selectedDb) { showToast('Введите имя базы данных', 'error'); return; }
+                otpSubmitBtn.disabled = true;
+                try {
+                    const formData = new FormData();
+                    formData.append('email', emailVal);
+                    formData.append('otp', codeVal);
+                    const response = await fetch(`${encodeURIComponent(selectedDb)}/otp`, {
+                        method: 'POST',
+                        credentials: 'include',
+                        body: formData
+                    });
+                    const text = await response.text();
+                    let data = null;
+                    try { data = JSON.parse(text); } catch (e) { data = null; }
+                    if (data && data.token && (data.msg === '' || data.msg == null)) {
+                        CookieUtil.set('last_db', selectedDb, 365);
+                        window.location.href = window.location.origin + '/' + selectedDb;
+                    } else {
+                        const errText = (data && (data.msg || data.message)) || text || 'Неверный код';
+                        showOtpMessage(errText, true);
+                        otpSubmitBtn.disabled = false;
+                    }
+                } catch (err) {
+                    showOtpMessage(err.message || 'Ошибка при проверке кода', true);
+                    otpSubmitBtn.disabled = false;
                 }
             });
         }
