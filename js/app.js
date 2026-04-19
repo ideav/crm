@@ -365,19 +365,17 @@ class AuthManager {
         }
     }
 
-    async register(email, password) {
+    async register(email, password, confirmPassword, agree) {
         const host = this.apiConfig.host;
-        const db = 'my';
-        // First get xsrf token
-        const xsrfData = await validateToken(host, db);
-        const xsrfToken = xsrfData ? (xsrfData._xsrf || '') : '';
-
-        const url = 'https://' + host + '/' + db + '/_m_new/18?up=1&next_act=inform';
+        const url = 'https://' + host + '/my/register?JSON';
         try {
             const formData = new URLSearchParams();
-            formData.append('_xsrf', xsrfToken);
-            formData.append('t18', email);
-            formData.append('t20', password);
+            formData.append('email', email);
+            formData.append('regpwd', password);
+            formData.append('regpwd1', confirmPassword);
+            if (agree) {
+                formData.append('agree', '1');
+            }
 
             const response = await fetch(url, {
                 method: 'POST',
@@ -391,10 +389,13 @@ class AuthManager {
             }
 
             const data = await response.json();
-            if (data.error) {
-                return { success: false, message: data.error };
+            if (data.message === 'toConfirm') {
+                return { success: true, message: 'Регистрация прошла успешно. Проверьте вашу почту для подтверждения.' };
             }
-            return { success: true, message: data.msg || 'Регистрация прошла успешно. Проверьте вашу почту для подтверждения.' };
+            const errorMessage = Array.isArray(data) && data[0] && data[0].error
+                ? data[0].error
+                : (data.error || data.msg || data.message || 'Ошибка регистрации');
+            return { success: false, message: String(errorMessage).replace(/ ?\[.+\]/, '') };
         } catch (err) {
             console.error('[auth] register error:', err);
             return { success: false, message: 'Ошибка регистрации: ' + err.message };
@@ -826,6 +827,7 @@ class App {
                 const email = document.getElementById('reg-email').value;
                 const password = document.getElementById('reg-password').value;
                 const confirmPassword = document.getElementById('reg-confirm-password').value;
+                const agree = document.getElementById('reg-agree');
 
                 if (password !== confirmPassword) {
                     showToast('Пароли не совпадают', 'error');
@@ -835,9 +837,13 @@ class App {
                     showToast('Пароль должен содержать минимум 6 символов', 'error');
                     return;
                 }
+                if (agree && !agree.checked) {
+                    showToast('Подтвердите согласие с правилами использования', 'error');
+                    return;
+                }
 
                 registerInProgress = true;
-                const result = await this.auth.register(email, password);
+                const result = await this.auth.register(email, password, confirmPassword, !agree || agree.checked);
                 showToast(result.message, result.success ? 'success' : 'error');
                 if (result.success) {
                     this.hideAuthPanel();

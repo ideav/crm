@@ -392,6 +392,20 @@ mark.search-highlight {
     margin-top: 0.8rem;
 }
 
+.auth-checkbox {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 0.8rem;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    line-height: 1.4;
+}
+
+.auth-checkbox input {
+    margin-top: 3px;
+}
+
 @media (max-width: 600px) {
     .welcome-container {
         padding: 12px;
@@ -1529,6 +1543,10 @@ mark.search-highlight {
                         <label for="reg-confirm-password" class="database-field-label">Подтвердите пароль</label>
                         <input type="password" id="reg-confirm-password" name="confirm-password" required class="database-field-input">
                     </div>
+                    <label class="auth-checkbox">
+                        <input type="checkbox" id="reg-agree" name="agree" required>
+                        <span>Я ознакомился с <a href="/terms.html" target="_blank">правилами использования</a></span>
+                    </label>
                     <br />
                     <button type="submit" class="btn-primary">Зарегистрироваться</button>
                 </form>
