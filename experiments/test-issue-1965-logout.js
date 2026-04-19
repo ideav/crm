@@ -6,6 +6,7 @@ const source = fs.readFileSync('js/main-app.js', 'utf8')
 
 const context = {
     console,
+    URLSearchParams,
     document: {
         createElement: () => ({ innerHTML: '', value: '' })
     },
@@ -19,6 +20,10 @@ function assert(condition, message) {
     if (!condition) {
         throw new Error(message);
     }
+}
+
+function getLogoutParams(dbName, username) {
+    return new URLSearchParams(context.MainAppController.getLogoutStartUrl(dbName, username).replace('/start.html?', ''));
 }
 
 const deletedCookies = [];
@@ -46,8 +51,20 @@ assert(
     'logout should not delete cookies for other DBs'
 );
 assert(
-    context.MainAppController.getLogoutStartUrl('demo db') === '/start.html?db=demo%20db',
+    getLogoutParams('demo db').get('db') === 'demo db',
     'logout should redirect to start.html with the current DB preselected'
+);
+assert(
+    context.MainAppController.getLogoutStartUrl('demo db').startsWith('/start.html?'),
+    'logout should redirect to start.html'
+);
+assert(
+    getLogoutParams('demo db', 'Иван Петров').get('u') === 'Иван Петров',
+    'logout should include the logged-out username in the start.html link'
+);
+assert(
+    !getLogoutParams('demo', '').has('u'),
+    'logout should omit empty username parameter'
 );
 
 console.log('issue-1965 logout behavior: ok');
