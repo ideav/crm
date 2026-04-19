@@ -153,6 +153,32 @@ function showToast(message, type = 'info') {
 }
 
 // ============================================================
+// Yandex SmartCaptcha helpers
+// ============================================================
+function getCaptchaToken(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return '';
+    if (window.smartCaptcha) {
+        const widgetId = container.dataset.widgetId;
+        if (widgetId !== undefined) {
+            return window.smartCaptcha.getResponse(parseInt(widgetId, 10)) || null;
+        }
+    }
+    // Fallback: hidden input rendered by the widget
+    const input = container.querySelector('input[name="smart-token"]');
+    return input ? (input.value || null) : null;
+}
+
+function resetCaptcha(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container || !window.smartCaptcha) return;
+    const widgetId = container.dataset.widgetId;
+    if (widgetId !== undefined) {
+        window.smartCaptcha.reset(parseInt(widgetId, 10));
+    }
+}
+
+// ============================================================
 // Yandex OAuth
 // ============================================================
 class YandexAuthManager {
@@ -324,7 +350,7 @@ class AuthManager {
         window.location.href = 'https://' + host + '/' + db;
     }
 
-    async login(email, password, db) {
+    async login(email, password, db, captchaToken) {
         const host = this.apiConfig.host;
         const targetDb = db || 'my';
         const url = 'https://' + host + '/' + targetDb + '/auth?JSON';
@@ -333,6 +359,7 @@ class AuthManager {
             formData.append('db', targetDb);
             formData.append('login', email);
             formData.append('pwd', password);
+            if (captchaToken) formData.append('smart-token', captchaToken);
 
             const response = await fetch(url, {
                 method: 'POST',
@@ -365,7 +392,7 @@ class AuthManager {
         }
     }
 
-    async register(email, password, confirmPassword, agree) {
+    async register(email, password, confirmPassword, agree, captchaToken) {
         const host = this.apiConfig.host;
         const url = 'https://' + host + '/my/register?JSON';
         try {
@@ -376,6 +403,7 @@ class AuthManager {
             if (agree) {
                 formData.append('agree', '1');
             }
+            if (captchaToken) formData.append('smart-token', captchaToken);
 
             const response = await fetch(url, {
                 method: 'POST',
@@ -583,7 +611,13 @@ class App {
                         return;
                     }
                 }
-                const result = await this.auth.login(email, password, selectedDb);
+                const captchaToken = getCaptchaToken('login-captcha-container');
+                if (captchaToken === null) {
+                    showToast('Пожалуйста, пройдите проверку капчи', 'error');
+                    loginInProgress = false;
+                    return;
+                }
+                const result = await this.auth.login(email, password, selectedDb, captchaToken);
                 if (result.success) {
                     CookieUtil.set('last_db', selectedDb, 365);
                     if (this._postLoginUri) {
@@ -593,6 +627,7 @@ class App {
                     }
                 } else {
                     showToast(result.message, 'error');
+                    resetCaptcha('login-captcha-container');
                     loginInProgress = false;
                 }
             });
@@ -842,12 +877,19 @@ class App {
                     return;
                 }
 
+                const captchaToken = getCaptchaToken('register-captcha-container');
+                if (captchaToken === null) {
+                    showToast('Пожалуйста, пройдите проверку капчи', 'error');
+                    return;
+                }
+
                 registerInProgress = true;
-                const result = await this.auth.register(email, password, confirmPassword, !agree || agree.checked);
+                const result = await this.auth.register(email, password, confirmPassword, !agree || agree.checked, captchaToken);
                 showToast(result.message, result.success ? 'success' : 'error');
                 if (result.success) {
                     this.hideAuthPanel();
                 } else {
+                    resetCaptcha('register-captcha-container');
                     registerInProgress = false;
                 }
             });
@@ -935,6 +977,19 @@ class App {
         this.switchTab('login');
         // Build DB options with the preselected db
         this.auth.buildAuthDbOptions(preselect);
+        this._initCaptchaWidgets();
+    }
+
+    _initCaptchaWidgets() {
+        if (!window.smartCaptcha) return;
+        ['login-captcha-container', 'register-captcha-container'].forEach(id => {
+            const el = document.getElementById(id);
+            if (!el || el.dataset.widgetId !== undefined) return;
+            const sitekey = el.dataset.sitekey;
+            if (!sitekey) return;
+            const widgetId = window.smartCaptcha.render(el, { sitekey });
+            el.dataset.widgetId = widgetId;
+        });
     }
 
     hideAuthPanel() {
