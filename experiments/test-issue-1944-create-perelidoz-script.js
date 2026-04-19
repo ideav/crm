@@ -3,7 +3,13 @@ const fs = require('fs');
 const path = require('path');
 
 const scriptPath = path.join(__dirname, '..', 'docs', 'create_perelidoz.ps1');
+const scriptBytes = fs.readFileSync(scriptPath);
 const script = fs.readFileSync(scriptPath, 'utf8');
+
+assert(
+    scriptBytes[0] === 0xef && scriptBytes[1] === 0xbb && scriptBytes[2] === 0xbf,
+    'PowerShell 5.1 should detect the Cyrillic script as UTF-8 via BOM'
+);
 
 assert(script.includes('[string]$BaseUrl = "https://integram.io"'), 'default API host should match MCP docs');
 assert(script.includes('$script:Tables["User"]'), 'script should reuse the existing system User table');
