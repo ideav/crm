@@ -1490,6 +1490,13 @@ mark.search-highlight {
                     </div>
                 </form>
                 <div id="otp-message" style="display:none; margin-top:0.75rem; padding:0.5rem 0.75rem; border-radius:var(--radius-sm); font-size:0.9rem;"></div>
+                <div id="otp-code-group" class="database-field-group" style="display:none; margin-top:0.75rem;">
+                    <label for="otp-code-input" class="database-field-label">Код из письма</label>
+                    <div style="display:flex; gap:0.5rem; align-items:center;">
+                        <input type="text" id="otp-code-input" class="database-field-input" placeholder="Введите код" autocomplete="one-time-code">
+                        <button type="button" id="otp-submit-btn" class="btn-primary" style="width:auto; white-space:nowrap;">Войти по коду</button>
+                    </div>
+                </div>
                 <div id="reset-message" style="display:none; margin-top:0.75rem; padding:0.5rem 0.75rem; border-radius:var(--radius-sm); font-size:0.9rem;"></div>
                 <div style="text-align:center; margin-top:0.75rem;">
                     <a href="#" id="reset-link" style="font-size:0.85rem; color:var(--link-color); text-decoration:none;">Сбросить пароль</a>
