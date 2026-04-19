@@ -538,6 +538,19 @@ function seekRep(v){
         timer=setTimeout(function(){myApi('GET','object/22/?JSON&F_22='+v,'list')},330);
     }
 }
+function fillQueryNameFromHint(v){
+    var input=document.querySelector('input[name="t22"]');
+    if(!input) return false;
+    input.value=v;
+    input.focus();
+    lastK=null;
+    seekRep(v);
+    if(byId('queries').classList.contains('hidden')){
+        byId('queries').classList.remove('hidden');
+        byId('show').classList.add('hidden');
+    }
+    return false;
+}
 function hideList(){
     if(!byId('queries').classList.contains('hidden'))
         byId('closeList').click();
@@ -1177,7 +1190,7 @@ else // In case a report is requested - draw it
     <div class="hint-drag-handle" id="sql-hint-drag-handle" title="Это окно можно перетаскивать по экрану"><span class="hint-drag-icon">⠿⠿</span></div>
     <div id="sql-hint-1" style="display:none;">
         <h3 style="margin:0 0 0.75rem; font-size:1.05rem; color:var(--text-primary);"><span style="margin-right:0.4rem;">💡</span>Выбор источника данных</h3>
-        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Введите слева вверху имя запроса — Права — и нажмите Создать запрос (нажмите там <i class="pi pi-list"></i>, если не видите поля ввода). Далее из списка справа вверху выберите таблицу-источник для запроса — Пользователь, а затем её колонку — Пользователь.</p>
+        <p style="color:var(--text-secondary); font-size:0.9rem; line-height:1.5; margin:0 0 1rem;">Введите слева вверху имя запроса — <a href="#" onclick="return fillQueryNameFromHint('Права')" class="text-primary">Права</a> — и нажмите Создать запрос (нажмите там <i class="pi pi-list"></i>, если не видите поля ввода). Далее из списка справа вверху выберите таблицу-источник для запроса — Пользователь, а затем её колонку — Пользователь.</p>
         <div style="display:flex; justify-content:flex-end; gap:0.5rem;">
             <button onclick="sqlHintClose()" style="padding:0.35rem 0.9rem; border:1px solid var(--border-color); border-radius:6px; background:none; color:var(--text-secondary); cursor:pointer; font-size:0.85rem;">Закрыть</button>
         </div>
