@@ -1100,7 +1100,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .col-multi-badge {
     color: var(--md-primary, #1976d2);
     margin-left: 4px;
-    font-size: 0.75rem;
+    font-size: 1.3rem;
 }
 
 /* Column type icon and original name display in column settings list (issue #945) */
