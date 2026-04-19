@@ -121,6 +121,16 @@ class MainAppController {
         this.setupMenuSearch();
     }
 
+    static getLogoutStartUrl(dbName) {
+        return '/start.html?db=' + encodeURIComponent(dbName || '');
+    }
+
+    static deleteCurrentDbCookies(dbName) {
+        if (!dbName) return;
+        document.cookie = 'idb_' + dbName + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
+        document.cookie = dbName + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
+    }
+
     isMobile() {
         return window.innerWidth <= 900;
     }
@@ -1698,13 +1708,9 @@ class MainAppController {
         const logoutBtn = document.getElementById('logout-btn');
         if (logoutBtn) {
             logoutBtn.addEventListener('click', () => {
-                // Delete the idb_{db} cookie for current database
-                if (typeof db !== 'undefined') {
-                    document.cookie = 'idb_' + db + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
-                    document.cookie = db + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
-                }
-                // Redirect to root
-                window.location.href = '/' + (db || '');
+                const dbName = typeof db !== 'undefined' ? db : '';
+                MainAppController.deleteCurrentDbCookies(dbName);
+                window.location.href = MainAppController.getLogoutStartUrl(dbName);
             });
         }
 
