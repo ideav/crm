@@ -12,7 +12,7 @@
  * - Cookie-based state persistence
  * - Custom cell styling via style columns
  * - Clickable "?" to fetch total record count
- */
+ */ 
 
 class IntegramTable{
         constructor(containerId, options = {}) {
