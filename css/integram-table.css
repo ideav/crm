@@ -1682,6 +1682,47 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     transform: translateY(1px);
 }
 
+.edit-form-footer .btn:disabled,
+.edit-form-footer .btn.disabled,
+.form-field-settings-footer .btn:disabled,
+.form-field-settings-footer .btn.disabled,
+.integram-modal-footer .btn:disabled,
+.integram-modal-footer .btn.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+    box-shadow: none;
+}
+
+.edit-form-footer .btn-primary:disabled,
+.edit-form-footer .btn-primary.disabled,
+.form-field-settings-footer .btn-primary:disabled,
+.form-field-settings-footer .btn-primary.disabled,
+.integram-modal-footer .btn-primary:disabled,
+.integram-modal-footer .btn-primary.disabled {
+    background-color: var(--text-secondary, #6c757d);
+    color: #fff;
+}
+
+.edit-form-footer .btn-secondary:disabled,
+.edit-form-footer .btn-secondary.disabled,
+.form-field-settings-footer .btn-secondary:disabled,
+.form-field-settings-footer .btn-secondary.disabled,
+.integram-modal-footer .btn-secondary:disabled,
+.integram-modal-footer .btn-secondary.disabled {
+    background-color: var(--bg-secondary, #f5f5f5);
+    color: var(--text-secondary, #6c757d);
+    border-color: var(--border-color, #ddd);
+}
+
+.edit-form-footer .btn-danger:disabled,
+.edit-form-footer .btn-danger.disabled,
+.integram-modal-footer .btn-danger:disabled,
+.integram-modal-footer .btn-danger.disabled {
+    background-color: var(--text-secondary, #6c757d);
+    color: #fff;
+}
+
 /* Read-only form fields (issue #1508) */
 .edit-form .form-field-readonly input,
 .edit-form .form-field-readonly textarea,
