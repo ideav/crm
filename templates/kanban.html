@@ -211,6 +211,89 @@
         cursor: not-allowed;
     }
 
+    /* Search toolbar */
+    .kanban-search-bar {
+        display: flex;
+        align-items: center;
+        padding: 6px 10px;
+        background: var(--kanban-surface);
+        border-bottom: 1px solid var(--kanban-border-color);
+        flex-shrink: 0;
+        gap: 6px;
+    }
+
+    .kanban-search-icon {
+        font-size: 14px;
+        color: var(--kanban-text-secondary);
+        flex-shrink: 0;
+        cursor: pointer;
+        padding: 4px;
+        border-radius: 4px;
+        transition: background 0.15s;
+    }
+
+    .kanban-search-icon:hover {
+        background: var(--kanban-drag-over-bg);
+    }
+
+    .kanban-search-input {
+        flex: 1;
+        border: 1px solid var(--kanban-border-color);
+        border-radius: 4px;
+        padding: 4px 8px;
+        font-size: 0.875rem;
+        background: var(--kanban-background);
+        color: var(--kanban-text-primary);
+        outline: none;
+        transition: border-color 0.15s;
+        max-width: 280px;
+    }
+
+    .kanban-search-input:focus {
+        border-color: var(--kanban-primary-color);
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+    }
+
+    .kanban-search-clear {
+        background: none;
+        border: none;
+        cursor: pointer;
+        color: var(--kanban-text-secondary);
+        font-size: 14px;
+        padding: 4px 6px;
+        border-radius: 4px;
+        display: none;
+        line-height: 1;
+        transition: background 0.15s;
+    }
+
+    .kanban-search-clear:hover {
+        background: var(--kanban-drag-over-bg);
+        color: var(--kanban-text-primary);
+    }
+
+    .kanban-search-count {
+        font-size: 0.8rem;
+        color: var(--kanban-text-secondary);
+        white-space: nowrap;
+    }
+
+    .kanban-card.search-hidden {
+        display: none;
+    }
+
+    mark.kanban-highlight {
+        background: orange;
+        color: inherit;
+        border-radius: 2px;
+        padding: 0;
+    }
+
+    [data-theme="dark"] mark.kanban-highlight {
+        background: #c85a00;
+        color: #fff;
+    }
+
     /* Loading and Error States */
     .kanban-loading {
         text-align: center;
@@ -409,6 +492,85 @@
 
     KanbanBoard.prototype._showLoading = function() {
         this.container.innerHTML = '<div class="kanban-loading">Загрузка данных...</div>';
+    };
+
+    KanbanBoard.prototype._initSearch = function() {
+        var self = this;
+        var input = this.container.querySelector('.kanban-search-input');
+        var clearBtn = this.container.querySelector('.kanban-search-clear');
+        if (!input) return;
+
+        input.addEventListener('input', function() {
+            self._applySearch(this.value);
+            if (clearBtn) clearBtn.style.display = this.value ? 'block' : 'none';
+        });
+
+        if (clearBtn) {
+            clearBtn.addEventListener('click', function() {
+                input.value = '';
+                clearBtn.style.display = 'none';
+                self._applySearch('');
+                input.focus();
+            });
+        }
+    };
+
+    KanbanBoard.prototype._escapeForRegex = function(str) {
+        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    };
+
+    KanbanBoard.prototype._highlightText = function(text, query) {
+        if (!query || !text) return this._escapeHtml(text);
+        var escaped = this._escapeHtml(text);
+        var escapedQuery = this._escapeForRegex(this._escapeHtml(query));
+        var re = new RegExp('(' + escapedQuery + ')', 'gi');
+        return escaped.replace(re, '<mark class="kanban-highlight">$1</mark>');
+    };
+
+    KanbanBoard.prototype._applySearch = function(query) {
+        var q = (query || '').toLowerCase().trim();
+        var cards = this.container.querySelectorAll('.kanban-card');
+        var visibleCount = 0;
+        var totalCount = cards.length;
+
+        cards.forEach(function(card) {
+            var searchText = card.dataset.searchText || '';
+            if (!q || searchText.indexOf(q) !== -1) {
+                card.classList.remove('search-hidden');
+                visibleCount++;
+            } else {
+                card.classList.add('search-hidden');
+            }
+        });
+
+        // Update highlights
+        var self = this;
+        var textEls = this.container.querySelectorAll('.kanban-card:not(.search-hidden) [data-original-text]');
+        textEls.forEach(function(el) {
+            var orig = el.dataset.originalText;
+            el.innerHTML = q ? self._highlightText(orig, q) : self._escapeHtml(orig);
+        });
+
+        // Update count display
+        var countEl = this.container.querySelector('.kanban-search-count');
+        if (countEl) {
+            if (q) {
+                countEl.textContent = visibleCount + ' из ' + totalCount;
+            } else {
+                countEl.textContent = '';
+            }
+        }
+
+        this._updateColumnCountsWithSearch();
+    };
+
+    KanbanBoard.prototype._updateColumnCountsWithSearch = function() {
+        var columns = this.container.querySelectorAll('.kanban-column');
+        columns.forEach(function(column) {
+            var count = column.querySelectorAll('.kanban-card:not(.search-hidden)').length;
+            var countSpan = column.querySelector('.kanban-column-count');
+            if (countSpan) countSpan.textContent = count;
+        });
     };
 
     KanbanBoard.prototype._showError = function(message) {
@@ -675,7 +837,13 @@
             return activityB.localeCompare(activityA);
         });
 
-        var html = '<div class="kanban-board">';
+        var html = '<div class="kanban-search-bar">'
+            + '<span class="kanban-search-icon" title="Поиск">&#128269;</span>'
+            + '<input class="kanban-search-input" type="text" placeholder="Быстрый поиск..." autocomplete="off" autocorrect="off" autocapitalize="off" />'
+            + '<button class="kanban-search-clear" title="Очистить">&#x2715;</button>'
+            + '<span class="kanban-search-count"></span>'
+            + '</div>'
+            + '<div class="kanban-board">';
 
         // Create columns for each status
         for (var i = 0; i < this.statuses.length; i++) {
@@ -738,6 +906,7 @@
         this.container.innerHTML = html;
 
         this._initDragAndDrop();
+        this._initSearch();
     };
 
     KanbanBoard.prototype._renderCard = function(card) {
@@ -764,29 +933,33 @@
         var amount = card[mapping.amount] || '';
         var statusId = card[mapping.statusId] || '';
 
-        var html = '<div class="kanban-card" draggable="true" data-card-id="' + cardId + '" data-status-id="' + statusId + '">';
+        // Build search text from all fields (lowercase for matching)
+        var searchParts = [title || 'Без названия', description, contact, amount, date, phone, email];
+        var searchText = searchParts.map(function(v) { return (v || '').toLowerCase(); }).join(' ');
+
+        var html = '<div class="kanban-card" draggable="true" data-card-id="' + cardId + '" data-status-id="' + statusId + '" data-search-text="' + this._escapeHtml(searchText) + '">';
 
         // Title
-        html += '<div class="kanban-card-title">' + this._escapeHtml(title || 'Без названия') + '</div>';
+        html += '<div class="kanban-card-title" data-original-text="' + this._escapeHtml(title || 'Без названия') + '">' + this._escapeHtml(title || 'Без названия') + '</div>';
 
         // Description
         if (description) {
-            html += '<div class="kanban-card-description">' + this._escapeHtml(description) + '</div>';
+            html += '<div class="kanban-card-description" data-original-text="' + this._escapeHtml(description) + '">' + this._escapeHtml(description) + '</div>';
         }
 
         // Contact
         if (contact) {
-            html += '<div class="kanban-card-contact">' + this._escapeHtml(contact) + '</div>';
+            html += '<div class="kanban-card-contact" data-original-text="' + this._escapeHtml(contact) + '">' + this._escapeHtml(contact) + '</div>';
         }
 
         // Amount
         if (amount) {
-            html += '<div class="kanban-card-amount">' + this._escapeHtml(amount) + '</div>';
+            html += '<div class="kanban-card-amount" data-original-text="' + this._escapeHtml(amount) + '">' + this._escapeHtml(amount) + '</div>';
         }
 
         // Date (top-right corner)
         if (date) {
-            html += '<div class="kanban-card-date">' + this._escapeHtml(date) + '</div>';
+            html += '<div class="kanban-card-date" data-original-text="' + this._escapeHtml(date) + '">' + this._escapeHtml(date) + '</div>';
         }
 
         // Contact icons (phone and email)
@@ -937,14 +1110,7 @@
     };
 
     KanbanBoard.prototype._updateColumnCounts = function() {
-        var columns = this.container.querySelectorAll('.kanban-column');
-        columns.forEach(function(column) {
-            var count = column.querySelectorAll('.kanban-card').length;
-            var countSpan = column.querySelector('.kanban-column-count');
-            if (countSpan) {
-                countSpan.textContent = count;
-            }
-        });
+        this._updateColumnCountsWithSearch();
     };
 
     KanbanBoard.prototype._updateCardStatus = function(cardId, newStatusId) {
