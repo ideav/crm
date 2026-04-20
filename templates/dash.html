@@ -1165,6 +1165,51 @@ function dashSaveValue(td, newVal) {
     newApi('GET', searchUrl, 'dashValueSearchDone', '', { td: td, newVal: newVal, valueItemId: valueItemId, fr: fr, to: to, rgHead: rgHead });
 }
 
+// Delete a Значение: search first, then delete if found
+function dashDeleteValue(td) {
+    var searchUrl = dashValueSearchUrl(td);
+    var valueItemId = td.dataset.valueItemId || td.dataset.itemId;
+    var fr = dashCellDateFr(td);
+    var to = dashCellDateTo(td);
+    var rgHead = td.dataset.rgHead || null;
+
+    newApi('GET', searchUrl, 'dashValueDeleteSearchDone', '', { td: td, valueItemId: valueItemId, fr: fr, to: to, rgHead: rgHead });
+}
+
+window.dashValueDeleteSearchDone = function(json, ctx) {
+    if (!json) json = [];
+    var td = ctx.td;
+
+    if (json.length === 0) {
+        // No record to delete — just clear the cell
+        dashSetStatus('Значение удалено');
+        td.textContent = '';
+        td.setAttribute('ready', '1');
+        dashCalcCells();
+    } else if (json.length === 1) {
+        // Delete existing record
+        var recId = json[0].i;
+        newApi('POST', '_m_del/' + recId + '?JSON', 'dashValueDeleteDone', '', { td: td });
+    } else {
+        // Multiple records — show modal with first 5, link to full list
+        dashShowMultivalModal(json, dashValueSearchUrl(td).replace('JSON_OBJ', '').replace(/&&/g, '&'));
+        dashSetStatus('Несколько значений найдено');
+    }
+};
+
+window.dashValueDeleteDone = function(json, ctx) {
+    if (!json || json.error) {
+        dashSetStatus('Ошибка удаления');
+        return;
+    }
+    // Clear cell display
+    ctx.td.textContent = '';
+    ctx.td.setAttribute('ready', '1');
+    dashSetStatus('Значение удалено');
+    // Recalculate dependent formula cells
+    dashCalcCells();
+};
+
 window.dashValueSearchDone = function(json, ctx) {
     if (!json) json = [];
     var td = ctx.td, newVal = ctx.newVal, valueItemId = ctx.valueItemId;
@@ -1223,9 +1268,14 @@ function dashStartInlineEdit(td) {
         var newVal = input.value.trim();
         restorePadding();
         td.textContent = currentVal; // restore while saving
-        if (newVal !== currentVal && newVal !== '') {
-            dashSetStatus('Сохранение...');
-            dashSaveValue(td, newVal);
+        if (newVal !== currentVal) {
+            if (newVal === '') {
+                dashSetStatus('Удаление...');
+                dashDeleteValue(td);
+            } else {
+                dashSetStatus('Сохранение...');
+                dashSaveValue(td, newVal);
+            }
         }
     }
 
