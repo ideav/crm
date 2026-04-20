@@ -986,8 +986,9 @@ class App {
             const el = document.getElementById(id);
             if (!el || el.dataset.widgetId !== undefined) return;
             const sitekey = el.dataset.sitekey;
-            if (!sitekey) return;
-            const widgetId = window.smartCaptcha.render(el, { sitekey });
+            if (!sitekey || sitekey.includes('XXXX')) return;
+            const robustness = el.dataset.robustness || 'strict';
+            const widgetId = window.smartCaptcha.render(el, { sitekey, robustness });
             el.dataset.widgetId = widgetId;
         });
     }
