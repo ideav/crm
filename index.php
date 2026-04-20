@@ -1203,6 +1203,8 @@ function my_die($msg, $code=""){
 	}
 	if($code !== "")
 		header("HTTP/1.0 $code");
+	else
+		header("HTTP/1.0 400 Bad Request");
 	if(isApi())
 	    api_dump(json_encode([["error" => $msg]], JSON_UNESCAPED_UNICODE));
 	else
@@ -3735,7 +3737,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 					$val = "<a target=\"$key\" href=\"/$z/edit_obj/".$row["i$key"]."\">".Format_Val_View($base, $val, $row["i$key"])."</a>";
 			}
 			elseif($base_str == "PATH")
-				$val = strlen($val) ? Format_Val_View($base, $val, $row["i$key"]) : "";
+				$val = strlen($val) && isset($row["i$key"]) ? Format_Val_View($base, $val, $row["i$key"]) : "";
 			elseif($base_str == "HTML")
 				$val = strlen($val) ? str_ireplace("{_global_.z}", $z, $val) : "";
 			elseif($base_str == "FILE")
@@ -5842,8 +5844,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                 							        // if(!isset($existing) // It is a ref of a new rec
                 							                // || (isset($GLOBALS["MULTI"][$key]) && !isset($reqs[$GLOBALS["refs"][$refType][$ref]]))) // or multiple ref yet not on the list
                 							        if(!isset($reqs[$GLOBALS["refs"][$refType][$ref]])) // ref yet not on the list
-                        							    Insert($new_id, 1, $GLOBALS["refs"][$refType][$ref], $key, "Import cached plain ref");
-                        							    // Insert_batch($new_id, 1, $GLOBALS["refs"][$refType][$ref], $key, "Import cached plain ref");
+                        							    // Insert($new_id, 1, $GLOBALS["refs"][$refType][$ref], $key, "Import cached plain ref");
+                        							    Insert_batch($new_id, 1, $GLOBALS["refs"][$refType][$ref], $key, "Import cached plain ref");
                     							    continue;
                     						    }
             								if($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE t=$refType AND val='".addslashes($ref)."'", "Check plain ref Obj Value")))
@@ -5863,8 +5865,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                     						    }
             								}
             								if(!isset($reqs[$refObjID]))
-                    							Insert($new_id, $ord++, $refObjID, $key, "Import plain ref");
-                							// Insert_batch($new_id, $ord++, $refObjID, $key, "Import plain ref");
+                    						// Insert($new_id, $ord++, $refObjID, $key, "Import plain ref");
+                							Insert_batch($new_id, $ord++, $refObjID, $key, "Import plain ref");
                 							$GLOBALS["refs"][$refType][$ref] = $refObjID;
                     					}
             						}
@@ -5884,8 +5886,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 						            if($GLOBALS["base"][$key] === "11" /* BOOLEAN */ && (strtolower($object[$order]) === "false" || $object[$order] === "-1" || $object[$order] === " "))
 						                ;
 						            elseif($val !== " ")
-        								Insert($new_id, 1, $key, $val, "Import plain req");
-    								//Insert_batch($new_id, 1, $key, $val, "Import plain req");
+        							// Insert($new_id, 1, $key, $val, "Import plain req");
+    								Insert_batch($new_id, 1, $key, $val, "Import plain req");
     						}
     				    }
     				}
@@ -7987,13 +7989,13 @@ switch($a)  # Check actions, which don't require authentication
 		$msg = "";
 		$p = $_POST["pwd"];
 		$pwd = hash("sha512", Salt($u, $p));
-		$data_set = Exec_sql("SELECT u.id uid, u.val, pwd.id pwd_id, pwd.val pwd, tok.id tok, tok.val token, act.id act, xsrf.id xsrf, retries.id retries_id, retries.val retries
+		$sql = "SELECT u.id uid, u.val, pwd.id pwd_id, pwd.val pwd, tok.id tok, tok.val token, act.id act, xsrf.id xsrf, retries.id retries_id, retries.val retries
 								FROM $z pwd, $z u LEFT JOIN $z act ON act.up=u.id AND act.t=".ACTIVITY
 									." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
 									." LEFT JOIN $z xsrf ON xsrf.up=u.id AND xsrf.t=".XSRF
 									." LEFT JOIN $z retries ON retries.up=u.id AND retries.t=".RETRIES
-								." WHERE u.t=".USER." AND u.val='$u' AND pwd.up=u.id AND pwd.t=".PASSWORD
-						, "Authenticate user");
+								." WHERE u.t=".USER." AND u.val='$u' AND pwd.up=u.id AND pwd.t=".PASSWORD;
+		$data_set = Exec_sql($sql, "Authenticate user");
 		if($row = mysqli_fetch_array($data_set)){
 			if($row["pwd"] !== $pwd){
 				if((int)$row["retries"] >= RETRIES_LIMIT){
@@ -8010,6 +8012,8 @@ switch($a)  # Check actions, which don't require authentication
 				$row = false;
 			}
 		}
+		else
+			wlog("Authenticate user: $sql", "log");
 		if(!$row){ # Check the user Cabinet
 		    $prevz = $z;
 		    $z = "my";
@@ -8472,7 +8476,7 @@ if(Validate_Token())
 			foreach($_REQUEST as $key => $value){
 				trace("_REQUEST $key");
 				$t = substr($key, 1); # Cut the Typ from the Var named tTyp
-				if((substr($key, 0, 1) != "t") || ($t == 0)) # Out of scope or empty
+				if((substr($key, 0, 1) != "t") || ($t == 0) || !is_numeric($t)) # Out of scope or empty
 					continue;
 				$req_id = isset($GLOBALS["REQ_TYPS"][$t]) ? $GLOBALS["REQ_TYPS"][$t] : 0; # Current Requisite's ID
 				if(!in_array($t, array("101", "102", "103", "132", "49")))
@@ -8755,7 +8759,7 @@ if(Validate_Token())
 				if($row["pup"] == 0)
 					my_die(t9n("[RU]Нельзя удалить метаданные (реквизит $id типа [EN]You can't delete metadata (the $id type".$row["up"].")!"));
 				if($row[0] > 0)
-					my_die(t9n("[RU]Нельзя удалить объект, на который существует ссылки (всего: [EN]You can't delete an object that has links to it (total:").$row[0].")!");
+					my_die(t9n("[RU]Нельзя удалить объект, на который существует ссылки (всего: [EN]You can't delete an object that has links to it (total:").$row[0].")!", "409 Conflict");
 				if($row["up"] > 1){ # We'll drop the Array or Reference element, so we need to adjust the order of its peers
 					if($row["tup"] === "0"){ # Array element
     					$arg = "F_U=".$row["up"];
@@ -9022,10 +9026,10 @@ if(Validate_Token())
 		case "_attributes":
 			if(($id == 0) || ($t == 0))
 				my_die(t9n("[RU]Неверный реквизит ($t) или ID ($id)[EN] Invalid requisite($t) or ID ($id)"));
-			if(trim($val) == "")
-				my_die(t9n("[RU]Пустой тип[EN]Empty type"));
-			$val = addslashes(trim($val));
 			if($t === 1){ // Add a free link Req
+				if(trim($val) == "")
+					my_die(t9n("[RU]Пустой тип[EN]Empty type"));
+				$val = addslashes(trim($val));
 				if($row = mysqli_fetch_array(Exec_sql("SELECT new.id FROM $z obj"
 													." LEFT JOIN $z new ON new.t=1 AND new.up=obj.id AND new.val='$val'"
 													." WHERE obj.id=$id AND obj.up=0"
@@ -9053,7 +9057,7 @@ if(Validate_Token())
 				if($row["existing"]){
 				    $obj = $id;
 				    $id = $row["existing"];
-					$GLOBALS["warning"] = (t9n("[RU]Реквизит $t уже существует![EN]Requisite $val already exists!"));
+					$GLOBALS["warning"] = (t9n("[RU]Реквизит $t уже существует![EN]Requisite $t already exists!"));
 				    break;
 				}
 			}
