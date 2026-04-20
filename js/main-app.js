@@ -465,6 +465,9 @@ class MainAppController {
                 if (submenu && submenu.classList.contains('app-submenu')) {
                     const isExpanded = submenu.classList.toggle('expanded');
                     menuItem.classList.toggle('expanded', isExpanded);
+                    if (this.editMode) {
+                        this.saveExpandedState(item.menu_id, isExpanded ? '1' : '');
+                    }
                 }
             });
 
@@ -477,6 +480,9 @@ class MainAppController {
                     if (submenu && submenu.classList.contains('app-submenu')) {
                         const isExpanded = submenu.classList.toggle('expanded');
                         menuItem.classList.toggle('expanded', isExpanded);
+                        if (this.editMode) {
+                            this.saveExpandedState(item.menu_id, isExpanded ? '1' : '');
+                        }
                     }
                 });
             }
@@ -1076,8 +1082,7 @@ class MainAppController {
             menuId: menuId,
             name: item.name || '',
             href: item.href || '',
-            icon: item.icon || '',
-            expanded: item.expanded || ''
+            icon: item.icon || ''
         });
     }
 
@@ -1123,12 +1128,6 @@ class MainAppController {
                         </div>
                     </div>
                 </div>
-            </div>
-            <div class="menu-modal-field">
-                <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;">
-                    <input type="checkbox" id="modal-expanded" ${config.expanded === '1' ? 'checked' : ''}>
-                    Раскрыто
-                </label>
             </div>
             <div class="menu-modal-actions">
                 ${config.mode === 'edit' ? '<button type="button" class="menu-modal-btn delete">Удалить</button>' : ''}
@@ -1222,7 +1221,6 @@ class MainAppController {
             const name = modal.querySelector('#modal-name').value.trim();
             const href = modal.querySelector('#modal-href').value.trim();
             const emoji = modal.querySelector('#modal-emoji').value.trim();
-            const expanded = modal.querySelector('#modal-expanded').checked ? '1' : '';
 
             // Use emoji if entered, otherwise use selected PrimeVue icon
             const finalIcon = emoji || selectedIcon;
@@ -1233,9 +1231,10 @@ class MainAppController {
             }
 
             if (config.mode === 'add') {
-                await this.createMenuItemAPI(name, href, finalIcon, config.parentId, expanded);
+                await this.createMenuItemAPI(name, href, finalIcon, config.parentId, '');
             } else {
-                await this.updateMenuItem(config.menuId, name, href, finalIcon, expanded);
+                const currentExpanded = (this.menuItems[config.menuId] && this.menuItems[config.menuId].expanded) || '';
+                await this.updateMenuItem(config.menuId, name, href, finalIcon, currentExpanded);
             }
 
             overlay.remove();
@@ -1453,6 +1452,12 @@ class MainAppController {
             console.error('Error updating menu item:', err);
             this.showErrorModal('Ошибка обновления пункта меню: ' + err.message);
         }
+    }
+
+    async saveExpandedState(menuId, expanded) {
+        const item = this.menuItems[menuId];
+        if (!item) return;
+        await this.updateMenuItem(menuId, item.name || '', item.href || '', item.icon || '', expanded);
     }
 
     async deleteMenuItem(menuId) {
