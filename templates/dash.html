@@ -881,7 +881,7 @@ function dashGetRep(rep, fr, to) {
 
 function dashGetSrc(json) {
     for (var i in json || []) {
-        if (json[i].itemID) dashValueItemIds[json[i].item] = json[i].itemID;
+        if (json[i].valueItemID) dashValueItemIds[json[i].item] = json[i].valueItemID;
         if (json[i].value.length > 0) {
             try {
                 var colGroup = json[i]['Колонка группы'] || '';
