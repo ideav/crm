@@ -289,6 +289,36 @@ class MainAppController {
         document.cookie = name + '=' + encodeURIComponent(value) + '; expires=' + expires + '; path=/';
     }
 
+    getExpandedCookieName() {
+        const dbName = typeof db !== 'undefined' ? db : 'default';
+        return 'menuExpanded_' + dbName;
+    }
+
+    getExpandedFromCookie(menuId) {
+        const raw = this.getCookie(this.getExpandedCookieName());
+        if (!raw) return false;
+        try {
+            const map = JSON.parse(raw);
+            return map[menuId] === '1';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    setExpandedInCookie(menuId, expanded) {
+        const raw = this.getCookie(this.getExpandedCookieName());
+        let map = {};
+        if (raw) {
+            try { map = JSON.parse(raw); } catch (e) { map = {}; }
+        }
+        if (expanded) {
+            map[menuId] = '1';
+        } else {
+            delete map[menuId];
+        }
+        this.setCookie(this.getExpandedCookieName(), JSON.stringify(map), 365);
+    }
+
     buildMenu() {
         const menuContainer = document.getElementById('app-menu');
         if (!menuContainer || typeof menuData === 'undefined' || !Array.isArray(menuData)) return;
@@ -339,7 +369,7 @@ class MainAppController {
                     submenu.className = 'app-submenu';
                     submenu.setAttribute('data-parent', item.menu_id);
                     submenu.appendChild(renderItems(children[item.menu_id], level + 1, item.menu_id));
-                    if (item.expanded === '1') {
+                    if (this.getExpandedFromCookie(item.menu_id)) {
                         submenu.classList.add('expanded');
                         menuItem.classList.add('expanded');
                     }
@@ -465,9 +495,7 @@ class MainAppController {
                 if (submenu && submenu.classList.contains('app-submenu')) {
                     const isExpanded = submenu.classList.toggle('expanded');
                     menuItem.classList.toggle('expanded', isExpanded);
-                    if (this.editMode) {
-                        this.saveExpandedState(item.menu_id, isExpanded ? '1' : '');
-                    }
+                    this.setExpandedInCookie(item.menu_id, isExpanded);
                 }
             });
 
@@ -480,9 +508,7 @@ class MainAppController {
                     if (submenu && submenu.classList.contains('app-submenu')) {
                         const isExpanded = submenu.classList.toggle('expanded');
                         menuItem.classList.toggle('expanded', isExpanded);
-                        if (this.editMode) {
-                            this.saveExpandedState(item.menu_id, isExpanded ? '1' : '');
-                        }
+                        this.setExpandedInCookie(item.menu_id, isExpanded);
                     }
                 });
             }
@@ -1231,10 +1257,9 @@ class MainAppController {
             }
 
             if (config.mode === 'add') {
-                await this.createMenuItemAPI(name, href, finalIcon, config.parentId, '');
+                await this.createMenuItemAPI(name, href, finalIcon, config.parentId);
             } else {
-                const currentExpanded = (this.menuItems[config.menuId] && this.menuItems[config.menuId].expanded) || '';
-                await this.updateMenuItem(config.menuId, name, href, finalIcon, currentExpanded);
+                await this.updateMenuItem(config.menuId, name, href, finalIcon);
             }
 
             overlay.remove();
@@ -1293,10 +1318,10 @@ class MainAppController {
                   .replace(/'/g, '&#39;');
     }
 
-    async createMenuItemAPI(name, href, icon, parentId, expanded) {
+    async createMenuItemAPI(name, href, icon, parentId) {
         // Create menu item via API
         // POST: /{db}/_m_new/151?JSON&up={parentId or roleId}
-        // Parameters: t151 (name), t153 (href), t391 (icon), t307 (expanded)
+        // Parameters: t151 (name), t153 (href), t391 (icon)
         // Response: JSON with key 'obj' containing the new menu item ID
 
         const dbName = typeof db !== 'undefined' ? db : '';
@@ -1309,7 +1334,6 @@ class MainAppController {
         params.append('t151', name);
         params.append('t153', href);
         params.append('t391', icon);
-        params.append('t307', expanded || '');
 
         try {
             const response = await fetch(url, {
@@ -1333,8 +1357,7 @@ class MainAppController {
                         menu_up: parentId || '',
                         name: name,
                         href: href,
-                        icon: icon,
-                        expanded: expanded || ''
+                        icon: icon
                     };
                     this.menuItems[newItem.menu_id] = newItem;
 
@@ -1369,10 +1392,10 @@ class MainAppController {
         }
     }
 
-    async updateMenuItem(menuId, name, href, icon, expanded) {
+    async updateMenuItem(menuId, name, href, icon) {
         // Update menu item via API
         // POST: /{db}/_m_save/{menuId}?JSON
-        // Parameters: t151 (name), t153 (href), t391 (icon), t307 (expanded)
+        // Parameters: t151 (name), t153 (href), t391 (icon)
         const item = this.menuItems[menuId];
         if (!item) return;
 
@@ -1384,7 +1407,6 @@ class MainAppController {
         params.append('t151', name);
         params.append('t153', href);
         params.append('t391', icon);
-        params.append('t307', expanded || '');
 
         try {
             const response = await fetch(url, {
@@ -1407,7 +1429,6 @@ class MainAppController {
                 item.name = name;
                 item.href = href;
                 item.icon = icon;
-                item.expanded = expanded || '';
 
                 // Find and update the DOM element
                 const menuElement = this.menuElements[menuId];
@@ -1439,11 +1460,10 @@ class MainAppController {
                         menuDataItem.name = name;
                         menuDataItem.href = href;
                         menuDataItem.icon = icon;
-                        menuDataItem.expanded = expanded || '';
                     }
                 }
 
-                console.log('Updated menu item:', { menuId, name, href, icon, expanded });
+                console.log('Updated menu item:', { menuId, name, href, icon });
             } else {
                 console.error('Failed to update menu item:', response.status);
                 this.showErrorModal('Ошибка обновления пункта меню: ' + response.status);
@@ -1454,10 +1474,8 @@ class MainAppController {
         }
     }
 
-    async saveExpandedState(menuId, expanded) {
-        const item = this.menuItems[menuId];
-        if (!item) return;
-        await this.updateMenuItem(menuId, item.name || '', item.href || '', item.icon || '', expanded);
+    saveExpandedState(menuId, expanded) {
+        this.setExpandedInCookie(menuId, expanded === '1' || expanded === true);
     }
 
     async deleteMenuItem(menuId) {
