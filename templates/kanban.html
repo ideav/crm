@@ -244,8 +244,111 @@
                     0 6px 10px 0 rgba(0,0,0,0.28),
                     0 1px 18px 0 rgba(0,0,0,0.24);
     }
+
+    /* Kanban header */
+    .kanban-header {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        padding: 6px 10px;
+        flex-shrink: 0;
+        background: var(--bg-secondary, #f8fafc);
+        border-bottom: 1px solid var(--border-color, #e2e8f0);
+    }
+
+    /* Settings icon */
+    .kanban-settings-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 4px;
+        cursor: pointer;
+        color: var(--text-secondary, #64748b);
+        transition: all 0.2s ease;
+        font-size: 16px;
+    }
+
+    .kanban-settings-icon:hover {
+        background: rgba(0, 0, 0, 0.06);
+        color: var(--text-primary, #1e293b);
+    }
+
+    [data-theme="dark"] .kanban-settings-icon:hover {
+        background: rgba(255, 255, 255, 0.10);
+    }
+
+    /* Settings modal overlay */
+    .kanban-settings-overlay {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: var(--modal-overlay, rgba(0,0,0,0.4));
+        z-index: 1050;
+    }
+
+    .kanban-settings-modal {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: var(--bg-primary, #fff);
+        color: var(--text-primary, #1e293b);
+        border-radius: 6px;
+        box-shadow: 0 24px 38px rgba(0,0,0,0.18), 0 9px 46px rgba(0,0,0,0.12);
+        border: 1px solid var(--border-color, #e2e8f0);
+        z-index: 1051;
+        padding: 20px 24px;
+        min-width: 320px;
+        max-width: 520px;
+        width: 90vw;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+
+    .kanban-settings-modal h4 {
+        margin: 0 0 14px;
+        font-size: 16px;
+        font-weight: 500;
+    }
+
+    .kanban-settings-section {
+        margin-bottom: 14px;
+    }
+
+    .kanban-settings-section label {
+        display: block;
+        font-size: 13px;
+        color: var(--text-secondary, #64748b);
+        margin-bottom: 4px;
+    }
+
+    .kanban-settings-section select,
+    .kanban-settings-section input[type="text"] {
+        width: 100%;
+        border: 1px solid var(--input-border, #cbd5e1);
+        border-radius: 4px;
+        padding: 5px 8px;
+        background-color: var(--input-bg, #fff);
+        color: var(--text-primary, #1e293b);
+        font-size: 13px;
+        outline: none;
+        box-sizing: border-box;
+    }
+
+    .kanban-settings-footer {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        margin-top: 16px;
+    }
 </style>
 
+<div id="kanban-header" class="kanban-header" style="display:none;">
+    <div id="kanban-settings-btn" class="kanban-settings-icon" title="Настройка">
+        <i class="pi pi-cog"></i>
+    </div>
+</div>
 <div id="kanban-container"></div>
 
 <script>
@@ -987,6 +1090,296 @@
         this.init();
     };
 
+    // ─── Settings persistence (table 269) ────────────────────────────────────────
+
+    KanbanBoard.prototype._getSettingsCookieKey = function() {
+        return 'kanban-settings-' + (this._settingsSourceId || 'default');
+    };
+
+    KanbanBoard.prototype._loadSettings = function(onDone) {
+        var self = this;
+        var srcId = this._settingsSourceId;
+        if (!srcId) { if (onDone) onDone(); return; }
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', this._getApiUrl('object/269/?F_269=kanban' + srcId + '&F_271=KANBAN'), true);
+        xhr.onload = function() {
+            if (xhr.status === 200) {
+                try {
+                    var json = JSON.parse(xhr.responseText);
+                    if (Array.isArray(json) && json.length > 0) {
+                        var item = json[0];
+                        var settingsJson = item.r && item.r[2] ? item.r[2] : null;
+                        if (settingsJson) {
+                            try {
+                                var parsed = JSON.parse(settingsJson);
+                                self._settings = Object.assign(self._settings || {}, parsed);
+                                self._settingsRemoteId = item.i;
+                            } catch(e) { /* ignore */ }
+                        }
+                    }
+                } catch(e) { /* ignore */ }
+            }
+            if (onDone) onDone();
+        };
+        xhr.onerror = function() { if (onDone) onDone(); };
+        xhr.send();
+    };
+
+    KanbanBoard.prototype._saveSettings = function() {
+        var self = this;
+        var srcId = this._settingsSourceId;
+        if (!srcId) return;
+        var toSave = Object.assign({}, this._settings || {});
+        delete toSave._remoteId;
+
+        var params = [];
+        params.push('t269=' + encodeURIComponent('kanban' + srcId));
+        params.push('t271=' + encodeURIComponent('KANBAN'));
+        params.push('t273=' + encodeURIComponent(JSON.stringify(toSave)));
+        if (window.xsrf) params.push('_xsrf=' + encodeURIComponent(window.xsrf));
+        var body = params.join('&');
+
+        var remoteId = this._settingsRemoteId;
+        var url = remoteId
+            ? this._getApiUrl('_m_save/' + remoteId + '?JSON')
+            : this._getApiUrl('_m_new/269?JSON&up=1');
+
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', url, true);
+        xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+        xhr.onload = function() {
+            if (xhr.status === 200 && !remoteId) {
+                try {
+                    var resp = JSON.parse(xhr.responseText);
+                    if (resp && resp.obj && resp.obj.id) {
+                        self._settingsRemoteId = resp.obj.id;
+                    }
+                } catch(e) { /* ignore */ }
+            }
+        };
+        xhr.send(body);
+    };
+
+    // ─── Fetch all metadata and check write permissions ───────────────────────────
+
+    KanbanBoard.prototype._fetchAllMetadataAndCheckPermissions = function(sourceId, onCanConfigure) {
+        var self = this;
+        this._settingsSourceId = sourceId;
+        this._settings = this._settings || {};
+        this._settingsRemoteId = null;
+
+        // Reuse global metadata if already fetched by IntegramTable or MainAppController
+        var cached = null;
+        if (window._integramTableInstances) {
+            for (var k = 0; k < window._integramTableInstances.length; k++) {
+                if (window._integramTableInstances[k] && window._integramTableInstances[k].globalMetadata) {
+                    cached = window._integramTableInstances[k].globalMetadata;
+                    break;
+                }
+            }
+        }
+        if (!cached && window._mainApp && window._mainApp.globalMetadata) {
+            cached = window._mainApp.globalMetadata;
+        }
+
+        function checkPermissions(allMeta) {
+            if (!Array.isArray(allMeta)) { return; }
+            self._allMetadata = allMeta;
+
+            // Check WRITE on the source table and on table 269 (Настройка)
+            var sourceWritable = false;
+            var settingsWritable = false;
+
+            for (var i = 0; i < allMeta.length; i++) {
+                var entry = allMeta[i];
+                if (String(entry.id) === String(sourceId) && entry.granted === 'WRITE') {
+                    sourceWritable = true;
+                }
+                if (String(entry.id) === '269' && entry.granted === 'WRITE') {
+                    settingsWritable = true;
+                }
+            }
+
+            if (sourceWritable && settingsWritable) {
+                onCanConfigure();
+            }
+        }
+
+        if (cached) {
+            checkPermissions(cached);
+            return;
+        }
+
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', this._getApiUrl('metadata'), true);
+        xhr.onload = function() {
+            if (xhr.status === 200) {
+                try {
+                    var allMeta = JSON.parse(xhr.responseText);
+                    checkPermissions(allMeta);
+                } catch(e) { /* ignore */ }
+            }
+        };
+        xhr.onerror = function() { /* ignore */ };
+        xhr.send();
+    };
+
+    // ─── Settings modal ───────────────────────────────────────────────────────────
+
+    KanbanBoard.prototype._openSettings = function() {
+        var self = this;
+        var settings = this._settings || {};
+        var allMeta = this._allMetadata || [];
+
+        var overlay = document.createElement('div');
+        overlay.className = 'kanban-settings-overlay';
+
+        var modal = document.createElement('div');
+        modal.className = 'kanban-settings-modal';
+
+        // Build data source options from all metadata
+        function buildSourceOptions(currentId) {
+            var html = '<option value="">(текущий)</option>';
+            for (var i = 0; i < allMeta.length; i++) {
+                var m = allMeta[i];
+                var sel = String(m.id) === String(currentId) ? ' selected' : '';
+                html += '<option value="' + self._escapeHtml(String(m.id)) + '"' + sel + '>' + self._escapeHtml(m.val || m.name || String(m.id)) + '</option>';
+            }
+            return html;
+        }
+
+        // Build field select for a given list of field names
+        function buildFieldSelect(id, fields, currentVal) {
+            var html = '<select id="' + id + '"><option value="">(авто)</option>';
+            for (var i = 0; i < fields.length; i++) {
+                var sel = fields[i] === currentVal ? ' selected' : '';
+                html += '<option value="' + self._escapeHtml(fields[i]) + '"' + sel + '>' + self._escapeHtml(fields[i]) + '</option>';
+            }
+            html += '</select>';
+            return html;
+        }
+
+        var mapping = settings.fieldMapping || {};
+        var currentFields = [
+            mapping.title || '', mapping.description || '', mapping.status || '',
+            mapping.statusId || '', mapping.date || '', mapping.phone || '',
+            mapping.email || '', mapping.amount || '', mapping.activity || '', mapping.cardId || ''
+        ].filter(function(v) { return v; });
+
+        // Use current config field mapping values as hint of available fields
+        var cfm = self.config.fieldMapping || {};
+        var knownFields = [
+            cfm.title, cfm.description, cfm.contact, cfm.status,
+            cfm.statusId, cfm.date, cfm.phone, cfm.email, cfm.amount,
+            cfm.activity, cfm.cardId
+        ].filter(function(v) { return v; });
+        // Merge known + saved fields for select options
+        var allFieldNames = [];
+        var seen = {};
+        knownFields.concat(currentFields).forEach(function(f) {
+            if (f && !seen[f]) { seen[f] = true; allFieldNames.push(f); }
+        });
+
+        modal.innerHTML =
+            '<h4><i class="pi pi-cog" style="margin-right:6px;"></i>Настройка канбан</h4>' +
+
+            '<div class="kanban-settings-section">' +
+                '<label>Источник данных (таблица):</label>' +
+                '<select id="ks-source">' + buildSourceOptions(settings.sourceId || self._settingsSourceId) + '</select>' +
+            '</div>' +
+
+            '<div class="kanban-settings-section">' +
+                '<label>Поле заголовка:</label>' +
+                buildFieldSelect('ks-title', allFieldNames, mapping.title || cfm.title) +
+            '</div>' +
+
+            '<div class="kanban-settings-section">' +
+                '<label>Поле описания:</label>' +
+                buildFieldSelect('ks-description', allFieldNames, mapping.description || cfm.description) +
+            '</div>' +
+
+            '<div class="kanban-settings-section">' +
+                '<label>Поле статуса:</label>' +
+                buildFieldSelect('ks-status', allFieldNames, mapping.status || cfm.status) +
+            '</div>' +
+
+            '<div class="kanban-settings-section">' +
+                '<label>Поле ID статуса:</label>' +
+                buildFieldSelect('ks-statusId', allFieldNames, mapping.statusId || cfm.statusId) +
+            '</div>' +
+
+            '<div class="kanban-settings-section">' +
+                '<label>Поле суммы:</label>' +
+                buildFieldSelect('ks-amount', allFieldNames, mapping.amount || cfm.amount) +
+            '</div>' +
+
+            '<div class="kanban-settings-section">' +
+                '<label>Поле даты:</label>' +
+                buildFieldSelect('ks-date', allFieldNames, mapping.date || cfm.date) +
+            '</div>' +
+
+            '<div class="kanban-settings-section">' +
+                '<label>Поле телефона:</label>' +
+                buildFieldSelect('ks-phone', allFieldNames, mapping.phone || cfm.phone) +
+            '</div>' +
+
+            '<div class="kanban-settings-section">' +
+                '<label>Поле email:</label>' +
+                buildFieldSelect('ks-email', allFieldNames, mapping.email || cfm.email) +
+            '</div>' +
+
+            '<div class="kanban-settings-footer">' +
+                '<button class="btn btn-sm btn-danger" id="ks-reset">Сбросить</button>' +
+                '<button class="btn btn-sm btn-primary" id="ks-save">Сохранить</button>' +
+                '<button class="btn btn-sm btn-secondary" id="ks-cancel">Отменить</button>' +
+            '</div>';
+
+        document.body.appendChild(overlay);
+        document.body.appendChild(modal);
+
+        function close() {
+            overlay.remove();
+            modal.remove();
+        }
+
+        overlay.addEventListener('click', close);
+        modal.querySelector('#ks-cancel').addEventListener('click', close);
+
+        modal.querySelector('#ks-reset').addEventListener('click', function() {
+            self._settings = {};
+            self._settingsRemoteId = null;
+            self._saveSettings();
+            close();
+            self.reload();
+        });
+
+        modal.querySelector('#ks-save').addEventListener('click', function() {
+            var sourceId = modal.querySelector('#ks-source').value || self._settingsSourceId;
+
+            var newMapping = {};
+            var fields = ['title', 'description', 'status', 'statusId', 'amount', 'date', 'phone', 'email'];
+            fields.forEach(function(f) {
+                var el = modal.querySelector('#ks-' + f);
+                if (el && el.value) newMapping[f] = el.value;
+            });
+
+            self._settings = {
+                sourceId: sourceId,
+                fieldMapping: Object.keys(newMapping).length > 0 ? newMapping : null
+            };
+            self._saveSettings();
+            close();
+
+            // Apply saved field mapping and reload
+            if (Object.keys(newMapping).length > 0) {
+                self.config = self._mergeConfig(Object.assign({}, self.config, {
+                    fieldMapping: Object.assign({}, self.config.fieldMapping, newMapping)
+                }));
+            }
+            self.reload();
+        });
+    };
+
     // Expose to global scope
     window.KanbanBoard = KanbanBoard;
 
@@ -1022,15 +1415,40 @@ document.addEventListener('DOMContentLoaded', function() {
         return base + sep + params;
     }
 
+    // Wire up settings icon after board is created
+    function setupSettingsIcon(board) {
+        var header = document.getElementById('kanban-header');
+        var btn = document.getElementById('kanban-settings-btn');
+        if (!btn || !header) return;
+
+        board._fetchAllMetadataAndCheckPermissions(recordId, function() {
+            // User has WRITE on source table and on table 269 — show header and wire button
+            header.style.display = '';
+            board._loadSettings(function() {
+                // Apply any saved field mapping from settings
+                var savedMapping = board._settings && board._settings.fieldMapping;
+                if (savedMapping) {
+                    board.config = board._mergeConfig(Object.assign({}, board.config, {
+                        fieldMapping: Object.assign({}, board.config.fieldMapping, savedMapping)
+                    }));
+                }
+            });
+            btn.addEventListener('click', function() {
+                board._openSettings();
+            });
+        });
+    }
+
     // Initialize kanban as object/table type using recordId as fallback
     function initAsTable() {
-        new KanbanBoard('kanban-container', {
+        var board = new KanbanBoard('kanban-container', {
             dataSource: {
                 type: 'object',
                 endpoint: buildEndpoint('object/' + recordId + '?JSON_OBJ', urlParams),
                 tableId: recordId
             }
         });
+        setupSettingsIcon(board);
     }
 
     // Fetch get_record to determine source type
@@ -1051,12 +1469,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // If record has obj == "22", use report type; otherwise fall back to table
         if (record && !record.error && String(record.obj) === '22') {
-            new KanbanBoard('kanban-container', {
+            var board = new KanbanBoard('kanban-container', {
                 dataSource: {
                     type: 'report',
                     endpoint: buildEndpoint('report/' + recordId + '?JSON', urlParams)
                 }
             });
+            setupSettingsIcon(board);
         } else {
             initAsTable();
         }
