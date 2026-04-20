@@ -198,8 +198,8 @@
 }
 /* Inline editor input — styled to match integram-table .inline-editor */
 .dash-cell-input {
-    width: 100%;
-    min-width: 4rem;
+    width: 80px;
+    max-width: 80px;
     border: none;
     border-radius: 4px;
     padding: 6px 10px;
@@ -1204,17 +1204,24 @@ window.dashValueSaveDone = function(json, ctx) {
 // Inline input editor
 function dashStartInlineEdit(td) {
     var currentVal = td.textContent.trim();
+    var savedPadding = td.style.padding;
     var input = document.createElement('input');
     input.type = 'text';
     input.className = 'dash-cell-input';
     input.value = currentVal;
     td.textContent = '';
+    td.style.padding = '0';
     td.appendChild(input);
     input.focus();
     input.select();
 
+    function restorePadding() {
+        td.style.padding = savedPadding;
+    }
+
     function commit() {
         var newVal = input.value.trim();
+        restorePadding();
         td.textContent = currentVal; // restore while saving
         if (newVal !== currentVal && newVal !== '') {
             dashSetStatus('Сохранение...');
@@ -1229,6 +1236,7 @@ function dashStartInlineEdit(td) {
             input.blur();
         } else if (e.key === 'Escape') {
             input.removeEventListener('blur', commit);
+            restorePadding();
             td.textContent = currentVal;
         } else if (e.key === 'Tab' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
             e.preventDefault();
