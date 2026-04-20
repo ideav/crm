@@ -339,6 +339,10 @@ class MainAppController {
                     submenu.className = 'app-submenu';
                     submenu.setAttribute('data-parent', item.menu_id);
                     submenu.appendChild(renderItems(children[item.menu_id], level + 1, item.menu_id));
+                    if (item.expanded === '1') {
+                        submenu.classList.add('expanded');
+                        menuItem.classList.add('expanded');
+                    }
                     fragment.appendChild(submenu);
                 }
             });
@@ -1072,7 +1076,8 @@ class MainAppController {
             menuId: menuId,
             name: item.name || '',
             href: item.href || '',
-            icon: item.icon || ''
+            icon: item.icon || '',
+            expanded: item.expanded || ''
         });
     }
 
@@ -1118,6 +1123,12 @@ class MainAppController {
                         </div>
                     </div>
                 </div>
+            </div>
+            <div class="menu-modal-field">
+                <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;">
+                    <input type="checkbox" id="modal-expanded" ${config.expanded === '1' ? 'checked' : ''}>
+                    Раскрыто
+                </label>
             </div>
             <div class="menu-modal-actions">
                 ${config.mode === 'edit' ? '<button type="button" class="menu-modal-btn delete">Удалить</button>' : ''}
@@ -1211,6 +1222,7 @@ class MainAppController {
             const name = modal.querySelector('#modal-name').value.trim();
             const href = modal.querySelector('#modal-href').value.trim();
             const emoji = modal.querySelector('#modal-emoji').value.trim();
+            const expanded = modal.querySelector('#modal-expanded').checked ? '1' : '';
 
             // Use emoji if entered, otherwise use selected PrimeVue icon
             const finalIcon = emoji || selectedIcon;
@@ -1221,9 +1233,9 @@ class MainAppController {
             }
 
             if (config.mode === 'add') {
-                await this.createMenuItemAPI(name, href, finalIcon, config.parentId);
+                await this.createMenuItemAPI(name, href, finalIcon, config.parentId, expanded);
             } else {
-                await this.updateMenuItem(config.menuId, name, href, finalIcon);
+                await this.updateMenuItem(config.menuId, name, href, finalIcon, expanded);
             }
 
             overlay.remove();
@@ -1282,10 +1294,10 @@ class MainAppController {
                   .replace(/'/g, '&#39;');
     }
 
-    async createMenuItemAPI(name, href, icon, parentId) {
+    async createMenuItemAPI(name, href, icon, parentId, expanded) {
         // Create menu item via API
         // POST: /{db}/_m_new/151?JSON&up={parentId or roleId}
-        // Parameters: t151 (name), t153 (href), t391 (icon)
+        // Parameters: t151 (name), t153 (href), t391 (icon), t721 (expanded)
         // Response: JSON with key 'obj' containing the new menu item ID
 
         const dbName = typeof db !== 'undefined' ? db : '';
@@ -1298,6 +1310,7 @@ class MainAppController {
         params.append('t151', name);
         params.append('t153', href);
         params.append('t391', icon);
+        params.append('t721', expanded || '');
 
         try {
             const response = await fetch(url, {
@@ -1321,7 +1334,8 @@ class MainAppController {
                         menu_up: parentId || '',
                         name: name,
                         href: href,
-                        icon: icon
+                        icon: icon,
+                        expanded: expanded || ''
                     };
                     this.menuItems[newItem.menu_id] = newItem;
 
@@ -1356,10 +1370,10 @@ class MainAppController {
         }
     }
 
-    async updateMenuItem(menuId, name, href, icon) {
+    async updateMenuItem(menuId, name, href, icon, expanded) {
         // Update menu item via API
         // POST: /{db}/_m_save/{menuId}?JSON
-        // Parameters: t151 (name), t153 (href), t391 (icon)
+        // Parameters: t151 (name), t153 (href), t391 (icon), t721 (expanded)
         const item = this.menuItems[menuId];
         if (!item) return;
 
@@ -1371,6 +1385,7 @@ class MainAppController {
         params.append('t151', name);
         params.append('t153', href);
         params.append('t391', icon);
+        params.append('t721', expanded || '');
 
         try {
             const response = await fetch(url, {
@@ -1393,6 +1408,7 @@ class MainAppController {
                 item.name = name;
                 item.href = href;
                 item.icon = icon;
+                item.expanded = expanded || '';
 
                 // Find and update the DOM element
                 const menuElement = this.menuElements[menuId];
@@ -1424,10 +1440,11 @@ class MainAppController {
                         menuDataItem.name = name;
                         menuDataItem.href = href;
                         menuDataItem.icon = icon;
+                        menuDataItem.expanded = expanded || '';
                     }
                 }
 
-                console.log('Updated menu item:', { menuId, name, href, icon });
+                console.log('Updated menu item:', { menuId, name, href, icon, expanded });
             } else {
                 console.error('Failed to update menu item:', response.status);
                 this.showErrorModal('Ошибка обновления пункта меню: ' + response.status);
