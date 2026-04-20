@@ -1296,7 +1296,7 @@ class MainAppController {
     async createMenuItemAPI(name, href, icon, parentId, expanded) {
         // Create menu item via API
         // POST: /{db}/_m_new/151?JSON&up={parentId or roleId}
-        // Parameters: t151 (name), t153 (href), t391 (icon), t721 (expanded)
+        // Parameters: t151 (name), t153 (href), t391 (icon), t307 (expanded)
         // Response: JSON with key 'obj' containing the new menu item ID
 
         const dbName = typeof db !== 'undefined' ? db : '';
@@ -1309,7 +1309,7 @@ class MainAppController {
         params.append('t151', name);
         params.append('t153', href);
         params.append('t391', icon);
-        params.append('t721', expanded || '');
+        params.append('t307', expanded || '');
 
         try {
             const response = await fetch(url, {
@@ -1372,7 +1372,7 @@ class MainAppController {
     async updateMenuItem(menuId, name, href, icon, expanded) {
         // Update menu item via API
         // POST: /{db}/_m_save/{menuId}?JSON
-        // Parameters: t151 (name), t153 (href), t391 (icon), t721 (expanded)
+        // Parameters: t151 (name), t153 (href), t391 (icon), t307 (expanded)
         const item = this.menuItems[menuId];
         if (!item) return;
 
@@ -1384,7 +1384,7 @@ class MainAppController {
         params.append('t151', name);
         params.append('t153', href);
         params.append('t391', icon);
-        params.append('t721', expanded || '');
+        params.append('t307', expanded || '');
 
         try {
             const response = await fetch(url, {
