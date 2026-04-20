@@ -1140,48 +1140,62 @@ function dashTodayYMD() {
         + String(d.getDate()).padStart(2, '0');
 }
 
+// Get the item text for t1042: valueItemID from data-value-item-id, or item-name from row
+function dashCellItemRef(td) {
+    if (td.dataset.valueItemId) return td.dataset.valueItemId;
+    var row = td.closest('tr');
+    return row ? (row.getAttribute('item-name') || '') : '';
+}
+
 // Build search URL for a Значение record
 function dashValueSearchUrl(td) {
-    var valueItemId = td.dataset.valueItemId || td.dataset.itemId;
+    var itemRef = dashCellItemRef(td);
     var fr = dashCellDateFr(td);
     var to = dashCellDateTo(td);
     var rgHead = td.dataset.rgHead || null;
     var url = 'object/1010?JSON_OBJ';
     if (fr) url += '&FR_1039=' + fr;
     if (to) url += '&TO_1039=' + to;
-    url += '&FR_1042=@' + valueItemId;
+    url += '&FR_1042=@' + encodeURIComponent(itemRef);
     if (rgHead) url += '&F_1104=' + encodeURIComponent(rgHead);
     return url;
 }
 
-// Save a Значение: search first, then create or update
+// Save or delete a Значение: search first, then create/update/delete
 function dashSaveValue(td, newVal) {
     var searchUrl = dashValueSearchUrl(td);
-    var valueItemId = td.dataset.valueItemId || td.dataset.itemId;
+    var itemRef = dashCellItemRef(td);
     var fr = dashCellDateFr(td);
     var to = dashCellDateTo(td);
     var rgHead = td.dataset.rgHead || null;
 
-    newApi('GET', searchUrl, 'dashValueSearchDone', '', { td: td, newVal: newVal, valueItemId: valueItemId, fr: fr, to: to, rgHead: rgHead });
+    newApi('GET', searchUrl, 'dashValueSearchDone', '', { td: td, newVal: newVal, itemRef: itemRef, fr: fr, to: to, rgHead: rgHead });
 }
 
 window.dashValueSearchDone = function(json, ctx) {
     if (!json) json = [];
-    var td = ctx.td, newVal = ctx.newVal, valueItemId = ctx.valueItemId;
+    var td = ctx.td, newVal = ctx.newVal, itemRef = ctx.itemRef;
     var fr = ctx.fr, to = ctx.to, rgHead = ctx.rgHead;
 
     if (json.length === 0) {
+        // Delete: nothing to do if value is already empty
+        if (newVal === '') { dashSetStatus(''); return; }
         // Create new record
         var params = 't1010=' + encodeURIComponent(newVal)
-            + '&t1042=' + encodeURIComponent(valueItemId)
+            + '&t1042=' + encodeURIComponent(itemRef)
             + '&t1039=' + encodeURIComponent(fr || dashTodayYMD());
         if (rgHead) params += '&t1104=' + encodeURIComponent(rgHead);
         newApi('POST', '_m_new/1010?JSON&up=1', 'dashValueSaveDone', params, { td: td, newVal: newVal });
     } else if (json.length === 1) {
-        // Update existing record
         var recId = json[0].i;
-        var params2 = 't1010=' + encodeURIComponent(newVal);
-        newApi('POST', '_m_save/' + recId + '?JSON', 'dashValueSaveDone', params2, { td: td, newVal: newVal });
+        if (newVal === '') {
+            // Delete existing record when value cleared
+            newApi('POST', '_m_del/' + recId, 'dashValueSaveDone', '', { td: td, newVal: newVal });
+        } else {
+            // Update existing record
+            var params2 = 't1010=' + encodeURIComponent(newVal);
+            newApi('POST', '_m_save/' + recId + '?JSON', 'dashValueSaveDone', params2, { td: td, newVal: newVal });
+        }
     } else {
         // Multiple records — show modal with first 5, link to full list
         dashShowMultivalModal(json, dashValueSearchUrl(td).replace('JSON_OBJ', '').replace(/&&/g, '&'));
@@ -1223,7 +1237,7 @@ function dashStartInlineEdit(td) {
         var newVal = input.value.trim();
         restorePadding();
         td.textContent = currentVal; // restore while saving
-        if (newVal !== currentVal && newVal !== '') {
+        if (newVal !== currentVal) {
             dashSetStatus('Сохранение...');
             dashSaveValue(td, newVal);
         }
