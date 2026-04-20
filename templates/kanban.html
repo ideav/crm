@@ -211,54 +211,44 @@
         cursor: not-allowed;
     }
 
-    /* Search toolbar */
+    /* Search toolbar — styled like integram-table header */
     .kanban-search-bar {
         display: flex;
         align-items: center;
-        padding: 6px 10px;
-        background: var(--kanban-surface);
-        border-bottom: 1px solid var(--kanban-border-color);
+        padding: 8px 12px;
+        background: var(--bg-secondary, #f8f9fa);
+        border-bottom: 1px solid var(--border-color, #dee2e6);
         flex-shrink: 0;
-        gap: 6px;
-    }
-
-    .kanban-search-icon {
-        font-size: 14px;
-        color: var(--kanban-text-secondary);
-        flex-shrink: 0;
-        cursor: pointer;
-        padding: 4px;
-        border-radius: 4px;
-        transition: background 0.15s;
-    }
-
-    .kanban-search-icon:hover {
-        background: var(--kanban-drag-over-bg);
+        gap: 8px;
+        overflow: hidden;
     }
 
     .kanban-search-input {
-        flex: 1;
-        border: 1px solid var(--kanban-border-color);
+        border: 1px solid var(--border-color, #dee2e6);
         border-radius: 4px;
-        padding: 4px 8px;
+        padding: 5px 10px;
         font-size: 0.875rem;
-        background: var(--kanban-background);
-        color: var(--kanban-text-primary);
+        background: var(--card-bg, #fff);
+        color: var(--text-primary, #1e293b);
         outline: none;
-        transition: border-color 0.15s;
-        max-width: 280px;
+        transition: border-color 0.15s, box-shadow 0.15s;
+        width: 210px;
     }
 
     .kanban-search-input:focus {
-        border-color: var(--kanban-primary-color);
-        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+        border-color: var(--button-primary, #3b82f6);
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+    }
+
+    .kanban-search-input::placeholder {
+        color: var(--text-secondary, #6c757d);
     }
 
     .kanban-search-clear {
         background: none;
         border: none;
         cursor: pointer;
-        color: var(--kanban-text-secondary);
+        color: var(--text-secondary, #6c757d);
         font-size: 14px;
         padding: 4px 6px;
         border-radius: 4px;
@@ -268,14 +258,15 @@
     }
 
     .kanban-search-clear:hover {
-        background: var(--kanban-drag-over-bg);
-        color: var(--kanban-text-primary);
+        background: rgba(0,0,0,0.06);
+        color: var(--text-primary, #1e293b);
     }
 
     .kanban-search-count {
         font-size: 0.8rem;
-        color: var(--kanban-text-secondary);
+        color: var(--text-secondary, #6c757d);
         white-space: nowrap;
+        flex: 1;
     }
 
     .kanban-card.search-hidden {
@@ -328,29 +319,19 @@
                     0 1px 18px 0 rgba(0,0,0,0.24);
     }
 
-    /* Kanban header */
-    .kanban-header {
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-        padding: 6px 10px;
-        flex-shrink: 0;
-        background: var(--bg-secondary, #f8fafc);
-        border-bottom: 1px solid var(--border-color, #e2e8f0);
-    }
-
-    /* Settings icon */
+    /* Settings icon — lives inline in search bar */
     .kanban-settings-icon {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 32px;
-        height: 32px;
+        width: 30px;
+        height: 30px;
         border-radius: 4px;
         cursor: pointer;
-        color: var(--text-secondary, #64748b);
+        color: var(--text-secondary, #6c757d);
         transition: all 0.2s ease;
         font-size: 16px;
+        flex-shrink: 0;
     }
 
     .kanban-settings-icon:hover {
@@ -425,13 +406,130 @@
         justify-content: flex-end;
         margin-top: 16px;
     }
+
+    .kanban-settings-fields-header {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text-primary, #1e293b);
+        margin: 16px 0 8px;
+        padding-bottom: 4px;
+        border-bottom: 1px solid var(--border-color, #e2e8f0);
+    }
+
+    .kanban-settings-field-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 10px;
+        cursor: grab;
+    }
+
+    .kanban-settings-field-row:active {
+        cursor: grabbing;
+    }
+
+    .kanban-settings-drag-handle {
+        color: var(--text-secondary, #6c757d);
+        font-size: 14px;
+        flex-shrink: 0;
+        cursor: grab;
+        user-select: none;
+    }
+
+    .kanban-settings-field-row input[type="checkbox"] {
+        flex-shrink: 0;
+        cursor: pointer;
+        width: 15px;
+        height: 15px;
+    }
+
+    .kanban-settings-field-row label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 1;
+        margin: 0;
+        cursor: pointer;
+    }
+
+    .kanban-settings-field-row label span {
+        font-size: 13px;
+        color: var(--text-secondary, #64748b);
+        min-width: 80px;
+    }
+
+    .kanban-settings-field-row select {
+        flex: 1;
+        border: 1px solid var(--input-border, #cbd5e1);
+        border-radius: 4px;
+        padding: 5px 8px;
+        background-color: var(--input-bg, #fff);
+        color: var(--text-primary, #1e293b);
+        font-size: 13px;
+        outline: none;
+        box-sizing: border-box;
+    }
+
+    .kanban-settings-field-row.drag-over-above {
+        border-top: 2px solid var(--button-primary, #3b82f6);
+    }
+
+    /* Kanban list (when no ID in URL) */
+    .kanban-list {
+        padding: 20px;
+        max-width: 600px;
+        margin: 0 auto;
+    }
+
+    .kanban-list h3 {
+        font-size: 1.1rem;
+        font-weight: 500;
+        color: var(--text-primary, #1e293b);
+        margin: 0 0 16px;
+    }
+
+    .kanban-list-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 16px;
+        border: 1px solid var(--border-color, #e2e8f0);
+        border-radius: 6px;
+        margin-bottom: 8px;
+        background: var(--card-bg, #fff);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+
+    .kanban-list-item-name {
+        font-size: 0.9rem;
+        font-weight: 500;
+        color: var(--text-primary, #1e293b);
+    }
+
+    .kanban-list-item-btn {
+        padding: 6px 14px;
+        border-radius: 4px;
+        border: none;
+        background: var(--button-primary, #3b82f6);
+        color: #fff;
+        font-size: 0.8rem;
+        cursor: pointer;
+        transition: background 0.15s;
+        text-decoration: none;
+    }
+
+    .kanban-list-item-btn:hover {
+        background: var(--button-primary-hover, #2563eb);
+    }
+
+    .kanban-list-empty {
+        color: var(--text-secondary, #6c757d);
+        font-size: 0.9rem;
+        text-align: center;
+        padding: 40px;
+    }
 </style>
 
-<div id="kanban-header" class="kanban-header" style="display:none;">
-    <div id="kanban-settings-btn" class="kanban-settings-icon" title="Настройка">
-        <i class="pi pi-cog"></i>
-    </div>
-</div>
 <div id="kanban-container"></div>
 
 <script>
@@ -614,6 +712,14 @@
                 clearBtn.style.display = 'none';
                 self._applySearch('');
                 input.focus();
+            });
+        }
+
+        // Wire settings button rendered inside search bar
+        var settingsBtn = this.container.querySelector('#kanban-settings-btn');
+        if (settingsBtn) {
+            settingsBtn.addEventListener('click', function() {
+                self._openSettings();
             });
         }
     };
@@ -940,11 +1046,15 @@
             return activityB.localeCompare(activityA);
         });
 
+        var settingsBtnHtml = this._canConfigure
+            ? '<div id="kanban-settings-btn" class="kanban-settings-icon" title="Настройка"><i class="pi pi-cog"></i></div>'
+            : '';
+
         var html = '<div class="kanban-search-bar">'
-            + '<span class="kanban-search-icon" title="Поиск">&#128269;</span>'
-            + '<input class="kanban-search-input" type="text" placeholder="Быстрый поиск..." autocomplete="off" autocorrect="off" autocapitalize="off" />'
+            + '<input class="kanban-search-input" type="text" placeholder="Быстрый поиск" autocomplete="off" autocorrect="off" autocapitalize="off" />'
             + '<button class="kanban-search-clear" title="Очистить">&#x2715;</button>'
             + '<span class="kanban-search-count"></span>'
+            + settingsBtnHtml
             + '</div>'
             + '<div class="kanban-board">';
 
@@ -1015,6 +1125,11 @@
     KanbanBoard.prototype._renderCard = function(card) {
         var mapping = this.config.fieldMapping;
         var cardId = card['_cardId'] || card[mapping.cardId] || '';
+        var visibleFields = (this._settings && this._settings.visibleFields) || null;
+
+        function isVisible(fieldKey) {
+            return !visibleFields || visibleFields.indexOf(fieldKey) !== -1;
+        }
 
         // Try multiple field names for title
         var title = card[mapping.title];
@@ -1036,48 +1151,46 @@
         var amount = card[mapping.amount] || '';
         var statusId = card[mapping.statusId] || '';
 
-        // Build search text from all fields (lowercase for matching)
         var searchParts = [title || 'Без названия', description, contact, amount, date, phone, email];
         var searchText = searchParts.map(function(v) { return (v || '').toLowerCase(); }).join(' ');
 
         var html = '<div class="kanban-card" draggable="true" data-card-id="' + cardId + '" data-status-id="' + statusId + '" data-search-text="' + this._escapeHtml(searchText) + '">';
 
-        // Title
+        // Title always shown
         html += '<div class="kanban-card-title" data-original-text="' + this._escapeHtml(title || 'Без названия') + '">' + this._escapeHtml(title || 'Без названия') + '</div>';
 
-        // Description
-        if (description) {
+        if (isVisible('description') && description) {
             html += '<div class="kanban-card-description" data-original-text="' + this._escapeHtml(description) + '">' + this._escapeHtml(description) + '</div>';
         }
 
-        // Contact
-        if (contact) {
+        if (isVisible('contact') && contact) {
             html += '<div class="kanban-card-contact" data-original-text="' + this._escapeHtml(contact) + '">' + this._escapeHtml(contact) + '</div>';
         }
 
-        // Amount
-        if (amount) {
+        if (isVisible('amount') && amount) {
             html += '<div class="kanban-card-amount" data-original-text="' + this._escapeHtml(amount) + '">' + this._escapeHtml(amount) + '</div>';
         }
 
-        // Date (top-right corner)
-        if (date) {
+        if (isVisible('date') && date) {
             html += '<div class="kanban-card-date" data-original-text="' + this._escapeHtml(date) + '">' + this._escapeHtml(date) + '</div>';
         }
 
-        // Contact icons (phone and email)
         html += '<div class="kanban-card-contacts">';
 
-        if (phone && phone.trim()) {
-            html += '<span class="kanban-card-contact-icon active" title="' + this._escapeHtml(phone) + '" data-copy="' + this._escapeHtml(phone) + '">&#x1F4DE;</span>';
-        } else {
-            html += '<span class="kanban-card-contact-icon inactive" title="Телефон недоступен">&#x1F4DE;</span>';
+        if (isVisible('phone')) {
+            if (phone && phone.trim()) {
+                html += '<span class="kanban-card-contact-icon active" title="' + this._escapeHtml(phone) + '" data-copy="' + this._escapeHtml(phone) + '">&#x1F4DE;</span>';
+            } else {
+                html += '<span class="kanban-card-contact-icon inactive" title="Телефон недоступен">&#x1F4DE;</span>';
+            }
         }
 
-        if (email && email.trim()) {
-            html += '<span class="kanban-card-contact-icon active" title="' + this._escapeHtml(email) + '" data-copy="' + this._escapeHtml(email) + '">&#x1F4E7;</span>';
-        } else {
-            html += '<span class="kanban-card-contact-icon inactive" title="Email недоступен">&#x1F4E7;</span>';
+        if (isVisible('email')) {
+            if (email && email.trim()) {
+                html += '<span class="kanban-card-contact-icon active" title="' + this._escapeHtml(email) + '" data-copy="' + this._escapeHtml(email) + '">&#x1F4E7;</span>';
+            } else {
+                html += '<span class="kanban-card-contact-icon inactive" title="Email недоступен">&#x1F4E7;</span>';
+            }
         }
 
         html += '</div>';
@@ -1367,6 +1480,7 @@
             }
 
             if (sourceWritable && settingsWritable) {
+                self._canConfigure = true;
                 onCanConfigure();
             }
         }
@@ -1414,8 +1528,8 @@
             return html;
         }
 
-        // Build field select for a given list of field names
-        function buildFieldSelect(id, fields, currentVal) {
+        // Build field select (returns HTML string only, no wrapping div)
+        function buildFieldSelectHtml(id, fields, currentVal) {
             var html = '<select id="' + id + '"><option value="">(авто)</option>';
             for (var i = 0; i < fields.length; i++) {
                 var sel = fields[i] === currentVal ? ' selected' : '';
@@ -1426,11 +1540,9 @@
         }
 
         var mapping = settings.fieldMapping || {};
-        var currentFields = [
-            mapping.title || '', mapping.description || '', mapping.status || '',
-            mapping.statusId || '', mapping.date || '', mapping.phone || '',
-            mapping.email || '', mapping.amount || '', mapping.activity || '', mapping.cardId || ''
-        ].filter(function(v) { return v; });
+        var savedVisible = settings.visibleFields || null;
+        var savedOrder = settings.fieldOrder || null;
+        var kanbanName = settings.name || '';
 
         // Use current config field mapping values as hint of available fields
         var cfm = self.config.fieldMapping || {};
@@ -1439,60 +1551,75 @@
             cfm.statusId, cfm.date, cfm.phone, cfm.email, cfm.amount,
             cfm.activity, cfm.cardId
         ].filter(function(v) { return v; });
-        // Merge known + saved fields for select options
+
+        var currentMappingFields = Object.keys(mapping).map(function(k) { return mapping[k]; }).filter(function(v) { return v; });
         var allFieldNames = [];
-        var seen = {};
-        knownFields.concat(currentFields).forEach(function(f) {
-            if (f && !seen[f]) { seen[f] = true; allFieldNames.push(f); }
+        var seenF = {};
+        knownFields.concat(currentMappingFields).forEach(function(f) {
+            if (f && !seenF[f]) { seenF[f] = true; allFieldNames.push(f); }
         });
+
+        // Field definitions: key, label
+        var fieldDefs = [
+            { key: 'title',       label: 'Заголовок' },
+            { key: 'description', label: 'Описание' },
+            { key: 'contact',     label: 'Контакт' },
+            { key: 'status',      label: 'Статус' },
+            { key: 'statusId',    label: 'ID статуса' },
+            { key: 'amount',      label: 'Сумма' },
+            { key: 'date',        label: 'Дата' },
+            { key: 'phone',       label: 'Телефон' },
+            { key: 'email',       label: 'Email' },
+            { key: 'activity',    label: 'Активность' },
+            { key: 'cardId',      label: 'ID карточки' }
+        ];
+
+        // Apply saved order
+        if (savedOrder && Array.isArray(savedOrder)) {
+            var orderedDefs = [];
+            savedOrder.forEach(function(k) {
+                for (var i = 0; i < fieldDefs.length; i++) {
+                    if (fieldDefs[i].key === k) { orderedDefs.push(fieldDefs[i]); break; }
+                }
+            });
+            fieldDefs.forEach(function(fd) {
+                if (savedOrder.indexOf(fd.key) === -1) orderedDefs.push(fd);
+            });
+            fieldDefs = orderedDefs;
+        }
+
+        // Build fields list HTML
+        var fieldsHtml = '<div id="ks-fields-list">';
+        fieldDefs.forEach(function(fd) {
+            var isVisible = !savedVisible || savedVisible.indexOf(fd.key) !== -1;
+            var checkedAttr = isVisible ? ' checked' : '';
+            var currentVal = (mapping[fd.key] !== undefined) ? mapping[fd.key] : (cfm[fd.key] || '');
+            fieldsHtml += '<div class="kanban-settings-field-row" draggable="true" data-field-key="' + fd.key + '">'
+                + '<span class="kanban-settings-drag-handle" title="Перетащить">&#8942;</span>'
+                + '<input type="checkbox" id="ks-vis-' + fd.key + '"' + checkedAttr + ' title="Показывать поле">'
+                + '<label for="ks-vis-' + fd.key + '">'
+                + '<span>' + self._escapeHtml(fd.label) + ':</span>'
+                + buildFieldSelectHtml('ks-' + fd.key, allFieldNames, currentVal)
+                + '</label>'
+                + '</div>';
+        });
+        fieldsHtml += '</div>';
 
         modal.innerHTML =
             '<h4><i class="pi pi-cog" style="margin-right:6px;"></i>Настройка канбан</h4>' +
+
+            '<div class="kanban-settings-section">' +
+                '<label>Название канбана:</label>' +
+                '<input type="text" id="ks-name" value="' + self._escapeHtml(kanbanName) + '" placeholder="Название (необязательно)" />' +
+            '</div>' +
 
             '<div class="kanban-settings-section">' +
                 '<label>Источник данных (таблица):</label>' +
                 '<select id="ks-source">' + buildSourceOptions(settings.sourceId || self._settingsSourceId) + '</select>' +
             '</div>' +
 
-            '<div class="kanban-settings-section">' +
-                '<label>Поле заголовка:</label>' +
-                buildFieldSelect('ks-title', allFieldNames, mapping.title || cfm.title) +
-            '</div>' +
-
-            '<div class="kanban-settings-section">' +
-                '<label>Поле описания:</label>' +
-                buildFieldSelect('ks-description', allFieldNames, mapping.description || cfm.description) +
-            '</div>' +
-
-            '<div class="kanban-settings-section">' +
-                '<label>Поле статуса:</label>' +
-                buildFieldSelect('ks-status', allFieldNames, mapping.status || cfm.status) +
-            '</div>' +
-
-            '<div class="kanban-settings-section">' +
-                '<label>Поле ID статуса:</label>' +
-                buildFieldSelect('ks-statusId', allFieldNames, mapping.statusId || cfm.statusId) +
-            '</div>' +
-
-            '<div class="kanban-settings-section">' +
-                '<label>Поле суммы:</label>' +
-                buildFieldSelect('ks-amount', allFieldNames, mapping.amount || cfm.amount) +
-            '</div>' +
-
-            '<div class="kanban-settings-section">' +
-                '<label>Поле даты:</label>' +
-                buildFieldSelect('ks-date', allFieldNames, mapping.date || cfm.date) +
-            '</div>' +
-
-            '<div class="kanban-settings-section">' +
-                '<label>Поле телефона:</label>' +
-                buildFieldSelect('ks-phone', allFieldNames, mapping.phone || cfm.phone) +
-            '</div>' +
-
-            '<div class="kanban-settings-section">' +
-                '<label>Поле email:</label>' +
-                buildFieldSelect('ks-email', allFieldNames, mapping.email || cfm.email) +
-            '</div>' +
+            '<div class="kanban-settings-fields-header">Поля карточки:</div>' +
+            fieldsHtml +
 
             '<div class="kanban-settings-footer">' +
                 '<button class="btn btn-sm btn-danger" id="ks-reset">Сбросить</button>' +
@@ -1502,6 +1629,92 @@
 
         document.body.appendChild(overlay);
         document.body.appendChild(modal);
+
+        // ── Item 9: When ks-source changes, load source metadata and refresh field selects ──
+        var nameInput = modal.querySelector('#ks-name');
+        var nameManuallyEdited = !!kanbanName;
+
+        modal.querySelector('#ks-source').addEventListener('change', function() {
+            var newSourceId = this.value;
+            if (!newSourceId) return;
+
+            // Auto-fill name from table name if not manually edited
+            if (!nameManuallyEdited) {
+                for (var i = 0; i < allMeta.length; i++) {
+                    if (String(allMeta[i].id) === String(newSourceId)) {
+                        nameInput.value = allMeta[i].val || allMeta[i].name || '';
+                        break;
+                    }
+                }
+            }
+
+            // Fetch metadata for the selected table to populate field selects
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', self._getApiUrl('metadata/' + newSourceId), true);
+            xhr.onload = function() {
+                if (xhr.status !== 200) return;
+                var meta;
+                try { meta = JSON.parse(xhr.responseText); } catch(e) { return; }
+                if (!meta || !meta.reqs) return;
+
+                var newFields = meta.reqs.map(function(r) { return r.val; }).filter(function(v) { return v; });
+
+                modal.querySelectorAll('.kanban-settings-field-row').forEach(function(row) {
+                    var sel = row.querySelector('select');
+                    if (!sel) return;
+                    var currentVal = sel.value;
+                    var opts = '<option value="">(авто)</option>';
+                    newFields.forEach(function(f) {
+                        var selected = f === currentVal ? ' selected' : '';
+                        opts += '<option value="' + self._escapeHtml(f) + '"' + selected + '>' + self._escapeHtml(f) + '</option>';
+                    });
+                    sel.innerHTML = opts;
+                });
+            };
+            xhr.send();
+        });
+
+        nameInput.addEventListener('input', function() {
+            nameManuallyEdited = true;
+        });
+
+        // ── Item 8: Drag-and-drop reordering of field rows ──
+        var fieldsList = modal.querySelector('#ks-fields-list');
+        var dragSrc = null;
+
+        fieldsList.addEventListener('dragstart', function(e) {
+            var row = e.target.closest('.kanban-settings-field-row');
+            if (!row) return;
+            dragSrc = row;
+            e.dataTransfer.effectAllowed = 'move';
+            row.style.opacity = '0.5';
+        });
+
+        fieldsList.addEventListener('dragend', function() {
+            if (dragSrc) dragSrc.style.opacity = '';
+            fieldsList.querySelectorAll('.kanban-settings-field-row').forEach(function(r) {
+                r.classList.remove('drag-over-above');
+            });
+            dragSrc = null;
+        });
+
+        fieldsList.addEventListener('dragover', function(e) {
+            var row = e.target.closest('.kanban-settings-field-row');
+            if (!row || row === dragSrc) return;
+            e.preventDefault();
+            fieldsList.querySelectorAll('.kanban-settings-field-row').forEach(function(r) {
+                r.classList.remove('drag-over-above');
+            });
+            row.classList.add('drag-over-above');
+        });
+
+        fieldsList.addEventListener('drop', function(e) {
+            var row = e.target.closest('.kanban-settings-field-row');
+            if (!row || !dragSrc || row === dragSrc) return;
+            e.preventDefault();
+            row.classList.remove('drag-over-above');
+            fieldsList.insertBefore(dragSrc, row);
+        });
 
         function close() {
             overlay.remove();
@@ -1521,22 +1734,31 @@
 
         modal.querySelector('#ks-save').addEventListener('click', function() {
             var sourceId = modal.querySelector('#ks-source').value || self._settingsSourceId;
+            var name = modal.querySelector('#ks-name').value.trim();
 
             var newMapping = {};
-            var fields = ['title', 'description', 'status', 'statusId', 'amount', 'date', 'phone', 'email'];
-            fields.forEach(function(f) {
-                var el = modal.querySelector('#ks-' + f);
-                if (el && el.value) newMapping[f] = el.value;
+            var visibleFields = [];
+            var fieldOrder = [];
+
+            modal.querySelectorAll('.kanban-settings-field-row').forEach(function(row) {
+                var fkey = row.dataset.fieldKey;
+                fieldOrder.push(fkey);
+                var checkbox = row.querySelector('input[type="checkbox"]');
+                if (checkbox && checkbox.checked) visibleFields.push(fkey);
+                var sel = row.querySelector('select');
+                if (sel && sel.value) newMapping[fkey] = sel.value;
             });
 
             self._settings = {
+                name: name,
                 sourceId: sourceId,
-                fieldMapping: Object.keys(newMapping).length > 0 ? newMapping : null
+                fieldMapping: Object.keys(newMapping).length > 0 ? newMapping : null,
+                visibleFields: visibleFields,
+                fieldOrder: fieldOrder
             };
             self._saveSettings();
             close();
 
-            // Apply saved field mapping and reload
             if (Object.keys(newMapping).length > 0) {
                 self.config = self._mergeConfig(Object.assign({}, self.config, {
                     fieldMapping: Object.assign({}, self.config.fieldMapping, newMapping)
@@ -1551,61 +1773,105 @@
 
 })(window);
 
-// Auto-detect kanban source from URL pattern: kanban/N
-// Fetches get_record/N to determine data source type:
+// Auto-detect kanban source from URL pattern: {host}/{db}/kanban/{id}
+// If no ID, fetches list from object/269?JSON_OBJ&F_271=KANBAN and shows launchable list.
+// If ID present, fetches get_record/N to determine data source type:
 //   obj == "22" => report type  => report/N?JSON
 //   obj != "22" or error => object/table type  => object/N?JSON_OBJ + metadata/N
-// All URL query parameters are forwarded to both get_record and data requests.
+// All URL query parameters are forwarded to data requests.
 document.addEventListener('DOMContentLoaded', function() {
     var pathParts = window.location.pathname.split('/').filter(function(p) { return p !== ''; });
-    // Find 'kanban' segment and get the next integer id
     var kanbanIdx = -1;
     for (var i = 0; i < pathParts.length; i++) {
         if (pathParts[i] === 'kanban') { kanbanIdx = i; break; }
     }
-    if (kanbanIdx === -1 || kanbanIdx + 1 >= pathParts.length) return;
-    var rawId = pathParts[kanbanIdx + 1];
-    if (!/^\d+$/.test(rawId)) return;
-    var recordId = rawId;
+    if (kanbanIdx === -1) return;
 
-    // Collect URL query parameters to forward with requests
-    var urlSearch = window.location.search; // e.g. "?param1=v1&param2=v2"
-    var urlParams = urlSearch ? urlSearch.slice(1) : ''; // remove leading '?'
+    var rawId = kanbanIdx + 1 < pathParts.length ? pathParts[kanbanIdx + 1] : '';
+    var hasId = /^\d+$/.test(rawId);
 
+    var urlSearch = window.location.search;
+    var urlParams = urlSearch ? urlSearch.slice(1) : '';
     var apiBase = 'https://' + window.location.hostname + '/' + window.db;
 
-    // Build endpoint with optional query params
     function buildEndpoint(base, params) {
         if (!params) return base;
         var sep = base.indexOf('?') !== -1 ? '&' : '?';
         return base + sep + params;
     }
 
-    // Wire up settings icon after board is created
-    function setupSettingsIcon(board) {
-        var header = document.getElementById('kanban-header');
-        var btn = document.getElementById('kanban-settings-btn');
-        if (!btn || !header) return;
+    // Show a launchable list of kanbans from table 269
+    function showKanbanList() {
+        var container = document.getElementById('kanban-container');
+        container.innerHTML = '<div class="kanban-loading">Загрузка списка канбанов...</div>';
 
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', apiBase + '/object/269?JSON_OBJ&F_271=KANBAN', true);
+        xhr.onload = function() {
+            if (xhr.status !== 200) {
+                container.innerHTML = '<div class="kanban-error">Ошибка загрузки списка канбанов: HTTP ' + xhr.status + '</div>';
+                return;
+            }
+            var items;
+            try { items = JSON.parse(xhr.responseText); } catch(e) {
+                container.innerHTML = '<div class="kanban-error">Ошибка парсинга ответа</div>';
+                return;
+            }
+            if (!Array.isArray(items) || items.length === 0) {
+                container.innerHTML = '<div class="kanban-list"><div class="kanban-list-empty">Канбаны не найдены. Создайте новый канбан через настройку.</div></div>';
+                return;
+            }
+            var html = '<div class="kanban-list"><h3>Выберите канбан:</h3>';
+            items.forEach(function(item) {
+                var id = item.i;
+                var name = (item.r && item.r[0]) ? item.r[0] : ('Канбан #' + id);
+                var href = '/' + window.db + '/kanban/' + id;
+                html += '<div class="kanban-list-item">'
+                    + '<span class="kanban-list-item-name">' + escapeHtml(name) + '</span>'
+                    + '<a class="kanban-list-item-btn" href="' + href + '">Открыть</a>'
+                    + '</div>';
+            });
+            html += '</div>';
+            container.innerHTML = html;
+        };
+        xhr.onerror = function() {
+            container.innerHTML = '<div class="kanban-error">Ошибка сети при загрузке списка канбанов</div>';
+        };
+        xhr.send();
+    }
+
+    function escapeHtml(text) {
+        var div = document.createElement('div');
+        div.textContent = text || '';
+        return div.innerHTML;
+    }
+
+    if (!hasId) {
+        showKanbanList();
+        return;
+    }
+
+    var recordId = rawId;
+
+    // Set up permissions and settings icon after board renders
+    function setupSettingsIcon(board) {
         board._fetchAllMetadataAndCheckPermissions(recordId, function() {
-            // User has WRITE on source table and on table 269 — show header and wire button
-            header.style.display = '';
+            // User has WRITE on source table and on table 269 — re-render to show settings icon
             board._loadSettings(function() {
-                // Apply any saved field mapping from settings
                 var savedMapping = board._settings && board._settings.fieldMapping;
                 if (savedMapping) {
                     board.config = board._mergeConfig(Object.assign({}, board.config, {
                         fieldMapping: Object.assign({}, board.config.fieldMapping, savedMapping)
                     }));
                 }
-            });
-            btn.addEventListener('click', function() {
-                board._openSettings();
+                // Re-render to inject settings icon into search bar
+                if (board.statuses.length > 0) {
+                    board._render();
+                }
             });
         });
     }
 
-    // Initialize kanban as object/table type using recordId as fallback
     function initAsTable() {
         var board = new KanbanBoard('kanban-container', {
             dataSource: {
@@ -1617,7 +1883,6 @@ document.addEventListener('DOMContentLoaded', function() {
         setupSettingsIcon(board);
     }
 
-    // Fetch get_record to determine source type
     var getRecordUrl = apiBase + '/get_record/' + recordId;
     if (urlParams) getRecordUrl += '?' + urlParams;
 
@@ -1626,14 +1891,8 @@ document.addEventListener('DOMContentLoaded', function() {
     xhr.onload = function() {
         var record;
         if (xhr.status === 200) {
-            try {
-                record = JSON.parse(xhr.responseText);
-            } catch (e) {
-                record = null;
-            }
+            try { record = JSON.parse(xhr.responseText); } catch(e) { record = null; }
         }
-
-        // If record has obj == "22", use report type; otherwise fall back to table
         if (record && !record.error && String(record.obj) === '22') {
             var board = new KanbanBoard('kanban-container', {
                 dataSource: {
@@ -1646,9 +1905,7 @@ document.addEventListener('DOMContentLoaded', function() {
             initAsTable();
         }
     };
-    xhr.onerror = function() {
-        initAsTable();
-    };
+    xhr.onerror = function() { initAsTable(); };
     xhr.send();
 });
 </script>
