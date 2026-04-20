@@ -4,9 +4,9 @@
 
 param(
     [string]$Login = "api",
-    [string]$Password = "k6cvfvg3",
-    [string]$BaseUrl = "https://integram.io",
-    [string]$DbName = "test",
+    [string]$Password = "",
+    [string]$BaseUrl = "https://ideav.ru",
+    [string]$DbName = "perelidoz",
     [string]$LogPath = "api_log.txt",
     [switch]$SkipSeedData
 )
