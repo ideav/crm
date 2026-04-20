@@ -1981,7 +1981,7 @@
             var remoteId = this.settings._remoteId;
             var url = remoteId
                 ? apiBase + '/_m_save/' + remoteId + '?JSON'
-                : apiBase + '/_m_new/269?JSON';
+                : apiBase + '/_m_new/269?JSON&up=1';
 
             var self = this;
             fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString() })
