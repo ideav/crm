@@ -406,6 +406,7 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
     , cellTpl     = '<td range=":from:-:to:" ready=":ready:" class="f-cell :classes:" align="right" title=":title:" data-src=":src:" data-item-id=":item-id:":extra:>:val:';
 
 let dashModelData = {}, dashPeriodData = {}, dashPeriods = {}, dashValues = {}, dashFormulas = {}, dashItems = {}, dashReports = {}, dashAjaxes = 0;
+let dashValueItemIds = {}; // item name -> valueItemID from ЗначенияЗаПериод
 
 function dashDateYMD(d) {
     return d.slice(6) + d.slice(3, 5) + d.slice(0, 2);
@@ -631,6 +632,8 @@ function dashDrawPeriods() {
                             panel.querySelectorAll('.f-item').forEach(function(row) {
                                 var itemName = row.getAttribute('item-name');
                                 var s = dashCellSrc(row.id, 'rg');
+                                var valueItemId = dashValueItemIds[itemName] || '';
+                                var rgHeadVal = dashModelData[panelId].rgs[rg].head || '';
                                 rgCols.forEach(function(colName) {
                                     v = dashGetVal(itemName + ':' + colName, fr, to);
                                     if (v === undefined && dashFormulas[row.id]) {
@@ -640,6 +643,9 @@ function dashDrawPeriods() {
                                             v = dashGetVal(dashFormulas[row.id].match(itemRegex)[1] + ':' + colName, fr, to)
                                              || dashGetVal(dashFormulas[row.id].match(itemRegex)[1], fr, to) || '0';
                                     }
+                                    var cellExtra = s.extra
+                                        + (valueItemId ? ' data-value-item-id="' + valueItemId + '"' : '')
+                                        + (rgHeadVal ? ' data-rg-head="' + rgHeadVal.replace(/"/g, '&quot;') + '"' : '');
                                     row.insertAdjacentHTML('beforeend',
                                         cellTpl.replace(':val:', v || '')
                                             .replace(':ready:', '1')
@@ -647,7 +653,7 @@ function dashDrawPeriods() {
                                             .replace(':classes:', 'f-rg-cell')
                                             .replace(':src:', s.src)
                                             .replace(':item-id:', row.id)
-                                            .replace(':extra:', s.extra)
+                                            .replace(':extra:', cellExtra)
                                             .replace(':from:', fr)
                                             .replace(':to:', to));
                                 });
@@ -658,13 +664,19 @@ function dashDrawPeriods() {
                                 headTpl.replace(':head:', p[i].r[0]).replace(':from:', fr).replace(':to:', to));
                             panel.querySelectorAll('.f-item').forEach(function(row) {
                                 var s = dashCellSrc(row.id, 'rg');
-                                v = dashGetVal(row.getAttribute('item-name'), fr, to);
+                                var itemName = row.getAttribute('item-name');
+                                var valueItemId = dashValueItemIds[itemName] || '';
+                                var rgHeadVal = dashModelData[panelId].rgs[rg].head || '';
+                                v = dashGetVal(itemName, fr, to);
                                 if (v === undefined && dashFormulas[row.id]) {
                                     if (dashFormulas[row.id] === '[]')
-                                        v = dashGetVal(row.getAttribute('item-name'), fr, to);
+                                        v = dashGetVal(itemName, fr, to);
                                     else if (itemRegex.test(dashFormulas[row.id]))
                                         v = dashGetVal(dashFormulas[row.id].match(itemRegex)[1], fr, to) || '0';
                                 }
+                                var cellExtra = s.extra
+                                    + (valueItemId ? ' data-value-item-id="' + valueItemId + '"' : '')
+                                    + (rgHeadVal ? ' data-rg-head="' + rgHeadVal.replace(/"/g, '&quot;') + '"' : '');
                                 row.insertAdjacentHTML('beforeend',
                                     cellTpl.replace(':val:', v || '')
                                         .replace(':ready:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? '1' : '0')
@@ -672,7 +684,7 @@ function dashDrawPeriods() {
                                         .replace(':classes:', 'f-rg-cell')
                                         .replace(':src:', s.src)
                                         .replace(':item-id:', row.id)
-                                        .replace(':extra:', s.extra)
+                                        .replace(':extra:', cellExtra)
                                         .replace(':from:', fr)
                                         .replace(':to:', to));
                             });
@@ -690,6 +702,12 @@ function dashDrawPeriods() {
                         if (resolved.alias)
                             s = { src: 'value', extra: '' };
                         v = dashNormalizeVal(row.id, resolved.value);
+                        var itemName = row.getAttribute('item-name');
+                        var valueItemId = dashValueItemIds[itemName] || '';
+                        var rgHeadVal = groupName;
+                        var cellExtra = s.extra
+                            + (valueItemId ? ' data-value-item-id="' + valueItemId + '"' : '')
+                            + (rgHeadVal ? ' data-rg-head="' + rgHeadVal.replace(/"/g, '&quot;') + '"' : '');
                         row.insertAdjacentHTML('beforeend',
                             cellTpl.replace(':val:', v || '')
                                 .replace(':classes:', 'f-values')
@@ -698,7 +716,7 @@ function dashDrawPeriods() {
                                 .replace(':title:', dashFormulas[row.id] || '')
                                 .replace(':src:', s.src)
                                 .replace(':item-id:', row.id)
-                                .replace(':extra:', s.extra));
+                                .replace(':extra:', cellExtra));
                     });
                     break;
                 case 'mu':
@@ -863,6 +881,7 @@ function dashGetRep(rep, fr, to) {
 
 function dashGetSrc(json) {
     for (var i in json || []) {
+        if (json[i].itemID) dashValueItemIds[json[i].item] = json[i].itemID;
         if (json[i].value.length > 0) {
             try {
                 var colGroup = json[i]['Колонка группы'] || '';
@@ -1005,7 +1024,7 @@ function dashGetModel(json) {
 
 function dashReset() {
     dashModelData = {}; dashPeriodData = {}; dashPeriods = {}; dashValues = {};
-    dashFormulas = {}; dashItems = {}; dashReports = {}; dashAjaxes = 0;
+    dashFormulas = {}; dashItems = {}; dashReports = {}; dashAjaxes = 0; dashValueItemIds = {};
     var model = document.getElementById('dash-model');
     model.querySelector('.sheet-tabs').innerHTML = '';
     model.querySelector('.sheets').innerHTML = '';
@@ -1038,7 +1057,7 @@ window.dashApplyFilter = function(sheetEl) {
         delete dashModelData[p.id];
         p.remove();
     });
-    dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashReports = {}; dashAjaxes = 0;
+    dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashReports = {}; dashAjaxes = 0; dashValueItemIds = {};
 
     // Re-fetch model for this sheet only — skip get_record, use cached dashRecordId
     dashSetStatus('Загрузка данных...');
@@ -1123,23 +1142,14 @@ function dashTodayYMD() {
 
 // Build search URL for a Значение record
 function dashValueSearchUrl(td) {
-    var itemId = td.dataset.itemId;
+    var valueItemId = td.dataset.valueItemId || td.dataset.itemId;
     var fr = dashCellDateFr(td);
     var to = dashCellDateTo(td);
-    // rgHead: from data-rg-col attribute on the corresponding thead th
-    var range = td.getAttribute('range') || '-';
-    var panel = td.closest('.f-panel');
-    var rgHead = null;
-    if (panel) {
-        var thSel = range !== '-'
-            ? 'th[data-rg-col][range="' + range + '"]'
-            : 'th[data-rg-col]';
-        var rgTh = panel.querySelector(thSel);
-        if (rgTh) rgHead = rgTh.getAttribute('data-rg-col');
-    }
-    var url = 'object/1010?JSON_OBJ&FR_1042=@' + itemId;
+    var rgHead = td.dataset.rgHead || null;
+    var url = 'object/1010?JSON_OBJ';
     if (fr) url += '&FR_1039=' + fr;
     if (to) url += '&TO_1039=' + to;
+    url += '&FR_1042=@' + valueItemId;
     if (rgHead) url += '&F_1104=' + encodeURIComponent(rgHead);
     return url;
 }
@@ -1147,44 +1157,31 @@ function dashValueSearchUrl(td) {
 // Save a Значение: search first, then create or update
 function dashSaveValue(td, newVal) {
     var searchUrl = dashValueSearchUrl(td);
-    var itemId = td.dataset.itemId;
+    var valueItemId = td.dataset.valueItemId || td.dataset.itemId;
     var fr = dashCellDateFr(td);
     var to = dashCellDateTo(td);
-    var range = td.getAttribute('range') || '-';
-    var panel = td.closest('.f-panel');
-    var rgHead = null, rgHeadId = null;
-    if (panel) {
-        var thSel = range !== '-'
-            ? 'th[data-rg-col][range="' + range + '"]'
-            : 'th[data-rg-col]';
-        var rgTh = panel.querySelector(thSel);
-        if (rgTh) rgHead = rgTh.getAttribute('data-rg-col');
-    }
+    var rgHead = td.dataset.rgHead || null;
 
-    newApi('GET', searchUrl, 'dashValueSearchDone', '', { td: td, newVal: newVal, itemId: itemId, fr: fr, to: to, rgHead: rgHead, rgHeadId: rgHeadId });
+    newApi('GET', searchUrl, 'dashValueSearchDone', '', { td: td, newVal: newVal, valueItemId: valueItemId, fr: fr, to: to, rgHead: rgHead });
 }
 
 window.dashValueSearchDone = function(json, ctx) {
     if (!json) json = [];
-    var td = ctx.td, newVal = ctx.newVal, itemId = ctx.itemId;
+    var td = ctx.td, newVal = ctx.newVal, valueItemId = ctx.valueItemId;
     var fr = ctx.fr, to = ctx.to, rgHead = ctx.rgHead;
 
     if (json.length === 0) {
         // Create new record
-        var params = '_xsrf=' + encodeURIComponent(xsrf)
-            + '&t1010=' + encodeURIComponent(newVal)
-            + '&t1042=' + encodeURIComponent(itemId)
+        var params = 't1010=' + encodeURIComponent(newVal)
+            + '&t1042=' + encodeURIComponent(valueItemId)
             + '&t1039=' + encodeURIComponent(fr || dashTodayYMD());
-        if (rgHead) {
-            // resolve rgHead name to id: look in json (empty here), use text
-            params += '&t1104=' + encodeURIComponent(rgHead);
-        }
+        if (rgHead) params += '&t1104=' + encodeURIComponent(rgHead);
         newApi('POST', '_m_new/1010?JSON&up=1', 'dashValueSaveDone', params, { td: td, newVal: newVal });
     } else if (json.length === 1) {
         // Update existing record
         var recId = json[0].i;
-        var params2 = '_xsrf=' + encodeURIComponent(xsrf) + '&t1010=' + encodeURIComponent(newVal);
-        newApi('POST', '_m_save/' + recId+'?JSON', 'dashValueSaveDone', params2, { td: td, newVal: newVal });
+        var params2 = 't1010=' + encodeURIComponent(newVal);
+        newApi('POST', '_m_save/' + recId + '?JSON', 'dashValueSaveDone', params2, { td: td, newVal: newVal });
     } else {
         // Multiple records — show modal with first 5, link to full list
         dashShowMultivalModal(json, dashValueSearchUrl(td).replace('JSON_OBJ', '').replace(/&&/g, '&'));
