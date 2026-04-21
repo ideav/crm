@@ -73,6 +73,11 @@ td[base=SIGNED],td[base=NUMBER]{
 input.inline-edit,textarea.inline-edit{
     outline: none;
     border: none;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+td:has(.inline-edit) {
+    overflow: hidden;
 }
 .sub-totals-left{
     border-left: 2px solid var(--color-success, darkgreen) !important;
