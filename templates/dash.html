@@ -602,7 +602,7 @@ function dashCalcCells() {
         });
         dashCalcLineTotals();
     }
-    document.querySelectorAll('#dash-model td[ready="0"]').forEach(function(el) {
+    document.querySelectorAll('#dash-model td[ready="0"]:not(.f-rg-formula-cell)').forEach(function(el) {
         el.classList.add('dash-err');
     });
 }
@@ -672,14 +672,18 @@ function dashCalcRGFormulas() {
                 val = 'N/A';
                 console.log('RGformula eval error: ' + e + ' in: ' + expr);
             }
-            el.innerHTML = val !== null && val !== undefined ? String(val) : '';
+            var valStr = val !== null && val !== undefined ? String(val) : '';
+            el.innerHTML = valStr;
+            el.title = rgf + ' => ' + expr + ' = ' + valStr;
             el.setAttribute('ready', '1');
             progress = true;
         });
     }
-    // Mark still-pending cells as errors
+    // Mark still-pending cells as errors and show the formula in title for debugging
     document.querySelectorAll('#dash-model td.f-rg-formula-cell[ready="0"]').forEach(function(el) {
         el.classList.add('dash-err');
+        var rgf = el.getAttribute('data-rg-formula');
+        if (rgf && el.title === rgf) el.title = rgf + ' (не удалось вычислить)';
     });
 }
 
