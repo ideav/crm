@@ -278,14 +278,45 @@
     box-shadow: 0 4px 24px rgba(0,0,0,0.18);
 }
 #dash-multival-modal h6 {
-    margin: 0 0 0.75rem;
+    margin: 0 0 0.35rem;
     font-size: 0.95rem;
     font-weight: 600;
 }
+#dash-multival-modal #dash-multival-subtitle {
+    margin: 0 0 0.75rem;
+    font-size: 0.8rem;
+    color: var(--text-muted, #6c757d);
+}
 #dash-multival-modal ul {
-    padding: 0 0 0 1rem;
+    list-style: none;
+    padding: 0;
     margin: 0 0 0.75rem;
     font-size: 0.875rem;
+}
+#dash-multival-modal ul li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.3rem 0;
+}
+#dash-multival-modal ul li .dash-multival-del {
+    cursor: pointer;
+    color: var(--text-muted, #6c757d);
+    background: none;
+    border: none;
+    padding: 0 0.25rem;
+    font-size: 1rem;
+    line-height: 1;
+    flex-shrink: 0;
+}
+#dash-multival-modal ul li .dash-multival-del:hover {
+    color: var(--danger, #dc3545);
+}
+#dash-multival-modal .dash-modal-btns {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 0.75rem;
 }
 /* Readonly tooltip */
 .dash-readonly-tip {
@@ -326,9 +357,10 @@
 <div id="dash-multival-modal" role="dialog" aria-modal="true">
     <div class="dash-modal-box">
         <h6>Найдено несколько значений</h6>
+        <p id="dash-multival-subtitle"></p>
         <ul id="dash-multival-list"></ul>
-        <a id="dash-multival-link" href="#" target="_blank" style="font-size:0.85rem">Открыть все</a>
         <div class="dash-modal-btns">
+            <a id="dash-multival-link" href="#" target="_blank" style="font-size:0.85rem">Показать в таблице</a>
             <button class="dash-apply-btn" id="dash-multival-close">Закрыть</button>
         </div>
     </div>
@@ -1197,7 +1229,7 @@ window.dashValueSearchDone = function(json, ctx) {
         }
     } else {
         // Multiple records — show modal with first 5, link to full list
-        dashShowMultivalModal(json, dashValueSearchUrl(td).replace('JSON_OBJ', '').replace(/&&/g, '&'));
+        dashShowMultivalModal(json, dashValueSearchUrl(td).replace('JSON_OBJ', '').replace(/&&/g, '&'), td, newVal);
     }
 };
 
@@ -1329,19 +1361,66 @@ window.dashFormulaSaveDone = function(json, ctx) {
     dashSetStatus('Формула сохранена');
 };
 
-// Multiple values modal
-function dashShowMultivalModal(records, baseUrl) {
+// Multiple values modal state
+var dashMultivalCtx = null;
+
+function dashMultivalRenderList(records) {
     var list = document.getElementById('dash-multival-list');
     list.innerHTML = '';
     records.slice(0, 5).forEach(function(rec) {
         var li = document.createElement('li');
-        li.textContent = rec.r ? rec.r.join(' | ') : String(rec.i);
+        var span = document.createElement('span');
+        span.textContent = rec.r ? rec.r.join(' | ') : String(rec.i);
+        var btn = document.createElement('button');
+        btn.className = 'dash-multival-del';
+        btn.title = 'Удалить';
+        btn.textContent = '×';
+        btn.dataset.recId = rec.i;
+        li.appendChild(span);
+        li.appendChild(btn);
         list.appendChild(li);
     });
+}
+
+function dashShowMultivalModal(records, baseUrl, td, newVal) {
+    dashMultivalCtx = { records: records, baseUrl: baseUrl, td: td, newVal: newVal };
+    document.getElementById('dash-multival-subtitle').textContent = 'Не могу однозначно сохранить ' + newVal;
+    dashMultivalRenderList(records);
     var link = document.getElementById('dash-multival-link');
     link.href = '/' + db + '/' + baseUrl;
     document.getElementById('dash-multival-modal').classList.add('open');
 }
+
+document.getElementById('dash-multival-list').addEventListener('click', function(e) {
+    var btn = e.target.closest('.dash-multival-del');
+    if (!btn || !dashMultivalCtx) return;
+    var recId = btn.dataset.recId;
+    newApi('POST', '_m_del/' + recId + '?JSON', 'dashMultivalDelDone', '', { recId: recId });
+});
+
+window.dashMultivalDelDone = function(json, ctx) {
+    if (!json || json.error || !dashMultivalCtx) {
+        dashSetStatus('Ошибка удаления');
+        return;
+    }
+    var remaining = dashMultivalCtx.records.filter(function(r) { return String(r.i) !== String(ctx.recId); });
+    dashMultivalCtx.records = remaining;
+    if (remaining.length === 1) {
+        // Auto-save the pending value into the last remaining record
+        var recId = remaining[0].i;
+        var newVal = dashMultivalCtx.newVal;
+        var td = dashMultivalCtx.td;
+        document.getElementById('dash-multival-modal').classList.remove('open');
+        dashMultivalCtx = null;
+        if (newVal === '') {
+            newApi('POST', '_m_del/' + recId + '?JSON', 'dashValueSaveDone', '', { td: td, newVal: newVal });
+        } else {
+            newApi('POST', '_m_save/' + recId + '?JSON', 'dashValueSaveDone', 't1010=' + encodeURIComponent(newVal), { td: td, newVal: newVal });
+        }
+    } else {
+        dashMultivalRenderList(remaining);
+    }
+};
 
 document.getElementById('dash-multival-close').addEventListener('click', function() {
     document.getElementById('dash-multival-modal').classList.remove('open');
