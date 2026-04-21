@@ -2635,6 +2635,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 /* Inline editor input styles */
 .inline-editor {
     width: 100%;
+    max-width: 100%;
     padding: 6px 10px 6px 0;
     /* border: 2px solid var(--md-primary); */
     border-radius: 4px;
@@ -2695,6 +2696,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 td:has(.inline-editor) {
     background-color: rgba(25, 118, 210, 0.08) !important;
     padding: 4px !important;
+    overflow: hidden;
 }
 
 /* Visual feedback for cells that are being saved (issue #1431) */
