@@ -6629,32 +6629,124 @@ class IntegramTable{
         attachStickyHeader() {
             const tableWrapper = this.container.querySelector('.integram-table-wrapper');
             const header = this.container.querySelector('.integram-table-header');
+            const tableContainer = this.container.querySelector('.integram-table-container');
 
-            if (!tableWrapper || !header) return;
+            if (!tableWrapper || !header || !tableContainer) return;
 
             if (this._stickyHeaderScrollListener) {
                 (this._stickyHeaderScrollContainer || window).removeEventListener('scroll', this._stickyHeaderScrollListener);
             }
+            if (this._stickyHeaderTableScrollListener) {
+                tableContainer.removeEventListener('scroll', this._stickyHeaderTableScrollListener);
+            }
             if (this._stickyHeaderResizeObserver) {
                 this._stickyHeaderResizeObserver.disconnect();
+            }
+            // Remove previous clone if any
+            if (this._stickyTheadClone) {
+                this._stickyTheadClone.remove();
+                this._stickyTheadClone = null;
             }
 
             const scrollContainer = this.getScrollContainer();
             this._stickyHeaderScrollContainer = scrollContainer;
 
-            const applyOffsets = () => {
-                const headerHeight = header.offsetHeight;
-                const ths = tableWrapper.querySelectorAll('.integram-table thead th');
-                ths.forEach(th => {
-                    th.style.top = headerHeight + 'px';
+            // Build a fixed-position clone of the thead to display when the real thead
+            // scrolls above the toolbar. CSS position:sticky on <th> cannot work here
+            // because .integram-table-container has overflow-x:auto which implicitly sets
+            // overflow-y:auto too, making it the sticky scroll container instead of
+            // .app-content — so the th never sticks during vertical scroll (issue #2065).
+            const theadRow = tableWrapper.querySelector('.integram-table thead tr');
+            const filterRow = tableWrapper.querySelector('.integram-table .filter-row');
+
+            const buildClone = () => {
+                if (this._stickyTheadClone) this._stickyTheadClone.remove();
+
+                const originalThs = theadRow
+                    ? Array.from(theadRow.querySelectorAll('th'))
+                    : [];
+                const originalFilterTds = filterRow
+                    ? Array.from(filterRow.querySelectorAll('td'))
+                    : [];
+
+                if (originalThs.length === 0) return;
+
+                const clone = document.createElement('div');
+                clone.className = 'integram-sticky-thead-clone';
+                clone.style.cssText = 'position:fixed;z-index:109;overflow:hidden;display:none;pointer-events:none;box-sizing:border-box;';
+
+                const cloneTable = document.createElement('table');
+                cloneTable.className = 'integram-table compact';
+                cloneTable.style.cssText = 'border-collapse:collapse;table-layout:fixed;';
+
+                const cloneThead = document.createElement('thead');
+                const cloneTr = document.createElement('tr');
+                originalThs.forEach(th => cloneTr.appendChild(th.cloneNode(true)));
+                cloneThead.appendChild(cloneTr);
+                cloneTable.appendChild(cloneThead);
+
+                if (originalFilterTds.length > 0) {
+                    const cloneFilterTr = document.createElement('tr');
+                    cloneFilterTr.className = 'filter-row';
+                    originalFilterTds.forEach(td => cloneFilterTr.appendChild(td.cloneNode(true)));
+                    cloneThead.appendChild(cloneFilterTr);
+                }
+
+                clone.appendChild(cloneTable);
+                document.body.appendChild(clone);
+                this._stickyTheadClone = clone;
+            };
+
+            buildClone();
+
+            const syncClone = () => {
+                const clone = this._stickyTheadClone;
+                if (!clone) return;
+
+                const containerRect = tableContainer.getBoundingClientRect();
+                const headerBottom = header.getBoundingClientRect().bottom;
+                const table = tableWrapper.querySelector('.integram-table');
+
+                clone.style.top = headerBottom + 'px';
+                clone.style.left = containerRect.left + 'px';
+                clone.style.width = containerRect.width + 'px';
+
+                const cloneTable = clone.querySelector('table');
+                if (table && cloneTable) {
+                    cloneTable.style.width = table.scrollWidth + 'px';
+                }
+
+                // Sync column widths from the real thead
+                const originalThs = theadRow ? Array.from(theadRow.querySelectorAll('th')) : [];
+                const cloneThs = Array.from(clone.querySelectorAll('thead tr:first-child th'));
+                originalThs.forEach((th, i) => {
+                    if (cloneThs[i]) {
+                        const w = th.getBoundingClientRect().width;
+                        cloneThs[i].style.width = w + 'px';
+                        cloneThs[i].style.minWidth = w + 'px';
+                    }
                 });
 
-                const firstTh = tableWrapper.querySelector('.integram-table thead th');
-                const thHeight = firstTh ? firstTh.offsetHeight : 0;
-                const filterCells = tableWrapper.querySelectorAll('.filter-row td');
-                filterCells.forEach(td => {
-                    td.style.top = (headerHeight + thHeight) + 'px';
-                });
+                // Sync horizontal scroll
+                clone.scrollLeft = tableContainer.scrollLeft;
+            };
+
+            let isStickyThead = false;
+
+            const updateStickyThead = () => {
+                const clone = this._stickyTheadClone;
+                if (!clone || !theadRow) return;
+
+                const theadRect = theadRow.getBoundingClientRect();
+                const headerBottom = header.getBoundingClientRect().bottom;
+                const shouldBeSticky = theadRect.bottom <= headerBottom + 1;
+
+                if (shouldBeSticky !== isStickyThead) {
+                    isStickyThead = shouldBeSticky;
+                    clone.style.display = shouldBeSticky ? 'block' : 'none';
+                }
+
+                if (isStickyThead) syncClone();
             };
 
             const updateStickyState = () => {
@@ -6662,31 +6754,39 @@ class IntegramTable{
                 const containerTop = scrollContainer === window
                     ? 0
                     : scrollContainer.getBoundingClientRect().top;
-                // Header is sticky when CSS has pinned it to the top of the scroll container
                 const isSticky = headerRect.top <= containerTop + 1;
 
                 const wasSticky = header.classList.contains('sticky');
                 if (isSticky !== wasSticky) {
                     header.classList.toggle('sticky', isSticky);
                     tableWrapper.classList.toggle('sticky-header', isSticky);
-                    // Re-read header height after the CSS transition completes (150ms)
-                    // so th/filter-row top offsets stay accurate (issue #2063)
-                    setTimeout(applyOffsets, 160);
+                    // Rebuild clone after transition to pick up padding changes (issue #2063)
+                    setTimeout(() => { buildClone(); updateStickyThead(); }, 160);
                 }
 
-                applyOffsets();
+                updateStickyThead();
             };
+
+            // Sync clone horizontal scroll when the table container scrolls
+            this._stickyHeaderTableScrollListener = () => {
+                if (isStickyThead && this._stickyTheadClone) {
+                    this._stickyTheadClone.scrollLeft = tableContainer.scrollLeft;
+                }
+            };
+            tableContainer.addEventListener('scroll', this._stickyHeaderTableScrollListener);
 
             this._stickyHeaderScrollListener = updateStickyState;
             scrollContainer.addEventListener('scroll', this._stickyHeaderScrollListener);
 
             if (typeof ResizeObserver !== 'undefined') {
-                this._stickyHeaderResizeObserver = new ResizeObserver(updateStickyState);
+                this._stickyHeaderResizeObserver = new ResizeObserver(() => {
+                    updateStickyState();
+                    if (isStickyThead) syncClone();
+                });
                 this._stickyHeaderResizeObserver.observe(header);
+                this._stickyHeaderResizeObserver.observe(tableContainer);
             }
 
-            // Defer the initial call so the browser has completed layout
-            // and header.offsetHeight reflects the true rendered height (issue #2063)
             requestAnimationFrame(updateStickyState);
         }
 
