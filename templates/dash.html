@@ -199,6 +199,7 @@
 /* Inline editor input — fills the cell exactly, no layout shift */
 .dash-cell-input {
     width: 100%;
+    max-width: 100%;
     border: none;
     border-radius: 0;
     padding: 0.3rem 0.6rem;
@@ -214,6 +215,9 @@
 }
 .dash-cell-input:focus {
     box-shadow: inset 0 0 0 2px rgba(25, 118, 210, 0.7);
+}
+td:has(.dash-cell-input) {
+    overflow: hidden;
 }
 /* Formula modal */
 #dash-formula-modal {
