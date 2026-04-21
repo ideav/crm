@@ -69,6 +69,23 @@
     margin-bottom: 12px;
     padding: 12px 12px 0;
     overflow: hidden;
+    position: sticky;
+    top: 0;
+    z-index: 110;
+    background: var(--bg-primary, #ffffff);
+    transition: margin-bottom 0.15s ease, padding 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Sticky state: header is pinned above the viewport fold and covers the navbar */
+.integram-table-header.sticky {
+    margin-bottom: 3px;
+    padding: 3px 12px 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+/* Hide button labels when header is sticky for compactness */
+.integram-table-header.sticky .btn-label {
+    display: none;
 }
 
 /* Title area wrapper with create button (issue #693) */
@@ -442,6 +459,20 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .integram-table.compact td {
     padding: 3px 5px;
+}
+
+/* Sticky-header mode: reduce th and filter input padding for compactness (issue #2051) */
+.integram-table-wrapper.sticky-header .integram-table th {
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+.integram-table-wrapper.sticky-header .filter-input,
+.integram-table-wrapper.sticky-header .filter-input-with-icon,
+.integram-table-wrapper.sticky-header .filter-ref-trigger,
+.integram-table-wrapper.sticky-header .filter-date-picker {
+    padding-top: 0;
+    padding-bottom: 0;
 }
 
 .integram-table td {
