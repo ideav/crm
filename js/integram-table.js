@@ -6545,68 +6545,6 @@ class IntegramTable{
         }
 
         /**
-         * Make the table header sticky so it covers the navbar when the user scrolls
-         * past the top of the table. Adds/removes the `.sticky` class on the header and
-         * the `.sticky-header` class on the wrapper, and adjusts the `top` offset of
-         * `<th>` and filter-row cells to account for the pinned header height. (issue #2051)
-         */
-        attachStickyHeader() {
-            const tableWrapper = this.container.querySelector('.integram-table-wrapper');
-            const header = this.container.querySelector('.integram-table-header');
-
-            if (!tableWrapper || !header) return;
-
-            // Remove previous listener if re-attached after re-render
-            if (this._stickyHeaderScrollListener) {
-                window.removeEventListener('scroll', this._stickyHeaderScrollListener, true);
-            }
-            if (this._stickyHeaderResizeObserver) {
-                this._stickyHeaderResizeObserver.disconnect();
-            }
-
-            const updateStickyState = () => {
-                const headerRect = header.getBoundingClientRect();
-                // Header is "sticking" when its natural top would be above 0 (i.e. scrolled past)
-                const isSticky = headerRect.top <= 0;
-
-                const wasSticky = header.classList.contains('sticky');
-                if (isSticky !== wasSticky) {
-                    header.classList.toggle('sticky', isSticky);
-                    tableWrapper.classList.toggle('sticky-header', isSticky);
-                }
-
-                // Update th top offset so column headers sit directly below the sticky table header
-                const headerHeight = header.offsetHeight;
-                const ths = tableWrapper.querySelectorAll('.integram-table thead th');
-                ths.forEach(th => {
-                    th.style.top = isSticky ? headerHeight + 'px' : '0';
-                });
-
-                // Update filter row cells top offset
-                const filterCells = tableWrapper.querySelectorAll('.filter-row td');
-                filterCells.forEach(td => {
-                    if (isSticky) {
-                        const firstTh = tableWrapper.querySelector('.integram-table thead th');
-                        const thHeight = firstTh ? firstTh.offsetHeight : 0;
-                        td.style.top = (headerHeight + thHeight) + 'px';
-                    } else {
-                        td.style.top = '';
-                    }
-                });
-            };
-
-            this._stickyHeaderScrollListener = updateStickyState;
-            window.addEventListener('scroll', this._stickyHeaderScrollListener, true);
-
-            if (typeof ResizeObserver !== 'undefined') {
-                this._stickyHeaderResizeObserver = new ResizeObserver(updateStickyState);
-                this._stickyHeaderResizeObserver.observe(header);
-            }
-
-            updateStickyState();
-        }
-
-        /**
          * Position scroll counter relative to the table wrapper (issue #656)
          * This ensures the counter stays within the table area and doesn't overlap with sidebar menu.
          * Uses .app-content left edge to remain stable during horizontal table scroll (issue #1010).
@@ -6674,6 +6612,71 @@ class IntegramTable{
 
             // Initial position update
             updateScrollCounterPosition();
+        }
+
+        /**
+         * Toggles `.sticky` on `.integram-table-header` and `.sticky-header` on the wrapper
+         * when the user has scrolled the header past the top of the scroll container.
+         * Adjusts `top` offsets of `<th>` and filter-row cells to account for the pinned
+         * header height. (issue #2051, fixed in #2055)
+         */
+        attachStickyHeader() {
+            const tableWrapper = this.container.querySelector('.integram-table-wrapper');
+            const header = this.container.querySelector('.integram-table-header');
+
+            if (!tableWrapper || !header) return;
+
+            if (this._stickyHeaderScrollListener) {
+                (this._stickyHeaderScrollContainer || window).removeEventListener('scroll', this._stickyHeaderScrollListener);
+            }
+            if (this._stickyHeaderResizeObserver) {
+                this._stickyHeaderResizeObserver.disconnect();
+            }
+
+            const scrollContainer = this.getScrollContainer();
+            this._stickyHeaderScrollContainer = scrollContainer;
+
+            const updateStickyState = () => {
+                const headerRect = header.getBoundingClientRect();
+                const containerTop = scrollContainer === window
+                    ? 0
+                    : scrollContainer.getBoundingClientRect().top;
+                // Header is sticky when CSS has pinned it to the top of the scroll container
+                const isSticky = headerRect.top <= containerTop + 1;
+
+                const wasSticky = header.classList.contains('sticky');
+                if (isSticky !== wasSticky) {
+                    header.classList.toggle('sticky', isSticky);
+                    tableWrapper.classList.toggle('sticky-header', isSticky);
+                }
+
+                const headerHeight = header.offsetHeight;
+                const ths = tableWrapper.querySelectorAll('.integram-table thead th');
+                ths.forEach(th => {
+                    th.style.top = isSticky ? headerHeight + 'px' : '0';
+                });
+
+                const filterCells = tableWrapper.querySelectorAll('.filter-row td');
+                filterCells.forEach(td => {
+                    if (isSticky) {
+                        const firstTh = tableWrapper.querySelector('.integram-table thead th');
+                        const thHeight = firstTh ? firstTh.offsetHeight : 0;
+                        td.style.top = (headerHeight + thHeight) + 'px';
+                    } else {
+                        td.style.top = '';
+                    }
+                });
+            };
+
+            this._stickyHeaderScrollListener = updateStickyState;
+            scrollContainer.addEventListener('scroll', this._stickyHeaderScrollListener);
+
+            if (typeof ResizeObserver !== 'undefined') {
+                this._stickyHeaderResizeObserver = new ResizeObserver(updateStickyState);
+                this._stickyHeaderResizeObserver.observe(header);
+            }
+
+            updateStickyState();
         }
 
         attachColumnResizeHandlers() {
