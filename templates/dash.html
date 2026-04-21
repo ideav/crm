@@ -196,25 +196,24 @@
     background-color: var(--bg-secondary, #f0f4ff);
     outline: 1px solid var(--border-color, #adb5bd);
 }
-/* Inline editor input — styled to match integram-table .inline-editor */
+/* Inline editor input — fills the cell exactly, no layout shift */
 .dash-cell-input {
-    width: 80px;
-    max-width: 80px;
+    width: 100%;
     border: none;
-    border-radius: 4px;
-    padding: 6px 10px;
+    border-radius: 0;
+    padding: 0.3rem 0.6rem;
     font-size: 0.875rem;
     font-family: inherit;
     text-align: right;
     background: var(--md-surface, #fff);
     color: var(--md-text-primary, #212529);
     outline: none;
-    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.15);
+    box-shadow: inset 0 0 0 2px rgba(25, 118, 210, 0.4);
     box-sizing: border-box;
-    transition: box-shadow 0.15s ease;
+    display: block;
 }
 .dash-cell-input:focus {
-    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.25);
+    box-shadow: inset 0 0 0 2px rgba(25, 118, 210, 0.7);
 }
 /* Formula modal */
 #dash-formula-modal {
