@@ -410,7 +410,9 @@ class IntegramTable{
         async loadData(append = false) {
             // Block concurrent loads; block appending when there are no more records.
             // Allow non-append (refresh) calls unconditionally so the refresh button works (issue #1516).
-            if (this.isLoading || (append && !this.hasMore)) {
+            // Block scroll-triggered appends while a new row is pending creation (issue #2059):
+            // re-rendering would destroy the unsaved row and lose the editor focus.
+            if (this.isLoading || (append && !this.hasMore) || (append && this.pendingNewRow)) {
                 return;
             }
 
@@ -3302,6 +3304,10 @@ class IntegramTable{
             const rows = tbody.querySelectorAll('tr');
             const newRow = rows[rowIndex];
             if (!newRow) return;
+
+            // Scroll new row into view before focusing to prevent browser auto-scroll
+            // after focus, which could cause a layout shift and trigger outsideClickHandler (issue #2059).
+            newRow.scrollIntoView({ block: 'nearest', behavior: 'instant' });
 
             // Find the first editable column cell (should match objectTableId)
             const firstColumnId = String(this.objectTableId || this.options.tableTypeId);
@@ -10812,11 +10818,9 @@ class IntegramTable{
         /**
          * Resolve a default value for a field based on attrs and field format (issue #1498)
          * Supports built-in tokens like [NOW], [TODAY], [USER_ID], etc.
-         * For DATE/DATETIME formats with no attrs default, returns current date/time unless
-         * suppressDateFallback is true (used for non-first columns, issue #2057).
+         * For DATE/DATETIME formats with no attrs default, returns current date/time.
          * @param {string|null} rawAttrs - The raw attrs string from column metadata
          * @param {string} format - The field format (DATE, DATETIME, SHORT, etc.)
-         * @param {boolean} suppressDateFallback - If true, don't auto-fill date/datetime with current time
          * @returns {string} Resolved default value, or empty string if none
          */
         resolveDefaultValue(rawAttrs, format, suppressDateFallback = false) {
