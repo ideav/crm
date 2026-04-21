@@ -196,10 +196,9 @@
     background-color: var(--bg-secondary, #f0f4ff);
     outline: 1px solid var(--border-color, #adb5bd);
 }
-/* Inline editor input — fills the cell exactly, no layout shift */
+/* Inline editor input — max-width is set to the cell's pixel width at edit-start via JS */
 .dash-cell-input {
     width: 100%;
-    max-width: 100%;
     border: none;
     border-radius: 0;
     padding: 0.3rem 0;
@@ -1368,10 +1367,12 @@ window.dashValueSaveDone = function(json, ctx) {
 function dashStartInlineEdit(td) {
     var currentVal = td.textContent.trim();
     var savedPadding = td.style.padding;
+    var cellWidth = td.offsetWidth;
     var input = document.createElement('input');
     input.type = 'text';
     input.className = 'dash-cell-input';
     input.value = currentVal;
+    input.style.maxWidth = cellWidth + 'px';
     td.textContent = '';
     td.style.padding = '0';
     td.appendChild(input);
