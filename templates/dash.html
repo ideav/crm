@@ -1026,9 +1026,17 @@ function dashGetModel(json) {
                     .replace(':pl:', Math.max(0, (json[i].level || 1) - 1))
                     .replace(/:name:/g, json[i].item));
         }
-        // Remember RG metadata
+        // Remember RG metadata; accumulate column names across rows (each row may carry one column)
         if (!dashModelData['fp' + json[i].panelID].rgs[json[i].RG])
             dashModelData['fp' + json[i].panelID].rgs[json[i].RG] = { type: json[i].RGtype, head: json[i].rgHead, src: json[i].RGsourceID, columns: json[i].RGcolumns || '' };
+        else if (json[i].RGcolumns) {
+            var existingCols = dashModelData['fp' + json[i].panelID].rgs[json[i].RG].columns
+                .split(',').map(function(c) { return c.trim(); }).filter(Boolean);
+            json[i].RGcolumns.split(',').map(function(c) { return c.trim(); }).filter(Boolean).forEach(function(col) {
+                if (existingCols.indexOf(col) === -1) existingCols.push(col);
+            });
+            dashModelData['fp' + json[i].panelID].rgs[json[i].RG].columns = existingCols.join(',');
+        }
         // Predefined values
         if (json[i].value.length > 0)
             dashValues[json[i].itemID] = dashNormalizeVal(json[i].itemID, json[i].value);
