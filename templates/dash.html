@@ -1190,7 +1190,7 @@ window.dashValueSearchDone = function(json, ctx) {
         var recId = json[0].i;
         if (newVal === '') {
             // Delete existing record when value cleared
-            newApi('POST', '_m_del/' + recId, 'dashValueSaveDone', '', { td: td, newVal: newVal });
+            newApi('POST', '_m_del/' + recId + '?JSON', 'dashValueSaveDone', '', { td: td, newVal: newVal });
         } else {
             // Update existing record
             var params2 = 't1010=' + encodeURIComponent(newVal);
