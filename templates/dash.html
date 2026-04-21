@@ -1235,11 +1235,13 @@ window.dashValueSearchDone = function(json, ctx) {
 
 window.dashValueSaveDone = function(json, ctx) {
     if (!json || json.error) {
+        ctx.td.style.backgroundColor = '';
         dashSetStatus('Ошибка сохранения');
         return;
     }
     // Update cell display
     ctx.td.textContent = ctx.newVal;
+    ctx.td.style.backgroundColor = '';
     ctx.td.setAttribute('ready', '1');
     dashSetStatus('Сохранено');
     // Recalculate dependent formula cells
@@ -1267,8 +1269,9 @@ function dashStartInlineEdit(td) {
     function commit() {
         var newVal = input.value.trim();
         restorePadding();
-        td.textContent = currentVal; // restore while saving
+        td.textContent = newVal;
         if (newVal !== currentVal) {
+            td.style.backgroundColor = '#ffe0e0';
             dashSetStatus('Сохранение...');
             dashSaveValue(td, newVal);
         }
