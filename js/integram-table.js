@@ -3214,15 +3214,18 @@ class IntegramTable{
 
             // Create row data with default values from column attrs (issue #1498)
             const emptyRow = this.columns.map(col => this.resolveDefaultValue(col.attrs || '', col.format || this.mapTypeIdToFormat(col.type)));
-            const newRowIndex = this.data.length;
 
-            // Add empty row to data arrays
-            this.data.push(emptyRow);
+            // Issue #2053: Insert new row above scroll-counter if rows are beneath it,
+            // to prevent unwanted scroll that loses focus and garbles saved data.
+            const newRowIndex = this._getInsertIndexAboveScrollCounter();
+
+            // Insert row into data arrays at the computed index
+            this.data.splice(newRowIndex, 0, emptyRow);
             this.loadedRecords++;
 
-            // Add placeholder to rawObjectData for the new row
+            // Add placeholder to rawObjectData for the new row at the same index
             // Mark as pending (no 'i' field yet since record not created)
-            this.rawObjectData.push({
+            this.rawObjectData.splice(newRowIndex, 0, {
                 i: null,  // Will be set after _m_new response
                 u: this.options.parentId || 1,
                 o: newRowIndex,
@@ -3243,6 +3246,42 @@ class IntegramTable{
             setTimeout(() => {
                 this.startNewRowEdit(newRowIndex);
             }, 50);
+        }
+
+        /**
+         * Compute the index at which to insert a new row (issue #2053).
+         * If .scroll-counter overlaps table rows, insert 2 rows above the first row
+         * hidden beneath the counter so the new row stays fully visible.
+         * Falls back to appending at the end when there is no overlap.
+         */
+        _getInsertIndexAboveScrollCounter() {
+            const defaultIndex = this.data.length;
+            const scrollCounter = this.container && this.container.querySelector('.scroll-counter');
+            if (!scrollCounter) return defaultIndex;
+
+            const counterRect = scrollCounter.getBoundingClientRect();
+            if (counterRect.height === 0) return defaultIndex;
+
+            const tbody = this.container.querySelector('.integram-table tbody');
+            if (!tbody) return defaultIndex;
+
+            const rows = tbody.querySelectorAll('tr');
+            if (!rows.length) return defaultIndex;
+
+            // Find the last row whose top edge is above the counter's top edge.
+            let lastVisibleRowIndex = -1;
+            for (let i = 0; i < rows.length; i++) {
+                const rowRect = rows[i].getBoundingClientRect();
+                if (rowRect.top < counterRect.top) {
+                    lastVisibleRowIndex = i;
+                }
+            }
+
+            // If all rows are above the counter, no adjustment needed.
+            if (lastVisibleRowIndex < 0 || lastVisibleRowIndex === rows.length - 1) return defaultIndex;
+
+            // Insert 2 rows before the first hidden row, clamped to 0.
+            return Math.max(0, lastVisibleRowIndex - 1);
         }
 
         /**
