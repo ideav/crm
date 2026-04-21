@@ -410,7 +410,9 @@ class IntegramTable{
         async loadData(append = false) {
             // Block concurrent loads; block appending when there are no more records.
             // Allow non-append (refresh) calls unconditionally so the refresh button works (issue #1516).
-            if (this.isLoading || (append && !this.hasMore)) {
+            // Block scroll-triggered appends while a new row is pending creation (issue #2059):
+            // re-rendering would destroy the unsaved row and lose the editor focus.
+            if (this.isLoading || (append && !this.hasMore) || (append && this.pendingNewRow)) {
                 return;
             }
 
@@ -3213,8 +3215,14 @@ class IntegramTable{
                 return;
             }
 
-            // Create row data with default values from column attrs (issue #1498)
-            const emptyRow = this.columns.map(col => this.resolveDefaultValue(col.attrs || '', col.format || this.mapTypeIdToFormat(col.type)));
+            // Create row data with default values from column attrs (issue #1498, #2057)
+            // Only the first column (main table column) gets current date/time as default;
+            // other date/datetime columns are left empty unless they have an explicit attrs default.
+            const firstColId = String(this.objectTableId || this.options.tableTypeId);
+            const emptyRow = this.columns.map(col => {
+                const isFirstCol = col.id === firstColId;
+                return this.resolveDefaultValue(col.attrs || '', col.format || this.mapTypeIdToFormat(col.type), !isFirstCol);
+            });
 
             // Issue #2053: Insert new row above scroll-counter if rows are beneath it,
             // to prevent unwanted scroll that loses focus and garbles saved data.
@@ -3296,6 +3304,10 @@ class IntegramTable{
             const rows = tbody.querySelectorAll('tr');
             const newRow = rows[rowIndex];
             if (!newRow) return;
+
+            // Scroll new row into view before focusing to prevent browser auto-scroll
+            // after focus, which could cause a layout shift and trigger outsideClickHandler (issue #2059).
+            newRow.scrollIntoView({ block: 'nearest', behavior: 'instant' });
 
             // Find the first editable column cell (should match objectTableId)
             const firstColumnId = String(this.objectTableId || this.options.tableTypeId);
@@ -10805,9 +10817,10 @@ class IntegramTable{
          * For DATE/DATETIME formats with no attrs default, returns current date/time.
          * @param {string|null} rawAttrs - The raw attrs string from column metadata
          * @param {string} format - The field format (DATE, DATETIME, SHORT, etc.)
+         * @param {boolean} suppressDateFallback - If true, don't return current date for date fields with no default
          * @returns {string} Resolved default value, or empty string if none
          */
-        resolveDefaultValue(rawAttrs, format) {
+        resolveDefaultValue(rawAttrs, format, suppressDateFallback = false) {
             const now = new Date();
 
             // Helper to format date as DD.MM.YYYY
@@ -10861,11 +10874,13 @@ class IntegramTable{
                 }
             }
 
-            // No attrs default — apply current date/time for date/datetime fields
-            if (format === 'DATE') {
-                return formatDate(now);
-            } else if (format === 'DATETIME') {
-                return formatDateTime(now);
+            // No attrs default — apply current date/time for date/datetime fields (unless suppressed)
+            if (!suppressDateFallback) {
+                if (format === 'DATE') {
+                    return formatDate(now);
+                } else if (format === 'DATETIME') {
+                    return formatDateTime(now);
+                }
             }
 
             return '';

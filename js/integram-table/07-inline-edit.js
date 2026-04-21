@@ -11,8 +11,14 @@
                 return;
             }
 
-            // Create row data with default values from column attrs (issue #1498)
-            const emptyRow = this.columns.map(col => this.resolveDefaultValue(col.attrs || '', col.format || this.mapTypeIdToFormat(col.type)));
+            // Create row data with default values from column attrs (issue #1498, #2057)
+            // Only the first column (main table column) gets current date/time as default;
+            // other date/datetime columns are left empty unless they have an explicit attrs default.
+            const firstColId = String(this.objectTableId || this.options.tableTypeId);
+            const emptyRow = this.columns.map(col => {
+                const isFirstCol = col.id === firstColId;
+                return this.resolveDefaultValue(col.attrs || '', col.format || this.mapTypeIdToFormat(col.type), !isFirstCol);
+            });
 
             // Issue #2053: Insert new row above scroll-counter if rows are beneath it,
             // to prevent unwanted scroll that loses focus and garbles saved data.
@@ -94,6 +100,10 @@
             const rows = tbody.querySelectorAll('tr');
             const newRow = rows[rowIndex];
             if (!newRow) return;
+
+            // Scroll new row into view before focusing to prevent browser auto-scroll
+            // after focus, which could cause a layout shift and trigger outsideClickHandler (issue #2059).
+            newRow.scrollIntoView({ block: 'nearest', behavior: 'instant' });
 
             // Find the first editable column cell (should match objectTableId)
             const firstColumnId = String(this.objectTableId || this.options.tableTypeId);

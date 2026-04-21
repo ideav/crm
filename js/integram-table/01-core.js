@@ -393,7 +393,9 @@
         async loadData(append = false) {
             // Block concurrent loads; block appending when there are no more records.
             // Allow non-append (refresh) calls unconditionally so the refresh button works (issue #1516).
-            if (this.isLoading || (append && !this.hasMore)) {
+            // Block scroll-triggered appends while a new row is pending creation (issue #2059):
+            // re-rendering would destroy the unsaved row and lose the editor focus.
+            if (this.isLoading || (append && !this.hasMore) || (append && this.pendingNewRow)) {
                 return;
             }
 

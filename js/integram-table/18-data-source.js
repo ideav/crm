@@ -174,7 +174,7 @@
          * @param {string} format - The field format (DATE, DATETIME, SHORT, etc.)
          * @returns {string} Resolved default value, or empty string if none
          */
-        resolveDefaultValue(rawAttrs, format) {
+        resolveDefaultValue(rawAttrs, format, suppressDateFallback = false) {
             const now = new Date();
 
             // Helper to format date as DD.MM.YYYY
@@ -228,11 +228,13 @@
                 }
             }
 
-            // No attrs default — apply current date/time for date/datetime fields
-            if (format === 'DATE') {
-                return formatDate(now);
-            } else if (format === 'DATETIME') {
-                return formatDateTime(now);
+            // No attrs default — apply current date/time for date/datetime fields (unless suppressed)
+            if (!suppressDateFallback) {
+                if (format === 'DATE') {
+                    return formatDate(now);
+                } else if (format === 'DATETIME') {
+                    return formatDateTime(now);
+                }
             }
 
             return '';
