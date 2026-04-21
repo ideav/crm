@@ -1182,7 +1182,7 @@ window.dashValueSearchDone = function(json, ctx) {
         if (newVal === '') { dashSetStatus(''); return; }
         // Create new record
         var params = 't1010=' + encodeURIComponent(newVal)
-            + '&t1042=' + encodeURIComponent(itemRef)
+            + '&NEW_1042=' + encodeURIComponent(itemRef) // Create the ref in case it does not exist
             + '&t1039=' + encodeURIComponent(fr || dashTodayYMD());
         if (rgHead) params += '&t1104=' + encodeURIComponent(rgHead);
         newApi('POST', '_m_new/1010?JSON&up=1', 'dashValueSaveDone', params, { td: td, newVal: newVal });
