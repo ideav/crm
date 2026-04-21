@@ -310,18 +310,14 @@
                 const headerHeight = header.offsetHeight;
                 const ths = tableWrapper.querySelectorAll('.integram-table thead th');
                 ths.forEach(th => {
-                    th.style.top = isSticky ? headerHeight + 'px' : '0';
+                    th.style.top = headerHeight + 'px';
                 });
 
+                const firstTh = tableWrapper.querySelector('.integram-table thead th');
+                const thHeight = firstTh ? firstTh.offsetHeight : 0;
                 const filterCells = tableWrapper.querySelectorAll('.filter-row td');
                 filterCells.forEach(td => {
-                    if (isSticky) {
-                        const firstTh = tableWrapper.querySelector('.integram-table thead th');
-                        const thHeight = firstTh ? firstTh.offsetHeight : 0;
-                        td.style.top = (headerHeight + thHeight) + 'px';
-                    } else {
-                        td.style.top = '';
-                    }
+                    td.style.top = (headerHeight + thHeight) + 'px';
                 });
             };
 
