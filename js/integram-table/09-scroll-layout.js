@@ -293,20 +293,7 @@
             const scrollContainer = this.getScrollContainer();
             this._stickyHeaderScrollContainer = scrollContainer;
 
-            const updateStickyState = () => {
-                const headerRect = header.getBoundingClientRect();
-                const containerTop = scrollContainer === window
-                    ? 0
-                    : scrollContainer.getBoundingClientRect().top;
-                // Header is sticky when CSS has pinned it to the top of the scroll container
-                const isSticky = headerRect.top <= containerTop + 1;
-
-                const wasSticky = header.classList.contains('sticky');
-                if (isSticky !== wasSticky) {
-                    header.classList.toggle('sticky', isSticky);
-                    tableWrapper.classList.toggle('sticky-header', isSticky);
-                }
-
+            const applyOffsets = () => {
                 const headerHeight = header.offsetHeight;
                 const ths = tableWrapper.querySelectorAll('.integram-table thead th');
                 ths.forEach(th => {
@@ -321,6 +308,26 @@
                 });
             };
 
+            const updateStickyState = () => {
+                const headerRect = header.getBoundingClientRect();
+                const containerTop = scrollContainer === window
+                    ? 0
+                    : scrollContainer.getBoundingClientRect().top;
+                // Header is sticky when CSS has pinned it to the top of the scroll container
+                const isSticky = headerRect.top <= containerTop + 1;
+
+                const wasSticky = header.classList.contains('sticky');
+                if (isSticky !== wasSticky) {
+                    header.classList.toggle('sticky', isSticky);
+                    tableWrapper.classList.toggle('sticky-header', isSticky);
+                    // Re-read header height after the CSS transition completes (150ms)
+                    // so th/filter-row top offsets stay accurate (issue #2063)
+                    setTimeout(applyOffsets, 160);
+                }
+
+                applyOffsets();
+            };
+
             this._stickyHeaderScrollListener = updateStickyState;
             scrollContainer.addEventListener('scroll', this._stickyHeaderScrollListener);
 
@@ -329,7 +336,9 @@
                 this._stickyHeaderResizeObserver.observe(header);
             }
 
-            updateStickyState();
+            // Defer the initial call so the browser has completed layout
+            // and header.offsetHeight reflects the true rendered height (issue #2063)
+            requestAnimationFrame(updateStickyState);
         }
 
         attachColumnResizeHandlers() {
