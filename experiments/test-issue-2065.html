@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<style>
+  body { margin: 0; font-size: 0.82rem; }
+  /* Minimal app layout */
+  .layout { display: flex; flex-direction: column; height: 100vh; }
+  .navbar { background: #2c3e50; color: white; padding: 8px 16px; height: 46px; box-sizing: border-box; position: sticky; top: 0; z-index: 200; display: flex; align-items: center; font-size: 1rem; }
+  .app-body { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+  .app-sidebar { width: 48px; background: #f8f9fa; border-right: 1px solid #ddd; flex-shrink: 0; }
+  .app-content { flex: 1; min-width: 0; padding: 0; background: #fff; overflow-y: auto; overflow-x: auto; height: 100%; }
+</style>
+<!-- Real CSS files from repo -->
+<link rel="stylesheet" href="../css/integram-table.css">
+</head>
+<body>
+<div class="layout">
+  <div class="navbar">SportZania – Test (issue #2065)</div>
+  <div class="app-body">
+    <div class="app-sidebar"></div>
+    <div class="app-content" id="app-content">
+      <div id="tasks-table" style="padding:0">
+        <div class="integram-table-wrapper">
+          <div class="integram-table-header" id="header">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:1.25rem;font-weight:500;">Дата события</span>
+              <button style="padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:1rem;background:none;">+</button>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <div class="integram-table-settings"><i>↺</i><span class="btn-label">обновить</span></div>
+              <div class="integram-table-settings"><i>⊞</i><span class="btn-label">группы</span></div>
+              <div class="integram-table-settings"><i>⊟</i><span class="btn-label">фильтры</span></div>
+              <div class="integram-table-settings"><i>↓</i><span class="btn-label">экспорт</span></div>
+              <div class="integram-table-settings"><i>⚙</i><span class="btn-label">вид</span></div>
+              <div class="integram-table-settings"><i>▦</i><span class="btn-label">колонки</span></div>
+            </div>
+          </div>
+          <div class="integram-table-container" id="table-container">
+            <table class="integram-table compact" id="main-table">
+              <thead><tr id="thead-row"></tr></thead>
+              <tbody id="tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="integram-table-sticky-scrollbar" id="tasks-table-sticky-scrollbar" style="display:none;">
+          <div class="integram-table-sticky-scrollbar-content" id="sticky-scrollbar-content"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="debug" style="position:fixed;bottom:10px;right:10px;background:rgba(0,0,0,.8);color:#fff;padding:8px;font:11px monospace;border-radius:4px;z-index:9999;max-width:300px;"></div>
+
+<script src="../js/integram-table.js"></script>
+<script>
+// Build table with 15 columns, 60 rows
+const COLS = ['Дата события','Вакансия','Первый контакт','Анкета','Скрининг','Интервью','Отправлено НМ','Интервью с НМ','Отправлено рук-лю','Интервью с рук-лем','Финал','Оффер','Оффер принят','Старт обучения','Выход'];
+const theadRow = document.getElementById('thead-row');
+const tbody = document.getElementById('tbody');
+
+COLS.forEach((name, j) => {
+  const th = document.createElement('th');
+  th.textContent = name;
+  th.style.minWidth = j === 0 ? '100px' : '80px';
+  theadRow.appendChild(th);
+});
+
+for (let i = 1; i <= 60; i++) {
+  const date = `${String(i).padStart(2,'0')}.11.2025`;
+  const tr = document.createElement('tr');
+  COLS.forEach((_, j) => {
+    const td = document.createElement('td');
+    td.textContent = j === 0 ? date : (Math.random() > 0.6 ? Math.floor(Math.random()*20) : '');
+    tr.appendChild(td);
+  });
+  tbody.appendChild(tr);
+}
+
+// === Minimal integram table simulation for testing attachStickyHeader ===
+// We'll manually instantiate what attachStickyHeader needs
+const container = { id: 'tasks-table' };
+const tableInstance = {
+  container: document.getElementById('tasks-table'),
+  _stickyHeaderScrollContainer: null,
+  _stickyHeaderScrollListener: null,
+  _stickyHeaderTableScrollListener: null,
+  _stickyHeaderResizeObserver: null,
+  _stickyTheadClone: null,
+  getScrollContainer() {
+    return document.querySelector('.app-content') || window;
+  }
+};
+
+// Bind attachStickyHeader from the built JS
+// Actually, since the built JS defines it as a method in a class, 
+// let's just inline the same logic for the test:
+
+(function() {
+  const self = tableInstance;
+  const tableWrapper = self.container.querySelector('.integram-table-wrapper');
+  const header = self.container.querySelector('.integram-table-header');
+  const tableContainer = self.container.querySelector('.integram-table-container');
+
+  if (!tableWrapper || !header || !tableContainer) return;
+
+  const scrollContainer = self.getScrollContainer();
+  self._stickyHeaderScrollContainer = scrollContainer;
+
+  const theadRow = tableWrapper.querySelector('.integram-table thead tr');
+  const filterRow = tableWrapper.querySelector('.integram-table .filter-row');
+
+  const buildClone = () => {
+    if (self._stickyTheadClone) self._stickyTheadClone.remove();
+    const originalThs = theadRow ? Array.from(theadRow.querySelectorAll('th')) : [];
+    if (originalThs.length === 0) return;
+    const clone = document.createElement('div');
+    clone.className = 'integram-sticky-thead-clone';
+    clone.style.cssText = 'position:fixed;z-index:109;overflow:hidden;display:none;pointer-events:none;box-sizing:border-box;';
+    const cloneTable = document.createElement('table');
+    cloneTable.className = 'integram-table compact';
+    cloneTable.style.cssText = 'border-collapse:collapse;table-layout:fixed;';
+    const cloneThead = document.createElement('thead');
+    const cloneTr = document.createElement('tr');
+    originalThs.forEach(th => cloneTr.appendChild(th.cloneNode(true)));
+    cloneThead.appendChild(cloneTr);
+    cloneTable.appendChild(cloneThead);
+    if (filterRow) {
+      const cloneFilterTr = document.createElement('tr');
+      cloneFilterTr.className = 'filter-row';
+      Array.from(filterRow.querySelectorAll('td')).forEach(td => cloneFilterTr.appendChild(td.cloneNode(true)));
+      cloneThead.appendChild(cloneFilterTr);
+    }
+    clone.appendChild(cloneTable);
+    document.body.appendChild(clone);
+    self._stickyTheadClone = clone;
+  };
+
+  buildClone();
+
+  const syncClone = () => {
+    const clone = self._stickyTheadClone;
+    if (!clone) return;
+    const containerRect = tableContainer.getBoundingClientRect();
+    const headerBottom = header.getBoundingClientRect().bottom;
+    const table = tableWrapper.querySelector('.integram-table');
+    clone.style.top = headerBottom + 'px';
+    clone.style.left = containerRect.left + 'px';
+    clone.style.width = containerRect.width + 'px';
+    const cloneTable = clone.querySelector('table');
+    if (table && cloneTable) cloneTable.style.width = table.scrollWidth + 'px';
+    const originalThs = theadRow ? Array.from(theadRow.querySelectorAll('th')) : [];
+    const cloneThs = Array.from(clone.querySelectorAll('thead tr:first-child th'));
+    originalThs.forEach((th, i) => {
+      if (cloneThs[i]) {
+        const w = th.getBoundingClientRect().width;
+        cloneThs[i].style.width = w + 'px';
+        cloneThs[i].style.minWidth = w + 'px';
+      }
+    });
+    clone.scrollLeft = tableContainer.scrollLeft;
+  };
+
+  let isStickyThead = false;
+  const updateStickyThead = () => {
+    const clone = self._stickyTheadClone;
+    if (!clone || !theadRow) return;
+    const theadRect = theadRow.getBoundingClientRect();
+    const headerBottom = header.getBoundingClientRect().bottom;
+    const shouldBeSticky = theadRect.bottom <= headerBottom + 1;
+    if (shouldBeSticky !== isStickyThead) {
+      isStickyThead = shouldBeSticky;
+      clone.style.display = shouldBeSticky ? 'block' : 'none';
+    }
+    if (isStickyThead) syncClone();
+    document.getElementById('debug').innerHTML = `
+      isStickyThead: ${isStickyThead}<br>
+      theadRect.bottom: ${Math.round(theadRow.getBoundingClientRect().bottom)}<br>
+      headerBottom: ${Math.round(header.getBoundingClientRect().bottom)}<br>
+      clone.display: ${clone.style.display}<br>
+      container.scrollLeft: ${tableContainer.scrollLeft}
+    `;
+  };
+
+  const updateStickyState = () => {
+    const headerRect = header.getBoundingClientRect();
+    const containerTop = scrollContainer === window ? 0 : scrollContainer.getBoundingClientRect().top;
+    const isSticky = headerRect.top <= containerTop + 1;
+    const wasSticky = header.classList.contains('sticky');
+    if (isSticky !== wasSticky) {
+      header.classList.toggle('sticky', isSticky);
+      tableWrapper.classList.toggle('sticky-header', isSticky);
+      setTimeout(() => { buildClone(); updateStickyThead(); }, 160);
+    }
+    updateStickyThead();
+  };
+
+  self._stickyHeaderTableScrollListener = () => {
+    if (isStickyThead && self._stickyTheadClone) {
+      self._stickyTheadClone.scrollLeft = tableContainer.scrollLeft;
+    }
+  };
+  tableContainer.addEventListener('scroll', self._stickyHeaderTableScrollListener);
+  self._stickyHeaderScrollListener = updateStickyState;
+  scrollContainer.addEventListener('scroll', self._stickyHeaderScrollListener);
+
+  if (typeof ResizeObserver !== 'undefined') {
+    self._stickyHeaderResizeObserver = new ResizeObserver(() => {
+      updateStickyState();
+      if (isStickyThead) syncClone();
+    });
+    self._stickyHeaderResizeObserver.observe(header);
+    self._stickyHeaderResizeObserver.observe(tableContainer);
+  }
+
+  requestAnimationFrame(updateStickyState);
+})();
+</script>
+</body>
+</html>
