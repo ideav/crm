@@ -1321,8 +1321,9 @@ window.dashValueSearchDone = function(json, ctx) {
         // Delete: nothing to do if value is already empty
         if (newVal === '') { dashSetStatus(''); return; }
         // Create new record
+        var valueItemId = ctx.td.dataset.valueItemId;
         var params = 't1010=' + encodeURIComponent(newVal)
-            + '&NEW_1042=' + encodeURIComponent(itemRef) // Create the ref in case it does not exist
+            + (valueItemId ? '&t1042=' + encodeURIComponent(valueItemId) : '&NEW_1042=' + encodeURIComponent(itemRef)) // Create the ref in case it does not exist
             + '&t1039=' + encodeURIComponent(fr || dashTodayYMD());
         if (rgHead) params += '&t1104=' + encodeURIComponent(rgHead);
         newApi('POST', '_m_new/1010?JSON&up=1', 'dashValueSaveDone', params, { td: td, newVal: newVal });
