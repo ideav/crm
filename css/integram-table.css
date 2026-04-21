@@ -2635,7 +2635,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 /* Inline editor input styles */
 .inline-editor {
     width: 100%;
-    padding: 6px 10px;
+    padding: 6px 10px 6px 0;
     /* border: 2px solid var(--md-primary); */
     border-radius: 4px;
     font-size: 0.875rem;
