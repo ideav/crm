@@ -607,6 +607,82 @@ function dashCalcCells() {
     });
 }
 
+function dashCalcRGFormulas() {
+    var progress = true, j = 0;
+    while (progress && j++ < 100) {
+        progress = false;
+        document.querySelectorAll('#dash-model td.f-rg-formula-cell[ready="0"]').forEach(function(el) {
+            var rgf = el.getAttribute('data-rg-formula');
+            if (!rgf) return;
+            var row = el.closest('tr');
+            if (!row) return;
+            // Collect all cells in this row (td elements)
+            var cells = Array.from(row.querySelectorAll('td'));
+            var myIdx = cells.indexOf(el);
+
+            // Build a map: column header name -> cell index (for named refs)
+            var table = row.closest('table');
+            var colNameMap = {};
+            if (table) {
+                // Prefer sub-header row (RGcolumns column names); fall back to main header
+                var subhead = table.querySelector('thead .f-subhead');
+                var headRow = table.querySelector('thead .dash-head');
+                var refRow = subhead || headRow;
+                if (refRow) {
+                    Array.from(refRow.querySelectorAll('th')).forEach(function(th, thIdx) {
+                        var name = (th.getAttribute('data-rg-col') || th.textContent || '').trim();
+                        if (name) colNameMap[name] = thIdx;
+                    });
+                }
+            }
+
+            var expr = rgf;
+            var allReady = true;
+
+            // Replace named refs [colName]
+            expr = expr.replace(/\[([^\]]+)\]/g, function(match, ref) {
+                // Check if numeric offset
+                var num = parseInt(ref, 10);
+                if (!isNaN(num) && String(num) === ref.trim()) {
+                    // numeric relative ref
+                    var targetIdx = myIdx + num;
+                    if (targetIdx < 0 || targetIdx >= cells.length) return '0';
+                    var tc = cells[targetIdx];
+                    if (!tc || tc.getAttribute('ready') !== '1') { allReady = false; return match; }
+                    return tc.textContent.trim() || '0';
+                }
+                // Named ref: find column index by name
+                var colIdx = colNameMap[ref.trim()];
+                if (colIdx === undefined) {
+                    // fallback: search all cells in row for a column with that header
+                    return '0';
+                }
+                var tc = cells[colIdx];
+                if (!tc || tc.getAttribute('ready') !== '1') { allReady = false; return match; }
+                return tc.textContent.trim() || '0';
+            });
+
+            if (!allReady) return; // wait for deps
+
+            // Evaluate
+            var val;
+            try {
+                val = eval(expr); // eslint-disable-line no-eval
+            } catch (e) {
+                val = 'N/A';
+                console.log('RGformula eval error: ' + e + ' in: ' + expr);
+            }
+            el.innerHTML = val !== null && val !== undefined ? String(val) : '';
+            el.setAttribute('ready', '1');
+            progress = true;
+        });
+    }
+    // Mark still-pending cells as errors
+    document.querySelectorAll('#dash-model td.f-rg-formula-cell[ready="0"]').forEach(function(el) {
+        el.classList.add('dash-err');
+    });
+}
+
 function dashGetRepVals() {
     var rep, i, j, repField, date;
     for (rep in dashReports) {
@@ -754,6 +830,23 @@ function dashDrawPeriods() {
                                 .replace(':extra:', cellExtra));
                     });
                     break;
+                case 'formulas':
+                    panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
+                        headTpl.replace(':head:', dashModelData[panelId].rgs[rg].head || '')
+                               .replace(':from:-:to:', '-'));
+                    panel.querySelectorAll('.f-item').forEach(function(row) {
+                        var rgf = dashModelData[panelId].rgs[rg].rgFormulas || '';
+                        row.insertAdjacentHTML('beforeend',
+                            cellTpl.replace(':val:', '')
+                                .replace(':classes:', 'f-rg-formula-cell')
+                                .replace(':from:', '-').replace(':to:', '-')
+                                .replace(':ready:', '0')
+                                .replace(':title:', rgf)
+                                .replace(':src:', 'rgformula')
+                                .replace(':item-id:', row.id)
+                                .replace(':extra:', rgf ? ' data-rg-formula="' + rgf.replace(/"/g, '&quot;') + '"' : ''));
+                    });
+                    break;
                 case 'mu':
                     panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
                         headTpl.replace(':head:', dashModelData[panelId].rgs[rg].head || 'Ед.изм.')
@@ -817,6 +910,7 @@ function dashDrawPeriods() {
     });
     dashGetRepVals();
     dashCalcCells();
+    dashCalcRGFormulas();
     dashUpdateTableWrapOverflow();
     dashSetStatus('Готово');
     dashDebug();
@@ -1028,7 +1122,7 @@ function dashGetModel(json) {
         }
         // Remember RG metadata; accumulate column names across rows (each row may carry one column)
         if (!dashModelData['fp' + json[i].panelID].rgs[json[i].RG])
-            dashModelData['fp' + json[i].panelID].rgs[json[i].RG] = { type: json[i].RGtype, head: json[i].rgHead, src: json[i].RGsourceID, columns: json[i].RGcolumns || '' };
+            dashModelData['fp' + json[i].panelID].rgs[json[i].RG] = { type: json[i].RGtype, head: json[i].rgHead, src: json[i].RGsourceID, columns: json[i].RGcolumns || '', rgFormulas: json[i].RGformulas || '' };
         else if (json[i].RGcolumns) {
             var existingCols = dashModelData['fp' + json[i].panelID].rgs[json[i].RG].columns
                 .split(',').map(function(c) { return c.trim(); }).filter(Boolean);
@@ -1256,8 +1350,14 @@ window.dashValueSaveDone = function(json, ctx) {
     ctx.td.style.backgroundColor = '';
     ctx.td.setAttribute('ready', '1');
     dashSetStatus('Сохранено');
-    // Recalculate dependent formula cells
+    // Reset and recalculate RGformula cells in the same row
+    ctx.td.closest('tr').querySelectorAll('td.f-rg-formula-cell').forEach(function(fc) {
+        fc.setAttribute('ready', '0');
+        fc.textContent = '';
+        fc.classList.remove('dash-err');
+    });
     dashCalcCells();
+    dashCalcRGFormulas();
 };
 
 // Inline input editor
@@ -1373,6 +1473,7 @@ window.dashFormulaSaveDone = function(json, ctx) {
     ctx.td.setAttribute('ready', '0');
     ctx.td.dataset.formula = ctx.newFormula;
     dashCalcCells();
+    dashCalcRGFormulas();
     dashSetStatus('Формула сохранена');
 };
 
@@ -1478,7 +1579,7 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         return;
     }
 
-    if (src === 'report' || src === 'mu' || src === 'linesum') {
+    if (src === 'report' || src === 'mu' || src === 'linesum' || src === 'rgformula') {
         dashShowReadonlyTip(e);
         return;
     }
