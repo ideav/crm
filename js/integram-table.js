@@ -3213,8 +3213,14 @@ class IntegramTable{
                 return;
             }
 
-            // Create row data with default values from column attrs (issue #1498)
-            const emptyRow = this.columns.map(col => this.resolveDefaultValue(col.attrs || '', col.format || this.mapTypeIdToFormat(col.type)));
+            // Create row data with default values from column attrs (issue #1498, #2057)
+            // Only the first column (main table column) gets current date/time as default;
+            // other date/datetime columns are left empty unless they have an explicit attrs default.
+            const firstColId = String(this.objectTableId || this.options.tableTypeId);
+            const emptyRow = this.columns.map(col => {
+                const isFirstCol = col.id === firstColId;
+                return this.resolveDefaultValue(col.attrs || '', col.format || this.mapTypeIdToFormat(col.type), !isFirstCol);
+            });
 
             // Issue #2053: Insert new row above scroll-counter if rows are beneath it,
             // to prevent unwanted scroll that loses focus and garbles saved data.
@@ -10806,12 +10812,14 @@ class IntegramTable{
         /**
          * Resolve a default value for a field based on attrs and field format (issue #1498)
          * Supports built-in tokens like [NOW], [TODAY], [USER_ID], etc.
-         * For DATE/DATETIME formats with no attrs default, returns current date/time.
+         * For DATE/DATETIME formats with no attrs default, returns current date/time unless
+         * suppressDateFallback is true (used for non-first columns, issue #2057).
          * @param {string|null} rawAttrs - The raw attrs string from column metadata
          * @param {string} format - The field format (DATE, DATETIME, SHORT, etc.)
+         * @param {boolean} suppressDateFallback - If true, don't auto-fill date/datetime with current time
          * @returns {string} Resolved default value, or empty string if none
          */
-        resolveDefaultValue(rawAttrs, format) {
+        resolveDefaultValue(rawAttrs, format, suppressDateFallback = false) {
             const now = new Date();
 
             // Helper to format date as DD.MM.YYYY
@@ -10865,11 +10873,13 @@ class IntegramTable{
                 }
             }
 
-            // No attrs default — apply current date/time for date/datetime fields
-            if (format === 'DATE') {
-                return formatDate(now);
-            } else if (format === 'DATETIME') {
-                return formatDateTime(now);
+            // No attrs default — apply current date/time for date/datetime fields (unless suppressed)
+            if (!suppressDateFallback) {
+                if (format === 'DATE') {
+                    return formatDate(now);
+                } else if (format === 'DATETIME') {
+                    return formatDateTime(now);
+                }
             }
 
             return '';
