@@ -331,10 +331,6 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 /* Column header add button */
-.integram-table th {
-    position: relative;
-}
-
 .column-add-btn {
     position: absolute;
     right: 8px;
