@@ -229,7 +229,6 @@
             this.attachScrollListener();
             this.attachPlusKeyShortcut();
             this.attachStickyScrollbar();
-            this.attachStickyHeader();
             this.attachColumnResizeHandlers();
             this.attachScrollCounterPositioning();
 
