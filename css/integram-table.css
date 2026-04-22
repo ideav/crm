@@ -38,11 +38,12 @@
 
 .integram-table-container {
     overflow-x: auto;
-    /* overflow-y: clip prevents the browser from promoting overflow-y to auto
-       (which CSS spec does when overflow-x is non-visible), keeping this element
-       from becoming a vertical scroll container so that position:sticky on <th>
-       correctly scopes to the outer .app-content scroll container (issue #2079). */
-    overflow-y: clip;
+    /* overflow-y: auto so the container is the vertical scroll context for the table.
+       JS sets max-height dynamically via updateContainerHeight() so the header row
+       (position:sticky; top:0) sticks within this container (issue #2083).
+       Note: overflow-y:clip degrades to hidden when overflow-x is non-visible (CSS spec),
+       which made the earlier clip-based fix ineffective (issue #2079, #2083). */
+    overflow-y: auto;
     width: 100%;
     /* border-radius: 4px; */
 }

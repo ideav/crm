@@ -232,6 +232,8 @@
             this.attachColumnResizeHandlers();
             this.attachScrollCounterPositioning();
             this.updateFilterRowStickyTop();
+            this.updateContainerHeight();
+            this.attachContainerHeightObserver();
 
             // Load reference field filter options asynchronously for REF-format columns (issue #795)
             if (this.filtersEnabled) {
