@@ -565,14 +565,13 @@ function dashCalcCells() {
                 for (i in refs) {
                     // Try exact range match first; if not found and range="-", accept any range (issue #1877)
                     var rangeVal = el.getAttribute('range');
-                    var selector = '#' + refs[i] + ' .f-rg-cell[range="' + rangeVal + '"],' +
-                        '#' + refs[i] + ' .f-col-cell[range="' + rangeVal + '"]';
-                    var cells = document.querySelectorAll(selector);
+                    // Use getElementById to avoid invalid CSS selectors when IDs start with digits (issue #2074)
+                    var refEl = document.getElementById(refs[i]);
+                    var cells = refEl ? refEl.querySelectorAll('.f-rg-cell[range="' + rangeVal + '"],.f-col-cell[range="' + rangeVal + '"]') : [];
                     var fallbackUsed = false;
                     if (cells.length === 0 && rangeVal === '-') {
                         // If no exact match and looking for "-", accept any range
-                        cells = document.querySelectorAll('#' + refs[i] + ' .f-rg-cell,' +
-                            '#' + refs[i] + ' .f-col-cell');
+                        cells = refEl ? refEl.querySelectorAll('.f-rg-cell,.f-col-cell') : [];
                         fallbackUsed = true;
                     }
                     dashTrace('formula-ref-lookup', {
@@ -587,7 +586,8 @@ function dashCalcCells() {
                         if (rc.getAttribute('ready') === '1')
                             f = f.replace(new RegExp('\\[' + refs[i] + '\\]'), rc.innerHTML || 0);
                     });
-                    document.querySelectorAll('#' + refs[i] + ' .f-values').forEach(function(fv) {
+                    // Use getElementById to avoid invalid CSS selectors when IDs start with digits (issue #2074)
+                    (refEl ? refEl.querySelectorAll('.f-values') : []).forEach(function(fv) {
                         if (fv.getAttribute('ready') === '1')
                             f = f.replace(new RegExp('\\[' + refs[i] + '\\]'), fv.innerHTML || 0);
                     });
@@ -693,7 +693,9 @@ function dashGetRepVals() {
         for (i in dashFormulas) {
             if (dashFormulas[i].indexOf('[' + rep + '.') === 0) {
                 repField = dashFormulas[i].match(repRegex)[2].substr(1);
-                document.querySelectorAll('#' + i + ' .f-rg-cell').forEach(function(el) {
+                // Use getElementById to avoid invalid CSS selectors when IDs start with digits (issue #2074)
+                var iEl = document.getElementById(i);
+                (iEl ? iEl.querySelectorAll('.f-rg-cell') : []).forEach(function(el) {
                     var val = 0, range = el.getAttribute('range').split('-');
                     for (j in dashReports[rep])
                         // If range[0] is empty (range="-"), include all data regardless of date (issue #1875)
