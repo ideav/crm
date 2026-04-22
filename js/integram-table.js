@@ -6651,6 +6651,15 @@ class IntegramTable{
             const scrollContainer = this.getScrollContainer();
             this._stickyHeaderScrollContainer = scrollContainer;
 
+            // Cancellation token: each attachStickyHeader() call increments _stickyGeneration.
+            // Async callbacks (RAF, setTimeout) capture their generation at creation time and
+            // bail out if it no longer matches — this prevents stale closures from a previous
+            // render() call from corrupting clone position or visibility after infinite scroll
+            // triggers a new render() within the 160ms CSS-transition window (issue #2072).
+            if (!this._stickyGeneration) this._stickyGeneration = 0;
+            const myGeneration = ++this._stickyGeneration;
+            const isCancelled = () => this._stickyGeneration !== myGeneration;
+
             // Build a fixed-position clone of the thead to display when the real thead
             // scrolls above the toolbar. CSS position:sticky on <th> cannot work here
             // because .integram-table-container has overflow-x:auto which implicitly sets
@@ -6660,6 +6669,7 @@ class IntegramTable{
             const filterRow = tableWrapper.querySelector('.integram-table .filter-row');
 
             const buildClone = () => {
+                if (isCancelled()) return;
                 if (this._stickyTheadClone) this._stickyTheadClone.remove();
 
                 const originalThs = theadRow
@@ -6700,6 +6710,7 @@ class IntegramTable{
             buildClone();
 
             const syncClone = () => {
+                if (isCancelled()) return;
                 const clone = this._stickyTheadClone;
                 if (!clone) return;
 
@@ -6734,6 +6745,7 @@ class IntegramTable{
             let isStickyThead = false;
 
             const updateStickyThead = () => {
+                if (isCancelled()) return;
                 const clone = this._stickyTheadClone;
                 if (!clone || !theadRow) return;
 
@@ -6750,6 +6762,7 @@ class IntegramTable{
             };
 
             const updateStickyState = () => {
+                if (isCancelled()) return;
                 const headerRect = header.getBoundingClientRect();
                 const containerTop = scrollContainer === window
                     ? 0
@@ -6769,7 +6782,7 @@ class IntegramTable{
 
             // Sync clone horizontal scroll when the table container scrolls
             this._stickyHeaderTableScrollListener = () => {
-                if (isStickyThead && this._stickyTheadClone) {
+                if (!isCancelled() && isStickyThead && this._stickyTheadClone) {
                     this._stickyTheadClone.scrollLeft = tableContainer.scrollLeft;
                 }
             };
@@ -6780,6 +6793,7 @@ class IntegramTable{
 
             if (typeof ResizeObserver !== 'undefined') {
                 this._stickyHeaderResizeObserver = new ResizeObserver(() => {
+                    if (isCancelled()) return;
                     updateStickyState();
                     if (isStickyThead) syncClone();
                 });
