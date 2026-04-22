@@ -38,6 +38,11 @@
 
 .integram-table-container {
     overflow-x: auto;
+    /* overflow-y: clip prevents the browser from promoting overflow-y to auto
+       (which CSS spec does when overflow-x is non-visible), keeping this element
+       from becoming a vertical scroll container so that position:sticky on <th>
+       correctly scopes to the outer .app-content scroll container (issue #2079). */
+    overflow-y: clip;
     width: 100%;
     /* border-radius: 4px; */
 }
@@ -524,9 +529,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border-bottom: 1px solid var(--md-divider);
     border-right: 1px solid rgba(0, 0, 0, 0.06);
     position: sticky;
-    /* top: 44px;
-    height: 40px;
-    min-height: 40px; */
+    /* top is set dynamically by updateFilterRowStickyTop() (issue #2079) */
     z-index: 9;
     vertical-align: middle;
 }
