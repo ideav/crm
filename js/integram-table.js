@@ -1500,6 +1500,7 @@ class IntegramTable{
             this.attachStickyScrollbar();
             this.attachColumnResizeHandlers();
             this.attachScrollCounterPositioning();
+            this.updateFilterRowStickyTop();
 
             // Load reference field filter options asynchronously for REF-format columns (issue #795)
             if (this.filtersEnabled) {
@@ -6467,6 +6468,30 @@ class IntegramTable{
                     this.loadData(true);  // Append mode
                 }
             }, 100);  // Small delay to ensure DOM is updated
+        }
+
+        /**
+         * Set sticky top offset for the filter row so it sticks below the column headers (issue #2079).
+         * The column headers use position:sticky with top:0; the filter row needs top = total thead height
+         * above it. Must be called after each render because smart-grouping can produce multiple header rows.
+         */
+        updateFilterRowStickyTop() {
+            const thead = this.container.querySelector('.integram-table thead');
+            if (!thead) return;
+            const filterRow = thead.querySelector('.filter-row');
+            if (!filterRow) return;
+
+            // Sum the heights of all header rows that precede the filter row.
+            let headerHeight = 0;
+            const rows = thead.querySelectorAll('tr');
+            for (const row of rows) {
+                if (row === filterRow) break;
+                headerHeight += row.getBoundingClientRect().height;
+            }
+
+            filterRow.querySelectorAll('td').forEach(td => {
+                td.style.top = headerHeight + 'px';
+            });
         }
 
         attachStickyScrollbar() {

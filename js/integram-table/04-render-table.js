@@ -231,6 +231,7 @@
             this.attachStickyScrollbar();
             this.attachColumnResizeHandlers();
             this.attachScrollCounterPositioning();
+            this.updateFilterRowStickyTop();
 
             // Load reference field filter options asynchronously for REF-format columns (issue #795)
             if (this.filtersEnabled) {
