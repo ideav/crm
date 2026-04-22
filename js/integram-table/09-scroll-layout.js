@@ -94,9 +94,16 @@
             }
 
             const rect = tableWrapper.getBoundingClientRect();
-            const containerBottom = isWindow ? window.innerHeight : scrollContainer.getBoundingClientRect().bottom;
             state.tableBottom = rect.bottom;
-            state.belowFold = rect.bottom - containerBottom;
+            // When scrollContainer is tableContainer (issue #2083), it contains the table but is itself
+            // inside tableWrapper, so rect.bottom ≈ containerBottom — using getBoundingClientRect diff
+            // always gives ~0 and triggers infinite loads. Instead, use scroll metrics directly:
+            // belowFold = how much content is still below the visible area of the scroll container.
+            if (isWindow) {
+                state.belowFold = rect.bottom - window.innerHeight;
+            } else {
+                state.belowFold = scrollHeight - scrollY - viewportHeight;
+            }
 
             if (state.belowFold < state.threshold) {
                 state.reason = 'near-table-bottom';
