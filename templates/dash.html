@@ -1289,12 +1289,25 @@ function dashCellItemRef(td) {
     return row ? (row.getAttribute('item-name') || '') : '';
 }
 
+// Get the rg group head for a cell: data-rg-head if set, otherwise data-rg-col from the subheader th
+function dashCellRgHead(td) {
+    if (td.dataset.rgHead) return td.dataset.rgHead;
+    var table = td.closest('table');
+    if (!table) return null;
+    var subhead = table.querySelector('thead .f-subhead');
+    if (!subhead) return null;
+    var colIdx = Array.from(td.parentNode.cells).indexOf(td);
+    var ths = Array.from(subhead.querySelectorAll('th'));
+    var th = ths[colIdx];
+    return (th && th.getAttribute('data-rg-col')) || null;
+}
+
 // Build search URL for a Значение record
 function dashValueSearchUrl(td) {
     var itemRef = dashCellItemRef(td);
     var fr = dashCellDateFr(td);
     var to = dashCellDateTo(td);
-    var rgHead = td.dataset.rgHead || null;
+    var rgHead = dashCellRgHead(td);
     var url = 'object/1010?JSON_OBJ';
     if (fr) url += '&FR_1039=' + fr;
     if (to) url += '&TO_1039=' + to;
@@ -1309,7 +1322,7 @@ function dashSaveValue(td, newVal) {
     var itemRef = dashCellItemRef(td);
     var fr = dashCellDateFr(td);
     var to = dashCellDateTo(td);
-    var rgHead = td.dataset.rgHead || null;
+    var rgHead = dashCellRgHead(td);
 
     newApi('GET', searchUrl, 'dashValueSearchDone', '', { td: td, newVal: newVal, itemRef: itemRef, fr: fr, to: to, rgHead: rgHead });
 }
