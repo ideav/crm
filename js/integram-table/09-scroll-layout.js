@@ -28,8 +28,13 @@
             // Apply only when there is a meaningful constraint (at least 100px)
             if (available > 100) {
                 tableContainer.style.maxHeight = available + 'px';
+                // Suppress the outer .app-content scrollbar — the table container now
+                // handles all vertical scrolling, so a second scrollbar is redundant (issue #2085).
+                if (appContent) appContent.style.overflowY = 'hidden';
             } else {
                 tableContainer.style.maxHeight = '';
+                // Restore .app-content vertical scroll when the table container is not constrained.
+                if (appContent) appContent.style.overflowY = '';
             }
         }
 
