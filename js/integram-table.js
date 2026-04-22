@@ -1501,6 +1501,8 @@ class IntegramTable{
             this.attachColumnResizeHandlers();
             this.attachScrollCounterPositioning();
             this.updateFilterRowStickyTop();
+            this.updateContainerHeight();
+            this.attachContainerHeightObserver();
 
             // Load reference field filter options asynchronously for REF-format columns (issue #795)
             if (this.filtersEnabled) {
@@ -6348,7 +6350,38 @@ class IntegramTable{
         }
 
         getScrollContainer() {
-            return document.querySelector('.app-content') || window;
+            // The table container is the scroll context for vertical scrolling (issue #2083).
+            // overflow-y:clip degrades to hidden when combined with overflow-x:auto (CSS spec),
+            // so we give the container a computed max-height and make it scroll vertically.
+            const tableContainer = this.container && this.container.querySelector('.integram-table-container');
+            return tableContainer || document.querySelector('.app-content') || window;
+        }
+
+        /**
+         * Set the max-height of .integram-table-container so it fills the remaining
+         * vertical space inside .app-content, making position:sticky on <th> work
+         * (the container itself becomes the vertical scroll container, issue #2083).
+         */
+        updateContainerHeight() {
+            const tableContainer = this.container && this.container.querySelector('.integram-table-container');
+            if (!tableContainer) return;
+
+            const appContent = document.querySelector('.app-content');
+            const scrollRoot = appContent || document.documentElement;
+
+            // Distance from the top of the container to the bottom of the scroll root
+            const containerRect = tableContainer.getBoundingClientRect();
+            const rootRect = scrollRoot.getBoundingClientRect();
+
+            // Available height = bottom of scroll root minus top of table container, minus a small gap
+            const available = rootRect.bottom - containerRect.top - 4;
+
+            // Apply only when there is a meaningful constraint (at least 100px)
+            if (available > 100) {
+                tableContainer.style.maxHeight = available + 'px';
+            } else {
+                tableContainer.style.maxHeight = '';
+            }
         }
 
         attachScrollListener() {
@@ -6468,6 +6501,25 @@ class IntegramTable{
                     this.loadData(true);  // Append mode
                 }
             }, 100);  // Small delay to ensure DOM is updated
+        }
+
+        /**
+         * Attach a ResizeObserver so updateContainerHeight() is re-run whenever the
+         * viewport or .app-content changes size (sidebar resize, window resize, etc.).
+         */
+        attachContainerHeightObserver() {
+            if (this._containerHeightObserver) {
+                this._containerHeightObserver.disconnect();
+            }
+            if (typeof ResizeObserver === 'undefined') {
+                window.addEventListener('resize', () => this.updateContainerHeight());
+                return;
+            }
+            this._containerHeightObserver = new ResizeObserver(() => this.updateContainerHeight());
+            const appContent = document.querySelector('.app-content');
+            if (appContent) this._containerHeightObserver.observe(appContent);
+            const tableWrapper = this.container && this.container.querySelector('.integram-table-wrapper');
+            if (tableWrapper) this._containerHeightObserver.observe(tableWrapper);
         }
 
         /**
