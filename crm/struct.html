@@ -1,0 +1,527 @@
+<style>
+    .struct-wrapper {
+        padding: 16px;
+        overflow: auto;
+        height: calc(100vh - 60px);
+        background: var(--background, #f8fafc);
+    }
+
+    .struct-title {
+        text-align: center;
+        font-size: 1.6rem;
+        font-weight: 600;
+        color: var(--text-primary, #1e293b);
+        margin-bottom: 24px;
+    }
+
+    .struct-loading {
+        text-align: center;
+        padding: 60px;
+        color: var(--text-secondary, #64748b);
+        font-size: 1rem;
+    }
+
+    .struct-error {
+        text-align: center;
+        padding: 40px;
+        color: #dc2626;
+        font-size: 0.95rem;
+    }
+
+    /* Org chart tree layout */
+    .org-tree {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        min-width: max-content;
+    }
+
+    .org-level {
+        display: flex;
+        justify-content: center;
+        gap: 0;
+        position: relative;
+    }
+
+    .org-node-wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        position: relative;
+    }
+
+    /* Vertical line down from parent to connector */
+    .org-node-wrap > .org-node::after {
+        content: '';
+        display: block;
+        width: 2px;
+        height: 16px;
+        background: var(--border-color, #cbd5e1);
+        margin: 0 auto;
+    }
+
+    /* Remove line if no children */
+    .org-node-wrap.no-children > .org-node::after {
+        display: none;
+    }
+
+    /* Horizontal connector bar above children */
+    .org-children-row {
+        display: flex;
+        justify-content: center;
+        gap: 0;
+        position: relative;
+    }
+
+    .org-children-row::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: calc(50% / var(--child-count, 1));
+        right: calc(50% / var(--child-count, 1));
+        height: 2px;
+        background: var(--border-color, #cbd5e1);
+    }
+
+    .org-child-wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 0 8px;
+        position: relative;
+    }
+
+    /* Vertical line from connector to child node */
+    .org-child-wrap::before {
+        content: '';
+        display: block;
+        width: 2px;
+        height: 16px;
+        background: var(--border-color, #cbd5e1);
+        margin: 0 auto;
+    }
+
+    /* Org node card */
+    .org-node {
+        background: var(--surface, #fff);
+        border: 1.5px solid var(--border-color, #e2e8f0);
+        border-radius: 6px;
+        padding: 8px 12px;
+        min-width: 140px;
+        max-width: 200px;
+        text-align: center;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        cursor: default;
+        transition: box-shadow 0.15s;
+        position: relative;
+    }
+
+    .org-node:hover {
+        box-shadow: 0 3px 8px rgba(0,0,0,0.15);
+        border-color: var(--primary-color, #2563eb);
+    }
+
+    /* Root node - CEO */
+    .org-node.root {
+        background: var(--primary-color, #2563eb);
+        border-color: var(--primary-color, #2563eb);
+        color: #fff;
+        font-size: 0.9rem;
+        font-weight: 600;
+        min-width: 180px;
+    }
+
+    .org-node.root .org-node-dept {
+        color: #fff;
+        font-weight: 600;
+    }
+
+    .org-node.root .org-node-employee {
+        color: rgba(255,255,255,0.85);
+    }
+
+    /* Level 1 - main directors */
+    .org-node.level-1 {
+        background: #eff6ff;
+        border-color: #bfdbfe;
+        min-width: 160px;
+    }
+
+    [data-theme="dark"] .org-node.level-1 {
+        background: #1e3a5f;
+        border-color: #3b82f6;
+    }
+
+    .org-node.level-1 .org-node-dept {
+        color: #1d4ed8;
+        font-weight: 600;
+    }
+
+    [data-theme="dark"] .org-node.level-1 .org-node-dept {
+        color: #93c5fd;
+    }
+
+    /* Level 2 - department heads */
+    .org-node.level-2 {
+        background: #f0fdf4;
+        border-color: #bbf7d0;
+        min-width: 150px;
+    }
+
+    [data-theme="dark"] .org-node.level-2 {
+        background: #14532d;
+        border-color: #22c55e;
+    }
+
+    .org-node.level-2 .org-node-dept {
+        color: #15803d;
+        font-weight: 600;
+    }
+
+    [data-theme="dark"] .org-node.level-2 .org-node-dept {
+        color: #86efac;
+    }
+
+    /* Level 3+ - sub-departments */
+    .org-node.level-3 {
+        background: #fefce8;
+        border-color: #fde68a;
+        min-width: 140px;
+    }
+
+    [data-theme="dark"] .org-node.level-3 {
+        background: #422006;
+        border-color: #f59e0b;
+    }
+
+    .org-node.level-3 .org-node-dept {
+        color: #92400e;
+        font-weight: 500;
+    }
+
+    [data-theme="dark"] .org-node.level-3 .org-node-dept {
+        color: #fcd34d;
+    }
+
+    .org-node.level-4 {
+        background: #fdf4ff;
+        border-color: #e9d5ff;
+        min-width: 130px;
+    }
+
+    [data-theme="dark"] .org-node.level-4 {
+        background: #3b0764;
+        border-color: #a855f7;
+    }
+
+    .org-node.level-4 .org-node-dept {
+        color: #7e22ce;
+        font-weight: 500;
+    }
+
+    [data-theme="dark"] .org-node.level-4 .org-node-dept {
+        color: #d8b4fe;
+    }
+
+    .org-node-dept {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text-primary, #1e293b);
+        line-height: 1.3;
+        margin-bottom: 4px;
+    }
+
+    .org-node-count {
+        font-size: 0.68rem;
+        color: var(--text-secondary, #64748b);
+        margin-bottom: 3px;
+    }
+
+    .org-node-employee {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        font-size: 0.72rem;
+        color: var(--text-secondary, #64748b);
+        line-height: 1.3;
+        margin-top: 2px;
+    }
+
+    .org-node-employee i {
+        font-size: 0.7rem;
+        flex-shrink: 0;
+    }
+
+    /* Collapsed department with multiple employees - show ellipsis */
+    .org-node-employees-list {
+        max-height: 80px;
+        overflow: hidden;
+        position: relative;
+    }
+
+    .org-node-employees-list.expanded {
+        max-height: none;
+    }
+
+    .org-node-expand {
+        font-size: 0.65rem;
+        color: var(--primary-color, #2563eb);
+        cursor: pointer;
+        margin-top: 2px;
+        text-decoration: underline;
+        background: none;
+        border: none;
+        padding: 0;
+    }
+
+    .org-node-expand:hover {
+        color: var(--primary-hover, #1d4ed8);
+    }
+
+    /* Separator/connector lines */
+    .org-connector {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .org-connector-line {
+        width: 2px;
+        height: 16px;
+        background: var(--border-color, #cbd5e1);
+    }
+
+    .org-connector-h {
+        height: 2px;
+        background: var(--border-color, #cbd5e1);
+        align-self: stretch;
+    }
+</style>
+
+<div class="struct-wrapper" id="struct-wrapper">
+    <div class="struct-title">Структура компании</div>
+    <div id="struct-loading" class="struct-loading">
+        <div style="display:inline-block;width:32px;height:32px;border:3px solid #e2e8f0;border-top-color:#2563eb;border-radius:50%;animation:struct-spin 0.8s linear infinite;"></div>
+        <div style="margin-top:12px;">Загрузка...</div>
+    </div>
+    <div id="struct-error" class="struct-error" style="display:none;"></div>
+    <div id="struct-chart" style="display:none;"></div>
+</div>
+
+<style>
+@keyframes struct-spin {
+    to { transform: rotate(360deg); }
+}
+</style>
+
+<script>
+(function() {
+    function buildOrgChart() {
+        var apiUrl = '/' + db + '/report/8027?JSON_KV';
+
+        fetch(apiUrl, {
+            headers: { 'X-XSRF-TOKEN': xsrf }
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            document.getElementById('struct-loading').style.display = 'none';
+            if (!Array.isArray(data) || data.length === 0) {
+                showError('Нет данных для отображения.');
+                return;
+            }
+            renderChart(data);
+        })
+        .catch(function(e) {
+            document.getElementById('struct-loading').style.display = 'none';
+            showError('Ошибка загрузки данных: ' + e.message);
+        });
+    }
+
+    function showError(msg) {
+        var el = document.getElementById('struct-error');
+        el.textContent = msg;
+        el.style.display = 'block';
+    }
+
+    function renderChart(data) {
+        // Build department map
+        // Each item: Департамент, ДепартаментID, РодительскийДепартаментID, Должность, ФИО, Табельный
+        var depts = {}; // id -> { id, name, parentId, employees: [] }
+
+        data.forEach(function(row) {
+            var id = row['ДепартаментID'];
+            var parentId = row['РодительскийДепартаментID'];
+            var name = row['Департамент'];
+
+            if (!depts[id]) {
+                depts[id] = { id: id, name: name, parentId: parentId, employees: [] };
+            }
+
+            if (row['ФИО']) {
+                depts[id].employees.push({
+                    name: row['ФИО'],
+                    position: row['Должность'],
+                    tab: row['Табельный']
+                });
+            }
+        });
+
+        // Find root: node where id == parentId
+        var rootId = null;
+        Object.keys(depts).forEach(function(id) {
+            if (depts[id].id === depts[id].parentId) {
+                rootId = id;
+            }
+        });
+
+        if (!rootId) {
+            // Fallback: find node not referenced as child
+            var childIds = new Set(Object.keys(depts));
+            Object.keys(depts).forEach(function(id) {
+                var parentId = depts[id].parentId;
+                if (parentId !== id) {
+                    // parentId is an ancestor
+                }
+            });
+            // Find node whose parentId is itself or not present
+            Object.keys(depts).forEach(function(id) {
+                var pId = depts[id].parentId;
+                if (pId === id || !depts[pId]) {
+                    rootId = id;
+                }
+            });
+        }
+
+        // Build children map
+        var children = {}; // id -> [childId, ...]
+        Object.keys(depts).forEach(function(id) {
+            var parentId = depts[id].parentId;
+            if (parentId !== id) {
+                if (!children[parentId]) children[parentId] = [];
+                children[parentId].push(id);
+            }
+        });
+
+        var chart = document.getElementById('struct-chart');
+        chart.style.display = 'block';
+
+        // Render as a tree
+        chart.innerHTML = '';
+        var treeEl = document.createElement('div');
+        treeEl.className = 'org-tree';
+        renderNode(treeEl, rootId, depts, children, 0);
+        chart.appendChild(treeEl);
+    }
+
+    function renderNode(container, id, depts, children, level) {
+        var dept = depts[id];
+        if (!dept) return;
+
+        var nodeWrap = document.createElement('div');
+        nodeWrap.className = 'org-node-wrap' + ((!children[id] || children[id].length === 0) ? ' no-children' : '');
+        nodeWrap.style.display = 'flex';
+        nodeWrap.style.flexDirection = 'column';
+        nodeWrap.style.alignItems = 'center';
+
+        var node = document.createElement('div');
+        var levelClass = level === 0 ? 'root' : 'level-' + Math.min(level, 4);
+        node.className = 'org-node ' + levelClass;
+        node.title = dept.name;
+
+        var deptNameEl = document.createElement('div');
+        deptNameEl.className = 'org-node-dept';
+        deptNameEl.textContent = dept.name;
+        node.appendChild(deptNameEl);
+
+        if (dept.employees.length > 0) {
+            var empList = document.createElement('div');
+            empList.className = 'org-node-employees-list';
+
+            var maxVisible = 2;
+            dept.employees.forEach(function(emp, i) {
+                var empEl = document.createElement('div');
+                empEl.className = 'org-node-employee';
+                empEl.innerHTML = '<i class="pi pi-user"></i><span>' + escHtml(emp.name) + '</span>';
+                if (emp.position) empEl.title = emp.position;
+                empList.appendChild(empEl);
+            });
+
+            node.appendChild(empList);
+
+            if (dept.employees.length > maxVisible) {
+                var total = dept.employees.length;
+                var countEl = document.createElement('div');
+                countEl.className = 'org-node-count';
+                countEl.textContent = total + ' сотр.';
+                node.insertBefore(countEl, empList);
+
+                // Show only first 2 initially
+                var items = empList.querySelectorAll('.org-node-employee');
+                items.forEach(function(el, i) {
+                    if (i >= maxVisible) el.style.display = 'none';
+                });
+
+                var expandBtn = document.createElement('button');
+                expandBtn.className = 'org-node-expand';
+                expandBtn.textContent = 'ещё ' + (total - maxVisible) + '...';
+                expandBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    var hidden = empList.querySelectorAll('.org-node-employee');
+                    hidden.forEach(function(el) { el.style.display = 'flex'; });
+                    expandBtn.style.display = 'none';
+                });
+                node.appendChild(expandBtn);
+            }
+        }
+
+        nodeWrap.appendChild(node);
+
+        var childIds = children[id] || [];
+        if (childIds.length > 0) {
+            // Vertical line from node down
+            var vLine = document.createElement('div');
+            vLine.style.cssText = 'width:2px;height:16px;background:var(--border-color,#cbd5e1);';
+            nodeWrap.appendChild(vLine);
+
+            var childrenRow = document.createElement('div');
+            childrenRow.style.cssText = 'display:flex;justify-content:center;align-items:flex-start;position:relative;';
+
+            // Draw horizontal connector bar if more than 1 child
+            if (childIds.length > 1) {
+                var hBar = document.createElement('div');
+                hBar.style.cssText = 'position:absolute;top:0;left:0;right:0;height:2px;background:var(--border-color,#cbd5e1);';
+                childrenRow.appendChild(hBar);
+            }
+
+            childIds.forEach(function(childId, idx) {
+                var childWrap = document.createElement('div');
+                childWrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;padding:0 8px;';
+
+                // Short vertical line from h-bar to child
+                var childVLine = document.createElement('div');
+                childVLine.style.cssText = 'width:2px;height:16px;background:var(--border-color,#cbd5e1);';
+                childWrap.appendChild(childVLine);
+
+                renderNode(childWrap, childId, depts, children, level + 1);
+                childrenRow.appendChild(childWrap);
+            });
+
+            nodeWrap.appendChild(childrenRow);
+        }
+
+        container.appendChild(nodeWrap);
+    }
+
+    function escHtml(str) {
+        return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // Initialize
+    if (typeof db !== 'undefined') {
+        buildOrgChart();
+    } else {
+        document.addEventListener('DOMContentLoaded', buildOrgChart);
+    }
+})();
+</script>
