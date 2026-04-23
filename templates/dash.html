@@ -463,27 +463,27 @@ function dashNormalizeVal(item, val) {
 }
 
 function dashGetVal(item, fr, to) {
-    var i, acc = 0, valids = false;
-    if (!dashValues[item]) return;
-    for (i in dashValues[item]) {
-        if (!fr || (dashValues[item][i].date >= fr && dashValues[item][i].date <= to)) {
+    var i, acc = 0, valids = false, key = item ? item.toLowerCase() : item;
+    if (!dashValues[key]) return;
+    for (i in dashValues[key]) {
+        if (!fr || (dashValues[key][i].date >= fr && dashValues[key][i].date <= to)) {
             valids = true;
-            acc += dashGetFloat(dashValues[item][i].val);
+            acc += dashGetFloat(dashValues[key][i].val);
         }
     }
-    if (valids) return dashNormalizeVal(item, acc);
+    if (valids) return dashNormalizeVal(key, acc);
 }
 
 function dashGetColVal(item, col) {
-    var i, acc = 0, valids = false;
-    if (!dashValues[item]) return;
-    for (i in dashValues[item]) {
-        if (dashValues[item][i].col === col) {
+    var i, acc = 0, valids = false, key = item ? item.toLowerCase() : item, colLower = col ? col.toLowerCase() : col;
+    if (!dashValues[key]) return;
+    for (i in dashValues[key]) {
+        if ((dashValues[key][i].col || '').toLowerCase() === colLower) {
             valids = true;
-            acc += dashGetFloat(dashValues[item][i].val);
+            acc += dashGetFloat(dashValues[key][i].val);
         }
     }
-    if (valids) return dashNormalizeVal(item, acc);
+    if (valids) return dashNormalizeVal(key, acc);
 }
 
 function dashResolveValueCell(rowId, groupName) {
@@ -748,7 +748,7 @@ function dashDrawPeriods() {
                             panel.querySelectorAll('.f-item').forEach(function(row) {
                                 var itemName = row.getAttribute('item-name');
                                 var s = dashCellSrc(row.id, 'rg');
-                                var valueItemId = dashValueItemIds[itemName] || '';
+                                var valueItemId = dashValueItemIds[(itemName || '').toLowerCase()] || '';
                                 var rgHeadVal = dashModelData[panelId].rgs[rg].head || '';
                                 rgCols.forEach(function(colName) {
                                     v = dashGetVal(itemName + ':' + colName, fr, to);
@@ -781,7 +781,7 @@ function dashDrawPeriods() {
                             panel.querySelectorAll('.f-item').forEach(function(row) {
                                 var s = dashCellSrc(row.id, 'rg');
                                 var itemName = row.getAttribute('item-name');
-                                var valueItemId = dashValueItemIds[itemName] || '';
+                                var valueItemId = dashValueItemIds[(itemName || '').toLowerCase()] || '';
                                 var rgHeadVal = dashModelData[panelId].rgs[rg].head || '';
                                 v = dashGetVal(itemName, fr, to);
                                 if (v === undefined && dashFormulas[row.id]) {
@@ -819,7 +819,7 @@ function dashDrawPeriods() {
                             s = { src: 'value', extra: '' };
                         v = dashNormalizeVal(row.id, resolved.value);
                         var itemName = row.getAttribute('item-name');
-                        var valueItemId = dashValueItemIds[itemName] || '';
+                        var valueItemId = dashValueItemIds[(itemName || '').toLowerCase()] || '';
                         var rgHeadVal = groupName;
                         var cellExtra = s.extra
                             + (valueItemId ? ' data-value-item-id="' + valueItemId + '"' : '')
@@ -1015,11 +1015,12 @@ function dashGetRep(rep, fr, to) {
 
 function dashGetSrc(json) {
     for (var i in json || []) {
-        if (json[i].valueItemID) dashValueItemIds[json[i].item] = json[i].valueItemID;
+        if (json[i].valueItemID) dashValueItemIds[(json[i].item || '').toLowerCase()] = json[i].valueItemID;
         if (json[i].value.length > 0) {
             try {
-                var colGroup = json[i]['Колонка группы'] || '';
-                var key = colGroup ? json[i].item + ':' + colGroup : json[i].item;
+                var colGroup = (json[i]['Колонка группы'] || '').toLowerCase();
+                var itemKey = (json[i].item || '').toLowerCase();
+                var key = colGroup ? itemKey + ':' + colGroup : itemKey;
                 var parsed = JSON.parse('[' + json[i].value + ']');
                 dashValues[key] = parsed;
                 dashTrace('source-value-parse', {
@@ -1030,7 +1031,7 @@ function dashGetSrc(json) {
                     first: parsed[0]
                 });
             } catch (e) {
-                dashValues[json[i].item] = 'error ' + e + ' in ' + json[i].value;
+                dashValues[(json[i].item || '').toLowerCase()] = 'error ' + e + ' in ' + json[i].value;
                 dashTrace('source-value-parse-error', {
                     item: json[i].item,
                     error: String(e),
