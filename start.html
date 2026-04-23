@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="css/styles.css">
     <link rel="stylesheet" href="css/cabinet.css">
     <link rel="stylesheet" href="assets/vendor/primeicons/primeicons.css">
+    <script src="https://smartcaptcha.yandexcloud.net/captcha.js" defer></script>
 </head>
 <body>
     <!-- Navigation Bar -->
@@ -1496,6 +1497,8 @@ mark.search-highlight {
                         <input type="password" id="login-password" name="password" required class="database-field-input">
                     </div>
                     <div id="reset-hint" style="display:none; font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.5rem;">Введите имя пользователя или email, мы попробуем найти вашу учетную запись и пришлем новый пароль на вашу почту</div>
+                    <div id="login-captcha-container" class="smart-captcha" data-sitekey="ysc1_2EhhILbwBUoENgVrsbujEEPhih5dgPfh4Rs2WfImcd89ae95" data-robustness="strict" style="margin-bottom:0.5rem;"></div>
+                    <br />
                     <div style="display:flex; gap:0.5rem; align-items:stretch; margin-top:0.8rem;">
                         <button type="submit" id="login-submit-btn" class="btn-primary" style="flex:1; justify-content:center;">Войти</button>
                         <button type="button" id="otp-btn" class="btn-secondary" style="flex:1; justify-content:center;" title="Получить одноразовый пароль на зарегистрированную почту">Код на почту</button>
@@ -1546,6 +1549,8 @@ mark.search-highlight {
                         <input type="checkbox" id="reg-agree" name="agree" required>
                         <span>Я ознакомился с <a href="/terms.html" target="_blank">правилами использования</a></span>
                     </label>
+                    <div id="register-captcha-container" class="smart-captcha" data-sitekey="ysc1_2EhhILbwBUoENgVrsbujEEPhih5dgPfh4Rs2WfImcd89ae95" data-robustness="strict" style="margin-bottom:0.5rem; margin-top:0.5rem;"></div>
+                    <br />
                     <button type="submit" class="btn-primary">Зарегистрироваться</button>
                 </form>
 
