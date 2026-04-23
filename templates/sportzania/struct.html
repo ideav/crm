@@ -300,7 +300,7 @@
                 depts[id] = { id: id, name: name, parentId: parentId, heads: [], employees: [] };
             }
 
-            if (row['ФИО']) {
+            if (row['ФИО'] && String(row['Статус найма']) === '2985') {
                 var emp = {
                     name: row['ФИО'],
                     position: row['Должность'],
