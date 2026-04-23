@@ -302,9 +302,15 @@
                     tab: row['Табельный']
                 };
                 if (row['Руководитель']) {
-                    depts[id].heads.push(emp);
+                    var alreadyHead = depts[id].heads.some(function(h) { return h.tab === emp.tab; });
+                    if (!alreadyHead) {
+                        depts[id].heads.push(emp);
+                        // Remove from employees if added earlier without the manager flag
+                        depts[id].employees = depts[id].employees.filter(function(e) { return e.tab !== emp.tab; });
+                    }
                 } else {
-                    depts[id].employees.push(emp);
+                    var isHead = depts[id].heads.some(function(h) { return h.tab === emp.tab; });
+                    if (!isHead) depts[id].employees.push(emp);
                 }
             }
         });
