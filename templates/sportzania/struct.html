@@ -36,69 +36,11 @@
         min-width: max-content;
     }
 
-    .org-level {
-        display: flex;
-        justify-content: center;
-        gap: 0;
-        position: relative;
-    }
-
     .org-node-wrap {
         display: flex;
         flex-direction: column;
         align-items: center;
         position: relative;
-    }
-
-    /* Vertical line down from parent to connector */
-    .org-node-wrap > .org-node::after {
-        content: '';
-        display: block;
-        width: 2px;
-        height: 16px;
-        background: var(--border-color, #cbd5e1);
-        margin: 0 auto;
-    }
-
-    /* Remove line if no children */
-    .org-node-wrap.no-children > .org-node::after {
-        display: none;
-    }
-
-    /* Horizontal connector bar above children */
-    .org-children-row {
-        display: flex;
-        justify-content: center;
-        gap: 0;
-        position: relative;
-    }
-
-    .org-children-row::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: calc(50% / var(--child-count, 1));
-        right: calc(50% / var(--child-count, 1));
-        height: 2px;
-        background: var(--border-color, #cbd5e1);
-    }
-
-    .org-child-wrap {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        padding: 0 8px;
-        position: relative;
-    }
-
-    /* Vertical line from connector to child node */
-    .org-child-wrap::before {
-        content: '';
-        display: block;
-        width: 2px;
-        height: 16px;
-        background: var(--border-color, #cbd5e1);
-        margin: 0 auto;
     }
 
     /* Org node card */
@@ -136,7 +78,8 @@
         font-weight: 600;
     }
 
-    .org-node.root .org-node-employee {
+    .org-node.root .org-node-employee,
+    .org-node.root .org-node-head {
         color: rgba(255,255,255,0.85);
     }
 
@@ -237,6 +180,32 @@
         margin-bottom: 3px;
     }
 
+    /* Department head(s) - shown prominently */
+    .org-node-head {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: var(--text-primary, #374151);
+        line-height: 1.3;
+        margin-top: 3px;
+        margin-bottom: 1px;
+    }
+
+    .org-node-head i {
+        font-size: 0.7rem;
+        flex-shrink: 0;
+    }
+
+    .org-node-head-divider {
+        width: 60%;
+        height: 1px;
+        background: var(--border-color, #e2e8f0);
+        margin: 3px auto;
+    }
+
     .org-node-employee {
         display: flex;
         align-items: center;
@@ -253,17 +222,6 @@
         flex-shrink: 0;
     }
 
-    /* Collapsed department with multiple employees - show ellipsis */
-    .org-node-employees-list {
-        max-height: 80px;
-        overflow: hidden;
-        position: relative;
-    }
-
-    .org-node-employees-list.expanded {
-        max-height: none;
-    }
-
     .org-node-expand {
         font-size: 0.65rem;
         color: var(--primary-color, #2563eb);
@@ -277,25 +235,6 @@
 
     .org-node-expand:hover {
         color: var(--primary-hover, #1d4ed8);
-    }
-
-    /* Separator/connector lines */
-    .org-connector {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-    }
-
-    .org-connector-line {
-        width: 2px;
-        height: 16px;
-        background: var(--border-color, #cbd5e1);
-    }
-
-    .org-connector-h {
-        height: 2px;
-        background: var(--border-color, #cbd5e1);
-        align-self: stretch;
     }
 </style>
 
@@ -345,9 +284,7 @@
     }
 
     function renderChart(data) {
-        // Build department map
-        // Each item: Департамент, ДепартаментID, РодительскийДепартаментID, Должность, ФИО, Табельный
-        var depts = {}; // id -> { id, name, parentId, employees: [] }
+        var depts = {}; // id -> { id, name, parentId, heads: [], employees: [] }
 
         data.forEach(function(row) {
             var id = row['ДепартаментID'];
@@ -355,43 +292,31 @@
             var name = row['Департамент'];
 
             if (!depts[id]) {
-                depts[id] = { id: id, name: name, parentId: parentId, employees: [] };
+                depts[id] = { id: id, name: name, parentId: parentId, heads: [], employees: [] };
             }
 
             if (row['ФИО']) {
-                depts[id].employees.push({
+                var emp = {
                     name: row['ФИО'],
                     position: row['Должность'],
                     tab: row['Табельный']
-                });
+                };
+                if (row['Руководитель']) {
+                    depts[id].heads.push(emp);
+                } else {
+                    depts[id].employees.push(emp);
+                }
             }
         });
 
-        // Find root: node where id == parentId
+        // Find root: node where id == parentId or parentId not present
         var rootId = null;
         Object.keys(depts).forEach(function(id) {
-            if (depts[id].id === depts[id].parentId) {
+            var pId = depts[id].parentId;
+            if (pId === id || !depts[pId]) {
                 rootId = id;
             }
         });
-
-        if (!rootId) {
-            // Fallback: find node not referenced as child
-            var childIds = new Set(Object.keys(depts));
-            Object.keys(depts).forEach(function(id) {
-                var parentId = depts[id].parentId;
-                if (parentId !== id) {
-                    // parentId is an ancestor
-                }
-            });
-            // Find node whose parentId is itself or not present
-            Object.keys(depts).forEach(function(id) {
-                var pId = depts[id].parentId;
-                if (pId === id || !depts[pId]) {
-                    rootId = id;
-                }
-            });
-        }
 
         // Build children map
         var children = {}; // id -> [childId, ...]
@@ -405,24 +330,27 @@
 
         var chart = document.getElementById('struct-chart');
         chart.style.display = 'block';
-
-        // Render as a tree
         chart.innerHTML = '';
         var treeEl = document.createElement('div');
         treeEl.className = 'org-tree';
         renderNode(treeEl, rootId, depts, children, 0);
         chart.appendChild(treeEl);
+
+        // Fix connector bars after render (must run after layout)
+        requestAnimationFrame(function() {
+            fixConnectorBars(chart);
+        });
     }
 
     function renderNode(container, id, depts, children, level) {
         var dept = depts[id];
         if (!dept) return;
 
+        var hasChildren = children[id] && children[id].length > 0;
+
         var nodeWrap = document.createElement('div');
-        nodeWrap.className = 'org-node-wrap' + ((!children[id] || children[id].length === 0) ? ' no-children' : '');
-        nodeWrap.style.display = 'flex';
-        nodeWrap.style.flexDirection = 'column';
-        nodeWrap.style.alignItems = 'center';
+        nodeWrap.className = 'org-node-wrap';
+        nodeWrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;';
 
         var node = document.createElement('div');
         var levelClass = level === 0 ? 'root' : 'level-' + Math.min(level, 4);
@@ -434,11 +362,38 @@
         deptNameEl.textContent = dept.name;
         node.appendChild(deptNameEl);
 
+        // Show department head(s) prominently
+        if (dept.heads.length > 0) {
+            dept.heads.forEach(function(head) {
+                var headEl = document.createElement('div');
+                headEl.className = 'org-node-head';
+                headEl.innerHTML = '<i class="pi pi-user"></i><span>' + escHtml(head.name) + '</span>';
+                if (head.position) headEl.title = head.position;
+                node.appendChild(headEl);
+            });
+        }
+
+        // Show regular employees
         if (dept.employees.length > 0) {
-            var empList = document.createElement('div');
-            empList.className = 'org-node-employees-list';
+            var totalStaff = dept.heads.length + dept.employees.length;
+
+            if (dept.heads.length > 0 && dept.employees.length > 0) {
+                var divider = document.createElement('div');
+                divider.className = 'org-node-head-divider';
+                node.appendChild(divider);
+            }
 
             var maxVisible = 2;
+
+            if (totalStaff > maxVisible + dept.heads.length) {
+                var countEl = document.createElement('div');
+                countEl.className = 'org-node-count';
+                countEl.textContent = totalStaff + ' сотр.';
+                node.appendChild(countEl);
+            }
+
+            var empList = document.createElement('div');
+
             dept.employees.forEach(function(emp, i) {
                 var empEl = document.createElement('div');
                 empEl.className = 'org-node-employee';
@@ -450,13 +405,6 @@
             node.appendChild(empList);
 
             if (dept.employees.length > maxVisible) {
-                var total = dept.employees.length;
-                var countEl = document.createElement('div');
-                countEl.className = 'org-node-count';
-                countEl.textContent = total + ' сотр.';
-                node.insertBefore(countEl, empList);
-
-                // Show only first 2 initially
                 var items = empList.querySelectorAll('.org-node-employee');
                 items.forEach(function(el, i) {
                     if (i >= maxVisible) el.style.display = 'none';
@@ -464,11 +412,12 @@
 
                 var expandBtn = document.createElement('button');
                 expandBtn.className = 'org-node-expand';
-                expandBtn.textContent = 'ещё ' + (total - maxVisible) + '...';
+                expandBtn.textContent = 'ещё ' + (dept.employees.length - maxVisible) + '...';
                 expandBtn.addEventListener('click', function(e) {
                     e.stopPropagation();
-                    var hidden = empList.querySelectorAll('.org-node-employee');
-                    hidden.forEach(function(el) { el.style.display = 'flex'; });
+                    empList.querySelectorAll('.org-node-employee').forEach(function(el) {
+                        el.style.display = 'flex';
+                    });
                     expandBtn.style.display = 'none';
                 });
                 node.appendChild(expandBtn);
@@ -479,28 +428,28 @@
 
         var childIds = children[id] || [];
         if (childIds.length > 0) {
-            // Vertical line from node down
+            // Vertical line from node down to connector
             var vLine = document.createElement('div');
-            vLine.style.cssText = 'width:2px;height:16px;background:var(--border-color,#cbd5e1);';
+            vLine.style.cssText = 'width:2px;height:16px;background:var(--border-color,#cbd5e1);flex-shrink:0;';
             nodeWrap.appendChild(vLine);
 
             var childrenRow = document.createElement('div');
+            childrenRow.className = 'org-children-row';
             childrenRow.style.cssText = 'display:flex;justify-content:center;align-items:flex-start;position:relative;';
 
-            // Draw horizontal connector bar if more than 1 child
-            if (childIds.length > 1) {
-                var hBar = document.createElement('div');
-                hBar.style.cssText = 'position:absolute;top:0;left:0;right:0;height:2px;background:var(--border-color,#cbd5e1);';
-                childrenRow.appendChild(hBar);
-            }
+            // Horizontal connector bar - will be positioned correctly after render
+            var hBar = document.createElement('div');
+            hBar.className = 'org-hbar';
+            hBar.style.cssText = 'position:absolute;top:0;height:2px;background:var(--border-color,#cbd5e1);pointer-events:none;';
+            childrenRow.appendChild(hBar);
 
-            childIds.forEach(function(childId, idx) {
+            childIds.forEach(function(childId) {
                 var childWrap = document.createElement('div');
                 childWrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;padding:0 8px;';
 
-                // Short vertical line from h-bar to child
+                // Short vertical line from h-bar down to child
                 var childVLine = document.createElement('div');
-                childVLine.style.cssText = 'width:2px;height:16px;background:var(--border-color,#cbd5e1);';
+                childVLine.style.cssText = 'width:2px;height:16px;background:var(--border-color,#cbd5e1);flex-shrink:0;';
                 childWrap.appendChild(childVLine);
 
                 renderNode(childWrap, childId, depts, children, level + 1);
@@ -513,11 +462,42 @@
         container.appendChild(nodeWrap);
     }
 
+    // After render, fix each horizontal connector bar to span exactly from
+    // center of first child to center of last child.
+    function fixConnectorBars(root) {
+        var rows = root.querySelectorAll('.org-children-row');
+        rows.forEach(function(row) {
+            var bar = row.querySelector(':scope > .org-hbar');
+            if (!bar) return;
+
+            // Child wraps are all direct children except the bar itself
+            var wraps = [];
+            row.childNodes.forEach(function(n) {
+                if (n !== bar && n.nodeType === 1) wraps.push(n);
+            });
+
+            if (wraps.length < 2) {
+                // Single child: no horizontal bar needed
+                bar.style.display = 'none';
+                return;
+            }
+
+            var rowRect = row.getBoundingClientRect();
+            var firstRect = wraps[0].getBoundingClientRect();
+            var lastRect = wraps[wraps.length - 1].getBoundingClientRect();
+
+            var left = firstRect.left + firstRect.width / 2 - rowRect.left;
+            var right = rowRect.right - (lastRect.left + lastRect.width / 2);
+
+            bar.style.left = left + 'px';
+            bar.style.right = right + 'px';
+        });
+    }
+
     function escHtml(str) {
         return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
-    // Initialize
     if (typeof db !== 'undefined') {
         buildOrgChart();
     } else {
