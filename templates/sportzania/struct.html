@@ -259,6 +259,9 @@
 <script>
 (function() {
     function buildOrgChart() {
+        var navCenter = document.querySelector('.navbar-center .navbar-workspace');
+        if (navCenter) navCenter.textContent = 'Структура';
+
         var apiUrl = '/' + db + '/report/8027?JSON_KV';
 
         fetch(apiUrl, {
