@@ -141,6 +141,10 @@
         background: var(--bg-primary, #e2e8f0);
     }
 
+    .funnel-filters-toggle {
+        display: none;
+    }
+
     /* Content area */
     .funnel-content {
         flex: 1;
@@ -370,10 +374,12 @@
     /* Table view */
     .funnel-table-wrap {
         overflow-x: auto;
+        max-width: 100%;
+        -webkit-overflow-scrolling: touch;
     }
 
     .funnel-table {
-        width: 100%;
+        min-width: 100%;
         border-collapse: collapse;
         font-size: 0.83rem;
         white-space: nowrap;
@@ -481,6 +487,117 @@
         border-bottom: 1px solid var(--border-color, var(--funnel-border));
         background: var(--bg-secondary, var(--funnel-bg));
     }
+
+    @media (max-width: 600px) {
+        #funnel-container {
+            min-width: 0;
+        }
+
+        .funnel-header {
+            padding: 8px 12px;
+        }
+
+        .funnel-title {
+            font-size: 0.92rem;
+        }
+
+        .funnel-view-toggle {
+            width: 100%;
+        }
+
+        .funnel-view-btn {
+            flex: 1;
+            justify-content: center;
+            min-height: 36px;
+        }
+
+        .funnel-filters-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            padding: 10px 12px;
+            border: 0;
+            border-bottom: 1px solid var(--border-color, var(--funnel-border));
+            background: var(--bg-primary, var(--funnel-surface));
+            color: var(--text-primary, var(--funnel-text-primary));
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .funnel-filters-toggle .pi {
+            color: var(--funnel-primary);
+        }
+
+        .funnel-filters {
+            display: none;
+            padding: 10px 12px 12px;
+            gap: 10px;
+        }
+
+        #funnel-container.filters-open .funnel-filters {
+            display: flex;
+        }
+
+        .funnel-filter-group {
+            flex: 1 1 100%;
+            max-width: none;
+            min-width: 0;
+        }
+
+        .funnel-filter-select {
+            min-height: 38px;
+        }
+
+        .funnel-filter-actions {
+            width: 100%;
+            margin-top: 2px;
+        }
+
+        .funnel-filter-actions .funnel-btn {
+            flex: 1;
+            justify-content: center;
+            min-height: 38px;
+        }
+
+        .funnel-content {
+            padding: 12px;
+            min-width: 0;
+        }
+
+        .funnel-section {
+            margin-bottom: 12px;
+            border-radius: 4px;
+        }
+
+        .funnel-section-title {
+            padding: 9px 12px;
+        }
+
+        .funnel-table-wrap {
+            border-top: 1px solid var(--border-color, var(--funnel-border));
+        }
+
+        .funnel-table {
+            width: max-content;
+            min-width: 720px;
+            font-size: 0.8rem;
+        }
+
+        .funnel-table th,
+        .funnel-table td {
+            padding: 7px 10px;
+        }
+
+        .funnel-table th:first-child,
+        .funnel-table td:first-child {
+            min-width: 220px;
+            max-width: 260px;
+            white-space: normal;
+            line-height: 1.25;
+        }
+    }
 </style>
 
 <div id="funnel-container">
@@ -499,6 +616,10 @@
         </div>
     </div>
 
+    <button class="funnel-filters-toggle" type="button" onclick="funnelToggleFilters()" aria-expanded="false">
+        <span><i class="pi pi-filter"></i> Фильтры</span>
+        <i class="pi pi-chevron-down" aria-hidden="true"></i>
+    </button>
     <div class="funnel-filters">
         <div class="funnel-filter-group">
             <div class="funnel-filter-label">Вакансия</div>
@@ -756,6 +877,20 @@
         document.getElementById('funnel-view-chart').classList.toggle('active', view === 'chart');
         document.getElementById('funnel-view-table').classList.toggle('active', view === 'table');
         funnelRender(funnelGetFiltered());
+    };
+
+    window.funnelToggleFilters = function() {
+        var container = document.getElementById('funnel-container');
+        var toggle = document.querySelector('.funnel-filters-toggle');
+        var isOpen = container.classList.toggle('filters-open');
+        if (toggle) {
+            toggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            var icon = toggle.querySelector('.pi-chevron-down, .pi-chevron-up');
+            if (icon) {
+                icon.classList.toggle('pi-chevron-down', !isOpen);
+                icon.classList.toggle('pi-chevron-up', isOpen);
+            }
+        }
     };
 
     window.funnelLoad = function() {
