@@ -501,30 +501,30 @@
 
 <script>
 (function() {
-    var STAGES = [
-        'Первый контакт',
-        'Анкета',
-        'Интервью',
-        'Отправлено руководителю',
-        'Оффер',
-        'Оффер принят',
-        'Старт обучения',
-        'Аттестация сдана'
-    ];
+    var FILTER_FIELDS = ['Вакансия', 'Имя', 'Месяц', 'Тип найма'];
 
-    var STAGE_COLORS = [
-        '#2563eb',
-        '#3b82f6',
-        '#0ea5e9',
-        '#06b6d4',
-        '#10b981',
-        '#22c55e',
-        '#84cc16',
-        '#eab308'
+    var STAGE_PALETTE = [
+        '#2563eb', '#3b82f6', '#0ea5e9', '#06b6d4',
+        '#10b981', '#22c55e', '#84cc16', '#eab308',
+        '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'
     ];
 
     var funnelAllData = [];
+    var funnelStages = [];
     var funnelView = 'chart';
+
+    function funnelDetectStages(data) {
+        if (!data || !data.length) return [];
+        var stages = [];
+        Object.keys(data[0]).forEach(function(key) {
+            if (FILTER_FIELDS.indexOf(key) === -1) stages.push(key);
+        });
+        return stages;
+    }
+
+    function funnelStageColor(i) {
+        return STAGE_PALETTE[i % STAGE_PALETTE.length];
+    }
 
     function funnelFormatMonth(val) {
         if (!val || val.length !== 6) return val;
@@ -579,46 +579,60 @@
         return rows.reduce(function(s, r) { return s + funnelNum(r[stage]); }, 0);
     }
 
+    // Cumulative count: everyone who reached stage i or further
+    function funnelCumulativeTotals(rows, stages) {
+        var raw = stages.map(function(s) { return funnelSumStage(rows, s); });
+        var cumulative = raw.slice();
+        for (var i = raw.length - 2; i >= 0; i--) {
+            cumulative[i] = raw[i] + cumulative[i + 1];
+        }
+        return cumulative;
+    }
+
     function funnelRenderChart(rows) {
-        var totals = STAGES.map(function(s) { return funnelSumStage(rows, s); });
+        var totals = funnelCumulativeTotals(rows, funnelStages);
         var maxVal = totals[0] || 1;
 
         var html = '';
 
-        // Summary cards for first and last stages
+        // Summary cards: first, last, and up to 2 middle stages
         html += '<div class="funnel-summary">';
-        STAGES.forEach(function(s, i) {
-            if (i === 0 || i === STAGES.length - 1 || i === 4 || i === 5) {
-                html += '<div class="funnel-summary-card">'
-                    + '<div class="funnel-summary-label">' + esc(s) + '</div>'
-                    + '<div class="funnel-summary-value">' + totals[i].toLocaleString('ru') + '</div>'
-                    + '</div>';
-            }
+        var cardIdxs = [0];
+        if (funnelStages.length > 2) {
+            var mid = Math.floor(funnelStages.length / 2);
+            cardIdxs.push(mid);
+        }
+        if (funnelStages.length > 1) cardIdxs.push(funnelStages.length - 1);
+        cardIdxs.forEach(function(i) {
+            html += '<div class="funnel-summary-card">'
+                + '<div class="funnel-summary-label">' + esc(funnelStages[i]) + '</div>'
+                + '<div class="funnel-summary-value">' + totals[i].toLocaleString('ru') + '</div>'
+                + '</div>';
         });
         html += '</div>';
 
         html += '<div class="funnel-chart">';
         html += '<div class="funnel-chart-title">Этапы воронки (сумма по выбранным фильтрам, ' + rows.length + ' записей)</div>';
 
-        STAGES.forEach(function(s, i) {
+        funnelStages.forEach(function(s, i) {
             var cnt = totals[i];
             var pct = maxVal > 0 ? Math.round(cnt / maxVal * 100) : 0;
             var prevCnt = i > 0 ? totals[i - 1] : null;
-            var conv = (prevCnt !== null && prevCnt > 0) ? Math.round(cnt / prevCnt * 100) + '%' : '—';
+            var convPct = (prevCnt !== null && prevCnt > 0) ? Math.round(cnt / prevCnt * 100) : null;
+            var conv = convPct !== null ? convPct + '%' : '—';
 
-            // Arrow between stages
             if (i > 0) {
                 html += '<div class="funnel-stage-arrow">'
                     + '<div class="funnel-stage-arrow-line"></div>'
-                    + '<span style="color:' + (parseInt(conv) < 50 ? '#ef4444' : '#10b981') + ';font-weight:500;font-size:0.78rem;">'
-                    + (prevCnt !== null && prevCnt > 0 ? conv + ' конверсия' : '') + '</span>'
+                    + '<span style="color:' + (convPct !== null && convPct < 50 ? '#ef4444' : '#10b981') + ';font-weight:500;font-size:0.78rem;">'
+                    + (convPct !== null ? conv + ' конверсия' : '') + '</span>'
                     + '</div>';
             }
 
             html += '<div class="funnel-stage">'
                 + '<div class="funnel-stage-name">' + esc(s) + '</div>'
                 + '<div class="funnel-stage-bar-wrap">'
-                +   '<div class="funnel-stage-bar" style="width:' + pct + '%;background:' + STAGE_COLORS[i] + ';">'
+                +   '<div class="funnel-stage-bar" style="width:' + pct + '%;background:' + funnelStageColor(i) + ';">'
                 +   (pct >= 8 ? '<span class="funnel-stage-bar-text">' + pct + '%</span>' : '')
                 +   '</div>'
                 + '</div>'
@@ -635,23 +649,11 @@
     function funnelRenderTable(rows) {
         if (!rows.length) return '';
 
-        // Group by Имя + Вакансия
-        var groupKeys = [];
-        var groupMap = {};
-        rows.forEach(function(row) {
-            var key = (row['Имя'] || '—') + ' / ' + (row['Вакансия'] || '—');
-            if (!groupMap[key]) {
-                groupMap[key] = { label: key, rows: [] };
-                groupKeys.push(key);
-            }
-            groupMap[key].rows.push(row);
-        });
-
         var html = '<div class="funnel-section">'
             + '<div class="funnel-section-title">Детальные данные</div>'
             + '<div class="funnel-table-wrap"><table class="funnel-table"><thead><tr>'
             + '<th>Имя / Вакансия</th><th>Месяц</th><th>Тип найма</th>';
-        STAGES.forEach(function(s) {
+        funnelStages.forEach(function(s) {
             html += '<th>' + esc(s) + '</th>';
         });
         html += '</tr></thead><tbody>';
@@ -661,7 +663,7 @@
                 + '<td>' + esc((row['Имя'] || '—') + ' / ' + (row['Вакансия'] || '—')) + '</td>'
                 + '<td>' + esc(funnelFormatMonth(row['Месяц'] || '')) + '</td>'
                 + '<td>' + esc(row['Тип найма'] || '—') + '</td>';
-            STAGES.forEach(function(s) {
+            funnelStages.forEach(function(s) {
                 var v = funnelNum(row[s]);
                 html += '<td>' + (v > 0 ? v.toLocaleString('ru') : '<span class="funnel-empty-val">—</span>') + '</td>';
             });
@@ -670,7 +672,7 @@
 
         // Totals
         html += '</tbody><tfoot><tr><td colspan="3">Итого (' + rows.length + ' записей)</td>';
-        STAGES.forEach(function(s) {
+        funnelStages.forEach(function(s) {
             html += '<td>' + funnelSumStage(rows, s).toLocaleString('ru') + '</td>';
         });
         html += '</tr></tfoot></table></div></div>';
@@ -730,6 +732,7 @@
                 return;
             }
             funnelAllData = data;
+            funnelStages = funnelDetectStages(data);
             funnelPopulateFilter('funnel-filter-vacancy', 'Вакансия');
             funnelPopulateFilter('funnel-filter-name', 'Имя');
             funnelPopulateFilter('funnel-filter-month', 'Месяц');
