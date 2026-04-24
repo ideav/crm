@@ -311,7 +311,7 @@
     .funnel-stage-arrow {
         color: var(--text-secondary, var(--funnel-text-secondary));
         font-size: 0.75rem;
-        padding: 4px 16px 4px 196px;
+        padding: 4px 16px;
         display: flex;
         align-items: center;
         gap: 8px;
@@ -322,6 +322,49 @@
         height: 1px;
         background: var(--border-color, var(--funnel-border));
         opacity: 0.5;
+    }
+
+    /* Desktop: funnel-stage-top is invisible to flex layout */
+    .funnel-stage-top {
+        display: contents;
+    }
+
+    /* Mobile layout: two rows per stage */
+    @media (max-width: 600px) {
+        .funnel-stage {
+            flex-wrap: wrap;
+            padding: 8px 12px;
+            gap: 4px 8px;
+        }
+
+        .funnel-stage-top {
+            display: flex;
+            align-items: center;
+            width: 100%;
+            gap: 8px;
+        }
+
+        .funnel-stage-name {
+            min-width: 0;
+            flex: 1;
+        }
+
+        .funnel-stage-bar-wrap {
+            width: 100%;
+            flex: none;
+        }
+
+        .funnel-stage-count {
+            min-width: auto;
+        }
+
+        .funnel-stage-pct {
+            min-width: auto;
+        }
+
+        .funnel-stage-conv {
+            min-width: auto;
+        }
     }
 
     /* Table view */
@@ -630,15 +673,17 @@
             }
 
             html += '<div class="funnel-stage">'
-                + '<div class="funnel-stage-name">' + esc(s) + '</div>'
+                + '<div class="funnel-stage-top">'
+                +   '<div class="funnel-stage-name">' + esc(s) + '</div>'
+                +   '<div class="funnel-stage-count">' + cnt.toLocaleString('ru') + '</div>'
+                +   '<div class="funnel-stage-pct">' + pct + '%</div>'
+                +   '<div class="funnel-stage-conv" title="Конверсия от предыдущего этапа">' + (i > 0 ? conv : '—') + '</div>'
+                + '</div>'
                 + '<div class="funnel-stage-bar-wrap">'
                 +   '<div class="funnel-stage-bar" style="width:' + pct + '%;background:' + funnelStageColor(i) + ';">'
                 +   (pct >= 8 ? '<span class="funnel-stage-bar-text">' + pct + '%</span>' : '')
                 +   '</div>'
                 + '</div>'
-                + '<div class="funnel-stage-count">' + cnt.toLocaleString('ru') + '</div>'
-                + '<div class="funnel-stage-pct">' + pct + '%</div>'
-                + '<div class="funnel-stage-conv" title="Конверсия от предыдущего этапа">' + (i > 0 ? conv : '—') + '</div>'
                 + '</div>';
         });
 
