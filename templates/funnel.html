@@ -1,0 +1,755 @@
+<style>
+    /* Funnel Component */
+    :root {
+        --funnel-primary: #2563eb;
+        --funnel-primary-hover: #1d4ed8;
+        --funnel-primary-light: #3b82f6;
+        --funnel-bg: #f8fafc;
+        --funnel-surface: #ffffff;
+        --funnel-border: #e2e8f0;
+        --funnel-text-primary: #1e293b;
+        --funnel-text-secondary: #64748b;
+        --funnel-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+        --funnel-shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+    }
+
+    [data-theme="dark"] {
+        --funnel-bg: #1a1a1a;
+        --funnel-surface: #2d2d2d;
+        --funnel-border: #495057;
+        --funnel-text-primary: #e9ecef;
+        --funnel-text-secondary: #adb5bd;
+    }
+
+    #funnel-container {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        background: var(--bg-secondary, var(--funnel-bg));
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    /* Header */
+    .funnel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border-color, var(--funnel-border));
+        background: var(--bg-secondary, var(--funnel-surface));
+        flex-shrink: 0;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .funnel-title {
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--text-primary, var(--funnel-text-primary));
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .funnel-title .pi {
+        color: var(--funnel-primary);
+    }
+
+    /* Filters bar */
+    .funnel-filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 10px 16px;
+        background: var(--bg-primary, var(--funnel-surface));
+        border-bottom: 1px solid var(--border-color, var(--funnel-border));
+        flex-shrink: 0;
+        align-items: center;
+    }
+
+    .funnel-filter-group {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 140px;
+        flex: 1;
+        max-width: 220px;
+    }
+
+    .funnel-filter-label {
+        font-size: 0.72rem;
+        color: var(--text-secondary, var(--funnel-text-secondary));
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+    .funnel-filter-select {
+        padding: 5px 8px;
+        border: 1px solid var(--input-border, var(--border-color, var(--funnel-border)));
+        border-radius: 4px;
+        background: var(--input-bg, var(--funnel-surface));
+        color: var(--text-primary, var(--funnel-text-primary));
+        font-size: 0.85rem;
+        cursor: pointer;
+        width: 100%;
+    }
+
+    .funnel-filter-select:focus {
+        outline: none;
+        border-color: var(--funnel-primary);
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+    }
+
+    .funnel-filter-actions {
+        display: flex;
+        gap: 8px;
+        align-items: flex-end;
+        padding-bottom: 0;
+        margin-top: auto;
+    }
+
+    .funnel-btn {
+        padding: 5px 14px;
+        border-radius: 4px;
+        border: none;
+        cursor: pointer;
+        font-size: 0.85rem;
+        font-weight: 500;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        transition: background 0.15s;
+    }
+
+    .funnel-btn-primary {
+        background: var(--funnel-primary);
+        color: #fff;
+    }
+
+    .funnel-btn-primary:hover {
+        background: var(--funnel-primary-hover);
+    }
+
+    .funnel-btn-secondary {
+        background: var(--bg-secondary, #f1f5f9);
+        color: var(--text-primary, var(--funnel-text-primary));
+        border: 1px solid var(--border-color, var(--funnel-border));
+    }
+
+    .funnel-btn-secondary:hover {
+        background: var(--bg-primary, #e2e8f0);
+    }
+
+    /* Content area */
+    .funnel-content {
+        flex: 1;
+        overflow: auto;
+        padding: 16px;
+    }
+
+    /* Loading / error */
+    .funnel-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 200px;
+        gap: 12px;
+        color: var(--text-secondary, var(--funnel-text-secondary));
+        font-size: 0.9rem;
+    }
+
+    .funnel-state .pi {
+        font-size: 2rem;
+        opacity: 0.5;
+    }
+
+    .funnel-spinner {
+        width: 36px;
+        height: 36px;
+        border: 3px solid var(--border-color, var(--funnel-border));
+        border-top-color: var(--funnel-primary);
+        border-radius: 50%;
+        animation: funnel-spin 0.75s linear infinite;
+    }
+
+    @keyframes funnel-spin {
+        to { transform: rotate(360deg); }
+    }
+
+    /* Summary row */
+    .funnel-summary {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+    }
+
+    .funnel-summary-card {
+        background: var(--bg-primary, var(--funnel-surface));
+        border: 1px solid var(--border-color, var(--funnel-border));
+        border-radius: 6px;
+        padding: 10px 16px;
+        min-width: 120px;
+        flex: 1;
+        max-width: 180px;
+        box-shadow: var(--funnel-shadow);
+    }
+
+    .funnel-summary-label {
+        font-size: 0.75rem;
+        color: var(--text-secondary, var(--funnel-text-secondary));
+        margin-bottom: 4px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .funnel-summary-value {
+        font-size: 1.4rem;
+        font-weight: 700;
+        color: var(--funnel-primary);
+    }
+
+    /* Funnel chart */
+    .funnel-chart {
+        background: var(--bg-primary, var(--funnel-surface));
+        border: 1px solid var(--border-color, var(--funnel-border));
+        border-radius: 6px;
+        overflow: hidden;
+        box-shadow: var(--funnel-shadow-md);
+        margin-bottom: 20px;
+    }
+
+    .funnel-chart-title {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--text-primary, var(--funnel-text-primary));
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border-color, var(--funnel-border));
+        background: var(--bg-secondary, var(--funnel-bg));
+    }
+
+    .funnel-stage {
+        display: flex;
+        align-items: center;
+        padding: 8px 16px;
+        border-bottom: 1px solid var(--border-color, var(--funnel-border));
+        gap: 12px;
+        transition: background 0.1s;
+    }
+
+    .funnel-stage:last-child {
+        border-bottom: none;
+    }
+
+    .funnel-stage:hover {
+        background: var(--bg-secondary, var(--funnel-bg));
+    }
+
+    .funnel-stage-name {
+        min-width: 180px;
+        font-size: 0.85rem;
+        color: var(--text-primary, var(--funnel-text-primary));
+        font-weight: 500;
+        flex-shrink: 0;
+    }
+
+    .funnel-stage-bar-wrap {
+        flex: 1;
+        background: var(--bg-secondary, #f1f5f9);
+        border-radius: 3px;
+        height: 22px;
+        overflow: hidden;
+        position: relative;
+    }
+
+    .funnel-stage-bar {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 0.4s ease;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        padding-right: 6px;
+        min-width: 4px;
+    }
+
+    .funnel-stage-bar-text {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #fff;
+        white-space: nowrap;
+    }
+
+    .funnel-stage-count {
+        min-width: 60px;
+        text-align: right;
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--text-primary, var(--funnel-text-primary));
+        flex-shrink: 0;
+    }
+
+    .funnel-stage-pct {
+        min-width: 52px;
+        text-align: right;
+        font-size: 0.8rem;
+        color: var(--text-secondary, var(--funnel-text-secondary));
+        flex-shrink: 0;
+    }
+
+    .funnel-stage-conv {
+        min-width: 80px;
+        text-align: right;
+        font-size: 0.8rem;
+        color: var(--text-secondary, var(--funnel-text-secondary));
+        flex-shrink: 0;
+    }
+
+    .funnel-stage-arrow {
+        color: var(--text-secondary, var(--funnel-text-secondary));
+        font-size: 0.75rem;
+        padding: 4px 16px 4px 196px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .funnel-stage-arrow-line {
+        flex: 1;
+        height: 1px;
+        background: var(--border-color, var(--funnel-border));
+        opacity: 0.5;
+    }
+
+    /* Table view */
+    .funnel-table-wrap {
+        overflow-x: auto;
+    }
+
+    .funnel-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.83rem;
+        white-space: nowrap;
+        background: var(--bg-primary, var(--funnel-surface));
+    }
+
+    .funnel-table th {
+        background: var(--bg-secondary, var(--funnel-bg));
+        color: var(--text-primary, var(--funnel-text-primary));
+        padding: 7px 12px;
+        border: 1px solid var(--border-color, var(--funnel-border));
+        font-weight: 600;
+        text-align: right;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
+
+    .funnel-table th:first-child {
+        text-align: left;
+        position: sticky;
+        left: 0;
+        z-index: 2;
+    }
+
+    .funnel-table td {
+        padding: 6px 12px;
+        border: 1px solid var(--border-color, var(--funnel-border));
+        color: var(--text-primary, var(--funnel-text-primary));
+        text-align: right;
+    }
+
+    .funnel-table td:first-child {
+        text-align: left;
+        font-weight: 500;
+        position: sticky;
+        left: 0;
+        background: var(--bg-primary, var(--funnel-surface));
+        z-index: 1;
+    }
+
+    .funnel-table tr:hover td {
+        background: var(--bg-secondary, var(--funnel-bg));
+    }
+
+    .funnel-table tr:hover td:first-child {
+        background: var(--bg-secondary, var(--funnel-bg));
+    }
+
+    .funnel-table tfoot td {
+        font-weight: 700;
+        background: var(--bg-secondary, var(--funnel-bg));
+    }
+
+    .funnel-table tfoot td:first-child {
+        background: var(--bg-secondary, var(--funnel-bg));
+    }
+
+    .funnel-empty-val {
+        color: var(--text-secondary, var(--funnel-text-secondary));
+        opacity: 0.5;
+    }
+
+    /* View toggle */
+    .funnel-view-toggle {
+        display: flex;
+        gap: 4px;
+    }
+
+    .funnel-view-btn {
+        padding: 4px 10px;
+        border-radius: 4px;
+        border: 1px solid var(--border-color, var(--funnel-border));
+        background: transparent;
+        color: var(--text-secondary, var(--funnel-text-secondary));
+        cursor: pointer;
+        font-size: 0.82rem;
+        transition: all 0.15s;
+    }
+
+    .funnel-view-btn.active {
+        background: var(--funnel-primary);
+        color: #fff;
+        border-color: var(--funnel-primary);
+    }
+
+    .funnel-view-btn:not(.active):hover {
+        background: var(--bg-secondary, var(--funnel-bg));
+    }
+
+    .funnel-section {
+        margin-bottom: 20px;
+        background: var(--bg-primary, var(--funnel-surface));
+        border: 1px solid var(--border-color, var(--funnel-border));
+        border-radius: 6px;
+        overflow: hidden;
+        box-shadow: var(--funnel-shadow);
+    }
+
+    .funnel-section-title {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--text-primary, var(--funnel-text-primary));
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border-color, var(--funnel-border));
+        background: var(--bg-secondary, var(--funnel-bg));
+    }
+</style>
+
+<div id="funnel-container">
+    <div class="funnel-header">
+        <div class="funnel-title">
+            <i class="pi pi-chart-bar"></i>
+            <span>HR-воронка продаж</span>
+        </div>
+        <div class="funnel-view-toggle">
+            <button class="funnel-view-btn active" id="funnel-view-chart" onclick="funnelSetView('chart')" title="Воронка">
+                <i class="pi pi-chart-bar"></i> Воронка
+            </button>
+            <button class="funnel-view-btn" id="funnel-view-table" onclick="funnelSetView('table')" title="Таблица">
+                <i class="pi pi-table"></i> Таблица
+            </button>
+        </div>
+    </div>
+
+    <div class="funnel-filters">
+        <div class="funnel-filter-group">
+            <div class="funnel-filter-label">Вакансия</div>
+            <select id="funnel-filter-vacancy" class="funnel-filter-select" onchange="funnelApplyFilters()">
+                <option value="">— Все —</option>
+            </select>
+        </div>
+        <div class="funnel-filter-group">
+            <div class="funnel-filter-label">Имя</div>
+            <select id="funnel-filter-name" class="funnel-filter-select" onchange="funnelApplyFilters()">
+                <option value="">— Все —</option>
+            </select>
+        </div>
+        <div class="funnel-filter-group">
+            <div class="funnel-filter-label">Месяц</div>
+            <select id="funnel-filter-month" class="funnel-filter-select" onchange="funnelApplyFilters()">
+                <option value="">— Все —</option>
+            </select>
+        </div>
+        <div class="funnel-filter-group">
+            <div class="funnel-filter-label">Тип найма</div>
+            <select id="funnel-filter-hire-type" class="funnel-filter-select" onchange="funnelApplyFilters()">
+                <option value="">— Все —</option>
+            </select>
+        </div>
+        <div class="funnel-filter-actions">
+            <button class="funnel-btn funnel-btn-secondary" onclick="funnelResetFilters()" title="Сбросить фильтры">
+                <i class="pi pi-times"></i> Сбросить
+            </button>
+            <button class="funnel-btn funnel-btn-primary" onclick="funnelLoad()" title="Обновить данные">
+                <i class="pi pi-refresh"></i> Обновить
+            </button>
+        </div>
+    </div>
+
+    <div class="funnel-content" id="funnel-content">
+        <div class="funnel-state" id="funnel-loading">
+            <div class="funnel-spinner"></div>
+            <span>Загрузка данных...</span>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    var STAGES = [
+        'Первый контакт',
+        'Анкета',
+        'Интервью',
+        'Отправлено руководителю',
+        'Оффер',
+        'Оффер принят',
+        'Старт обучения',
+        'Аттестация сдана'
+    ];
+
+    var STAGE_COLORS = [
+        '#2563eb',
+        '#3b82f6',
+        '#0ea5e9',
+        '#06b6d4',
+        '#10b981',
+        '#22c55e',
+        '#84cc16',
+        '#eab308'
+    ];
+
+    var funnelAllData = [];
+    var funnelView = 'chart';
+
+    function funnelFormatMonth(val) {
+        if (!val || val.length !== 6) return val;
+        var months = ['янв', 'фев', 'мар', 'апр', 'май', 'июн',
+                      'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+        var y = val.slice(0, 4);
+        var m = parseInt(val.slice(4, 6), 10);
+        return months[m - 1] + ' ' + y;
+    }
+
+    function funnelNum(v) {
+        var n = parseInt(v, 10);
+        return isNaN(n) ? 0 : n;
+    }
+
+    function funnelPopulateFilter(selectId, field) {
+        var sel = document.getElementById(selectId);
+        var prev = sel.value;
+        var vals = [];
+        funnelAllData.forEach(function(row) {
+            var v = row[field] || '';
+            if (v && vals.indexOf(v) === -1) vals.push(v);
+        });
+        vals.sort();
+        // rebuild options
+        while (sel.options.length > 1) sel.remove(1);
+        vals.forEach(function(v) {
+            var opt = document.createElement('option');
+            opt.value = v;
+            opt.textContent = field === 'Месяц' ? funnelFormatMonth(v) : v;
+            sel.appendChild(opt);
+        });
+        if (prev) sel.value = prev;
+    }
+
+    function funnelGetFiltered() {
+        var vacancy = document.getElementById('funnel-filter-vacancy').value;
+        var name = document.getElementById('funnel-filter-name').value;
+        var month = document.getElementById('funnel-filter-month').value;
+        var hireType = document.getElementById('funnel-filter-hire-type').value;
+
+        return funnelAllData.filter(function(row) {
+            if (vacancy && row['Вакансия'] !== vacancy) return false;
+            if (name && row['Имя'] !== name) return false;
+            if (month && row['Месяц'] !== month) return false;
+            if (hireType && row['Тип найма'] !== hireType) return false;
+            return true;
+        });
+    }
+
+    function funnelSumStage(rows, stage) {
+        return rows.reduce(function(s, r) { return s + funnelNum(r[stage]); }, 0);
+    }
+
+    function funnelRenderChart(rows) {
+        var totals = STAGES.map(function(s) { return funnelSumStage(rows, s); });
+        var maxVal = totals[0] || 1;
+
+        var html = '';
+
+        // Summary cards for first and last stages
+        html += '<div class="funnel-summary">';
+        STAGES.forEach(function(s, i) {
+            if (i === 0 || i === STAGES.length - 1 || i === 4 || i === 5) {
+                html += '<div class="funnel-summary-card">'
+                    + '<div class="funnel-summary-label">' + esc(s) + '</div>'
+                    + '<div class="funnel-summary-value">' + totals[i].toLocaleString('ru') + '</div>'
+                    + '</div>';
+            }
+        });
+        html += '</div>';
+
+        html += '<div class="funnel-chart">';
+        html += '<div class="funnel-chart-title">Этапы воронки (сумма по выбранным фильтрам, ' + rows.length + ' записей)</div>';
+
+        STAGES.forEach(function(s, i) {
+            var cnt = totals[i];
+            var pct = maxVal > 0 ? Math.round(cnt / maxVal * 100) : 0;
+            var prevCnt = i > 0 ? totals[i - 1] : null;
+            var conv = (prevCnt !== null && prevCnt > 0) ? Math.round(cnt / prevCnt * 100) + '%' : '—';
+
+            // Arrow between stages
+            if (i > 0) {
+                html += '<div class="funnel-stage-arrow">'
+                    + '<div class="funnel-stage-arrow-line"></div>'
+                    + '<span style="color:' + (parseInt(conv) < 50 ? '#ef4444' : '#10b981') + ';font-weight:500;font-size:0.78rem;">'
+                    + (prevCnt !== null && prevCnt > 0 ? conv + ' конверсия' : '') + '</span>'
+                    + '</div>';
+            }
+
+            html += '<div class="funnel-stage">'
+                + '<div class="funnel-stage-name">' + esc(s) + '</div>'
+                + '<div class="funnel-stage-bar-wrap">'
+                +   '<div class="funnel-stage-bar" style="width:' + pct + '%;background:' + STAGE_COLORS[i] + ';">'
+                +   (pct >= 8 ? '<span class="funnel-stage-bar-text">' + pct + '%</span>' : '')
+                +   '</div>'
+                + '</div>'
+                + '<div class="funnel-stage-count">' + cnt.toLocaleString('ru') + '</div>'
+                + '<div class="funnel-stage-pct">' + pct + '%</div>'
+                + '<div class="funnel-stage-conv" title="Конверсия от предыдущего этапа">' + (i > 0 ? conv : '—') + '</div>'
+                + '</div>';
+        });
+
+        html += '</div>';
+        return html;
+    }
+
+    function funnelRenderTable(rows) {
+        if (!rows.length) return '';
+
+        // Group by Имя + Вакансия
+        var groupKeys = [];
+        var groupMap = {};
+        rows.forEach(function(row) {
+            var key = (row['Имя'] || '—') + ' / ' + (row['Вакансия'] || '—');
+            if (!groupMap[key]) {
+                groupMap[key] = { label: key, rows: [] };
+                groupKeys.push(key);
+            }
+            groupMap[key].rows.push(row);
+        });
+
+        var html = '<div class="funnel-section">'
+            + '<div class="funnel-section-title">Детальные данные</div>'
+            + '<div class="funnel-table-wrap"><table class="funnel-table"><thead><tr>'
+            + '<th>Имя / Вакансия</th><th>Месяц</th><th>Тип найма</th>';
+        STAGES.forEach(function(s) {
+            html += '<th>' + esc(s) + '</th>';
+        });
+        html += '</tr></thead><tbody>';
+
+        rows.forEach(function(row) {
+            html += '<tr>'
+                + '<td>' + esc((row['Имя'] || '—') + ' / ' + (row['Вакансия'] || '—')) + '</td>'
+                + '<td>' + esc(funnelFormatMonth(row['Месяц'] || '')) + '</td>'
+                + '<td>' + esc(row['Тип найма'] || '—') + '</td>';
+            STAGES.forEach(function(s) {
+                var v = funnelNum(row[s]);
+                html += '<td>' + (v > 0 ? v.toLocaleString('ru') : '<span class="funnel-empty-val">—</span>') + '</td>';
+            });
+            html += '</tr>';
+        });
+
+        // Totals
+        html += '</tbody><tfoot><tr><td colspan="3">Итого (' + rows.length + ' записей)</td>';
+        STAGES.forEach(function(s) {
+            html += '<td>' + funnelSumStage(rows, s).toLocaleString('ru') + '</td>';
+        });
+        html += '</tr></tfoot></table></div></div>';
+        return html;
+    }
+
+    function funnelRender(rows) {
+        var content = document.getElementById('funnel-content');
+        if (!rows.length) {
+            content.innerHTML = '<div class="funnel-state"><i class="pi pi-inbox"></i><span>Нет данных по выбранным фильтрам</span></div>';
+            return;
+        }
+        var html = '';
+        if (funnelView === 'chart') {
+            html = funnelRenderChart(rows);
+        } else {
+            html = funnelRenderTable(rows);
+        }
+        content.innerHTML = html;
+    }
+
+    window.funnelApplyFilters = function() {
+        funnelRender(funnelGetFiltered());
+    };
+
+    window.funnelResetFilters = function() {
+        document.getElementById('funnel-filter-vacancy').value = '';
+        document.getElementById('funnel-filter-name').value = '';
+        document.getElementById('funnel-filter-month').value = '';
+        document.getElementById('funnel-filter-hire-type').value = '';
+        funnelRender(funnelAllData);
+    };
+
+    window.funnelSetView = function(view) {
+        funnelView = view;
+        document.getElementById('funnel-view-chart').classList.toggle('active', view === 'chart');
+        document.getElementById('funnel-view-table').classList.toggle('active', view === 'table');
+        funnelRender(funnelGetFiltered());
+    };
+
+    window.funnelLoad = function() {
+        var content = document.getElementById('funnel-content');
+        content.innerHTML = '<div class="funnel-state"><div class="funnel-spinner"></div><span>Загрузка данных...</span></div>';
+
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', '/' + db + '/report/7701?JSON_KV', true);
+        xhr.onload = function() {
+            var data;
+            try {
+                data = JSON.parse(xhr.responseText);
+            } catch (e) {
+                content.innerHTML = '<div class="funnel-state"><i class="pi pi-exclamation-triangle"></i><span>Ошибка чтения данных</span></div>';
+                return;
+            }
+            if (!Array.isArray(data) || data.length === 0) {
+                content.innerHTML = '<div class="funnel-state"><i class="pi pi-inbox"></i><span>Нет данных</span></div>';
+                return;
+            }
+            funnelAllData = data;
+            funnelPopulateFilter('funnel-filter-vacancy', 'Вакансия');
+            funnelPopulateFilter('funnel-filter-name', 'Имя');
+            funnelPopulateFilter('funnel-filter-month', 'Месяц');
+            funnelPopulateFilter('funnel-filter-hire-type', 'Тип найма');
+            funnelRender(funnelGetFiltered());
+        };
+        xhr.onerror = function() {
+            content.innerHTML = '<div class="funnel-state"><i class="pi pi-exclamation-triangle"></i><span>Ошибка сети</span></div>';
+        };
+        xhr.send();
+    };
+
+    function esc(s) {
+        var d = document.createElement('div');
+        d.textContent = s || '';
+        return d.innerHTML;
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        funnelLoad();
+    });
+})();
+</script>
