@@ -1824,7 +1824,8 @@ class CabinetController {
 
         try {
             const host = this.apiConfig.host;
-            const url = 'https://' + host + '/my/report/385?JSON_KV';
+            const reportId = user ? '385' : '236801';
+            const url = 'https://' + host + '/my/report/' + reportId + '?JSON_KV';
 
             const fd = new FormData();
             fd.append('confirmed', '1');
