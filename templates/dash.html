@@ -54,12 +54,14 @@
     position: sticky;
     left: 0;
     z-index: 2;
-    background: transparent;
     border-right: 2px solid var(--border-color, #dee2e6);
+}
+.f-panel td:first-child {
+    background: var(--bg-primary, #fff);
 }
 .f-panel th:first-child {
     z-index: 3;
-    background: transparent;
+    background: var(--bg-secondary, #f8f9fa);
 }
 .f-panel h4 {
     font-size: 1rem;
@@ -78,7 +80,7 @@
     vertical-align: middle;
 }
 .f-panel th {
-    background: transparent;
+    background: var(--bg-secondary, #f8f9fa);
     font-weight: 600;
     text-align: center;
 }
@@ -133,7 +135,7 @@
     position: sticky;
     top: 0;
     z-index: 2;
-    background: transparent;
+    background: var(--bg-secondary, #f8f9fa);
 }
 /* Corner cell: sticky both vertically and horizontally */
 .dash-head th:first-child {
