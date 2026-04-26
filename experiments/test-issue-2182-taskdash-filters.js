@@ -43,6 +43,12 @@ ${extractFunction('taskdashFindColumn')}
 ${extractFunction('taskdashFormatDateForApi')}
 ${extractFunction('taskdashEncodeParam')}
 ${extractFunction('taskdashFilterKey')}
+${extractFunction('taskdashIsStatusColumn')}
+${extractFunction('taskdashStatusFilterColumn')}
+${extractFunction('taskdashParseReference')}
+${extractFunction('taskdashStatusIdsFromFilter')}
+${extractFunction('taskdashStatusFilterValue')}
+${extractFunction('taskdashStatusIdFromRow')}
 ${extractFunction('taskdashIsDateColumn')}
 ${extractFunction('taskdashIsMetricColumn')}
 ${extractFunction('taskdashIsDashboardFilterColumn')}
@@ -78,7 +84,7 @@ assert(defaults['155682'].from === '2026-01-01' && defaults['155682'].to === '20
     'default month range must cover the current year');
 
 defaults['155679'] = { value: 'HR' };
-defaults['155724'] = { value: 'Завершена' };
+defaults['155724'] = { value: '44895' };
 defaults['155683'] = { from: '1', to: '2' };
 const url = taskdashBuildReportUrl('sportzania', columns, defaults);
 assert(url.includes('FR_%D0%9C%D0%B5%D1%81%D1%8F%D1%86=01.01.2026'),
@@ -87,8 +93,8 @@ assert(url.includes('TO_%D0%9C%D0%B5%D1%81%D1%8F%D1%86=31.12.2026'),
     'month upper bound must still be sent to the report API');
 assert(url.includes('FR_%D0%94%D0%B5%D0%BF%D0%B0%D1%80%D1%82%D0%B0%D0%BC%D0%B5%D0%BD%D1%82=%25HR%25'),
     'department filter must be sent as a report filter');
-assert(url.includes('FR_%D0%A1%D1%82%D0%B0%D1%82%D1%83%D1%81%20%D0%B7%D0%B0%D0%B4%D0%B0%D1%87%D0%B8=%25%D0%97%D0%B0%D0%B2%D0%B5%D1%80%D1%88%D0%B5%D0%BD%D0%B0%25'),
-    'task status filter must be sent as a report filter');
+assert(url.includes('FR_%D0%A1%D1%82%D0%B0%D1%82%D1%83%D1%81ID=44895'),
+    'task status filter must be sent as a status ID report filter');
 assert(!url.includes('%D0%9E%D1%82%D0%BB%D0%BE%D0%B6%D0%B5%D0%BD%D0%B0'),
     'stale metric filters must not be included in report URLs');
 

@@ -65,6 +65,12 @@ ${extractFunction('taskdashMonthLabel')}
 ${extractFunction('taskdashFormatDateForApi')}
 ${extractFunction('taskdashEncodeParam')}
 ${extractFunction('taskdashFilterKey')}
+${extractFunction('taskdashIsStatusColumn')}
+${extractFunction('taskdashStatusFilterColumn')}
+${extractFunction('taskdashParseReference')}
+${extractFunction('taskdashStatusIdsFromFilter')}
+${extractFunction('taskdashStatusFilterValue')}
+${extractFunction('taskdashStatusIdFromRow')}
 ${extractFunction('taskdashIsDateColumn')}
 ${extractFunction('taskdashIsMetricColumn')}
 ${extractFunction('taskdashIsDashboardFilterColumn')}
@@ -109,7 +115,7 @@ assert(!/\\s/.test(taskdashSafeId('Статус задачи')),
     'generated datalist IDs must not contain spaces');
 
 defaults['155679'] = { value: 'Коммерческий' };
-defaults['155724'] = { value: 'Завершена' };
+defaults['155724'] = { value: '44895' };
 defaults['155683'] = { from: '1', to: '3' };
 const url = taskdashBuildReportUrl('sportzania', normalized.columns, defaults);
 assert(url.startsWith('/sportzania/report/155675?JSON_KV&'),
@@ -120,8 +126,8 @@ assert(url.includes('TO_%D0%9C%D0%B5%D1%81%D1%8F%D1%86=31.12.2026'),
     'month upper bound must be sent as TO_Месяц');
 assert(url.includes('FR_%D0%94%D0%B5%D0%BF%D0%B0%D1%80%D1%82%D0%B0%D0%BC%D0%B5%D0%BD%D1%82=%25%D0%9A%D0%BE%D0%BC%D0%BC%D0%B5%D1%80%D1%87%D0%B5%D1%81%D0%BA%D0%B8%D0%B9%25'),
     'text filters must be sent as contains filters');
-assert(url.includes('FR_%D0%A1%D1%82%D0%B0%D1%82%D1%83%D1%81%20%D0%B7%D0%B0%D0%B4%D0%B0%D1%87%D0%B8=%25%D0%97%D0%B0%D0%B2%D0%B5%D1%80%D1%88%D0%B5%D0%BD%D0%B0%25'),
-    'task status filters must be sent as contains filters');
+assert(url.includes('FR_%D0%A1%D1%82%D0%B0%D1%82%D1%83%D1%81ID=44895'),
+    'task status filters must be sent by status ID');
 assert(!url.includes('%D0%9E%D1%82%D0%BB%D0%BE%D0%B6%D0%B5%D0%BD%D0%B0'),
     'metric filters must not be sent for the issue 2182 dashboard filter set');
 
