@@ -6,6 +6,42 @@
             return tableContainer || document.querySelector('.app-content') || window;
         }
 
+        captureScrollState() {
+            const scrollContainer = this.getScrollContainer();
+            if (!scrollContainer) return null;
+
+            if (scrollContainer === window) {
+                return {
+                    isWindow: true,
+                    scrollTop: window.scrollY || window.pageYOffset || 0,
+                    scrollLeft: window.scrollX || window.pageXOffset || 0
+                };
+            }
+
+            return {
+                isWindow: false,
+                scrollTop: scrollContainer.scrollTop || 0,
+                scrollLeft: scrollContainer.scrollLeft || 0
+            };
+        }
+
+        restoreScrollState(scrollState) {
+            if (!scrollState) return;
+
+            const scrollContainer = this.getScrollContainer();
+            if (!scrollContainer) return;
+
+            if (scrollState.isWindow || scrollContainer === window) {
+                if (typeof window.scrollTo === 'function') {
+                    window.scrollTo(scrollState.scrollLeft, scrollState.scrollTop);
+                }
+                return;
+            }
+
+            scrollContainer.scrollTop = scrollState.scrollTop;
+            scrollContainer.scrollLeft = scrollState.scrollLeft;
+        }
+
         /**
          * Set the max-height of .integram-table-container so it fills the remaining
          * vertical space inside .app-content, making position:sticky on <th> work

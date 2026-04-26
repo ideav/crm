@@ -518,7 +518,9 @@
                     this.options.onDataLoad(json);
                 }
 
+                const appendScrollState = append ? this.captureScrollState() : null;
                 this.render();
+                this.restoreScrollState(appendScrollState);
             } catch (error) {
                 console.error('Error loading data:', error);
                 if (!append && this.container) {
