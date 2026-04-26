@@ -535,7 +535,9 @@ class IntegramTable{
                     this.options.onDataLoad(json);
                 }
 
+                const appendScrollState = append ? this.captureScrollState() : null;
                 this.render();
+                this.restoreScrollState(appendScrollState);
             } catch (error) {
                 console.error('Error loading data:', error);
                 if (!append && this.container) {
@@ -6355,6 +6357,42 @@ class IntegramTable{
             // so we give the container a computed max-height and make it scroll vertically.
             const tableContainer = this.container && this.container.querySelector('.integram-table-container');
             return tableContainer || document.querySelector('.app-content') || window;
+        }
+
+        captureScrollState() {
+            const scrollContainer = this.getScrollContainer();
+            if (!scrollContainer) return null;
+
+            if (scrollContainer === window) {
+                return {
+                    isWindow: true,
+                    scrollTop: window.scrollY || window.pageYOffset || 0,
+                    scrollLeft: window.scrollX || window.pageXOffset || 0
+                };
+            }
+
+            return {
+                isWindow: false,
+                scrollTop: scrollContainer.scrollTop || 0,
+                scrollLeft: scrollContainer.scrollLeft || 0
+            };
+        }
+
+        restoreScrollState(scrollState) {
+            if (!scrollState) return;
+
+            const scrollContainer = this.getScrollContainer();
+            if (!scrollContainer) return;
+
+            if (scrollState.isWindow || scrollContainer === window) {
+                if (typeof window.scrollTo === 'function') {
+                    window.scrollTo(scrollState.scrollLeft, scrollState.scrollTop);
+                }
+                return;
+            }
+
+            scrollContainer.scrollTop = scrollState.scrollTop;
+            scrollContainer.scrollLeft = scrollState.scrollLeft;
         }
 
         /**
