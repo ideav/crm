@@ -475,12 +475,12 @@ function dashNormalizeVal(item, val) {
 }
 
 function dashNormalizeMatrixKey(v) {
-    return String(v || '').trim().toLowerCase();
+    return String(v || '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 function dashMatrixLabelScore(dashLabel, matrixLabel) {
-    var d = String(dashLabel || '').trim().toLowerCase();
-    var m = String(matrixLabel || '').trim().toLowerCase();
+    var d = dashNormalizeMatrixKey(dashLabel);
+    var m = dashNormalizeMatrixKey(matrixLabel);
     if (!d && !m) return 1;
     if (!d || !m) return 0;
     if (d === m) return 1000 + d.length;

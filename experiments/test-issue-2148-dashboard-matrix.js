@@ -70,6 +70,20 @@ match = dashFindMatrixValue('NPS родителей', '17-19 апреля', '');
 assert(match && match.val === '777' && match.valID === '102',
     'matrix lookup must use the both-empty-label rule');
 
+dashMatrixValues = [
+    {
+        val: '777',
+        line: 'NPS родителей',
+        col: '17–19 апреля 2026 «Новая Истра»',
+        'Метка': '',
+        valID: '155560'
+    }
+];
+
+match = dashFindMatrixValue('NPS родителей', '17–19 апреля 2026  «Новая Истра»', '');
+assert(match && match.val === '777' && match.valID === '155560',
+    'matrix lookup must ignore repeated whitespace in dashboard period columns');
+
 match = dashFindMatrixValue('NPS родителей', '17-19 апреля', 'Другая метка');
 assert(!match, 'matrix lookup must reject unrelated non-empty labels');
 `;
