@@ -803,8 +803,17 @@ class TablesController {
     showNewTableModal() {
         const modal = document.getElementById('new-table-modal');
         if (modal) {
+            const nameInput = document.getElementById('new-table-name');
+            const searchInput = document.getElementById('tables-search');
+            const searchValue = searchInput ? searchInput.value.trim() : '';
+
+            if (nameInput && searchValue) {
+                nameInput.value = searchValue;
+                nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+
             modal.style.display = '';
-            document.getElementById('new-table-name')?.focus();
+            nameInput?.focus();
         }
     }
 
