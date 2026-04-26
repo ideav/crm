@@ -23,6 +23,28 @@
         return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
     }
 
+    function resolvedRuntimeValue() {
+        for (let i = 0; i < arguments.length; i++) {
+            const value = toId(arguments[i]);
+            if (!value) continue;
+            let decoded = value;
+            try {
+                decoded = decodeURIComponent(value);
+            } catch (e) {
+                decoded = value;
+            }
+            if (decoded.indexOf('{') === -1 && decoded.indexOf('}') === -1 && decoded.indexOf('_global_.') === -1) {
+                return value;
+            }
+        }
+        return '';
+    }
+
+    function dbFromLocation() {
+        if (typeof window === 'undefined' || !window.location) return '';
+        return (window.location.pathname.split('/').filter(Boolean)[0]) || '';
+    }
+
     function decodeSegment(value) {
         const text = String(value || '').replace(/\+/g, ' ');
         try {
@@ -193,9 +215,9 @@
     class MigrationWorkspace {
         constructor(container) {
             this.container = container;
-            this.db = container.dataset.db || root.db || window.location.pathname.split('/')[1] || '';
-            this.xsrf = container.dataset.xsrf || root.xsrf || '';
-            this.user = container.dataset.user || root.user || '';
+            this.db = resolvedRuntimeValue(container.dataset.db, root.db, dbFromLocation());
+            this.xsrf = resolvedRuntimeValue(container.dataset.xsrf, root.xsrf);
+            this.user = resolvedRuntimeValue(container.dataset.user, root.user);
             this.state = {
                 settingsId: null,
                 settingsName: '',
