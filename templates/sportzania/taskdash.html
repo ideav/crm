@@ -1,0 +1,1288 @@
+<style>
+    .taskdash {
+        --taskdash-blue: #2563eb;
+        --taskdash-green: #16a34a;
+        --taskdash-amber: #d97706;
+        --taskdash-red: #dc2626;
+        --taskdash-cyan: #0891b2;
+        --taskdash-soft-blue: rgba(37, 99, 235, 0.10);
+        --taskdash-soft-green: rgba(22, 163, 74, 0.11);
+        --taskdash-soft-amber: rgba(217, 119, 6, 0.12);
+        --taskdash-soft-red: rgba(220, 38, 38, 0.10);
+        min-height: 100%;
+        padding: 16px;
+        background: var(--bg-primary, #f8fafc);
+        color: var(--text-primary, #111827);
+        box-sizing: border-box;
+    }
+
+    .taskdash * {
+        box-sizing: border-box;
+    }
+
+    .taskdash__topbar {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 14px;
+    }
+
+    .taskdash__title {
+        margin: 0;
+        font-size: 1.45rem;
+        line-height: 1.2;
+        font-weight: 700;
+        letter-spacing: 0;
+        color: var(--text-primary, #111827);
+    }
+
+    .taskdash__status {
+        min-height: 1.2rem;
+        margin-top: 5px;
+        color: var(--text-secondary, #64748b);
+        font-size: 0.86rem;
+    }
+
+    .taskdash__actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+    }
+
+    .taskdash-icon-btn {
+        width: 34px;
+        height: 34px;
+        border: 1px solid var(--border-color, #d6dee8);
+        border-radius: 7px;
+        background: var(--card-bg, #fff);
+        color: var(--text-primary, #111827);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: border-color 0.15s, background-color 0.15s, color 0.15s, transform 0.15s;
+    }
+
+    .taskdash-icon-btn:hover {
+        border-color: var(--taskdash-blue);
+        color: var(--taskdash-blue);
+        transform: translateY(-1px);
+    }
+
+    .taskdash-filter-panel {
+        border: 1px solid var(--border-color, #d6dee8);
+        border-radius: 8px;
+        background: var(--card-bg, #fff);
+        padding: 12px;
+        margin-bottom: 14px;
+    }
+
+    .taskdash-filter-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        gap: 10px;
+        align-items: end;
+    }
+
+    .taskdash-filter {
+        min-width: 0;
+    }
+
+    .taskdash-filter label {
+        display: block;
+        margin-bottom: 5px;
+        color: var(--text-secondary, #64748b);
+        font-size: 0.78rem;
+        font-weight: 600;
+    }
+
+    .taskdash-filter input {
+        width: 100%;
+        min-height: 34px;
+        border: 1px solid var(--input-border, #cbd5e1);
+        border-radius: 7px;
+        background: var(--input-bg, #fff);
+        color: var(--text-primary, #111827);
+        padding: 6px 9px;
+        font: inherit;
+        font-size: 0.88rem;
+    }
+
+    .taskdash-filter input:focus {
+        outline: 2px solid rgba(37, 99, 235, 0.20);
+        border-color: var(--taskdash-blue);
+    }
+
+    .taskdash-range {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 7px;
+    }
+
+    .taskdash-filter-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 10px;
+    }
+
+    .taskdash-btn {
+        min-height: 34px;
+        border: 1px solid var(--border-color, #d6dee8);
+        border-radius: 7px;
+        background: var(--card-bg, #fff);
+        color: var(--text-primary, #111827);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        padding: 6px 12px;
+        cursor: pointer;
+        font: inherit;
+        font-size: 0.88rem;
+        font-weight: 600;
+    }
+
+    .taskdash-btn:hover {
+        border-color: var(--taskdash-blue);
+        color: var(--taskdash-blue);
+    }
+
+    .taskdash-btn--primary {
+        background: var(--taskdash-blue);
+        border-color: var(--taskdash-blue);
+        color: #fff;
+    }
+
+    .taskdash-btn--primary:hover {
+        background: #1d4ed8;
+        border-color: #1d4ed8;
+        color: #fff;
+    }
+
+    .taskdash-kpis {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(130px, 1fr));
+        gap: 10px;
+        margin-bottom: 14px;
+    }
+
+    .taskdash-kpi {
+        min-width: 0;
+        border: 1px solid var(--border-color, #d6dee8);
+        border-radius: 8px;
+        background: var(--card-bg, #fff);
+        padding: 12px;
+    }
+
+    .taskdash-kpi__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        color: var(--text-secondary, #64748b);
+        font-size: 0.78rem;
+        font-weight: 600;
+    }
+
+    .taskdash-kpi__icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+
+    .taskdash-kpi__icon--total { background: var(--taskdash-soft-blue); color: var(--taskdash-blue); }
+    .taskdash-kpi__icon--done { background: var(--taskdash-soft-green); color: var(--taskdash-green); }
+    .taskdash-kpi__icon--active { background: rgba(8, 145, 178, 0.12); color: var(--taskdash-cyan); }
+    .taskdash-kpi__icon--delayed { background: var(--taskdash-soft-red); color: var(--taskdash-red); }
+    .taskdash-kpi__icon--staff { background: var(--taskdash-soft-amber); color: var(--taskdash-amber); }
+
+    .taskdash-kpi__value {
+        margin-top: 8px;
+        font-size: 1.35rem;
+        line-height: 1.1;
+        font-weight: 750;
+        color: var(--text-primary, #111827);
+        overflow-wrap: anywhere;
+    }
+
+    .taskdash-kpi__note {
+        margin-top: 4px;
+        color: var(--text-secondary, #64748b);
+        font-size: 0.78rem;
+    }
+
+    .taskdash-grid {
+        display: grid;
+        grid-template-columns: minmax(300px, 0.95fr) minmax(360px, 1.25fr);
+        gap: 14px;
+        align-items: start;
+    }
+
+    .taskdash-panel {
+        border: 1px solid var(--border-color, #d6dee8);
+        border-radius: 8px;
+        background: var(--card-bg, #fff);
+        min-width: 0;
+    }
+
+    .taskdash-panel__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 12px 12px 0;
+    }
+
+    .taskdash-panel__title {
+        margin: 0;
+        font-size: 0.98rem;
+        line-height: 1.25;
+        font-weight: 700;
+        color: var(--text-primary, #111827);
+    }
+
+    .taskdash-legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 12px;
+        color: var(--text-secondary, #64748b);
+        font-size: 0.78rem;
+    }
+
+    .taskdash-legend span {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+    }
+
+    .taskdash-dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        display: inline-block;
+    }
+
+    .taskdash-dot--done { background: var(--taskdash-green); }
+    .taskdash-dot--active { background: var(--taskdash-cyan); }
+    .taskdash-dot--delayed { background: var(--taskdash-red); }
+
+    .taskdash-chart {
+        padding: 12px;
+    }
+
+    .taskdash-bars {
+        height: 260px;
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(42px, 1fr);
+        gap: 10px;
+        align-items: end;
+        overflow-x: auto;
+        padding: 10px 2px 0;
+    }
+
+    .taskdash-bar-wrap {
+        min-width: 42px;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        gap: 6px;
+        height: 100%;
+        align-items: end;
+    }
+
+    .taskdash-bar-total {
+        color: var(--text-secondary, #64748b);
+        font-size: 0.75rem;
+        text-align: center;
+        min-height: 1rem;
+    }
+
+    .taskdash-bar {
+        width: min(34px, 100%);
+        height: 100%;
+        justify-self: center;
+        display: flex;
+        flex-direction: column-reverse;
+        border-radius: 7px 7px 3px 3px;
+        overflow: hidden;
+        background: var(--bg-secondary, #eef2f7);
+    }
+
+    .taskdash-bar-segment {
+        min-height: 0;
+        transition: height 0.2s;
+    }
+
+    .taskdash-bar-segment--done { background: var(--taskdash-green); }
+    .taskdash-bar-segment--active { background: var(--taskdash-cyan); }
+    .taskdash-bar-segment--delayed { background: var(--taskdash-red); }
+
+    .taskdash-bar-label {
+        color: var(--text-secondary, #64748b);
+        font-size: 0.72rem;
+        text-align: center;
+        line-height: 1.15;
+        min-height: 2rem;
+    }
+
+    .taskdash-table-panel {
+        overflow: hidden;
+    }
+
+    .taskdash-table-wrap {
+        max-height: 520px;
+        overflow: auto;
+        margin-top: 10px;
+    }
+
+    .taskdash-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: 0.86rem;
+        min-width: 760px;
+    }
+
+    .taskdash-table th,
+    .taskdash-table td {
+        border-bottom: 1px solid var(--border-color, #e2e8f0);
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: middle;
+        background: var(--card-bg, #fff);
+    }
+
+    .taskdash-table th {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        background: var(--bg-secondary, #f1f5f9);
+        color: var(--text-secondary, #475569);
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    .taskdash-table th button {
+        border: none;
+        background: transparent;
+        color: inherit;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        cursor: pointer;
+        font: inherit;
+        font-weight: inherit;
+    }
+
+    .taskdash-table tbody tr:hover td {
+        background: var(--bg-secondary, #f8fafc);
+    }
+
+    .taskdash-table .taskdash-number {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .taskdash-status-pill {
+        display: inline-flex;
+        align-items: center;
+        max-width: 100%;
+        min-height: 24px;
+        border-radius: 999px;
+        padding: 2px 8px;
+        background: var(--taskdash-soft-blue);
+        color: var(--taskdash-blue);
+        font-size: 0.78rem;
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    .taskdash-status-pill--done {
+        background: var(--taskdash-soft-green);
+        color: var(--taskdash-green);
+    }
+
+    .taskdash-status-pill--active {
+        background: rgba(8, 145, 178, 0.12);
+        color: var(--taskdash-cyan);
+    }
+
+    .taskdash-status-pill--delayed {
+        background: var(--taskdash-soft-red);
+        color: var(--taskdash-red);
+    }
+
+    .taskdash-empty,
+    .taskdash-error {
+        min-height: 160px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-secondary, #64748b);
+        text-align: center;
+        padding: 24px;
+    }
+
+    .taskdash-error {
+        color: var(--taskdash-red);
+    }
+
+    .taskdash-loading {
+        opacity: 0.65;
+        pointer-events: none;
+    }
+
+    [data-theme="dark"] .taskdash {
+        --taskdash-soft-blue: rgba(59, 130, 246, 0.18);
+        --taskdash-soft-green: rgba(34, 197, 94, 0.16);
+        --taskdash-soft-amber: rgba(245, 158, 11, 0.17);
+        --taskdash-soft-red: rgba(248, 113, 113, 0.15);
+    }
+
+    @media (max-width: 1120px) {
+        .taskdash-kpis {
+            grid-template-columns: repeat(3, minmax(130px, 1fr));
+        }
+
+        .taskdash-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @media (max-width: 720px) {
+        .taskdash {
+            padding: 12px;
+        }
+
+        .taskdash__topbar {
+            flex-direction: column;
+        }
+
+        .taskdash__actions {
+            width: 100%;
+            justify-content: flex-end;
+        }
+
+        .taskdash-kpis {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .taskdash-filter-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .taskdash-filter-actions {
+            justify-content: stretch;
+        }
+
+        .taskdash-btn {
+            flex: 1 1 auto;
+        }
+    }
+
+    @media (max-width: 460px) {
+        .taskdash-kpis {
+            grid-template-columns: 1fr;
+        }
+
+        .taskdash-range {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+<section class="taskdash" id="taskdash-root">
+    <div class="taskdash__topbar">
+        <div>
+            <h1 class="taskdash__title">Пульт задач</h1>
+            <div class="taskdash__status" id="taskdash-status"></div>
+        </div>
+        <div class="taskdash__actions">
+            <button class="taskdash-icon-btn" id="taskdash-refresh" type="button" title="Обновить" aria-label="Обновить">
+                <i class="pi pi-refresh"></i>
+            </button>
+            <button class="taskdash-icon-btn" id="taskdash-reset" type="button" title="Сбросить" aria-label="Сбросить">
+                <i class="pi pi-filter-slash"></i>
+            </button>
+        </div>
+    </div>
+
+    <form class="taskdash-filter-panel" id="taskdash-filter-form">
+        <div class="taskdash-filter-grid" id="taskdash-filter-grid"></div>
+        <div class="taskdash-filter-actions">
+            <button class="taskdash-btn" type="button" id="taskdash-clear">
+                <i class="pi pi-times"></i>
+                <span>Очистить</span>
+            </button>
+            <button class="taskdash-btn taskdash-btn--primary" type="submit">
+                <i class="pi pi-check"></i>
+                <span>Применить</span>
+            </button>
+        </div>
+    </form>
+
+    <div class="taskdash-kpis" id="taskdash-kpis"></div>
+
+    <div class="taskdash-grid">
+        <section class="taskdash-panel">
+            <div class="taskdash-panel__head">
+                <h2 class="taskdash-panel__title">Динамика по месяцам</h2>
+                <div class="taskdash-legend">
+                    <span><i class="taskdash-dot taskdash-dot--done"></i>Завершена</span>
+                    <span><i class="taskdash-dot taskdash-dot--active"></i>В работе</span>
+                    <span><i class="taskdash-dot taskdash-dot--delayed"></i>Отложена</span>
+                </div>
+            </div>
+            <div class="taskdash-chart" id="taskdash-chart"></div>
+        </section>
+
+        <section class="taskdash-panel taskdash-table-panel">
+            <div class="taskdash-panel__head">
+                <h2 class="taskdash-panel__title">Задачи</h2>
+                <div class="taskdash__status" id="taskdash-table-count"></div>
+            </div>
+            <div class="taskdash-table-wrap" id="taskdash-table-wrap"></div>
+        </section>
+    </div>
+</section>
+
+<script>
+(function() {
+    const TASKDASH_REPORT_ID = '155675';
+    const TASKDASH_FALLBACK_COLUMNS = [
+        { id: '155682', type: '', format: 'SHORT', name: 'Месяц' },
+        { id: '155679', type: '2953', format: 'SHORT', name: 'Департамент', granted: 1, ref: 1, orig: '2859' },
+        { id: '155683', type: '', format: 'SHORT', name: 'Отложена' },
+        { id: '155684', type: '', format: 'SHORT', name: 'Завершена' },
+        { id: '155685', type: '', format: 'SHORT', name: 'В работе' },
+        { id: '155721', type: '', format: 'SHORT', name: 'Сотрудников' },
+        { id: '155724', type: '8907', format: 'SHORT', name: 'Статус задачи', granted: 1, ref: 1, orig: '2685' }
+    ];
+
+    var taskdashState = {
+        columns: TASKDASH_FALLBACK_COLUMNS.map(taskdashNormalizeColumn),
+        rows: [],
+        filters: {},
+        sort: { columnId: '155682', dir: 'asc' },
+        loading: false
+    };
+
+    function taskdashNormalizeResponse(payload) {
+        var columns = [], rows = [], i, j, row, keys, data;
+        if (payload && Array.isArray(payload.columns)) {
+            columns = payload.columns.map(taskdashNormalizeColumn);
+        }
+
+        data = payload && Array.isArray(payload.data) ? payload.data : null;
+        if (columns.length && data && data.every(Array.isArray)) {
+            var isColumnMajor = data.length === columns.length;
+            if (isColumnMajor) {
+                var rowCount = data.reduce(function(max, values) {
+                    return Math.max(max, values.length);
+                }, 0);
+                for (i = 0; i < rowCount; i++) {
+                    row = {};
+                    for (j = 0; j < columns.length; j++) {
+                        row[columns[j].name] = taskdashValueAt(data[j], i);
+                    }
+                    rows.push(row);
+                }
+            } else {
+                for (i = 0; i < data.length; i++) {
+                    row = {};
+                    for (j = 0; j < columns.length; j++) {
+                        row[columns[j].name] = taskdashValueAt(data[i], j);
+                    }
+                    rows.push(row);
+                }
+            }
+        } else if (Array.isArray(payload)) {
+            rows = payload.map(function(item) {
+                return item && typeof item === 'object' ? Object.assign({}, item) : { value: item };
+            });
+        } else if (payload && Array.isArray(payload.data)) {
+            rows = payload.data.map(function(item) {
+                return item && typeof item === 'object' ? Object.assign({}, item) : { value: item };
+            });
+        }
+
+        if (!columns.length && rows.length) {
+            keys = [];
+            rows.forEach(function(item) {
+                Object.keys(item || {}).forEach(function(key) {
+                    if (keys.indexOf(key) === -1) keys.push(key);
+                });
+            });
+            columns = keys.map(function(key, index) {
+                return taskdashNormalizeColumn({ id: key || String(index), name: key || ('Поле ' + (index + 1)) }, index);
+            });
+        }
+
+        return { columns: columns, rows: rows };
+    }
+
+    function taskdashNormalizeColumn(column, index) {
+        var raw = column || {};
+        if (typeof raw !== 'object') raw = { id: index, name: String(raw || '') };
+        var name = raw.name || raw.val || raw.title || raw.id || ('Поле ' + ((index || 0) + 1));
+        return {
+            id: String(raw.id || name || index || ''),
+            name: String(name),
+            type: raw.type || '',
+            format: raw.format || '',
+            ref: raw.ref || '',
+            orig: raw.orig || '',
+            granted: raw.granted || ''
+        };
+    }
+
+    function taskdashValueAt(values, index) {
+        if (!Array.isArray(values)) return '';
+        return values[index] === undefined || values[index] === null ? '' : values[index];
+    }
+
+    function taskdashFindColumn(columns, names) {
+        var list = Array.isArray(names) ? names : [names];
+        var normalized = list.map(function(name) {
+            return String(name || '').toLowerCase();
+        });
+        var exact = columns.find(function(column) {
+            return normalized.indexOf(String(column.name || '').toLowerCase()) !== -1;
+        });
+        if (exact) return exact;
+        return columns.find(function(column) {
+            var name = String(column.name || '').toLowerCase();
+            return normalized.some(function(part) {
+                return part && name.indexOf(part) !== -1;
+            });
+        }) || null;
+    }
+
+    function taskdashParseNumber(value) {
+        if (value && typeof value === 'object') value = value.val || value.value || '';
+        if (value === null || value === undefined || value === '') return NaN;
+        var cleaned = String(value)
+            .replace(/\u00a0/g, ' ')
+            .replace(/\s/g, '')
+            .replace(',', '.')
+            .replace(/[^\d.-]/g, '');
+        if (!cleaned || cleaned === '-' || cleaned === '.') return NaN;
+        return parseFloat(cleaned);
+    }
+
+    function taskdashParseDateValue(value) {
+        if (value && typeof value === 'object') value = value.val || value.value || '';
+        var text = String(value || '').trim();
+        var match;
+        if (!text) return null;
+        match = text.match(/^(\d{4})(\d{2})(\d{2})$/);
+        if (match) return { year: match[1], month: match[2], day: match[3] };
+        match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (match) return { year: match[1], month: match[2], day: match[3] };
+        match = text.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+        if (match) return { year: match[3], month: match[2], day: match[1] };
+        return null;
+    }
+
+    function taskdashMonthKey(value) {
+        var parsed = taskdashParseDateValue(value);
+        return parsed ? parsed.year + '-' + parsed.month : '';
+    }
+
+    function taskdashMonthLabel(key) {
+        var months = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
+        var parts = String(key || '').split('-');
+        var monthIndex = parseInt(parts[1], 10) - 1;
+        if (parts.length !== 2 || monthIndex < 0 || monthIndex > 11) return key || '';
+        return months[monthIndex] + ' ' + parts[0];
+    }
+
+    function taskdashFormatDateForApi(value) {
+        var text = String(value || '').trim();
+        var match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (match) return match[3] + '.' + match[2] + '.' + match[1];
+        return text;
+    }
+
+    function taskdashEncodeParam(value) {
+        return encodeURIComponent(String(value || ''));
+    }
+
+    function taskdashFilterKey(prefix, column) {
+        return prefix + (prefix.slice(-1) === '_' ? '' : '_') + (column ? column.name : '');
+    }
+
+    function taskdashIsDateColumn(column) {
+        var name = String(column && column.name || '').toLowerCase();
+        var format = String(column && column.format || '').toLowerCase();
+        return name.indexOf('месяц') !== -1 || name.indexOf('дата') !== -1 || format.indexOf('date') !== -1;
+    }
+
+    function taskdashIsMetricColumn(column) {
+        var name = String(column && column.name || '').toLowerCase();
+        var metrics = ['отложена', 'завершена', 'в работе', 'сотрудников', 'количество', 'count'];
+        if (name.indexOf('статус') !== -1) return false;
+        return metrics.some(function(metric) {
+            return name === metric || name.indexOf(metric) !== -1;
+        });
+    }
+
+    function taskdashCreateDefaultFilters(year, columns) {
+        var filters = {};
+        (columns || []).forEach(function(column) {
+            if (taskdashIsDateColumn(column)) {
+                filters[column.id] = {
+                    from: String(year) + '-01-01',
+                    to: String(year) + '-12-31'
+                };
+            }
+        });
+        return filters;
+    }
+
+    function taskdashReconcileFilters(oldColumns, newColumns, filters) {
+        var byName = {}, next = {};
+        (oldColumns || []).forEach(function(column) {
+            if (filters && filters[column.id]) byName[column.name] = filters[column.id];
+        });
+        (newColumns || []).forEach(function(column) {
+            if (filters && filters[column.id]) {
+                next[column.id] = filters[column.id];
+            } else if (byName[column.name]) {
+                next[column.id] = byName[column.name];
+            }
+        });
+        return next;
+    }
+
+    function taskdashBuildReportUrl(dbName, columns, filters) {
+        var url = '/' + taskdashEncodeParam(dbName) + '/report/' + TASKDASH_REPORT_ID + '?JSON_KV';
+        var params = [];
+        (columns || []).forEach(function(column) {
+            var filter = filters && filters[column.id] ? filters[column.id] : {};
+            var from = filter.from ? String(filter.from).trim() : '';
+            var to = filter.to ? String(filter.to).trim() : '';
+            var value = filter.value ? String(filter.value).trim() : '';
+
+            if (taskdashIsDateColumn(column)) {
+                if (from) params.push(taskdashFilterKey('FR_', column) + '=' + taskdashFormatDateForApi(from));
+                if (to) params.push(taskdashFilterKey('TO_', column) + '=' + taskdashFormatDateForApi(to));
+            } else if (taskdashIsMetricColumn(column)) {
+                if (from) params.push(taskdashFilterKey('FR_', column) + '=' + from);
+                if (to) params.push(taskdashFilterKey('TO_', column) + '=' + to);
+            } else if (value) {
+                params.push(taskdashFilterKey('FR_', column) + '=%' + value + '%');
+            }
+        });
+        if (params.length) {
+            url += '&' + params.map(function(param) {
+                var eq = param.indexOf('=');
+                return taskdashEncodeParam(param.slice(0, eq)) + '=' + taskdashEncodeParam(param.slice(eq + 1));
+            }).join('&');
+        }
+        return url;
+    }
+
+    function taskdashBuildMonthlySeries(rows, columns) {
+        var dateColumn = taskdashFindColumn(columns, ['Месяц', 'Дата']);
+        var doneColumn = taskdashFindColumn(columns, ['Завершена']);
+        var activeColumn = taskdashFindColumn(columns, ['В работе']);
+        var delayedColumn = taskdashFindColumn(columns, ['Отложена']);
+        var grouped = {};
+
+        (rows || []).forEach(function(row) {
+            var key = dateColumn ? taskdashMonthKey(row[dateColumn.name]) : '';
+            if (!key) return;
+            if (!grouped[key]) {
+                grouped[key] = { key: key, label: taskdashMonthLabel(key), completed: 0, active: 0, delayed: 0, total: 0 };
+            }
+            grouped[key].completed += taskdashValueAsNumber(row, doneColumn);
+            grouped[key].active += taskdashValueAsNumber(row, activeColumn);
+            grouped[key].delayed += taskdashValueAsNumber(row, delayedColumn);
+            grouped[key].total = grouped[key].completed + grouped[key].active + grouped[key].delayed;
+        });
+
+        return Object.keys(grouped).sort().map(function(key) {
+            return grouped[key];
+        });
+    }
+
+    function taskdashValueAsNumber(row, column) {
+        if (!row || !column) return 0;
+        var value = taskdashParseNumber(row[column.name]);
+        return isNaN(value) ? 0 : value;
+    }
+
+    function taskdashGetDbName() {
+        if (typeof db !== 'undefined' && db) return db;
+        if (typeof window.db !== 'undefined' && window.db) return window.db;
+        return '';
+    }
+
+    function taskdashGetXsrf() {
+        if (typeof xsrf !== 'undefined' && xsrf) return xsrf;
+        if (typeof window.xsrf !== 'undefined' && window.xsrf) return window.xsrf;
+        return '';
+    }
+
+    function taskdashSetStatus(message) {
+        var status = document.getElementById('taskdash-status');
+        if (status) status.textContent = message || '';
+    }
+
+    function taskdashSetLoading(isLoading) {
+        taskdashState.loading = isLoading;
+        var root = document.getElementById('taskdash-root');
+        if (root) root.classList.toggle('taskdash-loading', isLoading);
+    }
+
+    function taskdashInit() {
+        document.title = 'Пульт задач';
+        var navCenter = document.querySelector('.navbar-center .navbar-workspace');
+        if (navCenter) navCenter.textContent = 'Пульт задач';
+
+        taskdashState.filters = taskdashCreateDefaultFilters(new Date().getFullYear(), taskdashState.columns);
+        taskdashRenderFilters();
+        taskdashBindEvents();
+        taskdashLoadData();
+    }
+
+    function taskdashBindEvents() {
+        var form = document.getElementById('taskdash-filter-form');
+        var refresh = document.getElementById('taskdash-refresh');
+        var reset = document.getElementById('taskdash-reset');
+        var clear = document.getElementById('taskdash-clear');
+
+        if (form) {
+            form.addEventListener('submit', function(event) {
+                event.preventDefault();
+                taskdashState.filters = taskdashReadFilters();
+                taskdashLoadData();
+            });
+        }
+        if (refresh) refresh.addEventListener('click', taskdashLoadData);
+        if (reset) reset.addEventListener('click', taskdashResetFilters);
+        if (clear) clear.addEventListener('click', taskdashClearFilters);
+    }
+
+    function taskdashResetFilters() {
+        taskdashState.filters = taskdashCreateDefaultFilters(new Date().getFullYear(), taskdashState.columns);
+        taskdashRenderFilters();
+        taskdashLoadData();
+    }
+
+    function taskdashClearFilters() {
+        taskdashState.filters = {};
+        taskdashRenderFilters();
+        taskdashLoadData();
+    }
+
+    function taskdashReadFilters() {
+        var filters = {};
+        var inputs = document.querySelectorAll('[data-taskdash-filter]');
+        inputs.forEach(function(input) {
+            var columnId = input.getAttribute('data-taskdash-filter');
+            var part = input.getAttribute('data-taskdash-filter-part');
+            var value = input.value;
+            if (!filters[columnId]) filters[columnId] = {};
+            if (value !== '') filters[columnId][part] = value;
+        });
+        return filters;
+    }
+
+    function taskdashRenderFilters() {
+        var grid = document.getElementById('taskdash-filter-grid');
+        if (!grid) return;
+        grid.innerHTML = '';
+        taskdashState.columns.forEach(function(column) {
+            grid.appendChild(taskdashCreateFilterControl(column));
+        });
+    }
+
+    function taskdashCreateFilterControl(column) {
+        var wrap = document.createElement('div');
+        var label = document.createElement('label');
+        var filter = taskdashState.filters[column.id] || {};
+        wrap.className = 'taskdash-filter';
+        label.textContent = column.name;
+        wrap.appendChild(label);
+
+        if (taskdashIsDateColumn(column) || taskdashIsMetricColumn(column)) {
+            var range = document.createElement('div');
+            var from = document.createElement('input');
+            var to = document.createElement('input');
+            range.className = 'taskdash-range';
+            from.type = taskdashIsDateColumn(column) ? 'date' : 'text';
+            to.type = taskdashIsDateColumn(column) ? 'date' : 'text';
+            from.inputMode = taskdashIsMetricColumn(column) ? 'decimal' : '';
+            to.inputMode = taskdashIsMetricColumn(column) ? 'decimal' : '';
+            from.placeholder = 'от';
+            to.placeholder = 'до';
+            from.value = filter.from || '';
+            to.value = filter.to || '';
+            taskdashMarkFilterInput(from, column.id, 'from');
+            taskdashMarkFilterInput(to, column.id, 'to');
+            range.appendChild(from);
+            range.appendChild(to);
+            wrap.appendChild(range);
+        } else {
+            var input = document.createElement('input');
+            var listId = 'taskdash-list-' + taskdashSafeId(column.id);
+            input.type = 'text';
+            input.value = filter.value || '';
+            input.setAttribute('list', listId);
+            taskdashMarkFilterInput(input, column.id, 'value');
+            wrap.appendChild(input);
+            wrap.appendChild(taskdashCreateDatalist(listId, column));
+        }
+        return wrap;
+    }
+
+    function taskdashSafeId(value) {
+        return encodeURIComponent(String(value || 'field')).replace(/%/g, '_');
+    }
+
+    function taskdashMarkFilterInput(input, columnId, part) {
+        input.setAttribute('data-taskdash-filter', columnId);
+        input.setAttribute('data-taskdash-filter-part', part);
+    }
+
+    function taskdashCreateDatalist(id, column) {
+        var datalist = document.createElement('datalist');
+        var values = [];
+        datalist.id = id;
+        taskdashState.rows.forEach(function(row) {
+            var value = taskdashCellText(row[column.name]);
+            if (value && values.indexOf(value) === -1) values.push(value);
+        });
+        values.sort().slice(0, 120).forEach(function(value) {
+            var option = document.createElement('option');
+            option.value = value;
+            datalist.appendChild(option);
+        });
+        return datalist;
+    }
+
+    function taskdashLoadData() {
+        var dbName = taskdashGetDbName();
+        if (!dbName) {
+            taskdashShowError('Не задана база данных.');
+            return;
+        }
+
+        var url = taskdashBuildReportUrl(dbName, taskdashState.columns, taskdashState.filters);
+        var headers = {};
+        var token = taskdashGetXsrf();
+        if (token) headers['X-XSRF-TOKEN'] = token;
+
+        taskdashSetLoading(true);
+        taskdashSetStatus('Загрузка...');
+        fetch(url, { headers: headers })
+            .then(function(response) {
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                return response.json();
+            })
+            .then(function(payload) {
+                var normalized = taskdashNormalizeResponse(payload);
+                if (normalized.columns.length) {
+                    taskdashState.filters = taskdashReconcileFilters(taskdashState.columns, normalized.columns, taskdashState.filters);
+                    taskdashState.columns = normalized.columns;
+                }
+                taskdashState.rows = normalized.rows;
+                taskdashSetLoading(false);
+                taskdashRenderFilters();
+                taskdashRenderDashboard();
+                taskdashSetStatus('Обновлено: ' + taskdashFormatClock(new Date()));
+            })
+            .catch(function(error) {
+                taskdashSetLoading(false);
+                taskdashShowError('Ошибка загрузки данных: ' + error.message);
+            });
+    }
+
+    function taskdashShowError(message) {
+        taskdashSetStatus(message);
+        var chart = document.getElementById('taskdash-chart');
+        var table = document.getElementById('taskdash-table-wrap');
+        var count = document.getElementById('taskdash-table-count');
+        if (chart) chart.innerHTML = '<div class="taskdash-error">' + taskdashEscape(message) + '</div>';
+        if (table) table.innerHTML = '<div class="taskdash-error">' + taskdashEscape(message) + '</div>';
+        if (count) count.textContent = '';
+    }
+
+    function taskdashRenderDashboard() {
+        taskdashRenderKpis();
+        taskdashRenderChart();
+        taskdashRenderTable();
+    }
+
+    function taskdashRenderKpis() {
+        var wrap = document.getElementById('taskdash-kpis');
+        var summary = taskdashBuildSummary(taskdashState.rows, taskdashState.columns);
+        if (!wrap) return;
+        wrap.innerHTML = '';
+        [
+            { label: 'Всего задач', value: summary.total, note: summary.completionRate + '% завершено', icon: 'pi pi-list-check', tone: 'total' },
+            { label: 'Завершена', value: summary.completed, note: 'готово', icon: 'pi pi-check-circle', tone: 'done' },
+            { label: 'В работе', value: summary.active, note: 'активно', icon: 'pi pi-clock', tone: 'active' },
+            { label: 'Отложена', value: summary.delayed, note: 'ожидает', icon: 'pi pi-pause-circle', tone: 'delayed' },
+            { label: 'Сотрудников', value: summary.staff, note: 'в выборке', icon: 'pi pi-users', tone: 'staff' }
+        ].forEach(function(item) {
+            wrap.appendChild(taskdashCreateKpi(item));
+        });
+    }
+
+    function taskdashBuildSummary(rows, columns) {
+        var doneColumn = taskdashFindColumn(columns, ['Завершена']);
+        var activeColumn = taskdashFindColumn(columns, ['В работе']);
+        var delayedColumn = taskdashFindColumn(columns, ['Отложена']);
+        var staffColumn = taskdashFindColumn(columns, ['Сотрудников']);
+        var summary = { completed: 0, active: 0, delayed: 0, staff: 0, total: 0, completionRate: 0 };
+        (rows || []).forEach(function(row) {
+            summary.completed += taskdashValueAsNumber(row, doneColumn);
+            summary.active += taskdashValueAsNumber(row, activeColumn);
+            summary.delayed += taskdashValueAsNumber(row, delayedColumn);
+            summary.staff += taskdashValueAsNumber(row, staffColumn);
+        });
+        summary.total = summary.completed + summary.active + summary.delayed;
+        summary.completionRate = summary.total ? Math.round(summary.completed / summary.total * 100) : 0;
+        return summary;
+    }
+
+    function taskdashCreateKpi(item) {
+        var el = document.createElement('div');
+        var head = document.createElement('div');
+        var label = document.createElement('span');
+        var icon = document.createElement('span');
+        var value = document.createElement('div');
+        var note = document.createElement('div');
+
+        el.className = 'taskdash-kpi';
+        head.className = 'taskdash-kpi__head';
+        label.textContent = item.label;
+        icon.className = 'taskdash-kpi__icon taskdash-kpi__icon--' + item.tone;
+        icon.innerHTML = '<i class="' + item.icon + '"></i>';
+        value.className = 'taskdash-kpi__value';
+        value.textContent = taskdashFormatNumber(item.value);
+        note.className = 'taskdash-kpi__note';
+        note.textContent = item.note;
+
+        head.appendChild(label);
+        head.appendChild(icon);
+        el.appendChild(head);
+        el.appendChild(value);
+        el.appendChild(note);
+        return el;
+    }
+
+    function taskdashRenderChart() {
+        var wrap = document.getElementById('taskdash-chart');
+        var series = taskdashBuildMonthlySeries(taskdashState.rows, taskdashState.columns);
+        var maxTotal = series.reduce(function(max, item) {
+            return Math.max(max, item.total);
+        }, 0);
+        if (!wrap) return;
+        wrap.innerHTML = '';
+        if (!series.length) {
+            wrap.innerHTML = '<div class="taskdash-empty">Нет данных</div>';
+            return;
+        }
+
+        var bars = document.createElement('div');
+        bars.className = 'taskdash-bars';
+        series.forEach(function(item) {
+            bars.appendChild(taskdashCreateBar(item, maxTotal));
+        });
+        wrap.appendChild(bars);
+    }
+
+    function taskdashCreateBar(item, maxTotal) {
+        var wrap = document.createElement('div');
+        var total = document.createElement('div');
+        var bar = document.createElement('div');
+        var label = document.createElement('div');
+        wrap.className = 'taskdash-bar-wrap';
+        total.className = 'taskdash-bar-total';
+        total.textContent = taskdashFormatNumber(item.total);
+        bar.className = 'taskdash-bar';
+        bar.title = item.label + ': ' + taskdashFormatNumber(item.total);
+        taskdashAppendSegment(bar, 'done', item.completed, maxTotal);
+        taskdashAppendSegment(bar, 'active', item.active, maxTotal);
+        taskdashAppendSegment(bar, 'delayed', item.delayed, maxTotal);
+        label.className = 'taskdash-bar-label';
+        label.textContent = item.label;
+        wrap.appendChild(total);
+        wrap.appendChild(bar);
+        wrap.appendChild(label);
+        return wrap;
+    }
+
+    function taskdashAppendSegment(bar, tone, value, maxTotal) {
+        var segment = document.createElement('div');
+        var height = maxTotal ? value / maxTotal * 100 : 0;
+        segment.className = 'taskdash-bar-segment taskdash-bar-segment--' + tone;
+        segment.style.height = value > 0 ? Math.max(height, 1.5) + '%' : '0';
+        segment.title = taskdashFormatNumber(value);
+        bar.appendChild(segment);
+    }
+
+    function taskdashRenderTable() {
+        var wrap = document.getElementById('taskdash-table-wrap');
+        var count = document.getElementById('taskdash-table-count');
+        var rows = taskdashGetSortedRows();
+        if (!wrap) return;
+        wrap.innerHTML = '';
+        if (count) count.textContent = rows.length + ' строк';
+        if (!rows.length) {
+            wrap.innerHTML = '<div class="taskdash-empty">Нет данных</div>';
+            return;
+        }
+
+        var table = document.createElement('table');
+        var thead = document.createElement('thead');
+        var tbody = document.createElement('tbody');
+        table.className = 'taskdash-table';
+        thead.appendChild(taskdashCreateHeaderRow());
+        rows.forEach(function(row) {
+            tbody.appendChild(taskdashCreateTableRow(row));
+        });
+        table.appendChild(thead);
+        table.appendChild(tbody);
+        wrap.appendChild(table);
+    }
+
+    function taskdashCreateHeaderRow() {
+        var tr = document.createElement('tr');
+        taskdashState.columns.forEach(function(column) {
+            var th = document.createElement('th');
+            var btn = document.createElement('button');
+            var icon = document.createElement('i');
+            btn.type = 'button';
+            btn.textContent = column.name;
+            icon.className = taskdashState.sort.columnId === column.id
+                ? (taskdashState.sort.dir === 'asc' ? 'pi pi-sort-up' : 'pi pi-sort-down')
+                : 'pi pi-sort-alt';
+            btn.appendChild(icon);
+            btn.addEventListener('click', function() {
+                taskdashApplySort(column.id);
+            });
+            th.appendChild(btn);
+            tr.appendChild(th);
+        });
+        return tr;
+    }
+
+    function taskdashCreateTableRow(row) {
+        var tr = document.createElement('tr');
+        taskdashState.columns.forEach(function(column) {
+            var td = document.createElement('td');
+            var raw = row[column.name];
+            if (taskdashIsMetricColumn(column)) {
+                td.className = 'taskdash-number';
+                td.textContent = taskdashFormatMetric(raw);
+            } else if (String(column.name || '').toLowerCase().indexOf('статус') !== -1) {
+                td.appendChild(taskdashCreateStatusPill(taskdashCellText(raw)));
+            } else if (taskdashIsDateColumn(column)) {
+                td.textContent = taskdashFormatDateCell(raw);
+            } else {
+                td.textContent = taskdashCellText(raw);
+            }
+            tr.appendChild(td);
+        });
+        return tr;
+    }
+
+    function taskdashCreateStatusPill(value) {
+        var pill = document.createElement('span');
+        var lower = String(value || '').toLowerCase();
+        pill.className = 'taskdash-status-pill';
+        if (lower.indexOf('заверш') !== -1) pill.classList.add('taskdash-status-pill--done');
+        else if (lower.indexOf('работ') !== -1 || lower.indexOf('прин') !== -1) pill.classList.add('taskdash-status-pill--active');
+        else if (lower.indexOf('отлож') !== -1) pill.classList.add('taskdash-status-pill--delayed');
+        pill.textContent = value || '—';
+        return pill;
+    }
+
+    function taskdashApplySort(columnId) {
+        if (taskdashState.sort.columnId === columnId) {
+            taskdashState.sort.dir = taskdashState.sort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+            taskdashState.sort.columnId = columnId;
+            taskdashState.sort.dir = 'asc';
+        }
+        taskdashRenderTable();
+    }
+
+    function taskdashGetSortedRows() {
+        var column = taskdashState.columns.find(function(item) {
+            return item.id === taskdashState.sort.columnId;
+        }) || taskdashState.columns[0];
+        var rows = taskdashState.rows.slice();
+        if (!column) return rows;
+        rows.sort(function(a, b) {
+            var av = taskdashSortValue(a[column.name], column);
+            var bv = taskdashSortValue(b[column.name], column);
+            var result = av > bv ? 1 : av < bv ? -1 : 0;
+            return taskdashState.sort.dir === 'desc' ? -result : result;
+        });
+        return rows;
+    }
+
+    function taskdashSortValue(value, column) {
+        var parsedDate = taskdashParseDateValue(value);
+        var parsedNumber = taskdashParseNumber(value);
+        if (taskdashIsDateColumn(column) && parsedDate) return parsedDate.year + parsedDate.month + parsedDate.day;
+        if (!isNaN(parsedNumber) && taskdashIsMetricColumn(column)) return parsedNumber;
+        return taskdashCellText(value).toLowerCase();
+    }
+
+    function taskdashCellText(value) {
+        if (value && typeof value === 'object') {
+            if (value.val !== undefined) return String(value.val);
+            if (value.value !== undefined) return String(value.value);
+        }
+        return value === null || value === undefined ? '' : String(value);
+    }
+
+    function taskdashFormatMetric(value) {
+        var number = taskdashParseNumber(value);
+        return isNaN(number) ? taskdashCellText(value) : taskdashFormatNumber(number);
+    }
+
+    function taskdashFormatNumber(value) {
+        var number = Number(value) || 0;
+        return String(Math.round(number * 100) / 100).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    }
+
+    function taskdashFormatDateCell(value) {
+        var key = taskdashMonthKey(value);
+        return key ? taskdashMonthLabel(key) : taskdashCellText(value);
+    }
+
+    function taskdashFormatClock(date) {
+        return String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
+    }
+
+    function taskdashEscape(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', taskdashInit);
+    } else {
+        taskdashInit();
+    }
+})();
+</script>
