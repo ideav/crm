@@ -385,6 +385,10 @@ const repRegex  = /^\[([A-Za-яЁё][A-Za-яЁё0-9 ]*)(\.[A-Za-яЁё][A-Za-я�
     , itemRegex = /^\[([A-Za-яЁё][ A-Za-яЁё0-9\(\)-]*)\]$/
     , exprRegex = /(СУММА)\(\[(.*?)\]:\[(.*?)\]\)/g
     , itemIdRegex = /\[\d+\]/g;
+const DASH_MATRIX_TYPE_ID = '155551'
+    , DASH_MATRIX_DATE_FIELD_ID = '155552'
+    , DASH_MATRIX_LINE_FIELD_ID = '155553'
+    , DASH_MATRIX_COL_FIELD_ID = '155554';
 
 let dashTraceEnabled = false;
 try {
@@ -1233,8 +1237,10 @@ function dashGetModel(json) {
                     .replace(':head:', json[i].itemsHead || json[i].panel)
                     .replace(':period:', json[i].period)
                     .replace(':name:', json[i].panel));
-            dashModelData['fp' + json[i].panelID] = { items: {}, rgs: {} };
+            dashModelData['fp' + json[i].panelID] = { items: {}, rgs: {}, noDates: json[i].NoDates };
         }
+        if (json[i].NoDates !== undefined)
+            dashModelData['fp' + json[i].panelID].noDates = json[i].NoDates;
         // Add item row
         if (json[i].itemID && !document.getElementById(json[i].itemID)) {
             document.getElementById('fp' + json[i].panelID).querySelector('table tbody').insertAdjacentHTML('beforeend',
@@ -1401,54 +1407,6 @@ function dashTodayYMD() {
         + String(d.getDate()).padStart(2, '0');
 }
 
-function dashMetadataAlias(req) {
-    var names = [req.val || ''];
-    var attrs = req.attrs || '';
-    var alias = attrs.match(/:ALIAS=([^:]+):/i);
-    if (alias) names.push(alias[1]);
-    return names.map(dashNormalizeMatrixKey);
-}
-
-function dashFindMetadataType(name) {
-    if (!Array.isArray(dashMetadata)) return null;
-    var key = dashNormalizeMatrixKey(name);
-    for (var i = 0; i < dashMetadata.length; i++) {
-        if (dashNormalizeMatrixKey(dashMetadata[i].val) === key)
-            return dashMetadata[i];
-    }
-    return null;
-}
-
-function dashFindMetadataReq(typeMeta, names) {
-    if (!typeMeta || !Array.isArray(typeMeta.reqs)) return null;
-    var keys = names.map(dashNormalizeMatrixKey);
-    for (var i = 0; i < typeMeta.reqs.length; i++) {
-        var aliases = dashMetadataAlias(typeMeta.reqs[i]);
-        for (var j = 0; j < keys.length; j++)
-            if (aliases.indexOf(keys[j]) !== -1)
-                return typeMeta.reqs[i];
-    }
-    return null;
-}
-
-function dashMatrixMetadata() {
-    var typeMeta = dashFindMetadataType('Значение матрицы');
-    if (!typeMeta) return null;
-    return {
-        typeId: typeMeta.id,
-        lineReq: dashFindMetadataReq(typeMeta, ['line', 'строка']),
-        colReq: dashFindMetadataReq(typeMeta, ['col', 'колонка', 'столбец']),
-        labelReq: dashFindMetadataReq(typeMeta, ['Метка']),
-        dateReq: dashFindMetadataReq(typeMeta, ['date', 'дата'])
-    };
-}
-
-function dashMatrixReqParam(req, value) {
-    if (!req || value === undefined || value === null || value === '') return '';
-    var prefix = req.ref ? 'NEW_' : 't';
-    return '&' + prefix + req.id + '=' + encodeURIComponent(value);
-}
-
 function dashMatrixUpsertCache(td, newVal, recId) {
     if (!recId) return;
     for (var i = 0; i < dashMatrixValues.length; i++) {
@@ -1472,53 +1430,115 @@ function dashMatrixUpsertCache(td, newVal, recId) {
     }
 }
 
-function dashSaveMatrixValue(td, newVal) {
-    var meta = dashMatrixMetadata();
-    if (!meta || !meta.typeId) {
-        td.style.backgroundColor = '';
-        dashSetStatus('Не найдена таблица Значение матрицы');
-        return;
-    }
-
-    var recId = td.dataset.matrixValId || '';
-    if (recId) {
-        if (newVal === '')
-            newApi('POST', '_m_del/' + recId + '?JSON', 'dashMatrixValueSaveDone', '', { td: td, newVal: newVal, recId: recId });
-        else
-            newApi('POST', '_m_save/' + recId + '?JSON', 'dashMatrixValueSaveDone',
-                't' + meta.typeId + '=' + encodeURIComponent(newVal), { td: td, newVal: newVal, recId: recId });
-        return;
-    }
-
-    if (newVal === '') { dashSetStatus(''); td.style.backgroundColor = ''; return; }
-    if (!meta.lineReq || !meta.colReq) {
-        td.style.backgroundColor = '';
-        dashSetStatus('Не найдены поля line/col для Значение матрицы');
-        return;
-    }
-
-    var params = 't' + meta.typeId + '=' + encodeURIComponent(newVal)
-        + dashMatrixReqParam(meta.lineReq, td.dataset.matrixLine || '')
-        + dashMatrixReqParam(meta.colReq, td.dataset.matrixCol || '')
-        + dashMatrixReqParam(meta.labelReq, td.dataset.matrixLabel || '')
-        + dashMatrixReqParam(meta.dateReq, td.dataset.matrixDate || dashTodayYMD());
-    newApi('POST', '_m_new/' + meta.typeId + '?JSON&up=1', 'dashMatrixValueSaveDone', params, { td: td, newVal: newVal, recId: '' });
+function dashMatrixRecordIds(td) {
+    return String((td.dataset && td.dataset.matrixValId) || '')
+        .split(',')
+        .map(function(id) { return id.trim(); })
+        .filter(Boolean);
 }
 
-window.dashMatrixValueSaveDone = function(json, ctx) {
+function dashMatrixUsesDates(td) {
+    var panel = td.closest('.f-panel');
+    var panelData = panel ? dashModelData[panel.id] : null;
+    return !!panelData && panelData.noDates === '';
+}
+
+function dashMatrixSheetInputValue(td, selector) {
+    var sheet = td.closest('.f-sheet');
+    var input = sheet ? sheet.querySelector(selector) : null;
+    return input ? input.value : '';
+}
+
+function dashMatrixSearchUrl(td) {
+    var url = 'object/' + DASH_MATRIX_TYPE_ID + '?JSON_OBJ';
+    if (dashMatrixUsesDates(td)) {
+        var fr = dashMatrixSheetInputValue(td, '.dash-fr-input');
+        var to = dashMatrixSheetInputValue(td, '.dash-to-input');
+        if (fr) url += '&FR_' + DASH_MATRIX_DATE_FIELD_ID + '=' + encodeURIComponent(fr);
+        if (to) url += '&TO_' + DASH_MATRIX_DATE_FIELD_ID + '=' + encodeURIComponent(to);
+    }
+    url += '&F_' + DASH_MATRIX_LINE_FIELD_ID + '=' + encodeURIComponent(td.dataset.matrixLine || '');
+    url += '&F_' + DASH_MATRIX_COL_FIELD_ID + '=' + encodeURIComponent(td.dataset.matrixCol || '');
+    return url;
+}
+
+function dashMatrixListUrl(url) {
+    return String(url || '')
+        .replace('?JSON_OBJ&', '?')
+        .replace('&JSON_OBJ&', '&')
+        .replace('?JSON_OBJ', '')
+        .replace('&JSON_OBJ', '')
+        .replace(/&&/g, '&')
+        .replace(/\?&/, '?')
+        .replace(/[?&]$/, '');
+}
+
+function dashMatrixCreateParams(td, newVal) {
+    var params = 't' + DASH_MATRIX_TYPE_ID + '=' + encodeURIComponent(newVal);
+    if (dashMatrixUsesDates(td))
+        params += '&t' + DASH_MATRIX_DATE_FIELD_ID + '=' + encodeURIComponent(dashTodayYMD());
+    params += '&t' + DASH_MATRIX_LINE_FIELD_ID + '=' + encodeURIComponent(td.dataset.matrixLine || '');
+    params += '&t' + DASH_MATRIX_COL_FIELD_ID + '=' + encodeURIComponent(td.dataset.matrixCol || '');
+    return params;
+}
+
+function dashSaveMatrixExisting(recId, td, newVal) {
+    if (newVal === '')
+        newApi('POST', '_m_del/' + recId + '?JSON', 'dashMatrixValueSaveDone', '', { td: td, newVal: newVal, recId: recId });
+    else
+        newApi('POST', '_m_save/' + recId + '?JSON', 'dashMatrixValueSaveDone',
+            't' + DASH_MATRIX_TYPE_ID + '=' + encodeURIComponent(newVal), { td: td, newVal: newVal, recId: recId });
+}
+
+function dashSaveMatrixValue(td, newVal) {
+    var ids = dashMatrixRecordIds(td);
+    if (ids.length === 1) {
+        dashSaveMatrixExisting(ids[0], td, newVal);
+        return;
+    }
+
+    var searchUrl = dashMatrixSearchUrl(td);
+    newApi('GET', searchUrl, 'dashMatrixValueSearchDone', '', { td: td, newVal: newVal, searchUrl: searchUrl });
+}
+
+function dashMatrixValueSearchDone(json, ctx) {
+    if (!Array.isArray(json)) json = [];
+    var td = ctx.td, newVal = ctx.newVal;
+
+    if (json.length === 0) {
+        if (newVal === '') {
+            dashSetStatus('');
+            td.style.backgroundColor = '';
+            return;
+        }
+        newApi('POST', '_m_new/' + DASH_MATRIX_TYPE_ID + '?JSON&up=1', 'dashMatrixValueSaveDone',
+            dashMatrixCreateParams(td, newVal), { td: td, newVal: newVal, recId: '' });
+    } else if (json.length === 1) {
+        dashSaveMatrixExisting(json[0].i, td, newVal);
+    } else {
+        td.style.backgroundColor = '';
+        dashShowMultivalModal(json, dashMatrixListUrl(ctx.searchUrl || dashMatrixSearchUrl(td)), td, newVal, {
+            saveCallback: 'dashMatrixValueSaveDone',
+            saveParam: 't' + DASH_MATRIX_TYPE_ID
+        });
+    }
+}
+window.dashMatrixValueSearchDone = dashMatrixValueSearchDone;
+
+function dashMatrixValueSaveDone(json, ctx) {
     if (!json || json.error) {
         ctx.td.style.backgroundColor = '';
         dashSetStatus('Ошибка сохранения');
         return;
     }
-    var recId = ctx.recId || json.id || '';
+    var recId = ctx.recId || json.id || json.obj || '';
     ctx.td.textContent = ctx.newVal;
     ctx.td.style.backgroundColor = '';
     ctx.td.setAttribute('ready', '1');
     if (ctx.newVal === '')
         delete ctx.td.dataset.matrixValId;
     else if (recId)
-        ctx.td.dataset.matrixValId = recId;
+        ctx.td.dataset.matrixValId = String(recId);
     dashMatrixUpsertCache(ctx.td, ctx.newVal, recId);
     dashSetStatus('Сохранено');
     ctx.td.closest('tr').querySelectorAll('td.f-rg-formula-cell').forEach(function(fc) {
@@ -1528,7 +1548,8 @@ window.dashMatrixValueSaveDone = function(json, ctx) {
     });
     dashCalcCells();
     dashCalcRGFormulas();
-};
+}
+window.dashMatrixValueSaveDone = dashMatrixValueSaveDone;
 
 // Get the item text for t1042: valueItemID from data-value-item-id, or item-name from row
 function dashCellItemRef(td) {
@@ -1577,9 +1598,7 @@ function dashSaveValue(td, newVal) {
 
 function dashSaveCell(td, newVal) {
     if (td.dataset.src === 'matrix') {
-        dashLoadMetadata(function() {
-            dashSaveMatrixValue(td, newVal);
-        });
+        dashSaveMatrixValue(td, newVal);
         return;
     }
     dashSaveValue(td, newVal);
@@ -1611,7 +1630,7 @@ window.dashValueSearchDone = function(json, ctx) {
             newApi('POST', '_m_save/' + recId + '?JSON', 'dashValueSaveDone', params2, { td: td, newVal: newVal });
         }
     } else {
-        // Multiple records — show modal with first 5, link to full list
+        // Multiple records — show modal with first 10, link to full list
         dashShowMultivalModal(json, dashValueSearchUrl(td).replace('JSON_OBJ', '').replace(/&&/g, '&'), td, newVal);
     }
 };
@@ -1762,7 +1781,7 @@ var dashMultivalCtx = null;
 function dashMultivalRenderList(records) {
     var list = document.getElementById('dash-multival-list');
     list.innerHTML = '';
-    records.slice(0, 5).forEach(function(rec) {
+    records.slice(0, 10).forEach(function(rec) {
         var li = document.createElement('li');
         var span = document.createElement('span');
         span.textContent = rec.r ? rec.r.join(' | ') : String(rec.i);
@@ -1777,8 +1796,8 @@ function dashMultivalRenderList(records) {
     });
 }
 
-function dashShowMultivalModal(records, baseUrl, td, newVal) {
-    dashMultivalCtx = { records: records, baseUrl: baseUrl, td: td, newVal: newVal };
+function dashShowMultivalModal(records, baseUrl, td, newVal, options) {
+    dashMultivalCtx = { records: records, baseUrl: baseUrl, td: td, newVal: newVal, options: options || {} };
     document.getElementById('dash-multival-subtitle').textContent = 'Не могу однозначно сохранить ' + newVal;
     dashMultivalRenderList(records);
     var link = document.getElementById('dash-multival-link');
@@ -1798,6 +1817,8 @@ window.dashMultivalDelDone = function(json, ctx) {
         dashSetStatus('Ошибка удаления');
         return;
     }
+    if (dashMultivalCtx.options && dashMultivalCtx.options.saveCallback === 'dashMatrixValueSaveDone')
+        dashMatrixUpsertCache(dashMultivalCtx.td, '', ctx.recId);
     var remaining = dashMultivalCtx.records.filter(function(r) { return String(r.i) !== String(ctx.recId); });
     dashMultivalCtx.records = remaining;
     if (remaining.length === 1) {
@@ -1805,12 +1826,18 @@ window.dashMultivalDelDone = function(json, ctx) {
         var recId = remaining[0].i;
         var newVal = dashMultivalCtx.newVal;
         var td = dashMultivalCtx.td;
+        var options = dashMultivalCtx.options || {};
+        var saveCallback = options.saveCallback || 'dashValueSaveDone';
+        var saveParam = options.saveParam || 't1010';
+        var saveCtx = { td: td, newVal: newVal };
+        if (saveCallback === 'dashMatrixValueSaveDone')
+            saveCtx.recId = recId;
         document.getElementById('dash-multival-modal').classList.remove('open');
         dashMultivalCtx = null;
         if (newVal === '') {
-            newApi('POST', '_m_del/' + recId + '?JSON', 'dashValueSaveDone', '', { td: td, newVal: newVal });
+            newApi('POST', '_m_del/' + recId + '?JSON', saveCallback, '', saveCtx);
         } else {
-            newApi('POST', '_m_save/' + recId + '?JSON', 'dashValueSaveDone', 't1010=' + encodeURIComponent(newVal), { td: td, newVal: newVal });
+            newApi('POST', '_m_save/' + recId + '?JSON', saveCallback, saveParam + '=' + encodeURIComponent(newVal), saveCtx);
         }
     } else {
         dashMultivalRenderList(remaining);
@@ -1844,7 +1871,12 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
 
     var src = td.dataset.src || '';
 
-    if (src === 'rg' || src === 'value' || src === 'matrix') {
+    if (src === 'matrix') {
+        dashStartInlineEdit(td);
+        return;
+    }
+
+    if (src === 'rg' || src === 'value') {
         dashLoadMetadata(function() {
             dashStartInlineEdit(td);
         });
