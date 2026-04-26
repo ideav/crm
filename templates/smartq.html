@@ -234,6 +234,17 @@ var conf={order:0,page:1,total:undefined,totalsOn:undefined,columns:{},ids:{},ar
         return container===window?0:container.getBoundingClientRect().top;
     }
 
+    function getSmartqContainerPaddingTop(container){
+        if(container===window)
+            return 0;
+        var paddingTop=parseFloat(window.getComputedStyle(container).paddingTop);
+        return isNaN(paddingTop)?0:paddingTop;
+    }
+
+    function roundSmartqStickyTop(top){
+        return top<0?Math.floor(top):Math.ceil(top);
+    }
+
     function getSmartqStickyTopFor(containerTop){
         var top=0;
         document.querySelectorAll('.navbar').forEach(function(navbar){
@@ -250,7 +261,9 @@ var conf={order:0,page:1,total:undefined,totalsOn:undefined,columns:{},ids:{},ar
     function updateSmartqStickyTop(){
         document.querySelectorAll('.sq-table').forEach(function(table){
             var container=getSmartqStickyScrollContainer(table);
-            var top=getSmartqStickyTopFor(getSmartqContainerTop(container));
+            var containerTop=getSmartqContainerTop(container);
+            var top=getSmartqStickyTopFor(containerTop)-getSmartqContainerPaddingTop(container);
+            top=roundSmartqStickyTop(top);
             table.style.setProperty('--smartq-sticky-top',top+'px');
         });
     }
