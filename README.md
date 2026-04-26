@@ -67,9 +67,9 @@ See [ASSETS_DEPLOYMENT.md](ASSETS_DEPLOYMENT.md) for details on asset structure 
   - `showDeleteConfirmModal(message)` — for delete confirmations
   - `showErrorModal(message)` — for errors (in `MainAppController`)
   - `showWarningModal(message)` — for warnings (in `IntegTable`)
-- Template variables must have spaces: `{ _global_.version }`, not `{_global_.version}`
+- Template variables must not have spaces: `{_global_.version}`, not `{ _global_.version }`
 - Styles go in `.css` files, scripts in `.js` files — no inline styles or scripts in templates
-- Asset URLs must include version for cache busting: `href="/css/file.css?{ _global_.version }"`
+- Asset URLs must include version for cache busting: `href="/css/file.css?{_global_.version}"`
 
 ## Related Documentation
 

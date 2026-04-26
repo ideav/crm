@@ -16,7 +16,7 @@ const queries = [
 const source = [
     "fetch('/demo/object/42?JSON_OBJ')",
     "fetch('/demo/report/5230?JSON_KV')",
-    "data-api-url=\"/{ _global_.z }/metadata/269\"",
+    "data-api-url=\"/{_global_.z}/metadata/269\"",
     "fetch('/demo/report/Матрица%20показателей?JSON')",
     "fetch('/demo/object/155551/?JSON_OBJ&F_155553=NPS')",
     "fetch('/demo/report/5230?JSON')"
