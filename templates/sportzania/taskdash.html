@@ -762,6 +762,17 @@
         return result;
     }
 
+    function taskdashIsServiceColumn(column) {
+        var name = String(column && column.name || '').trim().toLowerCase();
+        return name === 'статусid' || name === 'статус задачиid' || name === 'статус задачи id';
+    }
+
+    function taskdashGetTableColumns(columns) {
+        return (columns || []).filter(function(column) {
+            return !taskdashIsServiceColumn(column);
+        });
+    }
+
     function taskdashCreateDefaultFilters(year, columns) {
         var filters = {};
         (columns || []).forEach(function(column) {
@@ -1286,7 +1297,7 @@
 
     function taskdashCreateHeaderRow() {
         var tr = document.createElement('tr');
-        taskdashState.columns.forEach(function(column) {
+        taskdashGetTableColumns(taskdashState.columns).forEach(function(column) {
             var th = document.createElement('th');
             var btn = document.createElement('button');
             var icon = document.createElement('i');
@@ -1307,7 +1318,7 @@
 
     function taskdashCreateTableRow(row) {
         var tr = document.createElement('tr');
-        taskdashState.columns.forEach(function(column) {
+        taskdashGetTableColumns(taskdashState.columns).forEach(function(column) {
             var td = document.createElement('td');
             var raw = row[column.name];
             if (taskdashIsMetricColumn(column)) {
