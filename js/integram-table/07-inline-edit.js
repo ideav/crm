@@ -1649,7 +1649,7 @@
                     // Parse IDs from the left side of ':'
                     const ids = rawValue.substring(0, rawColonIndex).split(',').map(v => v.trim()).filter(v => v.length > 0);
                     // Issue #1786: Extract labels from the right side of ':' as fallback when ID is not in loaded options
-                    const storedLabels = rawValue.substring(rawColonIndex + 1).split(',').map(v => v.trim());
+                    const storedLabels = rawValue.substring(rawColonIndex + 1).split(',').map(v => this.decodeHtmlEntities(v.trim()));
                     for (let i = 0; i < ids.length; i++) {
                         const id = ids[i];
                         const match = options.find(([optId]) => String(optId) === id);
@@ -1664,7 +1664,7 @@
                 } else {
                     // Fallback: parse display names from currentValue and match against options by text
                     const currentTexts = currentValue
-                        ? currentValue.split(',').map(v => v.trim()).filter(v => v.length > 0)
+                        ? currentValue.split(',').map(v => this.decodeHtmlEntities(v.trim())).filter(v => v.length > 0)
                         : [];
                     for (const text of currentTexts) {
                         const match = options.find(([id, t]) => t === text);
@@ -1672,7 +1672,7 @@
                             selectedItems.push({ id: match[0], text: match[1] });
                         } else if (text) {
                             // Unknown text – keep it with empty id so user can see it
-                            selectedItems.push({ id: '', text });
+                            selectedItems.push({ id: '', text: this.decodeHtmlEntities(text) });
                         }
                     }
                 }
@@ -1682,18 +1682,21 @@
                     const selected = this.currentEditingCell.selectedItems;
                     const selectedIds = new Set(selected.map(s => s.id).filter(id => id));
 
-                    const tagsHtml = selected.map(({ id, text }) => `
-                        <span class="multi-ref-tag" data-id="${this.escapeHtml(id)}" data-text="${this.escapeHtml(text)}">
-                            ${this.escapeHtml(text)}
-                            <button class="multi-ref-tag-remove" type="button" title="Удалить" aria-label="Удалить ${this.escapeHtml(text)}"><i class="pi pi-times"></i></button>
+                    const tagsHtml = selected.map(({ id, text }) => {
+                        const decodedText = this.decodeHtmlEntities(text);
+                        return `
+                        <span class="multi-ref-tag" data-id="${this.escapeHtml(id)}" data-text="${this.escapeHtml(decodedText)}">
+                            ${this.escapeHtml(decodedText)}
+                            <button class="multi-ref-tag-remove" type="button" title="Удалить" aria-label="Удалить ${this.escapeHtml(decodedText)}"><i class="pi pi-times"></i></button>
                         </span>
-                    `).join('');
+                    `;
+                    }).join('');
 
                     const availableOptions = (this.currentEditingCell.referenceOptions || [])
                         .filter(([id]) => !selectedIds.has(id));
                     const optionsHtml = availableOptions.length > 0
                         ? availableOptions.map(([id, text]) => {
-                            const escapedText = this.escapeHtml(text);
+                            const escapedText = this.escapeHtml(this.decodeHtmlEntities(text));
                             return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${escapedText}" tabindex="0">${escapedText}</div>`;
                         }).join('')
                         : '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
@@ -1782,7 +1785,7 @@
                                     const serverFiltered = serverOptions.filter(([id]) => !currentSelected.has(id));
                                     dropdown.innerHTML = serverFiltered.length > 0
                                         ? serverFiltered.map(([id, text]) => {
-                                            const et = this.escapeHtml(text);
+                                            const et = this.escapeHtml(this.decodeHtmlEntities(text));
                                             return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
                                         }).join('')
                                         : '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
@@ -1792,7 +1795,7 @@
                             } else {
                                 dropdown.innerHTML = filtered.length > 0
                                     ? filtered.map(([id, text]) => {
-                                        const et = this.escapeHtml(text);
+                                        const et = this.escapeHtml(this.decodeHtmlEntities(text));
                                         return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
                                     }).join('')
                                     : '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
@@ -1966,7 +1969,8 @@
             }
 
             return filteredOptions.map(([id, text]) => {
-                const escapedText = this.escapeHtml(text);
+                const decodedText = this.decodeHtmlEntities(text);
+                const escapedText = this.escapeHtml(decodedText);
                 return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${escapedText}" tabindex="0">${escapedText}</div>`;
             }).join('');
         }
@@ -2139,6 +2143,7 @@
 
             const typeName = this.getMetadataName(metadata);
             const title = `Создание: ${typeName}`;
+            const decodedInitialValue = this.decodeHtmlEntities(initialValue);
 
             // Build attributes form HTML (similar to renderAttributesForm but simplified for create mode)
             const reqs = metadata.reqs || [];
@@ -2159,30 +2164,30 @@
             // Build main field HTML based on its type
             let mainFieldHtml = '';
             if (mainFieldType === 'BOOLEAN') {
-                const isChecked = initialValue ? 'checked' : '';
+                const isChecked = decodedInitialValue ? 'checked' : '';
                 mainFieldHtml = `<input type="checkbox" id="field-main-ref-create" name="main" value="1" ${ isChecked }>`;
             } else if (mainFieldType === 'DATE') {
-                const dateValueHtml5 = initialValue ? this.formatDateForHtml5(initialValue, false) : currentDateHtml5;
-                const dateValueDisplay = initialValue ? this.formatDateForInput(initialValue, false) : currentDateDisplay;
+                const dateValueHtml5 = decodedInitialValue ? this.formatDateForHtml5(decodedInitialValue, false) : currentDateHtml5;
+                const dateValueDisplay = decodedInitialValue ? this.formatDateForInput(decodedInitialValue, false) : currentDateDisplay;
                 mainFieldHtml = `<input type="date" class="form-control date-picker" id="field-main-ref-create-picker" required data-target="field-main-ref-create" value="${ this.escapeHtml(dateValueHtml5) }">`;
                 mainFieldHtml += `<input type="hidden" id="field-main-ref-create" name="main" value="${ this.escapeHtml(dateValueDisplay) }">`;
             } else if (mainFieldType === 'DATETIME') {
-                const dateTimeValueHtml5 = initialValue ? this.formatDateForHtml5(initialValue, true) : currentDateTimeHtml5;
-                const dateTimeValueDisplay = initialValue ? this.formatDateForInput(initialValue, true) : currentDateTimeDisplay;
+                const dateTimeValueHtml5 = decodedInitialValue ? this.formatDateForHtml5(decodedInitialValue, true) : currentDateTimeHtml5;
+                const dateTimeValueDisplay = decodedInitialValue ? this.formatDateForInput(decodedInitialValue, true) : currentDateTimeDisplay;
                 mainFieldHtml = `<input type="datetime-local" class="form-control datetime-picker" id="field-main-ref-create-picker" required data-target="field-main-ref-create" value="${ this.escapeHtml(dateTimeValueHtml5) }">`;
                 mainFieldHtml += `<input type="hidden" id="field-main-ref-create" name="main" value="${ this.escapeHtml(dateTimeValueDisplay) }">`;
             } else if (mainFieldType === 'NUMBER') {
-                mainFieldHtml = `<input type="number" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required>`;
+                mainFieldHtml = `<input type="number" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(decodedInitialValue) }" required>`;
             } else if (mainFieldType === 'SIGNED') {
-                mainFieldHtml = `<input type="number" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required step="0.01">`;
+                mainFieldHtml = `<input type="number" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(decodedInitialValue) }" required step="0.01">`;
             } else if (mainFieldType === 'MEMO') {
-                mainFieldHtml = `<textarea class="form-control memo-field" id="field-main-ref-create" name="main" rows="4" required>${ this.escapeHtml(initialValue) }</textarea>`;
+                mainFieldHtml = `<textarea class="form-control memo-field" id="field-main-ref-create" name="main" rows="4" required>${ this.escapeHtml(decodedInitialValue) }</textarea>`;
             } else if (mainFieldType === 'PWD') {
                 // Password field - render as type=password input (issue #1441)
-                mainFieldHtml = `<input type="password" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required autocomplete="new-password">`;
+                mainFieldHtml = `<input type="password" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(decodedInitialValue) }" required autocomplete="new-password">`;
             } else {
                 // Default: text input (SHORT, CHARS, etc.)
-                mainFieldHtml = `<input type="text" class="form-control" id="field-main-ref-create" name="main" value="${this.escapeHtml(initialValue)}" required>`;
+                mainFieldHtml = `<input type="text" class="form-control" id="field-main-ref-create" name="main" value="${this.escapeHtml(decodedInitialValue)}" required>`;
             }
 
             // For DATE/DATETIME, the visible/interactive element is the picker input (id="field-main-ref-create-picker"),
@@ -2406,7 +2411,7 @@
                 // According to the issue: "её id приходит в ключе obj JSON в ответ на запрос _m_new"
                 const createdId = result.obj || result.id || result.i;
                 // Use the value from the response (result.val) if available, otherwise use the input value
-                const createdValue = result.val || mainValue;
+                const createdValue = this.decodeHtmlEntities(result.val || mainValue);
 
 
                 // Close the create form modal

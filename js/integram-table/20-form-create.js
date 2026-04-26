@@ -616,7 +616,7 @@
                         }
                         const currentOption = options.find(([id]) => id === hiddenInput.value);
                         if (currentOption) {
-                            searchInput.value = currentOption[1];
+                            searchInput.value = this.decodeHtmlEntities(currentOption[1]);
                         }
                     }
 
@@ -1053,7 +1053,7 @@
                     // ids:values format — resolve each ID against fetched options
                     const ids = currentRawValue.substring(0, rawColonIndex).split(',').map(v => v.trim()).filter(v => v.length > 0);
                     // Issue #1786: Extract labels from the right side of ':' as fallback when ID is not in loaded options
-                    const storedLabels = currentRawValue.substring(rawColonIndex + 1).split(',').map(v => v.trim());
+                    const storedLabels = currentRawValue.substring(rawColonIndex + 1).split(',').map(v => this.decodeHtmlEntities(v.trim()));
                     for (let i = 0; i < ids.length; i++) {
                         const id = ids[i];
                         const match = options.find(([optId]) => String(optId) === id);
@@ -1068,14 +1068,14 @@
                 } else {
                     // Fallback: parse display names and match by text
                     const currentTexts = currentRawValue
-                        ? currentRawValue.split(',').map(v => v.trim()).filter(v => v.length > 0)
+                        ? currentRawValue.split(',').map(v => this.decodeHtmlEntities(v.trim())).filter(v => v.length > 0)
                         : [];
                     for (const text of currentTexts) {
                         const match = options.find(([id, t]) => t === text);
                         if (match) {
                             selectedItems.push({ id: match[0], text: match[1] });
                         } else if (text) {
-                            selectedItems.push({ id: '', text });
+                            selectedItems.push({ id: '', text: this.decodeHtmlEntities(text) });
                         }
                     }
                 }
@@ -1091,12 +1091,15 @@
                     if (selected.length === 0) {
                         tagsContainer.innerHTML = '<span class="multi-ref-tags-placeholder">Нет выбранных значений</span>';
                     } else {
-                        tagsContainer.innerHTML = selected.map(({ id, text }) => `
-                            <span class="multi-ref-tag" data-id="${this.escapeHtml(id)}" data-text="${this.escapeHtml(text)}">
-                                ${this.escapeHtml(text)}
-                                <button class="multi-ref-tag-remove" type="button" title="Удалить" aria-label="Удалить ${this.escapeHtml(text)}"><i class="pi pi-times"></i></button>
+                        tagsContainer.innerHTML = selected.map(({ id, text }) => {
+                            const decodedText = this.decodeHtmlEntities(text);
+                            return `
+                            <span class="multi-ref-tag" data-id="${this.escapeHtml(id)}" data-text="${this.escapeHtml(decodedText)}">
+                                ${this.escapeHtml(decodedText)}
+                                <button class="multi-ref-tag-remove" type="button" title="Удалить" aria-label="Удалить ${this.escapeHtml(decodedText)}"><i class="pi pi-times"></i></button>
                             </span>
-                        `).join('');
+                        `;
+                        }).join('');
                     }
                 };
 
@@ -1109,7 +1112,7 @@
                         dropdown.innerHTML = '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
                     } else {
                         dropdown.innerHTML = filtered.map(([id, text]) => {
-                            const et = this.escapeHtml(text);
+                            const et = this.escapeHtml(this.decodeHtmlEntities(text));
                             return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
                         }).join('');
                     }
@@ -1422,12 +1425,12 @@
             }
 
             options.forEach(([id, text]) => {
-                const escapedText = this.escapeHtml(text);
+                const decodedText = this.decodeHtmlEntities(text);
                 const optionDiv = document.createElement('div');
                 optionDiv.className = 'inline-editor-reference-option';
-                optionDiv.textContent = text;
+                optionDiv.textContent = decodedText;
                 optionDiv.dataset.id = id;
-                optionDiv.dataset.text = text;
+                optionDiv.dataset.text = decodedText;
                 optionDiv.tabIndex = 0;
 
                 // Highlight if selected
@@ -1486,6 +1489,7 @@
 
             const typeName = this.getMetadataName(metadata);
             const title = `Создание: ${typeName}`;
+            const decodedInitialValue = this.decodeHtmlEntities(initialValue);
 
             const reqs = metadata.reqs || [];
             const regularFields = reqs.filter(req => !req.arr_id);
@@ -1505,27 +1509,27 @@
             // Build main field HTML based on its type
             let mainFieldHtml = '';
             if (mainFieldType === 'BOOLEAN') {
-                const isChecked = initialValue ? 'checked' : '';
+                const isChecked = decodedInitialValue ? 'checked' : '';
                 mainFieldHtml = `<input type="checkbox" id="field-main-form-ref-create" name="main" value="1" ${ isChecked }>`;
             } else if (mainFieldType === 'DATE') {
-                const dateValueHtml5 = initialValue ? this.formatDateForHtml5(initialValue, false) : currentDateHtml5;
-                const dateValueDisplay = initialValue ? this.formatDateForInput(initialValue, false) : currentDateDisplay;
+                const dateValueHtml5 = decodedInitialValue ? this.formatDateForHtml5(decodedInitialValue, false) : currentDateHtml5;
+                const dateValueDisplay = decodedInitialValue ? this.formatDateForInput(decodedInitialValue, false) : currentDateDisplay;
                 mainFieldHtml = `<input type="date" class="form-control date-picker" id="field-main-form-ref-create-picker" required data-target="field-main-form-ref-create" value="${ this.escapeHtml(dateValueHtml5) }">`;
                 mainFieldHtml += `<input type="hidden" id="field-main-form-ref-create" name="main" value="${ this.escapeHtml(dateValueDisplay) }">`;
             } else if (mainFieldType === 'DATETIME') {
-                const dateTimeValueHtml5 = initialValue ? this.formatDateForHtml5(initialValue, true) : currentDateTimeHtml5;
-                const dateTimeValueDisplay = initialValue ? this.formatDateForInput(initialValue, true) : currentDateTimeDisplay;
+                const dateTimeValueHtml5 = decodedInitialValue ? this.formatDateForHtml5(decodedInitialValue, true) : currentDateTimeHtml5;
+                const dateTimeValueDisplay = decodedInitialValue ? this.formatDateForInput(decodedInitialValue, true) : currentDateTimeDisplay;
                 mainFieldHtml = `<input type="datetime-local" class="form-control datetime-picker" id="field-main-form-ref-create-picker" required data-target="field-main-form-ref-create" value="${ this.escapeHtml(dateTimeValueHtml5) }">`;
                 mainFieldHtml += `<input type="hidden" id="field-main-form-ref-create" name="main" value="${ this.escapeHtml(dateTimeValueDisplay) }">`;
             } else if (mainFieldType === 'NUMBER') {
-                mainFieldHtml = `<input type="number" class="form-control" id="field-main-form-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required>`;
+                mainFieldHtml = `<input type="number" class="form-control" id="field-main-form-ref-create" name="main" value="${ this.escapeHtml(decodedInitialValue) }" required>`;
             } else if (mainFieldType === 'SIGNED') {
-                mainFieldHtml = `<input type="number" class="form-control" id="field-main-form-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required step="0.01">`;
+                mainFieldHtml = `<input type="number" class="form-control" id="field-main-form-ref-create" name="main" value="${ this.escapeHtml(decodedInitialValue) }" required step="0.01">`;
             } else if (mainFieldType === 'MEMO') {
-                mainFieldHtml = `<textarea class="form-control memo-field" id="field-main-form-ref-create" name="main" rows="4" required>${ this.escapeHtml(initialValue) }</textarea>`;
+                mainFieldHtml = `<textarea class="form-control memo-field" id="field-main-form-ref-create" name="main" rows="4" required>${ this.escapeHtml(decodedInitialValue) }</textarea>`;
             } else {
                 // Default: text input (SHORT, CHARS, etc.)
-                mainFieldHtml = `<input type="text" class="form-control" id="field-main-form-ref-create" name="main" value="${this.escapeHtml(initialValue)}" required>`;
+                mainFieldHtml = `<input type="text" class="form-control" id="field-main-form-ref-create" name="main" value="${this.escapeHtml(decodedInitialValue)}" required>`;
             }
 
             let attributesHtml = `
@@ -1719,7 +1723,7 @@
                 if (result.warning) this.showToast(result.warning, 'warning');
 
                 const createdId = result.obj || result.id || result.i;
-                const createdValue = result.val || mainValue;
+                const createdValue = this.decodeHtmlEntities(result.val || mainValue);
 
 
                 // Close the create form modal
