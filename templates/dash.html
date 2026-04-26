@@ -1490,7 +1490,7 @@ function dashSaveMatrixExisting(recId, td, newVal) {
             't' + DASH_MATRIX_TYPE_ID + '=' + encodeURIComponent(newVal), { td: td, newVal: newVal, recId: recId });
 }
 
-function dashSaveMatrixValue(td, newVal) {
+function dashSaveMatrixValue(td, newVal, originalVal) {
     var ids = dashMatrixRecordIds(td);
     if (ids.length === 1) {
         dashSaveMatrixExisting(ids[0], td, newVal);
@@ -1498,7 +1498,7 @@ function dashSaveMatrixValue(td, newVal) {
     }
 
     var searchUrl = dashMatrixSearchUrl(td);
-    newApi('GET', searchUrl, 'dashMatrixValueSearchDone', '', { td: td, newVal: newVal, searchUrl: searchUrl });
+    newApi('GET', searchUrl, 'dashMatrixValueSearchDone', '', { td: td, newVal: newVal, originalVal: originalVal, searchUrl: searchUrl });
 }
 
 function dashMatrixValueSearchDone(json, ctx) {
@@ -1520,7 +1520,7 @@ function dashMatrixValueSearchDone(json, ctx) {
         dashShowMultivalModal(json, dashMatrixListUrl(ctx.searchUrl || dashMatrixSearchUrl(td)), td, newVal, {
             saveCallback: 'dashMatrixValueSaveDone',
             saveParam: 't' + DASH_MATRIX_TYPE_ID
-        });
+        }, ctx.originalVal);
     }
 }
 window.dashMatrixValueSearchDone = dashMatrixValueSearchDone;
@@ -1586,22 +1586,22 @@ function dashValueSearchUrl(td) {
 }
 
 // Save or delete a Значение: search first, then create/update/delete
-function dashSaveValue(td, newVal) {
+function dashSaveValue(td, newVal, originalVal) {
     var searchUrl = dashValueSearchUrl(td);
     var itemRef = dashCellItemRef(td);
     var fr = dashCellDateFr(td);
     var to = dashCellDateTo(td);
     var rgHead = dashCellRgHead(td);
 
-    newApi('GET', searchUrl, 'dashValueSearchDone', '', { td: td, newVal: newVal, itemRef: itemRef, fr: fr, to: to, rgHead: rgHead });
+    newApi('GET', searchUrl, 'dashValueSearchDone', '', { td: td, newVal: newVal, originalVal: originalVal, itemRef: itemRef, fr: fr, to: to, rgHead: rgHead });
 }
 
-function dashSaveCell(td, newVal) {
+function dashSaveCell(td, newVal, originalVal) {
     if (td.dataset.src === 'matrix') {
-        dashSaveMatrixValue(td, newVal);
+        dashSaveMatrixValue(td, newVal, originalVal);
         return;
     }
-    dashSaveValue(td, newVal);
+    dashSaveValue(td, newVal, originalVal);
 }
 
 window.dashValueSearchDone = function(json, ctx) {
@@ -1631,7 +1631,7 @@ window.dashValueSearchDone = function(json, ctx) {
         }
     } else {
         // Multiple records — show modal with first 10, link to full list
-        dashShowMultivalModal(json, dashValueSearchUrl(td).replace('JSON_OBJ', '').replace(/&&/g, '&'), td, newVal);
+        dashShowMultivalModal(json, dashValueSearchUrl(td).replace('JSON_OBJ', '').replace(/&&/g, '&'), td, newVal, {}, ctx.originalVal);
     }
 };
 
@@ -1683,7 +1683,7 @@ function dashStartInlineEdit(td) {
         if (newVal !== currentVal) {
             td.style.backgroundColor = '#ffe0e0';
             dashSetStatus('Сохранение...');
-            dashSaveCell(td, newVal);
+            dashSaveCell(td, newVal, currentVal);
         }
     }
 
@@ -1796,8 +1796,8 @@ function dashMultivalRenderList(records) {
     });
 }
 
-function dashShowMultivalModal(records, baseUrl, td, newVal, options) {
-    dashMultivalCtx = { records: records, baseUrl: baseUrl, td: td, newVal: newVal, options: options || {} };
+function dashShowMultivalModal(records, baseUrl, td, newVal, options, originalVal) {
+    dashMultivalCtx = { records: records, baseUrl: baseUrl, td: td, newVal: newVal, options: options || {}, originalVal: originalVal };
     document.getElementById('dash-multival-subtitle').textContent = 'Не могу однозначно сохранить ' + newVal;
     dashMultivalRenderList(records);
     var link = document.getElementById('dash-multival-link');
@@ -1846,6 +1846,14 @@ window.dashMultivalDelDone = function(json, ctx) {
 
 document.getElementById('dash-multival-close').addEventListener('click', function() {
     document.getElementById('dash-multival-modal').classList.remove('open');
+    if (dashMultivalCtx) {
+        var td = dashMultivalCtx.td;
+        if (td && dashMultivalCtx.originalVal !== undefined) {
+            td.textContent = dashMultivalCtx.originalVal;
+            td.style.backgroundColor = '';
+        }
+        dashMultivalCtx = null;
+    }
 });
 
 // Readonly tooltip
