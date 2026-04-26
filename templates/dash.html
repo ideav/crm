@@ -448,7 +448,7 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
         + ':name:'
     , cellTpl     = '<td range=":from:-:to:" ready=":ready:" class="f-cell :classes:" align="right" title=":title:" data-src=":src:" data-item-id=":item-id:":extra:>:val:';
 
-let dashModelData = {}, dashPeriodData = {}, dashPeriods = {}, dashValues = {}, dashFormulas = {}, dashItems = {}, dashReports = {}, dashAjaxes = 0;
+let dashModelData = {}, dashPeriodData = {}, dashPeriods = {}, dashValues = {}, dashFormulas = {}, dashItems = {}, dashReports = {}, dashReportNames = {}, dashReportKeys = {}, dashAjaxes = 0;
 let dashValueItemIds = {}; // item name -> valueItemID from ЗначенияЗаПериод
 let dashMatrixValues = [], dashMatrixValuesRequested = false, dashRgSourceIds = {};
 
@@ -543,6 +543,21 @@ function dashHasRows(json) {
     if (Array.isArray(json)) return json.length > 0;
     if (typeof json === 'object') return Object.keys(json).length > 0;
     return false;
+}
+
+function dashNormalizePanelFilter(panelFilter) {
+    return String(panelFilter || '').trim().replace(/^[?&]+/, '');
+}
+
+function dashReportKey(rep, panelFilter) {
+    return JSON.stringify([String(rep || ''), dashNormalizePanelFilter(panelFilter)]);
+}
+
+function dashReportUrl(rep, fr, to, panelFilter) {
+    var url = 'report/' + rep + '?JSON_KV&FR_Date=' + fr + '&TO_Date=' + to
+        , filter = dashNormalizePanelFilter(panelFilter);
+    if (filter) url += '&' + filter;
+    return url;
 }
 
 function dashFetchMatrixValues() {
@@ -777,20 +792,29 @@ function dashCalcRGFormulas() {
 }
 
 function dashGetRepVals() {
-    var rep, i, j, repField, date;
-    for (rep in dashReports) {
-        for (i in dashReports[rep][0]) { date = i; break; }
+    var reportKey, reportRows, rep, i, j, repField, date;
+    for (reportKey in dashReports) {
+        reportRows = dashReports[reportKey];
+        if (!reportRows || !reportRows[0]) continue;
+        date = '';
+        for (i in reportRows[0]) { date = i; break; }
+        rep = dashReportNames[reportKey] || reportKey;
         for (i in dashFormulas) {
+            if (dashReportKeys[i]) {
+                if (dashReportKeys[i] !== reportKey) continue;
+            } else if (dashFormulas[i].indexOf('[' + rep + '.') !== 0) {
+                continue;
+            }
             if (dashFormulas[i].indexOf('[' + rep + '.') === 0) {
                 repField = dashFormulas[i].match(repRegex)[2].substr(1);
                 // Use getElementById to avoid invalid CSS selectors when IDs start with digits (issue #2074)
                 var iEl = document.getElementById(i);
                 (iEl ? iEl.querySelectorAll('.f-rg-cell') : []).forEach(function(el) {
                     var val = 0, range = el.getAttribute('range').split('-');
-                    for (j in dashReports[rep])
+                    for (j in reportRows)
                         // If range[0] is empty (range="-"), include all data regardless of date (issue #1875)
-                        if (!range[0] || (dashReports[rep][j][date] >= range[0] && dashReports[rep][j][date] <= range[1]))
-                            val += dashGetFloat(dashReports[rep][j][repField]);
+                        if (!range[0] || (reportRows[j][date] >= range[0] && reportRows[j][date] <= range[1]))
+                            val += dashGetFloat(reportRows[j][repField]);
                     el.innerHTML = dashNormalizeVal(i, val);
                     el.setAttribute('ready', '1');
                 });
@@ -1117,17 +1141,21 @@ function dashGetMatrixValues(json) {
     dashDrawPeriods();
 }
 
-function dashGetRepDone(json, rep) {
+function dashGetRepDone(json, ctx) {
     if (!json) return;
-    dashReports[rep] = json;
+    var key = ctx && typeof ctx === 'object' ? ctx.key : ctx;
+    dashReports[key] = json;
     dashAjaxes--;
     dashDrawPeriods();
 }
 
-function dashGetRep(rep, fr, to) {
-    dashReports[rep] = {};
+function dashGetRep(rep, fr, to, panelFilter) {
+    var key = dashReportKey(rep, panelFilter);
+    dashReports[key] = {};
+    dashReportNames[key] = rep;
     dashAjaxes++;
-    newApi('GET', 'report/' + rep + '?JSON_KV&FR_Date=' + fr + '&TO_Date=' + to, 'dashGetRepDone', '', rep);
+    newApi('GET', dashReportUrl(rep, fr, to, panelFilter), 'dashGetRepDone', '', { key: key });
+    return key;
 }
 
 function dashGetSrc(json) {
@@ -1265,9 +1293,13 @@ function dashGetModel(json) {
         // Formulas
         if (json[i].formulas.length > 0) {
             dashFormulas[json[i].itemID] = json[i].formulas;
-            if (rep = json[i].formulas.match(repRegex))
-                if (!dashReports[rep[1]])
-                    dashGetRep(rep[1], fr, to);
+            if (rep = json[i].formulas.match(repRegex)) {
+                var reportKey = dashReportKey(rep[1], json[i].panelFilter);
+                dashReportKeys[json[i].itemID] = reportKey;
+                dashReportNames[reportKey] = rep[1];
+                if (!dashReports[reportKey])
+                    dashGetRep(rep[1], fr, to, json[i].panelFilter);
+            }
         }
     }
 
@@ -1289,7 +1321,7 @@ function dashGetModel(json) {
 
 function dashReset() {
     dashModelData = {}; dashPeriodData = {}; dashPeriods = {}; dashValues = {};
-    dashFormulas = {}; dashItems = {}; dashReports = {}; dashAjaxes = 0; dashValueItemIds = {};
+    dashFormulas = {}; dashItems = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashAjaxes = 0; dashValueItemIds = {};
     dashMatrixValues = []; dashMatrixValuesRequested = false; dashRgSourceIds = {};
     var model = document.getElementById('dash-model');
     model.querySelector('.sheet-tabs').innerHTML = '';
@@ -1320,11 +1352,12 @@ window.dashApplyFilter = function(sheetEl) {
         p.querySelectorAll('.f-item').forEach(function(row) {
             delete dashFormulas[row.id];
             delete dashItems[row.id];
+            delete dashReportKeys[row.id];
         });
         delete dashModelData[p.id];
         p.remove();
     });
-    dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashReports = {}; dashAjaxes = 0; dashValueItemIds = {}; dashRgSourceIds = {};
+    dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashAjaxes = 0; dashValueItemIds = {}; dashRgSourceIds = {};
 
     // Re-fetch model for this sheet only — skip get_record, use cached dashRecordId
     dashSetStatus('Загрузка данных...');
