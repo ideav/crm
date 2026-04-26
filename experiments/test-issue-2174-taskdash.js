@@ -72,6 +72,7 @@ ${extractFunction('taskdashSafeId')}
 ${extractFunction('taskdashBuildReportUrl')}
 ${extractFunction('taskdashBuildMonthlySeries')}
 ${extractFunction('taskdashValueAsNumber')}
+${extractFunction('taskdashFormatNumber')}
 
 function assert(condition, message) {
     if (!condition) throw new Error(message);
@@ -122,6 +123,8 @@ assert(series[0].key === '2025-01', 'first grouped month must be January 2025');
 assert(series[0].completed === 54 && series[0].active === 3 && series[0].delayed === 1,
     'monthly chart series must sum task counters');
 assert(series[0].label === 'Янв 2025', 'monthly labels must be readable Russian short labels');
+assert(taskdashFormatNumber(1234567.89) === '1 234 567.89',
+    'metric formatting must keep thousands separators after template-safe regex rewrite');
 `;
 
 vm.runInNewContext(code, { console });
