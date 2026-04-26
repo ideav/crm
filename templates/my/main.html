@@ -13,6 +13,7 @@
         var db='{_global_.z}',xsrf='{_global_.xsrf}',id='{_global_.id}',token='{_global_.token}',name='{_global_.user}',uid='{_global_.user_id}',action='{_global_.action}',menu=[];
     </script>
 <!-- Begin: isAdmin1 --><!--{Role}-->
+    <link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
     <link rel="stylesheet" href="/css/bootstrap4.5.2.min.css">
     <link rel="stylesheet" href="/css/css.css" />
     <style>
@@ -63,7 +64,7 @@
     <!-- Navigation Bar -->
     <nav class="navbar">
         <div class="navbar-left">
-            <a href="start.html">
+            <a href="/start.html">
                 <img src="/images/logo.png" alt="Логотип" class="logo">
             </a>
             <span title="Ваш Личный кабинет Интеграм">ЛК Интеграм</span>
@@ -369,7 +370,7 @@
                             <strong id="next-charge-date">26 марта 2026</strong>
                         </p>
                         <p class="tariff-description">
-                            Списание по тарифному плану производится один раз в месяц, при этом сбрасываются счетчики ресурсов всех ваших баз. Если расход ресурсов не укладывается в лимит плана, то для продолжения работы вам необходимо повысить план. Подробнее о планах.
+                            Списание по тарифному плану производится один раз в месяц, при этом сбрасываются счетчики ресурсов всех ваших баз. Если расход ресурсов не укладывается в лимит плана, то для продолжения работы вам необходимо повысить план. <a target="tarif" href="/start.html#tarif">Подробнее о планах</a>.
                         </p>
                         <div class="usage-info">
                             <p>
@@ -377,8 +378,8 @@
                                 <strong id="usage-units">0.00</strong>
                                 <span>ед. ресурсов или</span>
                                 <strong id="usage-percent">0.00%</strong>
-                                <span>от лимита бесплатного тарифного плана в</span>
-                                <strong id="usage-limit">20000</strong>
+                                <span>от лимита вашего тарифного плана в</span>
+                                <strong id="usage-limit">{limit}</strong>
                                 <span>ед.</span>
                             </p>
                             <div class="usage-bar">
@@ -421,8 +422,8 @@
                             <strong id="balance-usage-units">0.00</strong>
                             <span>ед. ресурсов или</span>
                             <strong id="balance-usage-percent">0.00%</strong>
-                            <span>от лимита бесплатного тарифного плана в</span>
-                            <strong id="balance-usage-limit">3000</strong>
+                            <span>от лимита вашего тарифного плана в</span>
+                            <strong id="balance-usage-limit">{limit}</strong>
                             <span>ед.</span>
                         </p>
                     </div>
