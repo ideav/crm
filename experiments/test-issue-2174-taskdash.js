@@ -52,6 +52,7 @@ const sample = {
 
 const code = `
 const TASKDASH_REPORT_ID = '155675';
+const TASKDASH_FILTER_NAMES = ['месяц', 'департамент', 'статус задачи'];
 
 ${extractFunction('taskdashNormalizeResponse')}
 ${extractFunction('taskdashNormalizeColumn')}
@@ -66,6 +67,8 @@ ${extractFunction('taskdashEncodeParam')}
 ${extractFunction('taskdashFilterKey')}
 ${extractFunction('taskdashIsDateColumn')}
 ${extractFunction('taskdashIsMetricColumn')}
+${extractFunction('taskdashIsDashboardFilterColumn')}
+${extractFunction('taskdashGetFilterColumns')}
 ${extractFunction('taskdashCreateDefaultFilters')}
 ${extractFunction('taskdashReconcileFilters')}
 ${extractFunction('taskdashSafeId')}
@@ -89,8 +92,12 @@ assert(normalized.rows[2]['Статус задачи'] === 'Принята',
 const defaults = taskdashCreateDefaultFilters(2026, normalized.columns);
 assert(defaults['155682'].from === '2026-01-01' && defaults['155682'].to === '2026-12-31',
     'default filter must cover the current calendar year for the month field');
+assert(Object.keys(defaults).length === 1,
+    'default filters must not initialize metric ranges');
 assert(!taskdashIsMetricColumn(normalized.columns[6]),
     'status field must not be treated as a numeric metric filter');
+assert(taskdashGetFilterColumns(normalized.columns).map(function(column) { return column.name; }).join(',') === 'Месяц,Департамент,Статус задачи',
+    'dashboard filters must be limited to the requested fields');
 
 const kvResponse = taskdashNormalizeResponse([
     { 'Месяц': '20260101', 'Департамент': 'HR', 'Завершена': '10' }
@@ -102,6 +109,7 @@ assert(!/\\s/.test(taskdashSafeId('Статус задачи')),
     'generated datalist IDs must not contain spaces');
 
 defaults['155679'] = { value: 'Коммерческий' };
+defaults['155724'] = { value: 'Завершена' };
 defaults['155683'] = { from: '1', to: '3' };
 const url = taskdashBuildReportUrl('sportzania', normalized.columns, defaults);
 assert(url.startsWith('/sportzania/report/155675?JSON_KV&'),
@@ -112,10 +120,10 @@ assert(url.includes('TO_%D0%9C%D0%B5%D1%81%D1%8F%D1%86=31.12.2026'),
     'month upper bound must be sent as TO_Месяц');
 assert(url.includes('FR_%D0%94%D0%B5%D0%BF%D0%B0%D1%80%D1%82%D0%B0%D0%BC%D0%B5%D0%BD%D1%82=%25%D0%9A%D0%BE%D0%BC%D0%BC%D0%B5%D1%80%D1%87%D0%B5%D1%81%D0%BA%D0%B8%D0%B9%25'),
     'text filters must be sent as contains filters');
-assert(url.includes('FR_%D0%9E%D1%82%D0%BB%D0%BE%D0%B6%D0%B5%D0%BD%D0%B0=1'),
-    'metric lower bound must be sent as FR_Отложена');
-assert(url.includes('TO_%D0%9E%D1%82%D0%BB%D0%BE%D0%B6%D0%B5%D0%BD%D0%B0=3'),
-    'metric upper bound must be sent as TO_Отложена');
+assert(url.includes('FR_%D0%A1%D1%82%D0%B0%D1%82%D1%83%D1%81%20%D0%B7%D0%B0%D0%B4%D0%B0%D1%87%D0%B8=%25%D0%97%D0%B0%D0%B2%D0%B5%D1%80%D1%88%D0%B5%D0%BD%D0%B0%25'),
+    'task status filters must be sent as contains filters');
+assert(!url.includes('%D0%9E%D1%82%D0%BB%D0%BE%D0%B6%D0%B5%D0%BD%D0%B0'),
+    'metric filters must not be sent for the issue 2182 dashboard filter set');
 
 const series = taskdashBuildMonthlySeries(normalized.rows, normalized.columns);
 assert(series.length === 2, 'chart series must group rows by month');

@@ -44,33 +44,6 @@
         font-size: 0.86rem;
     }
 
-    .taskdash__actions {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        flex-shrink: 0;
-    }
-
-    .taskdash-icon-btn {
-        width: 34px;
-        height: 34px;
-        border: 1px solid var(--border-color, #d6dee8);
-        border-radius: 7px;
-        background: var(--card-bg, #fff);
-        color: var(--text-primary, #111827);
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        transition: border-color 0.15s, background-color 0.15s, color 0.15s, transform 0.15s;
-    }
-
-    .taskdash-icon-btn:hover {
-        border-color: var(--taskdash-blue);
-        color: var(--taskdash-blue);
-        transform: translateY(-1px);
-    }
-
     .taskdash-filter-panel {
         border: 1px solid var(--border-color, #d6dee8);
         border-radius: 8px;
@@ -98,7 +71,8 @@
         font-weight: 600;
     }
 
-    .taskdash-filter input {
+    .taskdash-filter input,
+    .taskdash-filter select {
         width: 100%;
         min-height: 34px;
         border: 1px solid var(--input-border, #cbd5e1);
@@ -110,7 +84,8 @@
         font-size: 0.88rem;
     }
 
-    .taskdash-filter input:focus {
+    .taskdash-filter input:focus,
+    .taskdash-filter select:focus {
         outline: 2px solid rgba(37, 99, 235, 0.20);
         border-color: var(--taskdash-blue);
     }
@@ -119,6 +94,30 @@
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 7px;
+    }
+
+    .taskdash-filter__quick {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 12px;
+        margin-top: 8px;
+    }
+
+    .taskdash-quick-link {
+        color: var(--taskdash-blue);
+        font-size: 0.78rem;
+        font-weight: 600;
+        line-height: 1.2;
+        text-decoration-line: underline;
+        text-decoration-style: dashed;
+        text-decoration-thickness: 1px;
+        text-underline-offset: 3px;
+    }
+
+    .taskdash-quick-link:hover,
+    .taskdash-quick-link:focus {
+        color: #1d4ed8;
+        outline: none;
     }
 
     .taskdash-filter-actions {
@@ -148,18 +147,6 @@
     .taskdash-btn:hover {
         border-color: var(--taskdash-blue);
         color: var(--taskdash-blue);
-    }
-
-    .taskdash-btn--primary {
-        background: var(--taskdash-blue);
-        border-color: var(--taskdash-blue);
-        color: #fff;
-    }
-
-    .taskdash-btn--primary:hover {
-        background: #1d4ed8;
-        border-color: #1d4ed8;
-        color: #fff;
     }
 
     .taskdash-kpis {
@@ -466,11 +453,6 @@
             flex-direction: column;
         }
 
-        .taskdash__actions {
-            width: 100%;
-            justify-content: flex-end;
-        }
-
         .taskdash-kpis {
             grid-template-columns: 1fr 1fr;
         }
@@ -505,14 +487,6 @@
             <h1 class="taskdash__title">Пульт задач</h1>
             <div class="taskdash__status" id="taskdash-status"></div>
         </div>
-        <div class="taskdash__actions">
-            <button class="taskdash-icon-btn" id="taskdash-refresh" type="button" title="Обновить" aria-label="Обновить">
-                <i class="pi pi-refresh"></i>
-            </button>
-            <button class="taskdash-icon-btn" id="taskdash-reset" type="button" title="Сбросить" aria-label="Сбросить">
-                <i class="pi pi-filter-slash"></i>
-            </button>
-        </div>
     </div>
 
     <form class="taskdash-filter-panel" id="taskdash-filter-form">
@@ -520,11 +494,7 @@
         <div class="taskdash-filter-actions">
             <button class="taskdash-btn" type="button" id="taskdash-clear">
                 <i class="pi pi-times"></i>
-                <span>Очистить</span>
-            </button>
-            <button class="taskdash-btn taskdash-btn--primary" type="submit">
-                <i class="pi pi-check"></i>
-                <span>Применить</span>
+                <span>Очистить фильтр</span>
             </button>
         </div>
     </form>
@@ -557,6 +527,7 @@
 <script>
 (function() {
     const TASKDASH_REPORT_ID = '155675';
+    const TASKDASH_FILTER_NAMES = ['месяц', 'департамент', 'статус задачи'];
     const TASKDASH_FALLBACK_COLUMNS = [
         { id: '155682', type: '', format: 'SHORT', name: 'Месяц' },
         { id: '155679', type: '2953', format: 'SHORT', name: 'Департамент', granted: 1, ref: 1, orig: '2859' },
@@ -735,10 +706,26 @@
         });
     }
 
+    function taskdashIsDashboardFilterColumn(column) {
+        var name = String(column && column.name || '').trim().toLowerCase();
+        return TASKDASH_FILTER_NAMES.indexOf(name) !== -1;
+    }
+
+    function taskdashGetFilterColumns(columns) {
+        var result = [];
+        TASKDASH_FILTER_NAMES.forEach(function(filterName) {
+            var column = (columns || []).find(function(item) {
+                return String(item && item.name || '').trim().toLowerCase() === filterName;
+            });
+            if (column && result.indexOf(column) === -1) result.push(column);
+        });
+        return result;
+    }
+
     function taskdashCreateDefaultFilters(year, columns) {
         var filters = {};
         (columns || []).forEach(function(column) {
-            if (taskdashIsDateColumn(column)) {
+            if (taskdashIsDashboardFilterColumn(column) && taskdashIsDateColumn(column)) {
                 filters[column.id] = {
                     from: String(year) + '-01-01',
                     to: String(year) + '-12-31'
@@ -751,9 +738,12 @@
     function taskdashReconcileFilters(oldColumns, newColumns, filters) {
         var byName = {}, next = {};
         (oldColumns || []).forEach(function(column) {
-            if (filters && filters[column.id]) byName[column.name] = filters[column.id];
+            if (taskdashIsDashboardFilterColumn(column) && filters && filters[column.id]) {
+                byName[column.name] = filters[column.id];
+            }
         });
         (newColumns || []).forEach(function(column) {
+            if (!taskdashIsDashboardFilterColumn(column)) return;
             if (filters && filters[column.id]) {
                 next[column.id] = filters[column.id];
             } else if (byName[column.name]) {
@@ -767,6 +757,7 @@
         var url = '/' + taskdashEncodeParam(dbName) + '/report/' + TASKDASH_REPORT_ID + '?JSON_KV';
         var params = [];
         (columns || []).forEach(function(column) {
+            if (!taskdashIsDashboardFilterColumn(column)) return;
             var filter = filters && filters[column.id] ? filters[column.id] : {};
             var from = filter.from ? String(filter.from).trim() : '';
             var to = filter.to ? String(filter.to).trim() : '';
@@ -857,19 +848,14 @@
 
     function taskdashBindEvents() {
         var form = document.getElementById('taskdash-filter-form');
-        var refresh = document.getElementById('taskdash-refresh');
-        var reset = document.getElementById('taskdash-reset');
         var clear = document.getElementById('taskdash-clear');
 
         if (form) {
             form.addEventListener('submit', function(event) {
                 event.preventDefault();
-                taskdashState.filters = taskdashReadFilters();
-                taskdashLoadData();
+                taskdashApplyFiltersFromControls();
             });
         }
-        if (refresh) refresh.addEventListener('click', taskdashLoadData);
-        if (reset) reset.addEventListener('click', taskdashResetFilters);
         if (clear) clear.addEventListener('click', taskdashClearFilters);
     }
 
@@ -882,6 +868,11 @@
     function taskdashClearFilters() {
         taskdashState.filters = {};
         taskdashRenderFilters();
+        taskdashLoadData();
+    }
+
+    function taskdashApplyFiltersFromControls() {
+        taskdashState.filters = taskdashReadFilters();
         taskdashLoadData();
     }
 
@@ -902,7 +893,7 @@
         var grid = document.getElementById('taskdash-filter-grid');
         if (!grid) return;
         grid.innerHTML = '';
-        taskdashState.columns.forEach(function(column) {
+        taskdashGetFilterColumns(taskdashState.columns).forEach(function(column) {
             grid.appendChild(taskdashCreateFilterControl(column));
         });
     }
@@ -915,15 +906,13 @@
         label.textContent = column.name;
         wrap.appendChild(label);
 
-        if (taskdashIsDateColumn(column) || taskdashIsMetricColumn(column)) {
+        if (taskdashIsDateColumn(column)) {
             var range = document.createElement('div');
             var from = document.createElement('input');
             var to = document.createElement('input');
             range.className = 'taskdash-range';
-            from.type = taskdashIsDateColumn(column) ? 'date' : 'text';
-            to.type = taskdashIsDateColumn(column) ? 'date' : 'text';
-            from.inputMode = taskdashIsMetricColumn(column) ? 'decimal' : '';
-            to.inputMode = taskdashIsMetricColumn(column) ? 'decimal' : '';
+            from.type = 'date';
+            to.type = 'date';
             from.placeholder = 'от';
             to.placeholder = 'до';
             from.value = filter.from || '';
@@ -933,17 +922,93 @@
             range.appendChild(from);
             range.appendChild(to);
             wrap.appendChild(range);
+            wrap.appendChild(taskdashCreateQuickLinks(column));
         } else {
-            var input = document.createElement('input');
-            var listId = 'taskdash-list-' + taskdashSafeId(column.id);
-            input.type = 'text';
-            input.value = filter.value || '';
-            input.setAttribute('list', listId);
-            taskdashMarkFilterInput(input, column.id, 'value');
-            wrap.appendChild(input);
-            wrap.appendChild(taskdashCreateDatalist(listId, column));
+            wrap.appendChild(taskdashCreateSelectFilter(column, filter));
         }
         return wrap;
+    }
+
+    function taskdashCreateSelectFilter(column, filter) {
+        var select = document.createElement('select');
+        var empty = document.createElement('option');
+        empty.value = '';
+        empty.textContent = 'Все';
+        select.appendChild(empty);
+        taskdashCollectFilterValues(column, filter.value).forEach(function(value) {
+            var option = document.createElement('option');
+            option.value = value;
+            option.textContent = value;
+            select.appendChild(option);
+        });
+        select.value = filter.value || '';
+        taskdashMarkFilterInput(select, column.id, 'value');
+        return select;
+    }
+
+    function taskdashCollectFilterValues(column, selectedValue) {
+        var values = [];
+        var selected = String(selectedValue || '').trim();
+        taskdashState.rows.forEach(function(row) {
+            var value = taskdashCellText(row[column.name]).trim();
+            if (value && values.indexOf(value) === -1) values.push(value);
+        });
+        values.sort();
+        values = values.slice(0, 120);
+        if (selected && values.indexOf(selected) === -1) values.unshift(selected);
+        return values;
+    }
+
+    function taskdashCreateQuickLinks(column) {
+        var wrap = document.createElement('div');
+        wrap.className = 'taskdash-filter__quick';
+        taskdashCreateQuickRanges(new Date()).forEach(function(range) {
+            var link = document.createElement('a');
+            link.href = '#';
+            link.className = 'taskdash-quick-link';
+            link.textContent = range.label;
+            link.setAttribute('data-taskdash-quick-range', range.key);
+            link.addEventListener('click', function(event) {
+                event.preventDefault();
+                taskdashApplyQuickRange(column.id, range.key);
+            });
+            wrap.appendChild(link);
+        });
+        return wrap;
+    }
+
+    function taskdashCreateQuickRanges(now) {
+        function iso(year, monthIndex, day) {
+            return String(year) + '-' + String(monthIndex + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+        }
+        function lastDay(year, monthIndex) {
+            return new Date(year, monthIndex + 1, 0).getDate();
+        }
+
+        var date = now instanceof Date ? now : new Date();
+        var year = date.getFullYear();
+        var month = date.getMonth();
+        var previousMonth = new Date(year, month - 1, 1);
+
+        return [
+            { key: 'current-year', label: 'текущий год', from: iso(year, 0, 1), to: iso(year, 11, 31) },
+            { key: 'previous-year', label: 'прошлый год', from: iso(year - 1, 0, 1), to: iso(year - 1, 11, 31) },
+            { key: 'current-month', label: 'текущий месяц', from: iso(year, month, 1), to: iso(year, month, lastDay(year, month)) },
+            { key: 'previous-month', label: 'прошлый месяц', from: iso(previousMonth.getFullYear(), previousMonth.getMonth(), 1), to: iso(previousMonth.getFullYear(), previousMonth.getMonth(), lastDay(previousMonth.getFullYear(), previousMonth.getMonth())) }
+        ];
+    }
+
+    function taskdashApplyQuickRange(columnId, rangeKey) {
+        var range = taskdashCreateQuickRanges(new Date()).filter(function(item) {
+            return item.key === rangeKey;
+        })[0];
+        if (!range) return;
+        taskdashState.filters = taskdashReadFilters();
+        if (!taskdashState.filters[columnId]) taskdashState.filters[columnId] = {};
+        taskdashState.filters[columnId].from = range.from;
+        taskdashState.filters[columnId].to = range.to;
+        taskdashRenderFilters();
+        taskdashLoadData();
     }
 
     function taskdashSafeId(value) {
@@ -953,6 +1018,7 @@
     function taskdashMarkFilterInput(input, columnId, part) {
         input.setAttribute('data-taskdash-filter', columnId);
         input.setAttribute('data-taskdash-filter-part', part);
+        input.addEventListener('change', taskdashApplyFiltersFromControls);
     }
 
     function taskdashCreateDatalist(id, column) {
