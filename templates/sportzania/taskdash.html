@@ -691,6 +691,46 @@
         return prefix + (prefix.slice(-1) === '_' ? '' : '_') + (column ? column.name : '');
     }
 
+    function taskdashIsStatusColumn(column) {
+        return String(column && column.name || '').trim().toLowerCase() === 'статус задачи';
+    }
+
+    function taskdashStatusFilterColumn(column) {
+        return taskdashIsStatusColumn(column) ? { name: 'СтатусID' } : column;
+    }
+
+    function taskdashParseReference(value) {
+        var raw = value;
+        var text, match;
+        if (raw && typeof raw === 'object') {
+            raw = raw.id || raw.k || raw.key || raw.value || raw.val || '';
+        }
+        text = String(raw === null || raw === undefined ? '' : raw).trim();
+        match = text.match(/^(\d+)\s*:\s*(.+)$/);
+        if (match) return { id: match[1], name: match[2] };
+        return { id: '', name: taskdashCellText(value).trim() };
+    }
+
+    function taskdashStatusIdsFromFilter(value) {
+        var ids = String(value || '').split(',')
+            .map(function(item) { return item.trim(); })
+            .filter(function(item, index, list) {
+                return item && list.indexOf(item) === index;
+            });
+        return ids;
+    }
+
+    function taskdashStatusFilterValue(ids) {
+        if (!ids.length) return '';
+        return ids.length === 1 ? ids[0] : 'IN(' + ids.join(',') + ')';
+    }
+
+    function taskdashStatusIdFromRow(row) {
+        var direct = row && (row['СтатусID'] || row['Статус задачиID'] || row['Статус задачи ID']);
+        var parsed = taskdashParseReference(direct);
+        return parsed.id || taskdashCellText(direct).trim();
+    }
+
     function taskdashIsDateColumn(column) {
         var name = String(column && column.name || '').toLowerCase();
         var format = String(column && column.format || '').toLowerCase();
@@ -770,7 +810,12 @@
                 if (from) params.push(taskdashFilterKey('FR_', column) + '=' + from);
                 if (to) params.push(taskdashFilterKey('TO_', column) + '=' + to);
             } else if (value) {
-                params.push(taskdashFilterKey('FR_', column) + '=%' + value + '%');
+                if (taskdashIsStatusColumn(column)) {
+                    value = taskdashStatusFilterValue(taskdashStatusIdsFromFilter(value));
+                    if (value) params.push(taskdashFilterKey('FR_', taskdashStatusFilterColumn(column)) + '=' + value);
+                } else {
+                    params.push(taskdashFilterKey('FR_', column) + '=%' + value + '%');
+                }
             }
         });
         if (params.length) {
@@ -935,10 +980,11 @@
         empty.value = '';
         empty.textContent = 'Все';
         select.appendChild(empty);
-        taskdashCollectFilterValues(column, filter.value).forEach(function(value) {
+        taskdashCollectFilterValues(column, filter.value).forEach(function(item) {
             var option = document.createElement('option');
+            var value = item && typeof item === 'object' ? item.value : item;
             option.value = value;
-            option.textContent = value;
+            option.textContent = item && typeof item === 'object' ? item.label : value;
             select.appendChild(option);
         });
         select.value = filter.value || '';
@@ -949,13 +995,26 @@
     function taskdashCollectFilterValues(column, selectedValue) {
         var values = [];
         var selected = String(selectedValue || '').trim();
+        var selectedParts = selected ? selected.split(',').map(function(item) { return item.trim(); }) : [];
         taskdashState.rows.forEach(function(row) {
-            var value = taskdashCellText(row[column.name]).trim();
-            if (value && values.indexOf(value) === -1) values.push(value);
+            var value = row[column.name];
+            var item = taskdashIsStatusColumn(column) ? taskdashParseReference(value) : { id: '', name: taskdashCellText(value).trim() };
+            if (taskdashIsStatusColumn(column) && !item.id) item.id = taskdashStatusIdFromRow(row);
+            var key = taskdashIsStatusColumn(column) ? item.id : item.name;
+            if (!key) return;
+            if (!values.some(function(existing) { return existing.value === key; })) {
+                values.push({ value: key, label: item.name || key });
+            }
         });
-        values.sort();
+        values.sort(function(a, b) {
+            return a.label.localeCompare(b.label);
+        });
         values = values.slice(0, 120);
-        if (selected && values.indexOf(selected) === -1) values.unshift(selected);
+        selectedParts.forEach(function(part) {
+            if (part && !values.some(function(item) { return item.value === part; })) {
+                values.unshift({ value: part, label: part });
+            }
+        });
         return values;
     }
 
