@@ -13,7 +13,7 @@ assertSource(source.includes('data-matrix-val-id'),
     'rendered matrix cells must remember valID for later edit/delete');
 assertSource(source.includes('dashSumMatrixValues'),
     'matrix lookup must sum multiple matching values');
-assertSource(source.includes("src === 'rg' || src === 'value' || src === 'matrix'"),
+assertSource(source.includes("if (src === 'matrix')") && source.includes("src === 'rg' || src === 'value'"),
     'matrix cells must use the inline editor route');
 assertSource(!source.includes("src === 'report' || src === 'mu' || src === 'linesum' || src === 'rgformula'"),
     'RG formula cells must no longer show the read-only tooltip path');
