@@ -2418,6 +2418,7 @@
 
                 // Show success message
                 this.showToast('Запись успешно создана', 'success');
+                this.clearAllReferenceOptionCaches();
 
 
                 // Now set the created record in the reference field that's still open
@@ -2690,6 +2691,7 @@
                 this.currentEditingCell = null;
 
                 this.showToast('Запись создана', 'success');
+                this.clearAllReferenceOptionCaches();
 
                 // Now fetch the full row data to get server-formatted/default values (issue #811)
                 await this.fetchNewRowData(createdId, rowIndex);

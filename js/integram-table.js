@@ -5626,6 +5626,7 @@ class IntegramTable{
 
                 // Show success message
                 this.showToast('Запись успешно создана', 'success');
+                this.clearAllReferenceOptionCaches();
 
 
                 // Now set the created record in the reference field that's still open
@@ -5898,6 +5899,7 @@ class IntegramTable{
                 this.currentEditingCell = null;
 
                 this.showToast('Запись создана', 'success');
+                this.clearAllReferenceOptionCaches();
 
                 // Now fetch the full row data to get server-formatted/default values (issue #811)
                 await this.fetchNewRowData(createdId, rowIndex);
@@ -13575,26 +13577,24 @@ class IntegramTable{
                 }
 
                 try {
-                    const options = await this.fetchReferenceOptions(refReqId, recordId, '', {}, refAttrs);
+                    let options = await this.fetchReferenceOptions(refReqId, recordId, '', {}, refAttrs);
+                    const allOptionsFetched = options.length < 50;
+                    const currentReference = this.resolveCurrentFormReferenceOption(options, hiddenInput.value);
+                    options = currentReference.options;
 
                     // Store options data on the wrapper (array of [id, text] tuples)
                     wrapper._referenceOptions = options;
-                    wrapper._allOptionsFetched = options.length < 50;
+                    wrapper._allOptionsFetched = allOptionsFetched;
 
                     // Render options (hidden by default, shown on focus)
                     this.renderFormReferenceOptions(dropdown, options, hiddenInput, searchInput);
                     dropdown.style.display = 'none';
 
                     // Set current value if exists
-                    if (hiddenInput.value) {
-                        // Issue #869: value may arrive as "id:text" — strip text part, keep only id
-                        const colonIdx = hiddenInput.value.indexOf(':');
-                        if (colonIdx > 0) {
-                            hiddenInput.value = hiddenInput.value.substring(0, colonIdx);
-                        }
-                        const currentOption = options.find(([id]) => id === hiddenInput.value);
-                        if (currentOption) {
-                            searchInput.value = currentOption[1];
+                    if (currentReference.id) {
+                        hiddenInput.value = currentReference.id;
+                        if (currentReference.text) {
+                            searchInput.value = currentReference.text;
                         }
                     }
 
@@ -14409,7 +14409,7 @@ class IntegramTable{
                 optionDiv.tabIndex = 0;
 
                 // Highlight if selected
-                if (hiddenInput.value === id) {
+                if (String(hiddenInput.value) === String(id)) {
                     optionDiv.style.backgroundColor = 'var(--md-selected)';
                     optionDiv.style.color = 'var(--md-primary)';
                     optionDiv.style.fontWeight = '500';
@@ -14706,6 +14706,7 @@ class IntegramTable{
                 window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
 
                 this.showToast('Запись успешно создана', 'success');
+                this.clearAllReferenceOptionCaches();
 
                 // Set the created record in the form reference field
                 if (createdId) {
@@ -15272,6 +15273,9 @@ class IntegramTable{
                 // Show success message
                 this.showToast('Запись успешно сохранена', 'success');
 
+                // Reference dropdown data can include this saved record on other forms.
+                this.clearAllReferenceOptionCaches();
+
                 // Dispatch event for external listeners
                 const savedId = isCreate ? (result.id || result.i || null) : recordId;
                 document.dispatchEvent(new CustomEvent('integram-record-saved', {
@@ -15738,7 +15742,6 @@ class IntegramTable{
                 await this.loadData(false);
             }
         }
-
         roundToNearest5Minutes(date) {
             // Round date to nearest 5 minutes
             const minutes = date.getMinutes();
@@ -16024,6 +16027,53 @@ class IntegramTable{
             }
 
             return strValue;
+        }
+
+        /**
+         * Resolve a form reference value against loaded options.
+         * object/?JSON_OBJ returns reference values as "id:Label"; when _ref_reqs is cached
+         * and does not contain a just-created record, keep that label visible in the form.
+         */
+        resolveCurrentFormReferenceOption(options, rawValue) {
+            const resolvedOptions = Array.isArray(options) ? options.slice() : [];
+            const value = rawValue === null || rawValue === undefined ? '' : String(rawValue);
+
+            if (!value) {
+                return { id: '', text: '', options: resolvedOptions };
+            }
+
+            const colonIdx = value.indexOf(':');
+            const id = colonIdx > 0 ? value.substring(0, colonIdx) : value;
+            const fallbackText = colonIdx > 0 ? value.substring(colonIdx + 1) : '';
+            let currentOption = resolvedOptions.find(([optionId]) => String(optionId) === String(id));
+
+            if (!currentOption && fallbackText) {
+                currentOption = [id, fallbackText];
+                resolvedOptions.unshift(currentOption);
+            }
+
+            return {
+                id,
+                text: currentOption ? currentOption[1] : '',
+                options: resolvedOptions
+            };
+        }
+
+        clearReferenceOptionCaches() {
+            this.refFetchCache = {};
+            this.refOptionsCache = {};
+        }
+
+        clearAllReferenceOptionCaches() {
+            this.clearReferenceOptionCaches();
+
+            if (typeof window !== 'undefined' && window._integramTableInstances) {
+                window._integramTableInstances.forEach(instance => {
+                    if (instance && instance !== this && typeof instance.clearReferenceOptionCaches === 'function') {
+                        instance.clearReferenceOptionCaches();
+                    }
+                });
+            }
         }
 
         showToast(message, type = 'info') {
@@ -17383,6 +17433,31 @@ class IntegramCreateFormHelper {
         return formatMap[String(baseTypeId)] || 'SHORT';
     }
 
+    resolveCurrentFormReferenceOption(options, rawValue) {
+        const resolvedOptions = Array.isArray(options) ? options.slice() : [];
+        const value = rawValue === null || rawValue === undefined ? '' : String(rawValue);
+
+        if (!value) {
+            return { id: '', text: '', options: resolvedOptions };
+        }
+
+        const colonIdx = value.indexOf(':');
+        const id = colonIdx > 0 ? value.substring(0, colonIdx) : value;
+        const fallbackText = colonIdx > 0 ? value.substring(colonIdx + 1) : '';
+        let currentOption = resolvedOptions.find(([optionId]) => String(optionId) === String(id));
+
+        if (!currentOption && fallbackText) {
+            currentOption = [id, fallbackText];
+            resolvedOptions.unshift(currentOption);
+        }
+
+        return {
+            id,
+            text: currentOption ? currentOption[1] : '',
+            options: resolvedOptions
+        };
+    }
+
     formatDateForHtml5(dateStr, includeTime = false) {
         if (!dateStr) return '';
 
@@ -17919,7 +17994,19 @@ class IntegramCreateFormHelper {
 
                 // Parse options - data is an object {id: text, ...}
                 let optionsHtml = '';
-                const entries = Object.entries(data);
+                let entries = Object.entries(data);
+
+                let currentReference = this.resolveCurrentFormReferenceOption(entries, hiddenInput.value);
+                entries = currentReference.options;
+
+                // Check if this field has a pre-filled value from fieldValues
+                const fieldKey = `t${req.id}`;
+                const prefilledValue = fieldValues[fieldKey];
+
+                if (prefilledValue !== undefined) {
+                    currentReference = this.resolveCurrentFormReferenceOption(entries, prefilledValue);
+                    entries = currentReference.options;
+                }
 
                 if (entries.length === 0) {
                     optionsHtml = '<div class="inline-editor-reference-empty">Нет данных</div>';
@@ -17931,16 +18018,10 @@ class IntegramCreateFormHelper {
 
                 dropdown.innerHTML = optionsHtml;
 
-                // Check if this field has a pre-filled value from fieldValues
-                const fieldKey = `t${req.id}`;
-                const prefilledValue = fieldValues[fieldKey];
-
-                if (prefilledValue !== undefined) {
-                    hiddenInput.value = prefilledValue;
-                    // Find and display the text for this value
-                    const text = data[prefilledValue];
-                    if (text && searchInput) {
-                        searchInput.value = text;
+                if (currentReference.id) {
+                    hiddenInput.value = currentReference.id;
+                    if (currentReference.text && searchInput) {
+                        searchInput.value = currentReference.text;
                     }
                 }
 

@@ -285,6 +285,53 @@
             return strValue;
         }
 
+        /**
+         * Resolve a form reference value against loaded options.
+         * object/?JSON_OBJ returns reference values as "id:Label"; when _ref_reqs is cached
+         * and does not contain a just-created record, keep that label visible in the form.
+         */
+        resolveCurrentFormReferenceOption(options, rawValue) {
+            const resolvedOptions = Array.isArray(options) ? options.slice() : [];
+            const value = rawValue === null || rawValue === undefined ? '' : String(rawValue);
+
+            if (!value) {
+                return { id: '', text: '', options: resolvedOptions };
+            }
+
+            const colonIdx = value.indexOf(':');
+            const id = colonIdx > 0 ? value.substring(0, colonIdx) : value;
+            const fallbackText = colonIdx > 0 ? value.substring(colonIdx + 1) : '';
+            let currentOption = resolvedOptions.find(([optionId]) => String(optionId) === String(id));
+
+            if (!currentOption && fallbackText) {
+                currentOption = [id, fallbackText];
+                resolvedOptions.unshift(currentOption);
+            }
+
+            return {
+                id,
+                text: currentOption ? currentOption[1] : '',
+                options: resolvedOptions
+            };
+        }
+
+        clearReferenceOptionCaches() {
+            this.refFetchCache = {};
+            this.refOptionsCache = {};
+        }
+
+        clearAllReferenceOptionCaches() {
+            this.clearReferenceOptionCaches();
+
+            if (typeof window !== 'undefined' && window._integramTableInstances) {
+                window._integramTableInstances.forEach(instance => {
+                    if (instance && instance !== this && typeof instance.clearReferenceOptionCaches === 'function') {
+                        instance.clearReferenceOptionCaches();
+                    }
+                });
+            }
+        }
+
         showToast(message, type = 'info') {
             // Remove existing toasts
             const existingToasts = document.querySelectorAll('.integram-toast');
