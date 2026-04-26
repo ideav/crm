@@ -190,11 +190,13 @@
 }
 /* Editable cell highlight */
 .f-cell[data-src="rg"],
-.f-cell[data-src="value"] {
+.f-cell[data-src="value"],
+.f-cell[data-src="matrix"] {
     cursor: pointer;
 }
 .f-cell[data-src="rg"]:hover,
-.f-cell[data-src="value"]:hover {
+.f-cell[data-src="value"]:hover,
+.f-cell[data-src="matrix"]:hover {
     background-color: var(--bg-secondary, #f0f4ff);
     outline: 1px solid var(--border-color, #adb5bd);
 }
@@ -443,9 +445,17 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
 
 let dashModelData = {}, dashPeriodData = {}, dashPeriods = {}, dashValues = {}, dashFormulas = {}, dashItems = {}, dashReports = {}, dashAjaxes = 0;
 let dashValueItemIds = {}; // item name -> valueItemID from ЗначенияЗаПериод
+let dashMatrixValues = [], dashMatrixValuesRequested = false, dashRgSourceIds = {};
 
 function dashDateYMD(d) {
     return d.slice(6) + d.slice(3, 5) + d.slice(0, 2);
+}
+
+function dashAttr(v) {
+    return String(v || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;');
 }
 
 function dashSetStatus(msg) {
@@ -462,6 +472,55 @@ function dashNormalizeVal(item, val) {
     if (typeof val === 'object' && val !== null)
         v = val[0].val;
     return String(v).replace(/ /g, '').replace(/,/g, '.');
+}
+
+function dashNormalizeMatrixKey(v) {
+    return String(v || '').trim().toLowerCase();
+}
+
+function dashMatrixLabelScore(dashLabel, matrixLabel) {
+    var d = String(dashLabel || '').trim().toLowerCase();
+    var m = String(matrixLabel || '').trim().toLowerCase();
+    if (!d && !m) return 1;
+    if (!d || !m) return 0;
+    if (d === m) return 1000 + d.length;
+    if (d.indexOf(m) !== -1) return 500 + m.length;
+    if (m.indexOf(d) !== -1) return 250 + d.length;
+    return 0;
+}
+
+function dashMatrixLabelMatches(dashLabel, matrixLabel) {
+    return dashMatrixLabelScore(dashLabel, matrixLabel) > 0;
+}
+
+function dashFindMatrixValue(line, col, dashLabel) {
+    var lineKey = dashNormalizeMatrixKey(line);
+    var colKey = dashNormalizeMatrixKey(col);
+    var best = null, bestScore = 0;
+    (dashMatrixValues || []).forEach(function(row) {
+        if (dashNormalizeMatrixKey(row.line) !== lineKey) return;
+        if (dashNormalizeMatrixKey(row.col) !== colKey) return;
+        var score = dashMatrixLabelScore(dashLabel, row['Метка']);
+        if (score > bestScore) {
+            best = row;
+            bestScore = score;
+        }
+    });
+    return best;
+}
+
+function dashHasRows(json) {
+    if (!json) return false;
+    if (Array.isArray(json)) return json.length > 0;
+    if (typeof json === 'object') return Object.keys(json).length > 0;
+    return false;
+}
+
+function dashFetchMatrixValues() {
+    if (dashMatrixValuesRequested) return;
+    dashMatrixValuesRequested = true;
+    dashAjaxes++;
+    newApi('GET', 'report/155564?JSON_KV', 'dashGetMatrixValues');
 }
 
 function dashGetVal(item, fr, to) {
@@ -888,29 +947,48 @@ function dashDrawPeriods() {
                     break;
                 default:
                     rep = dashModelData[panelId].rgs[rg].src;
-                    if (rep)
+                    if (rep) {
+                        var useMatrix = dashRgSourceIds[rep] && dashMatrixValuesRequested;
                         for (i in dashPeriodData[rep])
                             for (j in dashPeriodData[rep][i]) {
                                 if (col = dashPeriodData[rep][i][j]) {
                                     panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
                                         headTpl.replace(':head:', col).replace(':from:-:to:', i));
                                     panel.querySelectorAll('.f-item').forEach(function(row) {
-                                        var ready = 0;
-                                        v = dashGetColVal(dashItems[row.id] ? dashItems[row.id].name : '', col);
-                                        if (v || dashFormulas[row.id] === '[]') ready = 1;
+                                        var ready = 0, src = 'report', extra = '';
+                                        var item = dashItems[row.id] || {};
+                                        var itemName = item.name || '';
+                                        if (useMatrix) {
+                                            var matrixRow = dashFindMatrixValue(itemName, col, item.label || '');
+                                            var matrixLabel = matrixRow ? (matrixRow['Метка'] || '') : (item.label || '');
+                                            v = matrixRow ? matrixRow.val : '';
+                                            ready = 1;
+                                            src = 'matrix';
+                                            extra = ' data-matrix-line="' + dashAttr(itemName) + '"'
+                                                + ' data-matrix-col="' + dashAttr(col) + '"'
+                                                + ' data-matrix-label="' + dashAttr(matrixLabel) + '"';
+                                            if (matrixRow && matrixRow.valID)
+                                                extra += ' data-matrix-val-id="' + dashAttr(matrixRow.valID) + '"';
+                                            if (matrixRow && matrixRow.date)
+                                                extra += ' data-matrix-date="' + dashAttr(matrixRow.date) + '"';
+                                        } else {
+                                            v = dashGetColVal(itemName, col);
+                                            if (v || dashFormulas[row.id] === '[]') ready = 1;
+                                        }
                                         row.insertAdjacentHTML('beforeend',
                                             cellTpl.replace(':val:', dashNormalizeVal(row.id, v || ''))
                                                 .replace(':ready:', ready)
                                                 .replace(':title:', '')
                                                 .replace(':classes:', 'f-col-cell')
-                                                .replace(':src:', 'report')
+                                                .replace(':src:', src)
                                                 .replace(':item-id:', row.id)
-                                                .replace(':extra:', '')
+                                                .replace(':extra:', extra)
                                                 .replace(':from:-:to:', i));
                                     });
                                 }
                                 break;
                             }
+                    }
                     break;
             }
         }
@@ -998,6 +1076,14 @@ function dashDebug() {
 
 function dashGetPeriods(json, period) {
     dashPeriodData[period] = (json && typeof json === 'object') ? json : {};
+    if (dashRgSourceIds[period] && dashHasRows(json))
+        dashFetchMatrixValues();
+    dashAjaxes--;
+    dashDrawPeriods();
+}
+
+function dashGetMatrixValues(json) {
+    dashMatrixValues = Array.isArray(json) ? json : [];
     dashAjaxes--;
     dashDrawPeriods();
 }
@@ -1073,12 +1159,15 @@ function dashGetModel(json) {
 
     for (i in json) {
         dashPeriods[json[i].period] = 1;
-        dashItems[json[i].itemID] = { name: json[i].item, format: json[i].format, mu: json[i].MU };
+        dashItems[json[i].itemID] = { name: json[i].item, format: json[i].format, mu: json[i].MU, label: json[i]['Метка'] || '' };
         if (json[i].RGsourceID && !dashPeriods[json[i].RGsourceID]) {
+            dashRgSourceIds[json[i].RGsourceID] = 1;
             dashPeriods[json[i].RGsourceID] = 1;
             dashAjaxes++;
             newApi('GET', 'report/' + json[i].RGsourceID + '?JSON_KV&FR_Date=' + json[i].periodFrom + '&TO_Date=' + json[i].periodTo,
                 'dashGetPeriods', '', json[i].RGsourceID);
+        } else if (json[i].RGsourceID) {
+            dashRgSourceIds[json[i].RGsourceID] = 1;
         }
     }
 
@@ -1170,6 +1259,7 @@ function dashGetModel(json) {
 function dashReset() {
     dashModelData = {}; dashPeriodData = {}; dashPeriods = {}; dashValues = {};
     dashFormulas = {}; dashItems = {}; dashReports = {}; dashAjaxes = 0; dashValueItemIds = {};
+    dashMatrixValues = []; dashMatrixValuesRequested = false; dashRgSourceIds = {};
     var model = document.getElementById('dash-model');
     model.querySelector('.sheet-tabs').innerHTML = '';
     model.querySelector('.sheets').innerHTML = '';
@@ -1179,6 +1269,7 @@ window.dashGetRecord  = dashGetRecord;
 window.dashGetModel   = dashGetModel;
 window.dashGetSrc     = dashGetSrc;
 window.dashGetPeriods = dashGetPeriods;
+window.dashGetMatrixValues = dashGetMatrixValues;
 window.dashGetRepDone             = dashGetRepDone;
 window.dashDebug                  = dashDebug;
 window.dashUpdateTableWrapOverflow = dashUpdateTableWrapOverflow;
@@ -1202,7 +1293,7 @@ window.dashApplyFilter = function(sheetEl) {
         delete dashModelData[p.id];
         p.remove();
     });
-    dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashReports = {}; dashAjaxes = 0; dashValueItemIds = {};
+    dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashReports = {}; dashAjaxes = 0; dashValueItemIds = {}; dashRgSourceIds = {};
 
     // Re-fetch model for this sheet only — skip get_record, use cached dashRecordId
     dashSetStatus('Загрузка данных...');
@@ -1285,6 +1376,135 @@ function dashTodayYMD() {
         + String(d.getDate()).padStart(2, '0');
 }
 
+function dashMetadataAlias(req) {
+    var names = [req.val || ''];
+    var attrs = req.attrs || '';
+    var alias = attrs.match(/:ALIAS=([^:]+):/i);
+    if (alias) names.push(alias[1]);
+    return names.map(dashNormalizeMatrixKey);
+}
+
+function dashFindMetadataType(name) {
+    if (!Array.isArray(dashMetadata)) return null;
+    var key = dashNormalizeMatrixKey(name);
+    for (var i = 0; i < dashMetadata.length; i++) {
+        if (dashNormalizeMatrixKey(dashMetadata[i].val) === key)
+            return dashMetadata[i];
+    }
+    return null;
+}
+
+function dashFindMetadataReq(typeMeta, names) {
+    if (!typeMeta || !Array.isArray(typeMeta.reqs)) return null;
+    var keys = names.map(dashNormalizeMatrixKey);
+    for (var i = 0; i < typeMeta.reqs.length; i++) {
+        var aliases = dashMetadataAlias(typeMeta.reqs[i]);
+        for (var j = 0; j < keys.length; j++)
+            if (aliases.indexOf(keys[j]) !== -1)
+                return typeMeta.reqs[i];
+    }
+    return null;
+}
+
+function dashMatrixMetadata() {
+    var typeMeta = dashFindMetadataType('Значение матрицы');
+    if (!typeMeta) return null;
+    return {
+        typeId: typeMeta.id,
+        lineReq: dashFindMetadataReq(typeMeta, ['line', 'строка']),
+        colReq: dashFindMetadataReq(typeMeta, ['col', 'колонка', 'столбец']),
+        labelReq: dashFindMetadataReq(typeMeta, ['Метка']),
+        dateReq: dashFindMetadataReq(typeMeta, ['date', 'дата'])
+    };
+}
+
+function dashMatrixReqParam(req, value) {
+    if (!req || value === undefined || value === null || value === '') return '';
+    var prefix = req.ref ? 'NEW_' : 't';
+    return '&' + prefix + req.id + '=' + encodeURIComponent(value);
+}
+
+function dashMatrixUpsertCache(td, newVal, recId) {
+    if (!recId) return;
+    for (var i = 0; i < dashMatrixValues.length; i++) {
+        if (String(dashMatrixValues[i].valID) === String(recId)) {
+            if (newVal === '')
+                dashMatrixValues.splice(i, 1);
+            else
+                dashMatrixValues[i].val = newVal;
+            return;
+        }
+    }
+    if (newVal !== '') {
+        dashMatrixValues.push({
+            val: newVal,
+            date: td.dataset.matrixDate || '',
+            line: td.dataset.matrixLine || '',
+            col: td.dataset.matrixCol || '',
+            'Метка': td.dataset.matrixLabel || '',
+            valID: String(recId)
+        });
+    }
+}
+
+function dashSaveMatrixValue(td, newVal) {
+    var meta = dashMatrixMetadata();
+    if (!meta || !meta.typeId) {
+        td.style.backgroundColor = '';
+        dashSetStatus('Не найдена таблица Значение матрицы');
+        return;
+    }
+
+    var recId = td.dataset.matrixValId || '';
+    if (recId) {
+        if (newVal === '')
+            newApi('POST', '_m_del/' + recId + '?JSON', 'dashMatrixValueSaveDone', '', { td: td, newVal: newVal, recId: recId });
+        else
+            newApi('POST', '_m_save/' + recId + '?JSON', 'dashMatrixValueSaveDone',
+                't' + meta.typeId + '=' + encodeURIComponent(newVal), { td: td, newVal: newVal, recId: recId });
+        return;
+    }
+
+    if (newVal === '') { dashSetStatus(''); td.style.backgroundColor = ''; return; }
+    if (!meta.lineReq || !meta.colReq) {
+        td.style.backgroundColor = '';
+        dashSetStatus('Не найдены поля line/col для Значение матрицы');
+        return;
+    }
+
+    var params = 't' + meta.typeId + '=' + encodeURIComponent(newVal)
+        + dashMatrixReqParam(meta.lineReq, td.dataset.matrixLine || '')
+        + dashMatrixReqParam(meta.colReq, td.dataset.matrixCol || '')
+        + dashMatrixReqParam(meta.labelReq, td.dataset.matrixLabel || '')
+        + dashMatrixReqParam(meta.dateReq, td.dataset.matrixDate || dashTodayYMD());
+    newApi('POST', '_m_new/' + meta.typeId + '?JSON&up=1', 'dashMatrixValueSaveDone', params, { td: td, newVal: newVal, recId: '' });
+}
+
+window.dashMatrixValueSaveDone = function(json, ctx) {
+    if (!json || json.error) {
+        ctx.td.style.backgroundColor = '';
+        dashSetStatus('Ошибка сохранения');
+        return;
+    }
+    var recId = ctx.recId || json.id || '';
+    ctx.td.textContent = ctx.newVal;
+    ctx.td.style.backgroundColor = '';
+    ctx.td.setAttribute('ready', '1');
+    if (ctx.newVal === '')
+        delete ctx.td.dataset.matrixValId;
+    else if (recId)
+        ctx.td.dataset.matrixValId = recId;
+    dashMatrixUpsertCache(ctx.td, ctx.newVal, recId);
+    dashSetStatus('Сохранено');
+    ctx.td.closest('tr').querySelectorAll('td.f-rg-formula-cell').forEach(function(fc) {
+        fc.setAttribute('ready', '0');
+        fc.textContent = '';
+        fc.classList.remove('dash-err');
+    });
+    dashCalcCells();
+    dashCalcRGFormulas();
+};
+
 // Get the item text for t1042: valueItemID from data-value-item-id, or item-name from row
 function dashCellItemRef(td) {
     if (td.dataset.valueItemId) return td.dataset.valueItemId;
@@ -1328,6 +1548,16 @@ function dashSaveValue(td, newVal) {
     var rgHead = dashCellRgHead(td);
 
     newApi('GET', searchUrl, 'dashValueSearchDone', '', { td: td, newVal: newVal, itemRef: itemRef, fr: fr, to: to, rgHead: rgHead });
+}
+
+function dashSaveCell(td, newVal) {
+    if (td.dataset.src === 'matrix') {
+        dashLoadMetadata(function() {
+            dashSaveMatrixValue(td, newVal);
+        });
+        return;
+    }
+    dashSaveValue(td, newVal);
 }
 
 window.dashValueSearchDone = function(json, ctx) {
@@ -1409,7 +1639,7 @@ function dashStartInlineEdit(td) {
         if (newVal !== currentVal) {
             td.style.backgroundColor = '#ffe0e0';
             dashSetStatus('Сохранение...');
-            dashSaveValue(td, newVal);
+            dashSaveCell(td, newVal);
         }
     }
 
@@ -1426,7 +1656,7 @@ function dashStartInlineEdit(td) {
             e.preventDefault();
             input.removeEventListener('blur', commit);
             commit();
-            var editableCells = Array.from(document.querySelectorAll('td.f-cell[data-src="rg"], td.f-cell[data-src="value"]'));
+            var editableCells = Array.from(document.querySelectorAll('td.f-cell[data-src="rg"], td.f-cell[data-src="value"], td.f-cell[data-src="matrix"]'));
             var idx = editableCells.indexOf(td);
             var target = null;
             if (e.key === 'Tab') {
@@ -1437,7 +1667,7 @@ function dashStartInlineEdit(td) {
                 var nextRow = td.parentNode.nextElementSibling;
                 while (nextRow) {
                     var candidate = nextRow.cells[colIdx];
-                    if (candidate && (candidate.dataset.src === 'rg' || candidate.dataset.src === 'value')) {
+                    if (candidate && (candidate.dataset.src === 'rg' || candidate.dataset.src === 'value' || candidate.dataset.src === 'matrix')) {
                         target = candidate; break;
                     }
                     nextRow = nextRow.nextElementSibling;
@@ -1447,7 +1677,7 @@ function dashStartInlineEdit(td) {
                 var prevRow = td.parentNode.previousElementSibling;
                 while (prevRow) {
                     var candidate = prevRow.cells[colIdx];
-                    if (candidate && (candidate.dataset.src === 'rg' || candidate.dataset.src === 'value')) {
+                    if (candidate && (candidate.dataset.src === 'rg' || candidate.dataset.src === 'value' || candidate.dataset.src === 'matrix')) {
                         target = candidate; break;
                     }
                     prevRow = prevRow.previousElementSibling;
@@ -1589,7 +1819,7 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
 
     var src = td.dataset.src || '';
 
-    if (src === 'rg' || src === 'value') {
+    if (src === 'rg' || src === 'value' || src === 'matrix') {
         dashLoadMetadata(function() {
             dashStartInlineEdit(td);
         });
@@ -1603,7 +1833,7 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         return;
     }
 
-    if (src === 'report' || src === 'mu' || src === 'linesum' || src === 'rgformula') {
+    if (src === 'report' || src === 'mu' || src === 'linesum') {
         dashShowReadonlyTip(e);
         return;
     }
