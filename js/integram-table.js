@@ -8091,22 +8091,29 @@ class IntegramTable{
 
                     if (result.success) {
                         // Add column to the table's internal state first so getColTypeIcon can use it
+                        const newColumnId = String(result.columnId);
+                        const isFreeLink = Number(baseTypeId) === 1;
                         const newCol = {
-                            id: String(result.columnId),
+                            id: newColumnId,
                             name: columnName,
+                            val: columnName,
                             type: baseTypeId,
-                            paramId: result.termId,
+                            format: isListValue ? 'REF' : this.mapTypeIdToFormat(baseTypeId),
+                            granted: 1,
+                            attrs: isMultiselect ? ':MULTI:' : '',
+                            paramId: newColumnId,
                             // For list columns, set ref_id, ref, and orig so showColumnEditForm treats them
                             // as reference columns immediately (without requiring a page refresh, issue #1678)
                             ref_id: isListValue ? result.refId : null,
                             ref: isListValue ? parseInt(result.termId) : 0,
-                            orig: isListValue ? result.termId : null
+                            orig: isFreeLink ? '1' : (isListValue ? result.termId : null)
                         };
                         this.columns.push(newCol);
+                        this.processColumnVisibility();
 
                         // Add new column to columnOrder so drag-and-drop reordering works immediately (issue #976)
-                        if (!this.columnOrder.includes(String(result.columnId))) {
-                            this.columnOrder.push(String(result.columnId));
+                        if (!this.columnOrder.includes(newColumnId)) {
+                            this.columnOrder.push(newColumnId);
                         }
 
                         // Add new column to the column settings list in the parent modal (issue #949)
@@ -8116,7 +8123,7 @@ class IntegramTable{
                             const newItem = document.createElement('div');
                             newItem.className = 'column-settings-item';
                             newItem.setAttribute('draggable', 'true');
-                            newItem.dataset.columnId = String(result.columnId);
+                            newItem.dataset.columnId = newColumnId;
                             // Determine 1-based position number among non-fixed columns (issue #970)
                             const nonFixedCount = columnList.querySelectorAll('.column-settings-item:not(.column-settings-item--fixed)').length;
                             const orderNum = nonFixedCount + 1;
@@ -8124,10 +8131,10 @@ class IntegramTable{
                                 <span class="col-settings-drag-handle" title="Перетащите для изменения порядка">&#9776;</span><span class="col-settings-order-num">${orderNum}</span>
                                 ${this.getColTypeIcon(newCol)}
                                 <label style="flex: 1; margin: 0;">
-                                    <input type="checkbox" data-column-id="${result.columnId}" checked>
+                                    <input type="checkbox" data-column-id="${newColumnId}" checked>
                                     ${this.escapeHtml(columnName)}
                                 </label>
-                                <button class="btn-col-edit" data-col-id="${result.columnId}" title="Редактировать колонку">
+                                <button class="btn-col-edit" data-col-id="${newColumnId}" title="Редактировать колонку">
                                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12.146 0.146009C12.2408 0.0522494 12.3679 0 12.5005 0C12.6331 0 12.7602 0.0522494 12.854 0.146009L15.854 3.14601C15.9006 3.19245 15.9375 3.24763 15.9627 3.30838C15.9879 3.36912 16.0009 3.43424 16.0009 3.50001C16.0009 3.56578 15.9879 3.6309 15.9627 3.69164C15.9375 3.75239 15.9006 3.80756 15.854 3.85401L5.85399 13.854C5.806 13.9017 5.74885 13.9391 5.68599 13.964L0.685989 15.964C0.595125 16.0004 0.495585 16.0093 0.399709 15.9896C0.303832 15.9699 0.215836 15.9226 0.14663 15.8534C0.0774234 15.7842 0.0300499 15.6962 0.0103825 15.6003C-0.00928499 15.5044 -0.000381488 15.4049 0.0359892 15.314L2.03599 10.314C2.06092 10.2511 2.09834 10.194 2.14599 10.146L12.146 0.146009ZM11.207 2.50001L13.5 4.79301L14.793 3.50001L12.5 1.20701L11.207 2.50001ZM12.793 5.50001L10.5 3.20701L3.99999 9.70701V10H4.49999C4.6326 10 4.75977 10.0527 4.85354 10.1465C4.94731 10.2402 4.99999 10.3674 4.99999 10.5V11H5.49999C5.6326 11 5.75977 11.0527 5.85354 11.1465C5.94731 11.2402 5.99999 11.3674 5.99999 11.5V12H6.29299L12.793 5.50001ZM3.03199 10.675L2.92599 10.781L1.39799 14.602L5.21899 13.074L5.32499 12.968C5.22961 12.9324 5.14738 12.8685 5.0893 12.7848C5.03123 12.7012 5.00007 12.6018 4.99999 12.5V12H4.49999C4.36738 12 4.2402 11.9473 4.14644 11.8536C4.05267 11.7598 3.99999 11.6326 3.99999 11.5V11H3.49999C3.39817 10.9999 3.2988 10.9688 3.21517 10.9107C3.13153 10.8526 3.06763 10.7704 3.03199 10.675Z" fill="currentColor"/></svg>
                                 </button>
                             `;
@@ -8152,7 +8159,7 @@ class IntegramTable{
                             const newEditBtn = newItem.querySelector('.btn-col-edit');
                             newEditBtn.addEventListener('click', (e) => {
                                 e.stopPropagation();
-                                const col = this.columns.find(c => c.id === String(result.columnId));
+                                const col = this.columns.find(c => c.id === newColumnId);
                                 if (col) {
                                     this.showColumnEditForm(col);
                                 }
@@ -8160,8 +8167,8 @@ class IntegramTable{
                         }
 
                         // Make the column visible
-                        if (!this.visibleColumns.includes(String(result.columnId))) {
-                            this.visibleColumns.push(String(result.columnId));
+                        if (!this.visibleColumns.includes(newColumnId) && !this.idColumns.has(newColumnId)) {
+                            this.visibleColumns.push(newColumnId);
                         }
 
                         // Save state and re-render
