@@ -241,11 +241,12 @@
                 if (!table.reqs || !Array.isArray(table.reqs)) continue;
                 for (const req of table.reqs) {
                     if (String(req.ref) === currentTableId) {
+                        const attrs = this.parseAttrs(req.attrs);
                         refs.push({
                             tableId: String(table.id),
                             tableName: table.val || String(table.id),
                             fieldId: String(req.id),
-                            fieldName: req.alias || req.val || String(req.id),
+                            fieldName: attrs.alias || req.alias || req.val || String(req.id),
                         });
                     }
                 }
