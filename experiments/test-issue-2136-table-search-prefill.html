@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Issue 2136: table search prefill</title>
+</head>
+<body>
+    <input type="text" id="tables-search">
+    <button type="button" id="add-table-btn">Новая таблица</button>
+
+    <div id="new-table-modal" style="display: none;">
+        <div class="modal-backdrop"></div>
+        <form id="new-table-form">
+            <input type="text" id="new-table-name" name="name">
+            <select id="new-table-type" name="type">
+                <option value="3">Короткая строка</option>
+            </select>
+            <input type="checkbox" id="new-table-unique" name="unique">
+        </form>
+        <button type="button" id="close-new-table-modal">Закрыть</button>
+        <button type="button" id="cancel-new-table">Отменить</button>
+    </div>
+
+    <script>
+        window.db = 'test';
+        window.xsrf = 'test';
+        window.myTablesSet = {};
+        window.fetch = function () {
+            return Promise.resolve({
+                ok: true,
+                json: function () { return Promise.resolve([]); }
+            });
+        };
+    </script>
+    <script src="../js/tables.js"></script>
+    <script>
+        window.addEventListener('load', function () {
+            setTimeout(function () {
+                var controller = window.tablesController || new TablesController();
+                var searchInput = document.getElementById('tables-search');
+                var nameInput = document.getElementById('new-table-name');
+                var modal = document.getElementById('new-table-modal');
+                var inputEvents = 0;
+
+                nameInput.addEventListener('input', function () {
+                    inputEvents += 1;
+                });
+
+                searchInput.value = 'Новая справочная таблица';
+                controller.showNewTableModal();
+
+                console.assert(nameInput.value === 'Новая справочная таблица', 'new table name should be copied from search');
+                console.assert(inputEvents === 1, 'prefill should dispatch an input event');
+                console.assert(modal.style.display === '', 'modal should be visible');
+
+                document.body.dataset.testStatus = 'passed';
+                console.log('issue-2136 passed');
+            }, 150);
+        });
+    </script>
+</body>
+</html>
