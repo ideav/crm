@@ -493,20 +493,44 @@ function dashMatrixLabelMatches(dashLabel, matrixLabel) {
     return dashMatrixLabelScore(dashLabel, matrixLabel) > 0;
 }
 
+function dashSumMatrixValues(rows) {
+    var acc = 0, hasNumeric = false, vals = [], ids = [];
+    rows.forEach(function(row) {
+        var raw = row ? row.val : '';
+        var n = dashGetFloat(raw);
+        if (!isNaN(n)) {
+            acc += n;
+            hasNumeric = true;
+        } else if (raw !== undefined && raw !== null && raw !== '') {
+            vals.push(raw);
+        }
+        if (row && row.valID !== undefined && row.valID !== null && row.valID !== '')
+            ids.push(String(row.valID));
+    });
+    return {
+        val: hasNumeric ? dashNormalizeVal('', acc) : vals.join(', '),
+        valID: ids.join(',')
+    };
+}
+
 function dashFindMatrixValue(line, col, dashLabel) {
     var lineKey = dashNormalizeMatrixKey(line);
     var colKey = dashNormalizeMatrixKey(col);
-    var best = null, bestScore = 0;
+    var bestRows = [], bestScore = 0;
     (dashMatrixValues || []).forEach(function(row) {
         if (dashNormalizeMatrixKey(row.line) !== lineKey) return;
         if (dashNormalizeMatrixKey(row.col) !== colKey) return;
         var score = dashMatrixLabelScore(dashLabel, row['Метка']);
         if (score > bestScore) {
-            best = row;
+            bestRows = [row];
             bestScore = score;
+        } else if (score === bestScore && score > 0) {
+            bestRows.push(row);
         }
     });
-    return best;
+    if (!bestRows.length) return null;
+    var result = Object.assign({}, bestRows[0], dashSumMatrixValues(bestRows));
+    return result;
 }
 
 function dashHasRows(json) {

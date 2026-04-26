@@ -11,6 +11,8 @@ assertSource(source.includes("report/155564?JSON_KV"),
     'dashboard must fetch the matrix values report exactly by report/155564?JSON_KV');
 assertSource(source.includes('data-matrix-val-id'),
     'rendered matrix cells must remember valID for later edit/delete');
+assertSource(source.includes('dashSumMatrixValues'),
+    'matrix lookup must sum multiple matching values');
 assertSource(source.includes("src === 'rg' || src === 'value' || src === 'matrix'"),
     'matrix cells must use the inline editor route');
 assertSource(!source.includes("src === 'report' || src === 'mu' || src === 'linesum' || src === 'rgformula'"),
@@ -35,9 +37,12 @@ const code = `
 let dashMatrixValues = [];
 function dashTrace() {}
 
+${extractFunction('dashGetFloat')}
+${extractFunction('dashNormalizeVal')}
 ${extractFunction('dashNormalizeMatrixKey')}
 ${extractFunction('dashMatrixLabelScore')}
 ${extractFunction('dashMatrixLabelMatches')}
+${extractFunction('dashSumMatrixValues')}
 ${extractFunction('dashFindMatrixValue')}
 
 function assert(condition, message) {
@@ -57,14 +62,15 @@ assert(!dashMatrixLabelMatches('', 'Новая Истра'),
 
 dashMatrixValues = [
     { val: '111', line: 'NPS родителей', col: '17-19 апреля', 'Метка': 'Новая Истра', valID: '101' },
+    { val: '222', line: 'NPS родителей', col: '17-19 апреля', 'Метка': 'Новая Истра', valID: '105' },
     { val: '777', line: 'NPS родителей', col: '17-19 апреля', 'Метка': '', valID: '102' },
     { val: '999', line: 'NPS родителей', col: '20-22 апреля', 'Метка': 'Новая Истра', valID: '103' },
     { val: '333', line: 'CSI', col: '17-19 апреля', 'Метка': 'Новая Истра', valID: '104' }
 ];
 
 let match = dashFindMatrixValue('nps родителей', '17-19 АПРЕЛЯ', 'B2C лагеря / Новая Истра');
-assert(match && match.val === '111' && match.valID === '101',
-    'matrix lookup must match line, col, substring label, and remember valID');
+assert(match && match.val === '333' && match.valID === '101,105',
+    'matrix lookup must sum values and remember comma-separated valIDs for all matching records');
 
 match = dashFindMatrixValue('NPS родителей', '17-19 апреля', '');
 assert(match && match.val === '777' && match.valID === '102',
