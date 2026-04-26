@@ -550,7 +550,7 @@
                     const labelField = idField.slice(0, -2);
 
                     // Return array of [id, text] tuples to preserve server order
-                    return overrideData.map(item => [String(item[idField]), item[labelField]]);
+                    return overrideData.map(item => [String(item[idField]), this.decodeHtmlEntities(item[labelField])]);
                 } catch (e) {
                     if (e.message && (e.message.includes('error') || e.message.includes('ID field'))) {
                         throw e;
@@ -602,7 +602,7 @@
 
                 // Parse JSON text to extract key-value pairs in original server order
                 // (JavaScript objects with numeric string keys iterate in numeric order, not insertion order)
-                const result = this.parseJsonObjectAsArray(text);
+                const result = this.parseJsonObjectAsArray(text).map(([id, value]) => [id, this.decodeHtmlEntities(value)]);
                 // Cache result for subsequent calls with same requisiteId + recordId + searchQuery (issue #1571)
                 if (Object.keys(extraParams).length === 0) {
                     this.refFetchCache[cacheKey] = result;
