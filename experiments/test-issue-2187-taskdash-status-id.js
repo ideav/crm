@@ -40,6 +40,8 @@ ${extractFunction('taskdashFormatDateForApi')}
 ${extractFunction('taskdashIsDateColumn')}
 ${extractFunction('taskdashIsMetricColumn')}
 ${extractFunction('taskdashIsDashboardFilterColumn')}
+${extractFunction('taskdashIsServiceColumn')}
+${extractFunction('taskdashGetTableColumns')}
 ${extractFunction('taskdashBuildReportUrl')}
 
 function assert(condition, message) {
@@ -77,6 +79,14 @@ assert(parsed.id === '44895' && parsed.name === 'Принята',
 
 assert(taskdashStatusIdFromRow({ 'Статус задачи': 'Принята', 'СтатусID': '44895' }) === '44895',
     'status filter options must read IDs from a companion СтатусID field when present');
+
+const tableColumns = taskdashGetTableColumns([
+    { id: '155682', name: 'Месяц', format: 'SHORT' },
+    { id: '155724', name: 'Статус задачи', format: 'SHORT' },
+    { id: '155725', name: 'СтатусID', format: 'SHORT' }
+]);
+assert(tableColumns.map(function(column) { return column.name; }).join(',') === 'Месяц,Статус задачи',
+    'service companion field СтатусID must not be rendered in the dashboard table');
 `;
 
 vm.runInNewContext(code, { console });
