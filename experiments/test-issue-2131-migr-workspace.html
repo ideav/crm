@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Issue 2131 Migration Workspace</title>
+    <link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="/css/styles.css">
+    <link rel="stylesheet" href="/css/migr.css">
+</head>
+<body>
+    <div id="migration-workspace" data-db="demo" data-xsrf="token" data-user="admin"></div>
+    <script>
+        window.db = 'demo';
+        window.xsrf = 'token';
+        window.user = 'admin';
+
+        const metadata = [
+            { id: 42, val: 'Роль', granted: 'WRITE' },
+            { id: 269, val: 'Настройка', granted: 'WRITE' },
+            { id: 155551, val: 'Матрица показателей', granted: 'WRITE' }
+        ];
+        const reports = [
+            { i: 5230, r: ['Исполнители'] },
+            { i: 155564, r: ['Матрица показателей'] }
+        ];
+        const settings = [
+            {
+                i: 901,
+                r: [
+                    'Демо миграция',
+                    'migration',
+                    JSON.stringify({
+                        version: 1,
+                        type: 'migration',
+                        name: 'Демо миграция',
+                        tables: [{ id: '42', name: 'Роль', exportData: false, filter: '' }],
+                        queries: [],
+                        files: []
+                    })
+                ]
+            }
+        ];
+
+        function jsonResponse(value) {
+            return Promise.resolve(new Response(JSON.stringify(value), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            }));
+        }
+
+        function textResponse(value) {
+            return Promise.resolve(new Response(value, {
+                status: 200,
+                headers: { 'Content-Type': 'text/html; charset=utf-8' }
+            }));
+        }
+
+        function dirHtml() {
+            return [
+                '<table>',
+                '<tr><td><input name="del[]" value="forms"></td><td colspan="2"><a href="/demo/dir_admin/?templates=1&add_path=forms"><b>forms</b></a></td></tr>',
+                '<tr><td><input name="del[]" value="main.html"></td><td><a href="/demo/dir_admin/?templates=1&add_path=&gf=main.html">main.html</a></td></tr>',
+                '<tr><td><input name="del[]" value="taskdash.html"></td><td><a href="/demo/dir_admin/?templates=1&add_path=&gf=taskdash.html">taskdash.html</a></td></tr>',
+                '</table>'
+            ].join('');
+        }
+
+        function fileContent(name) {
+            if (name === 'taskdash.html') {
+                return [
+                    '<script>',
+                    "fetch('/demo/object/155551/?JSON_OBJ&F_155553=NPS')",
+                    "fetch('/demo/report/Матрица%20показателей?JSON')",
+                    '<\/script>'
+                ].join('\n');
+            }
+            return '<div data-api-url="/demo/report/5230?JSON"></div>';
+        }
+
+        window.fetch = function(input) {
+            const url = new URL(String(input), location.origin);
+            const path = url.pathname.replace(/^\/demo\//, '');
+
+            if (path === 'metadata') return jsonResponse(metadata);
+            if (path === 'metadata/42') return jsonResponse({ id: 42, val: 'Роль', reqs: [] });
+            if (path === 'metadata/155551') return jsonResponse({ id: 155551, val: 'Матрица показателей', reqs: [] });
+            if (path === 'object/22') return jsonResponse(reports);
+            if (path === 'object/269') return jsonResponse(settings);
+            if (path === 'dir_admin/') {
+                const gf = url.searchParams.get('gf');
+                if (gf) return textResponse(fileContent(gf));
+                return textResponse(dirHtml());
+            }
+            if (path === 'object/42') return jsonResponse([{ i: 1, r: ['Администратор'] }]);
+            if (path === 'object/155551') return jsonResponse([{ i: 10, r: ['NPS родителей'] }]);
+            if (path === 'object/22/5230') return jsonResponse({ i: 5230, r: ['Исполнители'] });
+            if (path === 'object/22/155564') return jsonResponse({ i: 155564, r: ['Матрица показателей'] });
+            if (path === 'report/5230') return jsonResponse({ header: 'Исполнители', columns: [], data: [] });
+            if (path === 'report/155564') return jsonResponse({ header: 'Матрица показателей', columns: [], data: [] });
+
+            return Promise.resolve(new Response('Not found: ' + path, { status: 404 }));
+        };
+    </script>
+    <script src="/js/migr.js"></script>
+</body>
+</html>
