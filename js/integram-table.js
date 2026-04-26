@@ -8624,7 +8624,7 @@ class IntegramTable{
             const links = backRefs.map(ref => {
                 const href = `/${dbName}/table/${ref.tableId}?FR_${ref.fieldId}=@${recordId}`;
                 const label = `${ref.tableName}.${ref.fieldName}`;
-                return `<a href="${href}" class="reference-link" title="${label}">${label}</a>`;
+                return `<a href="${href}" class="reference-link" style="color: #9ca3af;" title="${label}">${label}</a>`;
             }).join(', ');
 
             return `<td class="references-column-cell">${links}</td>`;
