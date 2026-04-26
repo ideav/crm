@@ -19,6 +19,54 @@ class IntegramCreateFormHelper {
             .replace(/'/g, '&#039;');
     }
 
+    decodeHtmlEntities(text) {
+        if (text === null || text === undefined) return '';
+        const str = String(text);
+        if (!str.includes('&')) return str;
+
+        if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+            const textarea = document.createElement('textarea');
+            textarea.innerHTML = str;
+            return textarea.value;
+        }
+
+        const namedEntities = {
+            amp: '&',
+            lt: '<',
+            gt: '>',
+            quot: '"',
+            apos: "'",
+            nbsp: ' ',
+            ndash: String.fromCharCode(0x2013),
+            mdash: String.fromCharCode(0x2014),
+            laquo: String.fromCharCode(0x00ab),
+            raquo: String.fromCharCode(0x00bb),
+            lsquo: String.fromCharCode(0x2018),
+            rsquo: String.fromCharCode(0x2019),
+            ldquo: String.fromCharCode(0x201c),
+            rdquo: String.fromCharCode(0x201d),
+            hellip: String.fromCharCode(0x2026)
+        };
+
+        return str.replace(/&(#(?:x[0-9a-f]+|\d+)|[a-z][a-z0-9]+);/gi, (match, entity) => {
+            if (entity.charAt(0) === '#') {
+                const isHex = entity.charAt(1).toLowerCase() === 'x';
+                const codePoint = parseInt(entity.slice(isHex ? 2 : 1), isHex ? 16 : 10);
+                if (!Number.isNaN(codePoint)) {
+                    try {
+                        return String.fromCodePoint(codePoint);
+                    } catch (e) {
+                        return match;
+                    }
+                }
+                return match;
+            }
+
+            const decoded = namedEntities[entity.toLowerCase()];
+            return decoded !== undefined ? decoded : match;
+        });
+    }
+
     getMetadataName(metadata) {
         return metadata.val || metadata.name || metadata.title || `Тип #${metadata.id || '?'}`;
     }
@@ -628,7 +676,8 @@ class IntegramCreateFormHelper {
                     optionsHtml = '<div class="inline-editor-reference-empty">Нет данных</div>';
                 } else {
                     entries.forEach(([id, text]) => {
-                        optionsHtml += `<div class="inline-editor-reference-option" data-value="${this.escapeHtml(id)}">${this.escapeHtml(text)}</div>`;
+                        const decodedText = this.decodeHtmlEntities(text);
+                        optionsHtml += `<div class="inline-editor-reference-option" data-value="${this.escapeHtml(id)}">${this.escapeHtml(decodedText)}</div>`;
                     });
                 }
 
@@ -641,7 +690,7 @@ class IntegramCreateFormHelper {
                 if (prefilledValue !== undefined) {
                     hiddenInput.value = prefilledValue;
                     // Find and display the text for this value
-                    const text = data[prefilledValue];
+                    const text = this.decodeHtmlEntities(data[prefilledValue]);
                     if (text && searchInput) {
                         searchInput.value = text;
                     }
@@ -720,7 +769,7 @@ class IntegramCreateFormHelper {
             const data = await response.json();
 
             // Parse options into [id, text] tuples
-            const options = Object.entries(data);
+            const options = Object.entries(data).map(([id, text]) => [id, this.decodeHtmlEntities(text)]);
             wrapper._referenceOptions = options;
 
             // Parse current value: "id1,id2,...:val1,val2,..." or plain display names
@@ -730,7 +779,7 @@ class IntegramCreateFormHelper {
             if (currentRawValue && rawColonIndex > 0) {
                 const ids = currentRawValue.substring(0, rawColonIndex).split(',').map(v => v.trim()).filter(v => v.length > 0);
                 // Issue #1786: Extract labels from the right side of ':' as fallback when ID is not in loaded options
-                const storedLabels = currentRawValue.substring(rawColonIndex + 1).split(',').map(v => v.trim());
+                const storedLabels = currentRawValue.substring(rawColonIndex + 1).split(',').map(v => this.decodeHtmlEntities(v.trim()));
                 for (let i = 0; i < ids.length; i++) {
                     const id = ids[i];
                     const match = options.find(([optId]) => String(optId) === id);
@@ -744,14 +793,14 @@ class IntegramCreateFormHelper {
                 }
             } else {
                 const currentTexts = currentRawValue
-                    ? currentRawValue.split(',').map(v => v.trim()).filter(v => v.length > 0)
+                    ? currentRawValue.split(',').map(v => this.decodeHtmlEntities(v.trim())).filter(v => v.length > 0)
                     : [];
                 for (const text of currentTexts) {
                     const match = options.find(([id, t]) => t === text);
                     if (match) {
                         selectedItems.push({ id: match[0], text: match[1] });
                     } else if (text) {
-                        selectedItems.push({ id: '', text });
+                        selectedItems.push({ id: '', text: this.decodeHtmlEntities(text) });
                     }
                 }
             }
@@ -769,12 +818,15 @@ class IntegramCreateFormHelper {
                 if (selected.length === 0) {
                     tagsContainer.innerHTML = '<span class="multi-ref-tags-placeholder">Нет выбранных значений</span>';
                 } else {
-                    tagsContainer.innerHTML = selected.map(({ id, text }) => `
-                        <span class="multi-ref-tag" data-id="${self.escapeHtml(id)}" data-text="${self.escapeHtml(text)}">
-                            ${self.escapeHtml(text)}
-                            <button class="multi-ref-tag-remove" type="button" title="Удалить" aria-label="Удалить ${self.escapeHtml(text)}"><i class="pi pi-times"></i></button>
+                    tagsContainer.innerHTML = selected.map(({ id, text }) => {
+                        const decodedText = self.decodeHtmlEntities(text);
+                        return `
+                        <span class="multi-ref-tag" data-id="${self.escapeHtml(id)}" data-text="${self.escapeHtml(decodedText)}">
+                            ${self.escapeHtml(decodedText)}
+                            <button class="multi-ref-tag-remove" type="button" title="Удалить" aria-label="Удалить ${self.escapeHtml(decodedText)}"><i class="pi pi-times"></i></button>
                         </span>
-                    `).join('');
+                    `;
+                    }).join('');
                 }
             };
 
@@ -787,7 +839,7 @@ class IntegramCreateFormHelper {
                     dropdown.innerHTML = '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
                 } else {
                     dropdown.innerHTML = filtered.map(([id, text]) => {
-                        const et = self.escapeHtml(text);
+                        const et = self.escapeHtml(self.decodeHtmlEntities(text));
                         return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
                     }).join('');
                 }

@@ -233,6 +233,54 @@
                               .replace(/'/g, '&#039;');
         }
 
+        decodeHtmlEntities(text) {
+            if (text === null || text === undefined) return '';
+            const str = String(text);
+            if (!str.includes('&')) return str;
+
+            if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+                const textarea = document.createElement('textarea');
+                textarea.innerHTML = str;
+                return textarea.value;
+            }
+
+            const namedEntities = {
+                amp: '&',
+                lt: '<',
+                gt: '>',
+                quot: '"',
+                apos: "'",
+                nbsp: ' ',
+                ndash: String.fromCharCode(0x2013),
+                mdash: String.fromCharCode(0x2014),
+                laquo: String.fromCharCode(0x00ab),
+                raquo: String.fromCharCode(0x00bb),
+                lsquo: String.fromCharCode(0x2018),
+                rsquo: String.fromCharCode(0x2019),
+                ldquo: String.fromCharCode(0x201c),
+                rdquo: String.fromCharCode(0x201d),
+                hellip: String.fromCharCode(0x2026)
+            };
+
+            return str.replace(/&(#(?:x[0-9a-f]+|\d+)|[a-z][a-z0-9]+);/gi, (match, entity) => {
+                if (entity.charAt(0) === '#') {
+                    const isHex = entity.charAt(1).toLowerCase() === 'x';
+                    const codePoint = parseInt(entity.slice(isHex ? 2 : 1), isHex ? 16 : 10);
+                    if (!Number.isNaN(codePoint)) {
+                        try {
+                            return String.fromCodePoint(codePoint);
+                        } catch (e) {
+                            return match;
+                        }
+                    }
+                    return match;
+                }
+
+                const decoded = namedEntities[entity.toLowerCase()];
+                return decoded !== undefined ? decoded : match;
+            });
+        }
+
         /**
          * Convert URLs in already-HTML-escaped text to clickable hyperlinks (issue #947)
          * Input text must already be HTML-escaped; this method only wraps URL patterns
@@ -278,8 +326,9 @@
                 const colonIndex = strValue.indexOf(':');
                 if (colonIndex > 0) {
                     // Return only the display value part (after the colon)
-                    return strValue.substring(colonIndex + 1);
+                    return this.decodeHtmlEntities(strValue.substring(colonIndex + 1));
                 }
+                return this.decodeHtmlEntities(strValue);
             }
 
             return strValue;

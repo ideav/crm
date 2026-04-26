@@ -4857,7 +4857,7 @@ class IntegramTable{
                     // Parse IDs from the left side of ':'
                     const ids = rawValue.substring(0, rawColonIndex).split(',').map(v => v.trim()).filter(v => v.length > 0);
                     // Issue #1786: Extract labels from the right side of ':' as fallback when ID is not in loaded options
-                    const storedLabels = rawValue.substring(rawColonIndex + 1).split(',').map(v => v.trim());
+                    const storedLabels = rawValue.substring(rawColonIndex + 1).split(',').map(v => this.decodeHtmlEntities(v.trim()));
                     for (let i = 0; i < ids.length; i++) {
                         const id = ids[i];
                         const match = options.find(([optId]) => String(optId) === id);
@@ -4872,7 +4872,7 @@ class IntegramTable{
                 } else {
                     // Fallback: parse display names from currentValue and match against options by text
                     const currentTexts = currentValue
-                        ? currentValue.split(',').map(v => v.trim()).filter(v => v.length > 0)
+                        ? currentValue.split(',').map(v => this.decodeHtmlEntities(v.trim())).filter(v => v.length > 0)
                         : [];
                     for (const text of currentTexts) {
                         const match = options.find(([id, t]) => t === text);
@@ -4880,7 +4880,7 @@ class IntegramTable{
                             selectedItems.push({ id: match[0], text: match[1] });
                         } else if (text) {
                             // Unknown text – keep it with empty id so user can see it
-                            selectedItems.push({ id: '', text });
+                            selectedItems.push({ id: '', text: this.decodeHtmlEntities(text) });
                         }
                     }
                 }
@@ -4890,18 +4890,21 @@ class IntegramTable{
                     const selected = this.currentEditingCell.selectedItems;
                     const selectedIds = new Set(selected.map(s => s.id).filter(id => id));
 
-                    const tagsHtml = selected.map(({ id, text }) => `
-                        <span class="multi-ref-tag" data-id="${this.escapeHtml(id)}" data-text="${this.escapeHtml(text)}">
-                            ${this.escapeHtml(text)}
-                            <button class="multi-ref-tag-remove" type="button" title="Удалить" aria-label="Удалить ${this.escapeHtml(text)}"><i class="pi pi-times"></i></button>
+                    const tagsHtml = selected.map(({ id, text }) => {
+                        const decodedText = this.decodeHtmlEntities(text);
+                        return `
+                        <span class="multi-ref-tag" data-id="${this.escapeHtml(id)}" data-text="${this.escapeHtml(decodedText)}">
+                            ${this.escapeHtml(decodedText)}
+                            <button class="multi-ref-tag-remove" type="button" title="Удалить" aria-label="Удалить ${this.escapeHtml(decodedText)}"><i class="pi pi-times"></i></button>
                         </span>
-                    `).join('');
+                    `;
+                    }).join('');
 
                     const availableOptions = (this.currentEditingCell.referenceOptions || [])
                         .filter(([id]) => !selectedIds.has(id));
                     const optionsHtml = availableOptions.length > 0
                         ? availableOptions.map(([id, text]) => {
-                            const escapedText = this.escapeHtml(text);
+                            const escapedText = this.escapeHtml(this.decodeHtmlEntities(text));
                             return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${escapedText}" tabindex="0">${escapedText}</div>`;
                         }).join('')
                         : '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
@@ -4990,7 +4993,7 @@ class IntegramTable{
                                     const serverFiltered = serverOptions.filter(([id]) => !currentSelected.has(id));
                                     dropdown.innerHTML = serverFiltered.length > 0
                                         ? serverFiltered.map(([id, text]) => {
-                                            const et = this.escapeHtml(text);
+                                            const et = this.escapeHtml(this.decodeHtmlEntities(text));
                                             return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
                                         }).join('')
                                         : '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
@@ -5000,7 +5003,7 @@ class IntegramTable{
                             } else {
                                 dropdown.innerHTML = filtered.length > 0
                                     ? filtered.map(([id, text]) => {
-                                        const et = this.escapeHtml(text);
+                                        const et = this.escapeHtml(this.decodeHtmlEntities(text));
                                         return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
                                     }).join('')
                                     : '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
@@ -5174,7 +5177,8 @@ class IntegramTable{
             }
 
             return filteredOptions.map(([id, text]) => {
-                const escapedText = this.escapeHtml(text);
+                const decodedText = this.decodeHtmlEntities(text);
+                const escapedText = this.escapeHtml(decodedText);
                 return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${escapedText}" tabindex="0">${escapedText}</div>`;
             }).join('');
         }
@@ -5347,6 +5351,7 @@ class IntegramTable{
 
             const typeName = this.getMetadataName(metadata);
             const title = `Создание: ${typeName}`;
+            const decodedInitialValue = this.decodeHtmlEntities(initialValue);
 
             // Build attributes form HTML (similar to renderAttributesForm but simplified for create mode)
             const reqs = metadata.reqs || [];
@@ -5367,30 +5372,30 @@ class IntegramTable{
             // Build main field HTML based on its type
             let mainFieldHtml = '';
             if (mainFieldType === 'BOOLEAN') {
-                const isChecked = initialValue ? 'checked' : '';
+                const isChecked = decodedInitialValue ? 'checked' : '';
                 mainFieldHtml = `<input type="checkbox" id="field-main-ref-create" name="main" value="1" ${ isChecked }>`;
             } else if (mainFieldType === 'DATE') {
-                const dateValueHtml5 = initialValue ? this.formatDateForHtml5(initialValue, false) : currentDateHtml5;
-                const dateValueDisplay = initialValue ? this.formatDateForInput(initialValue, false) : currentDateDisplay;
+                const dateValueHtml5 = decodedInitialValue ? this.formatDateForHtml5(decodedInitialValue, false) : currentDateHtml5;
+                const dateValueDisplay = decodedInitialValue ? this.formatDateForInput(decodedInitialValue, false) : currentDateDisplay;
                 mainFieldHtml = `<input type="date" class="form-control date-picker" id="field-main-ref-create-picker" required data-target="field-main-ref-create" value="${ this.escapeHtml(dateValueHtml5) }">`;
                 mainFieldHtml += `<input type="hidden" id="field-main-ref-create" name="main" value="${ this.escapeHtml(dateValueDisplay) }">`;
             } else if (mainFieldType === 'DATETIME') {
-                const dateTimeValueHtml5 = initialValue ? this.formatDateForHtml5(initialValue, true) : currentDateTimeHtml5;
-                const dateTimeValueDisplay = initialValue ? this.formatDateForInput(initialValue, true) : currentDateTimeDisplay;
+                const dateTimeValueHtml5 = decodedInitialValue ? this.formatDateForHtml5(decodedInitialValue, true) : currentDateTimeHtml5;
+                const dateTimeValueDisplay = decodedInitialValue ? this.formatDateForInput(decodedInitialValue, true) : currentDateTimeDisplay;
                 mainFieldHtml = `<input type="datetime-local" class="form-control datetime-picker" id="field-main-ref-create-picker" required data-target="field-main-ref-create" value="${ this.escapeHtml(dateTimeValueHtml5) }">`;
                 mainFieldHtml += `<input type="hidden" id="field-main-ref-create" name="main" value="${ this.escapeHtml(dateTimeValueDisplay) }">`;
             } else if (mainFieldType === 'NUMBER') {
-                mainFieldHtml = `<input type="number" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required>`;
+                mainFieldHtml = `<input type="number" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(decodedInitialValue) }" required>`;
             } else if (mainFieldType === 'SIGNED') {
-                mainFieldHtml = `<input type="number" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required step="0.01">`;
+                mainFieldHtml = `<input type="number" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(decodedInitialValue) }" required step="0.01">`;
             } else if (mainFieldType === 'MEMO') {
-                mainFieldHtml = `<textarea class="form-control memo-field" id="field-main-ref-create" name="main" rows="4" required>${ this.escapeHtml(initialValue) }</textarea>`;
+                mainFieldHtml = `<textarea class="form-control memo-field" id="field-main-ref-create" name="main" rows="4" required>${ this.escapeHtml(decodedInitialValue) }</textarea>`;
             } else if (mainFieldType === 'PWD') {
                 // Password field - render as type=password input (issue #1441)
-                mainFieldHtml = `<input type="password" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required autocomplete="new-password">`;
+                mainFieldHtml = `<input type="password" class="form-control" id="field-main-ref-create" name="main" value="${ this.escapeHtml(decodedInitialValue) }" required autocomplete="new-password">`;
             } else {
                 // Default: text input (SHORT, CHARS, etc.)
-                mainFieldHtml = `<input type="text" class="form-control" id="field-main-ref-create" name="main" value="${this.escapeHtml(initialValue)}" required>`;
+                mainFieldHtml = `<input type="text" class="form-control" id="field-main-ref-create" name="main" value="${this.escapeHtml(decodedInitialValue)}" required>`;
             }
 
             // For DATE/DATETIME, the visible/interactive element is the picker input (id="field-main-ref-create-picker"),
@@ -5614,7 +5619,7 @@ class IntegramTable{
                 // According to the issue: "её id приходит в ключе obj JSON в ответ на запрос _m_new"
                 const createdId = result.obj || result.id || result.i;
                 // Use the value from the response (result.val) if available, otherwise use the input value
-                const createdValue = result.val || mainValue;
+                const createdValue = this.decodeHtmlEntities(result.val || mainValue);
 
 
                 // Close the create form modal
@@ -10341,7 +10346,7 @@ class IntegramTable{
                     const labelField = idField.slice(0, -2);
 
                     // Return array of [id, text] tuples to preserve server order
-                    return overrideData.map(item => [String(item[idField]), item[labelField]]);
+                    return overrideData.map(item => [String(item[idField]), this.decodeHtmlEntities(item[labelField])]);
                 } catch (e) {
                     if (e.message && (e.message.includes('error') || e.message.includes('ID field'))) {
                         throw e;
@@ -10393,7 +10398,7 @@ class IntegramTable{
 
                 // Parse JSON text to extract key-value pairs in original server order
                 // (JavaScript objects with numeric string keys iterate in numeric order, not insertion order)
-                const result = this.parseJsonObjectAsArray(text);
+                const result = this.parseJsonObjectAsArray(text).map(([id, value]) => [id, this.decodeHtmlEntities(value)]);
                 // Cache result for subsequent calls with same requisiteId + recordId + searchQuery (issue #1571)
                 if (Object.keys(extraParams).length === 0) {
                     this.refFetchCache[cacheKey] = result;
@@ -13594,7 +13599,7 @@ class IntegramTable{
                         }
                         const currentOption = options.find(([id]) => id === hiddenInput.value);
                         if (currentOption) {
-                            searchInput.value = currentOption[1];
+                            searchInput.value = this.decodeHtmlEntities(currentOption[1]);
                         }
                     }
 
@@ -14031,7 +14036,7 @@ class IntegramTable{
                     // ids:values format — resolve each ID against fetched options
                     const ids = currentRawValue.substring(0, rawColonIndex).split(',').map(v => v.trim()).filter(v => v.length > 0);
                     // Issue #1786: Extract labels from the right side of ':' as fallback when ID is not in loaded options
-                    const storedLabels = currentRawValue.substring(rawColonIndex + 1).split(',').map(v => v.trim());
+                    const storedLabels = currentRawValue.substring(rawColonIndex + 1).split(',').map(v => this.decodeHtmlEntities(v.trim()));
                     for (let i = 0; i < ids.length; i++) {
                         const id = ids[i];
                         const match = options.find(([optId]) => String(optId) === id);
@@ -14046,14 +14051,14 @@ class IntegramTable{
                 } else {
                     // Fallback: parse display names and match by text
                     const currentTexts = currentRawValue
-                        ? currentRawValue.split(',').map(v => v.trim()).filter(v => v.length > 0)
+                        ? currentRawValue.split(',').map(v => this.decodeHtmlEntities(v.trim())).filter(v => v.length > 0)
                         : [];
                     for (const text of currentTexts) {
                         const match = options.find(([id, t]) => t === text);
                         if (match) {
                             selectedItems.push({ id: match[0], text: match[1] });
                         } else if (text) {
-                            selectedItems.push({ id: '', text });
+                            selectedItems.push({ id: '', text: this.decodeHtmlEntities(text) });
                         }
                     }
                 }
@@ -14069,12 +14074,15 @@ class IntegramTable{
                     if (selected.length === 0) {
                         tagsContainer.innerHTML = '<span class="multi-ref-tags-placeholder">Нет выбранных значений</span>';
                     } else {
-                        tagsContainer.innerHTML = selected.map(({ id, text }) => `
-                            <span class="multi-ref-tag" data-id="${this.escapeHtml(id)}" data-text="${this.escapeHtml(text)}">
-                                ${this.escapeHtml(text)}
-                                <button class="multi-ref-tag-remove" type="button" title="Удалить" aria-label="Удалить ${this.escapeHtml(text)}"><i class="pi pi-times"></i></button>
+                        tagsContainer.innerHTML = selected.map(({ id, text }) => {
+                            const decodedText = this.decodeHtmlEntities(text);
+                            return `
+                            <span class="multi-ref-tag" data-id="${this.escapeHtml(id)}" data-text="${this.escapeHtml(decodedText)}">
+                                ${this.escapeHtml(decodedText)}
+                                <button class="multi-ref-tag-remove" type="button" title="Удалить" aria-label="Удалить ${this.escapeHtml(decodedText)}"><i class="pi pi-times"></i></button>
                             </span>
-                        `).join('');
+                        `;
+                        }).join('');
                     }
                 };
 
@@ -14087,7 +14095,7 @@ class IntegramTable{
                         dropdown.innerHTML = '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
                     } else {
                         dropdown.innerHTML = filtered.map(([id, text]) => {
-                            const et = this.escapeHtml(text);
+                            const et = this.escapeHtml(this.decodeHtmlEntities(text));
                             return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
                         }).join('');
                     }
@@ -14400,12 +14408,12 @@ class IntegramTable{
             }
 
             options.forEach(([id, text]) => {
-                const escapedText = this.escapeHtml(text);
+                const decodedText = this.decodeHtmlEntities(text);
                 const optionDiv = document.createElement('div');
                 optionDiv.className = 'inline-editor-reference-option';
-                optionDiv.textContent = text;
+                optionDiv.textContent = decodedText;
                 optionDiv.dataset.id = id;
-                optionDiv.dataset.text = text;
+                optionDiv.dataset.text = decodedText;
                 optionDiv.tabIndex = 0;
 
                 // Highlight if selected
@@ -14464,6 +14472,7 @@ class IntegramTable{
 
             const typeName = this.getMetadataName(metadata);
             const title = `Создание: ${typeName}`;
+            const decodedInitialValue = this.decodeHtmlEntities(initialValue);
 
             const reqs = metadata.reqs || [];
             const regularFields = reqs.filter(req => !req.arr_id);
@@ -14483,27 +14492,27 @@ class IntegramTable{
             // Build main field HTML based on its type
             let mainFieldHtml = '';
             if (mainFieldType === 'BOOLEAN') {
-                const isChecked = initialValue ? 'checked' : '';
+                const isChecked = decodedInitialValue ? 'checked' : '';
                 mainFieldHtml = `<input type="checkbox" id="field-main-form-ref-create" name="main" value="1" ${ isChecked }>`;
             } else if (mainFieldType === 'DATE') {
-                const dateValueHtml5 = initialValue ? this.formatDateForHtml5(initialValue, false) : currentDateHtml5;
-                const dateValueDisplay = initialValue ? this.formatDateForInput(initialValue, false) : currentDateDisplay;
+                const dateValueHtml5 = decodedInitialValue ? this.formatDateForHtml5(decodedInitialValue, false) : currentDateHtml5;
+                const dateValueDisplay = decodedInitialValue ? this.formatDateForInput(decodedInitialValue, false) : currentDateDisplay;
                 mainFieldHtml = `<input type="date" class="form-control date-picker" id="field-main-form-ref-create-picker" required data-target="field-main-form-ref-create" value="${ this.escapeHtml(dateValueHtml5) }">`;
                 mainFieldHtml += `<input type="hidden" id="field-main-form-ref-create" name="main" value="${ this.escapeHtml(dateValueDisplay) }">`;
             } else if (mainFieldType === 'DATETIME') {
-                const dateTimeValueHtml5 = initialValue ? this.formatDateForHtml5(initialValue, true) : currentDateTimeHtml5;
-                const dateTimeValueDisplay = initialValue ? this.formatDateForInput(initialValue, true) : currentDateTimeDisplay;
+                const dateTimeValueHtml5 = decodedInitialValue ? this.formatDateForHtml5(decodedInitialValue, true) : currentDateTimeHtml5;
+                const dateTimeValueDisplay = decodedInitialValue ? this.formatDateForInput(decodedInitialValue, true) : currentDateTimeDisplay;
                 mainFieldHtml = `<input type="datetime-local" class="form-control datetime-picker" id="field-main-form-ref-create-picker" required data-target="field-main-form-ref-create" value="${ this.escapeHtml(dateTimeValueHtml5) }">`;
                 mainFieldHtml += `<input type="hidden" id="field-main-form-ref-create" name="main" value="${ this.escapeHtml(dateTimeValueDisplay) }">`;
             } else if (mainFieldType === 'NUMBER') {
-                mainFieldHtml = `<input type="number" class="form-control" id="field-main-form-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required>`;
+                mainFieldHtml = `<input type="number" class="form-control" id="field-main-form-ref-create" name="main" value="${ this.escapeHtml(decodedInitialValue) }" required>`;
             } else if (mainFieldType === 'SIGNED') {
-                mainFieldHtml = `<input type="number" class="form-control" id="field-main-form-ref-create" name="main" value="${ this.escapeHtml(initialValue) }" required step="0.01">`;
+                mainFieldHtml = `<input type="number" class="form-control" id="field-main-form-ref-create" name="main" value="${ this.escapeHtml(decodedInitialValue) }" required step="0.01">`;
             } else if (mainFieldType === 'MEMO') {
-                mainFieldHtml = `<textarea class="form-control memo-field" id="field-main-form-ref-create" name="main" rows="4" required>${ this.escapeHtml(initialValue) }</textarea>`;
+                mainFieldHtml = `<textarea class="form-control memo-field" id="field-main-form-ref-create" name="main" rows="4" required>${ this.escapeHtml(decodedInitialValue) }</textarea>`;
             } else {
                 // Default: text input (SHORT, CHARS, etc.)
-                mainFieldHtml = `<input type="text" class="form-control" id="field-main-form-ref-create" name="main" value="${this.escapeHtml(initialValue)}" required>`;
+                mainFieldHtml = `<input type="text" class="form-control" id="field-main-form-ref-create" name="main" value="${this.escapeHtml(decodedInitialValue)}" required>`;
             }
 
             let attributesHtml = `
@@ -14697,7 +14706,7 @@ class IntegramTable{
                 if (result.warning) this.showToast(result.warning, 'warning');
 
                 const createdId = result.obj || result.id || result.i;
-                const createdValue = result.val || mainValue;
+                const createdValue = this.decodeHtmlEntities(result.val || mainValue);
 
 
                 // Close the create form modal
@@ -15974,6 +15983,54 @@ class IntegramTable{
                               .replace(/'/g, '&#039;');
         }
 
+        decodeHtmlEntities(text) {
+            if (text === null || text === undefined) return '';
+            const str = String(text);
+            if (!str.includes('&')) return str;
+
+            if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+                const textarea = document.createElement('textarea');
+                textarea.innerHTML = str;
+                return textarea.value;
+            }
+
+            const namedEntities = {
+                amp: '&',
+                lt: '<',
+                gt: '>',
+                quot: '"',
+                apos: "'",
+                nbsp: ' ',
+                ndash: String.fromCharCode(0x2013),
+                mdash: String.fromCharCode(0x2014),
+                laquo: String.fromCharCode(0x00ab),
+                raquo: String.fromCharCode(0x00bb),
+                lsquo: String.fromCharCode(0x2018),
+                rsquo: String.fromCharCode(0x2019),
+                ldquo: String.fromCharCode(0x201c),
+                rdquo: String.fromCharCode(0x201d),
+                hellip: String.fromCharCode(0x2026)
+            };
+
+            return str.replace(/&(#(?:x[0-9a-f]+|\d+)|[a-z][a-z0-9]+);/gi, (match, entity) => {
+                if (entity.charAt(0) === '#') {
+                    const isHex = entity.charAt(1).toLowerCase() === 'x';
+                    const codePoint = parseInt(entity.slice(isHex ? 2 : 1), isHex ? 16 : 10);
+                    if (!Number.isNaN(codePoint)) {
+                        try {
+                            return String.fromCodePoint(codePoint);
+                        } catch (e) {
+                            return match;
+                        }
+                    }
+                    return match;
+                }
+
+                const decoded = namedEntities[entity.toLowerCase()];
+                return decoded !== undefined ? decoded : match;
+            });
+        }
+
         /**
          * Convert URLs in already-HTML-escaped text to clickable hyperlinks (issue #947)
          * Input text must already be HTML-escaped; this method only wraps URL patterns
@@ -16019,8 +16076,9 @@ class IntegramTable{
                 const colonIndex = strValue.indexOf(':');
                 if (colonIndex > 0) {
                     // Return only the display value part (after the colon)
-                    return strValue.substring(colonIndex + 1);
+                    return this.decodeHtmlEntities(strValue.substring(colonIndex + 1));
                 }
+                return this.decodeHtmlEntities(strValue);
             }
 
             return strValue;
@@ -17316,6 +17374,54 @@ class IntegramCreateFormHelper {
             .replace(/'/g, '&#039;');
     }
 
+    decodeHtmlEntities(text) {
+        if (text === null || text === undefined) return '';
+        const str = String(text);
+        if (!str.includes('&')) return str;
+
+        if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+            const textarea = document.createElement('textarea');
+            textarea.innerHTML = str;
+            return textarea.value;
+        }
+
+        const namedEntities = {
+            amp: '&',
+            lt: '<',
+            gt: '>',
+            quot: '"',
+            apos: "'",
+            nbsp: ' ',
+            ndash: String.fromCharCode(0x2013),
+            mdash: String.fromCharCode(0x2014),
+            laquo: String.fromCharCode(0x00ab),
+            raquo: String.fromCharCode(0x00bb),
+            lsquo: String.fromCharCode(0x2018),
+            rsquo: String.fromCharCode(0x2019),
+            ldquo: String.fromCharCode(0x201c),
+            rdquo: String.fromCharCode(0x201d),
+            hellip: String.fromCharCode(0x2026)
+        };
+
+        return str.replace(/&(#(?:x[0-9a-f]+|\d+)|[a-z][a-z0-9]+);/gi, (match, entity) => {
+            if (entity.charAt(0) === '#') {
+                const isHex = entity.charAt(1).toLowerCase() === 'x';
+                const codePoint = parseInt(entity.slice(isHex ? 2 : 1), isHex ? 16 : 10);
+                if (!Number.isNaN(codePoint)) {
+                    try {
+                        return String.fromCodePoint(codePoint);
+                    } catch (e) {
+                        return match;
+                    }
+                }
+                return match;
+            }
+
+            const decoded = namedEntities[entity.toLowerCase()];
+            return decoded !== undefined ? decoded : match;
+        });
+    }
+
     getMetadataName(metadata) {
         return metadata.val || metadata.name || metadata.title || `Тип #${metadata.id || '?'}`;
     }
@@ -17925,7 +18031,8 @@ class IntegramCreateFormHelper {
                     optionsHtml = '<div class="inline-editor-reference-empty">Нет данных</div>';
                 } else {
                     entries.forEach(([id, text]) => {
-                        optionsHtml += `<div class="inline-editor-reference-option" data-value="${this.escapeHtml(id)}">${this.escapeHtml(text)}</div>`;
+                        const decodedText = this.decodeHtmlEntities(text);
+                        optionsHtml += `<div class="inline-editor-reference-option" data-value="${this.escapeHtml(id)}">${this.escapeHtml(decodedText)}</div>`;
                     });
                 }
 
@@ -17938,7 +18045,7 @@ class IntegramCreateFormHelper {
                 if (prefilledValue !== undefined) {
                     hiddenInput.value = prefilledValue;
                     // Find and display the text for this value
-                    const text = data[prefilledValue];
+                    const text = this.decodeHtmlEntities(data[prefilledValue]);
                     if (text && searchInput) {
                         searchInput.value = text;
                     }
@@ -18017,7 +18124,7 @@ class IntegramCreateFormHelper {
             const data = await response.json();
 
             // Parse options into [id, text] tuples
-            const options = Object.entries(data);
+            const options = Object.entries(data).map(([id, text]) => [id, this.decodeHtmlEntities(text)]);
             wrapper._referenceOptions = options;
 
             // Parse current value: "id1,id2,...:val1,val2,..." or plain display names
@@ -18027,7 +18134,7 @@ class IntegramCreateFormHelper {
             if (currentRawValue && rawColonIndex > 0) {
                 const ids = currentRawValue.substring(0, rawColonIndex).split(',').map(v => v.trim()).filter(v => v.length > 0);
                 // Issue #1786: Extract labels from the right side of ':' as fallback when ID is not in loaded options
-                const storedLabels = currentRawValue.substring(rawColonIndex + 1).split(',').map(v => v.trim());
+                const storedLabels = currentRawValue.substring(rawColonIndex + 1).split(',').map(v => this.decodeHtmlEntities(v.trim()));
                 for (let i = 0; i < ids.length; i++) {
                     const id = ids[i];
                     const match = options.find(([optId]) => String(optId) === id);
@@ -18041,14 +18148,14 @@ class IntegramCreateFormHelper {
                 }
             } else {
                 const currentTexts = currentRawValue
-                    ? currentRawValue.split(',').map(v => v.trim()).filter(v => v.length > 0)
+                    ? currentRawValue.split(',').map(v => this.decodeHtmlEntities(v.trim())).filter(v => v.length > 0)
                     : [];
                 for (const text of currentTexts) {
                     const match = options.find(([id, t]) => t === text);
                     if (match) {
                         selectedItems.push({ id: match[0], text: match[1] });
                     } else if (text) {
-                        selectedItems.push({ id: '', text });
+                        selectedItems.push({ id: '', text: this.decodeHtmlEntities(text) });
                     }
                 }
             }
@@ -18066,12 +18173,15 @@ class IntegramCreateFormHelper {
                 if (selected.length === 0) {
                     tagsContainer.innerHTML = '<span class="multi-ref-tags-placeholder">Нет выбранных значений</span>';
                 } else {
-                    tagsContainer.innerHTML = selected.map(({ id, text }) => `
-                        <span class="multi-ref-tag" data-id="${self.escapeHtml(id)}" data-text="${self.escapeHtml(text)}">
-                            ${self.escapeHtml(text)}
-                            <button class="multi-ref-tag-remove" type="button" title="Удалить" aria-label="Удалить ${self.escapeHtml(text)}"><i class="pi pi-times"></i></button>
+                    tagsContainer.innerHTML = selected.map(({ id, text }) => {
+                        const decodedText = self.decodeHtmlEntities(text);
+                        return `
+                        <span class="multi-ref-tag" data-id="${self.escapeHtml(id)}" data-text="${self.escapeHtml(decodedText)}">
+                            ${self.escapeHtml(decodedText)}
+                            <button class="multi-ref-tag-remove" type="button" title="Удалить" aria-label="Удалить ${self.escapeHtml(decodedText)}"><i class="pi pi-times"></i></button>
                         </span>
-                    `).join('');
+                    `;
+                    }).join('');
                 }
             };
 
@@ -18084,7 +18194,7 @@ class IntegramCreateFormHelper {
                     dropdown.innerHTML = '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
                 } else {
                     dropdown.innerHTML = filtered.map(([id, text]) => {
-                        const et = self.escapeHtml(text);
+                        const et = self.escapeHtml(self.decodeHtmlEntities(text));
                         return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
                     }).join('');
                 }
