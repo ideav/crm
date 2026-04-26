@@ -891,6 +891,25 @@
                 return type ? type.name : `Тип ${typeId}`;
             };
 
+            const ensureGlobalMetadataForSuggestions = async () => {
+                if (this.globalMetadata) {
+                    return true;
+                }
+
+                if (!this.globalMetadataPromise) {
+                    this.globalMetadataPromise = this.loadGlobalMetadata();
+                }
+
+                await this.globalMetadataPromise;
+
+                if (!this.globalMetadata) {
+                    this.globalMetadataPromise = null;
+                    return false;
+                }
+
+                return true;
+            };
+
             // Search metadata and return matching items
             const searchMetadata = (searchTerm) => {
                 if (!this.globalMetadata || !searchTerm || searchTerm.length < 1) {
@@ -1024,35 +1043,51 @@
                 });
             };
 
-            // Input event for search and auto-detection of type/reference (issue #1494)
-            nameInput.addEventListener('input', () => {
-                const value = nameInput.value.trim();
-                if (value.length >= 1) {
-                    const suggestions = searchMetadata(value);
-                    renderSuggestions(suggestions);
-
-                    // Auto-detect base type and reference flag from column name dictionary
-                    if (typeof detectColumnType === 'function') {
-                        const detected = detectColumnType(value);
-                        if (detected) {
-                            if (!typeManuallyChanged) {
-                                typeSelect.value = String(detected.type);
-                            }
-                            if (!refManuallyChanged) {
-                                listCheckbox._autoDetecting = true;
-                                listCheckbox.checked = detected.ref;
-                                listCheckbox._autoDetecting = false;
-                                multiselectContainer.style.display = detected.ref ? 'block' : 'none';
-                                if (!detected.ref) {
-                                    modal.querySelector(`#new-column-multiselect-${instanceName}`).checked = false;
-                                }
+            const applyColumnNameAutoDetection = (value) => {
+                if (typeof detectColumnType === 'function') {
+                    const detected = detectColumnType(value);
+                    if (detected) {
+                        if (!typeManuallyChanged) {
+                            typeSelect.value = String(detected.type);
+                        }
+                        if (!refManuallyChanged) {
+                            listCheckbox._autoDetecting = true;
+                            listCheckbox.checked = detected.ref;
+                            listCheckbox._autoDetecting = false;
+                            multiselectContainer.style.display = detected.ref ? 'block' : 'none';
+                            if (!detected.ref) {
+                                modal.querySelector(`#new-column-multiselect-${instanceName}`).checked = false;
                             }
                         }
                     }
+                }
+            };
+
+            let columnSuggestionRequestId = 0;
+
+            // Input event for search and auto-detection of type/reference (issue #1494)
+            nameInput.addEventListener('input', async () => {
+                const requestId = ++columnSuggestionRequestId;
+                const value = nameInput.value.trim();
+                if (value.length >= 1) {
+                    applyColumnNameAutoDetection(value);
+
+                    if (!this.globalMetadata) {
+                        suggestionsDiv.style.display = 'none';
+                        await ensureGlobalMetadataForSuggestions();
+                        if (requestId !== columnSuggestionRequestId || nameInput.value.trim() !== value) {
+                            return;
+                        }
+                    }
+
+                    const suggestions = searchMetadata(value);
+                    renderSuggestions(suggestions);
                 } else {
                     suggestionsDiv.style.display = 'none';
                 }
             });
+
+            ensureGlobalMetadataForSuggestions();
 
             // Hide suggestions when clicking outside
             document.addEventListener('click', (e) => {
@@ -1174,9 +1209,11 @@
                         // Clear metadata cache so edit/add forms fetch fresh metadata (issue #1424)
                         this.metadataCache = {};
                         this.metadataFetchPromises = {};  // Clear in-progress fetches (issue #1455)
-                        // Clear globalMetadata so fetchMetadata() re-fetches fresh column info (issue #1424)
+                        // Clear and refresh globalMetadata so edit/add forms and column suggestions use fresh column info
+                        // (issue #1424, issue #2138)
                         this.globalMetadata = null;
                         this.globalMetadataPromise = null;
+                        this.globalMetadataPromise = this.loadGlobalMetadata();
 
                         // Close the add column modal but keep the parent column settings modal open
                         closeAddColumnModal();
