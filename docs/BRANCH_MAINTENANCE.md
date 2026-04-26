@@ -29,6 +29,23 @@ release work.
 
 ## Safe Cleanup Commands
 
+Use the checked-in script for reviewed cleanup. It is dry-run by default and
+only considers remote branches whose latest GitHub pull request is merged:
+
+```bash
+tools/delete-merged-pr-branches.sh
+```
+
+Delete only branches whose merged pull request is at least 14 days old:
+
+```bash
+tools/delete-merged-pr-branches.sh --days-old 14 --execute
+```
+
+The script keeps `main`, `master`, `HEAD`, and the configured base branch. By
+default it only considers `issue-*`, `fix-*`, `fix/*`, `feature/*`, and `revert-*`
+branches. Use `--help` to see all options.
+
 List merged remote branches:
 
 ```bash
