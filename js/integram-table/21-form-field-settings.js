@@ -528,6 +528,9 @@
                 // Show success message
                 this.showToast('Запись успешно сохранена', 'success');
 
+                // Reference dropdown data can include this saved record on other forms.
+                this.clearAllReferenceOptionCaches();
+
                 // Dispatch event for external listeners
                 const savedId = isCreate ? (result.id || result.i || null) : recordId;
                 document.dispatchEvent(new CustomEvent('integram-record-saved', {
@@ -994,4 +997,3 @@
                 await this.loadData(false);
             }
         }
-

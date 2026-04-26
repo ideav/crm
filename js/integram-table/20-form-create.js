@@ -597,26 +597,24 @@
                 }
 
                 try {
-                    const options = await this.fetchReferenceOptions(refReqId, recordId, '', {}, refAttrs);
+                    let options = await this.fetchReferenceOptions(refReqId, recordId, '', {}, refAttrs);
+                    const allOptionsFetched = options.length < 50;
+                    const currentReference = this.resolveCurrentFormReferenceOption(options, hiddenInput.value);
+                    options = currentReference.options;
 
                     // Store options data on the wrapper (array of [id, text] tuples)
                     wrapper._referenceOptions = options;
-                    wrapper._allOptionsFetched = options.length < 50;
+                    wrapper._allOptionsFetched = allOptionsFetched;
 
                     // Render options (hidden by default, shown on focus)
                     this.renderFormReferenceOptions(dropdown, options, hiddenInput, searchInput);
                     dropdown.style.display = 'none';
 
                     // Set current value if exists
-                    if (hiddenInput.value) {
-                        // Issue #869: value may arrive as "id:text" — strip text part, keep only id
-                        const colonIdx = hiddenInput.value.indexOf(':');
-                        if (colonIdx > 0) {
-                            hiddenInput.value = hiddenInput.value.substring(0, colonIdx);
-                        }
-                        const currentOption = options.find(([id]) => id === hiddenInput.value);
-                        if (currentOption) {
-                            searchInput.value = this.decodeHtmlEntities(currentOption[1]);
+                    if (currentReference.id) {
+                        hiddenInput.value = currentReference.id;
+                        if (currentReference.text) {
+                            searchInput.value = this.decodeHtmlEntities(currentReference.text);
                         }
                     }
 
@@ -1434,7 +1432,7 @@
                 optionDiv.tabIndex = 0;
 
                 // Highlight if selected
-                if (hiddenInput.value === id) {
+                if (String(hiddenInput.value) === String(id)) {
                     optionDiv.style.backgroundColor = 'var(--md-selected)';
                     optionDiv.style.color = 'var(--md-primary)';
                     optionDiv.style.fontWeight = '500';
@@ -1732,6 +1730,7 @@
                 window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
 
                 this.showToast('Запись успешно создана', 'success');
+                this.clearAllReferenceOptionCaches();
 
                 // Set the created record in the form reference field
                 if (createdId) {
