@@ -619,6 +619,7 @@ function align(i){
     switch(i){
 		case 'PWD':
 		case 'DATE':
+		case 'DATETIME':
 		case 'BOOLEAN':
 			return 'CENTER';
 		case 'NUMBER':
@@ -626,6 +627,33 @@ function align(i){
 			return 'RIGHT';
 	}
 	return 'LEFT';
+}
+function parseSqlReportUnixTimestamp(value){
+    if(value===undefined||value===null||value==='') return null;
+    var str=String(value).trim();
+    if(!/^\d+(\.\d+)?$/.test(str)) return null;
+    var num=parseFloat(str);
+    if(isNaN(num)||num<1000000000) return null;
+    var date=new Date(num>=1000000000000?num:num*1000);
+    var year=date.getFullYear();
+    if(year<2001||year>2100) return null;
+    return date;
+}
+function formatSqlReportDateTime(date){
+    if(!date||isNaN(date.getTime())) return '';
+    var day=String(date.getDate()).padStart(2,'0');
+    var month=String(date.getMonth()+1).padStart(2,'0');
+    var year=date.getFullYear();
+    var hours=String(date.getHours()).padStart(2,'0');
+    var minutes=String(date.getMinutes()).padStart(2,'0');
+    var seconds=String(date.getSeconds()).padStart(2,'0');
+    return day+'.'+month+'.'+year+' '+hours+':'+minutes+':'+seconds;
+}
+function formatReportCellValue(value,column){
+    if(!column||String(column.format).toUpperCase()!=='DATETIME') return value;
+    var date=parseSqlReportUnixTimestamp(value);
+    if(!date) return value;
+    return formatSqlReportDateTime(date);
 }
 // Функция для отправки асинхронного запроса по https api с обработкой его результата
 function myApi(m,u,b,vars,index){ // Параметры: метод, адрес, действие - ветка switch, параметры
@@ -840,9 +868,11 @@ function myApi(m,u,b,vars,index){ // Параметры: метод, адрес,
                     byId('warning').classList.add('hidden');
                     for(i in json[b]["data"][0]){ // Data lines
                         el=rbody;
-                        for(j in json[b]["data"])
-                            el=el.replace('>:'+j+':<','>'+json[b]["data"][j][i]+'<')
+                        for(j in json[b]["data"]){
+                            var cellValue=formatReportCellValue(json[b]["data"][j][i], json[b]["columns"][j]);
+                            el=el.replace('>:'+j+':<','>'+cellValue+'<')
                                 .replace(':align'+j+':',align(json[b]["columns"][j].format));
+                        }
                         h+=el;
                     }
                     if(json[b]["columns"][0]["totals"]!==undefined){ // Fill in Total lines, if any
