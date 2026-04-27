@@ -151,7 +151,7 @@
 
     .taskdash-kpis {
         display: grid;
-        grid-template-columns: repeat(5, minmax(130px, 1fr));
+        grid-template-columns: repeat(6, minmax(130px, 1fr));
         gap: 10px;
         margin-bottom: 14px;
     }
@@ -187,7 +187,8 @@
     .taskdash-kpi__icon--total { background: var(--taskdash-soft-blue); color: var(--taskdash-blue); }
     .taskdash-kpi__icon--done { background: var(--taskdash-soft-green); color: var(--taskdash-green); }
     .taskdash-kpi__icon--active { background: rgba(8, 145, 178, 0.12); color: var(--taskdash-cyan); }
-    .taskdash-kpi__icon--delayed { background: var(--taskdash-soft-red); color: var(--taskdash-red); }
+    .taskdash-kpi__icon--overdue { background: var(--taskdash-soft-red); color: var(--taskdash-red); }
+    .taskdash-kpi__icon--delayed { background: var(--taskdash-soft-amber); color: var(--taskdash-amber); }
     .taskdash-kpi__icon--staff { background: var(--taskdash-soft-amber); color: var(--taskdash-amber); }
 
     .taskdash-kpi__value {
@@ -258,7 +259,8 @@
 
     .taskdash-dot--done { background: var(--taskdash-green); }
     .taskdash-dot--active { background: var(--taskdash-cyan); }
-    .taskdash-dot--delayed { background: var(--taskdash-red); }
+    .taskdash-dot--overdue { background: var(--taskdash-red); }
+    .taskdash-dot--delayed { background: var(--taskdash-amber); }
 
     .taskdash-chart {
         padding: 12px;
@@ -309,7 +311,8 @@
 
     .taskdash-bar-segment--done { background: var(--taskdash-green); }
     .taskdash-bar-segment--active { background: var(--taskdash-cyan); }
-    .taskdash-bar-segment--delayed { background: var(--taskdash-red); }
+    .taskdash-bar-segment--overdue { background: var(--taskdash-red); }
+    .taskdash-bar-segment--delayed { background: var(--taskdash-amber); }
 
     .taskdash-bar-label {
         color: var(--text-secondary, #64748b);
@@ -508,6 +511,7 @@
                 <div class="taskdash-legend">
                     <span><i class="taskdash-dot taskdash-dot--done"></i>Завершена</span>
                     <span><i class="taskdash-dot taskdash-dot--active"></i>В работе</span>
+                    <span><i class="taskdash-dot taskdash-dot--overdue"></i>Просрочена</span>
                     <span><i class="taskdash-dot taskdash-dot--delayed"></i>Отложена</span>
                 </div>
             </div>
@@ -531,6 +535,7 @@
     const TASKDASH_FALLBACK_COLUMNS = [
         { id: '155682', type: '', format: 'SHORT', name: 'Месяц' },
         { id: '155679', type: '2953', format: 'SHORT', name: 'Департамент', granted: 1, ref: 1, orig: '2859' },
+        { id: '155680', type: '', format: 'SHORT', name: 'Просрочена' },
         { id: '155683', type: '', format: 'SHORT', name: 'Отложена' },
         { id: '155684', type: '', format: 'SHORT', name: 'Завершена' },
         { id: '155685', type: '', format: 'SHORT', name: 'В работе' },
@@ -739,7 +744,7 @@
 
     function taskdashIsMetricColumn(column) {
         var name = String(column && column.name || '').toLowerCase();
-        var metrics = ['отложена', 'завершена', 'в работе', 'сотрудников', 'количество', 'count'];
+        var metrics = ['просрочена', 'отложена', 'завершена', 'в работе', 'сотрудников', 'количество', 'count'];
         if (name.indexOf('статус') !== -1) return false;
         return metrics.some(function(metric) {
             return name === metric || name.indexOf(metric) !== -1;
@@ -842,6 +847,7 @@
         var dateColumn = taskdashFindColumn(columns, ['Месяц', 'Дата']);
         var doneColumn = taskdashFindColumn(columns, ['Завершена']);
         var activeColumn = taskdashFindColumn(columns, ['В работе']);
+        var overdueColumn = taskdashFindColumn(columns, ['Просрочена']);
         var delayedColumn = taskdashFindColumn(columns, ['Отложена']);
         var grouped = {};
 
@@ -849,12 +855,13 @@
             var key = dateColumn ? taskdashMonthKey(row[dateColumn.name]) : '';
             if (!key) return;
             if (!grouped[key]) {
-                grouped[key] = { key: key, label: taskdashMonthLabel(key), completed: 0, active: 0, delayed: 0, total: 0 };
+                grouped[key] = { key: key, label: taskdashMonthLabel(key), completed: 0, active: 0, overdue: 0, delayed: 0, total: 0 };
             }
             grouped[key].completed += taskdashValueAsNumber(row, doneColumn);
             grouped[key].active += taskdashValueAsNumber(row, activeColumn);
+            grouped[key].overdue += taskdashValueAsNumber(row, overdueColumn);
             grouped[key].delayed += taskdashValueAsNumber(row, delayedColumn);
-            grouped[key].total = grouped[key].completed + grouped[key].active + grouped[key].delayed;
+            grouped[key].total = grouped[key].completed + grouped[key].active + grouped[key].overdue + grouped[key].delayed;
         });
 
         return Object.keys(grouped).sort().map(function(key) {
@@ -1169,6 +1176,7 @@
             { label: 'Всего задач', value: summary.total, note: summary.completionRate + '% завершено', icon: 'pi pi-list-check', tone: 'total' },
             { label: 'Завершена', value: summary.completed, note: 'готово', icon: 'pi pi-check-circle', tone: 'done' },
             { label: 'В работе', value: summary.active, note: 'активно', icon: 'pi pi-clock', tone: 'active' },
+            { label: 'Просрочена', value: summary.overdue, note: 'просрочено', icon: 'pi pi-exclamation-circle', tone: 'overdue' },
             { label: 'Отложена', value: summary.delayed, note: 'ожидает', icon: 'pi pi-pause-circle', tone: 'delayed' },
             { label: 'Сотрудников', value: summary.staff, note: 'в выборке', icon: 'pi pi-users', tone: 'staff' }
         ].forEach(function(item) {
@@ -1179,16 +1187,18 @@
     function taskdashBuildSummary(rows, columns) {
         var doneColumn = taskdashFindColumn(columns, ['Завершена']);
         var activeColumn = taskdashFindColumn(columns, ['В работе']);
+        var overdueColumn = taskdashFindColumn(columns, ['Просрочена']);
         var delayedColumn = taskdashFindColumn(columns, ['Отложена']);
         var staffColumn = taskdashFindColumn(columns, ['Сотрудников']);
-        var summary = { completed: 0, active: 0, delayed: 0, staff: 0, total: 0, completionRate: 0 };
+        var summary = { completed: 0, active: 0, overdue: 0, delayed: 0, staff: 0, total: 0, completionRate: 0 };
         (rows || []).forEach(function(row) {
             summary.completed += taskdashValueAsNumber(row, doneColumn);
             summary.active += taskdashValueAsNumber(row, activeColumn);
+            summary.overdue += taskdashValueAsNumber(row, overdueColumn);
             summary.delayed += taskdashValueAsNumber(row, delayedColumn);
             summary.staff += taskdashValueAsNumber(row, staffColumn);
         });
-        summary.total = summary.completed + summary.active + summary.delayed;
+        summary.total = summary.completed + summary.active + summary.overdue + summary.delayed;
         summary.completionRate = summary.total ? Math.round(summary.completed / summary.total * 100) : 0;
         return summary;
     }
@@ -1252,6 +1262,7 @@
         bar.title = item.label + ': ' + taskdashFormatNumber(item.total);
         taskdashAppendSegment(bar, 'done', item.completed, maxTotal);
         taskdashAppendSegment(bar, 'active', item.active, maxTotal);
+        taskdashAppendSegment(bar, 'overdue', item.overdue, maxTotal);
         taskdashAppendSegment(bar, 'delayed', item.delayed, maxTotal);
         label.className = 'taskdash-bar-label';
         label.textContent = item.label;
