@@ -1,0 +1,354 @@
+.procvac {
+    min-height: 100%;
+    padding: 14px;
+    background: var(--bg-primary, #f8fafc);
+    color: var(--text-primary, #111827);
+    box-sizing: border-box;
+}
+
+.procvac * {
+    box-sizing: border-box;
+}
+
+.procvac-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.procvac-search {
+    position: relative;
+    width: min(460px, 100%);
+    flex: 0 1 460px;
+}
+
+.procvac-search i {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-secondary, #64748b);
+    font-size: 0.9rem;
+}
+
+.procvac-search input {
+    width: 100%;
+    min-height: 34px;
+    border: 1px solid var(--input-border, #cbd5e1);
+    border-radius: 7px;
+    background: var(--input-bg, #fff);
+    color: var(--text-primary, #111827);
+    padding: 6px 10px 6px 32px;
+    font: inherit;
+}
+
+.procvac-search input:focus,
+.procvac-editor:focus {
+    outline: 2px solid rgba(37, 99, 235, 0.18);
+    border-color: #2563eb;
+}
+
+.procvac-icon-btn {
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--border-color, #d6dee8);
+    border-radius: 7px;
+    background: var(--card-bg, #fff);
+    color: var(--text-primary, #111827);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.procvac-icon-btn:hover {
+    color: #2563eb;
+    border-color: #2563eb;
+}
+
+.procvac-status {
+    color: var(--text-secondary, #64748b);
+    font-size: 0.84rem;
+    white-space: nowrap;
+}
+
+.procvac-status--error {
+    color: #dc2626;
+    white-space: normal;
+}
+
+.procvac-grid {
+    overflow: auto;
+    border: 1px solid var(--border-color, #d6dee8);
+    border-radius: 8px;
+    background: var(--card-bg, #fff);
+    max-height: calc(100vh - 128px);
+}
+
+.procvac-table {
+    width: max-content;
+    min-width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed;
+    font-size: 0.83rem;
+}
+
+.procvac-col--title { width: 190px; }
+.procvac-col--status { width: 124px; }
+.procvac-col--department { width: 210px; }
+.procvac-col--plan,
+.procvac-col--fact,
+.procvac-col--weeksInWork,
+.procvac-col--interviewHr,
+.procvac-col--recommendations,
+.procvac-col--interviewNm { width: 84px; }
+.procvac-col--request { width: 70px; }
+.procvac-col--responsible { width: 132px; }
+.procvac-col--startDate,
+.procvac-col--deadline,
+.procvac-col--exitDate { width: 110px; }
+.procvac-col--hireType { width: 130px; }
+.procvac-col--comments { width: 240px; }
+
+.procvac-head-cell {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg-secondary, #f1f5f9);
+    color: var(--text-primary, #111827);
+    border-bottom: 1px solid var(--border-color, #d6dee8);
+    border-right: 1px solid var(--border-color, #d6dee8);
+    padding: 7px 8px;
+    text-align: left;
+    font-weight: 700;
+    line-height: 1.2;
+    white-space: normal;
+}
+
+.procvac-cell {
+    min-height: 34px;
+    height: 34px;
+    border-bottom: 1px solid var(--border-color, #e2e8f0);
+    border-right: 1px solid var(--border-color, #e2e8f0);
+    padding: 6px 8px;
+    vertical-align: middle;
+    line-height: 1.25;
+    background: var(--card-bg, #fff);
+    color: var(--text-primary, #111827);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.procvac-cell--comments,
+.procvac-cell--department,
+.procvac-cell--title {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.procvac-cell--empty {
+    color: var(--text-secondary, #94a3b8);
+}
+
+.procvac-cell--editable {
+    cursor: cell;
+}
+
+.procvac-cell--editable:hover {
+    background: rgba(37, 99, 235, 0.07);
+    box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.24);
+}
+
+.procvac-cell--editing {
+    padding: 2px;
+    background: rgba(37, 99, 235, 0.08);
+}
+
+.procvac-editor {
+    width: 100%;
+    min-height: 30px;
+    border: 1px solid #2563eb;
+    border-radius: 5px;
+    background: var(--input-bg, #fff);
+    color: var(--text-primary, #111827);
+    padding: 4px 6px;
+    font: inherit;
+}
+
+.procvac-editor--textarea {
+    height: 68px;
+    resize: vertical;
+    line-height: 1.25;
+}
+
+.procvac-doc-link {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #2563eb;
+    text-decoration: none;
+    border-radius: 6px;
+}
+
+.procvac-doc-link:hover {
+    background: rgba(37, 99, 235, 0.12);
+}
+
+.procvac-section-gap td {
+    height: 8px;
+    padding: 0;
+    border: 0;
+    background: var(--bg-primary, #f8fafc);
+}
+
+.procvac-section-row th {
+    padding: 0;
+    border: 0;
+    background: #f28c28;
+    color: #111827;
+}
+
+.procvac-section-head {
+    min-height: 34px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+}
+
+.procvac-section-title {
+    font-weight: 750;
+}
+
+.procvac-section-count {
+    min-width: 28px;
+    height: 22px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.72);
+    color: #111827;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 8px;
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.procvac-section-toggle {
+    margin-left: auto;
+    min-height: 26px;
+    border: 1px solid rgba(17, 24, 39, 0.2);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.72);
+    color: #111827;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.procvac-empty-row td,
+.procvac-pager-row td {
+    padding: 10px;
+    color: var(--text-secondary, #64748b);
+    background: var(--card-bg, #fff);
+    border-bottom: 1px solid var(--border-color, #e2e8f0);
+}
+
+.procvac-pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+.procvac-pager-btn {
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--border-color, #d6dee8);
+    border-radius: 6px;
+    background: var(--card-bg, #fff);
+    color: var(--text-primary, #111827);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.procvac-pager-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.procvac mark {
+    padding: 0 1px;
+    border-radius: 3px;
+    background: #fed7aa;
+    color: inherit;
+}
+
+.procvac-loading,
+.procvac-error {
+    min-height: 140px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: var(--text-secondary, #64748b);
+}
+
+.procvac-error {
+    color: #dc2626;
+}
+
+.procvac-spinner,
+.procvac-cell-loading {
+    width: 18px;
+    height: 18px;
+    border: 2px solid rgba(37, 99, 235, 0.22);
+    border-top-color: #2563eb;
+    border-radius: 50%;
+    animation: procvac-spin 0.8s linear infinite;
+}
+
+.procvac-cell-loading {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+}
+
+@keyframes procvac-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (max-width: 760px) {
+    .procvac {
+        padding: 8px;
+    }
+
+    .procvac-toolbar {
+        align-items: stretch;
+        flex-wrap: wrap;
+    }
+
+    .procvac-search {
+        flex-basis: calc(100% - 44px);
+    }
+
+    .procvac-status {
+        width: 100%;
+    }
+
+    .procvac-grid {
+        max-height: calc(100vh - 150px);
+    }
+}
