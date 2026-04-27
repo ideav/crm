@@ -48,14 +48,18 @@
         border: 1px solid var(--border-color, #d6dee8);
         border-radius: 8px;
         background: var(--card-bg, #fff);
-        padding: 12px;
+        padding: 10px 12px;
         margin-bottom: 14px;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        align-items: end;
     }
 
     .taskdash-filter-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-        gap: 10px;
+        grid-template-columns: minmax(260px, 0.95fr) repeat(2, minmax(150px, 0.55fr));
+        gap: 8px;
         align-items: end;
     }
 
@@ -65,23 +69,23 @@
 
     .taskdash-filter label {
         display: block;
-        margin-bottom: 5px;
+        margin-bottom: 4px;
         color: var(--text-secondary, #64748b);
-        font-size: 0.78rem;
+        font-size: 0.74rem;
         font-weight: 600;
     }
 
     .taskdash-filter input,
     .taskdash-filter select {
         width: 100%;
-        min-height: 34px;
+        min-height: 32px;
         border: 1px solid var(--input-border, #cbd5e1);
         border-radius: 7px;
         background: var(--input-bg, #fff);
         color: var(--text-primary, #111827);
-        padding: 6px 9px;
+        padding: 5px 8px;
         font: inherit;
-        font-size: 0.88rem;
+        font-size: 0.84rem;
     }
 
     .taskdash-filter input:focus,
@@ -93,7 +97,7 @@
     .taskdash-range {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 7px;
+        gap: 6px;
     }
 
     .taskdash-filter__quick {
@@ -124,11 +128,11 @@
         display: flex;
         justify-content: flex-end;
         gap: 8px;
-        margin-top: 10px;
+        margin: 0;
     }
 
     .taskdash-btn {
-        min-height: 34px;
+        min-height: 32px;
         border: 1px solid var(--border-color, #d6dee8);
         border-radius: 7px;
         background: var(--card-bg, #fff);
@@ -136,12 +140,13 @@
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        gap: 7px;
-        padding: 6px 12px;
+        gap: 6px;
+        padding: 5px 10px;
         cursor: pointer;
         font: inherit;
-        font-size: 0.88rem;
+        font-size: 0.84rem;
         font-weight: 600;
+        white-space: nowrap;
     }
 
     .taskdash-btn:hover {
@@ -436,6 +441,14 @@
     }
 
     @media (max-width: 1120px) {
+        .taskdash-filter-panel {
+            grid-template-columns: 1fr;
+        }
+
+        .taskdash-filter-grid {
+            grid-template-columns: minmax(240px, 1fr) repeat(2, minmax(150px, 0.7fr));
+        }
+
         .taskdash-kpis {
             grid-template-columns: repeat(3, minmax(130px, 1fr));
         }
