@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Issue 2206 ProcVac</title>
+    <link rel="stylesheet" href="../assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="../css/procvac.css">
+    <style>
+        :root {
+            --bg-primary: #f8fafc;
+            --bg-secondary: #f1f5f9;
+            --card-bg: #ffffff;
+            --border-color: #d6dee8;
+            --input-border: #cbd5e1;
+            --input-bg: #ffffff;
+            --text-primary: #111827;
+            --text-secondary: #64748b;
+        }
+
+        html,
+        body {
+            margin: 0;
+            min-height: 100%;
+            font-family: Arial, sans-serif;
+            background: var(--bg-primary);
+        }
+    </style>
+    <script>
+        window.db = 'demo';
+        window.xsrf = 'test';
+
+        var procvacMetadata = {
+            id: '8137',
+            type: '3',
+            val: 'Вакансия актуальная',
+            granted: 'WRITE',
+            reqs: [
+                { id: '8140', val: 'Статус вакансии', type: '3', ref_id: '8139', orig: '8138' },
+                { id: '8141', val: 'Департамент', type: '3', ref_id: '2860', orig: '2859' },
+                { id: '8143', val: 'План', type: '13' },
+                { id: '8145', val: 'Факт', type: '13' },
+                { id: '8147', val: 'Заявка', type: '8' },
+                { id: '8148', val: 'Пользователь', type: '3', ref_id: '2670', orig: '18' },
+                { id: '8150', val: 'Старт работы', type: '9' },
+                { id: '8152', val: 'Дедлайн', type: '9' },
+                { id: '8153', val: 'Выход', type: '9' },
+                { id: '8154', val: 'Тип найма', type: '3', ref_id: '7932', orig: '7931' },
+                { id: '8210', val: 'Интервью HR', type: '13' },
+                { id: '8211', val: 'Рекомендации', type: '13' },
+                { id: '8212', val: 'Интервью с НМ', type: '13' },
+                { id: '8156', val: 'Комментарии', type: '3' },
+            ],
+        };
+
+        var procvacRows = [
+            { i: 8162, r: ['Менеджер', '8158:В работе', '2870:Департамент дополнительного', '1', '', '', '2616:darias', '13.04.2026', '31.05.2026', '', '7940:Штат', '1', '', '', ''] },
+            { i: 8163, r: ['Врач', '8158:В работе', '2869:Департамент лагерей', '10', '', 'https://docs.google.com', '2616:darias', '10.04.2026', '31.05.2026', '', '7938:Лагерь', '3', '2', '1', ''] },
+            { i: 8172, r: ['директор', '8173:Вышел', '2869:Департамент лагерей', '1', '1', '', '2616:darias', '14.04.2026', '15.05.2026', '22.04.2026', '7940:Штат', '2', '1', '1', ''] },
+            { i: 8200, r: ['Педагог ТМХ', '8185:Пауза', '2870:Департамент образования', '6', '', 'https://docs.google.com', '2989:alisay', '', '15.04.2026', '', '7934:B2B-проект', '', '', '', '5 +1 в резерв'] },
+            { i: 9000, r: ['Архивная вакансия', '8185:Пауза', '2875:Онлайн-школа', '1', '', '', '2989:alisay', '01.02.2026', '15.03.2026', '', '7936:Онлайн-школа', '', '', '', 'Закрыта ранее'] },
+        ];
+
+        window.fetch = function(url, options) {
+            if (url.indexOf('/metadata/8137') !== -1) {
+                return Promise.resolve(new Response(JSON.stringify(procvacMetadata), { status: 200 }));
+            }
+            if (url.indexOf('/object/8137/') !== -1) {
+                return Promise.resolve(new Response(JSON.stringify(procvacRows), { status: 200 }));
+            }
+            if (url.indexOf('/_ref_reqs/8140') !== -1) {
+                return Promise.resolve(new Response(JSON.stringify({
+                    8158: 'В работе',
+                    8169: 'Не начато',
+                    8173: 'Вышел',
+                    8185: 'Пауза',
+                }), { status: 200 }));
+            }
+            if (options && options.method === 'POST') {
+                return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+            }
+            return Promise.resolve(new Response('{}', { status: 200 }));
+        };
+    </script>
+    <script src="../js/procvac.js" defer></script>
+</head>
+<body>
+    <div id="procvac-app" class="procvac">
+        <div class="procvac-toolbar">
+            <div class="procvac-search">
+                <i class="pi pi-search"></i>
+                <input id="procvac-search" type="search" placeholder="Быстрый поиск" autocomplete="off" aria-label="Быстрый поиск">
+            </div>
+            <button id="procvac-refresh" class="procvac-icon-btn" type="button" title="Обновить" aria-label="Обновить">
+                <i class="pi pi-refresh"></i>
+            </button>
+            <div id="procvac-status" class="procvac-status"></div>
+        </div>
+        <div id="procvac-grid" class="procvac-grid">
+            <div class="procvac-loading"><span class="procvac-spinner"></span>Загрузка...</div>
+        </div>
+    </div>
+</body>
+</html>
