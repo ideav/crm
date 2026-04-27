@@ -136,6 +136,14 @@
     white-space: nowrap;
 }
 
+.procvac-cell--numeric {
+    text-align: right;
+}
+
+.procvac-cell--date {
+    text-align: center;
+}
+
 .procvac-cell--comments,
 .procvac-cell--department,
 .procvac-cell--title {

@@ -22,7 +22,7 @@
         { key: 'deadline', label: 'Дедлайн', names: ['Дедлайн'] },
         { key: 'exitDate', label: 'Выход', names: ['Выход'] },
         { key: 'hireType', label: 'Штат/Лагерь/ОШ', names: ['Штат/Лагерь/ОШ', 'Тип найма'] },
-        { key: 'weeksInWork', label: 'Недель в работе', derived: true },
+        { key: 'weeksInWork', label: 'Недель в работе', derived: true, format: 'NUMBER' },
         { key: 'interviewHr', label: 'Интервью HR', names: ['Интервью HR'] },
         { key: 'recommendations', label: 'Рекомендации', names: ['Рекомендации'] },
         { key: 'interviewNm', label: 'Интервью с НМ', names: ['Интервью с НМ'] },
@@ -186,7 +186,7 @@
                 derived: !!def.derived,
                 documentLink: !!def.documentLink,
                 editable: !def.derived && !!source && sourceIsEditable(metadata, source),
-                format: source ? source.format : 'SHORT',
+                format: source ? source.format : (def.format || 'SHORT'),
             };
         });
         return applyColumnWidths(columns, state.columnWidths);
@@ -549,11 +549,20 @@
         ].join('');
     }
 
+    function getCellAlignmentClass(column) {
+        var format = String(column && column.format || '').toUpperCase();
+        if (format === 'NUMBER' || format === 'SIGNED') return 'procvac-cell--numeric';
+        if (format === 'DATE' || format === 'DATETIME') return 'procvac-cell--date';
+        return '';
+    }
+
     function renderCell(row, column, sectionKey) {
         var value = row.values[column.key] || '';
         var rawValue = row.rawValues[column.key] || '';
         var classes = ['procvac-cell', 'procvac-cell--' + column.key];
+        var alignmentClass = getCellAlignmentClass(column);
         var editable = column.editable && sectionKey !== 'archive';
+        if (alignmentClass) classes.push(alignmentClass);
         if (editable) classes.push('procvac-cell--editable');
         if (!value) classes.push('procvac-cell--empty');
 
