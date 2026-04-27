@@ -1823,11 +1823,13 @@ class IntegramTable{
                 const colonIndex = value.indexOf(':');
                 if (colonIndex > 0) {
                     refValueId = value.substring(0, colonIndex);
-                    displayValue = value.substring(colonIndex + 1);
+                    displayValue = this.decodeHtmlEntities(value.substring(colonIndex + 1));
                     // For multi-select fields, store raw value so editor can resolve IDs directly
                     if (isArrayField) {
                         multiRawValue = value;
                     }
+                } else {
+                    displayValue = this.decodeHtmlEntities(value);
                 }
             }
 
@@ -16012,6 +16014,7 @@ class IntegramTable{
                 quot: '"',
                 apos: "'",
                 nbsp: ' ',
+                comma: ',',
                 ndash: String.fromCharCode(0x2013),
                 mdash: String.fromCharCode(0x2014),
                 laquo: String.fromCharCode(0x00ab),

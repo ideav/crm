@@ -251,6 +251,7 @@
                 quot: '"',
                 apos: "'",
                 nbsp: ' ',
+                comma: ',',
                 ndash: String.fromCharCode(0x2013),
                 mdash: String.fromCharCode(0x2014),
                 laquo: String.fromCharCode(0x00ab),
