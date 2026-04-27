@@ -1,9 +1,12 @@
 .procvac {
-    min-height: 100%;
-    padding: 14px;
+    height: 100%;
+    min-height: 0;
+    padding: 0;
     background: var(--bg-primary, #f8fafc);
     color: var(--text-primary, #111827);
     box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
 }
 
 .procvac * {
@@ -11,10 +14,11 @@
 }
 
 .procvac-toolbar {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     gap: 10px;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
 }
 
 .procvac-search {
@@ -49,41 +53,13 @@
     border-color: #2563eb;
 }
 
-.procvac-icon-btn {
-    width: 34px;
-    height: 34px;
-    border: 1px solid var(--border-color, #d6dee8);
-    border-radius: 7px;
-    background: var(--card-bg, #fff);
-    color: var(--text-primary, #111827);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-}
-
-.procvac-icon-btn:hover {
-    color: #2563eb;
-    border-color: #2563eb;
-}
-
-.procvac-status {
-    color: var(--text-secondary, #64748b);
-    font-size: 0.84rem;
-    white-space: nowrap;
-}
-
-.procvac-status--error {
-    color: #dc2626;
-    white-space: normal;
-}
-
 .procvac-grid {
+    flex: 1 1 auto;
+    min-height: 0;
     overflow: auto;
     border: 1px solid var(--border-color, #d6dee8);
     border-radius: 8px;
     background: var(--card-bg, #fff);
-    max-height: calc(100vh - 128px);
 }
 
 .procvac-table {
@@ -120,21 +96,39 @@
     color: var(--text-primary, #111827);
     border-bottom: 1px solid var(--border-color, #d6dee8);
     border-right: 1px solid var(--border-color, #d6dee8);
-    padding: 7px 8px;
+    padding: 2px 4px;
     text-align: left;
     font-weight: 700;
     line-height: 1.2;
     white-space: normal;
 }
 
+.procvac-head-label {
+    display: block;
+    padding-right: 10px;
+}
+
+.procvac-col-resize-handle {
+    position: absolute;
+    top: 0;
+    right: -4px;
+    width: 8px;
+    height: 100%;
+    cursor: col-resize;
+    user-select: none;
+    z-index: 3;
+}
+
+.procvac-col-resize-handle:hover {
+    background: rgba(37, 99, 235, 0.24);
+}
+
 .procvac-cell {
-    min-height: 34px;
-    height: 34px;
     border-bottom: 1px solid var(--border-color, #e2e8f0);
     border-right: 1px solid var(--border-color, #e2e8f0);
-    padding: 6px 8px;
-    vertical-align: middle;
-    line-height: 1.25;
+    padding: 2px 4px;
+    vertical-align: top;
+    line-height: 1.2;
     background: var(--card-bg, #fff);
     color: var(--text-primary, #111827);
     overflow: hidden;
@@ -163,19 +157,23 @@
 }
 
 .procvac-cell--editing {
-    padding: 2px;
+    padding: 1px;
     background: rgba(37, 99, 235, 0.08);
 }
 
 .procvac-editor {
     width: 100%;
-    min-height: 30px;
+    min-height: 24px;
     border: 1px solid #2563eb;
     border-radius: 5px;
     background: var(--input-bg, #fff);
     color: var(--text-primary, #111827);
-    padding: 4px 6px;
+    padding: 2px 4px;
     font: inherit;
+}
+
+.procvac-editor--select {
+    height: auto;
 }
 
 .procvac-editor--textarea {
@@ -185,8 +183,8 @@
 }
 
 .procvac-doc-link {
-    width: 28px;
-    height: 28px;
+    width: 22px;
+    height: 22px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -214,11 +212,11 @@
 }
 
 .procvac-section-head {
-    min-height: 34px;
+    min-height: 26px;
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 7px 10px;
+    padding: 4px 8px;
 }
 
 .procvac-section-title {
@@ -331,10 +329,6 @@
 }
 
 @media (max-width: 760px) {
-    .procvac {
-        padding: 8px;
-    }
-
     .procvac-toolbar {
         align-items: stretch;
         flex-wrap: wrap;
@@ -344,11 +338,7 @@
         flex-basis: calc(100% - 44px);
     }
 
-    .procvac-status {
-        width: 100%;
-    }
-
     .procvac-grid {
-        max-height: calc(100vh - 150px);
+        min-height: 0;
     }
 }
