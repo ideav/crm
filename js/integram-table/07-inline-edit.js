@@ -51,6 +51,50 @@
             setTimeout(() => {
                 this.startNewRowEdit(newRowIndex);
             }, 50);
+
+            // Issue #2206: Async resolve display labels for reference columns pre-filled with bare IDs.
+            // resolveDefaultValue returns the raw ID token (e.g. "447") but renderCell expects
+            // "id:Label" format (e.g. "447:sportzania").  Fetch options, find the matching label,
+            // update in-memory data and patch the specific cell in the DOM — no full re-render
+            // needed so the first-column editor is not disrupted.
+            const _refCols = this.columns
+                .map((col, colIndex) => ({ col, colIndex, value: emptyRow[colIndex] }))
+                .filter(({ col, value }) => {
+                    if (!value || String(value).indexOf(':') >= 0) return false;
+                    return col.ref_id != null || (col.ref && col.ref !== 0);
+                });
+
+            if (_refCols.length > 0) {
+                const _parentId = this.options.parentId || 1;
+                (async () => {
+                    for (const { col, colIndex, value } of _refCols) {
+                        if (!this.pendingNewRow || this.pendingNewRow.rowIndex !== newRowIndex) break;
+                        try {
+                            const options = await this.fetchReferenceOptions(
+                                col.paramId || col.type, _parentId, '', {}, col.attrs || ''
+                            );
+                            const match = options.find(([id]) => String(id) === String(value));
+                            if (!match) continue;
+                            const resolved = `${ match[0] }:${ match[1] }`;
+                            // Update in-memory data so subsequent renders are correct
+                            if (this.data[newRowIndex]) this.data[newRowIndex][colIndex] = resolved;
+                            if (this.rawObjectData[newRowIndex]) this.rawObjectData[newRowIndex].r[colIndex] = resolved;
+                            emptyRow[colIndex] = resolved;
+                            // Patch the specific cell in the DOM to avoid disrupting the active editor
+                            const cell = this.container && this.container.querySelector(
+                                `td[data-col-id="${ col.id }"][data-row-index="${ newRowIndex }"]`
+                            );
+                            if (cell) {
+                                const orderedColIndex = cell.dataset.col !== undefined
+                                    ? parseInt(cell.dataset.col, 10) : colIndex;
+                                cell.outerHTML = this.renderCell(col, resolved, newRowIndex, orderedColIndex);
+                            }
+                        } catch (_e) {
+                            // silently ignore — raw ID is acceptable fallback
+                        }
+                    }
+                })();
+            }
         }
 
         /**
