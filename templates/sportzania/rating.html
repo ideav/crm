@@ -1,0 +1,1349 @@
+<style>
+    .rating {
+        --rating-blue: #2563eb;
+        --rating-green: #16a34a;
+        --rating-amber: #d97706;
+        --rating-red: #dc2626;
+        --rating-cyan: #0891b2;
+        --rating-soft-blue: rgba(37, 99, 235, 0.10);
+        --rating-soft-green: rgba(22, 163, 74, 0.11);
+        --rating-soft-amber: rgba(217, 119, 6, 0.12);
+        --rating-soft-red: rgba(220, 38, 38, 0.10);
+        min-height: 100%;
+        padding: 16px;
+        background: var(--bg-primary, #f8fafc);
+        color: var(--text-primary, #111827);
+        box-sizing: border-box;
+    }
+
+    .rating * {
+        box-sizing: border-box;
+    }
+
+    .rating__topbar {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 14px;
+    }
+
+    .rating__title {
+        margin: 0;
+        font-size: 1.45rem;
+        line-height: 1.2;
+        font-weight: 700;
+        letter-spacing: 0;
+        color: var(--text-primary, #111827);
+    }
+
+    .rating__status {
+        min-height: 1.2rem;
+        margin-top: 5px;
+        color: var(--text-secondary, #64748b);
+        font-size: 0.86rem;
+    }
+
+    .rating-filter-panel {
+        border: 1px solid var(--border-color, #d6dee8);
+        border-radius: 8px;
+        background: var(--card-bg, #fff);
+        padding: 10px 12px;
+        margin-bottom: 14px;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        align-items: end;
+    }
+
+    .rating-filter-grid {
+        display: grid;
+        grid-template-columns: minmax(260px, 0.95fr) repeat(2, minmax(160px, 0.55fr));
+        gap: 8px;
+    }
+
+    .rating-filter {
+        min-width: 0;
+    }
+
+    .rating-filter label {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--text-secondary, #64748b);
+        font-size: 0.74rem;
+        font-weight: 600;
+    }
+
+    .rating-filter input,
+    .rating-filter select {
+        width: 100%;
+        min-height: 32px;
+        border: 1px solid var(--input-border, #cbd5e1);
+        border-radius: 7px;
+        background: var(--input-bg, #fff);
+        color: var(--text-primary, #111827);
+        padding: 5px 8px;
+        font: inherit;
+        font-size: 0.84rem;
+    }
+
+    .rating-filter input:focus,
+    .rating-filter select:focus {
+        outline: 2px solid rgba(37, 99, 235, 0.20);
+        border-color: var(--rating-blue);
+    }
+
+    .rating-range {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+    }
+
+    .rating-filter__quick {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 12px;
+        margin-top: 8px;
+    }
+
+    .rating-quick-link {
+        color: var(--rating-blue);
+        font-size: 0.78rem;
+        font-weight: 600;
+        line-height: 1.2;
+        text-decoration-line: underline;
+        text-decoration-style: dashed;
+        text-decoration-thickness: 1px;
+        text-underline-offset: 3px;
+    }
+
+    .rating-quick-link:hover,
+    .rating-quick-link:focus {
+        color: #1d4ed8;
+        outline: none;
+    }
+
+    .rating-filter-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin: 0;
+    }
+
+    .rating-btn {
+        min-height: 32px;
+        border: 1px solid var(--border-color, #d6dee8);
+        border-radius: 7px;
+        background: var(--card-bg, #fff);
+        color: var(--text-primary, #111827);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 5px 10px;
+        cursor: pointer;
+        font: inherit;
+        font-size: 0.84rem;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+
+    .rating-btn:hover {
+        border-color: var(--rating-blue);
+        color: var(--rating-blue);
+    }
+
+    .rating-kpis {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(130px, 1fr));
+        gap: 10px;
+        margin-bottom: 14px;
+    }
+
+    .rating-kpi {
+        min-width: 0;
+        border: 1px solid var(--border-color, #d6dee8);
+        border-radius: 8px;
+        background: var(--card-bg, #fff);
+        padding: 12px;
+    }
+
+    .rating-kpi__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        color: var(--text-secondary, #64748b);
+        font-size: 0.78rem;
+        font-weight: 600;
+    }
+
+    .rating-kpi__icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 7px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+
+    .rating-kpi__icon--total { background: var(--rating-soft-blue); color: var(--rating-blue); }
+    .rating-kpi__icon--score { background: var(--rating-soft-green); color: var(--rating-green); }
+    .rating-kpi__icon--tasks { background: rgba(8, 145, 178, 0.12); color: var(--rating-cyan); }
+    .rating-kpi__icon--closed { background: var(--rating-soft-amber); color: var(--rating-amber); }
+    .rating-kpi__icon--ontime { background: var(--rating-soft-red); color: var(--rating-red); }
+
+    .rating-kpi__value {
+        margin-top: 8px;
+        font-size: 1.35rem;
+        line-height: 1.1;
+        font-weight: 750;
+        color: var(--text-primary, #111827);
+        overflow-wrap: anywhere;
+    }
+
+    .rating-kpi__note {
+        margin-top: 4px;
+        color: var(--text-secondary, #64748b);
+        font-size: 0.78rem;
+    }
+
+    .rating-grid {
+        display: grid;
+        grid-template-columns: minmax(320px, 0.9fr) minmax(420px, 1.25fr);
+        gap: 14px;
+        align-items: start;
+    }
+
+    .rating-panel {
+        border: 1px solid var(--border-color, #d6dee8);
+        border-radius: 8px;
+        background: var(--card-bg, #fff);
+        min-width: 0;
+    }
+
+    .rating-panel__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 12px 12px 0;
+    }
+
+    .rating-panel__title {
+        margin: 0;
+        font-size: 0.98rem;
+        line-height: 1.25;
+        font-weight: 700;
+        color: var(--text-primary, #111827);
+    }
+
+    .rating-leaderboard {
+        display: grid;
+        gap: 10px;
+        padding: 12px;
+    }
+
+    .rating-leader {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: center;
+        padding: 10px;
+        border: 1px solid var(--border-color, #e2e8f0);
+        border-radius: 8px;
+        background: var(--bg-primary, #f8fafc);
+    }
+
+    .rating-leader__main {
+        min-width: 0;
+    }
+
+    .rating-leader__name {
+        font-size: 0.9rem;
+        font-weight: 700;
+        color: var(--text-primary, #111827);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .rating-leader__meta {
+        margin-top: 3px;
+        color: var(--text-secondary, #64748b);
+        font-size: 0.76rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .rating-leader__score {
+        color: var(--rating-green);
+        font-size: 1rem;
+        font-weight: 750;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+    }
+
+    .rating-leader__bar {
+        grid-column: 1 / -1;
+        height: 7px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: var(--bg-secondary, #e2e8f0);
+    }
+
+    .rating-leader__fill {
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--rating-green), var(--rating-cyan));
+    }
+
+    .rating-table-panel {
+        overflow: hidden;
+    }
+
+    .rating-table-wrap {
+        max-height: 560px;
+        overflow: auto;
+        margin-top: 10px;
+    }
+
+    .rating-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: 0.86rem;
+        min-width: 720px;
+    }
+
+    .rating-table th,
+    .rating-table td {
+        border-bottom: 1px solid var(--border-color, #e2e8f0);
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: middle;
+        background: var(--card-bg, #fff);
+    }
+
+    .rating-table th {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        background: var(--bg-secondary, #f1f5f9);
+        color: var(--text-secondary, #475569);
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    .rating-table th button {
+        border: none;
+        background: transparent;
+        color: inherit;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        cursor: pointer;
+        font: inherit;
+        font-weight: inherit;
+    }
+
+    .rating-table tbody tr:hover td {
+        background: var(--bg-secondary, #f8fafc);
+    }
+
+    .rating-table .rating-number {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .rating-score-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 54px;
+        min-height: 24px;
+        border-radius: 999px;
+        padding: 2px 8px;
+        background: var(--rating-soft-green);
+        color: var(--rating-green);
+        font-size: 0.78rem;
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    .rating-empty,
+    .rating-error {
+        min-height: 160px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-secondary, #64748b);
+        text-align: center;
+        padding: 24px;
+    }
+
+    .rating-error {
+        color: var(--rating-red);
+    }
+
+    .rating-loading {
+        opacity: 0.65;
+        pointer-events: none;
+    }
+
+    [data-theme="dark"] .rating {
+        --rating-soft-blue: rgba(59, 130, 246, 0.18);
+        --rating-soft-green: rgba(34, 197, 94, 0.16);
+        --rating-soft-amber: rgba(245, 158, 11, 0.17);
+        --rating-soft-red: rgba(248, 113, 113, 0.15);
+    }
+
+    @media (max-width: 1120px) {
+        .rating-filter-panel {
+            grid-template-columns: 1fr;
+        }
+
+        .rating-filter-grid {
+            grid-template-columns: minmax(240px, 1fr) repeat(2, minmax(150px, 0.7fr));
+        }
+
+        .rating-kpis {
+            grid-template-columns: repeat(3, minmax(130px, 1fr));
+        }
+
+        .rating-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    @media (max-width: 720px) {
+        .rating {
+            padding: 12px;
+        }
+
+        .rating__topbar {
+            flex-direction: column;
+        }
+
+        .rating-kpis {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .rating-filter-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .rating-filter-actions {
+            justify-content: stretch;
+        }
+
+        .rating-btn {
+            flex: 1 1 auto;
+        }
+    }
+
+    @media (max-width: 460px) {
+        .rating-kpis {
+            grid-template-columns: 1fr;
+        }
+
+        .rating-range {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+
+<section class="rating" id="rating-root">
+    <div class="rating__topbar">
+        <div>
+            <h1 class="rating__title">Рейтинг исполнителей</h1>
+            <div class="rating__status" id="rating-status"></div>
+        </div>
+    </div>
+
+    <form class="rating-filter-panel" id="rating-filter-form">
+        <div class="rating-filter-grid" id="rating-filter-grid"></div>
+        <div class="rating-filter-actions">
+            <button class="rating-btn" type="button" id="rating-clear">
+                <i class="pi pi-times"></i>
+                <span>Очистить фильтр</span>
+            </button>
+        </div>
+    </form>
+
+    <div class="rating-kpis" id="rating-kpis"></div>
+
+    <div class="rating-grid">
+        <section class="rating-panel">
+            <div class="rating-panel__head">
+                <h2 class="rating-panel__title">Топ исполнителей</h2>
+            </div>
+            <div class="rating-leaderboard" id="rating-leaderboard"></div>
+        </section>
+
+        <section class="rating-panel rating-table-panel">
+            <div class="rating-panel__head">
+                <h2 class="rating-panel__title">Исполнители</h2>
+                <div class="rating__status" id="rating-table-count"></div>
+            </div>
+            <div class="rating-table-wrap" id="rating-table-wrap"></div>
+        </section>
+    </div>
+</section>
+
+<script>
+(function() {
+    const RATING_REPORT_ID = '155768';
+    const RATING_FILTER_NAMES = ['срок', 'департамент', 'фио'];
+    const RATING_FALLBACK_COLUMNS = [
+        { id: '155773', type: '2948', format: 'SHORT', name: 'ФИО', granted: 1 },
+        { id: '155775', type: '2859', format: 'SHORT', name: 'Департамент', granted: 1 },
+        { id: '155787', type: '', format: 'SHORT', name: 'Закрыто' },
+        { id: '155779', type: '', format: 'SHORT', name: 'В срок' },
+        { id: '155790', type: '', format: 'SHORT', name: 'Задач' },
+        { id: '155796', type: '', format: 'SHORT', name: 'Срок' }
+    ];
+    const RATING_TABLE_COLUMNS = [
+        { id: 'name', label: 'ФИО' },
+        { id: 'department', label: 'Департамент' },
+        { id: 'score', label: 'Рейтинг', numeric: true },
+        { id: 'closedRate', label: 'Закрыто', numeric: true },
+        { id: 'onTimeRate', label: 'В срок', numeric: true },
+        { id: 'tasks', label: 'Задач', numeric: true },
+        { id: 'period', label: 'Срок' }
+    ];
+
+    var ratingState = {
+        columns: RATING_FALLBACK_COLUMNS.map(ratingNormalizeColumn),
+        rows: [],
+        performers: [],
+        filters: {},
+        sort: { columnId: 'score', dir: 'desc' },
+        loading: false
+    };
+
+    function ratingNormalizeResponse(payload) {
+        var columns = [], rows = [], i, j, row, keys, data;
+        if (payload && Array.isArray(payload.columns)) {
+            columns = payload.columns.map(ratingNormalizeColumn);
+        }
+
+        data = payload && Array.isArray(payload.data) ? payload.data : null;
+        if (columns.length && data && data.every(Array.isArray)) {
+            var isColumnMajor = data.length === columns.length;
+            if (isColumnMajor) {
+                var rowCount = data.reduce(function(max, values) {
+                    return Math.max(max, values.length);
+                }, 0);
+                for (i = 0; i < rowCount; i++) {
+                    row = {};
+                    for (j = 0; j < columns.length; j++) {
+                        row[columns[j].name] = ratingValueAt(data[j], i);
+                    }
+                    rows.push(row);
+                }
+            } else {
+                for (i = 0; i < data.length; i++) {
+                    row = {};
+                    for (j = 0; j < columns.length; j++) {
+                        row[columns[j].name] = ratingValueAt(data[i], j);
+                    }
+                    rows.push(row);
+                }
+            }
+        } else if (Array.isArray(payload)) {
+            rows = payload.map(function(item) {
+                return item && typeof item === 'object' ? Object.assign({}, item) : { value: item };
+            });
+        } else if (payload && Array.isArray(payload.data)) {
+            rows = payload.data.map(function(item) {
+                return item && typeof item === 'object' ? Object.assign({}, item) : { value: item };
+            });
+        }
+
+        if (!columns.length && rows.length) {
+            keys = [];
+            rows.forEach(function(item) {
+                Object.keys(item || {}).forEach(function(key) {
+                    if (keys.indexOf(key) === -1) keys.push(key);
+                });
+            });
+            columns = keys.map(function(key, index) {
+                return ratingNormalizeColumn({ id: key || String(index), name: key || ('Поле ' + (index + 1)) }, index);
+            });
+        }
+
+        return { columns: columns, rows: rows };
+    }
+
+    function ratingNormalizeColumn(column, index) {
+        var raw = column || {};
+        if (typeof raw !== 'object') raw = { id: index, name: String(raw || '') };
+        var name = raw.name || raw.val || raw.title || raw.id || ('Поле ' + ((index || 0) + 1));
+        return {
+            id: String(raw.id || name || index || ''),
+            name: String(name),
+            type: raw.type || '',
+            format: raw.format || '',
+            ref: raw.ref || '',
+            orig: raw.orig || '',
+            granted: raw.granted || ''
+        };
+    }
+
+    function ratingValueAt(values, index) {
+        if (!Array.isArray(values)) return '';
+        return values[index] === undefined || values[index] === null ? '' : values[index];
+    }
+
+    function ratingFindColumn(columns, names) {
+        var list = Array.isArray(names) ? names : [names];
+        var normalized = list.map(function(name) {
+            return String(name || '').toLowerCase();
+        });
+        var exact = columns.find(function(column) {
+            return normalized.indexOf(String(column.name || '').toLowerCase()) !== -1;
+        });
+        if (exact) return exact;
+        return columns.find(function(column) {
+            var name = String(column.name || '').toLowerCase();
+            return normalized.some(function(part) {
+                return part && name.indexOf(part) !== -1;
+            });
+        }) || null;
+    }
+
+    function ratingParseNumber(value) {
+        if (value && typeof value === 'object') value = value.val || value.value || '';
+        if (value === null || value === undefined || value === '') return NaN;
+        var cleaned = String(value)
+            .replace(/\u00a0/g, ' ')
+            .replace(/\s/g, '')
+            .replace(',', '.')
+            .replace(/[^\d.-]/g, '');
+        if (!cleaned || cleaned === '-' || cleaned === '.') return NaN;
+        return parseFloat(cleaned);
+    }
+
+    function ratingParseDateValue(value) {
+        if (value && typeof value === 'object') value = value.val || value.value || '';
+        var text = String(value || '').trim();
+        var match;
+        if (!text) return null;
+        match = text.match(/^(\d\d\d\d)(\d\d)(\d\d)$/);
+        if (match) return { year: match[1], month: match[2], day: match[3] };
+        match = text.match(/^(\d\d\d\d)-(\d\d)-(\d\d)/);
+        if (match) return { year: match[1], month: match[2], day: match[3] };
+        match = text.match(/^(\d\d)\.(\d\d)\.(\d\d\d\d)/);
+        if (match) return { year: match[3], month: match[2], day: match[1] };
+        return null;
+    }
+
+    function ratingMonthKey(value) {
+        var parsed = ratingParseDateValue(value);
+        return parsed ? parsed.year + '-' + parsed.month : '';
+    }
+
+    function ratingMonthLabel(key) {
+        var months = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
+        var parts = String(key || '').split('-');
+        var monthIndex = parseInt(parts[1], 10) - 1;
+        if (parts.length !== 2 || monthIndex < 0 || monthIndex > 11) return key || '';
+        return months[monthIndex] + ' ' + parts[0];
+    }
+
+    function ratingDateSortKey(value) {
+        var parsed = ratingParseDateValue(value);
+        return parsed ? parsed.year + parsed.month + parsed.day : '';
+    }
+
+    function ratingFormatDateForApi(value) {
+        var text = String(value || '').trim();
+        var match = text.match(/^(\d\d\d\d)-(\d\d)-(\d\d)$/);
+        if (match) return match[3] + '.' + match[2] + '.' + match[1];
+        return text;
+    }
+
+    function ratingEncodeParam(value) {
+        return encodeURIComponent(String(value || ''));
+    }
+
+    function ratingFilterKey(prefix, column) {
+        return prefix + (prefix.slice(-1) === '_' ? '' : '_') + (column ? column.name : '');
+    }
+
+    function ratingIsDateColumn(column) {
+        var name = String(column && column.name || '').toLowerCase();
+        var format = String(column && column.format || '').toLowerCase();
+        if (name === 'в срок') return false;
+        return name.indexOf('срок') !== -1 || name.indexOf('месяц') !== -1 || name.indexOf('дата') !== -1 || format.indexOf('date') !== -1;
+    }
+
+    function ratingIsMetricColumn(column) {
+        var name = String(column && column.name || '').toLowerCase();
+        var metrics = ['закрыто', 'в срок', 'задач', 'рейтинг', 'количество', 'count'];
+        return metrics.some(function(metric) {
+            return name === metric || name.indexOf(metric) !== -1;
+        });
+    }
+
+    function ratingIsRatingFilterColumn(column) {
+        var name = String(column && column.name || '').trim().toLowerCase();
+        return RATING_FILTER_NAMES.indexOf(name) !== -1;
+    }
+
+    function ratingGetFilterColumns(columns) {
+        var result = [];
+        RATING_FILTER_NAMES.forEach(function(filterName) {
+            var column = (columns || []).find(function(item) {
+                return String(item && item.name || '').trim().toLowerCase() === filterName;
+            });
+            if (column && result.indexOf(column) === -1) result.push(column);
+        });
+        return result;
+    }
+
+    function ratingCreateDefaultFilters(year, columns) {
+        var filters = {};
+        (columns || []).forEach(function(column) {
+            if (ratingIsRatingFilterColumn(column) && ratingIsDateColumn(column)) {
+                filters[column.id] = {
+                    from: String(year) + '-01-01',
+                    to: String(year) + '-12-31'
+                };
+            }
+        });
+        return filters;
+    }
+
+    function ratingReconcileFilters(oldColumns, newColumns, filters) {
+        var byName = {}, next = {};
+        (oldColumns || []).forEach(function(column) {
+            if (ratingIsRatingFilterColumn(column) && filters && filters[column.id]) {
+                byName[column.name] = filters[column.id];
+            }
+        });
+        (newColumns || []).forEach(function(column) {
+            if (!ratingIsRatingFilterColumn(column)) return;
+            if (filters && filters[column.id]) {
+                next[column.id] = filters[column.id];
+            } else if (byName[column.name]) {
+                next[column.id] = byName[column.name];
+            }
+        });
+        return next;
+    }
+
+    function ratingBuildReportUrl(dbName, columns, filters) {
+        var url = '/' + ratingEncodeParam(dbName) + '/report/' + RATING_REPORT_ID + '?JSON_KV';
+        var params = [];
+        (columns || []).forEach(function(column) {
+            if (!ratingIsRatingFilterColumn(column)) return;
+            var filter = filters && filters[column.id] ? filters[column.id] : {};
+            var from = filter.from ? String(filter.from).trim() : '';
+            var to = filter.to ? String(filter.to).trim() : '';
+            var value = filter.value ? String(filter.value).trim() : '';
+
+            if (ratingIsDateColumn(column)) {
+                if (from) params.push(ratingFilterKey('FR_', column) + '=' + ratingFormatDateForApi(from));
+                if (to) params.push(ratingFilterKey('TO_', column) + '=' + ratingFormatDateForApi(to));
+            } else if (!ratingIsMetricColumn(column) && value) {
+                params.push(ratingFilterKey('FR_', column) + '=%' + value + '%');
+            }
+        });
+        if (params.length) {
+            url += '&' + params.map(function(param) {
+                var eq = param.indexOf('=');
+                return ratingEncodeParam(param.slice(0, eq)) + '=' + ratingEncodeParam(param.slice(eq + 1));
+            }).join('&');
+        }
+        return url;
+    }
+
+    function ratingValueAsNumber(row, column) {
+        if (!row || !column) return 0;
+        var value = ratingParseNumber(row[column.name]);
+        return isNaN(value) ? 0 : value;
+    }
+
+    function ratingScore(closedRate, onTimeRate) {
+        return (Number(closedRate) || 0) / 2 + (Number(onTimeRate) || 0) / 2;
+    }
+
+    function ratingAggregatePerformers(rows, columns) {
+        var nameColumn = ratingFindColumn(columns, ['ФИО', 'Исполнитель', 'Сотрудник']);
+        var departmentColumn = ratingFindColumn(columns, ['Департамент']);
+        var closedColumn = ratingFindColumn(columns, ['Закрыто']);
+        var onTimeColumn = ratingFindColumn(columns, ['В срок']);
+        var tasksColumn = ratingFindColumn(columns, ['Задач']);
+        var periodColumn = ratingFindColumn(columns, ['Срок', 'Месяц', 'Дата']);
+        var groups = {};
+
+        (rows || []).forEach(function(row) {
+            var name = ratingCellText(nameColumn ? row[nameColumn.name] : '').trim() || 'Без ФИО';
+            var department = ratingCellText(departmentColumn ? row[departmentColumn.name] : '').trim();
+            var key = name + '\u0000' + department;
+            var tasks = ratingValueAsNumber(row, tasksColumn);
+            var weight = tasks > 0 ? tasks : 1;
+            var closed = ratingValueAsNumber(row, closedColumn);
+            var onTime = ratingValueAsNumber(row, onTimeColumn);
+            var periodValue = periodColumn ? row[periodColumn.name] : '';
+            var dateKey = ratingDateSortKey(periodValue);
+
+            if (!groups[key]) {
+                groups[key] = {
+                    name: name,
+                    department: department,
+                    tasks: 0,
+                    weight: 0,
+                    closedWeighted: 0,
+                    onTimeWeighted: 0,
+                    periodStart: '',
+                    periodEnd: ''
+                };
+            }
+            groups[key].tasks += tasks;
+            groups[key].weight += weight;
+            groups[key].closedWeighted += closed * weight;
+            groups[key].onTimeWeighted += onTime * weight;
+            if (dateKey) {
+                if (!groups[key].periodStart || dateKey < groups[key].periodStart) groups[key].periodStart = dateKey;
+                if (!groups[key].periodEnd || dateKey > groups[key].periodEnd) groups[key].periodEnd = dateKey;
+            }
+        });
+
+        return Object.keys(groups).map(function(key) {
+            var item = groups[key];
+            item.closedRate = item.weight ? item.closedWeighted / item.weight : 0;
+            item.onTimeRate = item.weight ? item.onTimeWeighted / item.weight : 0;
+            item.score = ratingScore(item.closedRate, item.onTimeRate);
+            return item;
+        }).sort(function(a, b) {
+            if (b.score !== a.score) return b.score - a.score;
+            if (b.tasks !== a.tasks) return b.tasks - a.tasks;
+            return a.name.localeCompare(b.name);
+        });
+    }
+
+    function ratingBuildSummary(performers) {
+        var summary = { performers: 0, tasks: 0, avgScore: 0, avgClosed: 0, avgOnTime: 0 };
+        var weightTotal = 0;
+        (performers || []).forEach(function(item) {
+            var weight = item.tasks > 0 ? item.tasks : 1;
+            summary.performers += 1;
+            summary.tasks += item.tasks;
+            summary.avgScore += item.score * weight;
+            summary.avgClosed += item.closedRate * weight;
+            summary.avgOnTime += item.onTimeRate * weight;
+            weightTotal += weight;
+        });
+        if (weightTotal) {
+            summary.avgScore = summary.avgScore / weightTotal;
+            summary.avgClosed = summary.avgClosed / weightTotal;
+            summary.avgOnTime = summary.avgOnTime / weightTotal;
+        }
+        return summary;
+    }
+
+    function ratingGetDbName() {
+        if (typeof db !== 'undefined' && db) return db;
+        if (typeof window.db !== 'undefined' && window.db) return window.db;
+        return '';
+    }
+
+    function ratingGetXsrf() {
+        if (typeof xsrf !== 'undefined' && xsrf) return xsrf;
+        if (typeof window.xsrf !== 'undefined' && window.xsrf) return window.xsrf;
+        return '';
+    }
+
+    function ratingSetStatus(message) {
+        var status = document.getElementById('rating-status');
+        if (status) status.textContent = message || '';
+    }
+
+    function ratingSetLoading(isLoading) {
+        ratingState.loading = isLoading;
+        var root = document.getElementById('rating-root');
+        if (root) root.classList.toggle('rating-loading', isLoading);
+    }
+
+    function ratingInit() {
+        document.title = 'Рейтинг исполнителей';
+        var navCenter = document.querySelector('.navbar-center .navbar-workspace');
+        if (navCenter) navCenter.textContent = 'Рейтинг исполнителей';
+
+        ratingState.filters = ratingCreateDefaultFilters(new Date().getFullYear(), ratingState.columns);
+        ratingRenderFilters();
+        ratingBindEvents();
+        ratingLoadData();
+    }
+
+    function ratingBindEvents() {
+        var form = document.getElementById('rating-filter-form');
+        var clear = document.getElementById('rating-clear');
+
+        if (form) {
+            form.addEventListener('submit', function(event) {
+                event.preventDefault();
+                ratingApplyFiltersFromControls();
+            });
+        }
+        if (clear) clear.addEventListener('click', ratingClearFilters);
+    }
+
+    function ratingClearFilters() {
+        ratingState.filters = {};
+        ratingRenderFilters();
+        ratingLoadData();
+    }
+
+    function ratingApplyFiltersFromControls() {
+        ratingState.filters = ratingReadFilters();
+        ratingLoadData();
+    }
+
+    function ratingReadFilters() {
+        var filters = {};
+        var inputs = document.querySelectorAll('[data-rating-filter]');
+        inputs.forEach(function(input) {
+            var columnId = input.getAttribute('data-rating-filter');
+            var part = input.getAttribute('data-rating-filter-part');
+            var value = input.value;
+            if (!filters[columnId]) filters[columnId] = {};
+            if (value !== '') filters[columnId][part] = value;
+        });
+        return filters;
+    }
+
+    function ratingRenderFilters() {
+        var grid = document.getElementById('rating-filter-grid');
+        if (!grid) return;
+        grid.innerHTML = '';
+        ratingGetFilterColumns(ratingState.columns).forEach(function(column) {
+            grid.appendChild(ratingCreateFilterControl(column));
+        });
+    }
+
+    function ratingCreateFilterControl(column) {
+        var wrap = document.createElement('div');
+        var label = document.createElement('label');
+        var filter = ratingState.filters[column.id] || {};
+        wrap.className = 'rating-filter';
+        label.textContent = column.name;
+        wrap.appendChild(label);
+
+        if (ratingIsDateColumn(column)) {
+            var range = document.createElement('div');
+            var from = document.createElement('input');
+            var to = document.createElement('input');
+            range.className = 'rating-range';
+            from.type = 'date';
+            to.type = 'date';
+            from.placeholder = 'от';
+            to.placeholder = 'до';
+            from.value = filter.from || '';
+            to.value = filter.to || '';
+            ratingMarkFilterInput(from, column.id, 'from');
+            ratingMarkFilterInput(to, column.id, 'to');
+            range.appendChild(from);
+            range.appendChild(to);
+            wrap.appendChild(range);
+            wrap.appendChild(ratingCreateQuickLinks(column));
+        } else {
+            wrap.appendChild(ratingCreateSelectFilter(column, filter));
+        }
+        return wrap;
+    }
+
+    function ratingCreateSelectFilter(column, filter) {
+        var select = document.createElement('select');
+        var empty = document.createElement('option');
+        empty.value = '';
+        empty.textContent = 'Все';
+        select.appendChild(empty);
+        ratingCollectFilterValues(column, filter.value).forEach(function(item) {
+            var option = document.createElement('option');
+            option.value = item.value;
+            option.textContent = item.label;
+            select.appendChild(option);
+        });
+        select.value = filter.value || '';
+        ratingMarkFilterInput(select, column.id, 'value');
+        return select;
+    }
+
+    function ratingCollectFilterValues(column, selectedValue) {
+        var values = [];
+        var selected = String(selectedValue || '').trim();
+        ratingState.rows.forEach(function(row) {
+            var value = ratingCellText(row[column.name]).trim();
+            if (!value) return;
+            if (!values.some(function(existing) { return existing.value === value; })) {
+                values.push({ value: value, label: value });
+            }
+        });
+        values.sort(function(a, b) {
+            return a.label.localeCompare(b.label);
+        });
+        values = values.slice(0, 160);
+        if (selected && !values.some(function(item) { return item.value === selected; })) {
+            values.unshift({ value: selected, label: selected });
+        }
+        return values;
+    }
+
+    function ratingCreateQuickLinks(column) {
+        var wrap = document.createElement('div');
+        wrap.className = 'rating-filter__quick';
+        ratingCreateQuickRanges(new Date()).forEach(function(range) {
+            var link = document.createElement('a');
+            link.href = '#';
+            link.className = 'rating-quick-link';
+            link.textContent = range.label;
+            link.setAttribute('data-rating-quick-range', range.key);
+            link.addEventListener('click', function(event) {
+                event.preventDefault();
+                ratingApplyQuickRange(column.id, range.key);
+            });
+            wrap.appendChild(link);
+        });
+        return wrap;
+    }
+
+    function ratingCreateQuickRanges(now) {
+        function iso(year, monthIndex, day) {
+            return String(year) + '-' + String(monthIndex + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+        }
+        function lastDay(year, monthIndex) {
+            return new Date(year, monthIndex + 1, 0).getDate();
+        }
+
+        var date = now instanceof Date ? now : new Date();
+        var year = date.getFullYear();
+        var month = date.getMonth();
+        var previousMonth = new Date(year, month - 1, 1);
+
+        return [
+            { key: 'current-year', label: 'текущий год', from: iso(year, 0, 1), to: iso(year, 11, 31) },
+            { key: 'previous-year', label: 'прошлый год', from: iso(year - 1, 0, 1), to: iso(year - 1, 11, 31) },
+            { key: 'current-month', label: 'текущий месяц', from: iso(year, month, 1), to: iso(year, month, lastDay(year, month)) },
+            { key: 'previous-month', label: 'прошлый месяц', from: iso(previousMonth.getFullYear(), previousMonth.getMonth(), 1), to: iso(previousMonth.getFullYear(), previousMonth.getMonth(), lastDay(previousMonth.getFullYear(), previousMonth.getMonth())) }
+        ];
+    }
+
+    function ratingApplyQuickRange(columnId, rangeKey) {
+        var range = ratingCreateQuickRanges(new Date()).filter(function(item) {
+            return item.key === rangeKey;
+        })[0];
+        if (!range) return;
+        ratingState.filters = ratingReadFilters();
+        if (!ratingState.filters[columnId]) ratingState.filters[columnId] = {};
+        ratingState.filters[columnId].from = range.from;
+        ratingState.filters[columnId].to = range.to;
+        ratingRenderFilters();
+        ratingLoadData();
+    }
+
+    function ratingMarkFilterInput(input, columnId, part) {
+        input.setAttribute('data-rating-filter', columnId);
+        input.setAttribute('data-rating-filter-part', part);
+        input.addEventListener('change', ratingApplyFiltersFromControls);
+    }
+
+    function ratingLoadData() {
+        var dbName = ratingGetDbName();
+        if (!dbName) {
+            ratingShowError('Не задана база данных.');
+            return;
+        }
+
+        var url = ratingBuildReportUrl(dbName, ratingState.columns, ratingState.filters);
+        var headers = {};
+        var token = ratingGetXsrf();
+        if (token) headers['X-XSRF-TOKEN'] = token;
+
+        ratingSetLoading(true);
+        ratingSetStatus('Загрузка...');
+        fetch(url, { headers: headers })
+            .then(function(response) {
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                return response.json();
+            })
+            .then(function(payload) {
+                var normalized = ratingNormalizeResponse(payload);
+                if (normalized.columns.length) {
+                    ratingState.filters = ratingReconcileFilters(ratingState.columns, normalized.columns, ratingState.filters);
+                    ratingState.columns = normalized.columns;
+                }
+                ratingState.rows = normalized.rows;
+                ratingState.performers = ratingAggregatePerformers(ratingState.rows, ratingState.columns);
+                ratingSetLoading(false);
+                ratingRenderFilters();
+                ratingRenderDashboard();
+                ratingSetStatus('Обновлено: ' + ratingFormatClock(new Date()));
+            })
+            .catch(function(error) {
+                ratingSetLoading(false);
+                ratingShowError('Ошибка загрузки данных: ' + error.message);
+            });
+    }
+
+    function ratingShowError(message) {
+        ratingSetStatus(message);
+        var leaderboard = document.getElementById('rating-leaderboard');
+        var table = document.getElementById('rating-table-wrap');
+        var count = document.getElementById('rating-table-count');
+        if (leaderboard) leaderboard.innerHTML = '<div class="rating-error">' + ratingEscape(message) + '</div>';
+        if (table) table.innerHTML = '<div class="rating-error">' + ratingEscape(message) + '</div>';
+        if (count) count.textContent = '';
+    }
+
+    function ratingRenderDashboard() {
+        ratingRenderKpis();
+        ratingRenderLeaderboard();
+        ratingRenderTable();
+    }
+
+    function ratingRenderKpis() {
+        var wrap = document.getElementById('rating-kpis');
+        var summary = ratingBuildSummary(ratingState.performers);
+        if (!wrap) return;
+        wrap.innerHTML = '';
+        [
+            { label: 'Исполнителей', value: ratingFormatNumber(summary.performers), note: 'в рейтинге', icon: 'pi pi-users', tone: 'total' },
+            { label: 'Всего задач', value: ratingFormatNumber(summary.tasks), note: 'по фильтру', icon: 'pi pi-list-check', tone: 'tasks' },
+            { label: 'Рейтинг', value: ratingFormatPercent(summary.avgScore), note: 'средний', icon: 'pi pi-star', tone: 'score' },
+            { label: 'Закрыто', value: ratingFormatPercent(summary.avgClosed), note: 'среднее', icon: 'pi pi-check-circle', tone: 'closed' },
+            { label: 'В срок', value: ratingFormatPercent(summary.avgOnTime), note: 'среднее', icon: 'pi pi-clock', tone: 'ontime' }
+        ].forEach(function(item) {
+            wrap.appendChild(ratingCreateKpi(item));
+        });
+    }
+
+    function ratingCreateKpi(item) {
+        var el = document.createElement('div');
+        var head = document.createElement('div');
+        var label = document.createElement('span');
+        var icon = document.createElement('span');
+        var value = document.createElement('div');
+        var note = document.createElement('div');
+
+        el.className = 'rating-kpi';
+        head.className = 'rating-kpi__head';
+        label.textContent = item.label;
+        icon.className = 'rating-kpi__icon rating-kpi__icon--' + item.tone;
+        icon.innerHTML = '<i class="' + item.icon + '"></i>';
+        value.className = 'rating-kpi__value';
+        value.textContent = item.value;
+        note.className = 'rating-kpi__note';
+        note.textContent = item.note;
+
+        head.appendChild(label);
+        head.appendChild(icon);
+        el.appendChild(head);
+        el.appendChild(value);
+        el.appendChild(note);
+        return el;
+    }
+
+    function ratingRenderLeaderboard() {
+        var wrap = document.getElementById('rating-leaderboard');
+        var performers = ratingState.performers.slice(0, 10);
+        if (!wrap) return;
+        wrap.innerHTML = '';
+        if (!performers.length) {
+            wrap.innerHTML = '<div class="rating-empty">Нет данных</div>';
+            return;
+        }
+        performers.forEach(function(item) {
+            wrap.appendChild(ratingCreateLeader(item));
+        });
+    }
+
+    function ratingCreateLeader(item) {
+        var row = document.createElement('div');
+        var main = document.createElement('div');
+        var name = document.createElement('div');
+        var meta = document.createElement('div');
+        var score = document.createElement('div');
+        var bar = document.createElement('div');
+        var fill = document.createElement('div');
+
+        row.className = 'rating-leader';
+        main.className = 'rating-leader__main';
+        name.className = 'rating-leader__name';
+        name.textContent = item.name;
+        meta.className = 'rating-leader__meta';
+        meta.textContent = [item.department || 'Без департамента', ratingFormatNumber(item.tasks) + ' задач'].join(' · ');
+        score.className = 'rating-leader__score';
+        score.textContent = ratingFormatPercent(item.score);
+        bar.className = 'rating-leader__bar';
+        fill.className = 'rating-leader__fill';
+        fill.style.width = Math.max(0, Math.min(100, item.score)) + '%';
+
+        main.appendChild(name);
+        main.appendChild(meta);
+        bar.appendChild(fill);
+        row.appendChild(main);
+        row.appendChild(score);
+        row.appendChild(bar);
+        return row;
+    }
+
+    function ratingRenderTable() {
+        var wrap = document.getElementById('rating-table-wrap');
+        var count = document.getElementById('rating-table-count');
+        var performers = ratingGetSortedPerformers();
+        if (!wrap) return;
+        wrap.innerHTML = '';
+        if (count) count.textContent = performers.length + ' строк';
+        if (!performers.length) {
+            wrap.innerHTML = '<div class="rating-empty">Нет данных</div>';
+            return;
+        }
+
+        var table = document.createElement('table');
+        var thead = document.createElement('thead');
+        var tbody = document.createElement('tbody');
+        table.className = 'rating-table';
+        thead.appendChild(ratingCreateHeaderRow());
+        performers.forEach(function(item) {
+            tbody.appendChild(ratingCreateTableRow(item));
+        });
+        table.appendChild(thead);
+        table.appendChild(tbody);
+        wrap.appendChild(table);
+    }
+
+    function ratingCreateHeaderRow() {
+        var tr = document.createElement('tr');
+        RATING_TABLE_COLUMNS.forEach(function(column) {
+            var th = document.createElement('th');
+            var btn = document.createElement('button');
+            var icon = document.createElement('i');
+            btn.type = 'button';
+            btn.textContent = column.label;
+            icon.className = ratingState.sort.columnId === column.id
+                ? (ratingState.sort.dir === 'asc' ? 'pi pi-sort-up' : 'pi pi-sort-down')
+                : 'pi pi-sort-alt';
+            btn.appendChild(icon);
+            btn.addEventListener('click', function() {
+                ratingApplySort(column.id);
+            });
+            th.appendChild(btn);
+            tr.appendChild(th);
+        });
+        return tr;
+    }
+
+    function ratingCreateTableRow(item) {
+        var tr = document.createElement('tr');
+        RATING_TABLE_COLUMNS.forEach(function(column) {
+            var td = document.createElement('td');
+            if (column.numeric) td.className = 'rating-number';
+            if (column.id === 'score') {
+                td.appendChild(ratingCreateScorePill(item.score));
+            } else if (column.id === 'closedRate' || column.id === 'onTimeRate') {
+                td.textContent = ratingFormatPercent(item[column.id]);
+            } else if (column.id === 'tasks') {
+                td.textContent = ratingFormatNumber(item.tasks);
+            } else if (column.id === 'period') {
+                td.textContent = ratingFormatPeriod(item);
+            } else {
+                td.textContent = item[column.id] || '';
+            }
+            tr.appendChild(td);
+        });
+        return tr;
+    }
+
+    function ratingCreateScorePill(value) {
+        var pill = document.createElement('span');
+        pill.className = 'rating-score-pill';
+        pill.textContent = ratingFormatPercent(value);
+        return pill;
+    }
+
+    function ratingApplySort(columnId) {
+        if (ratingState.sort.columnId === columnId) {
+            ratingState.sort.dir = ratingState.sort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+            ratingState.sort.columnId = columnId;
+            ratingState.sort.dir = columnId === 'name' || columnId === 'department' || columnId === 'period' ? 'asc' : 'desc';
+        }
+        ratingRenderLeaderboard();
+        ratingRenderTable();
+    }
+
+    function ratingGetSortedPerformers() {
+        var rows = ratingState.performers.slice();
+        var columnId = ratingState.sort.columnId;
+        rows.sort(function(a, b) {
+            var av = ratingSortValue(a, columnId);
+            var bv = ratingSortValue(b, columnId);
+            var result = av > bv ? 1 : av < bv ? -1 : 0;
+            if (result === 0 && columnId !== 'score') result = b.score - a.score;
+            return ratingState.sort.dir === 'desc' ? -result : result;
+        });
+        return rows;
+    }
+
+    function ratingSortValue(item, columnId) {
+        if (columnId === 'period') return item.periodEnd || item.periodStart || '';
+        if (columnId === 'tasks' || columnId === 'score' || columnId === 'closedRate' || columnId === 'onTimeRate') {
+            return Number(item[columnId]) || 0;
+        }
+        return String(item[columnId] || '').toLowerCase();
+    }
+
+    function ratingCellText(value) {
+        if (value && typeof value === 'object') {
+            if (value.val !== undefined) return String(value.val);
+            if (value.value !== undefined) return String(value.value);
+        }
+        return value === null || value === undefined ? '' : String(value);
+    }
+
+    function ratingFormatPeriod(item) {
+        var start = ratingMonthKey(item.periodStart);
+        var end = ratingMonthKey(item.periodEnd);
+        if (start && end && start !== end) return ratingMonthLabel(start) + ' - ' + ratingMonthLabel(end);
+        if (end) return ratingMonthLabel(end);
+        if (start) return ratingMonthLabel(start);
+        return '';
+    }
+
+    function ratingFormatPercent(value) {
+        var number = Number(value) || 0;
+        var rounded = Math.round(number * 10) / 10;
+        return String(rounded).replace(/\.0$/, '') + '%';
+    }
+
+    function ratingFormatNumber(value) {
+        var number = Number(value) || 0;
+        return String(Math.round(number * 100) / 100).replace(/\B(?=(\d\d\d)+(?!\d))/g, ' ');
+    }
+
+    function ratingFormatClock(date) {
+        return String(date.getHours()).padStart(2, '0') + ':' + String(date.getMinutes()).padStart(2, '0');
+    }
+
+    function ratingEscape(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', ratingInit);
+    } else {
+        ratingInit();
+    }
+})();
+</script>
