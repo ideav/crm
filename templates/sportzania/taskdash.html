@@ -189,8 +189,6 @@
     .taskdash-kpi__icon--active { background: rgba(8, 145, 178, 0.12); color: var(--taskdash-cyan); }
     .taskdash-kpi__icon--overdue { background: var(--taskdash-soft-red); color: var(--taskdash-red); }
     .taskdash-kpi__icon--delayed { background: var(--taskdash-soft-amber); color: var(--taskdash-amber); }
-    .taskdash-kpi__icon--staff { background: var(--taskdash-soft-amber); color: var(--taskdash-amber); }
-
     .taskdash-kpi__value {
         margin-top: 8px;
         font-size: 1.35rem;
@@ -1177,8 +1175,7 @@
             { label: 'Завершена', value: summary.completed, note: 'готово', icon: 'pi pi-check-circle', tone: 'done' },
             { label: 'В работе', value: summary.active, note: 'активно', icon: 'pi pi-clock', tone: 'active' },
             { label: 'Просрочена', value: summary.overdue, note: 'просрочено', icon: 'pi pi-exclamation-circle', tone: 'overdue' },
-            { label: 'Отложена', value: summary.delayed, note: 'ожидает', icon: 'pi pi-pause-circle', tone: 'delayed' },
-            { label: 'Сотрудников', value: summary.staff, note: 'в выборке', icon: 'pi pi-users', tone: 'staff' }
+            { label: 'Отложена', value: summary.delayed, note: 'ожидает', icon: 'pi pi-pause-circle', tone: 'delayed' }
         ].forEach(function(item) {
             wrap.appendChild(taskdashCreateKpi(item));
         });
@@ -1189,14 +1186,12 @@
         var activeColumn = taskdashFindColumn(columns, ['В работе']);
         var overdueColumn = taskdashFindColumn(columns, ['Просрочена']);
         var delayedColumn = taskdashFindColumn(columns, ['Отложена']);
-        var staffColumn = taskdashFindColumn(columns, ['Сотрудников']);
-        var summary = { completed: 0, active: 0, overdue: 0, delayed: 0, staff: 0, total: 0, completionRate: 0 };
+        var summary = { completed: 0, active: 0, overdue: 0, delayed: 0, total: 0, completionRate: 0 };
         (rows || []).forEach(function(row) {
             summary.completed += taskdashValueAsNumber(row, doneColumn);
             summary.active += taskdashValueAsNumber(row, activeColumn);
             summary.overdue += taskdashValueAsNumber(row, overdueColumn);
             summary.delayed += taskdashValueAsNumber(row, delayedColumn);
-            summary.staff += taskdashValueAsNumber(row, staffColumn);
         });
         summary.total = summary.completed + summary.active + summary.overdue + summary.delayed;
         summary.completionRate = summary.total ? Math.round(summary.completed / summary.total * 100) : 0;

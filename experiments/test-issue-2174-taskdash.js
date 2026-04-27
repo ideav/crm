@@ -27,6 +27,10 @@ assert(source.includes("TASKDASH_REPORT_ID = '155675'"),
     'task dashboard must load data from report 155675');
 assert(source.includes('FR_') && source.includes('TO_'),
     'task dashboard must build report FR_/TO_ filters');
+assert(!source.includes("label: 'Сотрудников'"),
+    'task dashboard must not render the employee count KPI because report rows can double-count employees');
+assert(!source.includes('summary.staff'),
+    'task dashboard summary must not calculate a staff total from grouped report rows');
 
 const sample = {
     columns: [
@@ -82,6 +86,7 @@ ${extractFunction('taskdashBuildReportUrl')}
 ${extractFunction('taskdashBuildMonthlySeries')}
 ${extractFunction('taskdashValueAsNumber')}
 ${extractFunction('taskdashFormatNumber')}
+${extractFunction('taskdashBuildSummary')}
 
 function assert(condition, message) {
     if (!condition) throw new Error(message);
@@ -139,6 +144,12 @@ assert(series[0].completed === 54 && series[0].active === 3 && series[0].delayed
 assert(series[0].label === 'Янв 2025', 'monthly labels must be readable Russian short labels');
 assert(taskdashFormatNumber(1234567.89) === '1 234 567.89',
     'metric formatting must keep thousands separators after template-safe regex rewrite');
+
+const summary = taskdashBuildSummary(normalized.rows, normalized.columns);
+assert(summary.total === 131 && summary.completed === 121 && summary.active === 7 && summary.delayed === 3,
+    'summary must still calculate task KPI totals from task counters');
+assert(!Object.prototype.hasOwnProperty.call(summary, 'staff'),
+    'summary must not expose a staff metric derived from the grouped report');
 `;
 
 vm.runInNewContext(code, { console });
