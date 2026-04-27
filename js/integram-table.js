@@ -11484,9 +11484,6 @@ class IntegramTable{
                 sortedFields.sort((a, b) => sortKey.get(a.id) - sortKey.get(b.id));
             }
 
-            // Issue #2205: only the first date/datetime field gets current date as default;
-            // subsequent date fields are suppressed unless they have an explicit attrs default.
-            let firstDateFieldSeen = false;
             sortedFields.forEach(req => {
                 const attrs = this.parseAttrs(req.attrs);
                 const fieldName = attrs.alias || req.val;
@@ -11496,11 +11493,10 @@ class IntegramTable{
                 const isRequired = attrs.required;
                 const isMulti = attrs.multi; // Issue #853
                 // Apply default value from attrs when creating a new record (issue #1498)
-                // Suppress date fallback for all date fields after the first one (issue #2205)
-                const isDateLike = baseFormat === 'DATE' || baseFormat === 'DATETIME';
-                const suppressDateFallback = isDateLike && firstDateFieldSeen;
-                if (isDateLike) firstDateFieldSeen = true;
-                const reqValue = storedValue || (isCreate ? this.resolveDefaultValue(req.attrs, baseFormat, suppressDateFallback) : '');
+                // Suppress date fallback for ALL sortedFields in create mode (issue #2205):
+                // the main field (first column) is rendered separately above and gets today's
+                // date there; secondary fields must not auto-fill dates unless attrs say so.
+                const reqValue = storedValue || (isCreate ? this.resolveDefaultValue(req.attrs, baseFormat, true) : '');
                 // Field is read-only when form is read-only and req does not have granted: "WRITE" (issue #1508)
                 const isReqReadOnly = formIsReadOnly && req.granted !== 'WRITE';
 
