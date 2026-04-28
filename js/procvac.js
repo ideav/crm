@@ -22,6 +22,15 @@
         'пауза': 'procvac-status--pause',
         'оффер': 'procvac-status--offer',
     };
+    var STATUS_SUMMARY_ORDER = ['в работе', 'не начато', 'оффер', 'оффер принят', 'вышел', 'пауза'];
+    var STATUS_SUMMARY_LABELS = {
+        'в работе': 'В работе',
+        'не начато': 'Не начато',
+        'оффер': 'Оффер',
+        'оффер принят': 'Оффер принят',
+        'вышел': 'Вышел',
+        'пауза': 'Пауза',
+    };
 
     var FIELD_DEFS = [
         { key: 'title', label: 'Вакансия актуальная', names: ['Вакансия актуальная'] },
@@ -347,12 +356,47 @@
     }
 
     function statusText(row) {
-        return String((row && row.values && row.values.status) || '').trim().toLowerCase();
+        return normalizeStatusKey(row && row.values && row.values.status);
+    }
+
+    function normalizeStatusKey(value) {
+        return String(value || '').trim().toLowerCase().replace(/ё/g, 'е');
     }
 
     function getStatusClass(value) {
-        var key = String(value || '').trim().toLowerCase().replace(/ё/g, 'е');
+        var key = normalizeStatusKey(value);
         return STATUS_CELL_CLASSES[key] || '';
+    }
+
+    function getSectionStatusSummary(rows) {
+        var counters = {};
+        var firstIndex = {};
+
+        (rows || []).forEach(function(row, index) {
+            var label = String((row && row.values && row.values.status) || '').trim();
+            var key = normalizeStatusKey(label);
+            if (!key) return;
+
+            if (!counters[key]) {
+                counters[key] = {
+                    key: key,
+                    label: STATUS_SUMMARY_LABELS[key] || label,
+                    count: 0,
+                };
+                firstIndex[key] = index;
+            }
+            counters[key].count += 1;
+        });
+
+        return Object.keys(counters).map(function(key) {
+            return counters[key];
+        }).sort(function(a, b) {
+            var aOrder = STATUS_SUMMARY_ORDER.indexOf(a.key);
+            var bOrder = STATUS_SUMMARY_ORDER.indexOf(b.key);
+            if (aOrder === -1) aOrder = STATUS_SUMMARY_ORDER.length + firstIndex[a.key];
+            if (bOrder === -1) bOrder = STATUS_SUMMARY_ORDER.length + firstIndex[b.key];
+            return aOrder - bOrder;
+        });
     }
 
     function getRowSection(row, now) {
@@ -666,6 +710,15 @@
         return '<tr class="procvac-data-row" data-row-id="' + escapeHtml(row.id) + '" data-section="' + escapeHtml(sectionKey) + '">' + cells + '</tr>';
     }
 
+    function renderSectionStatusSummary(rows) {
+        var summary = getSectionStatusSummary(rows);
+        if (!summary.length) return '';
+
+        return '<span class="procvac-section-statuses">' + summary.map(function(item) {
+            return '<span class="procvac-section-status-badge">' + escapeHtml(item.label) + ' ' + item.count + '</span>';
+        }).join('') + '</span>';
+    }
+
     function renderSectionHeader(key, title, rows) {
         var button = '';
         if (key === 'archive') {
@@ -681,6 +734,7 @@
             '<div class="procvac-section-head">',
             '<span class="procvac-section-title">' + escapeHtml(title) + '</span>',
             '<span class="procvac-section-count">' + rows.length + '</span>',
+            renderSectionStatusSummary(rows),
             button,
             '</div>',
             '</th>',
@@ -1366,9 +1420,11 @@
         renderDocumentLink: renderDocumentLink,
         normalizeColumnWidths: normalizeColumnWidths,
         applyColumnWidths: applyColumnWidths,
+        getSectionStatusSummary: getSectionStatusSummary,
         renderColumn: renderColumn,
         renderHeaderCell: renderHeaderCell,
         renderCell: renderCell,
+        renderSectionHeader: renderSectionHeader,
         renderEventsCell: renderEventsCell,
         getReferenceSelectSize: getReferenceSelectSize,
         FLOATING_REFERENCE_EDITOR_MIN_WIDTH: FLOATING_REFERENCE_EDITOR_MIN_WIDTH,

@@ -119,6 +119,13 @@
     white-space: normal;
 }
 
+.procvac-head-cell--title {
+    position: sticky;
+    left: 0;
+    z-index: 5;
+    box-shadow: 1px 0 0 var(--border-color, #d6dee8);
+}
+
 .procvac-head-label {
     display: block;
     padding-right: 10px;
@@ -154,6 +161,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.procvac-cell--title {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    box-shadow: 1px 0 0 var(--border-color, #e2e8f0);
 }
 
 .procvac-cell--numeric {
@@ -312,6 +326,9 @@
 }
 
 .procvac-section-row th {
+    position: sticky;
+    left: 0;
+    z-index: 1;
     padding: 0;
     border: 0;
     background: #f28c28;
@@ -319,6 +336,10 @@
 }
 
 .procvac-section-head {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    width: min(100%, calc(100vw - 32px));
     min-height: 26px;
     display: flex;
     align-items: center;
@@ -342,6 +363,29 @@
     padding: 0 8px;
     font-size: 0.78rem;
     font-weight: 700;
+}
+
+.procvac-section-statuses {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.procvac-section-status-badge {
+    min-height: 18px;
+    border: 1px solid rgba(107, 114, 128, 0.78);
+    border-radius: 999px;
+    background: transparent;
+    color: #111827;
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1.15;
+    white-space: nowrap;
 }
 
 .procvac-section-toggle {
