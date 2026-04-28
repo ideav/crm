@@ -553,7 +553,7 @@
         var value = row.values[column.key] || '';
         var rawValue = row.rawValues[column.key] || '';
         var classes = ['procvac-cell', 'procvac-cell--' + column.key];
-        var editable = column.editable && sectionKey !== 'archive';
+        var editable = column.editable;
         if (editable) classes.push('procvac-cell--editable');
         if (!value) classes.push('procvac-cell--empty');
 
@@ -816,7 +816,6 @@
 
     function startCellEdit(cell) {
         if (!cell || cell.classList.contains('procvac-cell--editing')) return;
-        if (cell.dataset.section === 'archive') return;
 
         var row = findRowById(cell.dataset.rowId);
         var column = findColumnByKey(cell.dataset.colKey);
@@ -1074,6 +1073,7 @@
         applyColumnWidths: applyColumnWidths,
         renderColumn: renderColumn,
         renderHeaderCell: renderHeaderCell,
+        renderCell: renderCell,
         getReferenceSelectSize: getReferenceSelectSize,
         parseDate: parseDate,
         calculateWeeksInWork: calculateWeeksInWork,
