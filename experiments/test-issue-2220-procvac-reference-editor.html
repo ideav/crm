@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Issue 2220 ProcVac reference editor</title>
+    <link rel="stylesheet" href="../css/procvac.css">
+    <style>
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+        }
+
+        body {
+            font: 12px Arial, sans-serif;
+        }
+
+        .test-shell {
+            width: 472px;
+            height: 268px;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-shell">
+        <div id="procvac-app" class="procvac">
+            <div class="procvac-toolbar">
+                <div class="procvac-search">
+                    <i class="pi pi-search"></i>
+                    <input id="procvac-search" type="search" placeholder="Быстрый поиск" autocomplete="off" aria-label="Быстрый поиск">
+                </div>
+            </div>
+            <div id="procvac-grid" class="procvac-grid">
+                <div class="procvac-loading"><span class="procvac-spinner"></span>Загрузка...</div>
+            </div>
+        </div>
+    </div>
+    <script>
+        window.db = 'demo';
+        window.xsrf = 'test-token';
+
+        var metadata = {
+            id: '8137',
+            type: '3',
+            val: 'Вакансия актуальная',
+            granted: 'WRITE',
+            reqs: [
+                { id: '8140', val: 'Статус вакансии', type: '3', ref_id: '8139', orig: '8138' },
+                { id: '8141', val: 'Департамент', type: '3', ref_id: '2860', orig: '2859' },
+                { id: '8143', val: 'План', type: '13' },
+                { id: '8145', val: 'Факт', type: '13' },
+                { id: '8147', val: 'Заявка', type: '8' },
+                { id: '8148', val: 'Пользователь', type: '3', ref_id: '2670', orig: '18' },
+                { id: '8150', val: 'Старт работы', type: '9' },
+                { id: '8152', val: 'Дедлайн', type: '9' },
+                { id: '8153', val: 'Выход', type: '9' },
+                { id: '8154', val: 'Тип найма', type: '3', ref_id: '7932', orig: '7931' },
+                { id: '8156', val: 'Комментарии', type: '3' },
+            ],
+        };
+        var rows = [
+            {
+                i: 8162,
+                r: [
+                    'Менеджер по продажам B2B',
+                    '8158:В работе',
+                    '2870:Департамент детских лагерей',
+                    '1',
+                    '10',
+                    '',
+                    '2616:darias',
+                    '01.04.2026',
+                    '31.05.2026',
+                    '',
+                    '7940:Штат',
+                    '',
+                ],
+            },
+        ];
+        var departments = [
+            [2870, 'Департамент детских лагерей'],
+            [2871, 'Операционный отдел'],
+            [2872, 'Отдел В'],
+            [2873, 'Отдел Г'],
+            [2874, 'Отдел Д'],
+            [2875, 'Отдел И'],
+            [2876, 'Отдел К'],
+            [2877, 'Отдел М'],
+            [2878, 'Отдел П'],
+            [2879, 'Отдел Р'],
+            [2880, 'Отдел С'],
+        ];
+
+        window.fetch = function(url, options) {
+            var payload = [];
+            if (url.indexOf('/metadata/') !== -1) {
+                payload = metadata;
+            } else if (url.indexOf('/object/') !== -1) {
+                payload = rows;
+            } else if (url.indexOf('/_ref_reqs/8141') !== -1) {
+                payload = departments;
+            } else if (options && options.method === 'POST') {
+                payload = {};
+            }
+
+            return Promise.resolve({
+                ok: true,
+                text: function() {
+                    return Promise.resolve(JSON.stringify(payload));
+                },
+            });
+        };
+    </script>
+    <script src="../js/procvac.js"></script>
+</body>
+</html>

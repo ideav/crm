@@ -226,6 +226,14 @@
     height: auto;
 }
 
+.procvac-editor--floating {
+    position: fixed;
+    z-index: 20;
+    min-width: min(260px, calc(100vw - 16px));
+    max-width: calc(100vw - 16px);
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.22);
+}
+
 .procvac-editor--textarea {
     height: 68px;
     resize: vertical;
