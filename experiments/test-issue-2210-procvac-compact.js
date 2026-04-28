@@ -41,7 +41,7 @@ function assertEqual(actual, expected, message) {
     }
 }
 
-const template = fs.readFileSync(path.join(rootDir, 'templates', 'procvac.html'), 'utf8');
+const template = fs.readFileSync(path.join(rootDir, 'templates', 'sportzania', 'procvac.html'), 'utf8');
 assert(!template.includes('procvac-refresh'), 'refresh button is removed from procvac template');
 assert(!template.includes('procvac-status'), 'status element is removed from procvac template');
 

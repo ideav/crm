@@ -13,6 +13,7 @@
     var FLOATING_REFERENCE_EDITOR_MAX_WIDTH = 420;
     var FLOATING_REFERENCE_EDITOR_MARGIN = 8;
     var EVENTS_TABLE_ID = '5616';
+    var EVENTS_FALLBACK_LIMIT = 10000;
     var STATUS_CELL_CLASSES = {
         'в работе': 'procvac-status--in-work',
         'не начато': 'procvac-status--not-started',
@@ -35,7 +36,7 @@
         { key: 'exitDate', label: 'Выход', names: ['Выход'] },
         { key: 'hireType', label: 'Штат/Лагерь/ОШ', names: ['Штат/Лагерь/ОШ', 'Тип найма'] },
         { key: 'weeksInWork', label: 'Недель в работе', derived: true, format: 'NUMBER' },
-        { key: 'events', label: 'События', derived: true },
+        { key: 'events', label: 'События', names: ['События'], arrId: EVENTS_TABLE_ID, eventCount: true },
         { key: 'comments', label: 'Комментарии', names: ['Комментарии'] },
     ];
 
@@ -66,6 +67,8 @@
         editing: null,
         refOptionsCache: {},
         columnWidths: {},
+        wasHidden: false,
+        reloadAdapter: null,
     };
 
     function normalizeFieldName(value) {
@@ -138,6 +141,7 @@
                 granted: req.granted,
                 ref_id: req.ref_id || null,
                 orig: req.orig || null,
+                arr_id: req.arr_id || null,
                 attrs: req.attrs || '',
             });
         });
@@ -147,6 +151,13 @@
 
     function findSourceForField(def, sources) {
         if (def.derived) return null;
+        if (def.arrId) {
+            for (var arrIndex = 0; arrIndex < sources.length; arrIndex++) {
+                if (String(sources[arrIndex].arr_id || '') === String(def.arrId)) {
+                    return sources[arrIndex];
+                }
+            }
+        }
         var wanted = (def.names || []).map(normalizeFieldName);
         for (var i = 0; i < sources.length; i++) {
             if (wanted.indexOf(normalizeFieldName(sources[i].name)) !== -1) {
@@ -192,9 +203,10 @@
                 names: def.names || [],
                 source: source,
                 derived: !!def.derived,
+                eventCount: !!def.eventCount,
                 documentLink: !!def.documentLink,
-                editable: !def.derived && !!source && sourceIsEditable(metadata, source),
-                format: source ? source.format : (def.format || 'SHORT'),
+                editable: !def.derived && !def.eventCount && !!source && sourceIsEditable(metadata, source),
+                format: def.eventCount ? 'NUMBER' : (source ? source.format : (def.format || 'SHORT')),
             };
         });
         return applyColumnWidths(columns, state.columnWidths);
@@ -240,6 +252,13 @@
             return abbreviateDepartmentName(value);
         }
         return value;
+    }
+
+    function normalizeEventCount(value) {
+        if (value === undefined || value === null || value === '') return '0';
+        var number = parseInt(value, 10);
+        if (isFinite(number)) return String(Math.max(0, number));
+        return String(value);
     }
 
     function parseDate(value) {
@@ -304,6 +323,13 @@
         };
 
         columns.forEach(function(column) {
+            if (column.key === 'events') {
+                var eventRawValue = column.source ? getSourceValue(rawRow, column.source) : '';
+                row.rawValues.events = normalizeEventCount(eventRawValue);
+                row.values.events = row.rawValues.events;
+                row.fields.events = column.source || null;
+                return;
+            }
             if (column.derived) return;
             var rawValue = getSourceValue(rawRow, column.source);
             row.rawValues[column.key] = rawValue;
@@ -313,8 +339,10 @@
 
         row.rawValues.weeksInWork = row.rawValues.startDate || '';
         row.values.weeksInWork = calculateWeeksInWork(row.rawValues.startDate, now || new Date());
-        row.rawValues.events = row.id === undefined || row.id === null ? '' : String(row.id);
-        row.values.events = row.rawValues.events ? 'События' : '';
+        if (!Object.prototype.hasOwnProperty.call(row.rawValues, 'events')) {
+            row.rawValues.events = row.id === undefined || row.id === null ? '' : '0';
+            row.values.events = row.rawValues.events;
+        }
         return row;
     }
 
@@ -420,10 +448,21 @@
         return getApiBase() + '/table/' + EVENTS_TABLE_ID + '?F_U=' + encodeURIComponent(rowId);
     }
 
-    function renderEventsLink(rowId) {
-        if (rowId === undefined || rowId === null || rowId === '') return '';
+    function renderEventsCell(row) {
+        if (!row || row.id === undefined || row.id === null || row.id === '') return '';
+        var rowId = String(row.id);
+        var count = normalizeEventCount(row.values && row.values.events);
         var href = buildEventsHref(rowId);
-        return '<a class="procvac-events-link" href="' + escapeHtml(href) + '" target="_blank" rel="noopener" title="Посмотреть события" aria-label="Посмотреть события"><i class="pi pi-calendar"></i></a>';
+        return [
+            '<span class="procvac-events-actions">',
+            '<a class="procvac-events-count" href="' + escapeHtml(href) + '" target="_blank" rel="noopener" title="Посмотреть события" aria-label="Посмотреть события: ' + escapeHtml(count) + '">',
+            escapeHtml(count),
+            '</a>',
+            '<button type="button" class="procvac-event-create-btn" data-row-id="' + escapeHtml(rowId) + '" title="Создать событие" aria-label="Создать событие">',
+            '<i class="pi pi-plus"></i>',
+            '</button>',
+            '</span>',
+        ].join('');
     }
 
     function getApiBase() {
@@ -610,7 +649,7 @@
 
         var html = '';
         if (column.key === 'events') {
-            html = renderEventsLink(row.id);
+            html = renderEventsCell(row);
         } else if (column.documentLink && isUrl(rawValue)) {
             html = renderDocumentLink(rawValue);
         } else {
@@ -729,6 +768,42 @@
         ].join('');
     }
 
+    function shouldLoadEventCounts() {
+        var column = findColumnByKey('events');
+        return !!(column && !column.source && state.rows.length);
+    }
+
+    function loadEventCountsForRows(rows) {
+        var wanted = {};
+        (rows || []).forEach(function(row) {
+            if (row && row.id !== undefined && row.id !== null && row.id !== '') {
+                wanted[String(row.id)] = true;
+            }
+        });
+        if (!Object.keys(wanted).length) return Promise.resolve();
+
+        var url = getApiBase() + '/object/' + EVENTS_TABLE_ID + '?JSON_OBJ&LIMIT=' + EVENTS_FALLBACK_LIMIT;
+        return fetchJson(url).then(function(events) {
+            var counts = {};
+            (Array.isArray(events) ? events : []).forEach(function(eventRow) {
+                var parentId = eventRow && eventRow.u;
+                if (parentId === undefined || parentId === null) return;
+                parentId = String(parentId);
+                if (!wanted[parentId]) return;
+                counts[parentId] = (counts[parentId] || 0) + 1;
+            });
+
+            rows.forEach(function(row) {
+                var count = normalizeEventCount(counts[String(row.id)] || 0);
+                row.rawValues.events = count;
+                row.values.events = count;
+            });
+            render();
+        }).catch(function(error) {
+            console.warn('procvac event count load error:', error);
+        });
+    }
+
     function loadData() {
         var apiBase = getApiBase();
         var metadataUrl = apiBase + '/metadata/' + TABLE_ID + '?JSON';
@@ -747,6 +822,9 @@
                 });
                 state.archivePage = 0;
                 render();
+                if (shouldLoadEventCounts()) {
+                    return loadEventCountsForRows(state.rows);
+                }
             })
             .catch(function(error) {
                 console.error('procvac load error:', error);
@@ -1165,7 +1243,53 @@
         }
     }
 
+    function openCreateRecord(tableId, parentId) {
+        if (typeof window.openCreateRecordForm === 'function') {
+            return window.openCreateRecordForm(tableId, parentId);
+        }
+        console.error('procvac create form error: openCreateRecordForm is not available');
+        return null;
+    }
+
+    function openCreateVacancy() {
+        return openCreateRecord(TABLE_ID, 1);
+    }
+
+    function openCreateEvent(rowId) {
+        if (rowId === undefined || rowId === null || rowId === '') return null;
+        return openCreateRecord(EVENTS_TABLE_ID, rowId);
+    }
+
+    function registerGlobalReload() {
+        if (!window) return;
+        window._integramTableInstances = window._integramTableInstances || [];
+        if (state.reloadAdapter) return;
+        state.reloadAdapter = {
+            reload: loadData,
+        };
+        window._integramTableInstances.push(state.reloadAdapter);
+    }
+
+    function handleVisibilityChange() {
+        if (!document) return;
+        if (document.hidden) {
+            state.wasHidden = true;
+            return;
+        }
+        if (state.wasHidden) {
+            state.wasHidden = false;
+            loadData();
+        }
+    }
+
     function attachEvents() {
+        var addVacancy = document.getElementById('procvac-add-vacancy');
+        if (addVacancy) {
+            addVacancy.addEventListener('click', function() {
+                openCreateVacancy();
+            });
+        }
+
         var search = document.getElementById('procvac-search');
         if (search) {
             search.addEventListener('input', function() {
@@ -1184,6 +1308,14 @@
 
             grid.addEventListener('click', function(event) {
                 if (event.target.closest('.procvac-col-resize-handle')) return;
+
+                var eventCreate = event.target.closest('.procvac-event-create-btn');
+                if (eventCreate) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    openCreateEvent(eventCreate.dataset.rowId);
+                    return;
+                }
 
                 var archiveToggle = event.target.closest('#procvac-archive-toggle');
                 var archiveHeader = event.target.closest('.procvac-section-row--archive');
@@ -1207,6 +1339,10 @@
                 if (cell) startCellEdit(cell);
             });
         }
+
+        if (document && document.addEventListener) {
+            document.addEventListener('visibilitychange', handleVisibilityChange);
+        }
     }
 
     function init() {
@@ -1214,6 +1350,7 @@
         if (!root) return;
         state.columnWidths = loadColumnWidths();
         configureShellLayout(root);
+        registerGlobalReload();
         attachEvents();
         loadData();
     }
@@ -1232,10 +1369,14 @@
         renderColumn: renderColumn,
         renderHeaderCell: renderHeaderCell,
         renderCell: renderCell,
+        renderEventsCell: renderEventsCell,
         getReferenceSelectSize: getReferenceSelectSize,
         FLOATING_REFERENCE_EDITOR_MIN_WIDTH: FLOATING_REFERENCE_EDITOR_MIN_WIDTH,
         getFloatingReferenceEditorLayout: getFloatingReferenceEditorLayout,
         attachFloatingReferenceEditor: attachFloatingReferenceEditor,
+        openCreateVacancy: openCreateVacancy,
+        openCreateEvent: openCreateEvent,
+        handleVisibilityChange: handleVisibilityChange,
         parseDate: parseDate,
         calculateWeeksInWork: calculateWeeksInWork,
         getRowSection: getRowSection,

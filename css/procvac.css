@@ -21,6 +21,25 @@
     margin-bottom: 8px;
 }
 
+.procvac-add-vacancy {
+    width: 30px;
+    height: 30px;
+    border: 1px solid #2563eb;
+    border-radius: 7px;
+    background: #2563eb;
+    color: #ffffff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex: 0 0 auto;
+}
+
+.procvac-add-vacancy:hover {
+    background: #1d4ed8;
+    border-color: #1d4ed8;
+}
+
 .procvac-search {
     position: relative;
     width: min(460px, 100%);
@@ -240,8 +259,17 @@
     line-height: 1.25;
 }
 
+.procvac-events-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 0;
+}
+
 .procvac-doc-link,
-.procvac-events-link {
+.procvac-events-count,
+.procvac-event-create-btn {
     width: 22px;
     height: 22px;
     display: inline-flex;
@@ -252,12 +280,23 @@
     border-radius: 6px;
 }
 
-.procvac-events-link {
+.procvac-events-count {
     color: #0f766e;
+    font-weight: 700;
+}
+
+.procvac-event-create-btn {
+    border: 0;
+    background: transparent;
+    color: #2563eb;
+    cursor: pointer;
+    padding: 0;
+    font: inherit;
 }
 
 .procvac-doc-link:hover,
-.procvac-events-link:hover {
+.procvac-events-count:hover,
+.procvac-event-create-btn:hover {
     background: rgba(37, 99, 235, 0.12);
 }
 

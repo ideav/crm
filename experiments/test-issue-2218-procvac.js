@@ -121,7 +121,9 @@ assertEqual(row.values.department, 'ДДЛ', 'department names are abbreviated t
 const eventsHtml = helpers.renderCell(row, columns.find((col) => col.key === 'events'), 'active');
 assert(eventsHtml.includes('href="/demo/table/5616?F_U=8162"'), 'events link points to the row events table');
 assert(eventsHtml.includes('target="_blank"'), 'events link opens in a new tab');
-assert(eventsHtml.includes('pi-calendar'), 'events link renders an icon');
+assert(eventsHtml.includes('class="procvac-events-count"'), 'events link renders a count');
+assert(eventsHtml.includes('class="procvac-event-create-btn"'), 'events cell renders the create button');
+assert(eventsHtml.includes('pi-plus'), 'events create button renders a plus icon');
 
 const statusColumn = columns.find((col) => col.key === 'status');
 [
