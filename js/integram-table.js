@@ -709,26 +709,7 @@ class IntegramTable{
                 // Add requisite columns (use req.id as column id for correct FR_{id} filter params - issue #793)
                 if (metadata.reqs && Array.isArray(metadata.reqs)) {
                     metadata.reqs.forEach((req, idx) => {
-                        const attrs = this.parseAttrs(req.attrs);
-                        const isReference = req.hasOwnProperty('ref_id');
-                        // Use req.granted if table is not fully writable; otherwise treat as writable (issue #1508)
-                        const reqGranted = this.isTableWritable() ? 1 : (req.granted === 'WRITE' ? 1 : 0);
-                        columns.push({
-                            id: String(req.id),
-                            type: req.type || 'SHORT',
-                            // Use 'REF' format for reference fields to enable dropdown filter (issue #795)
-                            format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
-                            name: attrs.alias || req.val,
-                            val: req.val, // Store original name for alias display (issue #945)
-                            granted: reqGranted,  // Use metadata granted for access control (issue #1508)
-                            ref: isReference ? req.orig : 0,
-                            ref_id: req.ref_id || null,
-                            orig: req.orig || null,
-                            attrs: req.attrs || '',
-                            unique: req.unique, // Store unique flag for column edit form (issue #1026)
-                            paramId: req.id, // For cell editing: use t{req.id} for requisite columns
-                            arr_id: req.arr_id || null // For table requisites (subordinate tables) (issue #710)
-                        });
+                        columns.push(this.buildColumnFromMetadataReq(req));
                     });
                 }
 
@@ -814,6 +795,30 @@ class IntegramTable{
                    !json.hasOwnProperty('data');
         }
 
+        buildColumnFromMetadataReq(req) {
+            const attrs = this.parseAttrs(req.attrs);
+            const isReference = req.hasOwnProperty('ref_id');
+            // Use req.granted if table is not fully writable; otherwise treat as writable (issue #1508)
+            const reqGranted = this.isTableWritable() ? 1 : (req.granted === 'WRITE' ? 1 : 0);
+
+            return {
+                id: String(req.id),
+                type: req.type || 'SHORT',
+                // Use 'REF' format for reference fields to enable dropdown filter (issue #795)
+                format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
+                name: attrs.alias || req.val,
+                val: req.val, // Store original name for alias display (issue #945)
+                granted: reqGranted,  // Use metadata granted for access control (issue #1508)
+                ref: isReference ? req.orig : 0,
+                ref_id: req.ref_id || null,
+                orig: req.orig || null,
+                attrs: req.attrs || '',
+                unique: req.unique, // Store unique flag for column edit form (issue #1026)
+                paramId: req.id, // For cell editing: use t{req.id} for requisite columns
+                arr_id: req.arr_id || null // For table requisites (subordinate tables)
+            };
+        }
+
         /**
          * Parse object format metadata and fetch data
          * Object format structure:
@@ -858,27 +863,7 @@ class IntegramTable{
             // Remaining columns from reqs array: use req.id as column id (not sequential index)
             if (metadata.reqs && Array.isArray(metadata.reqs)) {
                 metadata.reqs.forEach((req, idx) => {
-                    const attrs = this.parseAttrs(req.attrs);
-                    const isReference = req.hasOwnProperty('ref_id');
-                    // Use req.granted if table is not fully writable; otherwise treat as writable (issue #1508)
-                    const reqGranted = this.isTableWritable() ? 1 : (req.granted === 'WRITE' ? 1 : 0);
-
-                    columns.push({
-                        id: String(req.id),
-                        type: req.type || 'SHORT',
-                        // Use 'REF' format for reference fields to enable dropdown filter (issue #795)
-                        format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
-                        name: attrs.alias || req.val,
-                        val: req.val, // Store original name for alias display (issue #945)
-                        granted: reqGranted,  // Use metadata granted for access control (issue #1508)
-                        ref: isReference ? req.orig : 0,
-                        ref_id: req.ref_id || null,
-                        orig: req.orig || null,
-                        attrs: req.attrs || '',
-                        unique: req.unique, // Store unique flag for column edit form (issue #1026)
-                        paramId: req.id, // For cell editing: use t{req.id} for requisite columns
-                        arr_id: req.arr_id || null // For table requisites (subordinate tables)
-                    });
+                    columns.push(this.buildColumnFromMetadataReq(req));
                 });
             }
 
@@ -1052,27 +1037,7 @@ class IntegramTable{
                 // Add requisite columns (use req.id as column id for correct FR_{id} filter params - issue #793)
                 if (metadata.reqs && Array.isArray(metadata.reqs)) {
                     metadata.reqs.forEach((req, idx) => {
-                        const attrs = this.parseAttrs(req.attrs);
-                        const isReference = req.hasOwnProperty('ref_id');
-                        // Use req.granted if table is not fully writable; otherwise treat as writable (issue #1508)
-                        const reqGranted = this.isTableWritable() ? 1 : (req.granted === 'WRITE' ? 1 : 0);
-
-                        columns.push({
-                            id: String(req.id),
-                            type: req.type || 'SHORT',
-                            // Use 'REF' format for reference fields to enable dropdown filter (issue #795)
-                            format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
-                            name: attrs.alias || req.val,
-                            val: req.val, // Store original name for alias display (issue #945)
-                            granted: reqGranted,  // Use metadata granted for access control (issue #1508)
-                            ref: isReference ? req.orig : 0,
-                            ref_id: req.ref_id || null,
-                            orig: req.orig || null,
-                            attrs: req.attrs || '',
-                            unique: req.unique, // Store unique flag for column edit form (issue #1026)
-                            paramId: req.id, // For cell editing: use t{req.id} for requisite columns
-                            arr_id: req.arr_id || null // For table requisites (subordinate tables)
-                        });
+                        columns.push(this.buildColumnFromMetadataReq(req));
                     });
                 }
 
@@ -7043,6 +7008,25 @@ class IntegramTable{
             this.showAddColumnForm(null);
         }
 
+        async fetchFreshColumnAfterCreate(columnId) {
+            const tableId = this.objectTableId || this.options.tableTypeId;
+            if (!tableId || !columnId) {
+                return null;
+            }
+
+            delete this.metadataCache[tableId];
+            delete this.metadataFetchPromises[tableId];
+            this.globalMetadata = null;
+            this.globalMetadataPromise = null;
+
+            const metadata = await this.fetchMetadata(tableId);
+            const req = metadata && Array.isArray(metadata.reqs)
+                ? metadata.reqs.find(item => String(item.id) === String(columnId))
+                : null;
+
+            return req ? this.buildColumnFromMetadataReq(req) : null;
+        }
+
         openColumnSettings() {
             this._columnSettingsChanged = false;
             const overlay = document.createElement('div');
@@ -8139,21 +8123,29 @@ class IntegramTable{
                         // Add column to the table's internal state first so getColTypeIcon can use it
                         const newColumnId = String(result.columnId);
                         const isFreeLink = Number(baseTypeId) === 1;
-                        const newCol = {
-                            id: newColumnId,
-                            name: columnName,
-                            val: columnName,
-                            type: baseTypeId,
-                            format: isListValue ? 'REF' : this.mapTypeIdToFormat(baseTypeId),
-                            granted: 1,
-                            attrs: isMultiselect ? ':MULTI:' : '',
-                            paramId: newColumnId,
-                            // For list columns, set ref_id, ref, and orig so showColumnEditForm treats them
-                            // as reference columns immediately (without requiring a page refresh, issue #1678)
-                            ref_id: isListValue ? result.refId : null,
-                            ref: isListValue ? parseInt(result.termId) : 0,
-                            orig: isFreeLink ? '1' : (isListValue ? result.termId : null)
-                        };
+                        let newCol = null;
+                        try {
+                            newCol = await this.fetchFreshColumnAfterCreate(newColumnId);
+                        } catch (metadataError) {
+                            console.warn('Could not refresh created column metadata:', metadataError);
+                        }
+                        if (!newCol) {
+                            newCol = {
+                                id: newColumnId,
+                                name: columnName,
+                                val: columnName,
+                                type: baseTypeId,
+                                format: isListValue ? 'REF' : this.mapTypeIdToFormat(baseTypeId),
+                                granted: 1,
+                                attrs: isMultiselect ? ':MULTI:' : '',
+                                paramId: newColumnId,
+                                // For list columns, set ref_id, ref, and orig so showColumnEditForm treats them
+                                // as reference columns immediately (without requiring a page refresh, issue #1678)
+                                ref_id: isListValue ? result.refId : null,
+                                ref: isListValue ? parseInt(result.termId) : 0,
+                                orig: isFreeLink ? '1' : (isListValue ? result.termId : null)
+                            };
+                        }
                         this.columns.push(newCol);
                         this.processColumnVisibility();
 
