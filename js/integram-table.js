@@ -17358,31 +17358,8 @@ async function openCreateRecordForm(tableTypeId, parentId, fieldValues = {}) {
             return;
         }
 
-        // Fetch metadata for the table type
-        // Use globalMetadata from an existing IntegramTable instance if available (issue #783)
-        let metadata = null;
-        if (window._integramTableInstances && window._integramTableInstances.length > 0) {
-            for (const inst of window._integramTableInstances) {
-                if (inst && inst.globalMetadata) {
-                    const cached = inst.globalMetadata.find(item => item.id === tableTypeId || item.id === Number(tableTypeId));
-                    if (cached) {
-                        metadata = cached;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (!metadata) {
-            const metadataUrl = `${apiBase}/metadata/${tableTypeId}`;
-            const metadataResponse = await fetch(metadataUrl);
-
-            if (!metadataResponse.ok) {
-                throw new Error(`Failed to fetch metadata: ${metadataResponse.statusText}`);
-            }
-
-            metadata = await metadataResponse.json();
-        }
+        const helper = new IntegramCreateFormHelper(apiBase, tableTypeId, parentId);
+        const metadata = await helper.fetchMetadataStandalone(tableTypeId);
 
         // Convert fieldValues to recordData format for pre-filling
         // Input: {'t3888': 357, 't3886': 'Отказались'}
@@ -17433,9 +17410,8 @@ async function openCreateRecordForm(tableTypeId, parentId, fieldValues = {}) {
             }
         }
 
-        // Create the modal using a minimal helper class instance
-        // This reuses the existing form rendering logic from IntegramTable
-        const helper = new IntegramCreateFormHelper(apiBase, tableTypeId, parentId);
+        // Create the modal using a minimal helper class instance.
+        // This reuses the existing form rendering logic from IntegramTable.
         helper.renderCreateFormModal(metadata, recordData, fieldValues, parentInfo);
 
     } catch (error) {
@@ -17458,8 +17434,15 @@ class IntegramCreateFormHelper {
         this.apiBase = apiBase;
         this.tableTypeId = tableTypeId;
         this.parentId = parentId;
-        this.metadataCache = {};
-        this.metadataFetchPromises = {};  // In-progress fetch promises by type ID (issue #1455)
+        if (typeof window !== 'undefined') {
+            window._integramStandaloneMetadataCache = window._integramStandaloneMetadataCache || {};
+            window._integramStandaloneMetadataFetchPromises = window._integramStandaloneMetadataFetchPromises || {};
+            this.metadataCache = window._integramStandaloneMetadataCache;
+            this.metadataFetchPromises = window._integramStandaloneMetadataFetchPromises;
+        } else {
+            this.metadataCache = {};
+            this.metadataFetchPromises = {};
+        }
         this.grantOptionsCache = null;  // Cache for GRANT dropdown options (issue #607)
         this.reportColumnOptionsCache = null;  // Cache for REPORT_COLUMN dropdown options (issue #607)
     }
@@ -20009,30 +19992,8 @@ async function openEditRecordForm(recordId, typeId) {
             return;
         }
 
-        // Fetch metadata for the table type
-        let metadata = null;
-        if (window._integramTableInstances && window._integramTableInstances.length > 0) {
-            for (const inst of window._integramTableInstances) {
-                if (inst && inst.globalMetadata) {
-                    const cached = inst.globalMetadata.find(item => item.id === typeId || item.id === Number(typeId));
-                    if (cached) {
-                        metadata = cached;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (!metadata) {
-            const metadataUrl = `${apiBase}/metadata/${typeId}`;
-            const metadataResponse = await fetch(metadataUrl);
-
-            if (!metadataResponse.ok) {
-                throw new Error(`Failed to fetch metadata: ${metadataResponse.statusText}`);
-            }
-
-            metadata = await metadataResponse.json();
-        }
+        const helper = new IntegramCreateFormHelper(apiBase, typeId, 1);
+        const metadata = await helper.fetchMetadataStandalone(typeId);
 
         // Fetch existing record data using object/{typeId}/?JSON_OBJ
         const recordUrl = `${apiBase}/object/${typeId}/?JSON_OBJ&FR_${typeId}=@${recordId}`;
@@ -20049,7 +20010,6 @@ async function openEditRecordForm(recordId, typeId) {
         }
 
         // Convert JSON_OBJ {i, u, o, r} to {obj, reqs} expected by renderEditFormModalStandalone
-        const helper = new IntegramCreateFormHelper(apiBase, typeId, 1);
         const item = dataArray[0];
         const rowValues = item.r || [];
 

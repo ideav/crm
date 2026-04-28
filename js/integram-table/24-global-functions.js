@@ -68,31 +68,8 @@ async function openCreateRecordForm(tableTypeId, parentId, fieldValues = {}) {
             return;
         }
 
-        // Fetch metadata for the table type
-        // Use globalMetadata from an existing IntegramTable instance if available (issue #783)
-        let metadata = null;
-        if (window._integramTableInstances && window._integramTableInstances.length > 0) {
-            for (const inst of window._integramTableInstances) {
-                if (inst && inst.globalMetadata) {
-                    const cached = inst.globalMetadata.find(item => item.id === tableTypeId || item.id === Number(tableTypeId));
-                    if (cached) {
-                        metadata = cached;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (!metadata) {
-            const metadataUrl = `${apiBase}/metadata/${tableTypeId}`;
-            const metadataResponse = await fetch(metadataUrl);
-
-            if (!metadataResponse.ok) {
-                throw new Error(`Failed to fetch metadata: ${metadataResponse.statusText}`);
-            }
-
-            metadata = await metadataResponse.json();
-        }
+        const helper = new IntegramCreateFormHelper(apiBase, tableTypeId, parentId);
+        const metadata = await helper.fetchMetadataStandalone(tableTypeId);
 
         // Convert fieldValues to recordData format for pre-filling
         // Input: {'t3888': 357, 't3886': 'Отказались'}
@@ -143,9 +120,8 @@ async function openCreateRecordForm(tableTypeId, parentId, fieldValues = {}) {
             }
         }
 
-        // Create the modal using a minimal helper class instance
-        // This reuses the existing form rendering logic from IntegramTable
-        const helper = new IntegramCreateFormHelper(apiBase, tableTypeId, parentId);
+        // Create the modal using a minimal helper class instance.
+        // This reuses the existing form rendering logic from IntegramTable.
         helper.renderCreateFormModal(metadata, recordData, fieldValues, parentInfo);
 
     } catch (error) {
