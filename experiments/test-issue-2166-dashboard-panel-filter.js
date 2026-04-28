@@ -36,7 +36,7 @@ let dashReportNames = {};
 let dashReportKeys = {};
 let dashFormulas = {};
 let dashAjaxes = 0;
-const repRegex = /^\\[([A-Za-яЁё][A-Za-яЁё0-9 ]*)(\\.[A-Za-яЁё][A-Za-яЁё0-9 ]*)\\]$/;
+const repRegex = /^\\[([A-Za-яЁё][A-Za-яЁё0-9 ]*)(\\.[A-Za-яЁё][A-Za-яЁё0-9 ]*)(\\.[A-Za-яЁё][A-Za-яЁё0-9 ]*)?\\]$/;
 
 function newApi(method, url, callback, vars, index) {
     calls.push({ method, url, callback, vars, index });
@@ -49,6 +49,16 @@ ${extractFunctionMaybe('dashReportKey')}
 ${extractFunctionMaybe('dashReportUrl')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashNormalizeVal')}
+${extractFunctionMaybe('dashParseReportFormula')}
+${extractFunctionMaybe('dashReportFieldName')}
+${extractFunctionMaybe('dashReportHasField')}
+${extractFunctionMaybe('dashReportSumField')}
+${extractFunctionMaybe('dashNormalizeGroupName')}
+${extractFunctionMaybe('dashSameGroupName')}
+${extractFunctionMaybe('dashCellRgColumn')}
+${extractFunctionMaybe('dashCellReportGroup')}
+${extractFunctionMaybe('dashCollectReportGroups')}
+${extractFunctionMaybe('dashResolveReportCellValue')}
 ${extractFunction('dashGetRepVals')}
 ${extractFunction('dashGetRepDone')}
 ${extractFunction('dashGetRep')}
