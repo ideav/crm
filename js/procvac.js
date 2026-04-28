@@ -9,6 +9,9 @@
     var COLUMN_WIDTH_COOKIE = 'procvac-column-widths';
     var MIN_COLUMN_WIDTH = 48;
     var MAX_REFERENCE_SELECT_SIZE = 10;
+    var FLOATING_REFERENCE_EDITOR_MIN_WIDTH = 260;
+    var FLOATING_REFERENCE_EDITOR_MAX_WIDTH = 420;
+    var FLOATING_REFERENCE_EDITOR_MARGIN = 8;
     var EVENTS_TABLE_ID = '5616';
     var STATUS_CELL_CLASSES = {
         'в работе': 'procvac-status--in-work',
@@ -769,12 +772,18 @@
     }
 
     function clearEditing() {
+        var editing = state.editing;
+        if (editing && editing.cleanupEditor) {
+            editing.cleanupEditor();
+        }
         state.editing = null;
     }
 
     function cancelEditing() {
-        if (state.editing && state.editing.cell) {
-            state.editing.cell.innerHTML = state.editing.originalHtml;
+        var editing = state.editing;
+        if (editing && editing.cell) {
+            if (editing.cell.classList) editing.cell.classList.remove('procvac-cell--editing');
+            editing.cell.innerHTML = editing.originalHtml;
         }
         clearEditing();
     }
@@ -799,12 +808,100 @@
         return Math.min(MAX_REFERENCE_SELECT_SIZE, Math.max(2, Number(optionCount) || 0));
     }
 
+    function isReferenceColumn(column) {
+        return !!(column && (column.format === 'REF' || (column.source && column.source.ref_id)));
+    }
+
+    function getFloatingReferenceEditorLayout(cellRect, viewportWidth, viewportHeight, editorHeight) {
+        var margin = FLOATING_REFERENCE_EDITOR_MARGIN;
+        var rect = cellRect || {};
+        var viewWidth = Number(viewportWidth) || 0;
+        var viewHeight = Number(viewportHeight) || 0;
+        var availableWidth = Math.max(0, viewWidth - margin * 2);
+        var maxWidth = Math.min(FLOATING_REFERENCE_EDITOR_MAX_WIDTH, availableWidth || FLOATING_REFERENCE_EDITOR_MAX_WIDTH);
+        var minWidth = Math.min(FLOATING_REFERENCE_EDITOR_MIN_WIDTH, maxWidth);
+        var cellWidth = Math.max(0, Number(rect.width) || 0);
+        var width = Math.min(Math.max(cellWidth, minWidth), maxWidth);
+        var left = Number(rect.left) || margin;
+        var maxLeft = viewWidth - width - margin;
+
+        if (maxLeft < margin) maxLeft = margin;
+        left = Math.min(Math.max(left, margin), maxLeft);
+
+        var maxHeight = Math.max(32, viewHeight - margin * 2);
+        var height = Math.min(Math.max(0, Number(editorHeight) || 0), maxHeight);
+        var top = Number(rect.top) || margin;
+        var bottom = Number(rect.bottom) || top;
+        var bottomLimit = viewHeight - margin;
+
+        if (height && top + height > bottomLimit) {
+            var aboveTop = bottom - height;
+            top = aboveTop >= margin ? aboveTop : Math.max(margin, bottomLimit - height);
+        }
+        top = Math.max(margin, Math.min(top, bottomLimit - (height || 0)));
+
+        return {
+            left: Math.round(left),
+            top: Math.round(top),
+            width: Math.round(width),
+            maxHeight: Math.round(maxHeight),
+        };
+    }
+
+    function positionFloatingReferenceEditor(editor, cell) {
+        if (!editor || !cell || !cell.getBoundingClientRect) return;
+        var rect = cell.getBoundingClientRect();
+        var docEl = document.documentElement || {};
+        var viewportWidth = window.innerWidth || docEl.clientWidth || rect.right || 0;
+        var viewportHeight = window.innerHeight || docEl.clientHeight || rect.bottom || 0;
+        var editorHeight = editor.offsetHeight || getReferenceSelectSize(editor.options && editor.options.length) * 22;
+        var layout = getFloatingReferenceEditorLayout(rect, viewportWidth, viewportHeight, editorHeight);
+
+        editor.style.width = layout.width + 'px';
+        editor.style.left = layout.left + 'px';
+        editor.style.top = layout.top + 'px';
+        editor.style.maxHeight = layout.maxHeight + 'px';
+    }
+
+    function attachFloatingReferenceEditor(editor, cell) {
+        if (!editor || !cell) return function() {};
+
+        if (editor.classList) {
+            editor.classList.add('procvac-editor--floating');
+        } else {
+            editor.className = (editor.className ? editor.className + ' ' : '') + 'procvac-editor--floating';
+        }
+        if (document.body && editor.parentNode !== document.body) {
+            document.body.appendChild(editor);
+        }
+
+        function reposition() {
+            positionFloatingReferenceEditor(editor, cell);
+        }
+
+        reposition();
+        if (window.addEventListener) {
+            window.addEventListener('resize', reposition);
+            window.addEventListener('scroll', reposition, true);
+        }
+
+        return function() {
+            if (window.removeEventListener) {
+                window.removeEventListener('resize', reposition);
+                window.removeEventListener('scroll', reposition, true);
+            }
+            if (editor.parentNode) {
+                editor.parentNode.removeChild(editor);
+            }
+        };
+    }
+
     function buildEditor(column, row, options) {
         var currentRaw = row.rawValues[column.key] || '';
         var currentDisplay = row.values[column.key] || '';
         var format = column.format;
 
-        if (format === 'REF' || (column.source && column.source.ref_id)) {
+        if (isReferenceColumn(column)) {
             var currentRef = parseReferenceValue(currentRaw);
             var select = document.createElement('select');
             select.className = 'procvac-editor procvac-editor--select';
@@ -880,7 +977,18 @@
         var originalHtml = cell.innerHTML;
         cell.innerHTML = '<span class="procvac-cell-loading"></span>';
 
-        var optionsPromise = (column.format === 'REF' || (column.source && column.source.ref_id))
+        var editing = {
+            cell: cell,
+            row: row,
+            column: column,
+            editor: null,
+            originalHtml: originalHtml,
+            originalRaw: row.rawValues[column.key] || '',
+            cleanupEditor: null,
+        };
+        state.editing = editing;
+
+        var optionsPromise = isReferenceColumn(column)
             ? loadReferenceOptions(column.source).catch(function(error) {
                 console.warn('procvac reference options error:', error);
                 return [];
@@ -888,19 +996,16 @@
             : Promise.resolve([]);
 
         optionsPromise.then(function(options) {
-            if (!cell.isConnected) return;
+            if (!cell.isConnected || state.editing !== editing) return;
             var editor = buildEditor(column, row, options);
-            cell.innerHTML = '';
-            cell.appendChild(editor);
-
-            state.editing = {
-                cell: cell,
-                row: row,
-                column: column,
-                editor: editor,
-                originalHtml: originalHtml,
-                originalRaw: row.rawValues[column.key] || '',
-            };
+            if (isReferenceColumn(column)) {
+                cell.innerHTML = originalHtml;
+                editing.cleanupEditor = attachFloatingReferenceEditor(editor, cell);
+            } else {
+                cell.innerHTML = '';
+                cell.appendChild(editor);
+            }
+            editing.editor = editor;
 
             editor.focus();
             if (editor.select && editor.tagName !== 'SELECT') editor.select();
@@ -953,7 +1058,7 @@
         var source = column.source;
         var rawValue = String(newValue === undefined || newValue === null ? '' : newValue);
         var originalComparable = String(editing.originalRaw || '');
-        if (column.format === 'REF' || (column.source && column.source.ref_id)) {
+        if (isReferenceColumn(column)) {
             originalComparable = parseReferenceValue(originalComparable).id;
         }
 
@@ -1128,6 +1233,9 @@
         renderHeaderCell: renderHeaderCell,
         renderCell: renderCell,
         getReferenceSelectSize: getReferenceSelectSize,
+        FLOATING_REFERENCE_EDITOR_MIN_WIDTH: FLOATING_REFERENCE_EDITOR_MIN_WIDTH,
+        getFloatingReferenceEditorLayout: getFloatingReferenceEditorLayout,
+        attachFloatingReferenceEditor: attachFloatingReferenceEditor,
         parseDate: parseDate,
         calculateWeeksInWork: calculateWeeksInWork,
         getRowSection: getRowSection,
