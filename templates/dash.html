@@ -381,7 +381,7 @@ td:has(.dash-cell-input) {
 <script>
 (function() {
 
-const repRegex  = /^\[([A-Za-яЁё][A-Za-яЁё0-9 ]*)(\.[A-Za-яЁё][A-Za-яЁё0-9 ]*)\]$/
+const repRegex  = /^\[([A-Za-яЁё][A-Za-яЁё0-9 ]*)(\.[A-Za-яЁё][A-Za-яЁё0-9 ]*)(\.[A-Za-яЁё][A-Za-яЁё0-9 ]*)?\]$/
     , itemRegex = /^\[([A-Za-яЁё][ A-Za-яЁё0-9\(\)-]*)\]$/
     , exprRegex = /(СУММА)\(\[(.*?)\]:\[(.*?)\]\)/g
     , itemIdRegex = /\[\d+\]/g;
@@ -558,6 +558,126 @@ function dashReportUrl(rep, fr, to, panelFilter) {
         , filter = dashNormalizePanelFilter(panelFilter);
     if (filter) url += '&' + filter;
     return url;
+}
+
+function dashParseReportFormula(formula) {
+    var rep = (formula || '').match(repRegex);
+    if (!rep) return null;
+    var field = rep[2].substr(1)
+        , group = rep[3] ? rep[3].substr(1) : '';
+    return {
+        report: rep[1],
+        field: field,
+        group: group,
+        fullField: group ? field + '.' + group : field
+    };
+}
+
+function dashReportFieldName(row, field) {
+    var k, fieldLower;
+    if (!row || !field) return null;
+    if (Object.prototype.hasOwnProperty.call(row, field)) return field;
+    fieldLower = String(field).toLowerCase();
+    for (k in row)
+        if (String(k).toLowerCase() === fieldLower) return k;
+    return null;
+}
+
+function dashReportHasField(reportRows, field) {
+    var i;
+    for (i in reportRows || [])
+        if (dashReportFieldName(reportRows[i], field) !== null) return true;
+    return false;
+}
+
+function dashReportSumField(reportRows, dateField, range, field) {
+    var i, row, fieldName, n, acc = 0;
+    for (i in reportRows || []) {
+        row = reportRows[i];
+        fieldName = dashReportFieldName(row, field);
+        if (fieldName === null) continue;
+        // If range[0] is empty (range="-"), include all data regardless of date (issue #1875)
+        if (!range[0] || (row[dateField] >= range[0] && row[dateField] <= range[1])) {
+            n = dashGetFloat(row[fieldName] || 0);
+            if (!isNaN(n)) acc += n;
+        }
+    }
+    return dashNormalizeVal(field, acc);
+}
+
+function dashNormalizeGroupName(groupName) {
+    return String(groupName || '').trim().toLowerCase();
+}
+
+function dashSameGroupName(a, b) {
+    return dashNormalizeGroupName(a) === dashNormalizeGroupName(b);
+}
+
+function dashCellRgColumn(td) {
+    if (td.dataset && td.dataset.rgCol) return td.dataset.rgCol;
+    var table = td.closest ? td.closest('table') : null;
+    if (!table) return null;
+    var subhead = table.querySelector('thead .f-subhead');
+    if (!subhead) return null;
+    var colIdx = Array.from(td.parentNode.cells).indexOf(td);
+    var ths = Array.from(subhead.querySelectorAll('th'));
+    var th = ths[colIdx];
+    return (th && th.getAttribute('data-rg-col')) || null;
+}
+
+function dashCellReportGroup(td) {
+    return dashCellRgColumn(td) || (td.dataset ? td.dataset.rgHead : '') || '';
+}
+
+function dashCollectReportGroups(cells) {
+    var groups = [], seen = {};
+    cells.forEach(function(cell) {
+        var group = dashCellReportGroup(cell)
+            , key = dashNormalizeGroupName(group);
+        if (key && !seen[key]) {
+            seen[key] = true;
+            groups.push(group);
+        }
+    });
+    return groups;
+}
+
+function dashResolveReportCellValue(reportRows, dateField, range, parsed, cellGroup, groups) {
+    var groupCount = groups ? groups.length : 0
+        , hasGroups = groupCount > 0
+        , groupedField;
+
+    if (!hasGroups) {
+        if (parsed.group && dashReportHasField(reportRows, parsed.fullField))
+            return dashReportSumField(reportRows, dateField, range, parsed.fullField);
+        if (dashReportHasField(reportRows, parsed.field))
+            return dashReportSumField(reportRows, dateField, range, parsed.field);
+        return undefined;
+    }
+
+    if (!parsed.group) {
+        if (dashReportHasField(reportRows, parsed.field))
+            return dashReportSumField(reportRows, dateField, range, parsed.field);
+        if (cellGroup) {
+            groupedField = parsed.field + '.' + cellGroup;
+            if (dashReportHasField(reportRows, groupedField))
+                return dashReportSumField(reportRows, dateField, range, groupedField);
+        }
+        return undefined;
+    }
+
+    if (groupCount === 1) {
+        if (dashReportHasField(reportRows, parsed.fullField))
+            return dashReportSumField(reportRows, dateField, range, parsed.fullField);
+        if (dashReportHasField(reportRows, parsed.field))
+            return dashReportSumField(reportRows, dateField, range, parsed.field);
+        return undefined;
+    }
+
+    if (!dashSameGroupName(cellGroup, parsed.group)) return undefined;
+    if (dashReportHasField(reportRows, parsed.fullField))
+        return dashReportSumField(reportRows, dateField, range, parsed.fullField);
+    return undefined;
 }
 
 function dashFetchMatrixValues() {
@@ -792,7 +912,7 @@ function dashCalcRGFormulas() {
 }
 
 function dashGetRepVals() {
-    var reportKey, reportRows, rep, i, j, repField, date;
+    var reportKey, reportRows, rep, i, parsed, date;
     for (reportKey in dashReports) {
         reportRows = dashReports[reportKey];
         if (!reportRows || !reportRows[0]) continue;
@@ -800,25 +920,30 @@ function dashGetRepVals() {
         for (i in reportRows[0]) { date = i; break; }
         rep = dashReportNames[reportKey] || reportKey;
         for (i in dashFormulas) {
+            parsed = dashParseReportFormula(dashFormulas[i]);
+            if (!parsed) continue;
             if (dashReportKeys[i]) {
                 if (dashReportKeys[i] !== reportKey) continue;
-            } else if (dashFormulas[i].indexOf('[' + rep + '.') !== 0) {
+            } else if (parsed.report !== rep) {
                 continue;
             }
-            if (dashFormulas[i].indexOf('[' + rep + '.') === 0) {
-                repField = dashFormulas[i].match(repRegex)[2].substr(1);
-                // Use getElementById to avoid invalid CSS selectors when IDs start with digits (issue #2074)
-                var iEl = document.getElementById(i);
-                (iEl ? iEl.querySelectorAll('.f-rg-cell') : []).forEach(function(el) {
-                    var val = 0, range = el.getAttribute('range').split('-');
-                    for (j in reportRows)
-                        // If range[0] is empty (range="-"), include all data regardless of date (issue #1875)
-                        if (!range[0] || (reportRows[j][date] >= range[0] && reportRows[j][date] <= range[1]))
-                            val += dashGetFloat(reportRows[j][repField]);
-                    el.innerHTML = dashNormalizeVal(i, val);
-                    el.setAttribute('ready', '1');
+            // Use getElementById to avoid invalid CSS selectors when IDs start with digits (issue #2074)
+            var iEl = document.getElementById(i);
+            var cells = iEl ? Array.from(iEl.querySelectorAll('.f-rg-cell[data-src="report"],.f-values[data-src="report"]')) : [];
+            if (!cells.length && iEl)
+                cells = Array.from(iEl.querySelectorAll('.f-rg-cell')).filter(function(cell) {
+                    return !cell.dataset || !cell.dataset.src || cell.dataset.src === 'report';
                 });
-            }
+            var groups = dashCollectReportGroups(cells);
+            cells.forEach(function(el) {
+                var range = String(el.getAttribute('range') || '-').split('-')
+                    , group = dashCellReportGroup(el)
+                    , val = dashResolveReportCellValue(reportRows, date, range, parsed, group, groups);
+                if (val !== undefined) {
+                    el.innerHTML = val;
+                    el.setAttribute('ready', '1');
+                }
+            });
         }
     }
 }
@@ -875,7 +1000,8 @@ function dashDrawPeriods() {
                                     }
                                     var cellExtra = s.extra
                                         + (valueItemId ? ' data-value-item-id="' + valueItemId + '"' : '')
-                                        + (rgHeadVal ? ' data-rg-head="' + rgHeadVal.replace(/"/g, '&quot;') + '"' : '');
+                                        + (rgHeadVal ? ' data-rg-head="' + rgHeadVal.replace(/"/g, '&quot;') + '"' : '')
+                                        + ' data-rg-col="' + colName.replace(/"/g, '&quot;') + '"';
                                     row.insertAdjacentHTML('beforeend',
                                         cellTpl.replace(':val:', v || '')
                                             .replace(':ready:', '1')

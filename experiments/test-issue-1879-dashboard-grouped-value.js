@@ -31,8 +31,8 @@ ${extractFunction('dashResolveValueCell')}
 
 dashItems['2263'] = { name: 'Выручка' };
 dashFormulas['2263'] = '[]';
-dashValues['Выручка:План'] = [{ date: '20260101', val: '340434754' }];
-dashValues['Выручка:Факт'] = [{ date: '20260101', val: '42' }];
+dashValues['выручка:план'] = [{ date: '20260101', val: '340434754' }];
+dashValues['выручка:факт'] = [{ date: '20260101', val: '42' }];
 
 const plan = dashResolveValueCell('2263', 'План');
 const fact = dashResolveValueCell('2263', 'Факт');
