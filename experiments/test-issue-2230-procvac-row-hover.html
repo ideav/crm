@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Issue 2230 ProcVac row hover fixture</title>
+    <link rel="stylesheet" href="../css/procvac.css">
+    <style>
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+        }
+
+        body {
+            padding: 16px;
+            background: #f8fafc;
+            font-family: Arial, sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <div class="procvac">
+        <div class="procvac-grid">
+            <table class="procvac-table">
+                <colgroup>
+                    <col class="procvac-col procvac-col--title" style="width: 190px;">
+                    <col class="procvac-col procvac-col--status" style="width: 124px;">
+                    <col class="procvac-col procvac-col--department" style="width: 210px;">
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th class="procvac-head-cell procvac-head-cell--title">Вакансия</th>
+                        <th class="procvac-head-cell procvac-head-cell--status">Статус</th>
+                        <th class="procvac-head-cell procvac-head-cell--department">Подразделение</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="procvac-data-row">
+                        <td class="procvac-cell procvac-cell--title procvac-cell--editable">Руководитель проекта</td>
+                        <td class="procvac-cell procvac-cell--status procvac-cell--editable">В работе</td>
+                        <td class="procvac-cell procvac-cell--department procvac-cell--editable">Операционный блок</td>
+                    </tr>
+                    <tr class="procvac-data-row">
+                        <td class="procvac-cell procvac-cell--title procvac-cell--editable">Методист</td>
+                        <td class="procvac-cell procvac-cell--status procvac-cell--editable">Не начато</td>
+                        <td class="procvac-cell procvac-cell--department procvac-cell--editable">Академия</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>
