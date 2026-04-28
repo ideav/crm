@@ -38,12 +38,11 @@
 
 .procvac-search input {
     width: 100%;
-    min-height: 34px;
     border: 1px solid var(--input-border, #cbd5e1);
     border-radius: 7px;
     background: var(--input-bg, #fff);
     color: var(--text-primary, #111827);
-    padding: 6px 10px 6px 32px;
+    padding: 5px 10px 5px 32px;
     font: inherit;
 }
 
