@@ -2,7 +2,7 @@
     'use strict';
 
     var TABLE_ID = '8137';
-    var DEFAULT_ORDER = '-8152';
+    var DEFAULT_ORDER = '8140';
     var ARCHIVE_PAGE_SIZE = 25;
     var ACTIVE_STATUSES = ['в работе', 'не начато'];
     var REF_OPTIONS_LIMIT = 200;
