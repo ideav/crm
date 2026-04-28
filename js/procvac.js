@@ -729,7 +729,7 @@
     function loadData() {
         var apiBase = getApiBase();
         var metadataUrl = apiBase + '/metadata/' + TABLE_ID + '?JSON';
-        var dataUrl = apiBase + '/object/' + TABLE_ID + '/?JSON_OBJ&ORDER=' + encodeURIComponent(DEFAULT_ORDER);
+        var dataUrl = apiBase + '/object/' + TABLE_ID + '/?JSON_OBJ&LIMIT=10000&ORDER=' + encodeURIComponent(DEFAULT_ORDER);
 
         render();
 
