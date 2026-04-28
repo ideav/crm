@@ -78,6 +78,13 @@ class IntegramCreateFormHelper {
         return metadata.val || metadata.name || metadata.title || `Тип #${metadata.id || '?'}`;
     }
 
+    getServerError(result) {
+        if (Array.isArray(result)) {
+            return (result[0] && result[0].error) || null;
+        }
+        return result.error || null;
+    }
+
     parseAttrs(attrs) {
         const result = {
             required: false,
