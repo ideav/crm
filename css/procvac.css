@@ -139,6 +139,10 @@
     background: rgba(37, 99, 235, 0.24);
 }
 
+.procvac-head-cell:last-child .procvac-col-resize-handle {
+    right: 0;
+}
+
 .procvac-cell {
     border-bottom: 1px solid var(--border-color, #e2e8f0);
     border-right: 1px solid var(--border-color, #e2e8f0);
