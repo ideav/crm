@@ -9,6 +9,15 @@
     var COLUMN_WIDTH_COOKIE = 'procvac-column-widths';
     var MIN_COLUMN_WIDTH = 48;
     var MAX_REFERENCE_SELECT_SIZE = 10;
+    var EVENTS_TABLE_ID = '5616';
+    var STATUS_CELL_CLASSES = {
+        'в работе': 'procvac-status--in-work',
+        'не начато': 'procvac-status--not-started',
+        'оффер принят': 'procvac-status--offer-accepted',
+        'вышел': 'procvac-status--joined',
+        'пауза': 'procvac-status--pause',
+        'оффер': 'procvac-status--offer',
+    };
 
     var FIELD_DEFS = [
         { key: 'title', label: 'Вакансия актуальная', names: ['Вакансия актуальная'] },
@@ -23,9 +32,7 @@
         { key: 'exitDate', label: 'Выход', names: ['Выход'] },
         { key: 'hireType', label: 'Штат/Лагерь/ОШ', names: ['Штат/Лагерь/ОШ', 'Тип найма'] },
         { key: 'weeksInWork', label: 'Недель в работе', derived: true, format: 'NUMBER' },
-        { key: 'interviewHr', label: 'Интервью HR', names: ['Интервью HR'] },
-        { key: 'recommendations', label: 'Рекомендации', names: ['Рекомендации'] },
-        { key: 'interviewNm', label: 'Интервью с НМ', names: ['Интервью с НМ'] },
+        { key: 'events', label: 'События', derived: true },
         { key: 'comments', label: 'Комментарии', names: ['Комментарии'] },
     ];
 
@@ -36,9 +43,7 @@
         plan: 84,
         fact: 84,
         weeksInWork: 84,
-        interviewHr: 84,
-        recommendations: 84,
-        interviewNm: 84,
+        events: 70,
         request: 70,
         responsible: 132,
         startDate: 110,
@@ -211,12 +216,27 @@
         };
     }
 
+    function abbreviateDepartmentName(value) {
+        var text = String(value || '').trim();
+        if (!text) return '';
+        var parts = text.split(/[\s,.;:()\/\\-]+/);
+        var abbreviation = parts.map(function(part) {
+            var match = String(part || '').match(/[A-Za-zА-Яа-яЁё]/);
+            return match ? match[0].toUpperCase().replace('Ё', 'Е') : '';
+        }).join('');
+        return abbreviation || text;
+    }
+
     function displayValueForColumn(rawValue, column) {
         if (!column) return '';
+        var value = rawValue === undefined || rawValue === null ? '' : String(rawValue);
         if (column.format === 'REF' || (column.source && column.source.ref_id)) {
-            return parseReferenceValue(rawValue).text;
+            value = parseReferenceValue(rawValue).text;
         }
-        return rawValue === undefined || rawValue === null ? '' : String(rawValue);
+        if (column.key === 'department') {
+            return abbreviateDepartmentName(value);
+        }
+        return value;
     }
 
     function parseDate(value) {
@@ -268,7 +288,7 @@
         var nowMidnight = new Date(base.getFullYear(), base.getMonth(), base.getDate());
         var days = Math.floor((nowMidnight.getTime() - startMidnight.getTime()) / 86400000);
         if (days < 0) return '0';
-        return String(Math.floor(days / 7));
+        return String(Math.round(days / 7));
     }
 
     function normalizeRow(rawRow, columns, now) {
@@ -290,11 +310,18 @@
 
         row.rawValues.weeksInWork = row.rawValues.startDate || '';
         row.values.weeksInWork = calculateWeeksInWork(row.rawValues.startDate, now || new Date());
+        row.rawValues.events = row.id === undefined || row.id === null ? '' : String(row.id);
+        row.values.events = row.rawValues.events ? 'События' : '';
         return row;
     }
 
     function statusText(row) {
         return String((row && row.values && row.values.status) || '').trim().toLowerCase();
+    }
+
+    function getStatusClass(value) {
+        var key = String(value || '').trim().toLowerCase().replace(/ё/g, 'е');
+        return STATUS_CELL_CLASSES[key] || '';
     }
 
     function getRowSection(row, now) {
@@ -384,6 +411,16 @@
         if (!href) return '';
         if (!isUrl(href)) return escapeHtml(href);
         return '<a class="procvac-doc-link" href="' + escapeHtml(href) + '" target="_blank" rel="noopener" title="' + escapeHtml(href) + '" aria-label="Открыть заявку"><i class="pi pi-file"></i></a>';
+    }
+
+    function buildEventsHref(rowId) {
+        return getApiBase() + '/table/' + EVENTS_TABLE_ID + '?F_U=' + encodeURIComponent(rowId);
+    }
+
+    function renderEventsLink(rowId) {
+        if (rowId === undefined || rowId === null || rowId === '') return '';
+        var href = buildEventsHref(rowId);
+        return '<a class="procvac-events-link" href="' + escapeHtml(href) + '" target="_blank" rel="noopener" title="Посмотреть события" aria-label="Посмотреть события"><i class="pi pi-calendar"></i></a>';
     }
 
     function getApiBase() {
@@ -560,19 +597,22 @@
         var value = row.values[column.key] || '';
         var rawValue = row.rawValues[column.key] || '';
         var classes = ['procvac-cell', 'procvac-cell--' + column.key];
-<<<<<<< issue-2214-ab29a36026c3
         var alignmentClass = getCellAlignmentClass(column);
-        var editable = column.editable && sectionKey !== 'archive';
-        if (alignmentClass) classes.push(alignmentClass);
-=======
+        var statusClass = column.key === 'status' ? getStatusClass(value) : '';
         var editable = column.editable;
->>>>>>> main
+        if (alignmentClass) classes.push(alignmentClass);
+        if (statusClass) classes.push(statusClass);
         if (editable) classes.push('procvac-cell--editable');
         if (!value) classes.push('procvac-cell--empty');
 
-        var html = column.documentLink && isUrl(rawValue)
-            ? renderDocumentLink(rawValue)
-            : highlightText(value, state.search);
+        var html = '';
+        if (column.key === 'events') {
+            html = renderEventsLink(row.id);
+        } else if (column.documentLink && isUrl(rawValue)) {
+            html = renderDocumentLink(rawValue);
+        } else {
+            html = highlightText(value, state.search);
+        }
 
         return '<td class="' + classes.join(' ') + '" data-row-id="' + escapeHtml(row.id) + '" data-col-key="' + escapeHtml(column.key) + '" data-section="' + escapeHtml(sectionKey) + '">' + html + '</td>';
     }
