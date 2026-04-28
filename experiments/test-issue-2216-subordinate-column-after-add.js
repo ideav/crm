@@ -188,28 +188,51 @@ async function run() {
         }
     };
 
+    const metadataFetches = [];
     const renderStates = [];
     const table = Object.create(IntegramTable.prototype);
     Object.assign(table, {
-        options: { instanceName: 'tasksTable', tableTypeId: '100' },
+        options: { instanceName: 'tasksTable', tableTypeId: '100', dataSource: 'table' },
         objectTableId: '100',
+        tableGranted: 'WRITE',
         columns: [
-            { id: '100', name: 'Задачи', type: 3, format: 'SHORT', granted: 1, paramId: '100' }
+            { id: '100', name: 'События', type: 3, format: 'SHORT', granted: 1, paramId: '100' }
         ],
+        data: [['Событие 1']],
+        rawObjectData: [{ i: '900', r: ['Событие 1'] }],
         columnOrder: ['100'],
         visibleColumns: ['100'],
         editableColumns: new Map([['100', null]]),
         idColumns: new Set(),
         styleColumns: {},
-        metadataCache: {},
+        settings: { truncateLongValues: true },
+        metadataCache: { 100: { stale: true } },
         metadataFetchPromises: {},
-        globalMetadata: [],
-        globalMetadataPromise: null,
+        globalMetadata: [{ id: 100, val: 'События', reqs: [] }],
+        globalMetadataPromise: Promise.resolve(),
         async createColumn() {
-            return { success: true, columnId: '200', termId: '200', refId: null };
+            return { success: true, columnId: '200', termId: '300', refId: null };
         },
-        async fetchFreshColumnAfterCreate() {
-            return null;
+        async fetchMetadata(typeId) {
+            metadataFetches.push({
+                typeId,
+                globalMetadata: this.globalMetadata,
+                cachedMetadata: this.metadataCache[typeId]
+            });
+            return {
+                id: '100',
+                val: 'События',
+                type: '3',
+                reqs: [
+                    {
+                        id: '200',
+                        val: 'Дата события',
+                        type: '9',
+                        arr_id: '300',
+                        granted: 'WRITE'
+                    }
+                ]
+            };
         },
         getApiBase() {
             return '/api';
@@ -219,9 +242,10 @@ async function run() {
         },
         saveColumnState() {},
         render() {
+            const newColumn = this.columns.find(col => col.id === '200');
             renderStates.push({
-                hasNewEditableColumn: this.editableColumns.has('200'),
-                newColumn: this.columns.find(col => col.id === '200')
+                newColumn,
+                cellHtml: this.renderCell(newColumn, '', 0, 1)
             });
         },
         async loadGlobalMetadata() {
@@ -239,20 +263,25 @@ async function run() {
     assert(nameInput, 'add-column modal should render the column name input');
     assert(createBtn, 'add-column modal should render the create button');
 
-    nameInput.value = 'Срок';
+    nameInput.value = 'Дата события';
     await createBtn.dispatchEventType('click');
 
+    assert.strictEqual(metadataFetches.length, 1, 'created columns should be resolved through fresh table metadata');
+    assert.strictEqual(metadataFetches[0].typeId, '100');
+    assert.strictEqual(metadataFetches[0].globalMetadata, null, 'stale global metadata should be cleared before refresh');
+    assert.strictEqual(metadataFetches[0].cachedMetadata, undefined, 'stale table metadata should be cleared before refresh');
     assert.strictEqual(renderStates.length, 1, 'add-column success should re-render once');
-    assert.strictEqual(
-        renderStates[0].hasNewEditableColumn,
-        true,
-        'newly added columns should be registered as editable before the immediate render'
+    assert.strictEqual(renderStates[0].newColumn.arr_id, '300', 'newly added subordinate columns should keep arr_id immediately');
+    assert(
+        renderStates[0].cellHtml.includes('class="subordinate-link-cell"'),
+        'newly added subordinate columns should render as subordinate-link-cell before page reload'
     );
-    assert.strictEqual(renderStates[0].newColumn.granted, 1, 'newly added columns should get write grant locally');
-    assert.strictEqual(renderStates[0].newColumn.format, 'SHORT', 'newly added columns should get a render/edit format locally');
-    assert.strictEqual(renderStates[0].newColumn.paramId, '200', 'inline edit should post through the new requisite id');
+    assert(
+        renderStates[0].cellHtml.includes('data-arr-id="300"'),
+        'subordinate cell should carry the subordinate table id'
+    );
 
-    console.log('PASS issue-2164 newly added columns are immediately editable');
+    console.log('PASS issue-2216 newly added subordinate columns render immediately');
 }
 
 run().catch((error) => {

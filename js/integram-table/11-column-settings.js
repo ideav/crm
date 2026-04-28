@@ -34,6 +34,25 @@
             this.showAddColumnForm(null);
         }
 
+        async fetchFreshColumnAfterCreate(columnId) {
+            const tableId = this.objectTableId || this.options.tableTypeId;
+            if (!tableId || !columnId) {
+                return null;
+            }
+
+            delete this.metadataCache[tableId];
+            delete this.metadataFetchPromises[tableId];
+            this.globalMetadata = null;
+            this.globalMetadataPromise = null;
+
+            const metadata = await this.fetchMetadata(tableId);
+            const req = metadata && Array.isArray(metadata.reqs)
+                ? metadata.reqs.find(item => String(item.id) === String(columnId))
+                : null;
+
+            return req ? this.buildColumnFromMetadataReq(req) : null;
+        }
+
         openColumnSettings() {
             this._columnSettingsChanged = false;
             const overlay = document.createElement('div');
@@ -1130,21 +1149,29 @@
                         // Add column to the table's internal state first so getColTypeIcon can use it
                         const newColumnId = String(result.columnId);
                         const isFreeLink = Number(baseTypeId) === 1;
-                        const newCol = {
-                            id: newColumnId,
-                            name: columnName,
-                            val: columnName,
-                            type: baseTypeId,
-                            format: isListValue ? 'REF' : this.mapTypeIdToFormat(baseTypeId),
-                            granted: 1,
-                            attrs: isMultiselect ? ':MULTI:' : '',
-                            paramId: newColumnId,
-                            // For list columns, set ref_id, ref, and orig so showColumnEditForm treats them
-                            // as reference columns immediately (without requiring a page refresh, issue #1678)
-                            ref_id: isListValue ? result.refId : null,
-                            ref: isListValue ? parseInt(result.termId) : 0,
-                            orig: isFreeLink ? '1' : (isListValue ? result.termId : null)
-                        };
+                        let newCol = null;
+                        try {
+                            newCol = await this.fetchFreshColumnAfterCreate(newColumnId);
+                        } catch (metadataError) {
+                            console.warn('Could not refresh created column metadata:', metadataError);
+                        }
+                        if (!newCol) {
+                            newCol = {
+                                id: newColumnId,
+                                name: columnName,
+                                val: columnName,
+                                type: baseTypeId,
+                                format: isListValue ? 'REF' : this.mapTypeIdToFormat(baseTypeId),
+                                granted: 1,
+                                attrs: isMultiselect ? ':MULTI:' : '',
+                                paramId: newColumnId,
+                                // For list columns, set ref_id, ref, and orig so showColumnEditForm treats them
+                                // as reference columns immediately (without requiring a page refresh, issue #1678)
+                                ref_id: isListValue ? result.refId : null,
+                                ref: isListValue ? parseInt(result.termId) : 0,
+                                orig: isFreeLink ? '1' : (isListValue ? result.termId : null)
+                            };
+                        }
                         this.columns.push(newCol);
                         this.processColumnVisibility();
 

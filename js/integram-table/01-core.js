@@ -692,26 +692,7 @@
                 // Add requisite columns (use req.id as column id for correct FR_{id} filter params - issue #793)
                 if (metadata.reqs && Array.isArray(metadata.reqs)) {
                     metadata.reqs.forEach((req, idx) => {
-                        const attrs = this.parseAttrs(req.attrs);
-                        const isReference = req.hasOwnProperty('ref_id');
-                        // Use req.granted if table is not fully writable; otherwise treat as writable (issue #1508)
-                        const reqGranted = this.isTableWritable() ? 1 : (req.granted === 'WRITE' ? 1 : 0);
-                        columns.push({
-                            id: String(req.id),
-                            type: req.type || 'SHORT',
-                            // Use 'REF' format for reference fields to enable dropdown filter (issue #795)
-                            format: isReference ? 'REF' : this.mapTypeIdToFormat(req.type || 'SHORT'),
-                            name: attrs.alias || req.val,
-                            val: req.val, // Store original name for alias display (issue #945)
-                            granted: reqGranted,  // Use metadata granted for access control (issue #1508)
-                            ref: isReference ? req.orig : 0,
-                            ref_id: req.ref_id || null,
-                            orig: req.orig || null,
-                            attrs: req.attrs || '',
-                            unique: req.unique, // Store unique flag for column edit form (issue #1026)
-                            paramId: req.id, // For cell editing: use t{req.id} for requisite columns
-                            arr_id: req.arr_id || null // For table requisites (subordinate tables) (issue #710)
-                        });
+                        columns.push(this.buildColumnFromMetadataReq(req));
                     });
                 }
 
