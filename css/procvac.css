@@ -75,10 +75,8 @@
 .procvac-col--department { width: 210px; }
 .procvac-col--plan,
 .procvac-col--fact,
-.procvac-col--weeksInWork,
-.procvac-col--interviewHr,
-.procvac-col--recommendations,
-.procvac-col--interviewNm { width: 84px; }
+.procvac-col--weeksInWork { width: 84px; }
+.procvac-col--events,
 .procvac-col--request { width: 70px; }
 .procvac-col--responsible { width: 132px; }
 .procvac-col--startDate,
@@ -143,6 +141,10 @@
     text-align: center;
 }
 
+.procvac-cell--events {
+    text-align: center;
+}
+
 .procvac-cell--comments,
 .procvac-cell--department,
 .procvac-cell--title {
@@ -168,6 +170,47 @@
     background: rgba(37, 99, 235, 0.08);
 }
 
+.procvac-cell.procvac-status--in-work {
+    background: #f59e0b;
+    color: #111827;
+    font-weight: 650;
+}
+
+.procvac-cell.procvac-status--not-started {
+    background: #92400e;
+    color: #ffffff;
+    font-weight: 650;
+}
+
+.procvac-cell.procvac-status--offer-accepted {
+    background: #16a34a;
+    color: #ffffff;
+    font-weight: 650;
+}
+
+.procvac-cell.procvac-status--joined {
+    background: #d1d5db;
+    color: #111827;
+    font-weight: 650;
+}
+
+.procvac-cell.procvac-status--pause {
+    background: #f9a8d4;
+    color: #831843;
+    font-weight: 650;
+}
+
+.procvac-cell.procvac-status--offer {
+    background: #bbf7d0;
+    color: #14532d;
+    font-weight: 650;
+}
+
+.procvac-cell--status.procvac-cell--editable:hover {
+    box-shadow: inset 0 0 0 1px rgba(17, 24, 39, 0.24);
+    filter: brightness(0.98);
+}
+
 .procvac-editor {
     width: 100%;
     min-height: 24px;
@@ -189,7 +232,8 @@
     line-height: 1.25;
 }
 
-.procvac-doc-link {
+.procvac-doc-link,
+.procvac-events-link {
     width: 22px;
     height: 22px;
     display: inline-flex;
@@ -200,7 +244,12 @@
     border-radius: 6px;
 }
 
-.procvac-doc-link:hover {
+.procvac-events-link {
+    color: #0f766e;
+}
+
+.procvac-doc-link:hover,
+.procvac-events-link:hover {
     background: rgba(37, 99, 235, 0.12);
 }
 

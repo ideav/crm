@@ -89,14 +89,13 @@ assertDeepEqual(
         'Выход',
         'Штат/Лагерь/ОШ',
         'Недель в работе',
-        'Интервью HR',
-        'Рекомендации',
-        'Интервью с НМ',
+        'События',
         'Комментарии',
     ],
     'display columns match the workplace specification',
 );
 assertEqual(columns.find((col) => col.key === 'weeksInWork').editable, false, 'weeks column is read-only');
+assertEqual(columns.find((col) => col.key === 'events').editable, false, 'events column is read-only');
 assertEqual(columns.find((col) => col.key === 'status').source.id, '8140', 'status column maps by metadata name');
 assertEqual(columns.find((col) => col.key === 'comments').source.index, 14, 'comments stay mapped after optional fields');
 
@@ -108,9 +107,9 @@ const sampleMetadataWithoutOptionalInterviewFields = {
     reqs: metadata.reqs.filter((req) => !['8210', '8211', '8212'].includes(req.id)),
 };
 const sampleColumns = helpers.buildColumns(sampleMetadataWithoutOptionalInterviewFields);
-assertEqual(sampleColumns.length, 16, 'workspace still renders all requested columns when optional fields are absent');
+assertEqual(sampleColumns.length, 14, 'workspace still renders all requested columns when optional fields are absent');
 assertEqual(sampleColumns.find((col) => col.key === 'comments').source.index, 11, 'comments map to the sample metadata comments column');
-assertEqual(sampleColumns.find((col) => col.key === 'interviewHr').editable, false, 'missing optional fields are read-only placeholders');
+assert(!sampleColumns.some((col) => col.key === 'interviewHr'), 'removed optional fields are not rendered');
 
 const rows = [
     {
@@ -133,6 +132,7 @@ const rows = [
 
 const normalized = rows.map((row) => helpers.normalizeRow(row, columns, new Date('2026-04-27T12:00:00Z')));
 assertEqual(normalized[0].values.weeksInWork, '2', 'weeks in work are derived from start date');
+assertEqual(normalized[0].values.department, 'ДД', 'department names are abbreviated for display');
 assertEqual(normalized[2].values.request, 'https://docs.google.com/doc', 'request URL is preserved for icon rendering');
 
 const sections = helpers.groupRows(normalized, new Date('2026-04-27T12:00:00Z'));
