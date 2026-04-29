@@ -260,6 +260,7 @@
                 '      <div class="migr-subtitle">JSON-пакет сущностей, запросов, рабочих мест и файлов</div>',
                 '    </div>',
                 '    <div class="migr-actions">',
+                '      <button type="button" class="migr-btn migr-btn-secondary" data-action="scan-queries" title="Найти таблицы и колонки, используемые в выбранных запросах"><i class="pi pi-sitemap"></i><span>Анализ запросов</span></button>',
                 '      <button type="button" class="migr-btn migr-btn-secondary" data-action="scan-files" title="Найти зависимости в выбранных файлах"><i class="pi pi-search"></i><span>Найти связи</span></button>',
                 '      <button type="button" class="migr-btn migr-btn-secondary" data-action="save-settings" title="Сохранить конфигурацию"><i class="pi pi-save"></i><span>Сохранить</span></button>',
                 '      <button type="button" class="migr-btn migr-btn-primary" data-action="export-package" title="Сформировать JSON"><i class="pi pi-download"></i><span>Экспорт</span></button>',
@@ -368,6 +369,8 @@
                 this.newSettings();
             } else if (action === 'save-settings') {
                 await this.saveSettings();
+            } else if (action === 'scan-queries') {
+                await this.scanSelectedQueries();
             } else if (action === 'scan-files') {
                 await this.scanSelectedFiles();
             } else if (action === 'export-package') {
@@ -614,8 +617,12 @@
             const count = this.container.querySelector('#migr-tables-count');
             if (!list) return;
 
-            const items = this.catalog.tables.filter(function(item) {
+            const items = this.catalog.tables.filter((item) => {
                 return !search || normalizeSearch(item.name + ' ' + item.id).indexOf(search) > -1;
+            }).slice().sort((a, b) => {
+                const aSelected = this.state.selectedTables.has(a.id) ? 0 : 1;
+                const bSelected = this.state.selectedTables.has(b.id) ? 0 : 1;
+                return aSelected - bSelected;
             });
             if (count) count.textContent = String(this.state.selectedTables.size) + ' / ' + String(this.catalog.tables.length);
 
@@ -654,8 +661,12 @@
             const count = this.container.querySelector('#migr-queries-count');
             if (!list) return;
 
-            const items = this.catalog.queries.filter(function(item) {
+            const items = this.catalog.queries.filter((item) => {
                 return !search || normalizeSearch(item.name + ' ' + item.id).indexOf(search) > -1;
+            }).slice().sort((a, b) => {
+                const aSelected = this.state.selectedQueries.has(a.id) ? 0 : 1;
+                const bSelected = this.state.selectedQueries.has(b.id) ? 0 : 1;
+                return aSelected - bSelected;
             });
             if (count) count.textContent = String(this.state.selectedQueries.size) + ' / ' + String(this.catalog.queries.length);
 
@@ -879,6 +890,56 @@
             }
         }
 
+        async scanSelectedQueries() {
+            const queries = Array.from(this.state.selectedQueries.values());
+            if (!queries.length) {
+                this.showToast('Выберите запросы для анализа', 'error');
+                return;
+            }
+
+            this.setBusy(true);
+            let addedTables = 0;
+            try {
+                const tableById = mapById(this.catalog.tables);
+                for (const query of queries) {
+                    let columns;
+                    try {
+                        columns = await this.fetchJson('object/28?F_U=' + encodeURIComponent(query.id) + '&JSON_OBJ&LIMIT=1000');
+                    } catch (e) {
+                        console.warn('[migr] query columns fetch failed for', query.id, e);
+                        continue;
+                    }
+                    if (!Array.isArray(columns)) continue;
+                    for (const col of columns) {
+                        const r0 = col.r && col.r[0] ? String(col.r[0]) : '';
+                        const colon = r0.indexOf(':');
+                        if (colon < 1) continue;
+                        const rawId = r0.slice(0, colon).trim();
+                        if (!rawId || rawId === '0' || !/^\d+$/.test(rawId)) continue;
+                        if (this.state.selectedTables.has(rawId)) continue;
+                        const known = tableById.get(rawId);
+                        const name = known ? (known.name || rawId) : (r0.slice(colon + 1).trim() || rawId);
+                        this.state.selectedTables.set(rawId, {
+                            id: rawId,
+                            name: name,
+                            exportData: false,
+                            filter: ''
+                        });
+                        addedTables += 1;
+                    }
+                }
+                this.renderTables();
+                this.renderSelectedTables();
+                this.showToast('Добавлено таблиц из запросов: ' + addedTables, 'success');
+                this.setStatus('Анализ запросов завершён');
+            } catch (e) {
+                console.error('[migr] query scan failed:', e);
+                this.showToast('Не удалось проанализировать запросы', 'error');
+            } finally {
+                this.setBusy(false);
+            }
+        }
+
         async scanSelectedFiles() {
             const files = Array.from(this.state.selectedFiles.values());
             if (!files.length) {
@@ -1037,12 +1098,18 @@
                 id: query.id,
                 name: query.name,
                 record: null,
+                columns: null,
                 report: null
             };
             try {
                 entry.record = await this.fetchJson('object/' + QUERY_TABLE_ID + '/' + encodeURIComponent(query.id) + '?JSON_OBJ');
             } catch (e) {
                 entry.recordError = e.message;
+            }
+            try {
+                entry.columns = await this.fetchJson('object/28?F_U=' + encodeURIComponent(query.id) + '&JSON_OBJ&LIMIT=1000');
+            } catch (e) {
+                entry.columnsError = e.message;
             }
             try {
                 entry.report = await this.fetchJson('report/' + encodeURIComponent(query.id) + '?JSON');
