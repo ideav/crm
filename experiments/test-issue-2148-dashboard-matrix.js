@@ -37,6 +37,7 @@ const code = `
 let dashMatrixValues = [];
 function dashTrace() {}
 
+${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashNormalizeVal')}
 ${extractFunction('dashNormalizeMatrixKey')}

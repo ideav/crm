@@ -47,6 +47,7 @@ function dashDrawPeriods() {}
 ${extractFunctionMaybe('dashNormalizePanelFilter')}
 ${extractFunctionMaybe('dashReportKey')}
 ${extractFunctionMaybe('dashReportUrl')}
+${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashNormalizeVal')}
 ${extractFunctionMaybe('dashParseReportFormula')}

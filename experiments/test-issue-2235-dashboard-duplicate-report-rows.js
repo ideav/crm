@@ -68,6 +68,7 @@ function assert(condition, message) {
     if (!condition) throw new Error(message);
 }
 
+${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashNormalizeVal')}
 ${extractFunctionMaybe('dashNormalizePanelFilter')}
