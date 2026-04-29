@@ -2636,33 +2636,41 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .inline-editor {
     width: 100%;
     max-width: 100%;
-    padding: 6px 10px 6px 0;
-    /* border: 2px solid var(--md-primary); */
+    padding: 0;
+    border: none;
     border-radius: 4px;
     font-size: 0.875rem;
     font-family: inherit;
     color: var(--md-text-primary);
-    background: var(--md-surface);
-    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.15);
+    background: transparent;
+    box-shadow: none;
     transition: var(--md-transition);
     outline: none;
     box-sizing: border-box;
 }
 
 .inline-editor:focus {
-    border-color: var(--md-primary-dark);
-    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.25);
+    box-shadow: none;
 }
 
 /* Specific styles for different editor types */
 .inline-editor-number,
 .inline-editor-text {
-    min-height: 32px;
+    /* no min-height — keep row at its natural height */
+}
+
+/* Remove spinner arrows from number inputs */
+.inline-editor-number::-webkit-outer-spin-button,
+.inline-editor-number::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.inline-editor-number {
+    -moz-appearance: textfield;
 }
 
 .inline-editor-date,
 .inline-editor-datetime {
-    min-height: 32px;
     cursor: pointer;
 }
 
@@ -2692,10 +2700,9 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     opacity: 1;
 }
 
-/* Visual feedback for inline editing active state */
+/* Visual feedback for inline editing active state — keep original padding to prevent layout shift (issue #2240) */
 td:has(.inline-editor) {
     background-color: rgba(25, 118, 210, 0.08) !important;
-    padding: 4px !important;
     overflow: hidden;
 }
 
@@ -2705,14 +2712,10 @@ td.cell-saving {
     transition: background-color 0.2s ease;
 }
 
-/* Ensure proper sizing in compact mode */
-.integram-table.compact td:has(.inline-editor) {
-    padding: 2px !important;
-}
+/* Compact mode: inline editor inherits cell padding, no override needed (issue #2240) */
 
 /* Inline select editor for GRANT and REPORT_COLUMN types (issue #601) */
 .inline-editor-select {
-    min-height: 32px;
     cursor: pointer;
     appearance: none;
     -webkit-appearance: none;
