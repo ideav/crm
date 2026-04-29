@@ -468,15 +468,68 @@ function dashSetStatus(msg) {
     if (el) el.textContent = msg;
 }
 
+function dashNormalizeNumberText(v) {
+    if (v === null || v === undefined) return '';
+    var raw = String(v).trim()
+        , s, sign = '', lastComma, lastDot, lastSep, hasMixedSeparators
+        , parts, groupedThousands, whole, fraction;
+    if (!raw) return '';
+    raw = raw.replace(/[\u2212\u2012\u2013\u2014]/g, '-');
+    if (!/^[+-]?[\d\s\u00a0\u202f.,]+%?$/.test(raw)) return '';
+    s = raw.replace(/%$/, '').replace(/[\s\u00a0\u202f]/g, '');
+    if (s.charAt(0) === '+' || s.charAt(0) === '-') {
+        sign = s.charAt(0);
+        s = s.slice(1);
+    }
+    s = s.replace(/[^0-9.,]/g, '');
+    if (!/[0-9]/.test(s)) return '';
+
+    lastComma = s.lastIndexOf(',');
+    lastDot = s.lastIndexOf('.');
+    lastSep = Math.max(lastComma, lastDot);
+    if (lastSep !== -1) {
+        hasMixedSeparators = lastComma !== -1 && lastDot !== -1;
+        if (hasMixedSeparators) {
+            whole = s.slice(0, lastSep).replace(/[.,]/g, '') || '0';
+            fraction = s.slice(lastSep + 1).replace(/[.,]/g, '');
+            return sign + whole + (fraction ? '.' + fraction : '');
+        }
+
+        parts = s.split(s.charAt(lastSep));
+        groupedThousands = parts.length > 1
+            && parts.slice(1).every(function(part) { return part.length === 3; })
+            && parts[0].length > 0
+            && parts[0].length <= 3
+            && parts[0] !== '0';
+        if (!groupedThousands) {
+            whole = parts.slice(0, -1).join('').replace(/[.,]/g, '') || '0';
+            fraction = parts[parts.length - 1].replace(/[.,]/g, '');
+            return sign + whole + (fraction ? '.' + fraction : '');
+        }
+        s = parts.join('');
+    }
+    return sign + s;
+}
+
 function dashGetFloat(v) {
-    return parseFloat(String(v).replace(/ /g, '').replace(/,/g, '.'));
+    return parseFloat(dashNormalizeNumberText(v));
+}
+
+function dashNumberForFormula(v) {
+    var n = dashNormalizeNumberText(v);
+    return n === '' ? '0' : n;
+}
+
+function dashCellText(el) {
+    return el && el.textContent !== undefined ? el.textContent : (el ? el.innerHTML : '');
 }
 
 function dashNormalizeVal(item, val) {
-    var v = val || '';
+    var v = val || '', n;
     if (typeof val === 'object' && val !== null)
         v = val[0].val;
-    return String(v).replace(/ /g, '').replace(/,/g, '.');
+    n = dashNormalizeNumberText(v);
+    return n === '' ? String(v) : n;
 }
 
 function dashNormalizeMatrixKey(v) {
@@ -774,7 +827,7 @@ function dashCalcLineTotals() {
         var valids = false, v = 0;
         el.title = 'Сумма значений строки';
         el.closest('tr').querySelectorAll('.f-rg-cell').forEach(function(cell) {
-            var n = parseFloat(cell.innerHTML);
+            var n = dashGetFloat(dashCellText(cell));
             if (!isNaN(n)) { valids = true; v += n; }
         });
         if (valids) el.innerHTML = v;
@@ -836,12 +889,12 @@ function dashCalcCells() {
                     });
                     cells.forEach(function(rc) {
                         if (rc.getAttribute('ready') === '1')
-                            f = f.replace(new RegExp('\\[' + refs[i] + '\\]'), rc.innerHTML || 0);
+                            f = f.replace(new RegExp('\\[' + refs[i] + '\\]'), dashNumberForFormula(dashCellText(rc)));
                     });
                     // Use getElementById to avoid invalid CSS selectors when IDs start with digits (issue #2074)
                     (refEl ? refEl.querySelectorAll('.f-values') : []).forEach(function(fv) {
                         if (fv.getAttribute('ready') === '1')
-                            f = f.replace(new RegExp('\\[' + refs[i] + '\\]'), fv.innerHTML || 0);
+                            f = f.replace(new RegExp('\\[' + refs[i] + '\\]'), dashNumberForFormula(dashCellText(fv)));
                     });
                 }
                 refs = f.match(itemIdRegex);
@@ -900,7 +953,7 @@ function dashCalcRGFormulas() {
                     if (targetIdx < 0 || targetIdx >= cells.length) return '0';
                     var tc = cells[targetIdx];
                     if (!tc || tc.getAttribute('ready') !== '1') { allReady = false; return match; }
-                    return tc.textContent.trim() || '0';
+                    return dashNumberForFormula(dashCellText(tc));
                 }
                 // Named ref: find column index by name
                 var colIdx = colNameMap[ref.trim()];
@@ -910,7 +963,7 @@ function dashCalcRGFormulas() {
                 }
                 var tc = cells[colIdx];
                 if (!tc || tc.getAttribute('ready') !== '1') { allReady = false; return match; }
-                return tc.textContent.trim() || '0';
+                return dashNumberForFormula(dashCellText(tc));
             });
 
             if (!allReady) return; // wait for deps

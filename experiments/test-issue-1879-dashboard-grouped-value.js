@@ -24,6 +24,7 @@ let dashValues = Object.create(null);
 let dashItems = Object.create(null);
 let dashFormulas = Object.create(null);
 function dashTrace() {}
+${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashNormalizeVal')}
 ${extractFunction('dashGetVal')}
