@@ -2636,6 +2636,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .inline-editor {
     width: 100%;
     max-width: 100%;
+    min-width: 0; /* prevent input's intrinsic size from expanding the column (issue #2244) */
     padding: 0;
     border: none;
     border-radius: 4px;
