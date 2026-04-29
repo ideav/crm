@@ -3375,6 +3375,9 @@ class IntegramTable{
             // Highlight required fields in the row (issue #807)
             this.highlightNewRowRequiredCells(cell);
 
+            // Freeze column widths before inserting editor to prevent layout shift (issue #2244)
+            this._freezeColumnWidths();
+
             // Use pre-filled default value from addNewRow (issue #1500)
             const colDataIndex = this.columns.findIndex(c => c.id === colId);
             const defaultValue = (this.data[rowIndex] && colDataIndex !== -1)
@@ -3724,6 +3727,9 @@ class IntegramTable{
 
             // Get current value from the cell
             const currentValue = this.extractCellValue(cell);
+
+            // Freeze column widths before inserting editor to prevent layout shift (issue #2244)
+            this._freezeColumnWidths();
 
             // Store reference to current editing cell
             this.currentEditingCell = {
@@ -5715,6 +5721,8 @@ class IntegramTable{
             if (this.currentEditingCell.fixedDropdown && this.currentEditingCell.fixedDropdown.parentNode) {
                 this.currentEditingCell.fixedDropdown.parentNode.removeChild(this.currentEditingCell.fixedDropdown);
             }
+            // Unfreeze column widths now that the editor is removed (issue #2244)
+            this._unfreezeColumnWidths();
             this.currentEditingCell = null;
 
             // Navigate to the pending cell immediately, without waiting for the save (issue #1431)
@@ -5912,6 +5920,8 @@ class IntegramTable{
                 if (this.currentEditingCell.outsideClickHandler) {
                     document.removeEventListener('click', this.currentEditingCell.outsideClickHandler);
                 }
+                // Unfreeze column widths (issue #2244)
+                this._unfreezeColumnWidths();
                 this.currentEditingCell = null;
 
                 this.showToast('Запись создана', 'success');
@@ -6193,6 +6203,9 @@ class IntegramTable{
                 this.currentEditingCell.fixedDropdown.parentNode.removeChild(this.currentEditingCell.fixedDropdown);
             }
 
+            // Unfreeze column widths now that the editor is removed (issue #2244)
+            this._unfreezeColumnWidths();
+
             this.currentEditingCell = null;
 
             // Navigate to pending cell if set (issue #518)
@@ -6201,6 +6214,43 @@ class IntegramTable{
                 this.pendingCellClick = null;
                 this.navigateToCell(targetCell);
             }
+        }
+
+        /**
+         * Snapshot all th widths and lock them as inline styles so the table layout
+         * does not shift when an inline editor replaces cell content (issue #2244).
+         * Only locks headers that don't already have an explicit width stored in
+         * this.columnWidths, so manually-resized columns are unaffected.
+         */
+        _freezeColumnWidths() {
+            if (!this.container) return;
+            const table = this.container.querySelector('.integram-table');
+            if (!table) return;
+            const headers = table.querySelectorAll('thead th');
+            this._frozenHeaders = [];
+            headers.forEach(th => {
+                const colId = th.dataset.columnId;
+                // Skip headers that already have an explicit pixel width (manually resized)
+                if (colId && this.columnWidths[colId]) return;
+                const w = th.offsetWidth;
+                if (w > 0) {
+                    th.style.width = w + 'px';
+                    th.style.minWidth = w + 'px';
+                    this._frozenHeaders.push(th);
+                }
+            });
+        }
+
+        /**
+         * Remove the inline width styles added by _freezeColumnWidths (issue #2244).
+         */
+        _unfreezeColumnWidths() {
+            if (!this._frozenHeaders) return;
+            this._frozenHeaders.forEach(th => {
+                th.style.width = '';
+                th.style.minWidth = '';
+            });
+            this._frozenHeaders = null;
         }
 
         /**
@@ -6228,6 +6278,8 @@ class IntegramTable{
                 if (this.currentEditingCell.fixedDropdown && this.currentEditingCell.fixedDropdown.parentNode) {
                     this.currentEditingCell.fixedDropdown.parentNode.removeChild(this.currentEditingCell.fixedDropdown);
                 }
+                // Unfreeze column widths (issue #2244)
+                this._unfreezeColumnWidths();
                 this.currentEditingCell = null;
             }
 
