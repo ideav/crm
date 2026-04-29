@@ -782,12 +782,33 @@
 
                 this.showToast('Запись дублирована', 'success');
 
-                // Reload table data
-                this.data = [];
-                this.loadedRecords = 0;
-                this.hasMore = true;
-                this.totalRows = null;
-                await this.loadData(false);
+                let refreshedSubordinateTable = false;
+                if (this.currentEditModal && this.currentEditModal.subordinateTables) {
+                    const subordinateTable = this.currentEditModal.subordinateTables.find(st => st.arr_id == typeId);
+
+                    if (subordinateTable) {
+                        const tabContent = this.currentEditModal.modal.querySelector(`[data-tab-content="sub-${ subordinateTable.id }"]`);
+                        if (tabContent) {
+                            tabContent.dataset.loaded = '';
+                            await this.loadSubordinateTable(tabContent, subordinateTable.arr_id, this.currentEditModal.recordId);
+                            tabContent.dataset.loaded = 'true';
+                            refreshedSubordinateTable = true;
+                        }
+                    }
+                }
+
+                if (!refreshedSubordinateTable && this.cellSubordinateContext && this.cellSubordinateContext.arrId == typeId) {
+                    await this.loadSubordinateTable(this.cellSubordinateContext.container, this.cellSubordinateContext.arrId, this.cellSubordinateContext.parentRecordId);
+                    refreshedSubordinateTable = true;
+                }
+
+                if (!refreshedSubordinateTable) {
+                    this.data = [];
+                    this.loadedRecords = 0;
+                    this.hasMore = true;
+                    this.totalRows = null;
+                    await this.loadData(false);
+                }
 
                 // Open edit form for the newly created record
                 await this.openEditForm(newId, typeId, 0);
