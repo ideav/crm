@@ -773,6 +773,9 @@ class App {
             if (isError) {
                 otpMessage.style.background = 'var(--bg-secondary)';
                 otpMessage.style.color = 'var(--error-color, #ef4444)';
+            } else {
+                otpMessage.style.background = '';
+                otpMessage.style.color = '';
             }
             otpMessage.textContent = text;
         }
@@ -788,21 +791,24 @@ class App {
                 if (!selectedDb) { showToast('Введите имя базы данных', 'error'); return; }
                 otpBtn.disabled = true;
                 try {
-                    const formData = new FormData();
-                    formData.append('email', emailVal);
-                    const response = await fetch(`${encodeURIComponent(selectedDb)}/otp`, {
+                    const formData = new URLSearchParams();
+                    formData.append('u', emailVal);
+                    const response = await fetch(`${encodeURIComponent(selectedDb)}/getcode?JSON`, {
                         method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                         credentials: 'include',
-                        body: formData
+                        body: formData.toString()
                     });
                     const text = await response.text();
                     let data = null;
                     try { data = JSON.parse(text); } catch (e) { data = null; }
-                    const isError = !response.ok || (data && (data.msg || '').toUpperCase().includes('ERROR'));
-                    showOtpMessage(
-                        (data && (data.msg || data.message || data.details)) || text,
-                        isError
-                    );
+                    const isError = !response.ok || !data || !!data.error || data.msg !== 'ok';
+                    const message = data && data.msg === 'ok'
+                        ? 'Код отправлен на почту'
+                        : (data && data.msg === 'new'
+                            ? 'Пользователь с таким email не найден'
+                            : ((data && (data.error || data.message || data.details || data.msg)) || text || 'Ошибка при отправке кода'));
+                    showOtpMessage(message, isError);
                     if (!isError && otpCodeGroup) {
                         otpCodeGroup.style.display = '';
                         if (otpCodeInput) otpCodeInput.focus();
@@ -825,22 +831,24 @@ class App {
                 if (!selectedDb) { showToast('Введите имя базы данных', 'error'); return; }
                 otpSubmitBtn.disabled = true;
                 try {
-                    const formData = new FormData();
-                    formData.append('email', emailVal);
-                    formData.append('otp', codeVal);
-                    const response = await fetch(`${encodeURIComponent(selectedDb)}/otp`, {
+                    const formData = new URLSearchParams();
+                    formData.append('u', emailVal);
+                    formData.append('c', codeVal);
+                    const response = await fetch(`${encodeURIComponent(selectedDb)}/checkcode?JSON`, {
                         method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                         credentials: 'include',
-                        body: formData
+                        body: formData.toString()
                     });
                     const text = await response.text();
                     let data = null;
                     try { data = JSON.parse(text); } catch (e) { data = null; }
-                    if (data && data.token && (data.msg === '' || data.msg == null)) {
+                    if (response.ok && data && data.token) {
+                        CookieUtil.set('idb_' + selectedDb, data.token, 30);
                         CookieUtil.set('last_db', selectedDb, 365);
                         window.location.href = window.location.origin + '/' + selectedDb;
                     } else {
-                        const errText = (data && (data.msg || data.message)) || text || 'Неверный код';
+                        const errText = (data && (data.error || data.msg || data.message)) || text || 'Неверный код';
                         showOtpMessage(errText, true);
                         otpSubmitBtn.disabled = false;
                     }
