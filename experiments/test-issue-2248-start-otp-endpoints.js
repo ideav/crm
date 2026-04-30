@@ -22,6 +22,14 @@ class FakeElement {
         this.listeners[type] = handler;
     }
 
+    removeAttribute(name) {
+        this[name] = false;
+    }
+
+    setAttribute(name, value) {
+        this[name] = value === '' ? true : value;
+    }
+
     focus() {
         this.focused = true;
     }
@@ -31,6 +39,10 @@ const elements = {
     'auth-db-select': new FakeElement('auth-db-select'),
     'auth-db-custom': new FakeElement('auth-db-custom'),
     'login-email': new FakeElement('login-email'),
+    'login-password': new FakeElement('login-password'),
+    'login-password-group': new FakeElement('login-password-group'),
+    'login-captcha-container': new FakeElement('login-captcha-container'),
+    'login-submit-btn': new FakeElement('login-submit-btn'),
     'otp-btn': new FakeElement('otp-btn'),
     'otp-message': new FakeElement('otp-message'),
     'otp-code-group': new FakeElement('otp-code-group'),
@@ -110,6 +122,11 @@ vm.runInContext(`${source}; this.App = App;`, context);
     assert.strictEqual(getCodeBody.get('u'), 'user@example.com');
     assert.strictEqual(getCodeBody.has('email'), false);
     assert.strictEqual(elements['otp-code-group'].style.display, '');
+    assert.strictEqual(elements['login-password-group'].style.display, 'none');
+    assert.strictEqual(elements['login-captcha-container'].style.display, 'none');
+    assert.strictEqual(elements['login-submit-btn'].style.display, 'none');
+    assert.strictEqual(elements['otp-btn'].style.display, 'none');
+    assert.strictEqual(elements['login-password'].required, false);
     assert.strictEqual(elements['otp-message'].textContent, 'Код отправлен на почту');
 
     await elements['otp-submit-btn'].listeners.click();

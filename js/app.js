@@ -691,6 +691,7 @@ class App {
             backToLoginLink.addEventListener('click', (e) => {
                 e.preventDefault();
                 exitResetMode();
+                exitOtpCodeMode();
             });
         }
 
@@ -755,6 +756,8 @@ class App {
         const otpCodeGroup = document.getElementById('otp-code-group');
         const otpCodeInput = document.getElementById('otp-code-input');
         const otpSubmitBtn = document.getElementById('otp-submit-btn');
+        const loginCaptchaContainer = document.getElementById('login-captcha-container');
+        const loginPasswordInput = document.getElementById('login-password');
 
         function getSelectedDb() {
             const dbSelect = document.getElementById('auth-db-select');
@@ -778,6 +781,26 @@ class App {
                 otpMessage.style.color = '';
             }
             otpMessage.textContent = text;
+        }
+
+        function enterOtpCodeMode() {
+            if (otpCodeGroup) otpCodeGroup.style.display = '';
+            if (loginPasswordGroup) loginPasswordGroup.style.display = 'none';
+            if (loginCaptchaContainer) loginCaptchaContainer.style.display = 'none';
+            if (loginSubmitBtn) loginSubmitBtn.style.display = 'none';
+            if (otpBtn) otpBtn.style.display = 'none';
+            if (loginPasswordInput) loginPasswordInput.removeAttribute('required');
+            if (otpCodeInput) otpCodeInput.focus();
+        }
+
+        function exitOtpCodeMode() {
+            if (otpCodeGroup) otpCodeGroup.style.display = 'none';
+            if (loginPasswordGroup) loginPasswordGroup.style.display = '';
+            if (loginCaptchaContainer) loginCaptchaContainer.style.display = '';
+            if (loginSubmitBtn) loginSubmitBtn.style.display = '';
+            if (otpBtn) otpBtn.style.display = '';
+            if (loginPasswordInput) loginPasswordInput.setAttribute('required', '');
+            if (otpMessage) otpMessage.style.display = 'none';
         }
 
         // Step 1: send email → request OTP code
@@ -809,10 +832,7 @@ class App {
                             ? 'Пользователь с таким email не найден'
                             : ((data && (data.error || data.message || data.details || data.msg)) || text || 'Ошибка при отправке кода'));
                     showOtpMessage(message, isError);
-                    if (!isError && otpCodeGroup) {
-                        otpCodeGroup.style.display = '';
-                        if (otpCodeInput) otpCodeInput.focus();
-                    }
+                    if (!isError) enterOtpCodeMode();
                 } catch (err) {
                     showOtpMessage(err.message || 'Ошибка при отправке кода', true);
                 } finally {
