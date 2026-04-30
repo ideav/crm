@@ -8127,8 +8127,10 @@ switch($a)  # Check actions, which don't require authentication
     			$GLOBALS["tzone"] = round(((int)$_POST["tzone"] - time() - date("Z"))/1800)*1800; # Round the time zone shift to 30 min
     			setcookie("tzone", $GLOBALS["tzone"], time() + COOKIES_EXPIRE, "/"); # 30 days
     		}
-    		$data_set = Exec_sql("SELECT tok.val FROM $z u LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN." WHERE u.t=".EMAIL." AND u.val='$u'"
+    		$data_set = Exec_sql("SELECT tok.val FROM $z u LEFT JOIN $z tok ON tok.up=u.up AND tok.t=".TOKEN." WHERE u.t=".EMAIL." AND u.val='$u'"
     						, "Get the user token");
+    		if(mysqli_num_rows($data_set) > 1)
+    		    die('{"error":"найдено несколько пользователей с таким email"}');
     		if($row = mysqli_fetch_array($data_set)){
 				mysendmail($u, t9n("[RU]Одноразовый пароль [EN]One time password ").$u
 					, t9n("[RU]Ваш код для входа: [EN]Your password is: ").strtoupper(substr($row["val"], 0, 4))
@@ -8148,15 +8150,15 @@ switch($a)  # Check actions, which don't require authentication
 	case "checkcode":
 		$c = addslashes(strtolower($_REQUEST["c"]));
 		$u = addslashes(strtolower($_REQUEST["u"]));
-		if(preg_match(MAIL_MASK, $u) && (strlen($c) == 4))
-		{
-    		$data_set = Exec_sql("SELECT u.id, tok.id tok, xsrf.id xsrf, act.id act FROM $z tok, $z u"
+		if(preg_match(MAIL_MASK, $u) && (strlen($c) == 4)){
+    		$data_set = Exec_sql("SELECT u.id, tok.id tok, xsrf.id xsrf, act.id act FROM $z u"
+									." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
+    		                        ." LEFT JOIN $z email ON email.up=u.id AND email.t=".EMAIL." AND email.val='$u'"
     		                        ." LEFT JOIN $z act ON act.up=u.id AND act.t=".ACTIVITY
 									." LEFT JOIN $z xsrf ON xsrf.up=u.id AND xsrf.t=".XSRF
-    		                    ." WHERE u.t=".USER." AND u.val='$u' AND tok.up=u.id AND tok.t=".TOKEN." AND tok.val LIKE '$c%'"
+    		                    ." WHERE u.t=".USER." AND tok.val LIKE '$c%'"
     						, "Check the user token");
-    		if($row = mysqli_fetch_array($data_set))
-    		{
+    		if($row = mysqli_fetch_array($data_set)){
     			$token = md5(microtime(TRUE));
     			$xsrf = xsrf($token, $u);
 				Update_Val($row["tok"], $token);
