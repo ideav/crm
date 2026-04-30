@@ -129,7 +129,12 @@ vm.runInContext(`${source}; this.App = App;`, context);
     assert.strictEqual(elements['login-password'].required, false);
     assert.strictEqual(elements['otp-message'].textContent, 'Код отправлен на почту');
 
-    await elements['otp-submit-btn'].listeners.click();
+    await elements['otp-code-input'].listeners.keydown({
+        key: 'Enter',
+        preventDefault() {
+            this.defaultPrevented = true;
+        }
+    });
     assert.strictEqual(fetchCalls[1].url, 'demo/checkcode?JSON');
     assert.strictEqual(fetchCalls[1].options.method, 'POST');
     assert.strictEqual(fetchCalls[1].options.credentials, 'include');

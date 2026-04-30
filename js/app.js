@@ -841,41 +841,52 @@ class App {
             });
         }
 
+        async function submitOtpCode() {
+            const emailVal = loginEmailInput ? loginEmailInput.value.trim() : '';
+            const codeVal = otpCodeInput ? otpCodeInput.value.trim() : '';
+            if (!codeVal) { showToast('Введите код из письма', 'error'); return; }
+            const selectedDb = getSelectedDb();
+            if (!selectedDb) { showToast('Введите имя базы данных', 'error'); return; }
+            if (otpSubmitBtn) otpSubmitBtn.disabled = true;
+            try {
+                const formData = new URLSearchParams();
+                formData.append('u', emailVal);
+                formData.append('c', codeVal);
+                const response = await fetch(`${encodeURIComponent(selectedDb)}/checkcode?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    credentials: 'include',
+                    body: formData.toString()
+                });
+                const text = await response.text();
+                let data = null;
+                try { data = JSON.parse(text); } catch (e) { data = null; }
+                if (response.ok && data && data.token) {
+                    CookieUtil.set('idb_' + selectedDb, data.token, 30);
+                    CookieUtil.set('last_db', selectedDb, 365);
+                    window.location.href = window.location.origin + '/' + selectedDb;
+                } else {
+                    const errText = (data && (data.error || data.msg || data.message)) || text || 'Неверный код';
+                    showOtpMessage(errText, true);
+                    if (otpSubmitBtn) otpSubmitBtn.disabled = false;
+                }
+            } catch (err) {
+                showOtpMessage(err.message || 'Ошибка при проверке кода', true);
+                if (otpSubmitBtn) otpSubmitBtn.disabled = false;
+            }
+        }
+
         // Step 2: submit OTP code → login
         if (otpSubmitBtn) {
-            otpSubmitBtn.addEventListener('click', async () => {
-                const emailVal = loginEmailInput ? loginEmailInput.value.trim() : '';
-                const codeVal = otpCodeInput ? otpCodeInput.value.trim() : '';
-                if (!codeVal) { showToast('Введите код из письма', 'error'); return; }
-                const selectedDb = getSelectedDb();
-                if (!selectedDb) { showToast('Введите имя базы данных', 'error'); return; }
-                otpSubmitBtn.disabled = true;
-                try {
-                    const formData = new URLSearchParams();
-                    formData.append('u', emailVal);
-                    formData.append('c', codeVal);
-                    const response = await fetch(`${encodeURIComponent(selectedDb)}/checkcode?JSON`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                        credentials: 'include',
-                        body: formData.toString()
-                    });
-                    const text = await response.text();
-                    let data = null;
-                    try { data = JSON.parse(text); } catch (e) { data = null; }
-                    if (response.ok && data && data.token) {
-                        CookieUtil.set('idb_' + selectedDb, data.token, 30);
-                        CookieUtil.set('last_db', selectedDb, 365);
-                        window.location.href = window.location.origin + '/' + selectedDb;
-                    } else {
-                        const errText = (data && (data.error || data.msg || data.message)) || text || 'Неверный код';
-                        showOtpMessage(errText, true);
-                        otpSubmitBtn.disabled = false;
-                    }
-                } catch (err) {
-                    showOtpMessage(err.message || 'Ошибка при проверке кода', true);
-                    otpSubmitBtn.disabled = false;
+            otpSubmitBtn.addEventListener('click', submitOtpCode);
+        }
+        if (otpCodeInput) {
+            otpCodeInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    return submitOtpCode();
                 }
+                return undefined;
             });
         }
 
