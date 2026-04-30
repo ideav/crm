@@ -1170,6 +1170,16 @@ function Check_Val_granted($t, $val, $id=0){
 					else
 						my_die(t9n("[RU]У вас нет доступа к этому объекту ($val) по маске![EN]You do not have this object granted ($val) by mask")." ($t)");
 		    }
+			else{
+    			$mask = Fetch_WHERE_for_mask($t, $val, $mask);
+    			if($mask === "")
+        			continue;
+    			if($row = mysqli_fetch_array(Exec_sql("SELECT $mask", "Apply granted mask")))
+    				if($row[0] === "1")
+       					$ok = "READ";
+					else
+						my_die(t9n("[RU]У вас нет доступа к этому объекту ($val) по маске![EN]You do not have this object granted ($val) by mask")." ($t)");
+			}
 		if(!isset($ok))
 		    return isset($GLOBALS["GRANTS"][$t]) ? isset($GLOBALS["GRANTS"][$t]) : "BARRED";
 		if($ok === "BARRED")
@@ -1198,7 +1208,8 @@ function IsOccupied($id)
 function my_die($msg, $code=""){
 	if(isset($GLOBALS["TRACE"])){
 		print_r($GLOBALS["GRANTS"]);
-		print_r($GLOBALS["CUR_VARS"]);
+		if(isset($GLOBALS["CUR_VARS"]))
+			print_r($GLOBALS["CUR_VARS"]);
 		print($GLOBALS["TRACE"]);
 	}
 	if($code !== "")
@@ -8111,17 +8122,14 @@ switch($a)  # Check actions, which don't require authentication
     
 	case "getcode":
 		$u = addslashes(strtolower($_REQUEST["u"]));
-		if(preg_match(MAIL_MASK, $u))
-		{
-    		if(isset($_POST["tzone"]))
-    		{
+		if(preg_match(MAIL_MASK, $u)){
+    		if(isset($_POST["tzone"])){
     			$GLOBALS["tzone"] = round(((int)$_POST["tzone"] - time() - date("Z"))/1800)*1800; # Round the time zone shift to 30 min
     			setcookie("tzone", $GLOBALS["tzone"], time() + COOKIES_EXPIRE, "/"); # 30 days
     		}
-    		$data_set = Exec_sql("SELECT tok.val FROM $z u LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN." WHERE u.t=".USER." AND u.val='$u'"
+    		$data_set = Exec_sql("SELECT tok.val FROM $z u LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN." WHERE u.t=".EMAIL." AND u.val='$u'"
     						, "Get the user token");
-    		if($row = mysqli_fetch_array($data_set))
-    		{
+    		if($row = mysqli_fetch_array($data_set)){
 				mysendmail($u, t9n("[RU]Одноразовый пароль [EN]One time password ").$u
 					, t9n("[RU]Ваш код для входа: [EN]Your password is: ").strtoupper(substr($row["val"], 0, 4))
                 		."\r\n\r\n".t9n("[RU]Если вы не хотите получать от нас писем, связанных с регистрацией $u, вы можете отписаться от оповещений:"
@@ -8354,9 +8362,9 @@ if(Validate_Token())
 							if($t == PASSWORD) // Encrypt the password
         						$val = hash("sha512", Salt($z, $val));
         					elseif(($GLOBALS["REV_BT"][$row["t"]] == "NUMBER") && ($val != 0))
-        						$val = (int)$val;
+        						$val = $val === "" ? "" : (int)$val;
         					elseif(($GLOBALS["REV_BT"][$row["t"]] == "SIGNED") && ($val != 0))
-        						$val = (double)str_replace(",",".",$val);
+        						$val = $val === "" ? "" : (double)str_replace(",",".",$val);
         					else
         						$val = Format_Val($row["t"], $val);
         					if($cur_id){ # The Req exists
@@ -8962,9 +8970,19 @@ if(Validate_Token())
 					if(isset($GLOBALS["REF_typs"][$t])){
 						$refs = explode(",", $v);
 						foreach($refs as $v){
+    						if(!is_numeric($v)){ // Check if the ref was provided as its value, not id
+								if($GLOBALS["REF_typs"][$t] === "1") // A free link type
+									continue;
+								$v = trim($value);
+								if($row = mysqli_fetch_assoc(Exec_sql("SELECT id FROM $z WHERE val='".addcslashes($v, "\\\'")."' AND t=".$GLOBALS["REF_typs"][$t]
+																, "Find Ref by value and type")))
+									$v = $row["id"];
+								elseif(Grant_1level($GLOBALS["REF_typs"][$t]) === "WRITE")
+									$v = Insert(1, 1, $GLOBALS["REF_typs"][$t], $v, "Insert new Record for the Ref req"); # Create the new Value
+								else
+									continue;
+							}
     						$v = (int)$v;
-    						if($v == 0)
-            					continue;
     						if($row = mysqli_fetch_array(Exec_sql("SELECT val FROM $z WHERE id=$v AND t=".$GLOBALS["REF_typs"][$t], "Check Ref's req Type"))){
     						    if(!isset($GLOBALS["DEFVAL"][$t]))
         							Check_Val_granted($GLOBALS["REF_typs"][$t], $row["val"], $v);
@@ -9775,8 +9793,7 @@ if(Validate_Token())
     		if(isset($_GET["warning"]))
     			$GLOBALS["warning"] = $_REQUEST["warning"];
     
-    		if($a == "report")
-    		{
+    		if($a == "report"){
     			unset($blocks); # We might get some stuff there already
     			$text = Get_file("report.html"); # Avoid UI header and styles
     			if(isset($_REQUEST["obj"]))
