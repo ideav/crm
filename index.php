@@ -40,6 +40,7 @@ define("ACTIVITY", 124);
 define("PASSWORD", 20);
 define("RETRIES", 300);
 define("RETRIES_LIMIT", 5);
+define("CHECKCODE_RETRIES_LIMIT", 2);
 define("TOKEN", 125);
 define("SECRET", 130);
 define("VERSION", 8);
@@ -573,6 +574,14 @@ function updateTokens($row){
 		Update_Val($row["act"], microtime(TRUE));
 	else
 		Insert($row["uid"], 1, ACTIVITY, microtime(TRUE), "Save activity time");
+}
+function incrementRetries($uid, $retries_id, $retries, $message="Increment retries count"){
+	$newRetries = 1 + (int)$retries;
+	if($retries_id)
+		Update_Val($retries_id, $newRetries);
+	else
+		Insert($uid, 1, RETRIES, $newRetries, $message);
+	return $newRetries;
 }
 # Create a new DB for a user
 function newDb($db, $template, $name, $email, $pwd){
@@ -8016,10 +8025,8 @@ switch($a)  # Check actions, which don't require authentication
 						api_dump(json_encode(["error" => $msg], JSON_UNESCAPED_UNICODE));
 					}
 				}
-				elseif($row["retries_id"])
-					Update_Val($row["retries_id"], 1 + (int)$row["retries"]);
 				else
-					Insert($row["uid"], 1, RETRIES, 1, "Increment retries count");
+					incrementRetries($row["uid"], $row["retries_id"], $row["retries"]);
 				$row = false;
 			}
 		}
@@ -8151,14 +8158,25 @@ switch($a)  # Check actions, which don't require authentication
 		$c = addslashes(strtolower($_REQUEST["c"]));
 		$u = addslashes(strtolower($_REQUEST["u"]));
 		if(preg_match(MAIL_MASK, $u) && (strlen($c) == 4)){
-    		$data_set = Exec_sql("SELECT u.id, tok.id tok, xsrf.id xsrf, act.id act FROM $z u"
-									." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
-    		                        ." LEFT JOIN $z email ON email.up=u.id AND email.t=".EMAIL." AND email.val='$u'"
-    		                        ." LEFT JOIN $z act ON act.up=u.id AND act.t=".ACTIVITY
-									." LEFT JOIN $z xsrf ON xsrf.up=u.id AND xsrf.t=".XSRF
-    		                    ." WHERE u.t=".USER." AND tok.val LIKE '$c%'"
-    						, "Check the user token");
-    		if($row = mysqli_fetch_array($data_set)){
+			$data_set = Exec_sql("SELECT u.id, tok.id tok, tok.val token, xsrf.id xsrf, act.id act, retries.id retries_id, retries.val retries FROM $z email"
+								." JOIN $z u ON email.up=u.id AND u.t=".USER
+								." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
+								." LEFT JOIN $z act ON act.up=u.id AND act.t=".ACTIVITY
+								." LEFT JOIN $z xsrf ON xsrf.up=u.id AND xsrf.t=".XSRF
+								." LEFT JOIN $z retries ON retries.up=u.id AND retries.t=".RETRIES
+								." WHERE email.t=".EMAIL." AND email.val='$u'"
+							, "Check the user token");
+			if(mysqli_num_rows($data_set) > 1)
+				die('{"error":"найдено несколько пользователей с таким email"}');
+			if($row = mysqli_fetch_array($data_set)){
+				if((int)$row["retries"] >= CHECKCODE_RETRIES_LIMIT)
+					die(json_encode(["error" => t9n("[RU]Превышено количество попыток входа с кодом. Войдите с паролем.[EN]Too many code login attempts. Please sign in with your password.")], JSON_UNESCAPED_UNICODE));
+				if(strtolower(substr((string)$row["token"], 0, 4)) !== $c){
+					$newRetries = incrementRetries($row["id"], $row["retries_id"], $row["retries"], "Increment code retries count");
+					if($newRetries >= CHECKCODE_RETRIES_LIMIT)
+						die(json_encode(["error" => t9n("[RU]Превышено количество попыток входа с кодом. Войдите с паролем.[EN]Too many code login attempts. Please sign in with your password.")], JSON_UNESCAPED_UNICODE));
+					die(json_encode(["error" => t9n("[RU]Неверный код[EN]Invalid code")], JSON_UNESCAPED_UNICODE));
+				}
     			$token = md5(microtime(TRUE));
     			$xsrf = xsrf($token, $u);
 				Update_Val($row["tok"], $token);
