@@ -101,15 +101,26 @@
     font-size: 0.85rem;
 }
 .dash-apply-btn {
-    padding: 0.3rem 0.75rem;
+    padding: 0.35rem 0.9rem;
     border: 1px solid var(--border-color, #ced4da);
-    border-radius: 4px;
-    background: var(--bg-secondary, #f8f9fa);
-    color: var(--text-primary, #212529);
+    border-radius: 6px;
+    background: none;
+    color: var(--text-secondary, #6c757d);
     cursor: pointer;
     font-size: 0.85rem;
 }
-.dash-apply-btn:hover { background: var(--bg-primary, #e9ecef); }
+.dash-apply-btn:hover { background: var(--bg-secondary, #e9ecef); }
+.dash-btn-secondary {
+    border: 1px solid var(--border-color, #ced4da);
+    background: none;
+    color: var(--text-secondary, #6c757d);
+}
+.dash-btn-primary {
+    border: none;
+    background: var(--button-primary, #0d6efd);
+    color: #fff;
+}
+.dash-btn-primary:hover { background: var(--button-primary-hover, #0b5ed7); }
 .dash-search-input {
     padding: 0.3rem 0.4rem;
     border: 1px solid var(--input-border, #ced4da);
@@ -258,7 +269,8 @@ td:has(.dash-cell-input) {
     background: var(--input-bg, #fff);
     color: var(--text-primary, #212529);
 }
-#dash-formula-modal .dash-modal-btns {
+#dash-formula-modal .dash-modal-btns,
+#dash-viz-modal .dash-modal-btns {
     display: flex;
     gap: 0.5rem;
     justify-content: flex-end;
