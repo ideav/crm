@@ -1323,8 +1323,30 @@ function dashEnsureChartJs(cb) {
     document.head.appendChild(s);
 }
 
+function dashLoadScriptOnce(id, src, cb) {
+    var existing = document.getElementById(id)
+        , s;
+    if (existing) {
+        if (existing.getAttribute('data-loaded') === '1') { cb(); return; }
+        existing.addEventListener('load', cb);
+        return;
+    }
+    s = document.createElement('script');
+    s.id = id;
+    s.src = src;
+    s.onload = function() {
+        s.setAttribute('data-loaded', '1');
+        cb();
+    };
+    document.head.appendChild(s);
+}
+
+function dashPivotDepsReady() {
+    return window.jQuery && window.jQuery.fn && window.jQuery.fn.pivotUI && window.jQuery.fn.sortable;
+}
+
 function dashEnsurePivotJs(cb) {
-    if (window.jQuery && window.jQuery.fn && window.jQuery.fn.pivotUI) { cb(); return; }
+    if (dashPivotDepsReady()) { cb(); return; }
     // Load pivottable.js CSS
     if (!document.getElementById('pivottable-css')) {
         var lnk = document.createElement('link');
@@ -1334,19 +1356,18 @@ function dashEnsurePivotJs(cb) {
         document.head.appendChild(lnk);
     }
     function loadPivot() {
-        var s = document.createElement('script');
-        s.src = 'https://cdn.jsdelivr.net/npm/pivottable@2/dist/pivot.min.js';
-        s.onload = cb;
-        document.head.appendChild(s);
+        if (window.jQuery && window.jQuery.fn && window.jQuery.fn.pivotUI) { cb(); return; }
+        dashLoadScriptOnce('pivottable-js', 'https://cdn.jsdelivr.net/npm/pivottable@2/dist/pivot.min.js', cb);
     }
-    // pivot.min.js requires jQuery — load it first if not present
+    function loadJqueryUi() {
+        if (window.jQuery && window.jQuery.fn && window.jQuery.fn.sortable) { loadPivot(); return; }
+        dashLoadScriptOnce('jquery-ui-js', 'https://cdn.jsdelivr.net/npm/jquery-ui-dist@1.12.1/jquery-ui.min.js', loadPivot);
+    }
+    // PivotTable UI requires jQuery and jQuery UI sortable.
     if (!window.jQuery) {
-        var jq = document.createElement('script');
-        jq.src = 'https://cdn.jsdelivr.net/npm/jquery@3/dist/jquery.min.js';
-        jq.onload = loadPivot;
-        document.head.appendChild(jq);
+        dashLoadScriptOnce('jquery-js', 'https://cdn.jsdelivr.net/npm/jquery@3/dist/jquery.min.js', loadJqueryUi);
     } else {
-        loadPivot();
+        loadJqueryUi();
     }
 }
 
@@ -1539,7 +1560,7 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
 }
 
 function dashRenderPivot(panelEl, pivotWrap, data, fieldMap) {
-    if (!window.jQuery || !window.jQuery.fn || !window.jQuery.fn.pivotUI) {
+    if (!dashPivotDepsReady()) {
         dashEnsurePivotJs(function() {
             dashRenderPivot(panelEl, pivotWrap, data, fieldMap);
         });
@@ -1821,6 +1842,13 @@ function dashVizModalCollectSettings() {
 document.getElementById('dash-viz-cancel').addEventListener('click', function() {
     document.getElementById('dash-viz-modal').classList.remove('open');
     dashVizModalCtx = null;
+});
+
+document.getElementById('dash-viz-modal').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        document.getElementById('dash-viz-save').click();
+    }
 });
 
 document.getElementById('dash-viz-save').addEventListener('click', function() {
