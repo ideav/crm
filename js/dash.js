@@ -907,9 +907,9 @@ function dashDrawPeriods() {
     if (dashAjaxes === 0) {
         document.querySelectorAll('#dash-model .f-panel').forEach(function(panel) {
             var settings = (dashModelData[panel.id] || {}).settings;
-            // Only render if not yet interacted (no active icon set by user)
+            // Only render if not yet interacted (user click sets data-user-selected)
             var icons = panel.querySelector('.f-panel-viz-icons');
-            var hasUserSelection = icons && icons.querySelector('.f-viz-type-icon.active');
+            var hasUserSelection = icons && icons.querySelector('.f-viz-type-icon[data-user-selected]');
             if (settings && !hasUserSelection) dashPanelApplySettings(panel.id, settings, true);
         });
     }
@@ -1467,8 +1467,9 @@ function dashUpdatePanelVizIcons(panel, enabled) {
         btn.innerHTML = '<i class="pi ' + typeInfo.icon + '"></i>';
         btn.addEventListener('click', function(e) {
             e.stopPropagation();
-            container.querySelectorAll('.f-viz-type-icon').forEach(function(b) { b.classList.remove('active'); });
+            container.querySelectorAll('.f-viz-type-icon').forEach(function(b) { b.classList.remove('active'); delete b.dataset.userSelected; });
             btn.classList.add('active');
+            btn.dataset.userSelected = '1';
             var modelData = dashModelData[panel.id] || {};
             var s = modelData.settings;
             var vizList = s ? (Array.isArray(s) ? s : [s]) : [];
