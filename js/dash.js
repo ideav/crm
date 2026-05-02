@@ -57,7 +57,18 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
         + '<input type="text" class="dash-search-input" placeholder="Поиск..." oninput="dashApplySearch(this.value,this.closest(\'.f-sheet\'))">'
         + (dashIsAdmin ? '<a class="dash-settings-icon" onclick="dashOpenSettings()" title="Настройки дэшборда"><i class="pi pi-cog"></i></a>' : '')
         + '</div></div>'
-    , panelTpl    = '<div id=":id:" f-period=":period:" class="f-panel pt-3"><h4>:name:</h4><div class="f-table-wrap"><table class="table table-sm table-bordered w-auto"><thead><tr class="dash-head f-head"><th>:head:</thead><tbody></tbody></table></div></div>'
+    , panelTpl    = '<div id=":id:" f-period=":period:" class="f-panel pt-3" data-panel-id=":panelid:">'
+        + '<div class="f-panel-header">'
+        + '<div class="f-panel-viz-icons"></div>'
+        + '<h4>:name:</h4>'
+        + (dashIsAdmin ? '<a class="f-panel-settings-icon" title="Настройки отображения"><i class="pi pi-chart-bar"></i></a>' : '')
+        + '</div>'
+        + '<div class="f-panel-content">'
+        + '<div class="f-table-wrap"><table class="table table-sm table-bordered w-auto"><thead><tr class="dash-head f-head"><th>:head:</thead><tbody></tbody></table></div>'
+        + '<div class="f-chart-wrap" style="display:none"><canvas class="f-chart-canvas"></canvas></div>'
+        + '<div class="f-pivot-wrap" style="display:none"></div>'
+        + '</div>'
+        + '</div>'
     , headTpl     = '<th range=":from:-:to:">:head:'
     , itemTpl     = '<tr class="dash-item f-item" id=":id:" item-name=":name:"><td class="dash-first-cell f-first-cell" style="padding-left::pl:.2rem"><div class="show-id"><span onclick="dashCopy2Buffer(:id:)">:id:</span>'
         + ' <a href="/' + db + '/table/Строка?F_I=:id:" target="edit-item">'
@@ -889,6 +900,16 @@ function dashDrawPeriods() {
     dashCalcRGFormulas();
     dashUpdateTableWrapOverflow();
     dashSetStatus('Готово');
+    // Apply visualization settings after all data is loaded (final draw only)
+    if (dashAjaxes === 0) {
+        document.querySelectorAll('#dash-model .f-panel').forEach(function(panel) {
+            var settings = (dashModelData[panel.id] || {}).settings;
+            // Only render if not yet interacted (no active icon set by user)
+            var icons = panel.querySelector('.f-panel-viz-icons');
+            var hasUserSelection = icons && icons.querySelector('.f-viz-type-icon.active');
+            if (settings && !hasUserSelection) dashPanelApplySettings(panel.id, settings, true);
+        });
+    }
     dashDebug();
 }
 
@@ -1102,12 +1123,17 @@ function dashGetModel(json) {
         }
         // Add panel to sheet (prefix 'fp' to avoid ID collision with item rows)
         if (!document.getElementById(panelKey)) {
+            var panelSettingsStr = json[i].panelSettings || '';
+            var panelSettings = null;
+            try { if (panelSettingsStr) panelSettings = JSON.parse(panelSettingsStr); } catch(e) {}
             document.getElementById('ds' + json[i].sheetID).insertAdjacentHTML('beforeend',
                 panelTpl.replace(/:id:/g, panelKey)
                     .replace(':head:', json[i].itemsHead || json[i].panel)
                     .replace(':period:', json[i].period)
-                    .replace(':name:', json[i].panel));
-            dashModelData[panelKey] = { items: {}, rgs: {}, noDates: json[i].NoDates };
+                    .replace(':name:', json[i].panel)
+                    .replace(':panelid:', json[i].panelID));
+            dashModelData[panelKey] = { items: {}, rgs: {}, noDates: json[i].NoDates, settings: panelSettings, panelID: json[i].panelID };
+            dashPanelApplySettings(panelKey, panelSettings, false);
         }
         if (json[i].NoDates !== undefined)
             dashModelData[panelKey].noDates = json[i].NoDates;
@@ -1172,6 +1198,444 @@ function dashGetModel(json) {
         }
     }
 }
+
+// ─── Visualization (charts / pivot) ──────────────────────────────────────────
+
+var DASH_VIZ_TYPES = [
+    { id: 'table',  label: 'Таблица',               icon: 'pi-table' },
+    { id: 'line',   label: 'Линейный график',        icon: 'pi-chart-line' },
+    { id: 'pie',    label: 'Круговая диаграмма',     icon: 'pi-chart-pie' },
+    { id: 'bar',    label: 'Столбчатая диаграмма',   icon: 'pi-chart-bar' },
+    { id: 'area',   label: 'Диаграмма с областями',  icon: 'pi-chart-line' },
+    { id: 'bubble', label: 'Пузырьковая диаграмма',  icon: 'pi-circle' },
+    { id: 'pivot',  label: 'Сводная таблица',        icon: 'pi-table' }
+];
+
+var dashVizModalCtx = null; // { panelEl, panelKey }
+
+function dashPanelGetColumns(panelEl) {
+    var cols = [];
+    var subhead = panelEl.querySelector('thead .f-subhead');
+    var headRow = panelEl.querySelector('thead .f-head');
+    if (subhead) {
+        subhead.querySelectorAll('th').forEach(function(th) {
+            var name = (th.getAttribute('data-rg-col') || th.textContent || '').trim();
+            if (name) cols.push(name);
+        });
+    } else if (headRow) {
+        headRow.querySelectorAll('th').forEach(function(th, idx) {
+            if (idx === 0) return;
+            var name = th.textContent.trim();
+            if (name) cols.push(name);
+        });
+    }
+    return cols;
+}
+
+function dashPanelGetRows(panelEl) {
+    var rows = [];
+    panelEl.querySelectorAll('.f-item').forEach(function(tr) {
+        rows.push(tr.getAttribute('item-name') || '');
+    });
+    return rows;
+}
+
+function dashCollectPanelData(panelEl) {
+    var labels = [], datasets = [], cols = dashPanelGetColumns(panelEl);
+    panelEl.querySelectorAll('.f-item').forEach(function(tr) {
+        labels.push(tr.getAttribute('item-name') || '');
+    });
+
+    if (cols.length === 0) {
+        // Single value column
+        var vals = [];
+        panelEl.querySelectorAll('.f-item').forEach(function(tr) {
+            var td = tr.querySelector('td.f-cell');
+            vals.push(dashGetFloat(td ? td.textContent.trim() : '') || 0);
+        });
+        datasets.push({ label: '', data: vals });
+    } else {
+        cols.forEach(function(col, ci) {
+            var vals = [];
+            panelEl.querySelectorAll('.f-item').forEach(function(tr) {
+                var cells = Array.from(tr.querySelectorAll('td.f-cell'));
+                // Find cells matching this column
+                var matching = cells.filter(function(td) {
+                    return (td.dataset.rgCol || '') === col || (td.dataset.rgHead || '') === col;
+                });
+                var sum = 0;
+                matching.forEach(function(td) { sum += dashGetFloat(td.textContent.trim()) || 0; });
+                vals.push(matching.length ? sum : 0);
+            });
+            datasets.push({ label: col, data: vals });
+        });
+    }
+    return { labels: labels, datasets: datasets };
+}
+
+var CHART_COLORS = [
+    'rgba(54,162,235,0.7)', 'rgba(255,99,132,0.7)', 'rgba(255,206,86,0.7)',
+    'rgba(75,192,192,0.7)', 'rgba(153,102,255,0.7)', 'rgba(255,159,64,0.7)',
+    'rgba(99,255,132,0.7)', 'rgba(235,54,162,0.7)'
+];
+
+function dashEnsureChartJs(cb) {
+    if (window.Chart) { cb(); return; }
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js';
+    s.onload = cb;
+    document.head.appendChild(s);
+}
+
+function dashEnsurePivotJs(cb) {
+    if (window.$.pivotUI) { cb(); return; }
+    // Load pivottable.js CSS
+    if (!document.getElementById('pivottable-css')) {
+        var lnk = document.createElement('link');
+        lnk.id = 'pivottable-css';
+        lnk.rel = 'stylesheet';
+        lnk.href = 'https://cdn.jsdelivr.net/npm/pivottable@2/dist/pivot.min.css';
+        document.head.appendChild(lnk);
+    }
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/pivottable@2/dist/pivot.min.js';
+    s.onload = cb;
+    document.head.appendChild(s);
+}
+
+function dashRenderChart(panelEl, vizType, fieldMap) {
+    var data = dashCollectPanelData(panelEl);
+    var canvas = panelEl.querySelector('.f-chart-canvas');
+    var chartWrap = panelEl.querySelector('.f-chart-wrap');
+    var tableWrap = panelEl.querySelector('.f-table-wrap');
+    var pivotWrap = panelEl.querySelector('.f-pivot-wrap');
+
+    // Destroy old chart if any
+    if (canvas._chartInstance) {
+        canvas._chartInstance.destroy();
+        canvas._chartInstance = null;
+    }
+
+    tableWrap.style.display = 'none';
+    pivotWrap.style.display = 'none';
+
+    if (vizType === 'table') {
+        tableWrap.style.display = '';
+        chartWrap.style.display = 'none';
+        return;
+    }
+
+    if (vizType === 'pivot') {
+        chartWrap.style.display = 'none';
+        pivotWrap.style.display = '';
+        dashRenderPivot(panelEl, pivotWrap, data, fieldMap);
+        return;
+    }
+
+    chartWrap.style.display = '';
+
+    dashEnsureChartJs(function() {
+        var labels = data.labels;
+        var chartType, chartDatasets, options = {};
+
+        if (vizType === 'pie') {
+            chartType = 'pie';
+            var vals = data.datasets.length ? data.datasets[0].data : [];
+            chartDatasets = [{
+                data: vals,
+                backgroundColor: labels.map(function(_, i) { return CHART_COLORS[i % CHART_COLORS.length]; })
+            }];
+            options = { plugins: { legend: { position: 'right' } } };
+
+        } else if (vizType === 'line') {
+            chartType = 'line';
+            chartDatasets = data.datasets.map(function(ds, i) {
+                return { label: ds.label, data: ds.data, borderColor: CHART_COLORS[i % CHART_COLORS.length], backgroundColor: CHART_COLORS[i % CHART_COLORS.length], tension: 0.3, fill: false };
+            });
+
+        } else if (vizType === 'area') {
+            chartType = 'line';
+            chartDatasets = data.datasets.map(function(ds, i) {
+                return { label: ds.label, data: ds.data, borderColor: CHART_COLORS[i % CHART_COLORS.length], backgroundColor: CHART_COLORS[i % CHART_COLORS.length].replace('0.7', '0.3'), tension: 0.3, fill: true };
+            });
+
+        } else if (vizType === 'bar') {
+            var barMode = (fieldMap && fieldMap.barMode) || 'grouped';
+            chartType = 'bar';
+            chartDatasets = data.datasets.map(function(ds, i) {
+                return { label: ds.label, data: ds.data, backgroundColor: CHART_COLORS[i % CHART_COLORS.length] };
+            });
+            options = { scales: { x: { stacked: barMode === 'stacked' || barMode === 'combo' }, y: { stacked: barMode === 'stacked' } } };
+
+        } else if (vizType === 'bubble') {
+            chartType = 'bubble';
+            // Use first 3 datasets as x, y, r
+            var xData = (data.datasets[0] || { data: [] }).data;
+            var yData = (data.datasets[1] || data.datasets[0] || { data: [] }).data;
+            var rData = (data.datasets[2] || data.datasets[0] || { data: [] }).data;
+            chartDatasets = [{
+                label: panelEl.querySelector('h4') ? panelEl.querySelector('h4').textContent : '',
+                data: labels.map(function(lbl, i) {
+                    return { x: xData[i] || 0, y: yData[i] || 0, r: Math.max(3, Math.abs(rData[i] || 5)) };
+                }),
+                backgroundColor: CHART_COLORS[0]
+            }];
+        }
+
+        canvas._chartInstance = new Chart(canvas, {
+            type: chartType,
+            data: { labels: labels, datasets: chartDatasets },
+            options: options
+        });
+    });
+}
+
+function dashRenderPivot(panelEl, pivotWrap, data, fieldMap) {
+    if (!window.jQuery || !window.jQuery.fn || !window.jQuery.fn.pivotUI) {
+        dashEnsurePivotJs(function() {
+            dashRenderPivot(panelEl, pivotWrap, data, fieldMap);
+        });
+        return;
+    }
+    pivotWrap.innerHTML = '';
+    // Build flat records array for pivottable
+    var records = data.labels.map(function(lbl, i) {
+        var rec = { 'Строка': lbl };
+        data.datasets.forEach(function(ds) {
+            rec[ds.label || 'Значение'] = ds.data[i] || 0;
+        });
+        return rec;
+    });
+    window.jQuery(pivotWrap).pivotUI(records, {
+        rows: fieldMap && fieldMap.pivotRows ? [fieldMap.pivotRows] : ['Строка'],
+        cols: fieldMap && fieldMap.pivotCols ? [fieldMap.pivotCols] : [],
+        aggregatorName: 'Sum',
+        vals: fieldMap && fieldMap.pivotVals ? [fieldMap.pivotVals] : (data.datasets[0] ? [data.datasets[0].label || 'Значение'] : [])
+    });
+}
+
+function dashPanelApplySettings(panelKey, settings, renderChart) {
+    var panel = document.getElementById(panelKey);
+    if (!panel) return;
+    if (!settings) return;
+
+    // Normalize: settings can be a single object {type:...} or an array
+    var vizList = Array.isArray(settings) ? settings : [settings];
+    var enabled = vizList.filter(function(v) { return v && v.type; });
+    if (!enabled.length) return;
+
+    // Build visualization type icons
+    dashUpdatePanelVizIcons(panel, enabled);
+
+    if (!renderChart) return;
+
+    // Find default or first enabled
+    var def = enabled.find(function(v) { return v.default; }) || enabled[0];
+    if (def && def.type && def.type !== 'table') {
+        dashRenderChart(panel, def.type, def.fieldMap || {});
+    }
+}
+
+function dashUpdatePanelVizIcons(panel, enabled) {
+    var container = panel.querySelector('.f-panel-viz-icons');
+    if (!container) return;
+    container.innerHTML = '';
+
+    // Always add table icon first
+    var allTypes = [{ type: 'table' }].concat(enabled.filter(function(v) { return v.type !== 'table'; }));
+    allTypes.forEach(function(viz) {
+        var typeInfo = DASH_VIZ_TYPES.find(function(t) { return t.id === viz.type; }) || DASH_VIZ_TYPES[0];
+        var btn = document.createElement('a');
+        btn.className = 'f-viz-type-icon';
+        btn.title = typeInfo.label;
+        btn.dataset.vizType = viz.type;
+        btn.innerHTML = '<i class="pi ' + typeInfo.icon + '"></i>';
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            container.querySelectorAll('.f-viz-type-icon').forEach(function(b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+            var modelData = dashModelData[panel.id] || {};
+            var s = modelData.settings;
+            var vizList = s ? (Array.isArray(s) ? s : [s]) : [];
+            var vizCfg = vizList.find(function(v) { return v.type === viz.type; }) || {};
+            dashRenderChart(panel, viz.type, vizCfg.fieldMap || {});
+        });
+        container.appendChild(btn);
+    });
+
+    // Mark current default as active
+    var settings = (dashModelData[panel.id] || {}).settings;
+    var vizList = settings ? (Array.isArray(settings) ? settings : [settings]) : [];
+    var def = vizList.find(function(v) { return v.default; }) || vizList[0];
+    var activeType = def ? def.type : 'table';
+    var activeBtn = container.querySelector('[data-viz-type="' + activeType + '"]');
+    if (activeBtn) activeBtn.classList.add('active');
+}
+
+// Open visualization settings modal for a panel
+function dashOpenPanelVizSettings(panelEl) {
+    dashVizModalCtx = { panelEl: panelEl, panelKey: panelEl.id };
+    var settings = (dashModelData[panelEl.id] || {}).settings;
+    var vizList = settings ? (Array.isArray(settings) ? settings : [settings]) : [];
+
+    var accordion = document.getElementById('dash-viz-accordion');
+    accordion.innerHTML = '';
+
+    // Skip 'table' in the accordion (it's always available)
+    DASH_VIZ_TYPES.filter(function(t) { return t.id !== 'table'; }).forEach(function(typeInfo) {
+        var existing = vizList.find(function(v) { return v.type === typeInfo.id; }) || null;
+        var isChecked = !!existing;
+        var isDefault = existing && existing.default;
+
+        var item = document.createElement('div');
+        item.className = 'dash-viz-accordion-item';
+        item.dataset.vizType = typeInfo.id;
+
+        var headerHtml = '<div class="dash-viz-accordion-header">'
+            + '<label class="dash-viz-check-label">'
+            + '<input type="checkbox" class="dash-viz-check" data-viz-type="' + typeInfo.id + '"' + (isChecked ? ' checked' : '') + '>'
+            + '<i class="pi ' + typeInfo.icon + '"></i>'
+            + '<span>' + typeInfo.label + '</span>'
+            + '</label>'
+            + '<label class="dash-viz-default-label" title="По умолчанию">'
+            + '<input type="radio" name="dash-viz-default" class="dash-viz-default" value="' + typeInfo.id + '"' + (isDefault ? ' checked' : '') + (isChecked ? '' : ' disabled') + '>'
+            + 'По умолчанию'
+            + '</label>'
+            + '</div>';
+
+        var fieldMapHtml = '<div class="dash-viz-fieldmap" style="' + (isChecked ? '' : 'display:none') + '">';
+        fieldMapHtml += dashBuildFieldMapHtml(typeInfo.id, existing ? existing.fieldMap : null, panelEl);
+        fieldMapHtml += '</div>';
+
+        item.innerHTML = headerHtml + fieldMapHtml;
+
+        // Toggle fieldmap and default radio on checkbox change
+        item.querySelector('.dash-viz-check').addEventListener('change', function(e) {
+            var checked = e.target.checked;
+            item.querySelector('.dash-viz-fieldmap').style.display = checked ? '' : 'none';
+            item.querySelector('.dash-viz-default').disabled = !checked;
+            if (!checked && item.querySelector('.dash-viz-default').checked) {
+                item.querySelector('.dash-viz-default').checked = false;
+            }
+        });
+
+        accordion.appendChild(item);
+    });
+
+    document.getElementById('dash-viz-modal').classList.add('open');
+}
+
+function dashBuildFieldMapHtml(vizType, fieldMap, panelEl) {
+    var cols = dashPanelGetColumns(panelEl);
+    var rows = dashPanelGetRows(panelEl);
+    var allFields = cols.length ? cols : rows;
+    var fm = fieldMap || {};
+
+    var optionsHtml = '<option value="">(не задано)</option>';
+    allFields.forEach(function(f) {
+        optionsHtml += '<option value="' + dashAttr(f) + '">' + f + '</option>';
+    });
+
+    function sel(name, label, val) {
+        return '<div class="dash-viz-field-row"><label>' + label + '</label>'
+            + '<select name="' + name + '">'
+            + optionsHtml.replace('value="' + dashAttr(val) + '"', 'value="' + dashAttr(val) + '" selected')
+            + '</select></div>';
+    }
+
+    if (vizType === 'bar') {
+        var barMode = fm.barMode || 'grouped';
+        return '<div class="dash-viz-field-row"><label>Режим</label>'
+            + '<select name="barMode">'
+            + '<option value="grouped"' + (barMode === 'grouped' ? ' selected' : '') + '>Группы столбиков</option>'
+            + '<option value="stacked"' + (barMode === 'stacked' ? ' selected' : '') + '>Сегменты</option>'
+            + '<option value="combo"' + (barMode === 'combo' ? ' selected' : '') + '>Комбинация</option>'
+            + '</select></div>';
+    }
+    if (vizType === 'bubble') {
+        return sel('bubbleX', 'X (ось)', fm.bubbleX || '')
+            + sel('bubbleY', 'Y (ось)', fm.bubbleY || '')
+            + sel('bubbleR', 'Размер', fm.bubbleR || '');
+    }
+    if (vizType === 'pivot') {
+        return sel('pivotRows', 'Строки', fm.pivotRows || '')
+            + sel('pivotCols', 'Столбцы', fm.pivotCols || '')
+            + sel('pivotVals', 'Значения', fm.pivotVals || '');
+    }
+    return '<div class="dash-viz-field-row dash-viz-field-hint">Поля подбираются автоматически из данных панели.</div>';
+}
+
+function dashVizModalCollectSettings() {
+    var accordion = document.getElementById('dash-viz-accordion');
+    var result = [];
+    accordion.querySelectorAll('.dash-viz-accordion-item').forEach(function(item) {
+        var vizType = item.dataset.vizType;
+        var checked = item.querySelector('.dash-viz-check').checked;
+        if (!checked) return;
+        var isDefault = item.querySelector('.dash-viz-default').checked;
+        var fieldMap = {};
+        item.querySelectorAll('.dash-viz-fieldmap select').forEach(function(sel) {
+            if (sel.name && sel.value) fieldMap[sel.name] = sel.value;
+        });
+        var entry = { type: vizType, fieldMap: fieldMap };
+        if (isDefault) entry.default = true;
+        result.push(entry);
+    });
+    return result;
+}
+
+document.getElementById('dash-viz-cancel').addEventListener('click', function() {
+    document.getElementById('dash-viz-modal').classList.remove('open');
+    dashVizModalCtx = null;
+});
+
+document.getElementById('dash-viz-save').addEventListener('click', function() {
+    if (!dashVizModalCtx) return;
+    var settings = dashVizModalCollectSettings();
+    var panelEl = dashVizModalCtx.panelEl;
+    var panelKey = dashVizModalCtx.panelKey;
+    var panelID = (dashModelData[panelKey] || {}).panelID || '';
+    var jsonStr = JSON.stringify(settings);
+    document.getElementById('dash-viz-modal').classList.remove('open');
+    dashVizModalCtx = null;
+
+    if (panelID) {
+        newApi('POST', '_m_set/' + panelID + '?JSON', 'dashVizSettingsSaved',
+            't1165=' + encodeURIComponent(jsonStr),
+            { panelEl: panelEl, panelKey: panelKey, settings: settings });
+    } else {
+        dashApplyNewVizSettings(panelEl, panelKey, settings);
+    }
+});
+
+window.dashVizSettingsSaved = function(json, ctx) {
+    if (!json || json.error) { dashSetStatus('Ошибка сохранения настроек'); return; }
+    dashApplyNewVizSettings(ctx.panelEl, ctx.panelKey, ctx.settings);
+    dashSetStatus('Настройки сохранены');
+};
+
+function dashApplyNewVizSettings(panelEl, panelKey, settings) {
+    if (dashModelData[panelKey]) dashModelData[panelKey].settings = settings;
+    var enabled = settings.filter(function(v) { return v && v.type; });
+    dashUpdatePanelVizIcons(panelEl, enabled);
+    var def = enabled.find(function(v) { return v.default; }) || enabled[0];
+    if (def) {
+        dashRenderChart(panelEl, def.type, def.fieldMap || {});
+    } else {
+        // No enabled: show table
+        panelEl.querySelector('.f-table-wrap').style.display = '';
+        panelEl.querySelector('.f-chart-wrap').style.display = 'none';
+        panelEl.querySelector('.f-pivot-wrap').style.display = 'none';
+    }
+}
+
+// Event delegation for panel settings icon clicks
+document.addEventListener('click', function(e) {
+    var icon = e.target.closest('.f-panel-settings-icon');
+    if (!icon) return;
+    var panel = icon.closest('.f-panel');
+    if (panel) dashOpenPanelVizSettings(panel);
+});
 
 function dashReset() {
     dashModelData = {}; dashPeriodData = {}; dashPeriods = {}; dashValues = {};
