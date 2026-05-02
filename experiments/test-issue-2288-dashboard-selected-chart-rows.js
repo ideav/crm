@@ -1,6 +1,7 @@
 // Test for issue #2288: dashboard charts can be limited to selected rows.
 // Before the fix, dashCollectPanelData always used every .f-item row and the
 // visualization settings modal could not persist row-level selection.
+// Issue #2292 adds a master checkbox to check or clear every row at once.
 
 const fs = require('fs');
 const vm = require('vm');
@@ -106,7 +107,42 @@ function makeSettingsItem(rowChecks) {
     };
 }
 
+function makeRowBulkGroup(rowChecks) {
+    const allCheck = {
+        checked: false,
+        indeterminate: false,
+        listeners: {},
+        addEventListener(eventName, handler) {
+            this.listeners[eventName] = handler;
+        }
+    };
+    rowChecks.forEach(check => {
+        check.listeners = {};
+        check.addEventListener = function(eventName, handler) {
+            this.listeners[eventName] = handler;
+        };
+    });
+    const group = {
+        querySelector(selector) {
+            if (selector === '.dash-viz-row-all-check') return allCheck;
+            return null;
+        },
+        querySelectorAll(selector) {
+            if (selector === '.dash-viz-row-check') return rowChecks;
+            return [];
+        }
+    };
+    const item = {
+        querySelectorAll(selector) {
+            if (selector === '.dash-viz-rows-group') return [group];
+            return [];
+        }
+    };
+    return { allCheck, group, item, rowChecks };
+}
+
 const code = `
+${extractFunction('dashAttr')}
 ${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashPanelGetColumns')}
@@ -116,6 +152,9 @@ ${extractFunctionIfPresent('dashPanelGetRowKey')}
 ${extractFunctionIfPresent('dashPanelGetRowName')}
 ${extractFunctionIfPresent('dashPanelFilterRows')}
 ${extractFunctionIfPresent('dashCollectVizSelectedRows')}
+${extractFunction('dashBuildVizRowsHtml')}
+${extractFunction('dashSyncVizRowAllCheck')}
+${extractFunction('dashInitVizRowBulkControls')}
 ${extractFunction('dashCollectPanelData')}
 function dashCollectVizSize() { return null; }
 ${extractFunction('dashVizModalCollectSettings')}
@@ -213,4 +252,43 @@ vm.runInContext(code, ctx);
     assert(settings[0].selectedRows === undefined, 'all checked rows are stored as default all rows');
 }
 
-console.log('\nissue-2288 dashboard selected chart rows: ok');
+{
+    const rows = [
+        makeItemRow('row-a', 'Metric A', [makeCell('Jan', '10')]),
+        makeItemRow('row-b', 'Metric B', [makeCell('Jan', '30')])
+    ];
+    const html = ctx.dashBuildVizRowsHtml(['row-a'], makePanelEl([], rows));
+
+    assert(html.indexOf('dash-viz-row-all-check') !== -1, 'row selector renders a master checkbox');
+    assert(html.indexOf('Все строки') !== -1, 'master checkbox is labeled for all rows');
+}
+
+{
+    const bulk = makeRowBulkGroup([
+        { value: 'row-a', checked: true },
+        { value: 'row-b', checked: false },
+        { value: 'row-c', checked: false }
+    ]);
+
+    ctx.dashInitVizRowBulkControls(bulk.item);
+
+    assertEqual(bulk.allCheck.checked, false, 'master checkbox is unchecked for partial row selection');
+    assertEqual(bulk.allCheck.indeterminate, true, 'master checkbox is indeterminate for partial row selection');
+
+    bulk.allCheck.checked = true;
+    bulk.allCheck.listeners.change();
+    assert(bulk.rowChecks.every(check => check.checked), 'checking master checkbox checks every row');
+    assertEqual(bulk.allCheck.indeterminate, false, 'master checkbox is not indeterminate when every row is checked');
+
+    bulk.allCheck.checked = false;
+    bulk.allCheck.listeners.change();
+    assert(bulk.rowChecks.every(check => !check.checked), 'clearing master checkbox clears every row');
+    assertEqual(bulk.allCheck.indeterminate, false, 'master checkbox is not indeterminate when every row is clear');
+
+    bulk.rowChecks[1].checked = true;
+    bulk.rowChecks[1].listeners.change();
+    assertEqual(bulk.allCheck.checked, false, 'master checkbox remains unchecked after one row is checked');
+    assertEqual(bulk.allCheck.indeterminate, true, 'master checkbox returns to indeterminate after one row is checked');
+}
+
+console.log('\nissue-2288/2292 dashboard selected chart rows: ok');

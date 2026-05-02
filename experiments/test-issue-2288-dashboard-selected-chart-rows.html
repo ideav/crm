@@ -39,7 +39,13 @@
                     <div class="dash-viz-fieldmap">
                         <div class="dash-viz-field-row dash-viz-field-hint">Поля подбираются автоматически из данных панели.</div>
                         <div class="dash-viz-rows-group">
-                            <div class="dash-viz-rows-title">Строки на графике</div>
+                            <div class="dash-viz-rows-head">
+                                <div class="dash-viz-rows-title">Строки на графике</div>
+                                <label class="dash-viz-row-all-option">
+                                    <input type="checkbox" class="dash-viz-row-all-check">
+                                    <span>Все строки</span>
+                                </label>
+                            </div>
                             <div class="dash-viz-rows-list">
                                 <label class="dash-viz-row-option">
                                     <input type="checkbox" class="dash-viz-row-check" value="101" checked>
@@ -93,5 +99,8 @@
             </div>
         </div>
     </div>
+    <script>
+        document.querySelector('.dash-viz-row-all-check').indeterminate = true;
+    </script>
 </body>
 </html>

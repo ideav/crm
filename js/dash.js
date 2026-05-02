@@ -1690,6 +1690,7 @@ function dashOpenPanelVizSettings(panelEl) {
                 item.querySelector('.dash-viz-default').checked = false;
             }
         });
+        dashInitVizRowBulkControls(item);
 
         accordion.appendChild(item);
     });
@@ -1740,23 +1741,70 @@ function dashBuildFieldMapHtml(vizType, fieldMap, panelEl) {
 function dashBuildVizRowsHtml(selectedRows, panelEl) {
     var rows = Array.from(panelEl.querySelectorAll('.f-item'))
         , selected = dashNormalizeSelectedRows(selectedRows)
+        , rowItems = []
+        , allChecked = true
         , html = '';
     if (!rows.length) return '';
 
-    html += '<div class="dash-viz-rows-group">'
-        + '<div class="dash-viz-rows-title">Строки на графике</div>'
-        + '<div class="dash-viz-rows-list">';
     rows.forEach(function(row) {
         var key = dashPanelGetRowKey(row)
             , name = dashPanelGetRowName(row)
             , checked = selected === null || selected[key] || selected[name];
+        if (!checked) allChecked = false;
+        rowItems.push({ key: key, name: name, checked: checked });
+    });
+
+    html += '<div class="dash-viz-rows-group">'
+        + '<div class="dash-viz-rows-head">'
+        + '<div class="dash-viz-rows-title">Строки на графике</div>'
+        + '<label class="dash-viz-row-all-option">'
+        + '<input type="checkbox" class="dash-viz-row-all-check"' + (allChecked ? ' checked' : '') + '>'
+        + '<span>Все строки</span>'
+        + '</label>'
+        + '</div>'
+        + '<div class="dash-viz-rows-list">';
+    rowItems.forEach(function(row) {
         html += '<label class="dash-viz-row-option">'
-            + '<input type="checkbox" class="dash-viz-row-check" value="' + dashAttr(key) + '"' + (checked ? ' checked' : '') + '>'
-            + '<span>' + dashAttr(name) + '</span>'
+            + '<input type="checkbox" class="dash-viz-row-check" value="' + dashAttr(row.key) + '"' + (row.checked ? ' checked' : '') + '>'
+            + '<span>' + dashAttr(row.name) + '</span>'
             + '</label>';
     });
     html += '</div></div>';
     return html;
+}
+
+function dashSyncVizRowAllCheck(group) {
+    var allCheck = group ? group.querySelector('.dash-viz-row-all-check') : null
+        , checks = group ? Array.from(group.querySelectorAll('.dash-viz-row-check')) : [];
+    if (!allCheck || !checks.length) return;
+
+    var checkedCount = checks.filter(function(check) { return check.checked; }).length;
+    allCheck.checked = checkedCount === checks.length;
+    allCheck.indeterminate = checkedCount > 0 && checkedCount < checks.length;
+}
+
+function dashInitVizRowBulkControls(item) {
+    if (!item) return;
+    item.querySelectorAll('.dash-viz-rows-group').forEach(function(group) {
+        var allCheck = group.querySelector('.dash-viz-row-all-check')
+            , checks = Array.from(group.querySelectorAll('.dash-viz-row-check'));
+        if (!allCheck || !checks.length) return;
+
+        allCheck.addEventListener('change', function() {
+            checks.forEach(function(check) {
+                check.checked = allCheck.checked;
+            });
+            dashSyncVizRowAllCheck(group);
+        });
+
+        checks.forEach(function(check) {
+            check.addEventListener('change', function() {
+                dashSyncVizRowAllCheck(group);
+            });
+        });
+
+        dashSyncVizRowAllCheck(group);
+    });
 }
 
 function dashBuildVizSizeUnitOptions(selected) {
