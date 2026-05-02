@@ -1298,10 +1298,21 @@ function dashEnsurePivotJs(cb) {
         lnk.href = 'https://cdn.jsdelivr.net/npm/pivottable@2/dist/pivot.min.css';
         document.head.appendChild(lnk);
     }
-    var s = document.createElement('script');
-    s.src = 'https://cdn.jsdelivr.net/npm/pivottable@2/dist/pivot.min.js';
-    s.onload = cb;
-    document.head.appendChild(s);
+    function loadPivot() {
+        var s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/pivottable@2/dist/pivot.min.js';
+        s.onload = cb;
+        document.head.appendChild(s);
+    }
+    // pivot.min.js requires jQuery — load it first if not present
+    if (!window.jQuery) {
+        var jq = document.createElement('script');
+        jq.src = 'https://cdn.jsdelivr.net/npm/jquery@3/dist/jquery.min.js';
+        jq.onload = loadPivot;
+        document.head.appendChild(jq);
+    } else {
+        loadPivot();
+    }
 }
 
 function dashRenderChart(panelEl, vizType, fieldMap) {
