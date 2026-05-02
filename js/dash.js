@@ -1289,7 +1289,7 @@ function dashEnsureChartJs(cb) {
 }
 
 function dashEnsurePivotJs(cb) {
-    if (window.$.pivotUI) { cb(); return; }
+    if (window.jQuery && window.jQuery.fn && window.jQuery.fn.pivotUI) { cb(); return; }
     // Load pivottable.js CSS
     if (!document.getElementById('pivottable-css')) {
         var lnk = document.createElement('link');
