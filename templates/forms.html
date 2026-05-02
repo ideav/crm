@@ -1058,7 +1058,7 @@ function showConfirmModal(message, onConfirm) {
 
     var modal = document.createElement('div');
     modal.style.cssText = 'background:var(--card-bg,#fff);color:var(--text-primary,#212529);border-radius:8px;padding:24px;max-width:400px;width:90%;box-shadow:0 4px 16px rgba(0,0,0,0.2);';
-    modal.innerHTML = '<p style="margin:0 0 20px 0;">' + message + '</p><div style="display:flex;gap:8px;justify-content:flex-end;"><button class="btn-cancel" style="padding:8px 16px;border:1px solid var(--border-color,#dee2e6);border-radius:4px;background:transparent;color:var(--text-primary,#212529);cursor:pointer;">Отмена</button><button class="btn-confirm" style="padding:8px 16px;border:none;border-radius:4px;background:var(--color-danger,#dc3545);color:white;cursor:pointer;">Удалить</button></div>';
+    modal.innerHTML = '<p style="margin:0 0 20px 0;">' + message + '</p><div style="display:flex;gap:8px;justify-content:flex-end;"><button class="btn-cancel" style="padding:8px 16px;border:1px solid var(--border-color,#dee2e6);border-radius:4px;background:transparent;color:var(--text-primary,#212529);cursor:pointer;">Отменить</button><button class="btn-confirm" style="padding:8px 16px;border:none;border-radius:4px;background:var(--color-danger,#dc3545);color:white;cursor:pointer;">Удалить</button></div>';
 
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
