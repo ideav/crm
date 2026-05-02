@@ -1242,36 +1242,36 @@ function dashPanelGetRows(panelEl) {
 }
 
 function dashCollectPanelData(panelEl) {
-    var labels = [], datasets = [], cols = dashPanelGetColumns(panelEl);
-    panelEl.querySelectorAll('.f-item').forEach(function(tr) {
-        labels.push(tr.getAttribute('item-name') || '');
-    });
+    var datasets = [], cols = dashPanelGetColumns(panelEl);
+    var itemRows = Array.from(panelEl.querySelectorAll('.f-item'));
 
     if (cols.length === 0) {
-        // Single value column
-        var vals = [];
-        panelEl.querySelectorAll('.f-item').forEach(function(tr) {
+        // Single value column — one dataset, labels are row names
+        var labels = [], vals = [];
+        itemRows.forEach(function(tr) {
+            labels.push(tr.getAttribute('item-name') || '');
             var td = tr.querySelector('td.f-cell');
             vals.push(dashGetFloat(td ? td.textContent.trim() : '') || 0);
         });
         datasets.push({ label: '', data: vals });
-    } else {
-        cols.forEach(function(col, ci) {
-            var vals = [];
-            panelEl.querySelectorAll('.f-item').forEach(function(tr) {
-                var cells = Array.from(tr.querySelectorAll('td.f-cell'));
-                // Find cells matching this column
-                var matching = cells.filter(function(td) {
-                    return (td.dataset.rgCol || '') === col || (td.dataset.rgHead || '') === col;
-                });
-                var sum = 0;
-                matching.forEach(function(td) { sum += dashGetFloat(td.textContent.trim()) || 0; });
-                vals.push(matching.length ? sum : 0);
-            });
-            datasets.push({ label: col, data: vals });
-        });
+        return { labels: labels, datasets: datasets };
     }
-    return { labels: labels, datasets: datasets };
+
+    // Multiple columns: columns are X-axis labels, each row is a dataset
+    itemRows.forEach(function(tr) {
+        var rowName = tr.getAttribute('item-name') || '';
+        var vals = cols.map(function(col) {
+            var cells = Array.from(tr.querySelectorAll('td.f-cell'));
+            var matching = cells.filter(function(td) {
+                return (td.dataset.rgCol || '') === col || (td.dataset.rgHead || '') === col;
+            });
+            var sum = 0;
+            matching.forEach(function(td) { sum += dashGetFloat(td.textContent.trim()) || 0; });
+            return matching.length ? sum : 0;
+        });
+        datasets.push({ label: rowName, data: vals });
+    });
+    return { labels: cols, datasets: datasets };
 }
 
 var CHART_COLORS = [
