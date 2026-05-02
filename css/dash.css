@@ -397,14 +397,21 @@ td:has(.dash-cell-input) {
 }
 .f-viz-type-icon:hover { color: var(--text-primary, #212529); background: var(--bg-secondary, #f0f0f0); }
 .f-viz-type-icon.active { color: var(--text-primary, #212529); border-color: var(--border-color, #ced4da); background: var(--bg-secondary, #f8f9fa); }
+/* Panel in chart/pivot mode expands to fill available row width */
+.f-panel--chart {
+    flex: 1 1 100%;
+}
 /* Chart and pivot containers */
 .f-chart-wrap {
     min-height: 200px;
-    max-width: 100%;
+    width: 100%;
+    position: relative;
 }
 .f-chart-canvas {
-    max-width: 100%;
+    display: block;
+    width: 100% !important;
 }
+
 .f-pivot-wrap {
     overflow: auto;
     font-size: 0.85rem;

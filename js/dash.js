@@ -1337,17 +1337,20 @@ function dashRenderChart(panelEl, vizType, fieldMap) {
     if (vizType === 'table') {
         tableWrap.style.display = '';
         chartWrap.style.display = 'none';
+        panelEl.classList.remove('f-panel--chart');
         return;
     }
 
     if (vizType === 'pivot') {
         chartWrap.style.display = 'none';
         pivotWrap.style.display = '';
+        panelEl.classList.add('f-panel--chart');
         dashRenderPivot(panelEl, pivotWrap, data, fieldMap);
         return;
     }
 
     chartWrap.style.display = '';
+    panelEl.classList.add('f-panel--chart');
 
     dashEnsureChartJs(function() {
         var labels = data.labels;
@@ -1642,6 +1645,7 @@ function dashApplyNewVizSettings(panelEl, panelKey, settings) {
         panelEl.querySelector('.f-table-wrap').style.display = '';
         panelEl.querySelector('.f-chart-wrap').style.display = 'none';
         panelEl.querySelector('.f-pivot-wrap').style.display = 'none';
+        panelEl.classList.remove('f-panel--chart');
     }
 }
 
