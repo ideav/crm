@@ -1755,6 +1755,13 @@ document.getElementById('dash-viz-cancel').addEventListener('click', function() 
     dashVizModalCtx = null;
 });
 
+document.getElementById('dash-viz-modal').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        document.getElementById('dash-viz-save').click();
+    }
+});
+
 document.getElementById('dash-viz-save').addEventListener('click', function() {
     if (!dashVizModalCtx) return;
     var settings = dashVizModalCollectSettings();
