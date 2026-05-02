@@ -60,7 +60,7 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
     , panelTpl    = '<div id=":id:" f-period=":period:" class="f-panel pt-3"><h4>:name:</h4><div class="f-table-wrap"><table class="table table-sm table-bordered w-auto"><thead><tr class="dash-head f-head"><th>:head:</thead><tbody></tbody></table></div></div>'
     , headTpl     = '<th range=":from:-:to:">:head:'
     , itemTpl     = '<tr class="dash-item f-item" id=":id:" item-name=":name:"><td class="dash-first-cell f-first-cell" style="padding-left::pl:.2rem"><div class="show-id"><span onclick="dashCopy2Buffer(:id:)">:id:</span>'
-        + ' <a href="/' + db + '/table/Строка?F_I=:id:" target="edit-item">'
+        + ' <a href="/' + db + '/table/Строка?F_U=:panel-id:&F_I=:id:" target="edit-item">'
         + '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg" style="margin-top:-4px;">'
         + '<path d="M17.2857 13.09V17.2857C17.2857 17.7025 17.1201 18.1022 16.8254 18.3969C16.5307 18.6916 16.1311 18.8572 15.7143 18.8572H4.71428C4.29751 18.8572 3.89781 18.6916 3.60311 18.3969C3.30841 18.1022 3.14285 17.7025 3.14285 17.2857V6.28574C3.14285 5.86897 3.30841 5.46927 3.60311 5.17457C3.89781 4.87987 4.29751 4.71431 4.71428 4.71431H8.91M15.7143 3.14288L18.8571 6.28574L11 14.1429H7.85714V11L15.7143 3.14288Z" stroke="lightgray" stroke-linecap="round" stroke-linejoin="round"></path>'
         + '</svg></a></div>'
@@ -1115,6 +1115,7 @@ function dashGetModel(json) {
         if (json[i].itemID && !isDuplicateRow && !document.getElementById(json[i].itemID)) {
             document.getElementById(panelKey).querySelector('table tbody').insertAdjacentHTML('beforeend',
                 itemTpl.replace(/:id:/g, json[i].itemID)
+                    .replace(':panel-id:', json[i].panelID)
                     .replace(':pl:', Math.max(0, (json[i].level || 1) - 1))
                     .replace(/:name:/g, json[i].item));
         }
