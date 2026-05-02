@@ -90,6 +90,7 @@ elseif($z==="auth.asp" && !empty($_GET['error'])){
 elseif(!preg_match(DB_MASK, $z))
     die("Invalid database");
 
+include_once "include/report_sql.php";
 include "include/connection.php";
 # Check the DB existence
 $billing = mysqli_query($connection
@@ -2887,6 +2888,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     						//mywrite("fields $key => $value names:".$names[$key]." fields: ".$fields[$key]." display: ".$fieldsAll[$key]." ".$fieldsName[$key]);
     						$groupBy[$master] .= substr($displayName[$key],0,1) == "'" ? $fieldsAll[$key] : $fieldsName[$key]; # Fix a mysql bug https://bugs.mysql.com/bug.php?id=14019
     					}
+			$distinct = ReportDistinctClause($distinct, isset($group) ? $group : "");
 # Construct the HAVING clause, if applicable
 			$GLOBALS["CONDS"] = array();
 			foreach($GLOBALS["STORED_REPS"][$id]["head"] as $key => $value)
