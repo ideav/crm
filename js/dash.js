@@ -1240,20 +1240,51 @@ function dashPanelGetColumns(panelEl) {
 function dashPanelGetRows(panelEl) {
     var rows = [];
     panelEl.querySelectorAll('.f-item').forEach(function(tr) {
-        rows.push(tr.getAttribute('item-name') || '');
+        rows.push(dashPanelGetRowName(tr));
     });
     return rows;
 }
 
-function dashCollectPanelData(panelEl) {
+function dashPanelGetRowName(row) {
+    return row ? (row.getAttribute('item-name') || '') : '';
+}
+
+function dashPanelGetRowKey(row) {
+    return String((row && row.id) || dashPanelGetRowName(row) || '');
+}
+
+function dashNormalizeSelectedRows(selectedRows) {
+    var selected = {};
+    if (!Array.isArray(selectedRows)) return null;
+    selectedRows.forEach(function(row) {
+        var key = String(row || '');
+        if (key) selected[key] = true;
+    });
+    return selected;
+}
+
+function dashPanelFilterRows(rows, selectedRows) {
+    var selected = dashNormalizeSelectedRows(selectedRows);
+    if (selected === null) return rows;
+    return rows.filter(function(row) {
+        return !!(selected[dashPanelGetRowKey(row)] || selected[dashPanelGetRowName(row)]);
+    });
+}
+
+function dashCollectPanelData(panelEl, vizConfig) {
     var datasets = [], cols = dashPanelGetColumns(panelEl);
-    var itemRows = Array.from(panelEl.querySelectorAll('.f-item'));
+    var itemRows = dashPanelFilterRows(
+        Array.from(panelEl.querySelectorAll('.f-item')),
+        vizConfig ? vizConfig.selectedRows : null
+    );
+
+    if (!itemRows.length) return { labels: [], datasets: [] };
 
     if (cols.length === 0) {
         // Single value column — one dataset, labels are row names
         var labels = [], vals = [];
         itemRows.forEach(function(tr) {
-            labels.push(tr.getAttribute('item-name') || '');
+            labels.push(dashPanelGetRowName(tr));
             var td = tr.querySelector('td.f-cell');
             vals.push(dashGetFloat(td ? td.textContent.trim() : '') || 0);
         });
@@ -1263,7 +1294,7 @@ function dashCollectPanelData(panelEl) {
 
     // Multiple columns: columns are X-axis labels, each row is a dataset
     itemRows.forEach(function(tr) {
-        var rowName = tr.getAttribute('item-name') || '';
+        var rowName = dashPanelGetRowName(tr);
         var vals = cols.map(function(col) {
             var cells = Array.from(tr.querySelectorAll('td.f-cell'));
             var matching = cells.filter(function(td) {
@@ -1436,7 +1467,7 @@ function dashApplyVizSize(panelEl, vizType, vizConfig) {
 }
 
 function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
-    var data = dashCollectPanelData(panelEl);
+    var data = dashCollectPanelData(panelEl, vizConfig || {});
     var canvas = panelEl.querySelector('.f-chart-canvas');
     var chartWrap = panelEl.querySelector('.f-chart-wrap');
     var tableWrap = panelEl.querySelector('.f-table-wrap');
@@ -1644,6 +1675,7 @@ function dashOpenPanelVizSettings(panelEl) {
 
         var fieldMapHtml = '<div class="dash-viz-fieldmap" style="' + (isChecked ? '' : 'display:none') + '">';
         fieldMapHtml += dashBuildFieldMapHtml(typeInfo.id, existing ? existing.fieldMap : null, panelEl);
+        fieldMapHtml += dashBuildVizRowsHtml(existing ? existing.selectedRows : null, panelEl);
         fieldMapHtml += dashBuildVizSizeHtml(existing ? existing.size : null);
         fieldMapHtml += '</div>';
 
@@ -1705,6 +1737,28 @@ function dashBuildFieldMapHtml(vizType, fieldMap, panelEl) {
     return '<div class="dash-viz-field-row dash-viz-field-hint">Поля подбираются автоматически из данных панели.</div>';
 }
 
+function dashBuildVizRowsHtml(selectedRows, panelEl) {
+    var rows = Array.from(panelEl.querySelectorAll('.f-item'))
+        , selected = dashNormalizeSelectedRows(selectedRows)
+        , html = '';
+    if (!rows.length) return '';
+
+    html += '<div class="dash-viz-rows-group">'
+        + '<div class="dash-viz-rows-title">Строки на графике</div>'
+        + '<div class="dash-viz-rows-list">';
+    rows.forEach(function(row) {
+        var key = dashPanelGetRowKey(row)
+            , name = dashPanelGetRowName(row)
+            , checked = selected === null || selected[key] || selected[name];
+        html += '<label class="dash-viz-row-option">'
+            + '<input type="checkbox" class="dash-viz-row-check" value="' + dashAttr(key) + '"' + (checked ? ' checked' : '') + '>'
+            + '<span>' + dashAttr(name) + '</span>'
+            + '</label>';
+    });
+    html += '</div></div>';
+    return html;
+}
+
 function dashBuildVizSizeUnitOptions(selected) {
     selected = dashNormalizeVizSizeUnit(selected);
     return DASH_VIZ_SIZE_UNITS.map(function(unit) {
@@ -1750,6 +1804,18 @@ function dashCollectVizSize(item) {
     return result.width || result.height ? result : null;
 }
 
+function dashCollectVizSelectedRows(item) {
+    var checks = Array.from(item.querySelectorAll('.dash-viz-row-check'))
+        , selected = []
+        , unchecked = false;
+    if (!checks.length) return null;
+    checks.forEach(function(check) {
+        if (check.checked) selected.push(check.value);
+        else unchecked = true;
+    });
+    return unchecked ? selected : null;
+}
+
 function dashVizModalCollectSettings() {
     var accordion = document.getElementById('dash-viz-accordion');
     var result = [];
@@ -1760,11 +1826,13 @@ function dashVizModalCollectSettings() {
         var isDefault = item.querySelector('.dash-viz-default').checked;
         var fieldMap = {};
         var size = dashCollectVizSize(item);
+        var selectedRows = dashCollectVizSelectedRows(item);
         item.querySelectorAll('.dash-viz-fieldmap .dash-viz-field-select').forEach(function(sel) {
             if (sel.name && sel.value) fieldMap[sel.name] = sel.value;
         });
         var entry = { type: vizType, fieldMap: fieldMap };
         if (size) entry.size = size;
+        if (selectedRows !== null) entry.selectedRows = selectedRows;
         if (isDefault) entry.default = true;
         result.push(entry);
     });
