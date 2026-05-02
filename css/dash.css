@@ -533,11 +533,30 @@ td:has(.dash-cell-input) {
     padding-top: 0.6rem;
     border-top: 1px solid var(--border-color, #dee2e6);
 }
-.dash-viz-rows-title {
+.dash-viz-rows-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.75rem;
     margin-bottom: 0.4rem;
+}
+.dash-viz-rows-title {
+    margin: 0;
     color: var(--text-secondary, #6c757d);
     font-size: 0.82rem;
     font-weight: 600;
+}
+.dash-viz-row-all-option {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0;
+    color: var(--text-secondary, #6c757d);
+    font-size: 0.8rem;
+    line-height: 1.2;
+    cursor: pointer;
+    white-space: nowrap;
 }
 .dash-viz-rows-list {
     display: grid;
