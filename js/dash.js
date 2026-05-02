@@ -877,6 +877,7 @@ function dashDrawPeriods() {
                                             v = dashGetColVal(itemName, col);
                                             if (v || dashFormulas[row.id] === '[]') ready = 1;
                                         }
+                                        extra += ' data-rg-col="' + dashAttr(col) + '"';
                                         row.insertAdjacentHTML('beforeend',
                                             cellTpl.replace(':val:', dashNormalizeVal(row.id, v || ''))
                                                 .replace(':ready:', ready)
