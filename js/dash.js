@@ -1215,6 +1215,7 @@ var DASH_VIZ_TYPES = [
     { id: 'pivot',  label: 'Сводная таблица',        icon: 'pi-table' }
 ];
 
+var DASH_VIZ_SIZE_UNITS = ['%', 'px', 'rem'];
 var dashVizModalCtx = null; // { panelEl, panelKey }
 
 function dashPanelGetColumns(panelEl) {
@@ -1318,12 +1319,108 @@ function dashEnsurePivotJs(cb) {
     }
 }
 
-function dashRenderChart(panelEl, vizType, fieldMap) {
+function dashNormalizeVizSizeValue(value) {
+    var raw = String(value === undefined || value === null ? '' : value).trim().replace(',', '.')
+        , n;
+    if (!raw || !/^\d+(\.\d+)?$/.test(raw)) return '';
+    n = parseFloat(raw);
+    if (!isFinite(n) || n <= 0) return '';
+    return String(n);
+}
+
+function dashNormalizeVizSizeUnit(unit) {
+    unit = String(unit || '').trim();
+    return DASH_VIZ_SIZE_UNITS.indexOf(unit) === -1 ? 'px' : unit;
+}
+
+function dashNormalizeVizSizeDimension(dim) {
+    var value, unit, match;
+    if (!dim) return null;
+    if (typeof dim === 'string' || typeof dim === 'number') {
+        match = String(dim).trim().match(/^(\d+(?:[.,]\d+)?)(%|px|rem)?$/);
+        if (!match) return null;
+        value = match[1];
+        unit = match[2] || 'px';
+    } else {
+        value = dim.value;
+        unit = dim.unit;
+    }
+    value = dashNormalizeVizSizeValue(value);
+    if (!value) return null;
+    return { value: value, unit: dashNormalizeVizSizeUnit(unit) };
+}
+
+function dashNormalizeVizSize(size) {
+    var result = {}, width, height;
+    if (!size) return null;
+    width = dashNormalizeVizSizeDimension(size.width || (size.widthValue ? { value: size.widthValue, unit: size.widthUnit } : null));
+    height = dashNormalizeVizSizeDimension(size.height || (size.heightValue ? { value: size.heightValue, unit: size.heightUnit } : null));
+    if (width) result.width = width;
+    if (height) result.height = height;
+    return result.width || result.height ? result : null;
+}
+
+function dashVizSizeCss(dim) {
+    return dim ? dim.value + dim.unit : '';
+}
+
+function dashResetVizSizeStyles(el) {
+    if (!el || !el.style) return;
+    el.style.flex = '';
+    el.style.width = '';
+    el.style.maxWidth = '';
+    el.style.height = '';
+    el.style.maxHeight = '';
+    el.style.minHeight = '';
+}
+
+function dashApplyVizSize(panelEl, vizType, vizConfig) {
+    var chartWrap = panelEl.querySelector('.f-chart-wrap')
+        , pivotWrap = panelEl.querySelector('.f-pivot-wrap')
+        , canvas = panelEl.querySelector('.f-chart-canvas')
+        , size = dashNormalizeVizSize(vizConfig && vizConfig.size)
+        , targetWrap = vizType === 'pivot' ? pivotWrap : chartWrap
+        , widthCss = size && size.width ? dashVizSizeCss(size.width) : ''
+        , heightCss = size && size.height ? dashVizSizeCss(size.height) : '';
+
+    dashResetVizSizeStyles(panelEl);
+    dashResetVizSizeStyles(chartWrap);
+    dashResetVizSizeStyles(pivotWrap);
+    if (canvas && canvas.style) {
+        canvas.style.height = '';
+        canvas.style.maxHeight = '';
+    }
+
+    if (vizType === 'table' || !size) return size;
+
+    if (widthCss) {
+        panelEl.style.flex = '0 1 ' + widthCss;
+        panelEl.style.width = '100%';
+        panelEl.style.maxWidth = widthCss;
+        if (targetWrap) {
+            targetWrap.style.width = '100%';
+            targetWrap.style.maxWidth = widthCss;
+        }
+    }
+    if (heightCss && targetWrap) {
+        targetWrap.style.height = heightCss;
+        targetWrap.style.maxHeight = heightCss;
+        targetWrap.style.minHeight = '0';
+        if (canvas && vizType !== 'pivot') {
+            canvas.style.height = '100%';
+            canvas.style.maxHeight = '100%';
+        }
+    }
+    return size;
+}
+
+function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
     var data = dashCollectPanelData(panelEl);
     var canvas = panelEl.querySelector('.f-chart-canvas');
     var chartWrap = panelEl.querySelector('.f-chart-wrap');
     var tableWrap = panelEl.querySelector('.f-table-wrap');
     var pivotWrap = panelEl.querySelector('.f-pivot-wrap');
+    var vizSize = dashApplyVizSize(panelEl, vizType, vizConfig || {});
 
     // Destroy old chart if any
     if (canvas._chartInstance) {
@@ -1400,6 +1497,8 @@ function dashRenderChart(panelEl, vizType, fieldMap) {
             }];
         }
 
+        if (vizSize && vizSize.height) options.maintainAspectRatio = false;
+
         canvas._chartInstance = new Chart(canvas, {
             type: chartType,
             data: { labels: labels, datasets: chartDatasets },
@@ -1450,7 +1549,7 @@ function dashPanelApplySettings(panelKey, settings, renderChart) {
     // Find default or first enabled
     var def = enabled.find(function(v) { return v.default; }) || enabled[0];
     if (def && def.type && def.type !== 'table') {
-        dashRenderChart(panel, def.type, def.fieldMap || {});
+        dashRenderChart(panel, def.type, def.fieldMap || {}, def);
     }
 }
 
@@ -1477,7 +1576,7 @@ function dashUpdatePanelVizIcons(panel, enabled) {
             var s = modelData.settings;
             var vizList = s ? (Array.isArray(s) ? s : [s]) : [];
             var vizCfg = vizList.find(function(v) { return v.type === viz.type; }) || {};
-            dashRenderChart(panel, viz.type, vizCfg.fieldMap || {});
+            dashRenderChart(panel, viz.type, vizCfg.fieldMap || {}, vizCfg);
         });
         container.appendChild(btn);
     });
@@ -1524,6 +1623,7 @@ function dashOpenPanelVizSettings(panelEl) {
 
         var fieldMapHtml = '<div class="dash-viz-fieldmap" style="' + (isChecked ? '' : 'display:none') + '">';
         fieldMapHtml += dashBuildFieldMapHtml(typeInfo.id, existing ? existing.fieldMap : null, panelEl);
+        fieldMapHtml += dashBuildVizSizeHtml(existing ? existing.size : null);
         fieldMapHtml += '</div>';
 
         item.innerHTML = headerHtml + fieldMapHtml;
@@ -1557,7 +1657,7 @@ function dashBuildFieldMapHtml(vizType, fieldMap, panelEl) {
 
     function sel(name, label, val) {
         return '<div class="dash-viz-field-row"><label>' + label + '</label>'
-            + '<select name="' + name + '">'
+            + '<select class="dash-viz-field-select" name="' + name + '">'
             + optionsHtml.replace('value="' + dashAttr(val) + '"', 'value="' + dashAttr(val) + '" selected')
             + '</select></div>';
     }
@@ -1565,7 +1665,7 @@ function dashBuildFieldMapHtml(vizType, fieldMap, panelEl) {
     if (vizType === 'bar') {
         var barMode = fm.barMode || 'grouped';
         return '<div class="dash-viz-field-row"><label>Режим</label>'
-            + '<select name="barMode">'
+            + '<select class="dash-viz-field-select" name="barMode">'
             + '<option value="grouped"' + (barMode === 'grouped' ? ' selected' : '') + '>Группы столбиков</option>'
             + '<option value="stacked"' + (barMode === 'stacked' ? ' selected' : '') + '>Сегменты</option>'
             + '<option value="combo"' + (barMode === 'combo' ? ' selected' : '') + '>Комбинация</option>'
@@ -1584,6 +1684,51 @@ function dashBuildFieldMapHtml(vizType, fieldMap, panelEl) {
     return '<div class="dash-viz-field-row dash-viz-field-hint">Поля подбираются автоматически из данных панели.</div>';
 }
 
+function dashBuildVizSizeUnitOptions(selected) {
+    selected = dashNormalizeVizSizeUnit(selected);
+    return DASH_VIZ_SIZE_UNITS.map(function(unit) {
+        return '<option value="' + unit + '"' + (unit === selected ? ' selected' : '') + '>' + unit + '</option>';
+    }).join('');
+}
+
+function dashBuildVizSizeRow(axis, label, dim) {
+    var valueName = axis === 'width' ? 'sizeWidthValue' : 'sizeHeightValue'
+        , unitName = axis === 'width' ? 'sizeWidthUnit' : 'sizeHeightUnit'
+        , value = dim ? dim.value : ''
+        , unit = dim ? dim.unit : 'px';
+    return '<div class="dash-viz-field-row dash-viz-size-row">'
+        + '<label>' + label + '</label>'
+        + '<input type="number" min="0" step="0.1" name="' + valueName + '" value="' + dashAttr(value) + '">'
+        + '<select name="' + unitName + '">' + dashBuildVizSizeUnitOptions(unit) + '</select>'
+        + '</div>';
+}
+
+function dashBuildVizSizeHtml(size) {
+    var normalized = dashNormalizeVizSize(size) || {};
+    return '<div class="dash-viz-size-group">'
+        + '<div class="dash-viz-size-title">Размер</div>'
+        + dashBuildVizSizeRow('width', 'Ширина', normalized.width)
+        + dashBuildVizSizeRow('height', 'Высота', normalized.height)
+        + '</div>';
+}
+
+function dashCollectVizSizeDimension(item, axis) {
+    var valueEl = item.querySelector(axis === 'width' ? '[name="sizeWidthValue"]' : '[name="sizeHeightValue"]')
+        , unitEl = item.querySelector(axis === 'width' ? '[name="sizeWidthUnit"]' : '[name="sizeHeightUnit"]')
+        , value = valueEl ? valueEl.value : ''
+        , unit = unitEl ? unitEl.value : 'px';
+    return dashNormalizeVizSizeDimension({ value: value, unit: unit });
+}
+
+function dashCollectVizSize(item) {
+    var result = {}
+        , width = dashCollectVizSizeDimension(item, 'width')
+        , height = dashCollectVizSizeDimension(item, 'height');
+    if (width) result.width = width;
+    if (height) result.height = height;
+    return result.width || result.height ? result : null;
+}
+
 function dashVizModalCollectSettings() {
     var accordion = document.getElementById('dash-viz-accordion');
     var result = [];
@@ -1593,10 +1738,12 @@ function dashVizModalCollectSettings() {
         if (!checked) return;
         var isDefault = item.querySelector('.dash-viz-default').checked;
         var fieldMap = {};
-        item.querySelectorAll('.dash-viz-fieldmap select').forEach(function(sel) {
+        var size = dashCollectVizSize(item);
+        item.querySelectorAll('.dash-viz-fieldmap .dash-viz-field-select').forEach(function(sel) {
             if (sel.name && sel.value) fieldMap[sel.name] = sel.value;
         });
         var entry = { type: vizType, fieldMap: fieldMap };
+        if (size) entry.size = size;
         if (isDefault) entry.default = true;
         result.push(entry);
     });
@@ -1639,9 +1786,10 @@ function dashApplyNewVizSettings(panelEl, panelKey, settings) {
     dashUpdatePanelVizIcons(panelEl, enabled);
     var def = enabled.find(function(v) { return v.default; }) || enabled[0];
     if (def) {
-        dashRenderChart(panelEl, def.type, def.fieldMap || {});
+        dashRenderChart(panelEl, def.type, def.fieldMap || {}, def);
     } else {
         // No enabled: show table
+        dashApplyVizSize(panelEl, 'table', {});
         panelEl.querySelector('.f-table-wrap').style.display = '';
         panelEl.querySelector('.f-chart-wrap').style.display = 'none';
         panelEl.querySelector('.f-pivot-wrap').style.display = 'none';
