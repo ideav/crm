@@ -753,9 +753,11 @@ function dashDrawPeriods() {
                                     else if (itemRegex.test(dashFormulas[row.id]))
                                         v = dashGetVal(dashFormulas[row.id].match(itemRegex)[1], fr, to) || '0';
                                 }
+                                var periodLabel = p[i].r[0] || '';
                                 var cellExtra = s.extra
                                     + (valueItemId ? ' data-value-item-id="' + valueItemId + '"' : '')
-                                    + (rgHeadVal ? ' data-rg-head="' + rgHeadVal.replace(/"/g, '&quot;') + '"' : '');
+                                    + (rgHeadVal ? ' data-rg-head="' + rgHeadVal.replace(/"/g, '&quot;') + '"' : '')
+                                    + ' data-rg-col="' + dashAttr(periodLabel) + '"';
                                 row.insertAdjacentHTML('beforeend',
                                     cellTpl.replace(':val:', v || '')
                                         .replace(':ready:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? '1' : '0')
