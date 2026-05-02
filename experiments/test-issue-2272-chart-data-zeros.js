@@ -106,6 +106,10 @@ ${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashPanelGetColumns')}
 ${extractFunction('dashPanelGetRows')}
+${extractFunction('dashPanelGetRowName')}
+${extractFunction('dashPanelGetRowKey')}
+${extractFunction('dashNormalizeSelectedRows')}
+${extractFunction('dashPanelFilterRows')}
 ${extractFunction('dashCollectPanelData')}
 `;
 

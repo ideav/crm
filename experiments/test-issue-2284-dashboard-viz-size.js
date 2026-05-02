@@ -100,6 +100,7 @@ ${extractFunction('dashResetVizSizeStyles')}
 ${extractFunction('dashApplyVizSize')}
 ${extractFunction('dashCollectVizSizeDimension')}
 ${extractFunction('dashCollectVizSize')}
+${extractFunction('dashCollectVizSelectedRows')}
 ${extractFunction('dashVizModalCollectSettings')}
 ${extractFunction('dashRenderChart')}
 `;

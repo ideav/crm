@@ -528,3 +528,38 @@ td:has(.dash-cell-input) {
     font-style: italic;
     font-size: 0.82rem;
 }
+.dash-viz-rows-group {
+    margin-top: 0.6rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--border-color, #dee2e6);
+}
+.dash-viz-rows-title {
+    margin-bottom: 0.4rem;
+    color: var(--text-secondary, #6c757d);
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+.dash-viz-rows-list {
+    display: grid;
+    gap: 0.25rem;
+    max-height: 10rem;
+    overflow: auto;
+    padding-right: 0.25rem;
+}
+.dash-viz-row-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+    margin: 0;
+    color: var(--text-primary, #212529);
+    font-size: 0.85rem;
+    line-height: 1.25;
+    cursor: pointer;
+}
+.dash-viz-row-option input {
+    flex: 0 0 auto;
+    margin-top: 0.1rem;
+}
+.dash-viz-row-option span {
+    overflow-wrap: anywhere;
+}
