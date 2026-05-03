@@ -3284,17 +3284,12 @@ function dashSetPanelFilterOptionChecks(fieldEl, checked) {
 function dashSyncPanelFilterBulkControls(fieldEl) {
     var checks = dashPanelFilterOptionChecks(fieldEl)
         , selectAll = fieldEl ? fieldEl.querySelector('.dash-panel-filter-select-all') : null
-        , clear = fieldEl ? fieldEl.querySelector('.dash-panel-filter-clear') : null
         , checkedCount = checks.filter(function(check) { return check.checked; }).length
         , allChecked = checks.length > 0 && checkedCount === checks.length
-        , noneChecked = checkedCount === 0;
+        , partiallyChecked = checkedCount > 0 && checkedCount < checks.length;
     if (selectAll) {
         selectAll.checked = allChecked;
-        selectAll.indeterminate = checkedCount > 0 && checkedCount < checks.length;
-    }
-    if (clear) {
-        clear.checked = noneChecked;
-        clear.indeterminate = false;
+        selectAll.indeterminate = partiallyChecked;
     }
 }
 
@@ -3303,8 +3298,6 @@ function dashHandlePanelFilterCheckboxChange(input) {
     if (!fieldEl) return;
     if (input.classList.contains('dash-panel-filter-select-all')) {
         dashSetPanelFilterOptionChecks(fieldEl, input.checked);
-    } else if (input.classList.contains('dash-panel-filter-clear')) {
-        if (input.checked) dashSetPanelFilterOptionChecks(fieldEl, false);
     } else if (!input.classList.contains('dash-panel-filter-option-input')) {
         return;
     }
@@ -3441,26 +3434,16 @@ function dashRenderPanelFilterModal(panelEl, fields) {
 
     fields.forEach(function(field) {
         var filter = filters[field.key]
-            , html = '<div class="dash-panel-filter-field" data-field-key="' + dashAttr(field.key) + '">'
-                + '<div class="dash-panel-filter-label">' + dashAttr(field.label) + '</div>';
+            , html = '<div class="dash-panel-filter-field" data-field-key="' + dashAttr(field.key) + '">';
         if (field.kind === 'values' || field.kind === 'month') {
             var options = field.options || []
                 , selected = filter && Array.isArray(filter.selected) ? dashPanelFilterSelectedMap(filter) : null
                 , selectedCount = selected === null ? options.length : options.filter(function(option) { return selected[String(option.value)]; }).length
-                , allChecked = options.length > 0 && selectedCount === options.length
-                , noneChecked = options.length > 0 && selectedCount === 0;
-            if (options.length) {
-                html += '<div class="dash-panel-filter-bulk">'
-                    + '<label class="dash-panel-filter-bulk-option">'
-                    + '<input type="checkbox" class="dash-panel-filter-select-all" value="__all"' + (allChecked ? ' checked' : '') + '>'
-                    + '<span>Выделить всё</span>'
-                    + '</label>'
-                    + '<label class="dash-panel-filter-bulk-option">'
-                    + '<input type="checkbox" class="dash-panel-filter-clear" value="__clear"' + (noneChecked ? ' checked' : '') + '>'
-                    + '<span>Очистить</span>'
-                    + '</label>'
-                    + '</div>';
-            }
+                , allChecked = options.length > 0 && selectedCount === options.length;
+            html += '<div class="dash-panel-filter-label' + (options.length ? ' dash-panel-filter-label--with-toggle' : '') + '">';
+            if (options.length)
+                html += '<input type="checkbox" class="dash-panel-filter-select-all dash-panel-filter-bulk-toggle" value="__all" title="Выделить всё / снять выделение" aria-label="Выделить всё / снять выделение"' + (allChecked ? ' checked' : '') + '>';
+            html += '<span>' + dashAttr(field.label) + '</span></div>';
             html += '<div class="dash-panel-filter-options">';
             options.forEach(function(option) {
                 var checked = selected === null || selected[String(option.value)];
@@ -3472,6 +3455,7 @@ function dashRenderPanelFilterModal(panelEl, fields) {
             html += '</div>';
         } else {
             var inputType = field.valueType === 'date' ? 'date' : (field.valueType === 'number' ? 'number' : 'text');
+            html += '<div class="dash-panel-filter-label">' + dashAttr(field.label) + '</div>';
             html += '<div class="dash-panel-filter-range">'
                 + '<input type="' + inputType + '" class="dash-panel-filter-from" placeholder="' + dashAttr(field.min || 'От') + '" value="' + dashAttr(filter ? filter.from || '' : '') + '">'
                 + '<span>—</span>'
