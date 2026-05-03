@@ -216,7 +216,7 @@
                         </select>
                     </div>
                     <div class="user-menu-divider"></div>
-                    <button id="change-password-btn" class="user-menu-item" type="button" onclick="document.querySelector('.cp-form').style.display='block';document.querySelectorAll('.ch-toggle').forEach(function(el){el.style.display='flex';});document.querySelectorAll('.wait-toggle').forEach(function(el){el.style.display='none';});">
+                    <button id="change-password-btn" class="user-menu-item" type="button" onclick="openChangePasswordForm();">
                         <i class="user-menu-icon pi pi-lock"></i>
                         <span>Сменить пароль</span>
                     </button>
@@ -273,6 +273,30 @@
     <script src="/js/app.js"></script>
     <script src="/js/main-app.js"></script>
     <script>
+    function getChangePasswordFields(){
+        return document.querySelectorAll('#old-pwd,#new-pwd,#new-again');
+    }
+    function resetChangePasswordFields(){
+        getChangePasswordFields().forEach(function(el){
+            el.value='';
+            el.disabled=true;
+        });
+    }
+    function openChangePasswordForm(){
+        var form=document.querySelector('.cp-form');
+        if(form)form.style.display='block';
+        getChangePasswordFields().forEach(function(el){
+            el.value='';
+            el.disabled=false;
+        });
+        document.querySelectorAll('.ch-toggle').forEach(function(el){el.style.display='flex';});
+        document.querySelectorAll('.wait-toggle').forEach(function(el){el.style.display='none';});
+    }
+    function closeChangePasswordForm(){
+        var form=document.querySelector('.cp-form');
+        if(form)form.style.display='none';
+        resetChangePasswordFields();
+    }
     function changePwd(){
         var oldPwd=document.getElementById('old-pwd').value,
             newPwd=document.getElementById('new-pwd').value,
@@ -293,9 +317,7 @@
             if(json&&json.msg){
                 if(json.msg.indexOf('[err')===-1){
                     changeMsg('alert-success',json.msg);
-                    document.getElementById('old-pwd').value='';
-                    document.getElementById('new-pwd').value='';
-                    document.getElementById('new-again').value='';
+                    resetChangePasswordFields();
                 }else
                     changeMsg('alert-danger',json.msg.replace(/ ?\[.+\]/,''));
                 if(json.token)token=json.token;
@@ -319,7 +341,7 @@
     </script>
 
     <!-- Change Password Modal -->
-    <div class="cp-form" style="display: none; position: fixed; top: 0; left: 0; height: 100%; width: 100%; z-index: 9999; background: rgba(0,0,0,.4);" onclick="this.style.display='none';">
+    <div class="cp-form" style="display: none; position: fixed; top: 0; left: 0; height: 100%; width: 100%; z-index: 9999; background: rgba(0,0,0,.4);" onclick="closeChangePasswordForm();">
         <div style="display: flex; align-items: center; justify-content: center; height: 100%;">
             <div style="border-radius: 8px; background-color: #fff; max-width: 360px; width: 100%; padding: 1.5rem; box-shadow: 0 4px 24px rgba(0,0,0,.18);" onclick="event.stopPropagation();" onkeyup="if(event.keyCode===13)changePwd()">
                 <div style="text-align:center; margin-bottom:1rem;">
@@ -327,15 +349,15 @@
                 </div>
                 <div id="pwdchangemsg" class="alert w-100" style="display: none;"></div>
                 <label for="old-pwd" style="margin-bottom:0.25rem; display:block;">Действующий пароль</label>
-                <input type="password" id="old-pwd" style="border: 1px solid lightgray; margin-bottom: 0.75rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px; box-sizing:border-box;">
+                <input type="password" id="old-pwd" autocomplete="current-password" disabled style="border: 1px solid lightgray; margin-bottom: 0.75rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px; box-sizing:border-box;">
                 <label for="new-pwd" style="margin-bottom:0.25rem; display:block;">Новый пароль</label>
-                <input type="password" id="new-pwd" style="border: 1px solid lightgray; margin-bottom: 0.75rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px; box-sizing:border-box;">
+                <input type="password" id="new-pwd" autocomplete="new-password" disabled style="border: 1px solid lightgray; margin-bottom: 0.75rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px; box-sizing:border-box;">
                 <label for="new-again" style="margin-bottom:0.25rem; display:block;">Повторите пароль</label>
-                <input type="password" id="new-again" style="border: 1px solid lightgray; margin-bottom: 1rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px; box-sizing:border-box;">
+                <input type="password" id="new-again" autocomplete="new-password" disabled style="border: 1px solid lightgray; margin-bottom: 1rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px; box-sizing:border-box;">
                 <div style="text-align:center; display:none;" class="wait-toggle"><img src="/i/ajax.gif"></div>
                 <div style="display: flex; gap: 0.5rem;" class="ch-toggle">
                     <button style="flex:1; padding:0.5rem; background:#3b82f6; color:#fff; border:none; border-radius:6px; cursor:pointer;" type="button" onclick="changePwd()">Сменить</button>
-                    <button style="flex:1; padding:0.5rem; background:#fff; color:#333; border:1px solid #ccc; border-radius:6px; cursor:pointer;" type="button" onclick="document.querySelector('.cp-form').style.display='none';">Отменить</button>
+                    <button style="flex:1; padding:0.5rem; background:#fff; color:#333; border:1px solid #ccc; border-radius:6px; cursor:pointer;" type="button" onclick="closeChangePasswordForm();">Отменить</button>
                 </div>
             </div>
         </div>
@@ -361,7 +383,8 @@
     (function() {
         var fake = document.createElement('div');
         fake.style.cssText = 'position:absolute;left:-9999px;opacity:0;pointer-events:none;';
-        fake.innerHTML = '<input type="text" name="fake_username" value=""><input type="password" name="fake_password" value="">';
+        fake.setAttribute('aria-hidden', 'true');
+        fake.innerHTML = '<input type="text" name="fake_username" value="" autocomplete="off" readonly tabindex="-1"><input type="password" name="fake_password" value="" autocomplete="off" readonly tabindex="-1">';
         document.body.appendChild(fake);
     })();
     </script>
