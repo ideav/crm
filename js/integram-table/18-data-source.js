@@ -16,9 +16,9 @@
                 }
                 return '';
             }
-            const match = url.match(/^(.*?\/(report|type|metadata|object)\/\d+)/);
+            const match = url.match(/^(.*?\/(?:report|type|metadata|object))(?:\/|$)/);
             if (match) {
-                return match[1].replace(/\/(report|type|metadata|object)\/\d+$/, '');
+                return match[1].replace(/\/(?:report|type|metadata|object)$/, '');
             }
             // Fallback: remove everything after ? or last /
             return url.split('?')[0].replace(/\/[^\/]*$/, '');
@@ -279,4 +279,3 @@
             // Otherwise, it's a numeric ID - convert it
             return this.getFormatById(baseTypeId);
         }
-
