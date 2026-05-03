@@ -607,44 +607,167 @@
             };
         }
 
+        isNumericTableTypeId(value) {
+            return /^\d+$/.test(String(value || '').trim());
+        }
+
+        extractTableTypeIdFromApiUrl() {
+            const url = this.options.apiUrl || '';
+
+            // Supports /object/{id-or-name} and /metadata/{id-or-name}.
+            const endpointMatch = url.match(/\/(?:object|metadata)\/([^\/?#]+)/);
+            if (endpointMatch) {
+                return endpointMatch[1];
+            }
+
+            // Preserve the older numeric fallback for custom paths like /api/789.
+            const genericMatch = url.match(/\/(\d+)(?:\/|\?|$)/);
+            return genericMatch ? genericMatch[1] : null;
+        }
+
+        getMetadataLookupVariants(value) {
+            const variants = [];
+            const add = val => {
+                const normalized = String(val || '').trim();
+                if (normalized && !variants.includes(normalized)) {
+                    variants.push(normalized);
+                }
+            };
+
+            add(value);
+
+            try {
+                add(decodeURIComponent(String(value || '').replace(/\+/g, ' ')));
+            } catch (e) {
+                // Keep the raw value when it is not a valid percent-encoded path segment.
+            }
+
+            return variants;
+        }
+
+        metadataNameMatches(value, lookupVariants) {
+            const name = String(value || '').trim();
+            return lookupVariants.some(lookup => name === lookup);
+        }
+
+        metadataNameMatchesInsensitive(value, lookupVariants) {
+            const name = String(value || '').trim().toLocaleLowerCase();
+            return lookupVariants.some(lookup => name === lookup.toLocaleLowerCase());
+        }
+
+        pickBestMetadataNameMatch(matches, lookupVariants) {
+            if (matches.length <= 1 || !Array.isArray(this.globalMetadata)) {
+                return matches[0] || null;
+            }
+
+            const referencedTableIds = new Set();
+            this.globalMetadata.forEach(item => {
+                (item.reqs || []).forEach(req => {
+                    if (!this.metadataNameMatches(req.val, lookupVariants)) {
+                        return;
+                    }
+                    if (req.arr_id) {
+                        referencedTableIds.add(String(req.arr_id));
+                    }
+                    if (req.orig) {
+                        referencedTableIds.add(String(req.orig));
+                    }
+                });
+            });
+
+            let best = matches[0];
+            let bestScore = -1;
+            matches.forEach((item, index) => {
+                let score = 0;
+                const id = String(item.id);
+
+                // Subordinate table requisites point to the actual table id via arr_id/orig.
+                if (referencedTableIds.has(id)) {
+                    score += 1000;
+                }
+
+                // When duplicate names exist, prefer the richer table definition.
+                if (Array.isArray(item.reqs) && item.reqs.length > 0) {
+                    score += 100;
+                }
+
+                // Preserve metadata order for otherwise equal candidates.
+                score -= index;
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = item;
+                }
+            });
+
+            return best;
+        }
+
+        findMetadataItemByName(nameOrPathSegment) {
+            if (!Array.isArray(this.globalMetadata)) {
+                return null;
+            }
+
+            const lookupVariants = this.getMetadataLookupVariants(nameOrPathSegment);
+            if (lookupVariants.length === 0) {
+                return null;
+            }
+
+            const exactMatches = this.globalMetadata.filter(item =>
+                this.metadataNameMatches(item.val || item.value || item.name, lookupVariants)
+            );
+            if (exactMatches.length > 0) {
+                return this.pickBestMetadataNameMatch(exactMatches, lookupVariants);
+            }
+
+            const insensitiveMatches = this.globalMetadata.filter(item =>
+                this.metadataNameMatchesInsensitive(item.val || item.value || item.name, lookupVariants)
+            );
+            return this.pickBestMetadataNameMatch(insensitiveMatches, lookupVariants);
+        }
+
+        async resolveTableTypeId(typeIdOrName) {
+            const rawValue = String(typeIdOrName || '').trim();
+            if (!rawValue) {
+                return null;
+            }
+
+            if (this.isNumericTableTypeId(rawValue)) {
+                return rawValue;
+            }
+
+            if (this.globalMetadataPromise) {
+                await this.globalMetadataPromise;
+            }
+
+            if (!this.globalMetadata) {
+                this.globalMetadataPromise = null;
+                this.globalMetadataPromise = this.loadGlobalMetadata();
+                await this.globalMetadataPromise;
+            }
+
+            const metadataItem = this.findMetadataItemByName(rawValue);
+            return metadataItem && metadataItem.id ? String(metadataItem.id) : null;
+        }
+
         async loadDataFromTable(append = false) {
             // Table-based data loading using object/{typeId}/?JSON_OBJ&F_U={parentId}
             // Auto-detect tableTypeId from URL if not explicitly provided (issue #699)
-            if (!this.options.tableTypeId) {
-                let typeId = null;
+            // Resolve /metadata/{name} and /object/{name} through global metadata (issue #2302).
+            if (!this.options.tableTypeId || !this.isNumericTableTypeId(this.options.tableTypeId)) {
+                let typeId = this.options.tableTypeId || this.extractTableTypeIdFromApiUrl();
 
-                // Try /object/{id} pattern first
-                const objectMatch = this.options.apiUrl && this.options.apiUrl.match(/\/object\/(\d+)/);
-                if (objectMatch) {
-                    typeId = objectMatch[1];
-                }
-
-                // Try /metadata/{id} pattern
-                if (!typeId) {
-                    const metadataMatch = this.options.apiUrl && this.options.apiUrl.match(/\/metadata\/(\d+)/);
-                    if (metadataMatch) {
-                        typeId = metadataMatch[1];
-                    }
-                }
-
-                // Try to get from already stored objectTableId
                 if (!typeId && this.objectTableId) {
                     typeId = this.objectTableId;
                 }
 
-                // Try to extract from any /{database}/{endpoint}/{id} pattern
-                if (!typeId && this.options.apiUrl) {
-                    const genericMatch = this.options.apiUrl.match(/\/(\d+)(?:\/|\?|$)/);
-                    if (genericMatch) {
-                        typeId = genericMatch[1];
-                    }
+                const resolvedTypeId = await this.resolveTableTypeId(typeId);
+
+                if (!resolvedTypeId) {
+                    throw new Error(`tableTypeId is required for dataSource=table. Cannot auto-detect from apiUrl: ${this.options.apiUrl}. Expected patterns: /object/{id-or-name}, /metadata/{id-or-name}, or /{id}`);
                 }
 
-                if (!typeId) {
-                    throw new Error(`tableTypeId is required for dataSource=table. Cannot auto-detect from apiUrl: ${this.options.apiUrl}. Expected patterns: /object/{id}, /metadata/{id}, or /{id}`);
-                }
-
-                this.options.tableTypeId = typeId;
+                this.options.tableTypeId = resolvedTypeId;
             }
 
             this.objectTableId = this.options.tableTypeId;  // Store table ID for _count=1 queries
