@@ -60,6 +60,7 @@ var DASH_CHART_RESIZE_MIN_HEIGHT = 180;
 var DASH_CHART_RESIZE_COOKIE_MAX_AGE = 31536000;
 var dashRecordId = 'dash-test';
 var dashCurrentId = null;
+function dashApplyPanelMaxWidth() {}
 ${extractFunction('dashNormalizeVizSizeValue')}
 ${extractFunction('dashNormalizeVizSizeUnit')}
 ${extractFunction('dashNormalizeVizSizeDimension')}

@@ -55,6 +55,7 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
         + '<select class="dash-period-sel"><option value="Неделя">Неделя</option><option value="Месяц">Месяц</option><option value="Год">Год</option></select>'
         + '<button class="dash-apply-btn" onclick="dashApplyFilter(this.closest(\'.f-sheet\'))">Применить</button>'
         + '<input type="text" class="dash-search-input" placeholder="Поиск..." oninput="dashApplySearch(this.value,this.closest(\'.f-sheet\'))">'
+        + '<button type="button" class="dash-reset-size-icon" onclick="dashResetSheetSizeCookies(this.closest(\'.f-sheet\'))" title="Сбросить размеры панелей" aria-label="Сбросить размеры панелей" aria-hidden="true" disabled><i class="pi pi-refresh"></i></button>'
         + (dashIsAdmin ? '<a class="dash-settings-icon" onclick="dashOpenSettings()" title="Настройки дэшборда"><i class="pi pi-cog"></i></a>' : '')
         + '</div></div>'
     , panelTpl    = '<div id=":id:" f-period=":period:" class="f-panel pt-3" data-panel-id=":panelid:">'
@@ -1858,6 +1859,7 @@ function dashGetModel(json) {
             }
         }
     }
+    dashUpdateAllSheetSizeResetIcons();
 
     // Activate tab: restore from URL hash or default to first tab (issue #1840)
     if (!model.querySelector('.dash-sheet-tab.active')) {
@@ -2297,6 +2299,11 @@ function dashCookieSet(name, value, maxAge) {
         + '; path=/; max-age=' + String(maxAge || DASH_CHART_RESIZE_COOKIE_MAX_AGE);
 }
 
+function dashCookieRemove(name) {
+    if (typeof document === 'undefined') return;
+    document.cookie = String(name) + '=; path=/; max-age=0';
+}
+
 function dashCookieNamePart(value) {
     return String(value || '0').replace(/[^A-Za-z0-9_-]/g, '_');
 }
@@ -2369,6 +2376,109 @@ function dashWriteTableSizeCookie(panelEl, size) {
     if (!payload.width && !payload.height) return null;
     dashCookieSet(dashTableSizeCookieName(panelEl), JSON.stringify(payload), DASH_CHART_RESIZE_COOKIE_MAX_AGE);
     return payload;
+}
+
+function dashPanelSizeCookieNames(panelEl) {
+    var names = [];
+    if (!panelEl) return names;
+    names.push(dashTableSizeCookieName(panelEl));
+    DASH_VIZ_TYPES.forEach(function(vizType) {
+        if (dashIsResizableChartViz(vizType.id))
+            names.push(dashChartSizeCookieName(panelEl, vizType.id));
+    });
+    return names;
+}
+
+function dashSizeCookieExists(name) {
+    return !!dashCookieGet(name);
+}
+
+function dashSizeCookieHasWidth(name) {
+    var raw = dashCookieGet(name)
+        , parsed;
+    if (!raw) return false;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (e) {
+        return false;
+    }
+    return !!dashNormalizeVizSizeDimension({ value: parsed && parsed.width, unit: 'px' });
+}
+
+function dashSheetSizeCookieNames(sheetEl, widthOnly) {
+    var names = []
+        , seen = {};
+    if (!sheetEl || !sheetEl.querySelectorAll) return names;
+    sheetEl.querySelectorAll('.f-panel').forEach(function(panelEl) {
+        dashPanelSizeCookieNames(panelEl).forEach(function(name) {
+            if (seen[name]) return;
+            if (widthOnly ? dashSizeCookieHasWidth(name) : dashSizeCookieExists(name)) {
+                seen[name] = true;
+                names.push(name);
+            }
+        });
+    });
+    return names;
+}
+
+function dashSheetWidthSizeCookieNames(sheetEl) {
+    return dashSheetSizeCookieNames(sheetEl, true);
+}
+
+function dashUpdateSheetSizeResetIcon(sheetEl) {
+    var icon = sheetEl && sheetEl.querySelector ? sheetEl.querySelector('.dash-reset-size-icon') : null
+        , hasWidthCookies;
+    if (!icon) return;
+    hasWidthCookies = dashSheetWidthSizeCookieNames(sheetEl).length > 0;
+    if (icon.classList && icon.classList.toggle)
+        icon.classList.toggle('dash-reset-size-icon--visible', hasWidthCookies);
+    if ('disabled' in icon) icon.disabled = !hasWidthCookies;
+    if ('tabIndex' in icon) icon.tabIndex = hasWidthCookies ? 0 : -1;
+    if (icon.setAttribute) {
+        icon.setAttribute('aria-hidden', hasWidthCookies ? 'false' : 'true');
+        icon.setAttribute('aria-disabled', hasWidthCookies ? 'false' : 'true');
+    }
+}
+
+function dashUpdateAllSheetSizeResetIcons() {
+    if (typeof document === 'undefined' || !document.querySelectorAll) return;
+    document.querySelectorAll('#dash-model .f-sheet').forEach(dashUpdateSheetSizeResetIcon);
+}
+
+function dashPanelActiveVizType(panelEl) {
+    var active = panelEl && panelEl.querySelector ? panelEl.querySelector('.f-viz-type-icon.active') : null;
+    return active && active.dataset && active.dataset.vizType ? active.dataset.vizType : 'table';
+}
+
+function dashPanelVizConfig(panelEl, vizType) {
+    var settings = (panelEl && dashModelData[panelEl.id] || {}).settings
+        , list = settings ? (Array.isArray(settings) ? settings : [settings]) : []
+        , found = null;
+    list.forEach(function(entry) {
+        if (!found && entry && entry.type === vizType) found = entry;
+    });
+    return found || {};
+}
+
+function dashReapplyPanelSizeWithoutCookies(panelEl) {
+    var vizType = dashPanelActiveVizType(panelEl)
+        , vizConfig = dashPanelVizConfig(panelEl, vizType);
+    if (!panelEl) return;
+    dashRenderChart(panelEl, vizType, vizConfig.fieldMap || {}, vizConfig);
+}
+
+function dashResetSheetSizeCookies(sheetEl) {
+    var widthNames = dashSheetWidthSizeCookieNames(sheetEl)
+        , names;
+    if (!sheetEl || !widthNames.length) {
+        dashUpdateSheetSizeResetIcon(sheetEl);
+        return;
+    }
+    names = dashSheetSizeCookieNames(sheetEl, false);
+    names.forEach(dashCookieRemove);
+    sheetEl.querySelectorAll('.f-panel').forEach(dashReapplyPanelSizeWithoutCookies);
+    dashUpdateSheetSizeResetIcon(sheetEl);
+    dashSetStatus('Размеры панелей сброшены');
 }
 
 function dashMergeVizSize(baseSize, overrideSize) {
@@ -2537,7 +2647,11 @@ function dashStartChartResize(e, vizType) {
         document.removeEventListener('mouseup', onUp);
         panelEl.classList.remove('f-panel--chart-resizing');
         if (document.body && document.body.classList) document.body.classList.remove('dash-chart-resizing');
-        if (latestSize) dashWriteChartSizeCookie(panelEl, activeVizType, latestSize);
+        if (latestSize) {
+            dashWriteChartSizeCookie(panelEl, activeVizType, latestSize);
+            if (typeof dashUpdateSheetSizeResetIcon === 'function')
+                dashUpdateSheetSizeResetIcon(panelEl.closest ? panelEl.closest('.f-sheet') : null);
+        }
     }
 
     panelEl.classList.add('f-panel--chart-resizing');
@@ -2577,7 +2691,11 @@ function dashStartTableResize(e) {
         document.removeEventListener('mouseup', onUp);
         panelEl.classList.remove('f-panel--table-resizing');
         if (document.body && document.body.classList) document.body.classList.remove('dash-table-resizing');
-        if (latestSize) dashWriteTableSizeCookie(panelEl, latestSize);
+        if (latestSize) {
+            dashWriteTableSizeCookie(panelEl, latestSize);
+            if (typeof dashUpdateSheetSizeResetIcon === 'function')
+                dashUpdateSheetSizeResetIcon(panelEl.closest ? panelEl.closest('.f-sheet') : null);
+        }
     }
 
     panelEl.classList.add('f-panel--table-resizing');
@@ -4077,6 +4195,7 @@ window.dashGetRepDone             = dashGetRepDone;
 window.dashGetVizReportDone       = dashGetVizReportDone;
 window.dashDebug                  = dashDebug;
 window.dashUpdateTableWrapOverflow = dashUpdateTableWrapOverflow;
+window.dashResetSheetSizeCookies  = dashResetSheetSizeCookies;
 
 window.dashApplyFilter = function(sheetEl) {
     dashDateFr    = dashFromInputDate(sheetEl.querySelector('.dash-fr-input').value);
@@ -4098,6 +4217,7 @@ window.dashApplyFilter = function(sheetEl) {
         delete dashModelData[p.id];
         p.remove();
     });
+    dashUpdateSheetSizeResetIcon(sheetEl);
     dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashReportSources = {}; dashVizReports = {}; dashAjaxes = 0; dashValueItemIds = {}; dashRgSourceIds = {};
 
     // Re-fetch model for this sheet only — skip get_record, use cached dashRecordId
