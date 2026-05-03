@@ -1803,6 +1803,79 @@ var CHART_COLORS = [
     'rgba(99,255,132,0.7)', 'rgba(235,54,162,0.7)'
 ];
 
+function dashNormalizeAreaMode(mode) {
+    mode = String(mode || 'plain');
+    return ['plain', 'stacked', 'normalized'].indexOf(mode) === -1 ? 'plain' : mode;
+}
+
+function dashBuildAreaModeHtml(fieldMap) {
+    var areaMode = dashNormalizeAreaMode(fieldMap && fieldMap.areaMode);
+    return '<div class="dash-viz-field-row"><label>Режим</label>'
+        + '<select class="dash-viz-field-select" name="areaMode">'
+        + '<option value="plain"' + (areaMode === 'plain' ? ' selected' : '') + '>С областями</option>'
+        + '<option value="stacked"' + (areaMode === 'stacked' ? ' selected' : '') + '>С областями и накоплением</option>'
+        + '<option value="normalized"' + (areaMode === 'normalized' ? ' selected' : '') + '>Нормированная с накоплением</option>'
+        + '</select></div>';
+}
+
+function dashNormalizePercentDatasets(datasets) {
+    var source = Array.isArray(datasets) ? datasets : []
+        , totals = [];
+
+    source.forEach(function(ds) {
+        (ds && Array.isArray(ds.data) ? ds.data : []).forEach(function(value, index) {
+            var n = parseFloat(value);
+            if (!isNaN(n)) totals[index] = (totals[index] || 0) + n;
+        });
+    });
+
+    return source.map(function(ds) {
+        var data = (ds && Array.isArray(ds.data) ? ds.data : []).map(function(value, index) {
+            var n = parseFloat(value)
+                , total = totals[index] || 0;
+            return !isNaN(n) && total ? n * 100 / total : 0;
+        });
+        return Object.assign({}, ds, { data: data });
+    });
+}
+
+function dashBuildAreaDatasets(datasets, fieldMap) {
+    var areaMode = dashNormalizeAreaMode(fieldMap && fieldMap.areaMode)
+        , source = areaMode === 'normalized' ? dashNormalizePercentDatasets(datasets) : (datasets || []);
+
+    return source.map(function(ds, i) {
+        var dataset = {
+            label: ds.label,
+            data: ds.data,
+            borderColor: CHART_COLORS[i % CHART_COLORS.length],
+            backgroundColor: CHART_COLORS[i % CHART_COLORS.length].replace('0.7', '0.3'),
+            tension: 0.3,
+            fill: true
+        };
+        if (areaMode !== 'plain') dataset.stack = 'area';
+        return dataset;
+    });
+}
+
+function dashBuildAreaChartOptions(fieldMap) {
+    var areaMode = dashNormalizeAreaMode(fieldMap && fieldMap.areaMode)
+        , yScale;
+    if (areaMode === 'plain') return {};
+
+    yScale = { stacked: true };
+    if (areaMode === 'normalized') {
+        yScale.min = 0;
+        yScale.max = 100;
+        yScale.ticks = {
+            callback: function(value) {
+                var n = parseFloat(value);
+                return (isNaN(n) ? value : Math.round(n * 100) / 100) + '%';
+            }
+        };
+    }
+    return { scales: { y: yScale } };
+}
+
 function dashEnsureChartJs(cb) {
     if (window.Chart) { cb(); return; }
     var s = document.createElement('script');
@@ -2214,9 +2287,8 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
 
         } else if (vizType === 'area') {
             chartType = 'line';
-            chartDatasets = data.datasets.map(function(ds, i) {
-                return { label: ds.label, data: ds.data, borderColor: CHART_COLORS[i % CHART_COLORS.length], backgroundColor: CHART_COLORS[i % CHART_COLORS.length].replace('0.7', '0.3'), tension: 0.3, fill: true };
-            });
+            chartDatasets = dashBuildAreaDatasets(data.datasets, fieldMap);
+            options = dashBuildAreaChartOptions(fieldMap);
 
         } else if (vizType === 'bar') {
             var barMode = (fieldMap && fieldMap.barMode) || 'grouped';
@@ -2644,6 +2716,10 @@ function dashBuildFieldMapHtml(vizType, fieldMap, panelEl) {
             + '<option value="combo"' + (barMode === 'combo' ? ' selected' : '') + '>Комбинация</option>'
             + '</select></div>';
     }
+    if (vizType === 'area') {
+        return dashBuildAreaModeHtml(fm)
+            + '<div class="dash-viz-field-row dash-viz-field-hint">Поля подбираются автоматически из данных панели.</div>';
+    }
     if (vizType === 'bubble') {
         return sel('bubbleX', 'X (ось)', fm.bubbleX || '')
             + sel('bubbleY', 'Y (ось)', fm.bubbleY || '')
@@ -2698,8 +2774,14 @@ function dashBuildReportFieldMapHtml(vizType, fieldMap, report) {
             + sel('valueField', 'Значение', fm.valueField || '', dashReportColumnIsMeasure)
             + sel('seriesField', 'Серии', fm.seriesField || '', dashReportColumnIsDimension);
     }
-    if (vizType === 'line' || vizType === 'area') {
+    if (vizType === 'line') {
         return sel('labelField', 'Ось X', fm.labelField || fm.xField || '', dashReportColumnIsDimension)
+            + sel('valueField', 'Значение', fm.valueField || '', dashReportColumnIsMeasure)
+            + sel('seriesField', 'Серии', fm.seriesField || '', dashReportColumnIsDimension);
+    }
+    if (vizType === 'area') {
+        return dashBuildAreaModeHtml(fm)
+            + sel('labelField', 'Ось X', fm.labelField || fm.xField || '', dashReportColumnIsDimension)
             + sel('valueField', 'Значение', fm.valueField || '', dashReportColumnIsMeasure)
             + sel('seriesField', 'Серии', fm.seriesField || '', dashReportColumnIsDimension);
     }
