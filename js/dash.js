@@ -2186,7 +2186,7 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
         chartWrap.style.display = 'none';
         pivotWrap.style.display = '';
         panelEl.classList.add('f-panel--chart');
-        dashRenderPivot(panelEl, pivotWrap, data, fieldMap);
+        dashRenderPivot(panelEl, pivotWrap, data, fieldMap, vizConfig || {});
         return;
     }
 
@@ -2251,44 +2251,251 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
     });
 }
 
-function dashRenderPivot(panelEl, pivotWrap, data, fieldMap) {
-    if (!dashPivotDepsReady()) {
-        dashEnsurePivotJs(function() {
-            dashRenderPivot(panelEl, pivotWrap, data, fieldMap);
-        });
-        return;
+function dashGetPivotUiElement(pivotWrap) {
+    if (!pivotWrap || !pivotWrap.querySelector) return pivotWrap;
+    return pivotWrap.querySelector('.dash-pivot-ui') || pivotWrap;
+}
+
+function dashEnsurePivotShell(pivotWrap) {
+    var uiWrap, actionsWrap;
+    if (!pivotWrap) return { uiWrap: null, actionsWrap: null };
+    if (!pivotWrap.querySelector || !pivotWrap.appendChild || !document.createElement) {
+        pivotWrap.innerHTML = '';
+        return { uiWrap: pivotWrap, actionsWrap: null };
     }
-    pivotWrap.innerHTML = '';
-    var records, rowField, colField, valField;
-    if (data.records && data.columns) {
+    uiWrap = pivotWrap.querySelector('.dash-pivot-ui');
+    actionsWrap = pivotWrap.querySelector('.dash-pivot-actions');
+    if (!uiWrap) {
+        pivotWrap.innerHTML = '';
+        actionsWrap = null;
+        uiWrap = document.createElement('div');
+        uiWrap.className = 'dash-pivot-ui';
+        pivotWrap.appendChild(uiWrap);
+    } else {
+        uiWrap.innerHTML = '';
+    }
+    if (!actionsWrap) {
+        actionsWrap = document.createElement('div');
+        actionsWrap.className = 'dash-pivot-actions';
+        pivotWrap.appendChild(actionsWrap);
+    }
+    return { uiWrap: uiWrap, actionsWrap: actionsWrap };
+}
+
+function dashNormalizePivotConfig(config) {
+    var clean = {};
+    if (!config || typeof config !== 'object') return clean;
+    Object.keys(config).forEach(function(key) {
+        if (key === 'aggregators' || key === 'renderers' || key === 'onRefresh') return;
+        if (typeof config[key] === 'function') return;
+        clean[key] = config[key];
+    });
+    try {
+        return JSON.parse(JSON.stringify(clean));
+    } catch (e) {
+        return {};
+    }
+}
+
+function dashPivotConfigString(config) {
+    function stable(value) {
+        var sorted = {};
+        if (Array.isArray(value)) return value.map(stable);
+        if (!value || typeof value !== 'object') return value;
+        Object.keys(value).sort().forEach(function(key) {
+            sorted[key] = stable(value[key]);
+        });
+        return sorted;
+    }
+    return JSON.stringify(stable(dashNormalizePivotConfig(config)));
+}
+
+function dashDefaultPivotConfig(data, fieldMap) {
+    var config = { rows: [], cols: [], aggregatorName: 'Sum', rendererName: 'Table', vals: [] }
+        , rowField, colField, valField;
+    if (data && data.records && data.columns) {
         rowField = dashReportColumnByField(data.columns, fieldMap && fieldMap.pivotRows);
         colField = dashReportColumnByField(data.columns, fieldMap && fieldMap.pivotCols);
         valField = dashReportColumnByField(data.columns, fieldMap && fieldMap.pivotVals);
         rowField = rowField || dashReportDefaultColumn(data.columns, '', dashReportColumnIsDimension);
         valField = valField || dashReportDefaultColumn(data.columns, '', dashReportColumnIsMeasure);
-        records = data.records;
-        window.jQuery(pivotWrap).pivotUI(records, {
-            rows: rowField ? [rowField.name] : [],
-            cols: colField ? [colField.name] : [],
-            aggregatorName: 'Sum',
-            vals: valField ? [valField.name] : []
+        config.rows = rowField ? [rowField.name] : [];
+        config.cols = colField ? [colField.name] : [];
+        config.vals = valField ? [valField.name] : [];
+        return config;
+    }
+    config.rows = fieldMap && fieldMap.pivotRows ? [fieldMap.pivotRows] : ['Строка'];
+    config.cols = fieldMap && fieldMap.pivotCols ? [fieldMap.pivotCols] : [];
+    config.vals = fieldMap && fieldMap.pivotVals ? [fieldMap.pivotVals] : (data && data.datasets && data.datasets[0] ? [data.datasets[0].label || 'Значение'] : []);
+    return config;
+}
+
+function dashPivotConfigForRender(data, fieldMap, vizConfig) {
+    return Object.assign(
+        {},
+        dashDefaultPivotConfig(data, fieldMap),
+        dashNormalizePivotConfig(vizConfig && vizConfig.pivotConfig)
+    );
+}
+
+function dashPanelCanSaveVizSettings(panelEl) {
+    return !!(panelEl && panelEl.querySelector && panelEl.querySelector('.f-panel-settings-icon'));
+}
+
+function dashEnsurePivotSaveButton(panelEl, pivotWrap) {
+    var actionsWrap, btn;
+    if (!dashPanelCanSaveVizSettings(panelEl) || !pivotWrap || !pivotWrap.querySelector || !pivotWrap.appendChild || !document.createElement)
+        return null;
+    actionsWrap = pivotWrap.querySelector('.dash-pivot-actions');
+    if (!actionsWrap) {
+        actionsWrap = document.createElement('div');
+        actionsWrap.className = 'dash-pivot-actions';
+        pivotWrap.appendChild(actionsWrap);
+    }
+    btn = actionsWrap.querySelector('.dash-pivot-save-settings');
+    if (btn) return btn;
+    btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'dash-apply-btn dash-btn-primary dash-pivot-save-settings';
+    btn.textContent = 'Сохранить настройки';
+    btn.style.display = 'none';
+    btn.addEventListener('click', function(e) {
+        if (e && e.preventDefault) e.preventDefault();
+        dashSaveCurrentPivotSettings(panelEl, pivotWrap);
+    });
+    actionsWrap.appendChild(btn);
+    return btn;
+}
+
+function dashSetPivotSaveButtonDirty(panelEl, pivotWrap, dirty) {
+    var btn = dirty ? dashEnsurePivotSaveButton(panelEl, pivotWrap)
+        : (pivotWrap && pivotWrap.querySelector ? pivotWrap.querySelector('.dash-pivot-save-settings') : null);
+    if (!btn) return;
+    btn.style.display = dirty ? '' : 'none';
+}
+
+function dashCurrentPivotConfig(pivotWrap) {
+    var uiWrap = dashGetPivotUiElement(pivotWrap)
+        , options;
+    if (pivotWrap && pivotWrap._dashPivotCurrentConfig)
+        return dashNormalizePivotConfig(pivotWrap._dashPivotCurrentConfig);
+    if (!uiWrap || !window.jQuery) return null;
+    options = window.jQuery(uiWrap).data ? window.jQuery(uiWrap).data('pivotUIOptions') : null;
+    return options ? dashNormalizePivotConfig(options) : null;
+}
+
+function dashSetPivotSavedConfig(pivotWrap, configString) {
+    if (!pivotWrap) return;
+    if (pivotWrap.dataset) pivotWrap.dataset.dashPivotSavedConfig = configString;
+    else pivotWrap._dashPivotSavedConfig = configString;
+}
+
+function dashGetPivotSavedConfig(pivotWrap) {
+    if (!pivotWrap) return '';
+    return pivotWrap.dataset ? pivotWrap.dataset.dashPivotSavedConfig || '' : pivotWrap._dashPivotSavedConfig || '';
+}
+
+function dashMergePivotConfigIntoSettings(settings, pivotConfig) {
+    var vizList = settings ? (Array.isArray(settings) ? settings.slice() : [settings]) : []
+        , idx = -1
+        , normalized = dashNormalizePivotConfig(pivotConfig)
+        , pivotEntry, fieldMap;
+    vizList.forEach(function(viz, i) {
+        if (idx === -1 && viz && viz.type === 'pivot') idx = i;
+    });
+    pivotEntry = idx === -1 ? { type: 'pivot' } : Object.assign({}, vizList[idx]);
+    fieldMap = Object.assign({}, pivotEntry.fieldMap || {});
+    if (normalized.rows && normalized.rows.length) fieldMap.pivotRows = normalized.rows[0];
+    else delete fieldMap.pivotRows;
+    if (normalized.cols && normalized.cols.length) fieldMap.pivotCols = normalized.cols[0];
+    else delete fieldMap.pivotCols;
+    if (normalized.vals && normalized.vals.length) fieldMap.pivotVals = normalized.vals[0];
+    else delete fieldMap.pivotVals;
+    pivotEntry.fieldMap = fieldMap;
+    pivotEntry.pivotConfig = normalized;
+    if (idx === -1) vizList.push(pivotEntry);
+    else vizList[idx] = pivotEntry;
+    return vizList;
+}
+
+function dashSaveCurrentPivotSettings(panelEl, pivotWrap) {
+    var panelKey = panelEl ? panelEl.id : ''
+        , modelData = dashModelData[panelKey] || {}
+        , panelID = modelData.panelID || ''
+        , pivotConfig = dashCurrentPivotConfig(pivotWrap)
+        , settings, jsonStr;
+    if (!panelEl || !pivotConfig) return;
+    settings = dashMergePivotConfigIntoSettings(modelData.settings, pivotConfig);
+    jsonStr = JSON.stringify(settings);
+    if (panelID) {
+        newApi('POST', '_m_set/' + panelID + '?JSON', 'dashPivotSettingsSaved',
+            't1165=' + encodeURIComponent(jsonStr),
+            { panelEl: panelEl, panelKey: panelKey, settings: settings, pivotWrap: pivotWrap, pivotConfig: pivotConfig });
+    } else {
+        dashApplyNewVizSettings(panelEl, panelKey, settings);
+        dashSetPivotSavedConfig(pivotWrap, dashPivotConfigString(pivotConfig));
+        dashSetPivotSaveButtonDirty(panelEl, pivotWrap, false);
+        dashSetStatus('Настройки сохранены');
+    }
+}
+
+window.dashPivotSettingsSaved = function(json, ctx) {
+    if (!json || json.error) { dashSetStatus('Ошибка сохранения настроек'); return; }
+    dashApplyNewVizSettings(ctx.panelEl, ctx.panelKey, ctx.settings);
+    if (ctx.pivotWrap) {
+        dashSetPivotSavedConfig(ctx.pivotWrap, dashPivotConfigString(ctx.pivotConfig));
+        dashSetPivotSaveButtonDirty(ctx.panelEl, ctx.pivotWrap, false);
+    }
+    dashSetStatus('Настройки сохранены');
+};
+
+function dashRenderPivot(panelEl, pivotWrap, data, fieldMap, vizConfig) {
+    if (!dashPivotDepsReady()) {
+        dashEnsurePivotJs(function() {
+            dashRenderPivot(panelEl, pivotWrap, data, fieldMap, vizConfig);
         });
         return;
     }
-
-    records = data.labels.map(function(lbl, i) {
-        var rec = { 'Строка': lbl };
-        data.datasets.forEach(function(ds) {
-            rec[ds.label || 'Значение'] = ds.data[i] || 0;
+    var shell = dashEnsurePivotShell(pivotWrap)
+        , uiWrap = shell.uiWrap
+        , records
+        , options = dashPivotConfigForRender(data, fieldMap, vizConfig || {})
+        , initialRefreshSeen = false;
+    if (!uiWrap) return;
+    delete pivotWrap._dashPivotCurrentConfig;
+    if (data.records && data.columns) {
+        records = data.records;
+    } else {
+        records = data.labels.map(function(lbl, i) {
+            var rec = { 'Строка': lbl };
+            data.datasets.forEach(function(ds) {
+                rec[ds.label || 'Значение'] = ds.data[i] || 0;
+            });
+            return rec;
         });
-        return rec;
-    });
-    window.jQuery(pivotWrap).pivotUI(records, {
-        rows: fieldMap && fieldMap.pivotRows ? [fieldMap.pivotRows] : ['Строка'],
-        cols: fieldMap && fieldMap.pivotCols ? [fieldMap.pivotCols] : [],
-        aggregatorName: 'Sum',
-        vals: fieldMap && fieldMap.pivotVals ? [fieldMap.pivotVals] : (data.datasets[0] ? [data.datasets[0].label || 'Значение'] : [])
-    });
+    }
+
+    options.onRefresh = function(currentOptions) {
+        var currentConfig = dashNormalizePivotConfig(currentOptions || dashCurrentPivotConfig(pivotWrap) || options)
+            , currentString = dashPivotConfigString(currentConfig)
+            , savedString = dashGetPivotSavedConfig(pivotWrap);
+        pivotWrap._dashPivotCurrentConfig = currentConfig;
+        if (!initialRefreshSeen) {
+            initialRefreshSeen = true;
+            dashSetPivotSavedConfig(pivotWrap, currentString);
+            dashSetPivotSaveButtonDirty(panelEl, pivotWrap, false);
+            return;
+        }
+        dashSetPivotSaveButtonDirty(panelEl, pivotWrap, currentString !== savedString);
+    };
+
+    window.jQuery(uiWrap).pivotUI(records, options, true);
+    dashEnsurePivotSaveButton(panelEl, pivotWrap);
+    if (!initialRefreshSeen) {
+        initialRefreshSeen = true;
+        dashSetPivotSavedConfig(pivotWrap, dashPivotConfigString(dashCurrentPivotConfig(pivotWrap) || options));
+        dashSetPivotSaveButtonDirty(panelEl, pivotWrap, false);
+    }
 }
 
 function dashPanelApplySettings(panelKey, settings, renderChart) {
