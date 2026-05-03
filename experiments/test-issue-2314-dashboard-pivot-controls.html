@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Issue 2314 dashboard pivot controls</title>
+    <link rel="stylesheet" href="../assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="../css/dash.css">
+    <style>
+        :root {
+            --bg-primary: #fff;
+            --bg-secondary: #f8f9fa;
+            --border-color: #d7dce2;
+            --text-primary: #20242a;
+            --text-secondary: #637083;
+        }
+        body {
+            margin: 0;
+            padding: 32px;
+            font-family: Arial, sans-serif;
+            background: #f3f5f7;
+            color: #20242a;
+        }
+        .stage {
+            max-width: 1080px;
+            margin: 0 auto;
+        }
+        .f-panel {
+            background: #fff;
+            border: 1px solid #d7dce2;
+            border-radius: 6px;
+            padding: 18px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+        .f-panel-header h4 {
+            font-size: 18px;
+        }
+        .pvtUi {
+            border-collapse: collapse;
+            width: 100%;
+            background: #fff;
+        }
+        .pvtUi td {
+            border: 1px solid #d7dce2;
+            vertical-align: top;
+        }
+        .pvtAxisContainer,
+        .pvtUiCell {
+            background: #eef2f6;
+            min-height: 42px;
+            padding: 10px;
+            color: #445065;
+        }
+        .pvtRendererArea {
+            background: #fff;
+            min-height: 260px;
+            padding: 14px;
+        }
+        .pvtTable {
+            border-collapse: collapse;
+            width: 100%;
+            margin-top: 2px;
+        }
+        .pvtTable th,
+        .pvtTable td {
+            border: 1px solid #d7dce2;
+            padding: 8px 10px;
+            text-align: right;
+        }
+        .pvtTable th {
+            background: #f8f9fa;
+            font-weight: 600;
+            text-align: left;
+        }
+        .pvtAttr {
+            display: inline-block;
+            border: 1px solid #ccd3dc;
+            border-radius: 4px;
+            background: #fff;
+            padding: 4px 8px;
+            margin: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="stage">
+        <div class="f-panel f-panel--chart">
+            <div class="f-panel-header">
+                <div class="f-panel-viz-icons">
+                    <a class="f-viz-type-icon active"><i class="pi pi-table"></i></a>
+                </div>
+                <h4>Сводная таблица</h4>
+            </div>
+            <div class="f-panel-content">
+                <div class="f-pivot-wrap dash-pivot-controls-collapsed">
+                    <div class="dash-pivot-ui dash-pivot-controls-collapsed">
+                        <table class="pvtUi">
+                            <tr>
+                                <td class="pvtUiCell">Сумма <select><option>План</option></select></td>
+                                <td class="pvtAxisContainer pvtCols"><span class="pvtAttr">Месяц</span></td>
+                            </tr>
+                            <tr class="dash-pivot-renderer-row">
+                                <td class="pvtAxisContainer pvtRows"><span class="pvtAttr">Строка</span></td>
+                                <td class="pvtRendererArea">
+                                    <button class="dash-pivot-settings-toggle" type="button" aria-label="Настройка сводной таблицы" aria-expanded="false"><i class="pi pi-cog"></i></button>
+                                    <table class="pvtTable">
+                                        <tr><th></th><th>Январь</th><th>Февраль</th><th>Итого</th></tr>
+                                        <tr><th>План</th><td>120</td><td>140</td><td>260</td></tr>
+                                        <tr><th>Факт</th><td>98</td><td>151</td><td>249</td></tr>
+                                        <tr><th>Итого</th><td>218</td><td>291</td><td>509</td></tr>
+                                    </table>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td colspan="2" class="pvtAxisContainer pvtUnused"><span class="pvtAttr">Отдел</span><span class="pvtAttr">Статус</span></td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="dash-pivot-actions">
+                        <button class="dash-apply-btn dash-btn-primary dash-pivot-save-settings">Сохранить настройки</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

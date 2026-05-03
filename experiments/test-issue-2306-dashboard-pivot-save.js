@@ -60,7 +60,13 @@ class TestElement {
                 const remove = new Set(names);
                 this.className = this.className.split(/\s+/).filter(Boolean).filter(name => !remove.has(name)).join(' ');
             },
-            contains: name => this.className.split(/\s+/).filter(Boolean).indexOf(name) !== -1
+            contains: name => this.className.split(/\s+/).filter(Boolean).indexOf(name) !== -1,
+            toggle: (name, force) => {
+                const shouldAdd = force === undefined ? !this.classList.contains(name) : !!force;
+                if (shouldAdd) this.classList.add(name);
+                else this.classList.remove(name);
+                return shouldAdd;
+            }
         };
     }
 
@@ -185,6 +191,15 @@ ${extractFunctionIfPresent('dashPivotConfigString')}
 ${extractFunctionIfPresent('dashDefaultPivotConfig')}
 ${extractFunctionIfPresent('dashPivotConfigForRender')}
 ${extractFunctionIfPresent('dashPanelCanSaveVizSettings')}
+${extractFunctionIfPresent('dashReadPivotControlsState')}
+${extractFunctionIfPresent('dashSetPivotControlsVisible')}
+${extractFunctionIfPresent('dashPivotHasConfiguredOptions')}
+${extractFunctionIfPresent('dashPivotControlsAutoOpened')}
+${extractFunctionIfPresent('dashSetPivotControlsAutoOpened')}
+${extractFunctionIfPresent('dashShouldAutoOpenPivotControls')}
+${extractFunctionIfPresent('dashMarkPivotRendererArea')}
+${extractFunctionIfPresent('dashEnsurePivotSettingsToggle')}
+${extractFunctionIfPresent('dashRefreshPivotControls')}
 ${extractFunctionIfPresent('dashEnsurePivotSaveButton')}
 ${extractFunctionIfPresent('dashSetPivotSaveButtonDirty')}
 ${extractFunctionIfPresent('dashCurrentPivotConfig')}

@@ -2429,6 +2429,115 @@ function dashPanelCanSaveVizSettings(panelEl) {
     return !!(panelEl && panelEl.querySelector && panelEl.querySelector('.f-panel-settings-icon'));
 }
 
+function dashReadPivotControlsState(pivotWrap) {
+    var value;
+    if (!pivotWrap) return null;
+    value = pivotWrap.dataset ? pivotWrap.dataset.dashPivotControlsOpen : pivotWrap._dashPivotControlsOpen;
+    if (value === undefined || value === null || value === '') return null;
+    return value === true || value === '1';
+}
+
+function dashSetPivotControlsVisible(pivotWrap, visible) {
+    var uiWrap = dashGetPivotUiElement(pivotWrap)
+        , toggle = uiWrap && uiWrap.querySelector ? uiWrap.querySelector('.dash-pivot-settings-toggle') : null
+        , open = !!visible;
+    if (!pivotWrap || !uiWrap) return;
+    if (pivotWrap.dataset) pivotWrap.dataset.dashPivotControlsOpen = open ? '1' : '0';
+    else pivotWrap._dashPivotControlsOpen = open;
+    if (pivotWrap.classList) {
+        pivotWrap.classList.toggle('dash-pivot-controls-open', open);
+        pivotWrap.classList.toggle('dash-pivot-controls-collapsed', !open);
+    }
+    if (uiWrap.classList) {
+        uiWrap.classList.toggle('dash-pivot-controls-open', open);
+        uiWrap.classList.toggle('dash-pivot-controls-collapsed', !open);
+    }
+    if (toggle) {
+        toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (toggle.classList) toggle.classList.toggle('active', open);
+    }
+}
+
+function dashPivotHasConfiguredOptions(fieldMap, vizConfig) {
+    var fm = Object.assign({}, (vizConfig && vizConfig.fieldMap) || {}, fieldMap || {})
+        , pivotConfig = dashNormalizePivotConfig(vizConfig && vizConfig.pivotConfig);
+    if (fm.pivotRows || fm.pivotCols || fm.pivotVals) return true;
+    return Object.keys(pivotConfig).some(function(key) {
+        var value = pivotConfig[key];
+        if (Array.isArray(value)) return value.length > 0;
+        if (value && typeof value === 'object') return Object.keys(value).length > 0;
+        return !!value;
+    });
+}
+
+function dashPivotControlsAutoOpened(pivotWrap) {
+    var value;
+    if (!pivotWrap) return false;
+    value = pivotWrap.dataset ? pivotWrap.dataset.dashPivotControlsAutoOpened : pivotWrap._dashPivotControlsAutoOpened;
+    return value === true || value === '1';
+}
+
+function dashSetPivotControlsAutoOpened(pivotWrap) {
+    if (!pivotWrap) return;
+    if (pivotWrap.dataset) pivotWrap.dataset.dashPivotControlsAutoOpened = '1';
+    else pivotWrap._dashPivotControlsAutoOpened = true;
+}
+
+function dashShouldAutoOpenPivotControls(pivotWrap, fieldMap, vizConfig) {
+    return !dashPivotControlsAutoOpened(pivotWrap) && !dashPivotHasConfiguredOptions(fieldMap, vizConfig);
+}
+
+function dashMarkPivotRendererArea(uiWrap) {
+    var rendererArea, rendererRow;
+    if (!uiWrap || !uiWrap.querySelector) return null;
+    if (uiWrap.querySelectorAll)
+        Array.from(uiWrap.querySelectorAll('.dash-pivot-renderer-row')).forEach(function(row) {
+            if (row.classList) row.classList.remove('dash-pivot-renderer-row');
+        });
+    rendererArea = uiWrap.querySelector('.pvtRendererArea');
+    if (!rendererArea) return null;
+    rendererRow = rendererArea.closest ? rendererArea.closest('tr') : null;
+    if (rendererRow && rendererRow.classList) rendererRow.classList.add('dash-pivot-renderer-row');
+    return rendererArea;
+}
+
+function dashEnsurePivotSettingsToggle(panelEl, pivotWrap) {
+    var uiWrap = dashGetPivotUiElement(pivotWrap)
+        , rendererArea = dashMarkPivotRendererArea(uiWrap)
+        , toggle;
+    if (!rendererArea || !rendererArea.querySelector || !rendererArea.appendChild || !document.createElement)
+        return null;
+    toggle = rendererArea.querySelector('.dash-pivot-settings-toggle');
+    if (toggle) return toggle;
+    toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'dash-pivot-settings-toggle';
+    toggle.title = 'Настройка';
+    toggle.setAttribute('aria-label', 'Настройка сводной таблицы');
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.innerHTML = '<i class="pi pi-cog"></i>';
+    toggle.addEventListener('click', function(e) {
+        var state;
+        if (e && e.preventDefault) e.preventDefault();
+        if (e && e.stopPropagation) e.stopPropagation();
+        state = dashReadPivotControlsState(pivotWrap);
+        dashSetPivotControlsVisible(pivotWrap, state !== true);
+    });
+    rendererArea.appendChild(toggle);
+    return toggle;
+}
+
+function dashRefreshPivotControls(panelEl, pivotWrap, fieldMap, vizConfig, allowAutoOpen) {
+    var toggle = dashEnsurePivotSettingsToggle(panelEl, pivotWrap)
+        , state = dashReadPivotControlsState(pivotWrap);
+    dashSetPivotControlsVisible(pivotWrap, state === true);
+    if (allowAutoOpen && toggle && dashShouldAutoOpenPivotControls(pivotWrap, fieldMap, vizConfig)) {
+        dashSetPivotControlsAutoOpened(pivotWrap);
+        if (toggle.click) toggle.click();
+        else dashSetPivotControlsVisible(pivotWrap, true);
+    }
+}
+
 function dashEnsurePivotSaveButton(panelEl, pivotWrap) {
     var actionsWrap, btn;
     if (!dashPanelCanSaveVizSettings(panelEl) || !pivotWrap || !pivotWrap.querySelector || !pivotWrap.appendChild || !document.createElement)
@@ -2567,6 +2676,7 @@ function dashRenderPivot(panelEl, pivotWrap, data, fieldMap, vizConfig) {
             , currentString = dashPivotConfigString(currentConfig)
             , savedString = dashGetPivotSavedConfig(pivotWrap);
         pivotWrap._dashPivotCurrentConfig = currentConfig;
+        dashRefreshPivotControls(panelEl, pivotWrap, fieldMap, vizConfig, !initialRefreshSeen);
         if (!initialRefreshSeen) {
             initialRefreshSeen = true;
             dashSetPivotSavedConfig(pivotWrap, currentString);
@@ -2578,6 +2688,7 @@ function dashRenderPivot(panelEl, pivotWrap, data, fieldMap, vizConfig) {
 
     window.jQuery(uiWrap).pivotUI(records, options, true);
     dashEnsurePivotSaveButton(panelEl, pivotWrap);
+    dashRefreshPivotControls(panelEl, pivotWrap, fieldMap, vizConfig, true);
     if (!initialRefreshSeen) {
         initialRefreshSeen = true;
         dashSetPivotSavedConfig(pivotWrap, dashPivotConfigString(dashCurrentPivotConfig(pivotWrap) || options));
