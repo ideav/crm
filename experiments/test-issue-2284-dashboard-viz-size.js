@@ -82,6 +82,11 @@ function makeSizeItem() {
 const code = `
 var CHART_COLORS = ['rgba(54,162,235,0.7)', 'rgba(255,99,132,0.7)'];
 var DASH_VIZ_SIZE_UNITS = ['%', 'px', 'rem'];
+var DASH_CHART_RESIZE_MIN_WIDTH = 260;
+var DASH_CHART_RESIZE_MIN_HEIGHT = 180;
+var DASH_CHART_RESIZE_COOKIE_MAX_AGE = 31536000;
+var dashRecordId = 'dash-test';
+var dashCurrentId = null;
 function dashCollectPanelData(panelEl) {
     return { labels: ['Январь'], datasets: [{ label: 'План', data: [12] }] };
 }
@@ -97,6 +102,23 @@ ${extractFunction('dashNormalizeVizSizeDimension')}
 ${extractFunction('dashNormalizeVizSize')}
 ${extractFunction('dashVizSizeCss')}
 ${extractFunction('dashResetVizSizeStyles')}
+${extractFunction('dashIsResizableChartViz')}
+${extractFunction('dashCookieGet')}
+${extractFunction('dashCookieSet')}
+${extractFunction('dashCookieNamePart')}
+${extractFunction('dashChartSizeCookieName')}
+${extractFunction('dashReadChartSizeCookie')}
+${extractFunction('dashWriteChartSizeCookie')}
+${extractFunction('dashMergeVizSize')}
+${extractFunction('dashResolveVizSize')}
+${extractFunction('dashApplyVizSizeStyles')}
+${extractFunction('dashResizeChartInstance')}
+${extractFunction('dashApplyChartPixelSize')}
+${extractFunction('dashChartResizeMaxWidth')}
+${extractFunction('dashChartResizeMaxHeight')}
+${extractFunction('dashClampChartSize')}
+${extractFunction('dashStartChartResize')}
+${extractFunction('dashEnsureChartResizeHandle')}
 ${extractFunction('dashApplyVizSize')}
 ${extractFunction('dashCollectVizSizeDimension')}
 ${extractFunction('dashCollectVizSize')}
