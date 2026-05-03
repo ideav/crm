@@ -2380,7 +2380,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     justify-content: center;
     padding: 4px;
     border-radius: 4px;
-    color: var(--md-text-secondary, #666);
+    color: var(--md-primary);
     text-decoration: none !important;
     transition: var(--md-transition);
     vertical-align: middle;
@@ -2389,7 +2389,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .subordinate-table-icon-link:hover {
     background-color: rgba(25, 118, 210, 0.08);
-    color: var(--md-primary);
+    color: var(--md-primary-dark);
 }
 
 /* Count link - opens subordinate table in modal (issue #733) */
