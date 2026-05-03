@@ -174,6 +174,29 @@
     width: 10rem;
 }
 .dash-filter-sep { color: var(--text-secondary, #6c757d); }
+.dash-reset-size-icon {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    margin-left: auto;
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary, #6c757d);
+    cursor: pointer;
+    font-size: 1.1rem;
+    text-decoration: none;
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+.dash-reset-size-icon.dash-reset-size-icon--visible { display: inline-flex; }
+.dash-reset-size-icon:hover,
+.dash-reset-size-icon:focus {
+    color: var(--text-primary, #212529);
+    background: var(--bg-secondary, #f0f0f0);
+    outline: none;
+}
+.dash-reset-size-icon.dash-reset-size-icon--visible + .dash-settings-icon { margin-left: 0; }
 .dash-settings-icon {
     margin-left: auto;
     color: var(--text-secondary, #6c757d);
