@@ -66,6 +66,18 @@ const code = [
     'dashLoadScriptOnce',
     'dashPivotDepsReady',
     'dashEnsurePivotJs',
+    'dashGetPivotUiElement',
+    'dashEnsurePivotShell',
+    'dashNormalizePivotConfig',
+    'dashPivotConfigString',
+    'dashDefaultPivotConfig',
+    'dashPivotConfigForRender',
+    'dashPanelCanSaveVizSettings',
+    'dashEnsurePivotSaveButton',
+    'dashSetPivotSaveButtonDirty',
+    'dashCurrentPivotConfig',
+    'dashSetPivotSavedConfig',
+    'dashGetPivotSavedConfig',
     'dashRenderPivot'
 ].map(extractFunction).join('\n');
 
