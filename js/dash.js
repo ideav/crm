@@ -575,6 +575,7 @@ function dashRenderReportTable(panelEl) {
         , tableWrap = panelEl ? panelEl.querySelector('.f-table-wrap') : null;
     if (!report || !tableWrap || (panelEl && panelEl.querySelector('.f-item'))) return false;
     tableWrap.innerHTML = dashRenderReportTableHtml(report, dashPanelFiltersFor(panelEl));
+    dashEnsureTableResizeHandle(panelEl);
     return true;
 }
 
@@ -1798,6 +1799,7 @@ function dashGetModel(json) {
                 vizReportId: vizReportId,
                 vizReportKey: vizReportId ? dashGetVizReport(vizReportId, fr, to, json[i].panelFilter) : ''
             };
+            dashApplyVizSize(document.getElementById(panelKey), 'table', {});
             dashPanelApplySettings(panelKey, panelSettings, false);
         }
         if (panelNotes.trim() && dashModelData[panelKey] && !dashModelData[panelKey].notes) {
@@ -1888,6 +1890,8 @@ var DASH_VIZ_TYPES = [
 var DASH_VIZ_SIZE_UNITS = ['%', 'px', 'rem'];
 var DASH_CHART_RESIZE_MIN_WIDTH = 260;
 var DASH_CHART_RESIZE_MIN_HEIGHT = 180;
+var DASH_TABLE_RESIZE_MIN_WIDTH = 260;
+var DASH_TABLE_RESIZE_MIN_HEIGHT = 120;
 var DASH_CHART_RESIZE_COOKIE_MAX_AGE = 31536000;
 var dashVizModalCtx = null; // { panelEl, panelKey }
 
@@ -2241,6 +2245,40 @@ function dashWriteChartSizeCookie(panelEl, vizType, size) {
     return payload;
 }
 
+function dashTableSizeCookieName(panelEl) {
+    var dashId = dashRecordId || dashCurrentId || 'dash'
+        , panelId = panelEl && panelEl.dataset && panelEl.dataset.panelId ? panelEl.dataset.panelId : (panelEl ? panelEl.id : 'panel');
+    return 'dash_table_size_'
+        + dashCookieNamePart(dashId) + '_'
+        + dashCookieNamePart(panelId);
+}
+
+function dashReadTableSizeCookie(panelEl) {
+    var raw = dashCookieGet(dashTableSizeCookieName(panelEl))
+        , parsed;
+    if (!raw) return null;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (e) {
+        return null;
+    }
+    return dashNormalizeVizSize({
+        width: parsed.width ? { value: parsed.width, unit: 'px' } : null,
+        height: parsed.height ? { value: parsed.height, unit: 'px' } : null
+    });
+}
+
+function dashWriteTableSizeCookie(panelEl, size) {
+    var normalized = dashNormalizeVizSize(size)
+        , payload = {};
+    if (!normalized) return null;
+    if (normalized.width) payload.width = Math.round(parseFloat(normalized.width.value));
+    if (normalized.height) payload.height = Math.round(parseFloat(normalized.height.value));
+    if (!payload.width && !payload.height) return null;
+    dashCookieSet(dashTableSizeCookieName(panelEl), JSON.stringify(payload), DASH_CHART_RESIZE_COOKIE_MAX_AGE);
+    return payload;
+}
+
 function dashMergeVizSize(baseSize, overrideSize) {
     var merged = {}, hasSize = false;
     if (baseSize && baseSize.width) {
@@ -2268,11 +2306,19 @@ function dashResolveVizSize(panelEl, vizType, vizConfig) {
     return dashMergeVizSize(configuredSize, dashReadChartSizeCookie(panelEl, vizType));
 }
 
+function dashResolveTableSize(panelEl, vizConfig) {
+    return dashMergeVizSize(
+        dashNormalizeVizSize(vizConfig && vizConfig.size),
+        dashReadTableSizeCookie(panelEl)
+    );
+}
+
 function dashApplyVizSizeStyles(panelEl, vizType, size) {
     var chartWrap = panelEl.querySelector('.f-chart-wrap')
+        , tableWrap = panelEl.querySelector('.f-table-wrap')
         , pivotWrap = panelEl.querySelector('.f-pivot-wrap')
         , canvas = panelEl.querySelector('.f-chart-canvas')
-        , targetWrap = vizType === 'pivot' ? pivotWrap : chartWrap
+        , targetWrap = vizType === 'pivot' ? pivotWrap : (vizType === 'table' ? tableWrap : chartWrap)
         , widthCss = size && size.width ? dashVizSizeCss(size.width) : ''
         , heightCss = size && size.height ? dashVizSizeCss(size.height) : '';
 
@@ -2324,6 +2370,29 @@ function dashApplyChartPixelSize(panelEl, vizType, width, height) {
     }
     dashApplyVizSizeStyles(panelEl, vizType, size);
     dashResizeChartInstance(panelEl);
+    return size;
+}
+
+function dashApplyTablePixelSize(panelEl, width, height) {
+    var tableWrap = panelEl.querySelector('.f-table-wrap')
+        , chartWrap = panelEl.querySelector('.f-chart-wrap')
+        , pivotWrap = panelEl.querySelector('.f-pivot-wrap')
+        , canvas = panelEl.querySelector('.f-chart-canvas')
+        , size = dashNormalizeVizSize({
+            width: { value: Math.round(width), unit: 'px' },
+            height: { value: Math.round(height), unit: 'px' }
+        });
+    if (!size) return null;
+    dashResetVizSizeStyles(panelEl);
+    dashResetVizSizeStyles(tableWrap);
+    dashResetVizSizeStyles(chartWrap);
+    dashResetVizSizeStyles(pivotWrap);
+    if (canvas && canvas.style) {
+        canvas.style.height = '';
+        canvas.style.maxHeight = '';
+    }
+    dashApplyVizSizeStyles(panelEl, 'table', size);
+    dashUpdateTableWrapOverflow();
     return size;
 }
 
@@ -2384,6 +2453,46 @@ function dashStartChartResize(e, vizType) {
     document.addEventListener('mouseup', onUp);
 }
 
+function dashStartTableResize(e) {
+    var handle = e.currentTarget || e.target
+        , panelEl = handle && handle.closest ? handle.closest('.f-panel') : null
+        , tableWrap = panelEl ? panelEl.querySelector('.f-table-wrap') : null
+        , rect = tableWrap && tableWrap.getBoundingClientRect ? tableWrap.getBoundingClientRect() : null
+        , startX, startY, startWidth, startHeight, maxWidth, maxHeight
+        , latestSize = null;
+    if (e.button !== undefined && e.button !== 0) return;
+    if (!panelEl || !tableWrap || !rect) return;
+    e.preventDefault();
+    startX = e.clientX;
+    startY = e.clientY;
+    startWidth = rect.width || tableWrap.offsetWidth || DASH_TABLE_RESIZE_MIN_WIDTH;
+    startHeight = rect.height || tableWrap.offsetHeight || DASH_TABLE_RESIZE_MIN_HEIGHT;
+    maxWidth = dashChartResizeMaxWidth(panelEl);
+    maxHeight = dashChartResizeMaxHeight();
+
+    function onMove(moveEvent) {
+        var nextWidth, nextHeight;
+        moveEvent.preventDefault();
+        nextWidth = dashClampChartSize(startWidth + (moveEvent.clientX - startX), DASH_TABLE_RESIZE_MIN_WIDTH, maxWidth);
+        nextHeight = dashClampChartSize(startHeight + (moveEvent.clientY - startY), DASH_TABLE_RESIZE_MIN_HEIGHT, maxHeight);
+        latestSize = dashApplyTablePixelSize(panelEl, nextWidth, nextHeight);
+    }
+
+    function onUp(upEvent) {
+        if (upEvent && upEvent.preventDefault) upEvent.preventDefault();
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        panelEl.classList.remove('f-panel--table-resizing');
+        if (document.body && document.body.classList) document.body.classList.remove('dash-table-resizing');
+        if (latestSize) dashWriteTableSizeCookie(panelEl, latestSize);
+    }
+
+    panelEl.classList.add('f-panel--table-resizing');
+    if (document.body && document.body.classList) document.body.classList.add('dash-table-resizing');
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+}
+
 function dashEnsureChartResizeHandle(panelEl, vizType) {
     var chartWrap = panelEl ? panelEl.querySelector('.f-chart-wrap') : null
         , handle;
@@ -2408,22 +2517,50 @@ function dashEnsureChartResizeHandle(panelEl, vizType) {
     handle.style.display = '';
 }
 
+function dashEnsureTableResizeHandle(panelEl) {
+    var tableWrap = panelEl ? panelEl.querySelector('.f-table-wrap') : null
+        , handle;
+    if (!tableWrap || typeof document === 'undefined' || !document.createElement) return;
+    handle = tableWrap.querySelector('.f-table-resize-handle');
+    if (!handle) {
+        handle = document.createElement('button');
+        handle.type = 'button';
+        handle.className = 'f-table-resize-handle';
+        handle.title = 'Изменить размер таблицы';
+        handle.setAttribute('aria-label', 'Изменить размер таблицы');
+        handle.addEventListener('mousedown', dashStartTableResize);
+        tableWrap.appendChild(handle);
+    }
+    handle.style.display = '';
+}
+
 function dashApplyVizSize(panelEl, vizType, vizConfig) {
     var chartWrap = panelEl.querySelector('.f-chart-wrap')
+        , tableWrap = panelEl.querySelector('.f-table-wrap')
         , pivotWrap = panelEl.querySelector('.f-pivot-wrap')
         , canvas = panelEl.querySelector('.f-chart-canvas')
-        , size = dashResolveVizSize(panelEl, vizType, vizConfig || {});
+        , size = vizType === 'table'
+            ? dashResolveTableSize(panelEl, vizConfig || {})
+            : dashResolveVizSize(panelEl, vizType, vizConfig || {});
 
     dashResetVizSizeStyles(panelEl);
+    dashResetVizSizeStyles(tableWrap);
     dashResetVizSizeStyles(chartWrap);
     dashResetVizSizeStyles(pivotWrap);
     if (canvas && canvas.style) {
         canvas.style.height = '';
         canvas.style.maxHeight = '';
     }
+
+    if (vizType === 'table') {
+        dashEnsureTableResizeHandle(panelEl);
+        if (!size) return size;
+        return dashApplyVizSizeStyles(panelEl, vizType, size);
+    }
+
     dashEnsureChartResizeHandle(panelEl, vizType);
 
-    if (vizType === 'table' || !size) return size;
+    if (!size) return size;
     return dashApplyVizSizeStyles(panelEl, vizType, size);
 }
 
@@ -2446,6 +2583,7 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
 
     if (vizType === 'table') {
         dashRenderReportTable(panelEl);
+        dashEnsureTableResizeHandle(panelEl);
         tableWrap.style.display = '';
         chartWrap.style.display = 'none';
         panelEl.classList.remove('f-panel--chart');

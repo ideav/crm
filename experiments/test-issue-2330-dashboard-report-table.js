@@ -29,6 +29,7 @@ let dashModelData = {};
 let dashVizReports = {};
 function dashPanelFiltersFor() { return {}; }
 function dashFilterReportRowsForPanel(rows) { return rows || []; }
+function dashEnsureTableResizeHandle() {}
 
 ${extractFunction('dashAttr')}
 ${extractFunction('dashNormalizeNumberText')}

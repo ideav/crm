@@ -45,7 +45,9 @@
     min-width: 0;
 }
 .f-panel .f-table-wrap {
-    overflow-x: auto;
+    overflow: auto;
+    position: relative;
+    max-width: 100%;
 }
 .f-panel-notes {
     margin-top: 0.5rem;
@@ -552,6 +554,7 @@ td:has(.dash-cell-input) {
     display: block;
     width: 100% !important;
 }
+.f-table-resize-handle,
 .f-chart-resize-handle {
     position: absolute;
     right: 0;
@@ -566,6 +569,7 @@ td:has(.dash-cell-input) {
     z-index: 5;
     touch-action: none;
 }
+.f-table-resize-handle::before,
 .f-chart-resize-handle::before {
     content: "";
     position: absolute;
@@ -577,11 +581,15 @@ td:has(.dash-cell-input) {
     border-bottom: 2px solid var(--text-secondary, #6c757d);
     border-radius: 0 0 2px 0;
 }
+.f-table-wrap:hover .f-table-resize-handle,
+.f-table-resize-handle:focus,
+.f-panel--table-resizing .f-table-resize-handle,
 .f-chart-wrap:hover .f-chart-resize-handle,
 .f-chart-resize-handle:focus,
 .f-panel--chart-resizing .f-chart-resize-handle {
     opacity: 0.85;
 }
+body.dash-table-resizing,
 body.dash-chart-resizing {
     cursor: nwse-resize;
     user-select: none;

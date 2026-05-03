@@ -84,6 +84,8 @@ var CHART_COLORS = ['rgba(54,162,235,0.7)', 'rgba(255,99,132,0.7)'];
 var DASH_VIZ_SIZE_UNITS = ['%', 'px', 'rem'];
 var DASH_CHART_RESIZE_MIN_WIDTH = 260;
 var DASH_CHART_RESIZE_MIN_HEIGHT = 180;
+var DASH_TABLE_RESIZE_MIN_WIDTH = 260;
+var DASH_TABLE_RESIZE_MIN_HEIGHT = 120;
 var DASH_CHART_RESIZE_COOKIE_MAX_AGE = 31536000;
 var dashRecordId = 'dash-test';
 var dashCurrentId = null;
@@ -109,8 +111,12 @@ ${extractFunction('dashCookieNamePart')}
 ${extractFunction('dashChartSizeCookieName')}
 ${extractFunction('dashReadChartSizeCookie')}
 ${extractFunction('dashWriteChartSizeCookie')}
+${extractFunction('dashTableSizeCookieName')}
+${extractFunction('dashReadTableSizeCookie')}
+${extractFunction('dashWriteTableSizeCookie')}
 ${extractFunction('dashMergeVizSize')}
 ${extractFunction('dashResolveVizSize')}
+${extractFunction('dashResolveTableSize')}
 ${extractFunction('dashApplyVizSizeStyles')}
 ${extractFunction('dashResizeChartInstance')}
 ${extractFunction('dashApplyChartPixelSize')}
@@ -119,6 +125,7 @@ ${extractFunction('dashChartResizeMaxHeight')}
 ${extractFunction('dashClampChartSize')}
 ${extractFunction('dashStartChartResize')}
 ${extractFunction('dashEnsureChartResizeHandle')}
+${extractFunction('dashEnsureTableResizeHandle')}
 ${extractFunction('dashApplyVizSize')}
 ${extractFunction('dashCollectVizSizeDimension')}
 ${extractFunction('dashCollectVizSize')}
