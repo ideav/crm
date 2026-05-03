@@ -738,17 +738,28 @@ body.dash-chart-resizing {
     padding-top: 0.6rem;
     border-top: 1px solid var(--border-color, #dee2e6);
 }
+.dash-panel-max-width-settings {
+    margin-top: 0.75rem;
+}
+.dash-panel-max-width-group {
+    border: 1px solid var(--border-color, #dee2e6);
+    border-radius: 4px;
+    padding: 0.6rem 0.75rem 0.2rem;
+    background: var(--bg-primary, #fff);
+}
 .dash-viz-size-title {
     margin-bottom: 0.4rem;
     color: var(--text-secondary, #6c757d);
     font-size: 0.82rem;
     font-weight: 600;
 }
-.dash-viz-size-row input[type="number"] {
+.dash-viz-size-row input[type="number"],
+.dash-panel-max-width-row input[type="number"] {
     flex: 0 1 7rem;
     min-width: 0;
 }
-.dash-viz-size-row select {
+.dash-viz-size-row select,
+.dash-panel-max-width-row select {
     flex: 0 0 4.5rem;
 }
 .dash-viz-field-hint {

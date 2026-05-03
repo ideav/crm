@@ -1888,6 +1888,8 @@ var DASH_VIZ_TYPES = [
 ];
 
 var DASH_VIZ_SIZE_UNITS = ['%', 'px', 'rem'];
+var DASH_PANEL_MAX_WIDTH_UNITS = ['%', 'px'];
+var DASH_PANEL_MAX_WIDTH_MOBILE_BREAKPOINT = 767;
 var DASH_CHART_RESIZE_MIN_WIDTH = 260;
 var DASH_CHART_RESIZE_MIN_HEIGHT = 180;
 var DASH_TABLE_RESIZE_MIN_WIDTH = 260;
@@ -2177,6 +2179,96 @@ function dashVizSizeCss(dim) {
     return dim ? dim.value + dim.unit : '';
 }
 
+function dashNormalizePanelMaxWidthUnit(unit) {
+    unit = String(unit || '').trim();
+    return DASH_PANEL_MAX_WIDTH_UNITS.indexOf(unit) === -1 ? 'px' : unit;
+}
+
+function dashNormalizePanelMaxWidthDimension(dim) {
+    var value, unit, match;
+    if (!dim) return null;
+    if (typeof dim === 'string' || typeof dim === 'number') {
+        match = String(dim).trim().match(/^(\d+(?:[.,]\d+)?)(%|px)?$/);
+        if (!match) return null;
+        value = match[1];
+        unit = match[2] || 'px';
+    } else {
+        value = dim.value;
+        unit = dim.unit;
+    }
+    value = dashNormalizeVizSizeValue(value);
+    unit = String(unit || '').trim() || 'px';
+    if (!value) return null;
+    if (DASH_PANEL_MAX_WIDTH_UNITS.indexOf(unit) === -1) return null;
+    return { value: value, unit: unit };
+}
+
+function dashNormalizePanelMaxWidth(maxWidth) {
+    var result = {}, desktop, mobile;
+    if (!maxWidth) return null;
+    desktop = dashNormalizePanelMaxWidthDimension(maxWidth.desktop || (maxWidth.desktopValue ? { value: maxWidth.desktopValue, unit: maxWidth.desktopUnit } : null));
+    mobile = dashNormalizePanelMaxWidthDimension(maxWidth.mobile || (maxWidth.mobileValue ? { value: maxWidth.mobileValue, unit: maxWidth.mobileUnit } : null));
+    if (desktop) result.desktop = desktop;
+    if (mobile) result.mobile = mobile;
+    return result.desktop || result.mobile ? result : null;
+}
+
+function dashPanelMaxWidthFromSettings(settings) {
+    var list = settings ? (Array.isArray(settings) ? settings : [settings]) : []
+        , found = null;
+    list.forEach(function(entry) {
+        if (!found && entry && entry.panelMaxWidth)
+            found = dashNormalizePanelMaxWidth(entry.panelMaxWidth);
+    });
+    return found;
+}
+
+function dashSetPanelMaxWidthInSettings(settings, panelMaxWidth) {
+    var list = settings ? (Array.isArray(settings) ? settings.slice() : [settings]) : []
+        , normalized = dashNormalizePanelMaxWidth(panelMaxWidth)
+        , result = [];
+    list.forEach(function(entry) {
+        if (entry && entry.panelMaxWidth) return;
+        result.push(entry);
+    });
+    if (normalized) result.push({ panelMaxWidth: normalized });
+    return result;
+}
+
+function dashPanelMaxWidthDevice() {
+    if (typeof window !== 'undefined' && window.matchMedia)
+        return window.matchMedia('(max-width: ' + DASH_PANEL_MAX_WIDTH_MOBILE_BREAKPOINT + 'px)').matches ? 'mobile' : 'desktop';
+    if (typeof window !== 'undefined' && window.innerWidth && window.innerWidth <= DASH_PANEL_MAX_WIDTH_MOBILE_BREAKPOINT)
+        return 'mobile';
+    return 'desktop';
+}
+
+function dashPanelMaxWidthForPanel(panelEl) {
+    var modelData = panelEl ? dashModelData[panelEl.id] : null
+        , maxWidth = dashPanelMaxWidthFromSettings(modelData && modelData.settings)
+        , device = dashPanelMaxWidthDevice();
+    if (!maxWidth) return null;
+    if (device === 'mobile') return maxWidth.mobile || maxWidth.desktop || null;
+    return maxWidth.desktop || null;
+}
+
+function dashPanelMaxWidthCss(dim) {
+    return dim ? dim.value + dim.unit : '';
+}
+
+function dashCombineMaxWidthCss(vizWidthCss, panelMaxWidthCss) {
+    if (vizWidthCss && panelMaxWidthCss && vizWidthCss !== panelMaxWidthCss)
+        return 'min(' + vizWidthCss + ', ' + panelMaxWidthCss + ')';
+    return vizWidthCss || panelMaxWidthCss || '';
+}
+
+function dashApplyPanelMaxWidth(panelEl) {
+    var vizWidthCss = panelEl && panelEl._dashVizWidthCss ? panelEl._dashVizWidthCss : ''
+        , panelMaxWidthCss = dashPanelMaxWidthCss(dashPanelMaxWidthForPanel(panelEl));
+    if (!panelEl || !panelEl.style) return;
+    panelEl.style.maxWidth = dashCombineMaxWidthCss(vizWidthCss, panelMaxWidthCss);
+}
+
 function dashResetVizSizeStyles(el) {
     if (!el || !el.style) return;
     el.style.flex = '';
@@ -2323,9 +2415,9 @@ function dashApplyVizSizeStyles(panelEl, vizType, size) {
         , heightCss = size && size.height ? dashVizSizeCss(size.height) : '';
 
     if (widthCss) {
+        panelEl._dashVizWidthCss = widthCss;
         panelEl.style.flex = '0 1 ' + widthCss;
         panelEl.style.width = '100%';
-        panelEl.style.maxWidth = widthCss;
         if (targetWrap) {
             targetWrap.style.width = '100%';
             targetWrap.style.maxWidth = widthCss;
@@ -2361,6 +2453,7 @@ function dashApplyChartPixelSize(panelEl, vizType, width, height) {
             height: { value: Math.round(height), unit: 'px' }
         });
     if (!size) return null;
+    panelEl._dashVizWidthCss = '';
     dashResetVizSizeStyles(panelEl);
     dashResetVizSizeStyles(chartWrap);
     dashResetVizSizeStyles(pivotWrap);
@@ -2369,6 +2462,7 @@ function dashApplyChartPixelSize(panelEl, vizType, width, height) {
         canvas.style.maxHeight = '';
     }
     dashApplyVizSizeStyles(panelEl, vizType, size);
+    dashApplyPanelMaxWidth(panelEl);
     dashResizeChartInstance(panelEl);
     return size;
 }
@@ -2383,6 +2477,7 @@ function dashApplyTablePixelSize(panelEl, width, height) {
             height: { value: Math.round(height), unit: 'px' }
         });
     if (!size) return null;
+    panelEl._dashVizWidthCss = '';
     dashResetVizSizeStyles(panelEl);
     dashResetVizSizeStyles(tableWrap);
     dashResetVizSizeStyles(chartWrap);
@@ -2392,6 +2487,7 @@ function dashApplyTablePixelSize(panelEl, width, height) {
         canvas.style.maxHeight = '';
     }
     dashApplyVizSizeStyles(panelEl, 'table', size);
+    dashApplyPanelMaxWidth(panelEl);
     dashUpdateTableWrapOverflow();
     return size;
 }
@@ -2541,8 +2637,10 @@ function dashApplyVizSize(panelEl, vizType, vizConfig) {
         , canvas = panelEl.querySelector('.f-chart-canvas')
         , size = vizType === 'table'
             ? dashResolveTableSize(panelEl, vizConfig || {})
-            : dashResolveVizSize(panelEl, vizType, vizConfig || {});
+            : dashResolveVizSize(panelEl, vizType, vizConfig || {})
+        , appliedSize = null;
 
+    panelEl._dashVizWidthCss = '';
     dashResetVizSizeStyles(panelEl);
     dashResetVizSizeStyles(tableWrap);
     dashResetVizSizeStyles(chartWrap);
@@ -2554,14 +2652,16 @@ function dashApplyVizSize(panelEl, vizType, vizConfig) {
 
     if (vizType === 'table') {
         dashEnsureTableResizeHandle(panelEl);
-        if (!size) return size;
-        return dashApplyVizSizeStyles(panelEl, vizType, size);
+        if (size) appliedSize = dashApplyVizSizeStyles(panelEl, vizType, size);
+        dashApplyPanelMaxWidth(panelEl);
+        return appliedSize;
     }
 
     dashEnsureChartResizeHandle(panelEl, vizType);
 
-    if (!size) return size;
-    return dashApplyVizSizeStyles(panelEl, vizType, size);
+    if (size) appliedSize = dashApplyVizSizeStyles(panelEl, vizType, size);
+    dashApplyPanelMaxWidth(panelEl);
+    return appliedSize;
 }
 
 function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
@@ -3039,6 +3139,7 @@ function dashPanelApplySettings(panelKey, settings, renderChart) {
     // Normalize: settings can be a single object {type:...} or an array
     var vizList = Array.isArray(settings) ? settings : [settings];
     var enabled = vizList.filter(function(v) { return v && v.type; });
+    dashApplyPanelMaxWidth(panel);
     if (!enabled.length) return;
 
     // Build visualization type icons
@@ -3084,6 +3185,7 @@ function dashUpdatePanelVizIcons(panel, enabled) {
     // Mark current default as active
     var settings = (dashModelData[panel.id] || {}).settings;
     var vizList = settings ? (Array.isArray(settings) ? settings : [settings]) : [];
+    vizList = vizList.filter(function(v) { return v && v.type; });
     var def = vizList.find(function(v) { return v.default; }) || vizList[0];
     var activeType = def ? def.type : 'table';
     var activeBtn = container.querySelector('[data-viz-type="' + activeType + '"]');
@@ -3098,6 +3200,9 @@ function dashOpenPanelVizSettings(panelEl) {
 
     var accordion = document.getElementById('dash-viz-accordion');
     accordion.innerHTML = '';
+    var panelMaxWidthEl = document.getElementById('dash-panel-max-width-settings');
+    if (panelMaxWidthEl)
+        panelMaxWidthEl.innerHTML = dashBuildPanelMaxWidthHtml(dashPanelMaxWidthFromSettings(settings));
 
     // Skip 'table' in the accordion (it's always available)
     DASH_VIZ_TYPES.filter(function(t) { return t.id !== 'table'; }).forEach(function(typeInfo) {
@@ -3361,6 +3466,34 @@ function dashBuildVizSizeHtml(size) {
         + '</div>';
 }
 
+function dashBuildPanelMaxWidthUnitOptions(selected) {
+    selected = dashNormalizePanelMaxWidthUnit(selected);
+    return DASH_PANEL_MAX_WIDTH_UNITS.map(function(unit) {
+        return '<option value="' + unit + '"' + (unit === selected ? ' selected' : '') + '>' + unit + '</option>';
+    }).join('');
+}
+
+function dashBuildPanelMaxWidthRow(device, label, dim) {
+    var valueName = device === 'desktop' ? 'panelMaxWidthDesktopValue' : 'panelMaxWidthMobileValue'
+        , unitName = device === 'desktop' ? 'panelMaxWidthDesktopUnit' : 'panelMaxWidthMobileUnit'
+        , value = dim ? dim.value : ''
+        , unit = dim ? dim.unit : 'px';
+    return '<div class="dash-viz-field-row dash-panel-max-width-row">'
+        + '<label>' + label + '</label>'
+        + '<input type="number" min="0" step="0.1" name="' + valueName + '" value="' + dashAttr(value) + '">'
+        + '<select name="' + unitName + '">' + dashBuildPanelMaxWidthUnitOptions(unit) + '</select>'
+        + '</div>';
+}
+
+function dashBuildPanelMaxWidthHtml(panelMaxWidth) {
+    var normalized = dashNormalizePanelMaxWidth(panelMaxWidth) || {};
+    return '<div class="dash-panel-max-width-group">'
+        + '<div class="dash-viz-size-title">Максимальная ширина панели</div>'
+        + dashBuildPanelMaxWidthRow('desktop', 'Десктоп', normalized.desktop)
+        + dashBuildPanelMaxWidthRow('mobile', 'Мобильная', normalized.mobile)
+        + '</div>';
+}
+
 function dashCollectVizSizeDimension(item, axis) {
     var valueEl = item.querySelector(axis === 'width' ? '[name="sizeWidthValue"]' : '[name="sizeHeightValue"]')
         , unitEl = item.querySelector(axis === 'width' ? '[name="sizeWidthUnit"]' : '[name="sizeHeightUnit"]')
@@ -3376,6 +3509,25 @@ function dashCollectVizSize(item) {
     if (width) result.width = width;
     if (height) result.height = height;
     return result.width || result.height ? result : null;
+}
+
+function dashCollectPanelMaxWidthDimension(container, device) {
+    var valueEl = container ? container.querySelector(device === 'desktop' ? '[name="panelMaxWidthDesktopValue"]' : '[name="panelMaxWidthMobileValue"]') : null
+        , unitEl = container ? container.querySelector(device === 'desktop' ? '[name="panelMaxWidthDesktopUnit"]' : '[name="panelMaxWidthMobileUnit"]') : null
+        , value = valueEl ? valueEl.value : ''
+        , unit = unitEl ? unitEl.value : 'px';
+    return dashNormalizePanelMaxWidthDimension({ value: value, unit: unit });
+}
+
+function dashCollectPanelMaxWidth() {
+    var container = document.getElementById('dash-panel-max-width-settings')
+        , result = {}
+        , desktop = dashCollectPanelMaxWidthDimension(container, 'desktop')
+        , mobile = dashCollectPanelMaxWidthDimension(container, 'mobile');
+    if (!container) return null;
+    if (desktop) result.desktop = desktop;
+    if (mobile) result.mobile = mobile;
+    return result.desktop || result.mobile ? result : null;
 }
 
 function dashCollectVizSelectedRows(item) {
@@ -3410,7 +3562,7 @@ function dashVizModalCollectSettings() {
         if (isDefault) entry.default = true;
         result.push(entry);
     });
-    return result;
+    return dashSetPanelMaxWidthInSettings(result, dashCollectPanelMaxWidth());
 }
 
 document.getElementById('dash-viz-cancel').addEventListener('click', function() {
@@ -3452,7 +3604,8 @@ window.dashVizSettingsSaved = function(json, ctx) {
 
 function dashApplyNewVizSettings(panelEl, panelKey, settings) {
     if (dashModelData[panelKey]) dashModelData[panelKey].settings = settings;
-    var enabled = settings.filter(function(v) { return v && v.type; });
+    var vizList = settings ? (Array.isArray(settings) ? settings : [settings]) : [];
+    var enabled = vizList.filter(function(v) { return v && v.type; });
     dashUpdatePanelVizIcons(panelEl, enabled);
     var def = enabled.find(function(v) { return v.default; }) || enabled[0];
     if (def) {
@@ -3465,6 +3618,10 @@ function dashApplyNewVizSettings(panelEl, panelKey, settings) {
         panelEl.querySelector('.f-pivot-wrap').style.display = 'none';
         panelEl.classList.remove('f-panel--chart');
     }
+}
+
+function dashRefreshPanelMaxWidths() {
+    document.querySelectorAll('#dash-model .f-panel').forEach(dashApplyPanelMaxWidth);
 }
 
 // ─── Panel filters ──────────────────────────────────────────────────────────
@@ -3993,8 +4150,11 @@ window.dashCopy2Buffer = function(text) {
     document.body.removeChild(temp);
 };
 
-// Re-check table overflow on resize so sticky behaviour stays correct
-window.addEventListener('resize', function() { dashUpdateTableWrapOverflow(); });
+// Re-check responsive panel constraints on resize.
+window.addEventListener('resize', function() {
+    dashUpdateTableWrapOverflow();
+    dashRefreshPanelMaxWidths();
+});
 
 // ─── Cell editing ────────────────────────────────────────────────────────────
 

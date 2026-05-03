@@ -82,6 +82,8 @@ function makeSizeItem() {
 const code = `
 var CHART_COLORS = ['rgba(54,162,235,0.7)', 'rgba(255,99,132,0.7)'];
 var DASH_VIZ_SIZE_UNITS = ['%', 'px', 'rem'];
+var DASH_PANEL_MAX_WIDTH_UNITS = ['%', 'px'];
+var DASH_PANEL_MAX_WIDTH_MOBILE_BREAKPOINT = 767;
 var DASH_CHART_RESIZE_MIN_WIDTH = 260;
 var DASH_CHART_RESIZE_MIN_HEIGHT = 180;
 var DASH_TABLE_RESIZE_MIN_WIDTH = 260;
@@ -89,6 +91,7 @@ var DASH_TABLE_RESIZE_MIN_HEIGHT = 120;
 var DASH_CHART_RESIZE_COOKIE_MAX_AGE = 31536000;
 var dashRecordId = 'dash-test';
 var dashCurrentId = null;
+var dashModelData = {};
 function dashCollectPanelData(panelEl) {
     return { labels: ['Январь'], datasets: [{ label: 'План', data: [12] }] };
 }
@@ -103,6 +106,16 @@ ${extractFunction('dashNormalizeVizSizeUnit')}
 ${extractFunction('dashNormalizeVizSizeDimension')}
 ${extractFunction('dashNormalizeVizSize')}
 ${extractFunction('dashVizSizeCss')}
+${extractFunction('dashNormalizePanelMaxWidthUnit')}
+${extractFunction('dashNormalizePanelMaxWidthDimension')}
+${extractFunction('dashNormalizePanelMaxWidth')}
+${extractFunction('dashPanelMaxWidthFromSettings')}
+${extractFunction('dashSetPanelMaxWidthInSettings')}
+${extractFunction('dashPanelMaxWidthDevice')}
+${extractFunction('dashPanelMaxWidthForPanel')}
+${extractFunction('dashPanelMaxWidthCss')}
+${extractFunction('dashCombineMaxWidthCss')}
+${extractFunction('dashApplyPanelMaxWidth')}
 ${extractFunction('dashResetVizSizeStyles')}
 ${extractFunction('dashIsResizableChartViz')}
 ${extractFunction('dashCookieGet')}
@@ -129,6 +142,8 @@ ${extractFunction('dashEnsureTableResizeHandle')}
 ${extractFunction('dashApplyVizSize')}
 ${extractFunction('dashCollectVizSizeDimension')}
 ${extractFunction('dashCollectVizSize')}
+${extractFunction('dashCollectPanelMaxWidthDimension')}
+${extractFunction('dashCollectPanelMaxWidth')}
 ${extractFunction('dashCollectVizSelectedRows')}
 ${extractFunction('dashVizModalCollectSettings')}
 ${extractFunction('dashRenderChart')}
