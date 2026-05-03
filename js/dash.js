@@ -1610,7 +1610,7 @@ function dashStartChartResize(e, vizType) {
     function onMove(moveEvent) {
         var nextWidth, nextHeight;
         moveEvent.preventDefault();
-        nextWidth = dashClampChartSize(startWidth + (startX - moveEvent.clientX), DASH_CHART_RESIZE_MIN_WIDTH, maxWidth);
+        nextWidth = dashClampChartSize(startWidth + (moveEvent.clientX - startX), DASH_CHART_RESIZE_MIN_WIDTH, maxWidth);
         nextHeight = dashClampChartSize(startHeight + (moveEvent.clientY - startY), DASH_CHART_RESIZE_MIN_HEIGHT, maxHeight);
         latestSize = dashApplyChartPixelSize(panelEl, activeVizType, nextWidth, nextHeight);
     }

@@ -1,4 +1,4 @@
-// Test for issue #2296: dashboard charts can be resized from the lower-left
+// Test for issues #2296/#2298: dashboard charts can be resized from the lower-right
 // corner and the resulting size is persisted in browser cookies.
 
 const fs = require('fs');
@@ -199,14 +199,14 @@ vm.runInContext(code, ctx);
 
     assert(typeof ctx.document.listeners.mousemove === 'function', 'resize starts listening for mouse movement');
     ctx.document.listeners.mousemove({
-        clientX: 80,
+        clientX: 120,
         clientY: 140,
         preventDefault() {}
     });
     ctx.document.listeners.mouseup({ preventDefault() {} });
 
-    assertEqual(panel.style.maxWidth, '520px', 'dragging the lower-left corner left increases width');
-    assertEqual(panel._els.chartWrap.style.height, '340px', 'dragging the lower-left corner down increases height');
+    assertEqual(panel.style.maxWidth, '520px', 'dragging the lower-right corner right increases width');
+    assertEqual(panel._els.chartWrap.style.height, '340px', 'dragging the lower-right corner down increases height');
     assertEqual(panel._els.canvas._chartInstance.options.maintainAspectRatio, false,
         'interactive resize disables aspect ratio on the live chart');
     assert(panel.resizeCalls > 0, 'live Chart.js instance is resized after dimensions change');
