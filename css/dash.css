@@ -558,6 +558,51 @@ body.dash-chart-resizing {
 .f-pivot-wrap {
     overflow: auto;
     font-size: 0.85rem;
+    position: relative;
+}
+.dash-pivot-ui.dash-pivot-controls-collapsed .pvtUi > tr:not(.dash-pivot-renderer-row),
+.dash-pivot-ui.dash-pivot-controls-collapsed .pvtUi > tbody > tr:not(.dash-pivot-renderer-row) {
+    display: none;
+}
+.dash-pivot-ui.dash-pivot-controls-collapsed .pvtUi > tr.dash-pivot-renderer-row > td:not(.pvtRendererArea),
+.dash-pivot-ui.dash-pivot-controls-collapsed .pvtUi > tbody > tr.dash-pivot-renderer-row > td:not(.pvtRendererArea) {
+    display: none;
+}
+.dash-pivot-ui.dash-pivot-controls-collapsed .pvtUi,
+.dash-pivot-ui.dash-pivot-controls-collapsed .pvtRendererArea {
+    width: 100%;
+}
+.dash-pivot-ui .pvtRendererArea {
+    position: relative;
+}
+.dash-pivot-ui.dash-pivot-controls-collapsed .pvtRendererArea {
+    padding-top: 2.2rem;
+}
+.dash-pivot-controls-collapsed .dash-pivot-actions {
+    display: none;
+}
+.dash-pivot-settings-toggle {
+    position: absolute;
+    top: 0.35rem;
+    right: 0.35rem;
+    z-index: 6;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: 1px solid var(--border-color, #ced4da);
+    border-radius: 4px;
+    background: var(--bg-primary, #fff);
+    color: var(--text-secondary, #6c757d);
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+}
+.dash-pivot-settings-toggle:hover,
+.dash-pivot-settings-toggle.active {
+    color: var(--text-primary, #212529);
+    background: var(--bg-secondary, #f8f9fa);
 }
 /* Visualization settings modal */
 #dash-viz-modal {
