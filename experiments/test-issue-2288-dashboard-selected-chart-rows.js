@@ -142,6 +142,10 @@ function makeRowBulkGroup(rowChecks) {
 }
 
 const code = `
+let dashPanelFilters = {};
+function dashPanelFiltersFor() { return {}; }
+function dashPanelTableRowPassesFilters() { return true; }
+function dashPanelTableCellPassesFilters() { return true; }
 ${extractFunction('dashAttr')}
 ${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashGetFloat')}

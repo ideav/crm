@@ -91,6 +91,9 @@ function makePanelEl(headThs, subheadThs, itemRows) {
 }
 
 const code = `
+function dashPanelFiltersFor() { return {}; }
+function dashPanelTableRowPassesFilters() { return true; }
+function dashPanelTableCellPassesFilters() { return true; }
 ${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashPanelGetColumns')}
