@@ -2355,18 +2355,33 @@ function dashEnsurePivotShell(pivotWrap) {
 }
 
 function dashNormalizePivotConfig(config) {
-    var clean = {};
+    var clean = {}
+        , arrayKeys = ['rows', 'cols', 'vals']
+        , stringKeys = ['aggregatorName', 'rendererName', 'rowOrder', 'colOrder']
+        , objectKeys = ['exclusions', 'inclusions'];
     if (!config || typeof config !== 'object') return clean;
-    Object.keys(config).forEach(function(key) {
-        if (key === 'aggregators' || key === 'renderers' || key === 'onRefresh') return;
-        if (typeof config[key] === 'function') return;
-        clean[key] = config[key];
-    });
-    try {
-        return JSON.parse(JSON.stringify(clean));
-    } catch (e) {
-        return {};
+
+    function cloneJsonValue(value) {
+        try {
+            return JSON.parse(JSON.stringify(value));
+        } catch (e) {
+            return undefined;
+        }
     }
+
+    arrayKeys.forEach(function(key) {
+        var value = cloneJsonValue(config[key]);
+        if (Array.isArray(value)) clean[key] = value;
+    });
+    stringKeys.forEach(function(key) {
+        if (typeof config[key] === 'string' && config[key]) clean[key] = config[key];
+    });
+    objectKeys.forEach(function(key) {
+        var value = cloneJsonValue(config[key]);
+        if (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length)
+            clean[key] = value;
+    });
+    return clean;
 }
 
 function dashPivotConfigString(config) {
