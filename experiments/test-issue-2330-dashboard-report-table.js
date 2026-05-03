@@ -1,7 +1,7 @@
 'use strict';
 
 // Issue #2330: if a dashboard panel has no item rows (itemID IS NULL),
-// table mode should render the configured report JSON, including header,
+// table mode should render the configured report JSON, including column headers,
 // column formats, data rows, and totals.
 
 const fs = require('fs');
@@ -75,7 +75,7 @@ assert.deepStrictEqual(normalized.rows[1], {
 });
 
 const html = dashRenderReportTableHtml(normalized, {});
-assert(html.includes('<th colspan="4">Участники</th>'), 'report header should be rendered as table title');
+assert(!html.includes('dash-report-title-row'), 'report header should not duplicate the panel title');
 assert(html.includes('data-format="SIGNED"'), 'column format should be preserved in rendered table markup');
 assert(html.includes('<tfoot>'), 'report totals should render a footer');
 assert(html.includes('100.00'), 'SIGNED column total should be visible');
@@ -97,7 +97,7 @@ const reportOnlyPanel = {
 };
 
 assert.strictEqual(dashRenderReportTable(reportOnlyPanel), true);
-assert(tableWrap.innerHTML.includes('Участники'), 'report-only panel table should be replaced with report table');
+assert(tableWrap.innerHTML.includes('Дата изменения'), 'report-only panel table should be replaced with report table');
 
 const originalTableWrap = { innerHTML: '<table><tbody><tr class="f-item"></tr></tbody></table>' };
 const panelWithItems = {

@@ -536,12 +536,8 @@ function dashReportTableCellHtml(tagName, column, value, extraClass) {
 function dashRenderReportTableHtml(report, filters) {
     var columns = report ? report.columns || [] : []
         , rows = dashFilterReportRowsForPanel(report ? report.rows || [] : [], filters || {})
-        , colspan = Math.max(columns.length, 1)
         , html = '<table class="table table-sm table-bordered w-auto dash-report-table" data-dash-report-table="1"><thead>'
         , hasTotals = dashReportHasTotals(report);
-
-    if (report && report.header)
-        html += '<tr class="dash-report-title-row"><th colspan="' + colspan + '">' + dashAttr(report.header) + '</th></tr>';
 
     html += '<tr class="dash-head f-head">';
     columns.forEach(function(column) {
@@ -1886,7 +1882,7 @@ var DASH_VIZ_TYPES = [
     { id: 'bar',    label: 'Столбчатая диаграмма',   icon: 'pi-chart-bar' },
     { id: 'area',   label: 'Диаграмма с областями',  icon: 'pi-chart-line' },
     { id: 'bubble', label: 'Пузырьковая диаграмма',  icon: 'pi-circle' },
-    { id: 'pivot',  label: 'Сводная таблица',        icon: 'pi-table' }
+    { id: 'pivot',  label: 'Сводная таблица',        icon: 'pi-objects-column' }
 ];
 
 var DASH_VIZ_SIZE_UNITS = ['%', 'px', 'rem'];
