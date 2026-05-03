@@ -2422,6 +2422,7 @@ function dashApplyVizSizeStyles(panelEl, vizType, size) {
             targetWrap.style.width = '100%';
             targetWrap.style.maxWidth = widthCss;
         }
+        panelEl.style.maxWidth = widthCss;
     }
     if (heightCss && targetWrap) {
         targetWrap.style.height = heightCss;
