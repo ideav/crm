@@ -177,7 +177,34 @@ center:hover .add-id-for-col {
     display: inline-block;
 }
 #ShowReport {
+    overflow-x: auto;
     overflow-y: scroll;
+}
+#ShowReportStickyScrollbar {
+    position: fixed;
+    bottom: 0;
+    height: 20px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    z-index: 1030;
+    background: var(--bg-secondary, #f1f3f5);
+    border-top: 1px solid var(--border-color, #dee2e6);
+    display: none;
+    scrollbar-color: var(--text-secondary, #adb5bd) var(--bg-secondary, #f1f3f5);
+}
+#ShowReportStickyScrollbar::-webkit-scrollbar {
+    height: 16px;
+}
+#ShowReportStickyScrollbar::-webkit-scrollbar-track {
+    background: var(--bg-secondary, #f1f3f5);
+}
+#ShowReportStickyScrollbar::-webkit-scrollbar-thumb {
+    background: var(--text-secondary, #adb5bd);
+    border: 3px solid var(--bg-secondary, #f1f3f5);
+    border-radius: 8px;
+}
+#ShowReportStickyScrollbarContent {
+    height: 1px;
 }
 .inner-modal{
     margin-left: auto;
@@ -353,6 +380,9 @@ center:hover .add-id-for-col {
     </div>
     <div id="warning" class="alert alert-warning hidden" role="alert"></div>
     <div id="ShowReport"></div>
+    <div id="ShowReportStickyScrollbar" aria-hidden="true">
+        <div id="ShowReportStickyScrollbarContent"></div>
+    </div>
 </div>
 <div class="hidden" id="controls">
     <div id="template102">
@@ -434,6 +464,7 @@ center:hover .add-id-for-col {
 </div>
 <script>
 var timer,lastK,froms,repList=byId('list').innerHTML;
+var showReportScrollbarAttached=false,showReportScrollbarSyncing=false;
 function getFrom(json){
     var i,alias,right,f='',h='<option value=""> </option>';
     for(i in json.object){
@@ -565,6 +596,7 @@ function showCtl(el){ // Mark buttons pressed in case they were pressed before t
         byId(i).classList.add('hidden');
         el.classList.remove('active')
     }
+    scheduleShowReportScrollbarUpdate();
 }
 function setInteract(){ // Set Interactive mark and save it's value
     byId('interactWait').classList.remove('hidden');
@@ -819,6 +851,7 @@ function myApi(m,u,b,vars,index){ // Параметры: метод, адрес,
                     rbody='<tr>'+l+'</tr>';
                     // Table: Header (h) + Control lines (c) + Data (rbody as a template)
                     byId('ShowReport').innerHTML='<table class="table table-bordered table-sm integram-table"><thead><tr>'+h+c.join('')+'</thead><tbody id="rbody" style="display:none;">'+rbody+'</body></table>';
+                    attachShowReportScrollbar();
                     // A list of columns available to add to the report
                     h=colListTemplate.replace(/:id:/g,'')
                                     .replace(':val:','выберите таблицу');
@@ -901,6 +934,7 @@ function myApi(m,u,b,vars,index){ // Параметры: метод, адрес,
                     byId('warning').classList.remove('hidden');
                 }
                 $('#rbody').show();
+                scheduleShowReportScrollbarUpdate();
                 if (window.sqlHintAdvance) {
                     var firstColWrapper = document.querySelector('.col-title-wrapper');
                     var firstColAnchor = firstColWrapper && firstColWrapper.querySelector('a');
@@ -968,6 +1002,73 @@ function showLoading(el){ // Show loading spinner on icon click
     } else if(el.tagName==='SPAN'){
         el.innerHTML='<span class="loading-spinner"></span>';
     }
+}
+function scheduleShowReportScrollbarUpdate(){
+    if(window.requestAnimationFrame)
+        window.requestAnimationFrame(updateShowReportScrollbar);
+    else
+        setTimeout(updateShowReportScrollbar,0);
+}
+function updateShowReportScrollbar(){
+    var report=byId('ShowReport'),
+        scrollbar=byId('ShowReportStickyScrollbar'),
+        content=byId('ShowReportStickyScrollbarContent');
+    if(!report||!scrollbar||!content)
+        return;
+    var table=report.querySelector('table');
+    if(!table){
+        scrollbar.style.display='none';
+        return;
+    }
+    var rect=report.getBoundingClientRect(),
+        left=Math.max(0,rect.left),
+        visibleWidth=Math.min(rect.width,window.innerWidth-left),
+        scrollWidth=Math.max(report.scrollWidth||0,table.scrollWidth||0),
+        clientWidth=report.clientWidth||rect.width||0,
+        reportVisible=rect.bottom>0&&rect.top<window.innerHeight,
+        nativeScrollbarBelowViewport=rect.bottom>window.innerHeight,
+        hasHorizontalOverflow=scrollWidth>clientWidth+1;
+
+    if(!reportVisible||!nativeScrollbarBelowViewport||!hasHorizontalOverflow||visibleWidth<=0){
+        scrollbar.style.display='none';
+        return;
+    }
+
+    content.style.width=scrollWidth+'px';
+    scrollbar.style.left=left+'px';
+    scrollbar.style.width=visibleWidth+'px';
+    scrollbar.style.display='block';
+    if(!showReportScrollbarSyncing)
+        scrollbar.scrollLeft=report.scrollLeft;
+}
+function attachShowReportScrollbar(){
+    var report=byId('ShowReport'),
+        scrollbar=byId('ShowReportStickyScrollbar');
+    if(!report||!scrollbar)
+        return;
+    if(showReportScrollbarAttached){
+        scheduleShowReportScrollbarUpdate();
+        return;
+    }
+
+    report.addEventListener('scroll',function(){
+        if(!showReportScrollbarSyncing){
+            showReportScrollbarSyncing=true;
+            scrollbar.scrollLeft=report.scrollLeft;
+            showReportScrollbarSyncing=false;
+        }
+    });
+    scrollbar.addEventListener('scroll',function(){
+        if(!showReportScrollbarSyncing){
+            showReportScrollbarSyncing=true;
+            report.scrollLeft=scrollbar.scrollLeft;
+            showReportScrollbarSyncing=false;
+        }
+    });
+    window.addEventListener('scroll',scheduleShowReportScrollbarUpdate,true);
+    window.addEventListener('resize',scheduleShowReportScrollbarUpdate);
+    showReportScrollbarAttached=true;
+    scheduleShowReportScrollbarUpdate();
 }
 function drawCol(id, drawIdButton){
     if (drawIdButton) {
@@ -1073,6 +1174,7 @@ function addTextareaListeners() {
                 $($('.textarea-container')[index]).before(newTextareaHtml);
             }
         }
+        scheduleShowReportScrollbarUpdate();
         
         const newTextarea = $('[id="' + inputSelector.attr('id') + '_text"]');
         newTextarea.keydown(function(event){ // Text input fields on Enter pressed
@@ -1129,6 +1231,7 @@ function removeTextarea(textareaSelector) {
     $('[id="' + inputId + '"]').removeClass('active-input');
     $('[id="' + inputId + '"]').css('background-color', '');
     // $('[id="' + inputId + '"]').css('box-shadow', 'none');
+    scheduleShowReportScrollbarUpdate();
 }
 function insertValueToTextarea(newTextarea, value) {
     const textareaSelector = $(newTextarea)[0];
@@ -1147,6 +1250,7 @@ function insertValueToTextarea(newTextarea, value) {
 document.title='Конструктор запросов';
 var rbody,active=-1,alias=[],colNames={},rep=[],json=[],colListTemplate=$('#table').html(),dateDDFilledIn=[],curEl,ctl=['102','84','104','109','72','101','105','132','58'],lastCreatedIdColumn=0;
 localize();
+attachShowReportScrollbar();
 if('{_global_.id}'=='')
     byId('showanchor').click();
 else // In case a report is requested - draw it
