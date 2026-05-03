@@ -1,6 +1,6 @@
-// Test for issue #2306: dashboard pivot UI changes should expose a save
-// action for users who can edit panel visualization settings, and persist the
-// PivotTable UI config inside panelSettings.
+// Test for issues #2306/#2310: dashboard pivot UI changes should expose a save
+// action for users who can edit panel visualization settings, and persist only
+// stable PivotTable UI state inside panelSettings.
 
 const fs = require('fs');
 const vm = require('vm');
@@ -32,6 +32,10 @@ function assert(condition, message) {
 
 function assertEqual(actual, expected, message) {
     assert(actual === expected, message + ' (expected ' + expected + ', got ' + actual + ')');
+}
+
+function assertMissingKey(obj, key, message) {
+    assert(!Object.prototype.hasOwnProperty.call(obj, key), message);
 }
 
 class TestElement {
@@ -241,6 +245,32 @@ vm.runInContext(code, ctx);
         vals: ['План'],
         aggregatorName: 'Average',
         rendererName: 'Table',
+        rowOrder: 'key_a_to_z',
+        colOrder: 'key_z_to_a',
+        exclusions: { Статус: ['Завершена'] },
+        inclusions: { Департамент: ['HR'] },
+        rendererOptions: {
+            localeStrings: {
+                renderError: 'An error occurred rendering the PivotTable results.',
+                computeError: 'An error occurred computing the PivotTable results.',
+                uiRenderError: 'An error occurred rendering the PivotTable UI.'
+            }
+        },
+        localeStrings: {
+            renderError: 'An error occurred rendering the PivotTable results.',
+            computeError: 'An error occurred computing the PivotTable results.',
+            uiRenderError: 'An error occurred rendering the PivotTable UI.'
+        },
+        derivedAttributes: {},
+        hiddenAttributes: [],
+        hiddenFromAggregators: [],
+        hiddenFromDragDrop: [],
+        menuLimit: 500,
+        unusedAttrsVertical: 85,
+        autoSortUnusedAttrs: false,
+        showUI: true,
+        sorters: {},
+        inclusionsInfo: {},
         renderers: { Table: function() {} },
         aggregators: { Average: function() {} },
         onRefresh: function() {}
@@ -256,9 +286,25 @@ vm.runInContext(code, ctx);
     assertEqual(savedSettings.length, 2, 'saving pivot preserves other visualization settings');
     assertEqual(savedSettings[0].type, 'pivot', 'pivot entry is updated in place');
     assertEqual(savedSettings[0].pivotConfig.aggregatorName, 'Average', 'changed pivot aggregator is persisted');
-    assert(!savedSettings[0].pivotConfig.renderers, 'renderer functions are stripped from persisted config');
-    assert(!savedSettings[0].pivotConfig.aggregators, 'aggregator functions are stripped from persisted config');
-    assert(!savedSettings[0].pivotConfig.onRefresh, 'onRefresh callback is stripped from persisted config');
+    assertEqual(savedSettings[0].pivotConfig.rowOrder, 'key_a_to_z', 'pivot row order is persisted');
+    assertEqual(savedSettings[0].pivotConfig.colOrder, 'key_z_to_a', 'pivot column order is persisted');
+    assertEqual(savedSettings[0].pivotConfig.exclusions.Статус[0], 'Завершена', 'pivot exclusions are persisted');
+    assertEqual(savedSettings[0].pivotConfig.inclusions.Департамент[0], 'HR', 'pivot inclusions are persisted');
+    assertMissingKey(savedSettings[0].pivotConfig, 'renderers', 'renderer functions are stripped from persisted config');
+    assertMissingKey(savedSettings[0].pivotConfig, 'aggregators', 'aggregator functions are stripped from persisted config');
+    assertMissingKey(savedSettings[0].pivotConfig, 'onRefresh', 'onRefresh callback is stripped from persisted config');
+    assertMissingKey(savedSettings[0].pivotConfig, 'rendererOptions', 'PivotTable renderer options are stripped from persisted config');
+    assertMissingKey(savedSettings[0].pivotConfig, 'localeStrings', 'PivotTable locale strings are stripped from persisted config');
+    assertMissingKey(savedSettings[0].pivotConfig, 'derivedAttributes', 'PivotTable derived attributes are stripped from persisted config');
+    assertMissingKey(savedSettings[0].pivotConfig, 'hiddenAttributes', 'PivotTable hidden attributes are stripped from persisted config');
+    assertMissingKey(savedSettings[0].pivotConfig, 'hiddenFromAggregators', 'PivotTable hidden-from-aggregators list is stripped from persisted config');
+    assertMissingKey(savedSettings[0].pivotConfig, 'hiddenFromDragDrop', 'PivotTable hidden-from-dragdrop list is stripped from persisted config');
+    assertMissingKey(savedSettings[0].pivotConfig, 'menuLimit', 'PivotTable menu limit is stripped from persisted config');
+    assertMissingKey(savedSettings[0].pivotConfig, 'unusedAttrsVertical', 'PivotTable UI layout setting is stripped from persisted config');
+    assertMissingKey(savedSettings[0].pivotConfig, 'autoSortUnusedAttrs', 'PivotTable auto-sort UI setting is stripped from persisted config');
+    assertMissingKey(savedSettings[0].pivotConfig, 'showUI', 'PivotTable showUI flag is stripped from persisted config');
+    assertMissingKey(savedSettings[0].pivotConfig, 'sorters', 'PivotTable sorter callbacks/config are stripped from persisted config');
+    assertMissingKey(savedSettings[0].pivotConfig, 'inclusionsInfo', 'PivotTable inclusions metadata is stripped from persisted config');
 }
 
 {
