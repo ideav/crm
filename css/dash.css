@@ -112,10 +112,6 @@
     font-weight: 600;
     text-align: center;
 }
-.dash-report-title-row th {
-    text-align: center;
-    font-weight: 600;
-}
 .dash-report-cell--left {
     text-align: left;
 }
@@ -126,7 +122,6 @@
     text-align: right;
 }
 .dash-report-totals-row td {
-    background: var(--bg-secondary, #f8f9fa);
     font-weight: 600;
 }
 /* Filter bar above panels */
