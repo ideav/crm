@@ -400,6 +400,25 @@ td:has(.dash-cell-input) {
     max-height: 12rem;
     overflow: auto;
 }
+.dash-panel-filter-bulk {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 0.45rem;
+    padding-bottom: 0.45rem;
+    border-bottom: 1px solid var(--border-color, #dee2e6);
+}
+.dash-panel-filter-bulk-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin: 0;
+    font-size: 0.82rem;
+    color: var(--text-secondary, #6c757d);
+}
+.dash-panel-filter-bulk-option input {
+    flex-shrink: 0;
+}
 .dash-panel-filter-option {
     display: flex;
     align-items: flex-start;

@@ -3271,6 +3271,46 @@ function dashPanelFilterSelectedMap(filter) {
     return selected;
 }
 
+function dashPanelFilterOptionChecks(fieldEl) {
+    return fieldEl ? Array.from(fieldEl.querySelectorAll('.dash-panel-filter-option-input')) : [];
+}
+
+function dashSetPanelFilterOptionChecks(fieldEl, checked) {
+    dashPanelFilterOptionChecks(fieldEl).forEach(function(check) {
+        check.checked = checked;
+    });
+}
+
+function dashSyncPanelFilterBulkControls(fieldEl) {
+    var checks = dashPanelFilterOptionChecks(fieldEl)
+        , selectAll = fieldEl ? fieldEl.querySelector('.dash-panel-filter-select-all') : null
+        , clear = fieldEl ? fieldEl.querySelector('.dash-panel-filter-clear') : null
+        , checkedCount = checks.filter(function(check) { return check.checked; }).length
+        , allChecked = checks.length > 0 && checkedCount === checks.length
+        , noneChecked = checkedCount === 0;
+    if (selectAll) {
+        selectAll.checked = allChecked;
+        selectAll.indeterminate = checkedCount > 0 && checkedCount < checks.length;
+    }
+    if (clear) {
+        clear.checked = noneChecked;
+        clear.indeterminate = false;
+    }
+}
+
+function dashHandlePanelFilterCheckboxChange(input) {
+    var fieldEl = input && input.closest ? input.closest('.dash-panel-filter-field') : null;
+    if (!fieldEl) return;
+    if (input.classList.contains('dash-panel-filter-select-all')) {
+        dashSetPanelFilterOptionChecks(fieldEl, input.checked);
+    } else if (input.classList.contains('dash-panel-filter-clear')) {
+        if (input.checked) dashSetPanelFilterOptionChecks(fieldEl, false);
+    } else if (!input.classList.contains('dash-panel-filter-option-input')) {
+        return;
+    }
+    dashSyncPanelFilterBulkControls(fieldEl);
+}
+
 function dashPanelTableCellColumnLabel(td) {
     var table, head, ths, idx, th;
     if (!td) return '';
@@ -3404,12 +3444,28 @@ function dashRenderPanelFilterModal(panelEl, fields) {
             , html = '<div class="dash-panel-filter-field" data-field-key="' + dashAttr(field.key) + '">'
                 + '<div class="dash-panel-filter-label">' + dashAttr(field.label) + '</div>';
         if (field.kind === 'values' || field.kind === 'month') {
-            var selected = filter && Array.isArray(filter.selected) ? dashPanelFilterSelectedMap(filter) : null;
+            var options = field.options || []
+                , selected = filter && Array.isArray(filter.selected) ? dashPanelFilterSelectedMap(filter) : null
+                , selectedCount = selected === null ? options.length : options.filter(function(option) { return selected[String(option.value)]; }).length
+                , allChecked = options.length > 0 && selectedCount === options.length
+                , noneChecked = options.length > 0 && selectedCount === 0;
+            if (options.length) {
+                html += '<div class="dash-panel-filter-bulk">'
+                    + '<label class="dash-panel-filter-bulk-option">'
+                    + '<input type="checkbox" class="dash-panel-filter-select-all" value="__all"' + (allChecked ? ' checked' : '') + '>'
+                    + '<span>Выделить всё</span>'
+                    + '</label>'
+                    + '<label class="dash-panel-filter-bulk-option">'
+                    + '<input type="checkbox" class="dash-panel-filter-clear" value="__clear"' + (noneChecked ? ' checked' : '') + '>'
+                    + '<span>Очистить</span>'
+                    + '</label>'
+                    + '</div>';
+            }
             html += '<div class="dash-panel-filter-options">';
-            (field.options || []).forEach(function(option) {
-                var checked = selected === null || selected[option.value];
+            options.forEach(function(option) {
+                var checked = selected === null || selected[String(option.value)];
                 html += '<label class="dash-panel-filter-option">'
-                    + '<input type="checkbox" value="' + dashAttr(option.value) + '"' + (checked ? ' checked' : '') + '>'
+                    + '<input type="checkbox" class="dash-panel-filter-option-input" value="' + dashAttr(option.value) + '"' + (checked ? ' checked' : '') + '>'
                     + '<span>' + dashAttr(option.label) + '</span>'
                     + '</label>';
             });
@@ -3425,6 +3481,7 @@ function dashRenderPanelFilterModal(panelEl, fields) {
         html += '</div>';
         container.insertAdjacentHTML('beforeend', html);
     });
+    container.querySelectorAll('.dash-panel-filter-field').forEach(dashSyncPanelFilterBulkControls);
 }
 
 function dashReadPanelFilterState(fields) {
@@ -3435,7 +3492,7 @@ function dashReadPanelFilterState(fields) {
             , selected = [], from, to;
         if (!fieldEl) return;
         if (field.kind === 'values' || field.kind === 'month') {
-            fieldEl.querySelectorAll('input[type="checkbox"]').forEach(function(check) {
+            fieldEl.querySelectorAll('.dash-panel-filter-option-input').forEach(function(check) {
                 if (check.checked) selected.push(check.value);
             });
             if (selected.length !== (field.options || []).length)
@@ -3455,6 +3512,12 @@ function dashOpenPanelFilter(panelEl) {
     dashRenderPanelFilterModal(panelEl, fields);
     document.getElementById('dash-panel-filter-modal').classList.add('open');
 }
+
+document.getElementById('dash-panel-filter-fields').addEventListener('change', function(e) {
+    var target = e.target;
+    if (!target || target.type !== 'checkbox') return;
+    dashHandlePanelFilterCheckboxChange(target);
+});
 
 document.getElementById('dash-panel-filter-cancel').addEventListener('click', function() {
     document.getElementById('dash-panel-filter-modal').classList.remove('open');
