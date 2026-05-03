@@ -2880,8 +2880,10 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     							$group .= ", ";
     							$groupBy[$master] .= ", ";
     						}
-    						else
+    						else{
     							$group = $groupBy[$master] = "GROUP BY ";
+								$distinct = ""; #Drop top-level SELECT DISTINCT when the report already has a top-level GROUP BY, avoiding a redundant wide-row MySQL sort for aggregate reports
+							}
     						$group .= substr($names[$key],0,1) == "'" ? $fields[$key] : $names[$key]; # Fix a mysql bug https://bugs.mysql.com/bug.php?id=14019
     						
     						//mywrite("fields $key => $value names:".$names[$key]." fields: ".$fields[$key]." display: ".$fieldsAll[$key]." ".$fieldsName[$key]);
@@ -8137,7 +8139,7 @@ switch($a)  # Check actions, which don't require authentication
     		$data_set = Exec_sql("SELECT tok.val FROM $z u LEFT JOIN $z tok ON tok.up=u.up AND tok.t=".TOKEN." WHERE u.t=".EMAIL." AND u.val='$u'"
     						, "Get the user token");
     		if(mysqli_num_rows($data_set) > 1)
-    		    die('{"error":"найдено несколько пользователей с таким email"}');
+    		    die('{"error":"'.t9n("[RU]Найдено несколько пользователей с таким email[EN]Several users with this email were found.").'"}');
     		if($row = mysqli_fetch_array($data_set)){
 				mysendmail($u, t9n("[RU]Одноразовый пароль [EN]One time password ").$u
 					, t9n("[RU]Ваш код для входа: [EN]Your password is: ").strtoupper(substr($row["val"], 0, 4))
