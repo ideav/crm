@@ -102,6 +102,9 @@ function makePanelEl(headThs, subheadThs, itemRows) {
 
 // Extract functions from dash.js
 const code = `
+function dashPanelFiltersFor() { return {}; }
+function dashPanelTableRowPassesFilters() { return true; }
+function dashPanelTableCellPassesFilters() { return true; }
 ${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashPanelGetColumns')}

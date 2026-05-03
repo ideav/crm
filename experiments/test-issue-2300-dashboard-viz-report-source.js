@@ -26,6 +26,10 @@ function extractFunction(name) {
 const code = `
 let dashModelData = {};
 let dashVizReports = {};
+function dashPanelFiltersFor() { return {}; }
+function dashFilterReportRowsForPanel(rows) { return rows || []; }
+function dashPanelTableRowPassesFilters() { return true; }
+function dashPanelTableCellPassesFilters() { return true; }
 
 ${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashGetFloat')}

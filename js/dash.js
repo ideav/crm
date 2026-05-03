@@ -61,6 +61,7 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
         + '<div class="f-panel-header">'
         + '<div class="f-panel-viz-icons"></div>'
         + '<h4>:name:</h4>'
+        + '<a class="f-panel-filter-icon" title="Фильтр"><i class="pi pi-filter"></i></a>'
         + (dashIsAdmin ? '<a class="f-panel-settings-icon" title="Настройки отображения"><i class="pi pi-chart-bar"></i></a>' : '')
         + '</div>'
         + '<div class="f-panel-content">'
@@ -78,7 +79,7 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
         + ':name:'
     , cellTpl     = '<td range=":from:-:to:" ready=":ready:" class="f-cell :classes:" align="right" title=":title:" data-src=":src:" data-item-id=":item-id:":extra:>:val:';
 
-let dashModelData = {}, dashPeriodData = {}, dashPeriods = {}, dashValues = {}, dashFormulas = {}, dashItems = {}, dashReports = {}, dashReportNames = {}, dashReportKeys = {}, dashReportSources = {}, dashVizReports = {}, dashAjaxes = 0;
+let dashModelData = {}, dashPeriodData = {}, dashPeriods = {}, dashValues = {}, dashFormulas = {}, dashItems = {}, dashReports = {}, dashReportNames = {}, dashReportKeys = {}, dashReportSources = {}, dashVizReports = {}, dashPanelFilters = {}, dashAjaxes = 0;
 let dashValueItemIds = {}; // item name -> valueItemID from ЗначенияЗаПериод
 let dashMatrixValues = [], dashMatrixValuesRequested = false, dashRgSourceIds = {};
 
@@ -397,6 +398,194 @@ function dashReportValueLabel(value) {
     return value || '(пусто)';
 }
 
+function dashPanelDateValue(value) {
+    var s = String(value === undefined || value === null ? '' : value).trim()
+        , m;
+    if (!s) return '';
+    m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return m[1] + '-' + m[2] + '-' + m[3];
+    m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+    if (m) return m[1] + '-' + m[2] + '-' + m[3];
+    m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+    if (m) return m[3] + '-' + m[2] + '-' + m[1];
+    m = s.match(/^(\d{4})-(\d{2})$/);
+    if (m) return m[1] + '-' + m[2] + '-01';
+    m = s.match(/^(\d{2})\.(\d{4})$/);
+    if (m) return m[2] + '-' + m[1] + '-01';
+    return '';
+}
+
+function dashPanelMonthValue(value) {
+    var s = String(value === undefined || value === null ? '' : value).trim()
+        , m;
+    if (!s) return '';
+    m = s.match(/^(\d{4})-(\d{2})(?:-\d{2})?/);
+    if (m) return m[1] + '-' + m[2];
+    m = s.match(/^(\d{4})(\d{2})(?:\d{2})?$/);
+    if (m) return m[1] + '-' + m[2];
+    m = s.match(/^(\d{2})\.(\d{4})$/);
+    if (m) return m[2] + '-' + m[1];
+    m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+    if (m) return m[3] + '-' + m[2];
+    return '';
+}
+
+function dashPanelFilterValueKey(value, kind, valueType) {
+    var n, dateValue, monthValue;
+    if (kind === 'month') {
+        monthValue = dashPanelMonthValue(value);
+        return monthValue || String(value === undefined || value === null ? '' : value).trim();
+    }
+    if (valueType === 'date') {
+        dateValue = dashPanelDateValue(value);
+        return dateValue || String(value === undefined || value === null ? '' : value).trim();
+    }
+    if (valueType === 'number') {
+        n = dashGetFloat(value);
+        return isNaN(n) ? '' : String(n);
+    }
+    return String(value === undefined || value === null ? '' : value).trim();
+}
+
+function dashPanelFilterFieldKind(column, values) {
+    var name = String((column && (column.name || column.id)) || '')
+        , format = String((column && column.format) || '').toUpperCase()
+        , nonEmpty = (values || []).filter(function(value) {
+            return String(value === undefined || value === null ? '' : value).trim() !== '';
+        })
+        , monthName = /(^|[\s_-])(месяц|month)([\s_-]|$)/i.test(name) || format === 'MONTH'
+        , allMonthValues = nonEmpty.length > 0 && nonEmpty.every(function(value) { return !!dashPanelMonthValue(value); })
+        , allDateValues = nonEmpty.length > 0 && nonEmpty.every(function(value) { return !!dashPanelDateValue(value); })
+        , allNumericValues = nonEmpty.length > 0 && nonEmpty.every(function(value) { return !isNaN(dashGetFloat(value)); });
+
+    if (monthName || (format === 'MONTH' && allMonthValues))
+        return { kind: 'month', valueType: 'month' };
+    if (allMonthValues && /(^|[\s_-])(период|period)([\s_-]|$)/i.test(name))
+        return { kind: 'month', valueType: 'month' };
+    if (/^(DATE|DATETIME)$/.test(format) || allDateValues)
+        return { kind: 'range', valueType: 'date' };
+    if (dashReportColumnIsNumeric(column) || allNumericValues)
+        return { kind: 'range', valueType: 'number' };
+    return { kind: 'values', valueType: 'text' };
+}
+
+function dashPanelAddFilterOption(field, rawValue) {
+    var key = dashPanelFilterValueKey(rawValue, field.kind, field.valueType)
+        , label = String(rawValue === undefined || rawValue === null ? '' : rawValue).trim();
+    if (!field._seen) field._seen = {};
+    if (field._seen[key]) return;
+    field._seen[key] = true;
+    field.options.push({
+        value: key,
+        label: label || (key || '(пусто)')
+    });
+}
+
+function dashBuildReportFilterFields(columns, rows) {
+    var fields = [];
+    (columns || []).forEach(function(column) {
+        var values = (rows || []).map(function(row) { return dashReportRowValue(row, column); })
+            , kindInfo = dashPanelFilterFieldKind(column, values)
+            , field = {
+                source: 'report',
+                key: 'report:' + String((column && (column.name || column.id)) || ''),
+                field: String((column && (column.name || column.id)) || ''),
+                label: String((column && (column.name || column.id)) || ''),
+                kind: kindInfo.kind,
+                valueType: kindInfo.valueType,
+                options: []
+            }
+            , min = null, max = null;
+
+        if (!field.field) return;
+
+        if (field.kind === 'range') {
+            values.forEach(function(value) {
+                var normalized = dashPanelFilterValueKey(value, field.kind, field.valueType)
+                    , comparable;
+                if (!normalized) return;
+                comparable = field.valueType === 'number' ? parseFloat(normalized) : normalized;
+                if (field.valueType === 'number' && !isFinite(comparable)) return;
+                if (min === null || comparable < min) min = comparable;
+                if (max === null || comparable > max) max = comparable;
+            });
+            if (min === null && max === null) return;
+            field.min = String(min);
+            field.max = String(max);
+        } else {
+            values.forEach(function(value) { dashPanelAddFilterOption(field, value); });
+            field.options.sort(function(a, b) {
+                return String(a.value).localeCompare(String(b.value), undefined, { numeric: true });
+            });
+            delete field._seen;
+            if (!field.options.length) return;
+        }
+
+        fields.push(field);
+    });
+    return fields;
+}
+
+function dashPanelFilterIsActive(filter) {
+    if (!filter) return false;
+    if (filter.kind === 'values' || filter.kind === 'month')
+        return Array.isArray(filter.selected);
+    if (filter.kind === 'range')
+        return !!(String(filter.from || '').trim() || String(filter.to || '').trim());
+    return false;
+}
+
+function dashPanelReportRowPassesFilter(row, filter) {
+    var raw, value, from, to, n, selected;
+    if (!dashPanelFilterIsActive(filter) || filter.source === 'table') return true;
+    if (!row || !Object.prototype.hasOwnProperty.call(row, filter.field)) return true;
+    raw = row[filter.field];
+
+    if (filter.kind === 'values' || filter.kind === 'month') {
+        selected = {};
+        (filter.selected || []).forEach(function(item) { selected[String(item)] = true; });
+        value = dashPanelFilterValueKey(raw, filter.kind, filter.valueType);
+        return !!selected[value];
+    }
+
+    if (filter.kind === 'range' && filter.valueType === 'number') {
+        n = dashGetFloat(raw);
+        if (isNaN(n)) return false;
+        from = String(filter.from || '').trim();
+        to = String(filter.to || '').trim();
+        if (from && n < parseFloat(from)) return false;
+        if (to && n > parseFloat(to)) return false;
+        return true;
+    }
+
+    if (filter.kind === 'range' && filter.valueType === 'date') {
+        value = dashPanelDateValue(raw);
+        if (!value) return false;
+        from = String(filter.from || '').trim();
+        to = String(filter.to || '').trim();
+        if (from && value < from) return false;
+        if (to && value > to) return false;
+        return true;
+    }
+
+    return true;
+}
+
+function dashFilterReportRowsForPanel(rows, filters) {
+    var active = [];
+    Object.keys(filters || {}).forEach(function(key) {
+        var filter = filters[key];
+        if (filter && filter.source !== 'table' && dashPanelFilterIsActive(filter))
+            active.push(filter);
+    });
+    if (!active.length) return rows || [];
+    return (rows || []).filter(function(row) {
+        return active.every(function(filter) {
+            return dashPanelReportRowPassesFilter(row, filter);
+        });
+    });
+}
+
 function dashReportAddOrdered(order, seen, value) {
     var key = String(value);
     if (seen[key]) return;
@@ -409,7 +598,7 @@ function dashCollectReportVizData(report, vizConfig) {
         , fieldMap = config.fieldMap || {}
         , type = config.type || 'line'
         , columns = report ? report.columns || [] : []
-        , rows = report ? report.rows || [] : []
+        , rows = dashFilterReportRowsForPanel(report ? report.rows || [] : [], config.filters || {})
         , labelCol, valueCol, seriesCol, xCol, yCol, rCol
         , labels = [], datasets = [], labelSeen = {}, seriesSeen = {}, seriesOrder = [], buckets = {}
         , records;
@@ -908,9 +1097,12 @@ function dashGetRepVals() {
                 cells.forEach(function(el) {
                     var range = String(el.getAttribute('range') || '-').split('-')
                         , group = dashCellReportGroup(el)
+                        , panel = el.closest ? el.closest('.f-panel') : null
+                        , panelFilters = panel && dashPanelFilters[panel.id] ? dashPanelFilters[panel.id] : {}
+                        , filteredReportRows = dashFilterReportRowsForPanel(reportRows, panelFilters)
                         , val;
                     if (restrictToReportGroup && !dashSameGroupName(group, parsed.report)) return;
-                    val = dashResolveReportCellValue(reportRows, date, range, parsed, group, groups);
+                    val = dashResolveReportCellValue(filteredReportRows, date, range, parsed, group, groups);
                     if (val !== undefined) {
                         el.innerHTML = val;
                         el.setAttribute('ready', '1');
@@ -1157,6 +1349,8 @@ function dashDrawPeriods() {
     if (dashAjaxes === 0) {
         document.querySelectorAll('#dash-model .f-panel').forEach(function(panel) {
             var settings = (dashModelData[panel.id] || {}).settings;
+            dashApplyPanelTableFilters(panel);
+            dashUpdatePanelFilterIcon(panel);
             // Only render if not yet interacted (user click sets data-user-selected)
             var icons = panel.querySelector('.f-panel-viz-icons');
             var hasUserSelection = icons && icons.querySelector('.f-viz-type-icon[data-user-selected]');
@@ -1563,13 +1757,13 @@ function dashPanelFilterRows(rows, selectedRows) {
 
 function dashCollectPanelData(panelEl, vizConfig) {
     var report = typeof dashPanelGetVizReportData === 'function' ? dashPanelGetVizReportData(panelEl) : null;
-    if (report) return dashCollectReportVizData(report, vizConfig || {});
+    if (report) return dashCollectReportVizData(report, Object.assign({}, vizConfig || {}, { filters: dashPanelFiltersFor(panelEl) }));
 
-    var datasets = [], cols = dashPanelGetColumns(panelEl);
+    var datasets = [], cols = dashPanelGetColumns(panelEl), filters = dashPanelFiltersFor(panelEl);
     var itemRows = dashPanelFilterRows(
         Array.from(panelEl.querySelectorAll('.f-item')),
         vizConfig ? vizConfig.selectedRows : null
-    );
+    ).filter(function(row) { return dashPanelTableRowPassesFilters(row, filters); });
 
     if (!itemRows.length) return { labels: [], datasets: [] };
 
@@ -1591,7 +1785,8 @@ function dashCollectPanelData(panelEl, vizConfig) {
         var vals = cols.map(function(col) {
             var cells = Array.from(tr.querySelectorAll('td.f-cell'));
             var matching = cells.filter(function(td) {
-                return (td.dataset.rgCol || '') === col || (td.dataset.rgHead || '') === col;
+                return ((td.dataset.rgCol || '') === col || (td.dataset.rgHead || '') === col)
+                    && dashPanelTableCellPassesFilters(td, filters);
             });
             var sum = 0;
             matching.forEach(function(td) { sum += dashGetFloat(td.textContent.trim()) || 0; });
@@ -2522,6 +2717,363 @@ function dashApplyNewVizSettings(panelEl, panelKey, settings) {
     }
 }
 
+// ─── Panel filters ──────────────────────────────────────────────────────────
+
+var dashPanelFilterModalCtx = null;
+
+function dashPanelFiltersFor(panelEl) {
+    return panelEl && dashPanelFilters[panelEl.id] ? dashPanelFilters[panelEl.id] : {};
+}
+
+function dashReportRowsToColumns(rows) {
+    var columns = [], seen = {};
+    (rows || []).forEach(function(row) {
+        Object.keys(row || {}).forEach(function(name) {
+            if (seen[name]) return;
+            seen[name] = true;
+            columns.push({ id: name, name: name, format: '' });
+        });
+    });
+    return columns;
+}
+
+function dashMergePanelFilterFields(target, incoming) {
+    var byKey = {};
+    target.forEach(function(field) { byKey[field.key] = field; });
+    (incoming || []).forEach(function(field) {
+        var existing = byKey[field.key]
+            , fieldMin, fieldMax, existingMin, existingMax;
+        if (!existing) {
+            target.push(field);
+            byKey[field.key] = field;
+            return;
+        }
+        if (field.kind === 'range' && existing.kind === 'range') {
+            if (field.valueType === 'number' || existing.valueType === 'number') {
+                fieldMin = parseFloat(field.min);
+                fieldMax = parseFloat(field.max);
+                existingMin = parseFloat(existing.min);
+                existingMax = parseFloat(existing.max);
+                if (field.min !== undefined && (existing.min === undefined || !isFinite(existingMin) || (isFinite(fieldMin) && fieldMin < existingMin))) existing.min = field.min;
+                if (field.max !== undefined && (existing.max === undefined || !isFinite(existingMax) || (isFinite(fieldMax) && fieldMax > existingMax))) existing.max = field.max;
+            } else {
+                if (field.min !== undefined && (existing.min === undefined || field.min < existing.min)) existing.min = field.min;
+                if (field.max !== undefined && (existing.max === undefined || field.max > existing.max)) existing.max = field.max;
+            }
+        } else if ((field.kind === 'values' || field.kind === 'month') && Array.isArray(field.options)) {
+            if (!existing._seen) {
+                existing._seen = {};
+                (existing.options || []).forEach(function(option) { existing._seen[option.value] = true; });
+            }
+            field.options.forEach(function(option) {
+                if (existing._seen[option.value]) return;
+                existing._seen[option.value] = true;
+                existing.options.push(option);
+            });
+        }
+    });
+}
+
+function dashFinalizePanelFilterFields(fields) {
+    fields.forEach(function(field) {
+        if (field._seen) delete field._seen;
+        if (Array.isArray(field.options))
+            field.options.sort(function(a, b) {
+                return String(a.value).localeCompare(String(b.value), undefined, { numeric: true });
+            });
+    });
+    return fields;
+}
+
+function dashCollectFormulaFilterFields(panelEl) {
+    var rows = [];
+    panelEl.querySelectorAll('.f-item').forEach(function(row) {
+        var rowId = row.id
+            , sources = dashReportSources[rowId] || (dashReportKeys[rowId] ? [{ reportKey: dashReportKeys[rowId] }] : []);
+        sources.forEach(function(source) {
+            var reportRows = source && source.reportKey ? dashReports[source.reportKey] : null;
+            if (Array.isArray(reportRows)) rows = rows.concat(reportRows);
+        });
+    });
+    if (!rows.length) return [];
+    return dashBuildReportFilterFields(dashReportRowsToColumns(rows), rows);
+}
+
+function dashBuildTableFilterFields(panelEl) {
+    var fields = []
+        , rowField = { source: 'table', key: 'table:row', tableTarget: 'row', field: 'row', label: 'Строка', kind: 'values', valueType: 'text', options: [] }
+        , colField = { source: 'table', key: 'table:column', tableTarget: 'column', field: 'column', label: 'Колонка', kind: 'values', valueType: 'text', options: [] }
+        , valueField = { source: 'table', key: 'table:value', tableTarget: 'value', field: 'value', label: 'Значение', kind: 'range', valueType: 'number' }
+        , dateField = { source: 'table', key: 'table:date', tableTarget: 'date', field: 'date', label: 'Дата', kind: 'range', valueType: 'date' }
+        , minValue = null, maxValue = null, minDate = null, maxDate = null;
+
+    panelEl.querySelectorAll('.f-item').forEach(function(row) {
+        dashPanelAddFilterOption(rowField, dashPanelGetRowName(row));
+        row.querySelectorAll('td.f-cell').forEach(function(td) {
+            var n = dashGetFloat(td.textContent.trim())
+                , fr = dashPanelDateValue(dashCellDateFr(td) || '')
+                , to = dashPanelDateValue(dashCellDateTo(td) || '')
+                , col = dashPanelTableCellColumnLabel(td);
+            if (col) dashPanelAddFilterOption(colField, col);
+            if (!isNaN(n)) {
+                if (minValue === null || n < minValue) minValue = n;
+                if (maxValue === null || n > maxValue) maxValue = n;
+            }
+            if (fr && (minDate === null || fr < minDate)) minDate = fr;
+            if (to && (maxDate === null || to > maxDate)) maxDate = to;
+        });
+    });
+
+    if (rowField.options.length) fields.push(rowField);
+    if (colField.options.length) fields.push(colField);
+    if (minValue !== null || maxValue !== null) {
+        valueField.min = String(minValue);
+        valueField.max = String(maxValue);
+        fields.push(valueField);
+    }
+    if (minDate || maxDate) {
+        dateField.min = minDate || maxDate;
+        dateField.max = maxDate || minDate;
+        fields.push(dateField);
+    }
+    return dashFinalizePanelFilterFields(fields);
+}
+
+function dashCollectPanelFilterFields(panelEl) {
+    var fields = []
+        , report = dashPanelGetVizReportData(panelEl);
+    if (report)
+        dashMergePanelFilterFields(fields, dashBuildReportFilterFields(report.columns || [], report.rows || []));
+    dashMergePanelFilterFields(fields, dashCollectFormulaFilterFields(panelEl));
+    if (!fields.length)
+        dashMergePanelFilterFields(fields, dashBuildTableFilterFields(panelEl));
+    return dashFinalizePanelFilterFields(fields);
+}
+
+function dashPanelFilterSelectedMap(filter) {
+    var selected = {};
+    (filter && filter.selected || []).forEach(function(value) { selected[String(value)] = true; });
+    return selected;
+}
+
+function dashPanelTableCellColumnLabel(td) {
+    var table, head, ths, idx, th;
+    if (!td) return '';
+    if (td.dataset && td.dataset.rgCol) return td.dataset.rgCol;
+    if (td.dataset && td.dataset.rgHead) return td.dataset.rgHead;
+    table = td.closest ? td.closest('table') : null;
+    head = table ? table.querySelector('thead .f-subhead') || table.querySelector('thead .f-head') : null;
+    if (!head) return '';
+    idx = Array.from(td.parentNode.cells).indexOf(td);
+    ths = Array.from(head.querySelectorAll('th'));
+    th = ths[idx];
+    return th ? (th.getAttribute('data-rg-col') || th.textContent || '').trim() : '';
+}
+
+function dashPanelTableCellPassesFilters(td, filters) {
+    var cellFilters = [], selected, colValue, n, from, to, fr, cellFrom, cellTo;
+    Object.keys(filters || {}).forEach(function(key) {
+        var filter = filters[key];
+        if (filter && filter.source === 'table' && filter.tableTarget !== 'row' && dashPanelFilterIsActive(filter))
+            cellFilters.push(filter);
+    });
+    if (!cellFilters.length) return true;
+
+    for (var i = 0; i < cellFilters.length; i++) {
+        var filter = cellFilters[i];
+        if (filter.tableTarget === 'column') {
+            selected = dashPanelFilterSelectedMap(filter);
+            colValue = dashPanelFilterValueKey(dashPanelTableCellColumnLabel(td), filter.kind, filter.valueType);
+            if (!selected[colValue]) return false;
+        } else if (filter.tableTarget === 'value') {
+            n = dashGetFloat(td.textContent.trim());
+            if (isNaN(n)) return false;
+            from = String(filter.from || '').trim();
+            to = String(filter.to || '').trim();
+            if (from && n < parseFloat(from)) return false;
+            if (to && n > parseFloat(to)) return false;
+        } else if (filter.tableTarget === 'date') {
+            from = String(filter.from || '').trim();
+            to = String(filter.to || '').trim();
+            cellFrom = dashPanelDateValue(dashCellDateFr(td) || '');
+            cellTo = dashPanelDateValue(dashCellDateTo(td) || '') || cellFrom;
+            fr = cellFrom || cellTo;
+            if (!fr) return false;
+            if (from && cellTo < from) return false;
+            if (to && cellFrom > to) return false;
+        }
+    }
+    return true;
+}
+
+function dashPanelTableRowPassesFilters(row, filters) {
+    var rowFilter = filters ? filters['table:row'] : null
+        , selected, rowName, cells, hasCellFilters = false;
+    if (dashPanelFilterIsActive(rowFilter)) {
+        selected = dashPanelFilterSelectedMap(rowFilter);
+        rowName = dashPanelFilterValueKey(dashPanelGetRowName(row), rowFilter.kind, rowFilter.valueType);
+        if (!selected[rowName]) return false;
+    }
+    Object.keys(filters || {}).forEach(function(key) {
+        var filter = filters[key];
+        if (filter && filter.source === 'table' && filter.tableTarget !== 'row' && dashPanelFilterIsActive(filter))
+            hasCellFilters = true;
+    });
+    if (!hasCellFilters) return true;
+    cells = Array.from(row.querySelectorAll('td.f-cell'));
+    return cells.some(function(td) { return dashPanelTableCellPassesFilters(td, filters); });
+}
+
+function dashSetRowHidden(row, key, hidden) {
+    if (!row || !row.dataset) return;
+    if (hidden) row.dataset[key] = '1';
+    else delete row.dataset[key];
+    row.style.display = (row.dataset.dashSearchHidden === '1' || row.dataset.dashPanelFilterHidden === '1') ? 'none' : '';
+}
+
+function dashApplyPanelTableFilters(panelEl) {
+    var filters = dashPanelFiltersFor(panelEl);
+    panelEl.querySelectorAll('.f-item').forEach(function(row) {
+        dashSetRowHidden(row, 'dashPanelFilterHidden', !dashPanelTableRowPassesFilters(row, filters));
+    });
+}
+
+function dashUpdatePanelFilterIcon(panelEl) {
+    var icon = panelEl ? panelEl.querySelector('.f-panel-filter-icon') : null
+        , filters = dashPanelFiltersFor(panelEl)
+        , active = Object.keys(filters).some(function(key) { return dashPanelFilterIsActive(filters[key]); });
+    if (!icon) return;
+    icon.classList.toggle('active', active);
+}
+
+function dashRerenderCurrentPanelViz(panelEl) {
+    var active = panelEl.querySelector('.f-viz-type-icon.active')
+        , vizType = active ? active.dataset.vizType : 'table'
+        , modelData = dashModelData[panelEl.id] || {}
+        , settings = modelData.settings
+        , vizList = settings ? (Array.isArray(settings) ? settings : [settings]) : []
+        , vizCfg = vizList.find(function(v) { return v.type === vizType; }) || {};
+    dashRenderChart(panelEl, vizType, vizCfg.fieldMap || {}, vizCfg);
+}
+
+function dashRecalculatePanelAfterFilter(panelEl) {
+    panelEl.querySelectorAll('td.f-cell[data-src="report"]').forEach(function(td) {
+        td.textContent = '';
+        td.setAttribute('ready', '0');
+        td.classList.remove('dash-err');
+    });
+    panelEl.querySelectorAll('td.f-rg-formula-cell').forEach(function(td) {
+        td.textContent = '';
+        td.setAttribute('ready', '0');
+        td.classList.remove('dash-err');
+    });
+    dashGetRepVals();
+    dashCalcCells();
+    dashCalcRGFormulas();
+    dashApplyPanelTableFilters(panelEl);
+    dashRerenderCurrentPanelViz(panelEl);
+    dashUpdatePanelFilterIcon(panelEl);
+}
+
+function dashRenderPanelFilterModal(panelEl, fields) {
+    var container = document.getElementById('dash-panel-filter-fields')
+        , filters = dashPanelFiltersFor(panelEl);
+    container.innerHTML = '';
+    if (!fields.length) {
+        container.innerHTML = '<div class="dash-panel-filter-empty">Нет данных для фильтра</div>';
+        return;
+    }
+
+    fields.forEach(function(field) {
+        var filter = filters[field.key]
+            , html = '<div class="dash-panel-filter-field" data-field-key="' + dashAttr(field.key) + '">'
+                + '<div class="dash-panel-filter-label">' + dashAttr(field.label) + '</div>';
+        if (field.kind === 'values' || field.kind === 'month') {
+            var selected = filter && Array.isArray(filter.selected) ? dashPanelFilterSelectedMap(filter) : null;
+            html += '<div class="dash-panel-filter-options">';
+            (field.options || []).forEach(function(option) {
+                var checked = selected === null || selected[option.value];
+                html += '<label class="dash-panel-filter-option">'
+                    + '<input type="checkbox" value="' + dashAttr(option.value) + '"' + (checked ? ' checked' : '') + '>'
+                    + '<span>' + dashAttr(option.label) + '</span>'
+                    + '</label>';
+            });
+            html += '</div>';
+        } else {
+            var inputType = field.valueType === 'date' ? 'date' : (field.valueType === 'number' ? 'number' : 'text');
+            html += '<div class="dash-panel-filter-range">'
+                + '<input type="' + inputType + '" class="dash-panel-filter-from" placeholder="' + dashAttr(field.min || 'От') + '" value="' + dashAttr(filter ? filter.from || '' : '') + '">'
+                + '<span>—</span>'
+                + '<input type="' + inputType + '" class="dash-panel-filter-to" placeholder="' + dashAttr(field.max || 'До') + '" value="' + dashAttr(filter ? filter.to || '' : '') + '">'
+                + '</div>';
+        }
+        html += '</div>';
+        container.insertAdjacentHTML('beforeend', html);
+    });
+}
+
+function dashReadPanelFilterState(fields) {
+    var container = document.getElementById('dash-panel-filter-fields')
+        , state = {};
+    fields.forEach(function(field) {
+        var fieldEl = container.querySelector('[data-field-key="' + CSS.escape(field.key) + '"]')
+            , selected = [], from, to;
+        if (!fieldEl) return;
+        if (field.kind === 'values' || field.kind === 'month') {
+            fieldEl.querySelectorAll('input[type="checkbox"]').forEach(function(check) {
+                if (check.checked) selected.push(check.value);
+            });
+            if (selected.length !== (field.options || []).length)
+                state[field.key] = Object.assign({}, field, { selected: selected });
+        } else {
+            from = (fieldEl.querySelector('.dash-panel-filter-from') || {}).value || '';
+            to = (fieldEl.querySelector('.dash-panel-filter-to') || {}).value || '';
+            if (from || to) state[field.key] = Object.assign({}, field, { from: from, to: to });
+        }
+    });
+    return state;
+}
+
+function dashOpenPanelFilter(panelEl) {
+    var fields = dashCollectPanelFilterFields(panelEl);
+    dashPanelFilterModalCtx = { panelEl: panelEl, fields: fields };
+    dashRenderPanelFilterModal(panelEl, fields);
+    document.getElementById('dash-panel-filter-modal').classList.add('open');
+}
+
+document.getElementById('dash-panel-filter-cancel').addEventListener('click', function() {
+    document.getElementById('dash-panel-filter-modal').classList.remove('open');
+    dashPanelFilterModalCtx = null;
+});
+
+document.getElementById('dash-panel-filter-reset').addEventListener('click', function() {
+    if (!dashPanelFilterModalCtx) return;
+    delete dashPanelFilters[dashPanelFilterModalCtx.panelEl.id];
+    document.getElementById('dash-panel-filter-modal').classList.remove('open');
+    dashRecalculatePanelAfterFilter(dashPanelFilterModalCtx.panelEl);
+    dashPanelFilterModalCtx = null;
+});
+
+document.getElementById('dash-panel-filter-apply').addEventListener('click', function() {
+    if (!dashPanelFilterModalCtx) return;
+    var panelEl = dashPanelFilterModalCtx.panelEl
+        , state = dashReadPanelFilterState(dashPanelFilterModalCtx.fields);
+    if (Object.keys(state).length) dashPanelFilters[panelEl.id] = state;
+    else delete dashPanelFilters[panelEl.id];
+    document.getElementById('dash-panel-filter-modal').classList.remove('open');
+    dashRecalculatePanelAfterFilter(panelEl);
+    dashPanelFilterModalCtx = null;
+});
+
+document.addEventListener('click', function(e) {
+    var icon = e.target.closest('.f-panel-filter-icon');
+    if (!icon) return;
+    e.preventDefault();
+    e.stopPropagation();
+    var panel = icon.closest('.f-panel');
+    if (panel) dashOpenPanelFilter(panel);
+});
+
 // Event delegation for panel settings icon clicks
 document.addEventListener('click', function(e) {
     var icon = e.target.closest('.f-panel-settings-icon');
@@ -2532,7 +3084,8 @@ document.addEventListener('click', function(e) {
 
 function dashReset() {
     dashModelData = {}; dashPeriodData = {}; dashPeriods = {}; dashValues = {};
-    dashFormulas = {}; dashItems = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashReportSources = {}; dashVizReports = {}; dashAjaxes = 0; dashValueItemIds = {};
+    dashFormulas = {}; dashItems = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashReportSources = {}; dashVizReports = {}; dashPanelFilters = {}; dashAjaxes = 0; dashValueItemIds = {};
+    dashPanelFilterModalCtx = null;
     dashMatrixValues = []; dashMatrixValuesRequested = false; dashRgSourceIds = {};
     var model = document.getElementById('dash-model');
     model.querySelector('.sheet-tabs').innerHTML = '';
@@ -2583,7 +3136,7 @@ window.dashApplySearch = function(query, sheetEl) {
     var q = query.toLowerCase().trim();
     sheetEl.querySelectorAll('.f-item').forEach(function(row) {
         var match = !q || row.textContent.toLowerCase().indexOf(q) !== -1;
-        row.style.display = match ? '' : 'none';
+        dashSetRowHidden(row, 'dashSearchHidden', !match);
         row.style.backgroundColor = q && match ? 'rgba(255,140,0,0.25)' : '';
     });
 };
