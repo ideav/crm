@@ -270,6 +270,7 @@ td:has(.dash-cell-input) {
     color: var(--text-primary, #212529);
 }
 #dash-formula-modal .dash-modal-btns,
+#dash-panel-filter-modal .dash-modal-btns,
 #dash-viz-modal .dash-modal-btns {
     display: flex;
     gap: 0.5rem;
