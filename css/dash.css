@@ -411,6 +411,40 @@ td:has(.dash-cell-input) {
     display: block;
     width: 100% !important;
 }
+.f-chart-resize-handle {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 1.1rem;
+    height: 1.1rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: nesw-resize;
+    opacity: 0;
+    z-index: 5;
+    touch-action: none;
+}
+.f-chart-resize-handle::before {
+    content: "";
+    position: absolute;
+    left: 0.25rem;
+    bottom: 0.25rem;
+    width: 0.65rem;
+    height: 0.65rem;
+    border-left: 2px solid var(--text-secondary, #6c757d);
+    border-bottom: 2px solid var(--text-secondary, #6c757d);
+    border-radius: 0 0 0 2px;
+}
+.f-chart-wrap:hover .f-chart-resize-handle,
+.f-chart-resize-handle:focus,
+.f-panel--chart-resizing .f-chart-resize-handle {
+    opacity: 0.85;
+}
+body.dash-chart-resizing {
+    cursor: nesw-resize;
+    user-select: none;
+}
 
 .f-pivot-wrap {
     overflow: auto;

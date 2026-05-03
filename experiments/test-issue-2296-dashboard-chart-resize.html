@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Issue 2296 dashboard chart resize</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="../assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="../css/dash.css">
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: #eef1f5;
+            color: #1f2933;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        .demo-shell {
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 1.5rem;
+        }
+        #dash-status {
+            margin-bottom: 0.75rem;
+            color: #4b5563;
+            font-size: 0.9rem;
+        }
+        #dash-model {
+            background: #fff;
+            border: 1px solid #d6dee6;
+            border-radius: 6px;
+            padding: 0.75rem;
+            box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+        }
+        .f-chart-wrap {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+        }
+    </style>
+</head>
+<body>
+    <div class="demo-shell">
+        <div id="dash-status">Загрузка...</div>
+        <div id="dash-model" class="f-model">
+            <ul class="nav nav-tabs sheet-tabs"></ul>
+            <div class="sheets"></div>
+        </div>
+    </div>
+
+    <div id="dash-formula-modal" role="dialog" aria-modal="true">
+        <div class="dash-modal-box">
+            <h6>Редактирование формулы</h6>
+            <textarea id="dash-formula-textarea" rows="4"></textarea>
+            <div class="dash-modal-btns">
+                <button class="dash-apply-btn dash-btn-primary" id="dash-formula-save">Сохранить</button>
+                <button class="dash-apply-btn dash-btn-secondary" id="dash-formula-cancel">Отменить</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="dash-multival-modal" role="dialog" aria-modal="true">
+        <div class="dash-modal-box">
+            <h6>Найдено несколько значений</h6>
+            <p id="dash-multival-subtitle"></p>
+            <ul id="dash-multival-list"></ul>
+            <div class="dash-modal-btns">
+                <a id="dash-multival-link" href="#" target="_blank">Показать в таблице</a>
+                <button class="dash-apply-btn" id="dash-multival-close">Закрыть</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="dash-readonly-tip" id="dash-readonly-tip">Только чтение</div>
+
+    <div id="dash-viz-modal" role="dialog" aria-modal="true">
+        <div class="dash-modal-box dash-viz-modal-box">
+            <h6>Варианты отображения панели</h6>
+            <div id="dash-viz-accordion" class="dash-viz-accordion"></div>
+            <div class="dash-modal-btns">
+                <button class="dash-apply-btn dash-btn-primary" id="dash-viz-save">Сохранить</button>
+                <button class="dash-apply-btn dash-btn-secondary" id="dash-viz-cancel">Отменить</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        var db = 'demo';
+        var role = 'user';
+
+        var demoModelRows = [
+            {
+                sheetID: '1', sheet: 'Продажи', panelID: '501', panel: 'Помесячная динамика',
+                period: 'Месяц', periodFrom: '01.01.2026', periodTo: '31.03.2026',
+                itemID: '1001', item: 'Выручка', level: 1, format: '', MU: '', 'Метка': '',
+                RG: 'main', RGtype: 'rg', rgHead: '', RGsourceID: '', RGcolumns: '', RGformulas: '',
+                NoDates: '', value: '', formulas: '[]', itemsHead: 'Показатель', panelFilter: '',
+                panelSettings: '[{"type":"line","default":true,"size":{"width":{"value":"640","unit":"px"},"height":{"value":"320","unit":"px"}}}]'
+            },
+            {
+                sheetID: '1', sheet: 'Продажи', panelID: '501', panel: 'Помесячная динамика',
+                period: 'Месяц', periodFrom: '01.01.2026', periodTo: '31.03.2026',
+                itemID: '1002', item: 'Лиды', level: 1, format: '', MU: '', 'Метка': '',
+                RG: 'main', RGtype: 'rg', rgHead: '', RGsourceID: '', RGcolumns: '', RGformulas: '',
+                NoDates: '', value: '', formulas: '[]', itemsHead: 'Показатель', panelFilter: '',
+                panelSettings: '[{"type":"line","default":true,"size":{"width":{"value":"640","unit":"px"},"height":{"value":"320","unit":"px"}}}]'
+            }
+        ];
+
+        function demoSourceRows() {
+            return [
+                { item: 'Выручка', value: '{"date":"20260110","val":"120"},{"date":"20260210","val":"145"},{"date":"20260310","val":"168"}' },
+                { item: 'Лиды', value: '{"date":"20260110","val":"42"},{"date":"20260210","val":"50"},{"date":"20260310","val":"57"}' }
+            ];
+        }
+
+        function demoPeriods() {
+            return {
+                m1: { r: ['Январь', '01.01.2026', '31.01.2026'] },
+                m2: { r: ['Февраль', '01.02.2026', '28.02.2026'] },
+                m3: { r: ['Март', '01.03.2026', '31.03.2026'] }
+            };
+        }
+
+        function newApi(method, url, callback, body, ctx) {
+            setTimeout(function() {
+                if (callback === 'dashGetModel') window[callback](demoModelRows);
+                else if (callback === 'dashGetSrc') window[callback](demoSourceRows());
+                else if (callback === 'dashGetPeriods') window[callback](demoPeriods(), ctx);
+                else if (callback === 'dashVizSettingsSaved') window[callback]({}, ctx);
+            }, 0);
+        }
+
+        function Chart(canvas, config) {
+            this.canvas = canvas;
+            this.config = config;
+            this.options = config.options || {};
+            canvas._chartInstance = this;
+            this.resize();
+        }
+        Chart.prototype.destroy = function() {};
+        Chart.prototype.update = function() { this.resize(); };
+        Chart.prototype.resize = function() {
+            var canvas = this.canvas;
+            var wrap = canvas.parentElement;
+            var width = Math.max(300, Math.round(wrap.getBoundingClientRect().width || 640));
+            var height = Math.max(180, Math.round(wrap.getBoundingClientRect().height || 320));
+            var ctx = canvas.getContext('2d');
+            var labels = this.config.data.labels;
+            var datasets = this.config.data.datasets;
+            canvas.width = width;
+            canvas.height = height;
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, width, height);
+            ctx.strokeStyle = '#d6dee6';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(42, 24);
+            ctx.lineTo(42, height - 34);
+            ctx.lineTo(width - 24, height - 34);
+            ctx.stroke();
+            datasets.forEach(function(ds, dsIndex) {
+                var color = dsIndex === 0 ? '#2563eb' : '#dc2626';
+                var max = Math.max.apply(null, datasets.reduce(function(all, cur) {
+                    return all.concat(cur.data);
+                }, []));
+                ctx.strokeStyle = color;
+                ctx.fillStyle = color;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ds.data.forEach(function(value, i) {
+                    var x = 42 + ((width - 78) / Math.max(1, labels.length - 1)) * i;
+                    var y = height - 34 - ((height - 70) * value / max);
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                });
+                ctx.stroke();
+                ds.data.forEach(function(value, i) {
+                    var x = 42 + ((width - 78) / Math.max(1, labels.length - 1)) * i;
+                    var y = height - 34 - ((height - 70) * value / max);
+                    ctx.beginPath();
+                    ctx.arc(x, y, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+                ctx.fillText(ds.label || '', width - 120, 28 + dsIndex * 18);
+            });
+        };
+    </script>
+    <script src="../js/dash.js"></script>
+    <script>
+        window.dashGetRecord({ id: '77', type: 'Дэшборд', val: 'Demo dashboard' });
+    </script>
+</body>
+</html>

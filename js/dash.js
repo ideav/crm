@@ -1216,6 +1216,9 @@ var DASH_VIZ_TYPES = [
 ];
 
 var DASH_VIZ_SIZE_UNITS = ['%', 'px', 'rem'];
+var DASH_CHART_RESIZE_MIN_WIDTH = 260;
+var DASH_CHART_RESIZE_MIN_HEIGHT = 180;
+var DASH_CHART_RESIZE_COOKIE_MAX_AGE = 31536000;
 var dashVizModalCtx = null; // { panelEl, panelKey }
 
 function dashPanelGetColumns(panelEl) {
@@ -1426,24 +1429,98 @@ function dashResetVizSizeStyles(el) {
     el.style.minHeight = '';
 }
 
-function dashApplyVizSize(panelEl, vizType, vizConfig) {
+function dashIsResizableChartViz(vizType) {
+    return !!vizType && vizType !== 'table' && vizType !== 'pivot';
+}
+
+function dashCookieGet(name) {
+    var escaped, match;
+    if (typeof document === 'undefined' || !document.cookie) return '';
+    escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    match = document.cookie.match(new RegExp('(?:^|; )' + escaped + '=([^;]*)'));
+    return match ? decodeURIComponent(match[1]) : '';
+}
+
+function dashCookieSet(name, value, maxAge) {
+    if (typeof document === 'undefined') return;
+    document.cookie = String(name) + '=' + encodeURIComponent(String(value))
+        + '; path=/; max-age=' + String(maxAge || DASH_CHART_RESIZE_COOKIE_MAX_AGE);
+}
+
+function dashCookieNamePart(value) {
+    return String(value || '0').replace(/[^A-Za-z0-9_-]/g, '_');
+}
+
+function dashChartSizeCookieName(panelEl, vizType) {
+    var dashId = dashRecordId || dashCurrentId || 'dash'
+        , panelId = panelEl && panelEl.dataset && panelEl.dataset.panelId ? panelEl.dataset.panelId : (panelEl ? panelEl.id : 'panel');
+    return 'dash_chart_size_'
+        + dashCookieNamePart(dashId) + '_'
+        + dashCookieNamePart(panelId) + '_'
+        + dashCookieNamePart(vizType);
+}
+
+function dashReadChartSizeCookie(panelEl, vizType) {
+    var raw, parsed;
+    if (!dashIsResizableChartViz(vizType)) return null;
+    raw = dashCookieGet(dashChartSizeCookieName(panelEl, vizType));
+    if (!raw) return null;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (e) {
+        return null;
+    }
+    return dashNormalizeVizSize({
+        width: parsed.width ? { value: parsed.width, unit: 'px' } : null,
+        height: parsed.height ? { value: parsed.height, unit: 'px' } : null
+    });
+}
+
+function dashWriteChartSizeCookie(panelEl, vizType, size) {
+    var normalized = dashNormalizeVizSize(size)
+        , payload = {};
+    if (!dashIsResizableChartViz(vizType) || !normalized) return null;
+    if (normalized.width) payload.width = Math.round(parseFloat(normalized.width.value));
+    if (normalized.height) payload.height = Math.round(parseFloat(normalized.height.value));
+    if (!payload.width && !payload.height) return null;
+    dashCookieSet(dashChartSizeCookieName(panelEl, vizType), JSON.stringify(payload), DASH_CHART_RESIZE_COOKIE_MAX_AGE);
+    return payload;
+}
+
+function dashMergeVizSize(baseSize, overrideSize) {
+    var merged = {}, hasSize = false;
+    if (baseSize && baseSize.width) {
+        merged.width = baseSize.width;
+        hasSize = true;
+    }
+    if (baseSize && baseSize.height) {
+        merged.height = baseSize.height;
+        hasSize = true;
+    }
+    if (overrideSize && overrideSize.width) {
+        merged.width = overrideSize.width;
+        hasSize = true;
+    }
+    if (overrideSize && overrideSize.height) {
+        merged.height = overrideSize.height;
+        hasSize = true;
+    }
+    return hasSize ? merged : null;
+}
+
+function dashResolveVizSize(panelEl, vizType, vizConfig) {
+    var configuredSize = dashNormalizeVizSize(vizConfig && vizConfig.size);
+    if (!dashIsResizableChartViz(vizType)) return configuredSize;
+    return dashMergeVizSize(configuredSize, dashReadChartSizeCookie(panelEl, vizType));
+}
+
+function dashApplyVizSizeStyles(panelEl, vizType, size) {
     var chartWrap = panelEl.querySelector('.f-chart-wrap')
         , pivotWrap = panelEl.querySelector('.f-pivot-wrap')
         , canvas = panelEl.querySelector('.f-chart-canvas')
-        , size = dashNormalizeVizSize(vizConfig && vizConfig.size)
         , targetWrap = vizType === 'pivot' ? pivotWrap : chartWrap
         , widthCss = size && size.width ? dashVizSizeCss(size.width) : ''
         , heightCss = size && size.height ? dashVizSizeCss(size.height) : '';
-
-    dashResetVizSizeStyles(panelEl);
-    dashResetVizSizeStyles(chartWrap);
-    dashResetVizSizeStyles(pivotWrap);
-    if (canvas && canvas.style) {
-        canvas.style.height = '';
-        canvas.style.maxHeight = '';
-    }
-
-    if (vizType === 'table' || !size) return size;
 
     if (widthCss) {
         panelEl.style.flex = '0 1 ' + widthCss;
@@ -1464,6 +1541,136 @@ function dashApplyVizSize(panelEl, vizType, vizConfig) {
         }
     }
     return size;
+}
+
+function dashResizeChartInstance(panelEl) {
+    var canvas = panelEl ? panelEl.querySelector('.f-chart-canvas') : null
+        , chart = canvas ? canvas._chartInstance : null;
+    if (!chart) return;
+    if (chart.options) chart.options.maintainAspectRatio = false;
+    if (typeof chart.resize === 'function') chart.resize();
+    else if (typeof chart.update === 'function') chart.update();
+}
+
+function dashApplyChartPixelSize(panelEl, vizType, width, height) {
+    var chartWrap = panelEl.querySelector('.f-chart-wrap')
+        , pivotWrap = panelEl.querySelector('.f-pivot-wrap')
+        , canvas = panelEl.querySelector('.f-chart-canvas')
+        , size = dashNormalizeVizSize({
+            width: { value: Math.round(width), unit: 'px' },
+            height: { value: Math.round(height), unit: 'px' }
+        });
+    if (!size) return null;
+    dashResetVizSizeStyles(panelEl);
+    dashResetVizSizeStyles(chartWrap);
+    dashResetVizSizeStyles(pivotWrap);
+    if (canvas && canvas.style) {
+        canvas.style.height = '';
+        canvas.style.maxHeight = '';
+    }
+    dashApplyVizSizeStyles(panelEl, vizType, size);
+    dashResizeChartInstance(panelEl);
+    return size;
+}
+
+function dashChartResizeMaxWidth(panelEl) {
+    var parent = panelEl ? panelEl.parentElement : null
+        , rect = parent && parent.getBoundingClientRect ? parent.getBoundingClientRect() : null
+        , width = rect && rect.width ? rect.width : ((typeof window !== 'undefined' && window.innerWidth) ? window.innerWidth : 1200);
+    return Math.max(DASH_CHART_RESIZE_MIN_WIDTH, Math.round(width));
+}
+
+function dashChartResizeMaxHeight() {
+    var height = (typeof window !== 'undefined' && window.innerHeight) ? window.innerHeight : 800;
+    return Math.max(DASH_CHART_RESIZE_MIN_HEIGHT, Math.round(height * 1.5));
+}
+
+function dashClampChartSize(value, minValue, maxValue) {
+    return Math.max(minValue, Math.min(maxValue, Math.round(value)));
+}
+
+function dashStartChartResize(e, vizType) {
+    var handle = e.currentTarget || e.target
+        , panelEl = handle && handle.closest ? handle.closest('.f-panel') : null
+        , chartWrap = panelEl ? panelEl.querySelector('.f-chart-wrap') : null
+        , rect = chartWrap && chartWrap.getBoundingClientRect ? chartWrap.getBoundingClientRect() : null
+        , startX, startY, startWidth, startHeight, maxWidth, maxHeight, activeVizType
+        , latestSize = null;
+    if (e.button !== undefined && e.button !== 0) return;
+    if (!panelEl || !chartWrap || !rect) return;
+    e.preventDefault();
+    activeVizType = vizType || (handle.dataset ? handle.dataset.vizType : '') || 'line';
+    startX = e.clientX;
+    startY = e.clientY;
+    startWidth = rect.width || chartWrap.offsetWidth || DASH_CHART_RESIZE_MIN_WIDTH;
+    startHeight = rect.height || chartWrap.offsetHeight || DASH_CHART_RESIZE_MIN_HEIGHT;
+    maxWidth = dashChartResizeMaxWidth(panelEl);
+    maxHeight = dashChartResizeMaxHeight();
+
+    function onMove(moveEvent) {
+        var nextWidth, nextHeight;
+        moveEvent.preventDefault();
+        nextWidth = dashClampChartSize(startWidth + (startX - moveEvent.clientX), DASH_CHART_RESIZE_MIN_WIDTH, maxWidth);
+        nextHeight = dashClampChartSize(startHeight + (moveEvent.clientY - startY), DASH_CHART_RESIZE_MIN_HEIGHT, maxHeight);
+        latestSize = dashApplyChartPixelSize(panelEl, activeVizType, nextWidth, nextHeight);
+    }
+
+    function onUp(upEvent) {
+        if (upEvent && upEvent.preventDefault) upEvent.preventDefault();
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        panelEl.classList.remove('f-panel--chart-resizing');
+        if (document.body && document.body.classList) document.body.classList.remove('dash-chart-resizing');
+        if (latestSize) dashWriteChartSizeCookie(panelEl, activeVizType, latestSize);
+    }
+
+    panelEl.classList.add('f-panel--chart-resizing');
+    if (document.body && document.body.classList) document.body.classList.add('dash-chart-resizing');
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+}
+
+function dashEnsureChartResizeHandle(panelEl, vizType) {
+    var chartWrap = panelEl ? panelEl.querySelector('.f-chart-wrap') : null
+        , handle;
+    if (!chartWrap || typeof document === 'undefined' || !document.createElement) return;
+    handle = chartWrap.querySelector('.f-chart-resize-handle');
+    if (!dashIsResizableChartViz(vizType)) {
+        if (handle) handle.style.display = 'none';
+        return;
+    }
+    if (!handle) {
+        handle = document.createElement('button');
+        handle.type = 'button';
+        handle.className = 'f-chart-resize-handle';
+        handle.title = 'Изменить размер графика';
+        handle.setAttribute('aria-label', 'Изменить размер графика');
+        handle.addEventListener('mousedown', function(ev) {
+            dashStartChartResize(ev, handle.dataset.vizType);
+        });
+        chartWrap.appendChild(handle);
+    }
+    handle.dataset.vizType = vizType || '';
+    handle.style.display = '';
+}
+
+function dashApplyVizSize(panelEl, vizType, vizConfig) {
+    var chartWrap = panelEl.querySelector('.f-chart-wrap')
+        , pivotWrap = panelEl.querySelector('.f-pivot-wrap')
+        , canvas = panelEl.querySelector('.f-chart-canvas')
+        , size = dashResolveVizSize(panelEl, vizType, vizConfig || {});
+
+    dashResetVizSizeStyles(panelEl);
+    dashResetVizSizeStyles(chartWrap);
+    dashResetVizSizeStyles(pivotWrap);
+    if (canvas && canvas.style) {
+        canvas.style.height = '';
+        canvas.style.maxHeight = '';
+    }
+    dashEnsureChartResizeHandle(panelEl, vizType);
+
+    if (vizType === 'table' || !size) return size;
+    return dashApplyVizSizeStyles(panelEl, vizType, size);
 }
 
 function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
