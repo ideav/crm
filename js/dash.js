@@ -2418,10 +2418,6 @@ function dashApplyVizSizeStyles(panelEl, vizType, size) {
         panelEl._dashVizWidthCss = widthCss;
         panelEl.style.flex = '0 1 ' + widthCss;
         panelEl.style.width = '100%';
-        if (targetWrap) {
-            targetWrap.style.width = '100%';
-            targetWrap.style.maxWidth = widthCss;
-        }
         panelEl.style.maxWidth = widthCss;
     }
     if (heightCss && targetWrap) {
