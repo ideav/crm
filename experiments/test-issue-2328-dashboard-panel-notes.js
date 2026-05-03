@@ -53,6 +53,12 @@ assert(
     'panelNotes markdown list must be converted to HTML'
 );
 
+dashSetPanelNotes(panelEl, '\\\\* мультипликатор по последней сделке');
+assert(
+    notesEl.innerHTML === '<p>* мультипликатор по последней сделке</p>',
+    'escaped leading markdown marker must render as literal text without a backslash'
+);
+
 dashSetPanelNotes(panelEl, 'Перед <script>alert(1)</script>\\n\\n* [ссылка](https://example.com/?a=1&b=2)');
 assert(!notesEl.innerHTML.includes('<script>'), 'panel notes must escape raw HTML');
 assert(notesEl.innerHTML.includes('&lt;script&gt;alert(1)&lt;/script&gt;'), 'escaped HTML must remain readable');

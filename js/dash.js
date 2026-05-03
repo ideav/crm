@@ -122,6 +122,7 @@ function dashMarkdownInline(text) {
     s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
     s = s.replace(/(^|[\s(])\*([^*\n]+)\*(?=$|[\s).,;:!?])/g, '$1<em>$2</em>');
     s = s.replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s).,;:!?])/g, '$1<em>$2</em>');
+    s = s.replace(/\\([\\`*_\[\]()#+\-.!])/g, '$1');
     placeholders.forEach(function(html, i) {
         s = s.replace(new RegExp('\u0000' + i + '\u0000', 'g'), html);
     });
@@ -158,21 +159,21 @@ function dashMarkdownToHtml(markdown) {
             return;
         }
 
-        m = line.match(/^\s*[-*+]\s+(.+)$/);
+        m = line.match(/^(\s*)([-*+])\s+(.+)$/);
         if (m) {
             flushParagraph();
             if (listType && listType !== 'ul') flushList();
             listType = 'ul';
-            listItems.push(m[1]);
+            listItems.push(m[3]);
             return;
         }
 
-        m = line.match(/^\s*\d+[.)]\s+(.+)$/);
+        m = line.match(/^(\s*)\d+[.)]\s+(.+)$/);
         if (m) {
             flushParagraph();
             if (listType && listType !== 'ol') flushList();
             listType = 'ol';
-            listItems.push(m[1]);
+            listItems.push(m[2]);
             return;
         }
 
