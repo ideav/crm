@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Issue 2316 dashboard pivot collapsed width</title>
+    <link rel="stylesheet" href="../assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="../css/dash.css">
+    <style>
+        :root {
+            --bg-primary: #fff;
+            --bg-secondary: #f8f9fa;
+            --border-color: #d7dce2;
+            --text-primary: #20242a;
+            --text-secondary: #637083;
+        }
+        body {
+            margin: 0;
+            padding: 24px;
+            font-family: Arial, sans-serif;
+            background: #f3f5f7;
+            color: #20242a;
+        }
+        #dash-model {
+            max-width: 1280px;
+        }
+        .f-panel {
+            padding: 0;
+        }
+        .f-panel-header h4 {
+            margin: 0;
+            font-size: 16px;
+        }
+        .pvtUi {
+            border-collapse: collapse;
+            background: #fff;
+        }
+        .pvtUi td {
+            border: 1px solid #d7dce2;
+            vertical-align: top;
+        }
+        .pvtAxisContainer,
+        .pvtUiCell {
+            background: #eef2f6;
+            min-height: 42px;
+            padding: 10px;
+            color: #445065;
+        }
+        .pvtRendererArea {
+            background: #fff;
+            padding: 10px;
+        }
+        .pvtTable {
+            border-collapse: collapse;
+            margin-top: 2px;
+        }
+        .pvtTable th,
+        .pvtTable td {
+            border: 1px solid #d7dce2;
+            padding: 8px 10px;
+            text-align: right;
+        }
+        .pvtTable th {
+            background: #f8f9fa;
+            font-weight: 600;
+            text-align: left;
+        }
+        .pvtAttr {
+            display: inline-block;
+            border: 1px solid #ccd3dc;
+            border-radius: 4px;
+            background: #fff;
+            padding: 4px 8px;
+            margin: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div id="dash-model">
+        <div class="f-sheet">
+            <div class="f-panel f-panel--chart">
+                <div class="f-panel-header">
+                    <div class="f-panel-viz-icons">
+                        <a class="f-viz-type-icon active"><i class="pi pi-table"></i></a>
+                    </div>
+                    <h4>Подбор персонала и адаптация</h4>
+                </div>
+                <div class="f-panel-content">
+                    <div class="f-pivot-wrap dash-pivot-controls-collapsed">
+                        <div class="dash-pivot-ui dash-pivot-controls-collapsed">
+                            <table class="pvtUi">
+                                <tr>
+                                    <td class="pvtUiCell">Sum <select><option>Прошли ИС</option></select></td>
+                                    <td class="pvtAxisContainer pvtCols"><span class="pvtAttr">Прошли ИС</span></td>
+                                </tr>
+                                <tr class="dash-pivot-renderer-row">
+                                    <td class="pvtAxisContainer pvtRows"><span class="pvtAttr">Строка</span></td>
+                                    <td class="pvtRendererArea">
+                                        <button class="dash-pivot-settings-toggle" type="button" aria-label="Настройка сводной таблицы" aria-expanded="false"><i class="pi pi-cog"></i></button>
+                                        <table class="pvtTable">
+                                            <tr><th></th><th>Прошли ИС</th><th>1</th><th>Totals</th></tr>
+                                            <tr><th>План</th><td></td><td>12.00</td><td><strong>12.00</strong></td></tr>
+                                            <tr><th>Факт</th><td></td><td>12.00</td><td><strong>12.00</strong></td></tr>
+                                            <tr><th>Totals</th><td></td><td><strong>24.00</strong></td><td><strong>24.00</strong></td></tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td colspan="2" class="pvtAxisContainer pvtUnused">
+                                        <span class="pvtAttr">Средний TTS</span>
+                                        <span class="pvtAttr">Закрыто из взятых в работу</span>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+                        <div class="dash-pivot-actions">
+                            <button class="dash-apply-btn dash-btn-primary dash-pivot-save-settings">Сохранить настройки</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

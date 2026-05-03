@@ -590,7 +590,7 @@ body.dash-chart-resizing {
 }
 .dash-pivot-ui.dash-pivot-controls-collapsed .pvtUi,
 .dash-pivot-ui.dash-pivot-controls-collapsed .pvtRendererArea {
-    width: 100%;
+    width: auto;
 }
 .dash-pivot-ui .pvtRendererArea {
     position: relative;
