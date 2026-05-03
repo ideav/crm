@@ -161,6 +161,8 @@ ${extractFunction('dashSyncVizRowAllCheck')}
 ${extractFunction('dashInitVizRowBulkControls')}
 ${extractFunction('dashCollectPanelData')}
 function dashCollectVizSize() { return null; }
+function dashCollectPanelMaxWidth() { return null; }
+function dashSetPanelMaxWidthInSettings(settings) { return settings; }
 ${extractFunction('dashVizModalCollectSettings')}
 `;
 
