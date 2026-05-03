@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Issue 2318 Dashboard Panel Filter Toggle</title>
+    <link rel="stylesheet" href="../css/dash.css">
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: #f5f6f8;
+            font-family: Arial, sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <div id="dash-panel-filter-modal" class="open" role="dialog" aria-modal="true">
+        <div class="dash-modal-box dash-panel-filter-modal-box">
+            <h6>Фильтр панели</h6>
+            <div id="dash-panel-filter-fields" class="dash-panel-filter-fields">
+                <div class="dash-panel-filter-field" data-field-key="report:Месяц">
+                    <div class="dash-panel-filter-label dash-panel-filter-label--with-toggle">
+                        <input type="checkbox" class="dash-panel-filter-select-all dash-panel-filter-bulk-toggle" value="__all" title="Выделить всё / снять выделение" aria-label="Выделить всё / снять выделение" checked>
+                        <span>Месяц</span>
+                    </div>
+                    <div class="dash-panel-filter-options">
+                        <label class="dash-panel-filter-option">
+                            <input type="checkbox" class="dash-panel-filter-option-input" value="" checked>
+                            <span>(пусто)</span>
+                        </label>
+                        <label class="dash-panel-filter-option">
+                            <input type="checkbox" class="dash-panel-filter-option-input" value="20201201" checked>
+                            <span>20201201</span>
+                        </label>
+                        <label class="dash-panel-filter-option">
+                            <input type="checkbox" class="dash-panel-filter-option-input" value="20210501" checked>
+                            <span>20210501</span>
+                        </label>
+                        <label class="dash-panel-filter-option">
+                            <input type="checkbox" class="dash-panel-filter-option-input" value="20210601" checked>
+                            <span>20210601</span>
+                        </label>
+                        <label class="dash-panel-filter-option">
+                            <input type="checkbox" class="dash-panel-filter-option-input" value="20210701" checked>
+                            <span>20210701</span>
+                        </label>
+                        <label class="dash-panel-filter-option">
+                            <input type="checkbox" class="dash-panel-filter-option-input" value="20210801" checked>
+                            <span>20210801</span>
+                        </label>
+                        <label class="dash-panel-filter-option">
+                            <input type="checkbox" class="dash-panel-filter-option-input" value="20210901" checked>
+                            <span>20210901</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="dash-panel-filter-field" data-field-key="report:Клиент">
+                    <div class="dash-panel-filter-label dash-panel-filter-label--with-toggle">
+                        <input type="checkbox" class="dash-panel-filter-select-all dash-panel-filter-bulk-toggle" value="__all" title="Выделить всё / снять выделение" aria-label="Выделить всё / снять выделение">
+                        <span>Клиент</span>
+                    </div>
+                    <div class="dash-panel-filter-options">
+                        <label class="dash-panel-filter-option">
+                            <input type="checkbox" class="dash-panel-filter-option-input" value="alpha">
+                            <span>Альфа</span>
+                        </label>
+                        <label class="dash-panel-filter-option">
+                            <input type="checkbox" class="dash-panel-filter-option-input" value="beta">
+                            <span>Бета</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="dash-modal-btns">
+                <button class="dash-apply-btn dash-btn-primary" id="dash-panel-filter-apply">Применить</button>
+                <button class="dash-apply-btn dash-btn-secondary" id="dash-panel-filter-reset">Сбросить</button>
+                <button class="dash-apply-btn dash-btn-secondary" id="dash-panel-filter-cancel">Отменить</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

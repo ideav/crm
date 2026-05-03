@@ -77,26 +77,22 @@ const rangeField = {
 dashRenderPanelFilterModal({ id: 'panel-1' }, [valuesField, rangeField]);
 
 assert(
-    renderedContainer.html.includes('dash-panel-filter-bulk'),
-    'multi-value panel filters must render bulk checkbox controls'
+    renderedContainer.html.includes('dash-panel-filter-label--with-toggle'),
+    'multi-value panel filters must render a bulk checkbox control in the field label'
 );
 assert(
-    renderedContainer.html.includes('Выделить всё'),
-    'bulk controls must include "Выделить всё"'
+    renderedContainer.html.includes('title="Выделить всё / снять выделение"'),
+    'bulk control must include the select/clear tooltip'
 );
 assert(
-    renderedContainer.html.includes('Очистить'),
-    'bulk controls must include "Очистить"'
+    !renderedContainer.html.includes('dash-panel-filter-clear'),
+    'multi-value panel filters must not render a second clear checkbox'
 );
 assert(
     renderedContainer.html.includes('dash-panel-filter-option-input'),
     'value option checkboxes must be distinguishable from bulk-control checkboxes'
 );
 
-const bulkChecks = [
-    { checked: true, value: '__all' },
-    { checked: false, value: '__clear' }
-];
 const optionChecks = [
     { checked: true, value: 'alpha' },
     { checked: false, value: 'beta' }
@@ -104,7 +100,6 @@ const optionChecks = [
 const fakeFieldEl = {
     querySelectorAll(selector) {
         if (selector === '.dash-panel-filter-option-input') return optionChecks;
-        if (selector === 'input[type="checkbox"]') return bulkChecks.concat(optionChecks);
         return [];
     },
     querySelector() {
@@ -138,19 +133,12 @@ const selectAll = {
     classList: { contains: function(name) { return name === 'dash-panel-filter-select-all'; } },
     closest: function() { return eventFieldEl; }
 };
-const clear = {
-    checked: true,
-    indeterminate: false,
-    classList: { contains: function(name) { return name === 'dash-panel-filter-clear'; } },
-    closest: function() { return eventFieldEl; }
-};
 const eventFieldEl = {
     querySelectorAll(selector) {
         return selector === '.dash-panel-filter-option-input' ? eventOptionChecks : [];
     },
     querySelector(selector) {
         if (selector === '.dash-panel-filter-select-all') return selectAll;
-        if (selector === '.dash-panel-filter-clear') return clear;
         return null;
     }
 };
@@ -163,17 +151,15 @@ assert.deepStrictEqual(
 );
 assert.strictEqual(selectAll.checked, true, 'select-all stays checked when all options are checked');
 assert.strictEqual(selectAll.indeterminate, false, 'select-all is not indeterminate when all options are checked');
-assert.strictEqual(clear.checked, false, 'clear checkbox is unchecked when options are selected');
 
-clear.checked = true;
-dashHandlePanelFilterCheckboxChange(clear);
+selectAll.checked = false;
+dashHandlePanelFilterCheckboxChange(selectAll);
 assert.deepStrictEqual(
     eventOptionChecks.map(function(check) { return check.checked; }),
     [false, false],
-    'clear checkbox must uncheck every value option'
+    'select-all checkbox must uncheck every value option'
 );
-assert.strictEqual(selectAll.checked, false, 'select-all is unchecked after clear');
-assert.strictEqual(clear.checked, true, 'clear stays checked when no options are checked');
+assert.strictEqual(selectAll.checked, false, 'select-all stays unchecked when no options are checked');
 `;
 
 vm.runInNewContext(code, { require });
