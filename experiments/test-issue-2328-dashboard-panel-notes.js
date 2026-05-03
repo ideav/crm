@@ -28,6 +28,7 @@ function extractFunction(name) {
 assert(source.includes('json[i].panelNotes'), 'dashboard model parser must read panelNotes from model rows');
 assert(source.includes('f-panel-notes'), 'dashboard panels must include a notes container');
 assert(css.includes('.f-panel-notes'), 'dashboard notes must have dedicated styling');
+assert(/\.f-panel-notes\s*\{[^}]*margin-bottom:\s*1rem;/.test(css), 'dashboard notes must leave a 1rem margin below');
 
 const code = `
 ${extractFunction('dashEscapeHtml')}
