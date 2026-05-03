@@ -78,7 +78,7 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
         + ':name:'
     , cellTpl     = '<td range=":from:-:to:" ready=":ready:" class="f-cell :classes:" align="right" title=":title:" data-src=":src:" data-item-id=":item-id:":extra:>:val:';
 
-let dashModelData = {}, dashPeriodData = {}, dashPeriods = {}, dashValues = {}, dashFormulas = {}, dashItems = {}, dashReports = {}, dashReportNames = {}, dashReportKeys = {}, dashReportSources = {}, dashAjaxes = 0;
+let dashModelData = {}, dashPeriodData = {}, dashPeriods = {}, dashValues = {}, dashFormulas = {}, dashItems = {}, dashReports = {}, dashReportNames = {}, dashReportKeys = {}, dashReportSources = {}, dashVizReports = {}, dashAjaxes = 0;
 let dashValueItemIds = {}; // item name -> valueItemID from ЗначенияЗаПериод
 let dashMatrixValues = [], dashMatrixValuesRequested = false, dashRgSourceIds = {};
 
@@ -241,6 +241,256 @@ function dashReportUrl(rep, fr, to, panelFilter) {
         , filter = dashNormalizePanelFilter(panelFilter);
     if (filter) url += '&' + filter;
     return url;
+}
+
+function dashResolvePanelVizReportId(row) {
+    var keys = [
+        'panelChartReportID', 'panelChartReportId', 'panelChartQueryID', 'panelChartQueryId',
+        'chartReportID', 'chartReportId', 'chartQueryID', 'chartQueryId',
+        'chartReport', 'chartQuery',
+        'vizReportID', 'vizReportId', 'vizQueryID', 'vizQueryId',
+        'vizReport', 'vizQuery',
+        'panelReportID', 'panelReportId', 'panelQueryID', 'panelQueryId',
+        'panelReport', 'panelQuery',
+        'reportID', 'reportId', 'queryID', 'queryId', 'report', 'query',
+        'ГрафикЗапросID', 'ГрафикЗапрос', 'ЗапросГрафикаID', 'ЗапросГрафика',
+        'ЗапросID', 'ЗапросId', 'Запрос', 'ОтчетID', 'ОтчётID', 'Отчет', 'Отчёт'
+    ];
+    var i, key, value, match;
+    if (!row) return '';
+    for (i = 0; i < keys.length; i++) {
+        key = keys[i];
+        if (!Object.prototype.hasOwnProperty.call(row, key)) continue;
+        value = row[key];
+        if (value === null || value === undefined) continue;
+        value = String(value).trim();
+        if (!value || value === '0') continue;
+        match = value.match(/^\s*(\d+)(?::|$)/);
+        return match ? match[1] : value;
+    }
+    return '';
+}
+
+function dashVizReportKey(reportId, panelFilter) {
+    return JSON.stringify(['viz', String(reportId || ''), dashNormalizePanelFilter(panelFilter)]);
+}
+
+function dashVizReportUrl(reportId, fr, to, panelFilter) {
+    var url = 'report/' + reportId + '?JSON&FR_Date=' + fr + '&TO_Date=' + to
+        , filter = dashNormalizePanelFilter(panelFilter);
+    if (filter) url += '&' + filter;
+    return url;
+}
+
+function dashNormalizeReportJson(json) {
+    var rawColumns = (json && Array.isArray(json.columns)) ? json.columns : []
+        , columns = []
+        , rows = []
+        , data = json && json.data
+        , i, j, rowCount = 0, row, col, value;
+
+    rawColumns.forEach(function(column, idx) {
+        var name = String((column && (column.name || column.val || column.id)) || ('Колонка ' + (idx + 1)));
+        columns.push({
+            id: String((column && column.id !== undefined && column.id !== null) ? column.id : name),
+            name: name,
+            type: column ? column.type : '',
+            format: String((column && column.format) || '').toUpperCase(),
+            ref: column ? column.ref : undefined,
+            granted: column ? column.granted : undefined,
+            index: idx
+        });
+    });
+
+    if (!Array.isArray(data)) data = [];
+
+    if (data.length === columns.length && data.every(function(colData) { return Array.isArray(colData); })) {
+        data.forEach(function(colData) {
+            if (colData.length > rowCount) rowCount = colData.length;
+        });
+        for (i = 0; i < rowCount; i++) {
+            row = {};
+            for (j = 0; j < columns.length; j++) {
+                row[columns[j].name] = data[j] && data[j][i] !== undefined ? data[j][i] : '';
+            }
+            rows.push(row);
+        }
+    } else if (data.length === columns.length && data.length && data.every(function(cell) {
+        return !Array.isArray(cell) && (cell === null || typeof cell !== 'object');
+    })) {
+        row = {};
+        columns.forEach(function(column, idx) {
+            row[column.name] = data[idx] !== undefined ? data[idx] : '';
+        });
+        rows.push(row);
+    } else {
+        data.forEach(function(rawRow) {
+            row = {};
+            if (Array.isArray(rawRow)) {
+                columns.forEach(function(column, idx) {
+                    row[column.name] = rawRow[idx] !== undefined ? rawRow[idx] : '';
+                });
+            } else if (rawRow && typeof rawRow === 'object') {
+                columns.forEach(function(column) {
+                    if (Object.prototype.hasOwnProperty.call(rawRow, column.name))
+                        value = rawRow[column.name];
+                    else if (Object.prototype.hasOwnProperty.call(rawRow, column.id))
+                        value = rawRow[column.id];
+                    else
+                        value = '';
+                    row[column.name] = value;
+                });
+            }
+            rows.push(row);
+        });
+    }
+
+    return {
+        header: json && json.header ? json.header : '',
+        columns: columns,
+        rows: rows
+    };
+}
+
+function dashReportColumnByField(columns, field) {
+    var i, key = String(field || '');
+    if (!key) return null;
+    for (i = 0; i < (columns || []).length; i++)
+        if (String(columns[i].id) === key) return columns[i];
+    for (i = 0; i < (columns || []).length; i++)
+        if (String(columns[i].name) === key) return columns[i];
+    return null;
+}
+
+function dashReportColumnIsNumeric(column) {
+    var format = String((column && column.format) || '').toUpperCase();
+    return /^(NUMBER|SIGNED|NUMERIC|INT|INTEGER|FLOAT|DOUBLE|DECIMAL|MONEY|CURRENCY|PERCENT)$/.test(format);
+}
+
+function dashReportColumnIsMeasure(column) {
+    var name = String((column && column.name) || '').trim();
+    if (!dashReportColumnIsNumeric(column)) return false;
+    if (column && column.ref) return false;
+    if (/(^|[\s_-])(id|ид)$/i.test(name) || /(ID|ИД)$/.test(name)) return false;
+    return true;
+}
+
+function dashReportColumnIsDimension(column) {
+    return !!column && !dashReportColumnIsMeasure(column);
+}
+
+function dashReportDefaultColumn(columns, preferredField, predicate) {
+    var i, col = dashReportColumnByField(columns, preferredField);
+    if (col && (!predicate || predicate(col))) return col;
+    for (i = 0; i < (columns || []).length; i++)
+        if (!predicate || predicate(columns[i])) return columns[i];
+    return (columns && columns[0]) || null;
+}
+
+function dashReportRowValue(row, column) {
+    if (!row || !column) return '';
+    return row[column.name] !== undefined && row[column.name] !== null ? row[column.name] : '';
+}
+
+function dashReportValueLabel(value) {
+    value = String(value === undefined || value === null ? '' : value).trim();
+    return value || '(пусто)';
+}
+
+function dashReportAddOrdered(order, seen, value) {
+    var key = String(value);
+    if (seen[key]) return;
+    seen[key] = true;
+    order.push(value);
+}
+
+function dashCollectReportVizData(report, vizConfig) {
+    var config = vizConfig || {}
+        , fieldMap = config.fieldMap || {}
+        , type = config.type || 'line'
+        , columns = report ? report.columns || [] : []
+        , rows = report ? report.rows || [] : []
+        , labelCol, valueCol, seriesCol, xCol, yCol, rCol
+        , labels = [], datasets = [], labelSeen = {}, seriesSeen = {}, seriesOrder = [], buckets = {}
+        , records;
+
+    if (!rows.length) return { labels: [], datasets: [], records: [], columns: columns };
+
+    records = rows.map(function(row) {
+        var rec = {};
+        columns.forEach(function(column) {
+            var raw = dashReportRowValue(row, column)
+                , n;
+            if (dashReportColumnIsMeasure(column)) {
+                n = dashGetFloat(raw);
+                rec[column.name] = isNaN(n) ? 0 : n;
+            } else {
+                rec[column.name] = raw;
+            }
+        });
+        return rec;
+    });
+
+    if (type === 'bubble') {
+        xCol = dashReportDefaultColumn(columns, fieldMap.bubbleX, dashReportColumnIsMeasure);
+        yCol = dashReportDefaultColumn(columns, fieldMap.bubbleY, function(col) { return dashReportColumnIsMeasure(col) && (!xCol || col.id !== xCol.id); }) || xCol;
+        rCol = dashReportDefaultColumn(columns, fieldMap.bubbleR, function(col) {
+            return dashReportColumnIsMeasure(col) && (!xCol || col.id !== xCol.id) && (!yCol || col.id !== yCol.id);
+        }) || yCol || xCol;
+        labelCol = dashReportDefaultColumn(columns, fieldMap.labelField || fieldMap.bubbleLabel, dashReportColumnIsDimension) || columns[0];
+        rows.forEach(function(row) {
+            labels.push(dashReportValueLabel(dashReportRowValue(row, labelCol)));
+        });
+        return {
+            labels: labels,
+            datasets: [
+                { label: xCol ? xCol.name : 'X', data: rows.map(function(row) { return dashGetFloat(dashReportRowValue(row, xCol)) || 0; }) },
+                { label: yCol ? yCol.name : 'Y', data: rows.map(function(row) { return dashGetFloat(dashReportRowValue(row, yCol)) || 0; }) },
+                { label: rCol ? rCol.name : 'Размер', data: rows.map(function(row) { return dashGetFloat(dashReportRowValue(row, rCol)) || 0; }) }
+            ],
+            records: records,
+            columns: columns
+        };
+    }
+
+    labelCol = dashReportDefaultColumn(columns, fieldMap.labelField || fieldMap.xField, dashReportColumnIsDimension) || columns[0];
+    valueCol = dashReportDefaultColumn(columns, fieldMap.valueField, dashReportColumnIsMeasure);
+    seriesCol = dashReportColumnByField(columns, fieldMap.seriesField);
+
+    rows.forEach(function(row) {
+        var label = dashReportValueLabel(dashReportRowValue(row, labelCol))
+            , series = seriesCol ? dashReportValueLabel(dashReportRowValue(row, seriesCol)) : (valueCol ? valueCol.name : 'Количество')
+            , value = valueCol ? dashGetFloat(dashReportRowValue(row, valueCol)) : 1;
+        if (isNaN(value)) value = 0;
+        dashReportAddOrdered(labels, labelSeen, label);
+        dashReportAddOrdered(seriesOrder, seriesSeen, series);
+        if (!buckets[series]) buckets[series] = {};
+        buckets[series][label] = (buckets[series][label] || 0) + value;
+    });
+
+    if (type === 'pie') {
+        datasets.push({
+            label: valueCol ? valueCol.name : 'Количество',
+            data: labels.map(function(label) {
+                var sum = 0;
+                seriesOrder.forEach(function(series) {
+                    sum += (buckets[series] && buckets[series][label]) || 0;
+                });
+                return sum;
+            })
+        });
+    } else {
+        seriesOrder.forEach(function(series) {
+            datasets.push({
+                label: series,
+                data: labels.map(function(label) {
+                    return (buckets[series] && buckets[series][label]) || 0;
+                })
+            });
+        });
+    }
+
+    return { labels: labels, datasets: datasets, records: records, columns: columns };
 }
 
 function dashParseReportFormula(formula) {
@@ -1020,6 +1270,22 @@ function dashGetRep(rep, fr, to, panelFilter) {
     return key;
 }
 
+function dashGetVizReportDone(json, ctx) {
+    var key = ctx && typeof ctx === 'object' ? ctx.key : ctx;
+    dashVizReports[key] = dashNormalizeReportJson(json || {});
+    dashAjaxes--;
+    dashDrawPeriods();
+}
+
+function dashGetVizReport(reportId, fr, to, panelFilter) {
+    var key = dashVizReportKey(reportId, panelFilter);
+    if (dashVizReports[key]) return key;
+    dashVizReports[key] = { loading: true, columns: [], rows: [] };
+    dashAjaxes++;
+    newApi('GET', dashVizReportUrl(reportId, fr, to, panelFilter), 'dashGetVizReportDone', '', { key: key });
+    return key;
+}
+
 function dashGetSrc(json) {
     for (var i in json || []) {
         if (json[i].valueItemID) dashValueItemIds[(json[i].item || '').toLowerCase()] = json[i].valueItemID;
@@ -1115,7 +1381,8 @@ function dashGetModel(json) {
         var panelKey = 'fp' + json[i].panelID
             , previousItem = lastVisibleItemByPanel[panelKey]
             , isDuplicateRow = dashIsDuplicateModelRow(previousItem, json[i])
-            , itemTargetId = isDuplicateRow ? previousItem.itemID : json[i].itemID;
+            , itemTargetId = isDuplicateRow ? previousItem.itemID : json[i].itemID
+            , vizReportId = dashResolvePanelVizReportId(json[i]);
         // Add sheet tab
         if (!document.getElementById(json[i].sheetID)) {
             model.querySelector('.sheet-tabs').insertAdjacentHTML('beforeend',
@@ -1135,8 +1402,21 @@ function dashGetModel(json) {
                     .replace(':period:', json[i].period)
                     .replace(':name:', json[i].panel)
                     .replace(':panelid:', json[i].panelID));
-            dashModelData[panelKey] = { items: {}, rgs: {}, noDates: json[i].NoDates, settings: panelSettings, panelID: json[i].panelID };
+            dashModelData[panelKey] = {
+                items: {},
+                rgs: {},
+                noDates: json[i].NoDates,
+                settings: panelSettings,
+                panelID: json[i].panelID,
+                panelFilter: json[i].panelFilter || '',
+                vizReportId: vizReportId,
+                vizReportKey: vizReportId ? dashGetVizReport(vizReportId, fr, to, json[i].panelFilter) : ''
+            };
             dashPanelApplySettings(panelKey, panelSettings, false);
+        }
+        if (vizReportId && dashModelData[panelKey] && !dashModelData[panelKey].vizReportId) {
+            dashModelData[panelKey].vizReportId = vizReportId;
+            dashModelData[panelKey].vizReportKey = dashGetVizReport(vizReportId, fr, to, json[i].panelFilter);
         }
         if (json[i].NoDates !== undefined)
             dashModelData[panelKey].noDates = json[i].NoDates;
@@ -1221,6 +1501,13 @@ var DASH_CHART_RESIZE_MIN_HEIGHT = 180;
 var DASH_CHART_RESIZE_COOKIE_MAX_AGE = 31536000;
 var dashVizModalCtx = null; // { panelEl, panelKey }
 
+function dashPanelGetVizReportData(panelEl) {
+    var modelData = panelEl ? dashModelData[panelEl.id] : null
+        , report = modelData && modelData.vizReportKey ? dashVizReports[modelData.vizReportKey] : null;
+    if (!report || report.loading) return null;
+    return report;
+}
+
 function dashPanelGetColumns(panelEl) {
     var cols = [];
     var subhead = panelEl.querySelector('thead .f-subhead');
@@ -1275,6 +1562,9 @@ function dashPanelFilterRows(rows, selectedRows) {
 }
 
 function dashCollectPanelData(panelEl, vizConfig) {
+    var report = typeof dashPanelGetVizReportData === 'function' ? dashPanelGetVizReportData(panelEl) : null;
+    if (report) return dashCollectReportVizData(report, vizConfig || {});
+
     var datasets = [], cols = dashPanelGetColumns(panelEl);
     var itemRows = dashPanelFilterRows(
         Array.from(panelEl.querySelectorAll('.f-item')),
@@ -1674,7 +1964,7 @@ function dashApplyVizSize(panelEl, vizType, vizConfig) {
 }
 
 function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
-    var data = dashCollectPanelData(panelEl, vizConfig || {});
+    var data = dashCollectPanelData(panelEl, Object.assign({}, vizConfig || {}, { type: vizType, fieldMap: fieldMap || {} }));
     var canvas = panelEl.querySelector('.f-chart-canvas');
     var chartWrap = panelEl.querySelector('.f-chart-wrap');
     var tableWrap = panelEl.querySelector('.f-table-wrap');
@@ -1774,8 +2064,24 @@ function dashRenderPivot(panelEl, pivotWrap, data, fieldMap) {
         return;
     }
     pivotWrap.innerHTML = '';
-    // Build flat records array for pivottable
-    var records = data.labels.map(function(lbl, i) {
+    var records, rowField, colField, valField;
+    if (data.records && data.columns) {
+        rowField = dashReportColumnByField(data.columns, fieldMap && fieldMap.pivotRows);
+        colField = dashReportColumnByField(data.columns, fieldMap && fieldMap.pivotCols);
+        valField = dashReportColumnByField(data.columns, fieldMap && fieldMap.pivotVals);
+        rowField = rowField || dashReportDefaultColumn(data.columns, '', dashReportColumnIsDimension);
+        valField = valField || dashReportDefaultColumn(data.columns, '', dashReportColumnIsMeasure);
+        records = data.records;
+        window.jQuery(pivotWrap).pivotUI(records, {
+            rows: rowField ? [rowField.name] : [],
+            cols: colField ? [colField.name] : [],
+            aggregatorName: 'Sum',
+            vals: valField ? [valField.name] : []
+        });
+        return;
+    }
+
+    records = data.labels.map(function(lbl, i) {
         var rec = { 'Строка': lbl };
         data.datasets.forEach(function(ds) {
             rec[ds.label || 'Значение'] = ds.data[i] || 0;
@@ -1882,7 +2188,8 @@ function dashOpenPanelVizSettings(panelEl) {
 
         var fieldMapHtml = '<div class="dash-viz-fieldmap" style="' + (isChecked ? '' : 'display:none') + '">';
         fieldMapHtml += dashBuildFieldMapHtml(typeInfo.id, existing ? existing.fieldMap : null, panelEl);
-        fieldMapHtml += dashBuildVizRowsHtml(existing ? existing.selectedRows : null, panelEl);
+        if (!dashPanelGetVizReportData(panelEl))
+            fieldMapHtml += dashBuildVizRowsHtml(existing ? existing.selectedRows : null, panelEl);
         fieldMapHtml += dashBuildVizSizeHtml(existing ? existing.size : null);
         fieldMapHtml += '</div>';
 
@@ -1906,6 +2213,9 @@ function dashOpenPanelVizSettings(panelEl) {
 }
 
 function dashBuildFieldMapHtml(vizType, fieldMap, panelEl) {
+    var report = dashPanelGetVizReportData(panelEl);
+    if (report) return dashBuildReportFieldMapHtml(vizType, fieldMap, report);
+
     var cols = dashPanelGetColumns(panelEl);
     var rows = dashPanelGetRows(panelEl);
     var allFields = cols.length ? cols : rows;
@@ -1943,6 +2253,70 @@ function dashBuildFieldMapHtml(vizType, fieldMap, panelEl) {
             + sel('pivotVals', 'Значения', fm.pivotVals || '');
     }
     return '<div class="dash-viz-field-row dash-viz-field-hint">Поля подбираются автоматически из данных панели.</div>';
+}
+
+function dashBuildReportFieldOptions(columns, selected, predicate, includeEmpty) {
+    var html = includeEmpty ? '<option value="">(не задано)</option>' : ''
+        , selectedKey = String(selected || '')
+        , selectedFound = !selectedKey;
+    (columns || []).forEach(function(column) {
+        if (predicate && !predicate(column)) return;
+        var value = String(column.id)
+            , isSelected = selectedKey && (selectedKey === value || selectedKey === String(column.name));
+        if (isSelected) selectedFound = true;
+        html += '<option value="' + dashAttr(value) + '"' + (isSelected ? ' selected' : '') + '>'
+            + dashAttr(column.name)
+            + '</option>';
+    });
+    if (selectedKey && !selectedFound)
+        html += '<option value="' + dashAttr(selectedKey) + '" selected>' + dashAttr(selectedKey) + '</option>';
+    return html;
+}
+
+function dashBuildReportFieldMapHtml(vizType, fieldMap, report) {
+    var columns = report ? report.columns || [] : []
+        , fm = fieldMap || {};
+
+    function sel(name, label, val, predicate, includeEmpty) {
+        return '<div class="dash-viz-field-row"><label>' + label + '</label>'
+            + '<select class="dash-viz-field-select" name="' + name + '">'
+            + dashBuildReportFieldOptions(columns, val, predicate, includeEmpty !== false)
+            + '</select></div>';
+    }
+
+    if (vizType === 'bar') {
+        var barMode = fm.barMode || 'grouped';
+        return '<div class="dash-viz-field-row"><label>Режим</label>'
+            + '<select class="dash-viz-field-select" name="barMode">'
+            + '<option value="grouped"' + (barMode === 'grouped' ? ' selected' : '') + '>Группы столбиков</option>'
+            + '<option value="stacked"' + (barMode === 'stacked' ? ' selected' : '') + '>Сегменты</option>'
+            + '<option value="combo"' + (barMode === 'combo' ? ' selected' : '') + '>Комбинация</option>'
+            + '</select></div>'
+            + sel('labelField', 'Ось X', fm.labelField || fm.xField || '', dashReportColumnIsDimension)
+            + sel('valueField', 'Значение', fm.valueField || '', dashReportColumnIsMeasure)
+            + sel('seriesField', 'Серии', fm.seriesField || '', dashReportColumnIsDimension);
+    }
+    if (vizType === 'line' || vizType === 'area') {
+        return sel('labelField', 'Ось X', fm.labelField || fm.xField || '', dashReportColumnIsDimension)
+            + sel('valueField', 'Значение', fm.valueField || '', dashReportColumnIsMeasure)
+            + sel('seriesField', 'Серии', fm.seriesField || '', dashReportColumnIsDimension);
+    }
+    if (vizType === 'pie') {
+        return sel('labelField', 'Сектор', fm.labelField || '', dashReportColumnIsDimension)
+            + sel('valueField', 'Значение', fm.valueField || '', dashReportColumnIsMeasure);
+    }
+    if (vizType === 'bubble') {
+        return sel('bubbleX', 'X (ось)', fm.bubbleX || '', dashReportColumnIsMeasure)
+            + sel('bubbleY', 'Y (ось)', fm.bubbleY || '', dashReportColumnIsMeasure)
+            + sel('bubbleR', 'Размер', fm.bubbleR || '', dashReportColumnIsMeasure)
+            + sel('labelField', 'Подпись', fm.labelField || fm.bubbleLabel || '', dashReportColumnIsDimension);
+    }
+    if (vizType === 'pivot') {
+        return sel('pivotRows', 'Строки', fm.pivotRows || '', dashReportColumnIsDimension)
+            + sel('pivotCols', 'Столбцы', fm.pivotCols || '', dashReportColumnIsDimension)
+            + sel('pivotVals', 'Значения', fm.pivotVals || '', dashReportColumnIsMeasure);
+    }
+    return '';
 }
 
 function dashBuildVizRowsHtml(selectedRows, panelEl) {
@@ -2158,7 +2532,7 @@ document.addEventListener('click', function(e) {
 
 function dashReset() {
     dashModelData = {}; dashPeriodData = {}; dashPeriods = {}; dashValues = {};
-    dashFormulas = {}; dashItems = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashReportSources = {}; dashAjaxes = 0; dashValueItemIds = {};
+    dashFormulas = {}; dashItems = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashReportSources = {}; dashVizReports = {}; dashAjaxes = 0; dashValueItemIds = {};
     dashMatrixValues = []; dashMatrixValuesRequested = false; dashRgSourceIds = {};
     var model = document.getElementById('dash-model');
     model.querySelector('.sheet-tabs').innerHTML = '';
@@ -2171,6 +2545,7 @@ window.dashGetSrc     = dashGetSrc;
 window.dashGetPeriods = dashGetPeriods;
 window.dashGetMatrixValues = dashGetMatrixValues;
 window.dashGetRepDone             = dashGetRepDone;
+window.dashGetVizReportDone       = dashGetVizReportDone;
 window.dashDebug                  = dashDebug;
 window.dashUpdateTableWrapOverflow = dashUpdateTableWrapOverflow;
 
@@ -2194,7 +2569,7 @@ window.dashApplyFilter = function(sheetEl) {
         delete dashModelData[p.id];
         p.remove();
     });
-    dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashReportSources = {}; dashAjaxes = 0; dashValueItemIds = {}; dashRgSourceIds = {};
+    dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashReportSources = {}; dashVizReports = {}; dashAjaxes = 0; dashValueItemIds = {}; dashRgSourceIds = {};
 
     // Re-fetch model for this sheet only — skip get_record, use cached dashRecordId
     dashSetStatus('Загрузка данных...');
