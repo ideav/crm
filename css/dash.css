@@ -47,6 +47,35 @@
 .f-panel .f-table-wrap {
     overflow-x: auto;
 }
+.f-panel-notes {
+    margin-top: 0.5rem;
+    color: var(--text-secondary, #6c757d);
+    font-size: 0.82rem;
+    line-height: 1.4;
+    white-space: normal;
+}
+.f-panel-notes p,
+.f-panel-notes ul,
+.f-panel-notes ol {
+    margin: 0 0 0.35rem;
+}
+.f-panel-notes p:last-child,
+.f-panel-notes ul:last-child,
+.f-panel-notes ol:last-child {
+    margin-bottom: 0;
+}
+.f-panel-notes ul,
+.f-panel-notes ol {
+    padding-left: 1.2rem;
+}
+.f-panel-notes code {
+    padding: 0.05rem 0.2rem;
+    border-radius: 3px;
+    background: var(--bg-secondary, #f8f9fa);
+}
+.f-panel-notes a {
+    color: var(--button-primary, #0d6efd);
+}
 /* Sticky first column */
 .f-panel th:first-child,
 .f-panel td:first-child {

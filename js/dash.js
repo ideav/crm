@@ -68,6 +68,7 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
         + '<div class="f-table-wrap"><table class="table table-sm table-bordered w-auto"><thead><tr class="dash-head f-head"><th>:head:</thead><tbody></tbody></table></div>'
         + '<div class="f-chart-wrap" style="display:none"><canvas class="f-chart-canvas"></canvas></div>'
         + '<div class="f-pivot-wrap" style="display:none"></div>'
+        + '<div class="f-panel-notes" style="display:none"></div>'
         + '</div>'
         + '</div>'
     , headTpl     = '<th range=":from:-:to:">:head:'
@@ -92,6 +93,110 @@ function dashAttr(v) {
         .replace(/&/g, '&amp;')
         .replace(/"/g, '&quot;')
         .replace(/</g, '&lt;');
+}
+
+function dashEscapeHtml(v) {
+    return String(v === null || v === undefined ? '' : v)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function dashMarkdownInline(text) {
+    var placeholders = []
+        , s = dashEscapeHtml(text);
+    function hold(html) {
+        var token = '\u0000' + placeholders.length + '\u0000';
+        placeholders.push(html);
+        return token;
+    }
+    s = s.replace(/`([^`]+)`/g, function(match, code) {
+        return hold('<code>' + code + '</code>');
+    });
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+|\/[^\s)]*)\)/g, function(match, label, href) {
+        return hold('<a href="' + href + '" target="_blank" rel="noopener noreferrer">' + label + '</a>');
+    });
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[\s(])\*([^*\n]+)\*(?=$|[\s).,;:!?])/g, '$1<em>$2</em>');
+    s = s.replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s).,;:!?])/g, '$1<em>$2</em>');
+    placeholders.forEach(function(html, i) {
+        s = s.replace(new RegExp('\u0000' + i + '\u0000', 'g'), html);
+    });
+    return s;
+}
+
+function dashMarkdownToHtml(markdown) {
+    var lines = String(markdown === null || markdown === undefined ? '' : markdown).replace(/\r\n?/g, '\n').split('\n')
+        , html = []
+        , paragraph = []
+        , listType = ''
+        , listItems = [];
+
+    function flushParagraph() {
+        if (!paragraph.length) return;
+        html.push('<p>' + paragraph.map(dashMarkdownInline).join('<br>') + '</p>');
+        paragraph = [];
+    }
+
+    function flushList() {
+        if (!listType) return;
+        html.push('<' + listType + '>' + listItems.map(function(item) {
+            return '<li>' + dashMarkdownInline(item) + '</li>';
+        }).join('') + '</' + listType + '>');
+        listType = '';
+        listItems = [];
+    }
+
+    lines.forEach(function(line) {
+        var trimmed = line.trim(), m;
+        if (!trimmed) {
+            flushParagraph();
+            flushList();
+            return;
+        }
+
+        m = line.match(/^\s*[-*+]\s+(.+)$/);
+        if (m) {
+            flushParagraph();
+            if (listType && listType !== 'ul') flushList();
+            listType = 'ul';
+            listItems.push(m[1]);
+            return;
+        }
+
+        m = line.match(/^\s*\d+[.)]\s+(.+)$/);
+        if (m) {
+            flushParagraph();
+            if (listType && listType !== 'ol') flushList();
+            listType = 'ol';
+            listItems.push(m[1]);
+            return;
+        }
+
+        flushList();
+        m = line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/);
+        if (m) {
+            flushParagraph();
+            html.push('<p><strong>' + dashMarkdownInline(m[2]) + '</strong></p>');
+            return;
+        }
+        paragraph.push(trimmed);
+    });
+
+    flushParagraph();
+    flushList();
+    return html.join('');
+}
+
+function dashSetPanelNotes(panelEl, notes) {
+    var notesEl = panelEl && panelEl.querySelector ? panelEl.querySelector('.f-panel-notes') : null
+        , html = dashMarkdownToHtml(notes);
+    if (!notesEl) return;
+    notesEl.innerHTML = html;
+    notesEl.style.display = html ? '' : 'none';
 }
 
 function dashSetStatus(msg) {
@@ -1576,7 +1681,8 @@ function dashGetModel(json) {
             , previousItem = lastVisibleItemByPanel[panelKey]
             , isDuplicateRow = dashIsDuplicateModelRow(previousItem, json[i])
             , itemTargetId = isDuplicateRow ? previousItem.itemID : json[i].itemID
-            , vizReportId = dashResolvePanelVizReportId(json[i]);
+            , vizReportId = dashResolvePanelVizReportId(json[i])
+            , panelNotes = json[i].panelNotes === null || json[i].panelNotes === undefined ? '' : String(json[i].panelNotes);
         // Add sheet tab
         if (!document.getElementById(json[i].sheetID)) {
             model.querySelector('.sheet-tabs').insertAdjacentHTML('beforeend',
@@ -1602,11 +1708,16 @@ function dashGetModel(json) {
                 noDates: json[i].NoDates,
                 settings: panelSettings,
                 panelID: json[i].panelID,
+                notes: '',
                 panelFilter: json[i].panelFilter || '',
                 vizReportId: vizReportId,
                 vizReportKey: vizReportId ? dashGetVizReport(vizReportId, fr, to, json[i].panelFilter) : ''
             };
             dashPanelApplySettings(panelKey, panelSettings, false);
+        }
+        if (panelNotes.trim() && dashModelData[panelKey] && !dashModelData[panelKey].notes) {
+            dashModelData[panelKey].notes = panelNotes;
+            dashSetPanelNotes(document.getElementById(panelKey), panelNotes);
         }
         if (vizReportId && dashModelData[panelKey] && !dashModelData[panelKey].vizReportId) {
             dashModelData[panelKey].vizReportId = vizReportId;
