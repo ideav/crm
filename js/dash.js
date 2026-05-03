@@ -3140,6 +3140,30 @@ function dashPanelFiltersFor(panelEl) {
     return panelEl && dashPanelFilters[panelEl.id] ? dashPanelFilters[panelEl.id] : {};
 }
 
+function dashPanelFilterModalIsOpen() {
+    var modal = document.getElementById('dash-panel-filter-modal');
+    return !!(modal && modal.classList.contains('open'));
+}
+
+function dashClosePanelFilterModal() {
+    var modal = document.getElementById('dash-panel-filter-modal');
+    if (modal) modal.classList.remove('open');
+    dashPanelFilterModalCtx = null;
+}
+
+function dashHandlePanelFilterModalKeydown(e) {
+    if (!e || (e.key !== 'Escape' && e.keyCode !== 27)) return;
+    if (!dashPanelFilterModalIsOpen()) return;
+    if (e.preventDefault) e.preventDefault();
+    if (e.stopPropagation) e.stopPropagation();
+    dashClosePanelFilterModal();
+}
+
+function dashHandlePanelFilterBackdropClick(e) {
+    var modal = document.getElementById('dash-panel-filter-modal');
+    if (modal && e && e.target === modal) dashClosePanelFilterModal();
+}
+
 function dashReportRowsToColumns(rows) {
     var columns = [], seen = {};
     (rows || []).forEach(function(row) {
@@ -3520,16 +3544,15 @@ document.getElementById('dash-panel-filter-fields').addEventListener('change', f
 });
 
 document.getElementById('dash-panel-filter-cancel').addEventListener('click', function() {
-    document.getElementById('dash-panel-filter-modal').classList.remove('open');
-    dashPanelFilterModalCtx = null;
+    dashClosePanelFilterModal();
 });
 
 document.getElementById('dash-panel-filter-reset').addEventListener('click', function() {
     if (!dashPanelFilterModalCtx) return;
-    delete dashPanelFilters[dashPanelFilterModalCtx.panelEl.id];
-    document.getElementById('dash-panel-filter-modal').classList.remove('open');
-    dashRecalculatePanelAfterFilter(dashPanelFilterModalCtx.panelEl);
-    dashPanelFilterModalCtx = null;
+    var panelEl = dashPanelFilterModalCtx.panelEl;
+    delete dashPanelFilters[panelEl.id];
+    dashClosePanelFilterModal();
+    dashRecalculatePanelAfterFilter(panelEl);
 });
 
 document.getElementById('dash-panel-filter-apply').addEventListener('click', function() {
@@ -3538,10 +3561,12 @@ document.getElementById('dash-panel-filter-apply').addEventListener('click', fun
         , state = dashReadPanelFilterState(dashPanelFilterModalCtx.fields);
     if (Object.keys(state).length) dashPanelFilters[panelEl.id] = state;
     else delete dashPanelFilters[panelEl.id];
-    document.getElementById('dash-panel-filter-modal').classList.remove('open');
+    dashClosePanelFilterModal();
     dashRecalculatePanelAfterFilter(panelEl);
-    dashPanelFilterModalCtx = null;
 });
+
+document.addEventListener('keydown', dashHandlePanelFilterModalKeydown);
+document.getElementById('dash-panel-filter-modal').addEventListener('click', dashHandlePanelFilterBackdropClick);
 
 document.addEventListener('click', function(e) {
     var icon = e.target.closest('.f-panel-filter-icon');
