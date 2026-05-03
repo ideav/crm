@@ -299,6 +299,7 @@ function dashNormalizeReportJson(json) {
             format: String((column && column.format) || '').toUpperCase(),
             ref: column ? column.ref : undefined,
             granted: column ? column.granted : undefined,
+            totals: column && Object.prototype.hasOwnProperty.call(column, 'totals') ? column.totals : undefined,
             index: idx
         });
     });
@@ -391,6 +392,88 @@ function dashReportDefaultColumn(columns, preferredField, predicate) {
 function dashReportRowValue(row, column) {
     if (!row || !column) return '';
     return row[column.name] !== undefined && row[column.name] !== null ? row[column.name] : '';
+}
+
+function dashReportValueText(value) {
+    return value === undefined || value === null ? '' : String(value);
+}
+
+function dashReportColumnAlign(column) {
+    var format = String((column && column.format) || '').toUpperCase();
+    if (dashReportColumnIsNumeric(column)) return 'right';
+    if (/^(DATE|DATETIME|TIME|MONTH|BOOLEAN)$/.test(format)) return 'center';
+    return 'left';
+}
+
+function dashReportHasTotals(report) {
+    return (report && report.columns || []).some(function(column) {
+        return column
+            && column.totals !== undefined
+            && column.totals !== null
+            && dashReportValueText(column.totals).trim() !== '';
+    });
+}
+
+function dashReportTableCellHtml(tagName, column, value, extraClass) {
+    var format = String((column && column.format) || '').toUpperCase()
+        , align = dashReportColumnAlign(column)
+        , classes = ['dash-report-cell', 'dash-report-cell--' + align];
+    if (extraClass) classes.push(extraClass);
+    return '<' + tagName
+        + ' class="' + classes.join(' ') + '"'
+        + ' data-format="' + dashAttr(format) + '"'
+        + ' data-column-id="' + dashAttr(column ? column.id : '') + '">'
+        + dashAttr(dashReportValueText(value))
+        + '</' + tagName + '>';
+}
+
+function dashRenderReportTableHtml(report, filters) {
+    var columns = report ? report.columns || [] : []
+        , rows = dashFilterReportRowsForPanel(report ? report.rows || [] : [], filters || {})
+        , colspan = Math.max(columns.length, 1)
+        , html = '<table class="table table-sm table-bordered w-auto dash-report-table" data-dash-report-table="1"><thead>'
+        , hasTotals = dashReportHasTotals(report);
+
+    if (report && report.header)
+        html += '<tr class="dash-report-title-row"><th colspan="' + colspan + '">' + dashAttr(report.header) + '</th></tr>';
+
+    html += '<tr class="dash-head f-head">';
+    columns.forEach(function(column) {
+        html += dashReportTableCellHtml('th', column, column.name, 'dash-report-head-cell');
+    });
+    if (!columns.length)
+        html += '<th></th>';
+    html += '</tr></thead><tbody>';
+
+    rows.forEach(function(row) {
+        html += '<tr class="dash-report-row">';
+        columns.forEach(function(column) {
+            html += dashReportTableCellHtml('td', column, dashReportRowValue(row, column), '');
+        });
+        if (!columns.length)
+            html += '<td></td>';
+        html += '</tr>';
+    });
+    html += '</tbody>';
+
+    if (hasTotals) {
+        html += '<tfoot><tr class="dash-report-totals-row">';
+        columns.forEach(function(column) {
+            html += dashReportTableCellHtml('td', column, column.totals, 'dash-report-total-cell');
+        });
+        html += '</tr></tfoot>';
+    }
+
+    html += '</table>';
+    return html;
+}
+
+function dashRenderReportTable(panelEl) {
+    var report = dashPanelGetVizReportData(panelEl)
+        , tableWrap = panelEl ? panelEl.querySelector('.f-table-wrap') : null;
+    if (!report || !tableWrap || (panelEl && panelEl.querySelector('.f-item'))) return false;
+    tableWrap.innerHTML = dashRenderReportTableHtml(report, dashPanelFiltersFor(panelEl));
+    return true;
 }
 
 function dashReportValueLabel(value) {
@@ -1355,6 +1438,11 @@ function dashDrawPeriods() {
             var icons = panel.querySelector('.f-panel-viz-icons');
             var hasUserSelection = icons && icons.querySelector('.f-viz-type-icon[data-user-selected]');
             if (settings && !hasUserSelection) dashPanelApplySettings(panel.id, settings, true);
+            if (!hasUserSelection) {
+                var activeIcon = icons ? icons.querySelector('.f-viz-type-icon.active') : null;
+                if (!activeIcon || activeIcon.dataset.vizType === 'table')
+                    dashRenderReportTable(panel);
+            }
         });
     }
     dashDebug();
@@ -2249,6 +2337,7 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
     pivotWrap.style.display = 'none';
 
     if (vizType === 'table') {
+        dashRenderReportTable(panelEl);
         tableWrap.style.display = '';
         chartWrap.style.display = 'none';
         panelEl.classList.remove('f-panel--chart');
@@ -2713,7 +2802,7 @@ function dashPanelApplySettings(panelKey, settings, renderChart) {
 
     // Find default or first enabled
     var def = enabled.find(function(v) { return v.default; }) || enabled[0];
-    if (def && def.type && def.type !== 'table') {
+    if (def && def.type) {
         dashRenderChart(panel, def.type, def.fieldMap || {}, def);
     }
 }
