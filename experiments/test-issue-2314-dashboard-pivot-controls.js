@@ -203,6 +203,7 @@ var dashModelData = {
 };
 function dashPivotDepsReady() { return true; }
 function dashEnsurePivotJs(cb) { cb(); }
+function dashElementHiddenForRender() { return false; }
 function dashSetStatus() {}
 function dashPanelGetVizReportData() { return null; }
 function dashReportColumnByField() { return null; }

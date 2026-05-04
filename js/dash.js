@@ -249,6 +249,27 @@ function dashNormalizeNumberText(v) {
     return sign + s;
 }
 
+function dashFormatNumberText(v) {
+    if (v === null || v === undefined) return '';
+    var raw = String(v).trim()
+        , normalized, sign = '', percent = '', parts, whole, fraction, decimalSep;
+    if (!raw) return '';
+    normalized = dashNormalizeNumberText(raw);
+    if (normalized === '') return String(v);
+    if (/%\s*$/.test(raw)) percent = '%';
+    if (normalized.charAt(0) === '+' || normalized.charAt(0) === '-') {
+        sign = normalized.charAt(0);
+        normalized = normalized.slice(1);
+    }
+    parts = normalized.split('.');
+    whole = parts[0] || '0';
+    fraction = parts.length > 1 ? parts.slice(1).join('') : '';
+    if (whole.length > 1 && whole.charAt(0) === '0') return raw;
+    decimalSep = fraction && raw.lastIndexOf(',') > raw.lastIndexOf('.') ? ',' : '.';
+    whole = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    return sign + whole + (fraction ? decimalSep + fraction : '') + percent;
+}
+
 function dashGetFloat(v) {
     return parseFloat(dashNormalizeNumberText(v));
 }
@@ -668,7 +689,9 @@ function dashReportTableCellHtml(tagName, column, value, extraClass, styleText) 
     var format = String((column && column.format) || '').toUpperCase()
         , align = dashReportColumnAlign(column)
         , classes = ['dash-report-cell', 'dash-report-cell--' + align]
-        , text = dashReportValueText(value)
+        , text = tagName === 'td' && dashReportColumnIsNumeric(column)
+            ? dashFormatNumberText(value)
+            : dashReportValueText(value)
         , content = (tagName === 'td' && dashReportColumnIsHtml(column)) ? text : dashEscapeHtml(text)
         , inlineStyle = tagName === 'td' ? dashReportValueText(styleText).trim() : '';
     if (extraClass) classes.push(extraClass);
@@ -1238,7 +1261,7 @@ function dashCalcLineTotals() {
             var n = dashGetFloat(dashCellText(cell));
             if (!isNaN(n)) { valids = true; v += n; }
         });
-        if (valids) el.innerHTML = v;
+        if (valids) el.innerHTML = dashFormatNumberText(v);
     });
 }
 
@@ -1256,7 +1279,7 @@ function dashEvalFormula(el, f) {
         val = 'N/A';
         console.log(e + ': ' + f);
     }
-    el.innerHTML = val;
+    el.innerHTML = dashFormatNumberText(val);
     el.setAttribute('ready', '1');
     return true;
 }
@@ -1385,7 +1408,7 @@ function dashCalcRGFormulas() {
                 console.log('RGformula eval error: ' + e + ' in: ' + expr);
             }
             var valStr = val !== null && val !== undefined ? String(val) : '';
-            el.innerHTML = valStr;
+            el.innerHTML = dashFormatNumberText(valStr);
             el.title = rgf + ' => ' + expr + ' = ' + valStr;
             el.setAttribute('ready', '1');
             progress = true;
@@ -1445,7 +1468,7 @@ function dashGetRepVals() {
                     if (restrictToReportGroup && !dashSameGroupName(group, parsed.report)) return;
                     val = dashResolveReportCellValue(filteredReportRows, date, range, parsed, group, groups);
                     if (val !== undefined) {
-                        el.innerHTML = val;
+                        el.innerHTML = dashFormatNumberText(val);
                         el.setAttribute('ready', '1');
                     }
                 });
@@ -1509,9 +1532,9 @@ function dashDrawPeriods() {
                                         + (rgHeadVal ? ' data-rg-head="' + rgHeadVal.replace(/"/g, '&quot;') + '"' : '')
                                         + ' data-rg-col="' + colName.replace(/"/g, '&quot;') + '"';
                                     row.insertAdjacentHTML('beforeend',
-                                        cellTpl.replace(':val:', v || '')
+                                        cellTpl.replace(':val:', dashFormatNumberText(v || ''))
                                             .replace(':ready:', '1')
-                                            .replace(':title:', v || '')
+                                            .replace(':title:', dashFormatNumberText(v || ''))
                                             .replace(':classes:', 'f-rg-cell')
                                             .replace(':src:', s.src)
                                             .replace(':item-id:', row.id)
@@ -1542,9 +1565,9 @@ function dashDrawPeriods() {
                                     + (rgHeadVal ? ' data-rg-head="' + rgHeadVal.replace(/"/g, '&quot;') + '"' : '')
                                     + ' data-rg-col="' + dashAttr(periodLabel) + '"';
                                 row.insertAdjacentHTML('beforeend',
-                                    cellTpl.replace(':val:', v || '')
+                                    cellTpl.replace(':val:', dashFormatNumberText(v || ''))
                                         .replace(':ready:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? '1' : '0')
-                                        .replace(':title:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? v || '' : '')
+                                        .replace(':title:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? dashFormatNumberText(v || '') : '')
                                         .replace(':classes:', 'f-rg-cell')
                                         .replace(':src:', s.src)
                                         .replace(':item-id:', row.id)
@@ -1573,7 +1596,7 @@ function dashDrawPeriods() {
                             + (valueItemId ? ' data-value-item-id="' + valueItemId + '"' : '')
                             + (rgHeadVal ? ' data-rg-head="' + rgHeadVal.replace(/"/g, '&quot;') + '"' : '');
                         row.insertAdjacentHTML('beforeend',
-                            cellTpl.replace(':val:', v || '')
+                            cellTpl.replace(':val:', dashFormatNumberText(v || ''))
                                 .replace(':classes:', 'f-values')
                                 .replace(':from:', '-').replace(':to:', '-')
                                 .replace(':ready:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? '1' : '0')
@@ -1664,7 +1687,7 @@ function dashDrawPeriods() {
                                         }
                                         extra += ' data-rg-col="' + dashAttr(col) + '"';
                                         row.insertAdjacentHTML('beforeend',
-                                            cellTpl.replace(':val:', dashNormalizeVal(row.id, v || ''))
+                                            cellTpl.replace(':val:', dashFormatNumberText(dashNormalizeVal(row.id, v || '')))
                                                 .replace(':ready:', ready)
                                                 .replace(':title:', '')
                                                 .replace(':classes:', 'f-col-cell')
@@ -4701,7 +4724,7 @@ function dashMatrixValueSaveDone(json, ctx) {
         return;
     }
     var recId = ctx.recId || json.id || json.obj || '';
-    ctx.td.textContent = ctx.newVal;
+    ctx.td.textContent = dashFormatNumberText(ctx.newVal);
     ctx.td.style.backgroundColor = '';
     ctx.td.setAttribute('ready', '1');
     if (ctx.newVal === '')
@@ -4811,7 +4834,7 @@ window.dashValueSaveDone = function(json, ctx) {
         return;
     }
     // Update cell display
-    ctx.td.textContent = ctx.newVal;
+    ctx.td.textContent = dashFormatNumberText(ctx.newVal);
     ctx.td.style.backgroundColor = '';
     ctx.td.setAttribute('ready', '1');
     dashSetStatus('Сохранено');
@@ -4846,10 +4869,15 @@ function dashStartInlineEdit(td) {
     }
 
     function commit() {
-        var newVal = input.value.trim();
+        var newVal = input.value.trim()
+            , currentNumber = dashNormalizeNumberText(currentVal)
+            , newNumber = dashNormalizeNumberText(newVal)
+            , changed = currentNumber !== '' && newNumber !== ''
+                ? currentNumber !== newNumber
+                : newVal !== currentVal;
         restorePadding();
-        td.textContent = newVal;
-        if (newVal !== currentVal) {
+        td.textContent = dashFormatNumberText(newVal);
+        if (changed) {
             td.style.backgroundColor = '#ffe0e0';
             dashSetStatus('Сохранение...');
             dashSaveCell(td, newVal, currentVal);

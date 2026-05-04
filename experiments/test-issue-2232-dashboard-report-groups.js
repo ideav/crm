@@ -1,7 +1,7 @@
 const fs = require('fs');
 const vm = require('vm');
 
-const source = fs.readFileSync('templates/dash.html', 'utf8');
+const source = fs.readFileSync('js/dash.js', 'utf8');
 
 function extractFunction(name) {
     const marker = 'function ' + name + '(';
@@ -29,6 +29,7 @@ let dashReportNames = {};
 let dashReportKeys = {};
 let dashFormulas = {};
 let rowsById = {};
+function dashFilterReportRowsForPanel(rows) { return rows || []; }
 
 let document = {
     getElementById(id) {
@@ -77,6 +78,7 @@ function assert(condition, message) {
 }
 
 ${extractFunction('dashNormalizeNumberText')}
+${extractFunction('dashFormatNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashNormalizeVal')}
 ${extractFunctionMaybe('dashParseReportFormula')}

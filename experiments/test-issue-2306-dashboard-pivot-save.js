@@ -180,6 +180,7 @@ var dashModelData = {
 };
 function dashPivotDepsReady() { return true; }
 function dashEnsurePivotJs(cb) { cb(); }
+function dashElementHiddenForRender() { return false; }
 function dashSetStatus(msg) { dashSetStatus.last = msg; }
 function dashApplyNewVizSettings(panelEl, panelKey, settings) {
     dashModelData[panelKey].settings = settings;

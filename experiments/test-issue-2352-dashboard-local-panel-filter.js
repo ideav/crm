@@ -128,6 +128,7 @@ let dashPanelFilters = {};
 ${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashNormalizeVal')}
+${extractFunction('dashFormatNumberText')}
 ${extractFunction('dashPanelDateValue')}
 ${extractFunction('dashPanelMonthValue')}
 ${extractFunction('dashPanelFilterValueKey')}

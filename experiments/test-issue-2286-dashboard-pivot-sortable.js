@@ -62,7 +62,7 @@ function createDocument() {
     };
 }
 
-const code = [
+const code = 'function dashElementHiddenForRender() { return false; }\n' + [
     'dashLoadScriptOnce',
     'dashPivotDepsReady',
     'dashEnsurePivotJs',
