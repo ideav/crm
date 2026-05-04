@@ -70,6 +70,7 @@ function dashCollectPanelData() {
 function dashApplyVizSize() { return null; }
 function dashEnsureChartJs(cb) { cb(); }
 function dashRenderPivot() {}
+function dashElementHiddenForRender() { return false; }
 function dashReportColumnIsDimension(column) { return column && column.kind !== 'measure'; }
 function dashReportColumnIsMeasure(column) { return column && column.kind === 'measure'; }
 function Chart(canvas, config) {

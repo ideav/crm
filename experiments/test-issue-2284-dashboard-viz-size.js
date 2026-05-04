@@ -97,6 +97,7 @@ function dashCollectPanelData(panelEl) {
 }
 function dashEnsureChartJs(cb) { cb(); }
 function dashRenderPivot() {}
+function dashElementHiddenForRender() { return false; }
 function Chart(canvas, config) {
     Chart.lastConfig = config;
     canvas._chartInstance = { destroy: function() { Chart.destroyed = true; } };

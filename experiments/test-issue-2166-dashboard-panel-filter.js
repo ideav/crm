@@ -1,7 +1,7 @@
 const fs = require('fs');
 const vm = require('vm');
 
-const source = fs.readFileSync('templates/dash.html', 'utf8');
+const source = fs.readFileSync('js/dash.js', 'utf8');
 
 function assert(condition, message) {
     if (!condition) throw new Error(message);
@@ -43,11 +43,13 @@ function newApi(method, url, callback, vars, index) {
 }
 
 function dashDrawPeriods() {}
+function dashFilterReportRowsForPanel(rows) { return rows || []; }
 
 ${extractFunctionMaybe('dashNormalizePanelFilter')}
 ${extractFunctionMaybe('dashReportKey')}
 ${extractFunctionMaybe('dashReportUrl')}
 ${extractFunction('dashNormalizeNumberText')}
+${extractFunction('dashFormatNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashNormalizeVal')}
 ${extractFunctionMaybe('dashParseReportFormula')}

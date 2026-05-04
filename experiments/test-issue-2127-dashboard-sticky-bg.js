@@ -1,13 +1,6 @@
 const fs = require('fs');
 
-const source = fs.readFileSync('templates/dash.html', 'utf8');
-const styleMatch = source.match(/<style>([\s\S]*?)<\/style>/);
-
-if (!styleMatch) {
-    throw new Error('Missing inline dashboard style block');
-}
-
-const css = styleMatch[1];
+const css = fs.readFileSync('css/dash.css', 'utf8');
 
 function blocksFor(selector) {
     const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

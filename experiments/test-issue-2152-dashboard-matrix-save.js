@@ -1,7 +1,7 @@
 const fs = require('fs');
 const vm = require('vm');
 
-const source = fs.readFileSync('templates/dash.html', 'utf8');
+const source = fs.readFileSync('js/dash.js', 'utf8');
 
 function assert(condition, message) {
     if (!condition) throw new Error(message);
@@ -80,6 +80,8 @@ function makeCell(dataset) {
 }
 
 ${extractFunction('dashTodayYMD')}
+${extractFunction('dashNormalizeNumberText')}
+${extractFunction('dashFormatNumberText')}
 ${extractFunction('dashMatrixRecordIds')}
 ${extractFunction('dashMatrixUsesDates')}
 ${extractFunction('dashMatrixSheetInputValue')}

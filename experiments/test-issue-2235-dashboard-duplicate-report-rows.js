@@ -1,7 +1,7 @@
 const fs = require('fs');
 const vm = require('vm');
 
-const source = fs.readFileSync('templates/dash.html', 'utf8');
+const source = fs.readFileSync('js/dash.js', 'utf8');
 
 if (!source.includes('dashIsDuplicateModelRow(previousItem, json[i])')) {
     throw new Error('dashGetModel should detect consecutive duplicate rows while parsing the model');
@@ -38,6 +38,7 @@ let dashReportKeys = {};
 let dashReportSources = {};
 let dashFormulas = {};
 let rowsById = {};
+function dashFilterReportRowsForPanel(rows) { return rows || []; }
 
 let document = {
     getElementById(id) {
@@ -69,6 +70,7 @@ function assert(condition, message) {
 }
 
 ${extractFunction('dashNormalizeNumberText')}
+${extractFunction('dashFormatNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashNormalizeVal')}
 ${extractFunctionMaybe('dashNormalizePanelFilter')}

@@ -34,6 +34,7 @@ function dashEnsureTableResizeHandle() {}
 ${extractFunction('dashAttr')}
 ${extractFunction('dashEscapeHtml')}
 ${extractFunction('dashNormalizeNumberText')}
+${extractFunction('dashFormatNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashNormalizeReportJson')}
 ${extractFunction('dashReportColumnIsNumeric')}

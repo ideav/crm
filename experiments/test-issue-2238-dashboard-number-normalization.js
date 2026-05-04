@@ -1,7 +1,7 @@
 const fs = require('fs');
 const vm = require('vm');
 
-const source = fs.readFileSync('templates/dash.html', 'utf8');
+const source = fs.readFileSync('js/dash.js', 'utf8');
 
 function extractFunction(name) {
     const marker = 'function ' + name + '(';
@@ -40,6 +40,7 @@ function assertNear(actual, expected, message) {
 }
 
 ${extractFunctionMaybe('dashNormalizeNumberText')}
+${extractFunctionMaybe('dashFormatNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunctionMaybe('dashNumberForFormula')}
 ${extractFunctionMaybe('dashCellText')}
@@ -111,8 +112,8 @@ document = {
     }
 };
 dashCalcLineTotals();
-assertEqual(String(lineTotal.innerHTML), '3921882.88',
-    'line totals must sum normalized cell text');
+assertEqual(String(lineTotal.innerHTML), '3 921 882.88',
+    'line totals must sum normalized cell text and render with grouped thousands');
 `;
 
 vm.runInNewContext(code, { console });
