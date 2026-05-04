@@ -2880,7 +2880,99 @@ function dashApplyVizSize(panelEl, vizType, vizConfig) {
     return appliedSize;
 }
 
+function dashDocumentHidden() {
+    return typeof document !== 'undefined' && document.hidden === true;
+}
+
+function dashElementHiddenForRender(el) {
+    var doc = typeof document !== 'undefined' ? document : null
+        , rects;
+    if (!el || dashDocumentHidden()) return true;
+    if (el.getClientRects) {
+        rects = el.getClientRects();
+        if (!rects || rects.length === 0) return true;
+    }
+    if (el.offsetParent === null && (!doc || (el !== doc.body && el !== doc.documentElement)))
+        return true;
+    return false;
+}
+
+function dashQueueHiddenVizRender(panelEl, vizType, fieldMap, vizConfig) {
+    var normalizedFieldMap = Object.assign({}, fieldMap || (vizConfig && vizConfig.fieldMap) || {})
+        , normalizedConfig = Object.assign({}, vizConfig || {});
+    if (!panelEl) return;
+    if (normalizedConfig.fieldMap)
+        normalizedConfig.fieldMap = Object.assign({}, normalizedConfig.fieldMap);
+    if (Object.keys(normalizedFieldMap).length)
+        normalizedConfig.fieldMap = normalizedFieldMap;
+    panelEl._dashDeferredViz = {
+        vizType: vizType,
+        fieldMap: normalizedFieldMap,
+        vizConfig: normalizedConfig
+    };
+    if (panelEl.dataset) panelEl.dataset.dashDeferredViz = vizType || '';
+}
+
+function dashPanelListForRoot(rootEl) {
+    var doc = typeof document !== 'undefined' ? document : null
+        , root = rootEl || doc;
+    if (!root) return [];
+    if (root.matches && root.matches('.f-panel')) return [root];
+    if (!root.querySelectorAll) return [];
+    if (doc && root === doc) return Array.from(root.querySelectorAll('#dash-model .f-panel'));
+    return Array.from(root.querySelectorAll('.f-panel'));
+}
+
+function dashFlushDeferredVizRenders(rootEl) {
+    if (dashDocumentHidden()) return;
+    dashPanelListForRoot(rootEl).forEach(function(panelEl) {
+        var pending = panelEl._dashDeferredViz;
+        if (!pending || dashElementHiddenForRender(panelEl)) return;
+        delete panelEl._dashDeferredViz;
+        if (panelEl.dataset) delete panelEl.dataset.dashDeferredViz;
+        dashRenderChart(panelEl, pending.vizType, pending.fieldMap || {}, pending.vizConfig || {});
+    });
+}
+
+function dashRefreshChartInstance(chart) {
+    if (!chart) return;
+    if (typeof chart.resize === 'function') chart.resize();
+    if (typeof chart.update === 'function') chart.update('none');
+}
+
+function dashRefreshVisibleCharts(rootEl) {
+    if (dashDocumentHidden()) return;
+    dashPanelListForRoot(rootEl).forEach(function(panelEl) {
+        var canvas, chart;
+        if (dashElementHiddenForRender(panelEl)) return;
+        canvas = panelEl.querySelector('.f-chart-canvas');
+        chart = canvas ? canvas._chartInstance : null;
+        dashRefreshChartInstance(chart);
+    });
+}
+
+function dashScheduleVisibleVizRefresh(rootEl) {
+    var run = function() {
+        if (dashDocumentHidden()) return;
+        dashFlushDeferredVizRenders(rootEl);
+        dashRefreshVisibleCharts(rootEl);
+    };
+    if (dashDocumentHidden()) return;
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(function() {
+            window.requestAnimationFrame(run);
+        });
+    } else {
+        setTimeout(run, 0);
+    }
+}
+
 function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
+    if (vizType !== 'table' && dashElementHiddenForRender(panelEl)) {
+        dashQueueHiddenVizRender(panelEl, vizType, fieldMap, vizConfig);
+        return;
+    }
+
     var data = dashCollectPanelData(panelEl, Object.assign({}, vizConfig || {}, { type: vizType, fieldMap: fieldMap || {} }));
     var canvas = panelEl.querySelector('.f-chart-canvas');
     var chartWrap = panelEl.querySelector('.f-chart-wrap');
@@ -2920,6 +3012,11 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
     dashEnsureChartJs(function() {
         var labels = data.labels;
         var chartType, chartDatasets, options = {};
+
+        if (dashElementHiddenForRender(panelEl)) {
+            dashQueueHiddenVizRender(panelEl, vizType, fieldMap, vizConfig);
+            return;
+        }
 
         if (vizType === 'pie') {
             chartType = 'pie';
@@ -3297,6 +3394,10 @@ window.dashPivotSettingsSaved = function(json, ctx) {
 };
 
 function dashRenderPivot(panelEl, pivotWrap, data, fieldMap, vizConfig) {
+    if (dashElementHiddenForRender(panelEl)) {
+        dashQueueHiddenVizRender(panelEl, 'pivot', fieldMap, vizConfig);
+        return;
+    }
     if (!dashPivotDepsReady()) {
         dashEnsurePivotJs(function() {
             dashRenderPivot(panelEl, pivotWrap, data, fieldMap, vizConfig);
@@ -4359,6 +4460,7 @@ window.dashSetActive = function(el) {
     if (sheet) sheet.style.display = '';
     // Persist active tab in URL hash so page refresh restores it (issue #1840)
     try { history.replaceState(null, '', '#tab=' + encodeURIComponent(el.id)); } catch(e) {}
+    if (sheet) dashScheduleVisibleVizRefresh(sheet);
 };
 
 window.dashOpenSettings = function() {
@@ -4378,6 +4480,11 @@ window.dashCopy2Buffer = function(text) {
 window.addEventListener('resize', function() {
     dashUpdateTableWrapOverflow();
     dashRefreshPanelMaxWidths();
+    dashScheduleVisibleVizRefresh();
+});
+
+document.addEventListener('visibilitychange', function() {
+    if (!dashDocumentHidden()) dashScheduleVisibleVizRefresh();
 });
 
 // ─── Cell editing ────────────────────────────────────────────────────────────
