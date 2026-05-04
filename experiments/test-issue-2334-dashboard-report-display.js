@@ -52,12 +52,17 @@ const code = `
 function dashFilterReportRowsForPanel(rows) { return rows || []; }
 
 ${extractFunction('dashAttr')}
+${extractFunction('dashEscapeHtml')}
 ${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashReportColumnIsNumeric')}
+${extractFunction('dashReportColumnNameHasIdSuffix')}
+${extractFunction('dashReportColumnIsVisible')}
+${extractFunction('dashReportVisibleColumns')}
 ${extractFunction('dashReportColumnAlign')}
 ${extractFunction('dashReportHasTotals')}
 ${extractFunction('dashReportValueText')}
+${extractFunction('dashReportColumnIsHtml')}
 ${extractFunction('dashReportRowValue')}
 ${extractFunction('dashReportTableCellHtml')}
 ${extractFunction('dashRenderReportTableHtml')}
