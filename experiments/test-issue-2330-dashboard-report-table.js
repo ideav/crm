@@ -38,12 +38,16 @@ ${extractFunction('dashGetFloat')}
 ${extractFunction('dashNormalizeReportJson')}
 ${extractFunction('dashReportColumnIsNumeric')}
 ${extractFunction('dashReportColumnNameHasIdSuffix')}
+${extractFunction('dashReportColumnIsStyle')}
+${extractFunction('dashReportStyleTargetName')}
 ${extractFunction('dashReportColumnIsMeasure')}
 ${extractFunction('dashReportColumnIsVisible')}
 ${extractFunction('dashReportVisibleColumns')}
 ${extractFunction('dashReportRowValue')}
 ${extractFunction('dashPanelGetVizReportData')}
 ${extractFunction('dashReportValueText')}
+${extractFunction('dashReportColumnStyleKey')}
+${extractFunction('dashReportRowCellStyles')}
 ${extractFunction('dashReportColumnIsHtml')}
 ${extractFunction('dashReportColumnAlign')}
 ${extractFunction('dashReportHasTotals')}

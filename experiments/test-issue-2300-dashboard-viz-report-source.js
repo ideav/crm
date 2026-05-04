@@ -42,6 +42,7 @@ ${extractFunction('dashNormalizeReportJson')}
 ${extractFunction('dashReportColumnByField')}
 ${extractFunction('dashReportColumnIsNumeric')}
 ${extractFunction('dashReportColumnNameHasIdSuffix')}
+${extractFunction('dashReportColumnIsStyle')}
 ${extractFunction('dashReportColumnIsMeasure')}
 ${extractFunction('dashReportColumnIsDimension')}
 ${extractFunction('dashReportDefaultColumn')}
