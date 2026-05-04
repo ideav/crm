@@ -62,8 +62,8 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
         + '<div class="f-panel-header">'
         + '<div class="f-panel-viz-icons"></div>'
         + '<h4>:name:</h4>'
-        + '<a class="f-panel-filter-icon" title="Фильтр"><i class="pi pi-filter"></i></a>'
         + (dashIsAdmin ? '<a class="f-panel-settings-icon" title="Настройки отображения"><i class="pi pi-chart-bar"></i></a>' : '')
+        + '<a class="f-panel-filter-icon" title="Фильтр"><i class="pi pi-filter"></i></a>'
         + '</div>'
         + '<div class="f-panel-content">'
         + '<div class="f-table-wrap"><table class="table table-sm table-bordered w-auto"><thead><tr class="dash-head f-head"><th>:head:</thead><tbody></tbody></table></div>'
