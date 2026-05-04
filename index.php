@@ -4251,7 +4251,7 @@ function sendJsonHeaders($filename){
 # force download
 	header("Content-Type: application/json; charset=UTF-8");
 # disposition / encoding on response body
-	header("Content-Disposition: attachment;filename={$filename}");
+	header("Content-Disposition: attachment;filename=".rawurlencode($filename));
 	header("Content-Transfer-Encoding: binary");
 }
 function ResolveType($typ)
