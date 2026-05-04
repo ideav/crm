@@ -41,6 +41,7 @@
     flex-basis: 100%;
 }
 .f-panel {
+    margin-top: 1rem;
     margin-bottom: 0;
     min-width: 0;
 }
