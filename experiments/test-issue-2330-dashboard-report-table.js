@@ -32,14 +32,19 @@ function dashFilterReportRowsForPanel(rows) { return rows || []; }
 function dashEnsureTableResizeHandle() {}
 
 ${extractFunction('dashAttr')}
+${extractFunction('dashEscapeHtml')}
 ${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashNormalizeReportJson')}
 ${extractFunction('dashReportColumnIsNumeric')}
+${extractFunction('dashReportColumnNameHasIdSuffix')}
 ${extractFunction('dashReportColumnIsMeasure')}
+${extractFunction('dashReportColumnIsVisible')}
+${extractFunction('dashReportVisibleColumns')}
 ${extractFunction('dashReportRowValue')}
 ${extractFunction('dashPanelGetVizReportData')}
 ${extractFunction('dashReportValueText')}
+${extractFunction('dashReportColumnIsHtml')}
 ${extractFunction('dashReportColumnAlign')}
 ${extractFunction('dashReportHasTotals')}
 ${extractFunction('dashReportTableCellHtml')}
