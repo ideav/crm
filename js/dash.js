@@ -55,6 +55,7 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
         + '<select class="dash-period-sel"><option value="Неделя">Неделя</option><option value="Месяц">Месяц</option><option value="Год">Год</option></select>'
         + '<button class="dash-apply-btn" onclick="dashApplyFilter(this.closest(\'.f-sheet\'))">Применить</button>'
         + '<input type="text" class="dash-search-input" placeholder="Поиск..." oninput="dashApplySearch(this.value,this.closest(\'.f-sheet\'))">'
+        + '<button type="button" class="dash-tile-mode-icon" onclick="dashToggleSheetTileMode(this.closest(\'.f-sheet\'))" title="Включить режим плитки" aria-label="Режим плитки" aria-pressed="false"><i class="pi pi-th-large"></i></button>'
         + '<button type="button" class="dash-reset-size-icon" onclick="dashResetSheetSizeCookies(this.closest(\'.f-sheet\'))" title="Сбросить размеры панелей" aria-label="Сбросить размеры панелей" aria-hidden="true" disabled><i class="pi pi-refresh"></i></button>'
         + (dashIsAdmin ? '<a class="dash-settings-icon" onclick="dashOpenSettings()" title="Настройки дэшборда"><i class="pi pi-cog"></i></a>' : '')
         + '</div></div>'
@@ -1955,7 +1956,9 @@ function dashGetModel(json) {
                 sheetTabTpl.replace(/:id:/g, json[i].sheetID).replace(':name:', json[i].sheet));
             model.querySelector('.sheets').insertAdjacentHTML('beforeend',
                 sheetTpl.replace(/:id:/g, json[i].sheetID));
-            dashInitFilterBar(document.getElementById('ds' + json[i].sheetID));
+            var sheetEl = document.getElementById('ds' + json[i].sheetID);
+            dashInitFilterBar(sheetEl);
+            dashInitSheetTileMode(sheetEl);
         }
         // Add panel to sheet (prefix 'fp' to avoid ID collision with item rows)
         if (!document.getElementById(panelKey)) {
@@ -2625,6 +2628,58 @@ function dashUpdateSheetSizeResetIcon(sheetEl) {
 function dashUpdateAllSheetSizeResetIcons() {
     if (typeof document === 'undefined' || !document.querySelectorAll) return;
     document.querySelectorAll('#dash-model .f-sheet').forEach(dashUpdateSheetSizeResetIcon);
+}
+
+function dashSheetTileModeCookieName(sheetEl) {
+    var dashId = dashRecordId || dashCurrentId || 'dash'
+        , sheetId = sheetEl && sheetEl.id ? sheetEl.id : 'sheet';
+    return 'dash_tile_mode_'
+        + dashCookieNamePart(dashId) + '_'
+        + dashCookieNamePart(sheetId);
+}
+
+function dashReadSheetTileMode(sheetEl) {
+    if (!sheetEl) return false;
+    return dashCookieGet(dashSheetTileModeCookieName(sheetEl)) === '1';
+}
+
+function dashSetSheetTileModeButtonState(sheetEl, enabled) {
+    var button = sheetEl && sheetEl.querySelector ? sheetEl.querySelector('.dash-tile-mode-icon') : null;
+    if (!button) return;
+    if (button.classList && button.classList.toggle)
+        button.classList.toggle('active', !!enabled);
+    if (button.setAttribute) {
+        button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+        button.setAttribute('title', enabled ? 'Выключить режим плитки' : 'Включить режим плитки');
+    }
+    button.title = enabled ? 'Выключить режим плитки' : 'Включить режим плитки';
+}
+
+function dashApplySheetTileMode(sheetEl, enabled, persist) {
+    enabled = !!enabled;
+    if (!sheetEl || !sheetEl.classList) return enabled;
+    sheetEl.classList.toggle('dash-tile-mode', enabled);
+    dashSetSheetTileModeButtonState(sheetEl, enabled);
+    if (persist) {
+        if (enabled)
+            dashCookieSet(dashSheetTileModeCookieName(sheetEl), '1', DASH_CHART_RESIZE_COOKIE_MAX_AGE);
+        else
+            dashCookieRemove(dashSheetTileModeCookieName(sheetEl));
+    }
+    if (typeof dashScheduleVisibleVizRefresh === 'function')
+        dashScheduleVisibleVizRefresh(sheetEl);
+    return enabled;
+}
+
+function dashInitSheetTileMode(sheetEl) {
+    return dashApplySheetTileMode(sheetEl, dashReadSheetTileMode(sheetEl), false);
+}
+
+function dashToggleSheetTileMode(sheetEl) {
+    var enabled = !(sheetEl && sheetEl.classList && sheetEl.classList.contains('dash-tile-mode'));
+    dashApplySheetTileMode(sheetEl, enabled, true);
+    dashSetStatus(enabled ? 'Режим плитки включен' : 'Режим плитки выключен');
+    return enabled;
 }
 
 function dashPanelActiveVizType(panelEl) {
@@ -4485,6 +4540,7 @@ window.dashGetVizReportDone       = dashGetVizReportDone;
 window.dashDebug                  = dashDebug;
 window.dashUpdateTableWrapOverflow = dashUpdateTableWrapOverflow;
 window.dashResetSheetSizeCookies  = dashResetSheetSizeCookies;
+window.dashToggleSheetTileMode    = dashToggleSheetTileMode;
 
 window.dashApplyFilter = function(sheetEl) {
     dashDateFr    = dashFromInputDate(sheetEl.querySelector('.dash-fr-input').value);
