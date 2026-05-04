@@ -33,9 +33,13 @@ ${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashReportColumnIsNumeric')}
 ${extractFunction('dashReportColumnNameHasIdSuffix')}
+${extractFunction('dashReportColumnIsStyle')}
+${extractFunction('dashReportStyleTargetName')}
 ${extractFunction('dashReportColumnIsVisible')}
 ${extractFunction('dashReportVisibleColumns')}
 ${extractFunction('dashReportValueText')}
+${extractFunction('dashReportColumnStyleKey')}
+${extractFunction('dashReportRowCellStyles')}
 ${extractFunction('dashReportColumnIsHtml')}
 ${extractFunction('dashReportColumnAlign')}
 ${extractFunction('dashReportHasTotals')}

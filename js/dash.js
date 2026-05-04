@@ -557,15 +557,29 @@ function dashReportColumnNameHasIdSuffix(column) {
     return /(^|[\s_-])(id|ид)$/i.test(name) || /(ID|ИД)$/.test(name);
 }
 
+function dashReportColumnIsStyle(column) {
+    var name = String((column && column.name) || '')
+        , lower = name.toLowerCase();
+    return lower === 'style' || lower.slice(-6) === '.style';
+}
+
+function dashReportStyleTargetName(column) {
+    var name = String((column && column.name) || '')
+        , lower = name.toLowerCase();
+    if (lower === 'style') return '';
+    return lower.slice(-6) === '.style' ? name.slice(0, -6) : '';
+}
+
 function dashReportColumnIsMeasure(column) {
     if (!dashReportColumnIsNumeric(column)) return false;
+    if (dashReportColumnIsStyle(column)) return false;
     if (column && column.ref) return false;
     if (dashReportColumnNameHasIdSuffix(column)) return false;
     return true;
 }
 
 function dashReportColumnIsVisible(column) {
-    return !!column && !dashReportColumnNameHasIdSuffix(column);
+    return !!column && !dashReportColumnNameHasIdSuffix(column) && !dashReportColumnIsStyle(column);
 }
 
 function dashReportVisibleColumns(columns) {
@@ -573,7 +587,7 @@ function dashReportVisibleColumns(columns) {
 }
 
 function dashReportColumnIsDimension(column) {
-    return !!column && !dashReportColumnIsMeasure(column);
+    return !!column && !dashReportColumnIsStyle(column) && !dashReportColumnIsMeasure(column);
 }
 
 function dashReportDefaultColumn(columns, preferredField, predicate) {
@@ -591,6 +605,43 @@ function dashReportRowValue(row, column) {
 
 function dashReportValueText(value) {
     return value === undefined || value === null ? '' : String(value);
+}
+
+function dashReportColumnStyleKey(column) {
+    var id = column && column.id;
+    return String(id !== undefined && id !== null && id !== '' ? id : (column && column.name) || '');
+}
+
+function dashReportRowCellStyles(row, allColumns, visibleColumns) {
+    var styles = {}
+        , visibleByName = {}
+        , previousVisibleColumn = null;
+
+    (visibleColumns || []).forEach(function(column) {
+        var name = String((column && column.name) || '');
+        if (!visibleByName[name]) visibleByName[name] = column;
+    });
+
+    (allColumns || []).forEach(function(column) {
+        var styleText, targetName, targetColumn, key;
+        if (!dashReportColumnIsStyle(column)) {
+            if (dashReportColumnIsVisible(column)) previousVisibleColumn = column;
+            return;
+        }
+
+        styleText = dashReportValueText(dashReportRowValue(row, column)).trim();
+        if (!styleText) return;
+
+        targetName = dashReportStyleTargetName(column);
+        targetColumn = targetName ? visibleByName[targetName] : null;
+        if (!targetColumn) targetColumn = previousVisibleColumn;
+        if (!targetColumn) return;
+
+        key = dashReportColumnStyleKey(targetColumn);
+        styles[key] = styles[key] ? styles[key] + '; ' + styleText : styleText;
+    });
+
+    return styles;
 }
 
 function dashReportColumnIsHtml(column) {
@@ -613,23 +664,27 @@ function dashReportHasTotals(report) {
     });
 }
 
-function dashReportTableCellHtml(tagName, column, value, extraClass) {
+function dashReportTableCellHtml(tagName, column, value, extraClass, styleText) {
     var format = String((column && column.format) || '').toUpperCase()
         , align = dashReportColumnAlign(column)
         , classes = ['dash-report-cell', 'dash-report-cell--' + align]
         , text = dashReportValueText(value)
-        , content = (tagName === 'td' && dashReportColumnIsHtml(column)) ? text : dashEscapeHtml(text);
+        , content = (tagName === 'td' && dashReportColumnIsHtml(column)) ? text : dashEscapeHtml(text)
+        , inlineStyle = tagName === 'td' ? dashReportValueText(styleText).trim() : '';
     if (extraClass) classes.push(extraClass);
     return '<' + tagName
         + ' class="' + classes.join(' ') + '"'
         + ' data-format="' + dashAttr(format) + '"'
-        + ' data-column-id="' + dashAttr(column ? column.id : '') + '">'
+        + ' data-column-id="' + dashAttr(column ? column.id : '') + '"'
+        + (inlineStyle ? ' style="' + dashAttr(inlineStyle) + '"' : '')
+        + '>'
         + content
         + '</' + tagName + '>';
 }
 
 function dashRenderReportTableHtml(report, filters) {
-    var columns = dashReportVisibleColumns(report ? report.columns || [] : [])
+    var allColumns = report ? report.columns || [] : []
+        , columns = dashReportVisibleColumns(allColumns)
         , rows = dashFilterReportRowsForPanel(report ? report.rows || [] : [], filters || {})
         , html = '<table class="table table-sm table-bordered w-auto dash-report-table" data-dash-report-table="1"><thead>'
         , hasTotals = dashReportHasTotals({ columns: columns });
@@ -643,9 +698,10 @@ function dashRenderReportTableHtml(report, filters) {
     html += '</tr></thead><tbody>';
 
     rows.forEach(function(row) {
+        var rowStyles = dashReportRowCellStyles(row, allColumns, columns);
         html += '<tr class="dash-report-row">';
         columns.forEach(function(column) {
-            html += dashReportTableCellHtml('td', column, dashReportRowValue(row, column), '');
+            html += dashReportTableCellHtml('td', column, dashReportRowValue(row, column), '', rowStyles[dashReportColumnStyleKey(column)]);
         });
         if (!columns.length)
             html += '<td></td>';
@@ -765,6 +821,8 @@ function dashPanelAddFilterOption(field, rawValue) {
 function dashBuildReportFilterFields(columns, rows) {
     var fields = [];
     (columns || []).forEach(function(column) {
+        if (dashReportColumnIsStyle(column)) return;
+
         var values = (rows || []).map(function(row) { return dashReportRowValue(row, column); })
             , kindInfo = dashPanelFilterFieldKind(column, values)
             , field = {

@@ -33,6 +33,7 @@ ${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashReportRowValue')}
 ${extractFunction('dashReportColumnIsNumeric')}
+${extractFunction('dashReportColumnIsStyle')}
 ${extractFunction('dashPanelDateValue')}
 ${extractFunction('dashPanelMonthValue')}
 ${extractFunction('dashPanelFilterValueKey')}
@@ -51,12 +52,14 @@ const columns = [
     { id: 'amount', name: 'Сумма', format: 'NUMBER' },
     { id: 'deadline', name: 'Срок', format: 'DATE' },
     { id: 'month', name: 'Месяц', format: 'DATE' },
-    { id: 'period', name: 'Период', format: 'SHORT' }
+    { id: 'period', name: 'Период', format: 'SHORT' },
+    { id: 'clientStyle', name: 'Клиент.style', format: 'SHORT' },
+    { id: 'rowStyle', name: 'style', format: 'SHORT' }
 ];
 const rows = [
-    { 'Клиент': 'Альфа', 'Сумма': '10', 'Срок': '2026-01-10', 'Месяц': '2026-01', 'Период': '2026-01' },
-    { 'Клиент': 'Бета', 'Сумма': '15', 'Срок': '2026-01-15', 'Месяц': '2026-01', 'Период': '2026-01' },
-    { 'Клиент': 'Альфа', 'Сумма': '25,5', 'Срок': '2026-02-05', 'Месяц': '2026-02', 'Период': '2026-02' }
+    { 'Клиент': 'Альфа', 'Сумма': '10', 'Срок': '2026-01-10', 'Месяц': '2026-01', 'Период': '2026-01', 'Клиент.style': 'color: red', 'style': 'font-weight: bold' },
+    { 'Клиент': 'Бета', 'Сумма': '15', 'Срок': '2026-01-15', 'Месяц': '2026-01', 'Период': '2026-01', 'Клиент.style': 'color: blue', 'style': 'font-weight: normal' },
+    { 'Клиент': 'Альфа', 'Сумма': '25,5', 'Срок': '2026-02-05', 'Месяц': '2026-02', 'Период': '2026-02', 'Клиент.style': 'color: green', 'style': 'font-style: italic' }
 ];
 
 const fields = dashBuildReportFilterFields(columns, rows);
@@ -75,6 +78,8 @@ assert.strictEqual(byField['Месяц'].kind, 'month');
 assert.deepStrictEqual(byField['Месяц'].options.map(function(option) { return option.value; }), ['2026-01', '2026-02']);
 assert.strictEqual(byField['Период'].kind, 'month');
 assert.deepStrictEqual(byField['Период'].options.map(function(option) { return option.value; }), ['2026-01', '2026-02']);
+assert.strictEqual(byField['Клиент.style'], undefined, 'targeted style columns should not be offered as report filters');
+assert.strictEqual(byField['style'], undefined, 'plain style columns should not be offered as report filters');
 
 let filtered = dashFilterReportRowsForPanel(rows, {
     'report:Клиент': { source: 'report', field: 'Клиент', kind: 'values', selected: ['Альфа'] },
