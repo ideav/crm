@@ -1,7 +1,7 @@
 'use strict';
 
-// Issue #2366: dashboard sheets need a tile mode that can align panel widths
-// and visible table heights where possible.
+// Issue #2368: entering dashboard tile mode must not make the new grid
+// columns narrower than the panels were immediately before the switch.
 
 const assert = require('assert');
 const fs = require('fs');
@@ -45,20 +45,27 @@ function createCookieDocument() {
     };
 }
 
+function makeStyle() {
+    const props = {};
+    return {
+        setProperty(name, value) { props[name] = String(value); },
+        removeProperty(name) { delete props[name]; },
+        getPropertyValue(name) { return props[name] || ''; }
+    };
+}
+
 function makeClassList(initial) {
     const values = {};
     (initial || '').split(/\s+/).filter(Boolean).forEach(name => { values[name] = true; });
     return {
         values,
-        add(name) { values[name] = true; },
-        remove(name) { delete values[name]; },
-        contains(name) { return !!values[name]; },
         toggle(name, force) {
             const enabled = force === undefined ? !values[name] : !!force;
             if (enabled) values[name] = true;
             else delete values[name];
             return enabled;
-        }
+        },
+        contains(name) { return !!values[name]; }
     };
 }
 
@@ -72,34 +79,43 @@ function makeButton() {
     };
 }
 
-function makeSheet(id, button) {
+function makePanel(width) {
     return {
-        id,
-        classList: makeClassList('f-sheet'),
-        querySelector(selector) {
-            if (selector === '.dash-tile-mode-icon') return button;
-            return null;
+        getBoundingClientRect() {
+            return { width };
         }
     };
 }
 
-assert(source.includes('dash-tile-mode-icon'), 'dashboard sheet template renders a tile-mode button');
-assert(css.includes('.f-sheet.dash-tile-mode'), 'dashboard stylesheet defines tile mode for sheets');
-assert(/\.f-sheet\.dash-tile-mode\s*\{[^}]*display:\s*grid/.test(css), 'tile mode uses CSS grid');
-assert(/\.f-sheet\.dash-tile-mode\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,/.test(css), 'tile mode creates equal responsive columns');
-assert(/\.f-sheet\.dash-tile-mode\s+\.f-panel-content\s*\{[^}]*display:\s*flex/.test(css), 'tile panels stretch their content');
-assert(/\.f-sheet\.dash-tile-mode\s+\.f-table-wrap\s*>\s*table\s*\{[^}]*width:\s*100%/.test(css), 'tile tables fill equal tile width');
-assert(/\.f-sheet\.dash-tile-mode\s+\.f-table-wrap\s*>\s*table\s*\{[^}]*height:\s*100%/.test(css), 'tile tables fill equal tile height');
-assert(/\.f-sheet\.dash-tile-mode\s+\.f-table-wrap\s*>\s*table\s*\{[^}]*white-space:\s*normal/.test(css), 'tile tables wrap long values inside the tile');
+function makeSheet(id, panelWidths, button) {
+    const panels = panelWidths.map(makePanel);
+    return {
+        id,
+        style: makeStyle(),
+        classList: makeClassList('f-sheet'),
+        querySelector(selector) {
+            if (selector === '.dash-tile-mode-icon') return button;
+            return null;
+        },
+        querySelectorAll(selector) {
+            if (selector === '.f-panel') return panels;
+            return [];
+        }
+    };
+}
+
+assert(
+    /grid-template-columns:\s*repeat\(auto-fit,[^;]*var\(--dash-tile-panel-min-width/.test(css),
+    'tile grid uses the captured panel width as a minimum column width'
+);
 
 const code = `
 var DASH_CHART_RESIZE_COOKIE_MAX_AGE = 31536000;
-var dashRecordId = 'dash-2366';
+var dashRecordId = 'dash-2368';
 var dashCurrentId = null;
 var scheduledRoots = [];
-var statusMessages = [];
 function dashScheduleVisibleVizRefresh(rootEl) { scheduledRoots.push(rootEl.id); }
-function dashSetStatus(message) { statusMessages.push(message); }
+function dashSetStatus() {}
 ${extractFunction('dashCookieGet')}
 ${extractFunction('dashCookieSet')}
 ${extractFunction('dashCookieRemove')}
@@ -111,7 +127,6 @@ ${extractFunction('dashMeasureSheetTilePanelMinWidth')}
 ${extractFunction('dashPrepareSheetTileMode')}
 ${extractFunction('dashClearSheetTileMode')}
 ${extractFunction('dashApplySheetTileMode')}
-${extractFunction('dashInitSheetTileMode')}
 ${extractFunction('dashToggleSheetTileMode')}
 `;
 
@@ -123,27 +138,20 @@ vm.createContext(ctx);
 vm.runInContext(code, ctx);
 
 const button = makeButton();
-const sheet = makeSheet('ds-main', button);
-const cookieName = ctx.dashSheetTileModeCookieName(sheet);
+const sheet = makeSheet('ds-main', [420.2, 720.6, 0], button);
 
-assert.strictEqual(ctx.dashReadSheetTileMode(sheet), false, 'tile mode is off when the cookie is absent');
+assert.strictEqual(ctx.dashMeasureSheetTilePanelMinWidth(sheet), 721,
+    'measurement rounds up the widest visible panel');
+
 ctx.dashApplySheetTileMode(sheet, true, true);
 assert(sheet.classList.contains('dash-tile-mode'), 'applying tile mode adds the sheet class');
-assert(button.classList.contains('active'), 'button is highlighted when tile mode is active');
-assert.strictEqual(button.getAttribute('aria-pressed'), 'true', 'active button exposes pressed state');
-assert(ctx.document.hasCookie(cookieName), 'tile mode persists to a dashboard/sheet cookie');
-assert.strictEqual(ctx.scheduledRoots.join(','), 'ds-main', 'toggling schedules a visible visualization refresh');
+assert.strictEqual(sheet.style.getPropertyValue('--dash-tile-panel-min-width'), '721px',
+    'tile mode stores the current widest panel width before narrowing can occur');
+assert(ctx.document.hasCookie(ctx.dashSheetTileModeCookieName(sheet)), 'tile mode still persists');
+assert.strictEqual(ctx.scheduledRoots.join(','), 'ds-main', 'tile mode still schedules visualization refresh');
 
-ctx.dashToggleSheetTileMode(sheet);
-assert(!sheet.classList.contains('dash-tile-mode'), 'toggle removes tile mode from an active sheet');
-assert(!button.classList.contains('active'), 'button highlight is removed when tile mode is off');
-assert.strictEqual(button.getAttribute('aria-pressed'), 'false', 'inactive button exposes unpressed state');
-assert(!ctx.document.hasCookie(cookieName), 'disabling tile mode removes the cookie');
-assert(ctx.statusMessages.includes('Режим плитки выключен'), 'toggle reports the disabled state');
+ctx.dashApplySheetTileMode(sheet, false, true);
+assert.strictEqual(sheet.style.getPropertyValue('--dash-tile-panel-min-width'), '',
+    'disabling tile mode clears the captured width');
 
-ctx.dashApplySheetTileMode(sheet, true, true);
-const restoredSheet = makeSheet('ds-main', makeButton());
-ctx.dashInitSheetTileMode(restoredSheet);
-assert(restoredSheet.classList.contains('dash-tile-mode'), 'initialization restores tile mode from the cookie');
-
-console.log('issue-2366 dashboard tile mode: ok');
+console.log('issue-2368 dashboard tile mode panel width: ok');

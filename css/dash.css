@@ -39,7 +39,7 @@
 }
 #dash-model .f-sheet.dash-tile-mode {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, max(30rem, var(--dash-tile-panel-min-width, 30rem))), 1fr));
     align-items: stretch;
 }
 .dash-filter-bar {

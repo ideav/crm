@@ -1958,7 +1958,7 @@ function dashGetModel(json) {
                 sheetTpl.replace(/:id:/g, json[i].sheetID));
             var sheetEl = document.getElementById('ds' + json[i].sheetID);
             dashInitFilterBar(sheetEl);
-            dashInitSheetTileMode(sheetEl);
+            dashSetSheetTileModeButtonState(sheetEl, dashReadSheetTileMode(sheetEl));
         }
         // Add panel to sheet (prefix 'fp' to avoid ID collision with item rows)
         if (!document.getElementById(panelKey)) {
@@ -2057,7 +2057,10 @@ function dashGetModel(json) {
         if (targetTab) {
             targetTab.classList.add('active');
             var targetSheet = document.getElementById('ds' + targetTab.id);
-            if (targetSheet) targetSheet.style.display = '';
+            if (targetSheet) {
+                targetSheet.style.display = '';
+                dashInitSheetTileMode(targetSheet);
+            }
         }
     }
 }
@@ -2655,10 +2658,45 @@ function dashSetSheetTileModeButtonState(sheetEl, enabled) {
     button.title = enabled ? 'Выключить режим плитки' : 'Включить режим плитки';
 }
 
+function dashMeasureSheetTilePanelMinWidth(sheetEl) {
+    var maxWidth = 0;
+    if (!sheetEl || !sheetEl.querySelectorAll) return 0;
+    sheetEl.querySelectorAll('.f-panel').forEach(function(panelEl) {
+        var rect = panelEl && panelEl.getBoundingClientRect ? panelEl.getBoundingClientRect() : null
+            , width = rect && isFinite(rect.width) ? rect.width : 0;
+        if (width > maxWidth) maxWidth = width;
+    });
+    return maxWidth > 0 ? Math.ceil(maxWidth) : 0;
+}
+
+function dashPrepareSheetTileMode(sheetEl) {
+    var width = dashMeasureSheetTilePanelMinWidth(sheetEl);
+    if (!sheetEl || !sheetEl.style) return width;
+    if (width > 0 && sheetEl.style.setProperty)
+        sheetEl.style.setProperty('--dash-tile-panel-min-width', width + 'px');
+    else if (width > 0)
+        sheetEl.style['--dash-tile-panel-min-width'] = width + 'px';
+    else
+        dashClearSheetTileMode(sheetEl);
+    return width;
+}
+
+function dashClearSheetTileMode(sheetEl) {
+    if (!sheetEl || !sheetEl.style) return;
+    if (sheetEl.style.removeProperty)
+        sheetEl.style.removeProperty('--dash-tile-panel-min-width');
+    else
+        sheetEl.style['--dash-tile-panel-min-width'] = '';
+}
+
 function dashApplySheetTileMode(sheetEl, enabled, persist) {
+    var wasEnabled;
     enabled = !!enabled;
     if (!sheetEl || !sheetEl.classList) return enabled;
+    wasEnabled = sheetEl.classList.contains('dash-tile-mode');
+    if (enabled && !wasEnabled) dashPrepareSheetTileMode(sheetEl);
     sheetEl.classList.toggle('dash-tile-mode', enabled);
+    if (!enabled) dashClearSheetTileMode(sheetEl);
     dashSetSheetTileModeButtonState(sheetEl, enabled);
     if (persist) {
         if (enabled)
@@ -4595,9 +4633,9 @@ window.dashSetActive = function(el) {
     el.classList.add('active');
     var sheet = document.getElementById('ds' + el.id);
     if (sheet) sheet.style.display = '';
+    if (sheet) dashInitSheetTileMode(sheet);
     // Persist active tab in URL hash so page refresh restores it (issue #1840)
     try { history.replaceState(null, '', '#tab=' + encodeURIComponent(el.id)); } catch(e) {}
-    if (sheet) dashScheduleVisibleVizRefresh(sheet);
 };
 
 window.dashOpenSettings = function() {
