@@ -52,7 +52,7 @@
 }
 .f-panel-notes {
     margin-top: 0.5rem;
-    margin-bottom: 1rem;
+    margin-bottom: 0.5rem;
     color: var(--text-secondary, #6c757d);
     font-size: 0.82rem;
     line-height: 1.4;
