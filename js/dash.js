@@ -336,8 +336,84 @@ function dashHasRows(json) {
     return false;
 }
 
+function dashPanelFilterPartIsLocal(part) {
+    return part.indexOf('=') === -1 && part.indexOf(':') > 0;
+}
+
+function dashPanelFilterParts(panelFilter) {
+    var result = { server: [], local: [] }
+        , filter = String(panelFilter || '').trim().replace(/^[?&]+/, '');
+    if (!filter) return result;
+    filter.split('&').forEach(function(part) {
+        part = String(part || '').trim().replace(/^[?&]+/, '');
+        if (!part) return;
+        if (dashPanelFilterPartIsLocal(part))
+            result.local.push(part);
+        else
+            result.server.push(part);
+    });
+    return result;
+}
+
+function dashDecodePanelFilterPart(part) {
+    var text = String(part || '').replace(/\+/g, ' ');
+    try {
+        return decodeURIComponent(text);
+    } catch (e) {
+        return text;
+    }
+}
+
 function dashNormalizePanelFilter(panelFilter) {
-    return String(panelFilter || '').trim().replace(/^[?&]+/, '');
+    var filter = String(panelFilter || '').trim().replace(/^[?&]+/, '');
+    if (!filter) return '';
+    return filter.split('&').map(function(part) {
+        return String(part || '').trim().replace(/^[?&]+/, '');
+    }).filter(function(part) {
+        return part && !(part.indexOf('=') === -1 && part.indexOf(':') > 0);
+    }).join('&');
+}
+
+function dashPanelLocalFilterState(panelFilter) {
+    var filters = {};
+    dashPanelFilterParts(panelFilter).local.forEach(function(part) {
+        var idx = part.indexOf(':')
+            , field = dashDecodePanelFilterPart(part.slice(0, idx)).trim()
+            , value = dashDecodePanelFilterPart(part.slice(idx + 1)).trim()
+            , key, filterValue;
+        if (!field) return;
+        key = 'panelFilter:' + field;
+        filterValue = dashPanelFilterValueKey(value, 'values', 'text');
+        if (!filters[key])
+            filters[key] = { source: 'report', field: field, kind: 'values', valueType: 'text', selected: [] };
+        if (filters[key].selected.indexOf(filterValue) === -1)
+            filters[key].selected.push(filterValue);
+    });
+    return filters;
+}
+
+function dashMergePanelFilterState(target, incoming) {
+    target = target || {};
+    Object.keys(incoming || {}).forEach(function(key) {
+        var src = incoming[key]
+            , dst = target[key];
+        if (!dst) {
+            target[key] = Object.assign({}, src, {
+                selected: Array.isArray(src.selected) ? src.selected.slice() : src.selected
+            });
+            return;
+        }
+        if (Array.isArray(src.selected) && Array.isArray(dst.selected)) {
+            src.selected.forEach(function(value) {
+                if (dst.selected.indexOf(value) === -1) dst.selected.push(value);
+            });
+        } else {
+            target[key] = Object.assign({}, src, {
+                selected: Array.isArray(src.selected) ? src.selected.slice() : src.selected
+            });
+        }
+    });
+    return target;
 }
 
 function dashReportKey(rep, panelFilter) {
@@ -1303,7 +1379,9 @@ function dashGetRepVals() {
                     var range = String(el.getAttribute('range') || '-').split('-')
                         , group = dashCellReportGroup(el)
                         , panel = el.closest ? el.closest('.f-panel') : null
-                        , panelFilters = panel && dashPanelFilters[panel.id] ? dashPanelFilters[panel.id] : {}
+                        , panelFilters = (typeof dashPanelFiltersFor === 'function')
+                            ? dashPanelFiltersFor(panel)
+                            : (panel && typeof dashPanelFilters !== 'undefined' && dashPanelFilters[panel.id] ? dashPanelFilters[panel.id] : {})
                         , filteredReportRows = dashFilterReportRowsForPanel(reportRows, panelFilters)
                         , val;
                     if (restrictToReportGroup && !dashSameGroupName(group, parsed.report)) return;
@@ -1787,7 +1865,9 @@ function dashGetModel(json) {
             , isDuplicateRow = dashIsDuplicateModelRow(previousItem, json[i])
             , itemTargetId = isDuplicateRow ? previousItem.itemID : json[i].itemID
             , vizReportId = dashResolvePanelVizReportId(json[i])
-            , panelNotes = json[i].panelNotes === null || json[i].panelNotes === undefined ? '' : String(json[i].panelNotes);
+            , panelNotes = json[i].panelNotes === null || json[i].panelNotes === undefined ? '' : String(json[i].panelNotes)
+            , panelFilter = json[i].panelFilter || ''
+            , panelFilters = dashPanelLocalFilterState(panelFilter);
         // Add sheet tab
         if (!document.getElementById(json[i].sheetID)) {
             model.querySelector('.sheet-tabs').insertAdjacentHTML('beforeend',
@@ -1814,12 +1894,15 @@ function dashGetModel(json) {
                 settings: panelSettings,
                 panelID: json[i].panelID,
                 notes: '',
-                panelFilter: json[i].panelFilter || '',
+                panelFilter: panelFilter,
+                panelFilters: panelFilters,
                 vizReportId: vizReportId,
-                vizReportKey: vizReportId ? dashGetVizReport(vizReportId, fr, to, json[i].panelFilter) : ''
+                vizReportKey: vizReportId ? dashGetVizReport(vizReportId, fr, to, panelFilter) : ''
             };
             dashApplyVizSize(document.getElementById(panelKey), 'table', {});
             dashPanelApplySettings(panelKey, panelSettings, false);
+        } else if (dashModelData[panelKey]) {
+            dashModelData[panelKey].panelFilters = dashMergePanelFilterState(dashModelData[panelKey].panelFilters, panelFilters);
         }
         if (panelNotes.trim() && dashModelData[panelKey] && !dashModelData[panelKey].notes) {
             dashModelData[panelKey].notes = panelNotes;
@@ -1827,7 +1910,7 @@ function dashGetModel(json) {
         }
         if (vizReportId && dashModelData[panelKey] && !dashModelData[panelKey].vizReportId) {
             dashModelData[panelKey].vizReportId = vizReportId;
-            dashModelData[panelKey].vizReportKey = dashGetVizReport(vizReportId, fr, to, json[i].panelFilter);
+            dashModelData[panelKey].vizReportKey = dashGetVizReport(vizReportId, fr, to, panelFilter);
         }
         if (json[i].NoDates !== undefined)
             dashModelData[panelKey].noDates = json[i].NoDates;
@@ -1867,13 +1950,13 @@ function dashGetModel(json) {
             if (!dashFormulas[itemTargetId] || (rep && dashFormulas[itemTargetId] === '[]'))
                 dashFormulas[itemTargetId] = json[i].formulas;
             if (rep) {
-                var reportKey = dashReportKey(rep[1], json[i].panelFilter);
+                var reportKey = dashReportKey(rep[1], panelFilter);
                 if (!dashReportKeys[itemTargetId])
                     dashReportKeys[itemTargetId] = reportKey;
                 dashRememberReportSource(itemTargetId, json[i].formulas, reportKey);
                 dashReportNames[reportKey] = rep[1];
                 if (!dashReports[reportKey])
-                    dashGetRep(rep[1], fr, to, json[i].panelFilter);
+                    dashGetRep(rep[1], fr, to, panelFilter);
             }
         }
     }
@@ -3762,7 +3845,13 @@ function dashRefreshPanelMaxWidths() {
 var dashPanelFilterModalCtx = null;
 
 function dashPanelFiltersFor(panelEl) {
-    return panelEl && dashPanelFilters[panelEl.id] ? dashPanelFilters[panelEl.id] : {};
+    var modelStore = (typeof dashModelData !== 'undefined') ? dashModelData : {}
+        , filterStore = (typeof dashPanelFilters !== 'undefined') ? dashPanelFilters : {}
+        , modelFilters = panelEl && modelStore[panelEl.id] ? modelStore[panelEl.id].panelFilters : null
+        , userFilters = panelEl && filterStore[panelEl.id] ? filterStore[panelEl.id] : null;
+    if (!modelFilters) return userFilters || {};
+    if (!userFilters) return modelFilters || {};
+    return dashMergePanelFilterState(dashMergePanelFilterState({}, modelFilters), userFilters);
 }
 
 function dashPanelFilterModalIsOpen() {
