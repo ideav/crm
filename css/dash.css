@@ -459,7 +459,11 @@ td:has(.dash-cell-input) {
 .dash-panel-filter-label {
     font-size: 0.85rem;
     font-weight: 600;
-    margin-bottom: 0.35rem;
+    margin: -0.55rem -0.6rem 0.45rem;
+    padding: 0.4rem 0.6rem;
+    background: var(--bg-secondary, #f8f9fa);
+    border-bottom: 1px solid var(--border-color, #dee2e6);
+    border-radius: 5px 5px 0 0;
     color: var(--text-primary, #212529);
 }
 .dash-panel-filter-label--with-toggle {
