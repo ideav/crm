@@ -1,3 +1,41 @@
+        shouldRenderSubordinateRowNumber(rowIndex, colIndex) {
+            if (colIndex !== 0 || rowIndex === null || rowIndex === undefined) {
+                return false;
+            }
+
+            const sourceType = typeof this.getDataSourceType === 'function'
+                ? this.getDataSourceType()
+                : (this.options ? this.options.dataSource : null);
+            if (sourceType !== 'table') {
+                return false;
+            }
+
+            const parentId = parseInt(this.options && this.options.parentId, 10);
+            return !isNaN(parentId) && parentId > 1;
+        }
+
+        renderSubordinateRowNumber(rowIndex, withEditIcon = false) {
+            const className = withEditIcon
+                ? 'subordinate-row-number subordinate-row-number-with-edit-icon'
+                : 'subordinate-row-number';
+            return `<span class="${ className }">${ rowIndex + 1 }</span>`;
+        }
+
+        addSubordinateRowNumberToCellContent(cellHtml, rowIndex) {
+            if (cellHtml.includes('subordinate-row-number')) {
+                return cellHtml;
+            }
+
+            const hasEditIcon = cellHtml.includes('class="edit-icon"');
+            const rowNumberHtml = this.renderSubordinateRowNumber(rowIndex, hasEditIcon);
+
+            if (cellHtml.includes('class="cell-content-wrapper"')) {
+                return cellHtml.replace(/<\/div>\s*$/, `${ rowNumberHtml }</div>`);
+            }
+
+            return `<div class="cell-content-wrapper"><span>${ cellHtml }</span>${ rowNumberHtml }</div>`;
+        }
+
         renderCell(column, value, rowIndex, colIndex) {
             // Determine display format:
             // 1. For report data sources, column.format may already be a symbolic format like 'BOOLEAN'
@@ -506,6 +544,10 @@
                         console.log(`  ✗ Cell will NOT be editable - canEdit=${canEdit}, recordId=${recordId}`);
                     }
                 }
+            }
+
+            if (this.shouldRenderSubordinateRowNumber(rowIndex, colIndex)) {
+                escapedValue = this.addSubordinateRowNumberToCellContent(escapedValue, rowIndex);
             }
 
             return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }${ editableAttrs }>${ escapedValue }</td>`;

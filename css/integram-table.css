@@ -1390,6 +1390,27 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
+.subordinate-row-number {
+    position: absolute;
+    bottom: 4px;
+    right: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 24px;
+    color: var(--md-text-hint, #9e9e9e);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    line-height: 1;
+    pointer-events: none;
+    transition: var(--md-transition);
+}
+
+.editable-cell:hover .subordinate-row-number-with-edit-icon {
+    opacity: 0;
+}
+
 .editable-cell:hover .edit-icon {
     opacity: 1;
 }
@@ -1407,6 +1428,10 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
         position: static;
         margin-left: 5px;
         display: inline-flex;
+    }
+
+    .editable-cell .subordinate-row-number-with-edit-icon {
+        display: none;
     }
 }
 
@@ -2335,6 +2360,10 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     text-decoration: underline;
 }
 
+.subordinate-cell-with-row-number {
+    position: relative;
+}
+
 .subordinate-nested-count {
     /* Issue #737: Use same center alignment as .subordinate-link-cell */
     text-align: center;
@@ -2566,6 +2595,15 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     padding: 0 4px !important;
     text-align: center;
     vertical-align: middle;
+    position: relative;
+}
+
+.subordinate-drag-handle-td .subordinate-row-number {
+    inset: 0;
+    margin: auto;
+    min-width: 20px;
+    width: 20px;
+    height: 20px;
 }
 
 /* The drag handle icon */
@@ -2585,6 +2623,10 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .subordinate-table tbody tr:hover .subordinate-drag-handle {
     opacity: 1;
+}
+
+.subordinate-table tbody tr:hover .subordinate-drag-handle-td .subordinate-row-number {
+    opacity: 0;
 }
 
 .subordinate-drag-handle:hover {
