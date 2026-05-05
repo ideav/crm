@@ -4898,6 +4898,7 @@ function dashCellRgHead(td) {
 
 // Build search URL for a Значение record
 function dashValueSearchUrl(td) {
+    var valueItemId = (td.dataset && td.dataset.valueItemId) || '';
     var itemRef = dashCellItemRef(td);
     var fr = dashCellDateFr(td);
     var to = dashCellDateTo(td);
@@ -4906,7 +4907,9 @@ function dashValueSearchUrl(td) {
     var url = 'object/1010?JSON_OBJ';
     if (fr) url += '&FR_1039=' + fr;
     if (to) url += '&TO_1039=' + to;
-    url += '&FR_1042=@' + encodeURIComponent(itemRef);
+    // valueItemId is a record id (filter by id with @), itemRef is a name (filter by value)
+    if (valueItemId) url += '&FR_1042=@' + encodeURIComponent(valueItemId);
+    else url += '&FR_1042=' + encodeURIComponent(itemRef);
     if (rgHead) url += '&F_1104=' + encodeURIComponent(rgHead);
     url += '&F_' + DASH_VALUE_LABEL_FIELD_ID + '=' + (dashLabel ? '%' : '!%');
     return url;
