@@ -1400,16 +1400,12 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     justify-content: center;
     min-width: 24px;
     height: 24px; */
-    color: var(--md-text-hint, #9e9e9e);
+    color: lightgray;
     font-size: 0.6875rem;
     font-weight: 500;
     line-height: 1;
     pointer-events: none;
     transition: var(--md-transition);
-}
-
-.editable-cell:hover .subordinate-row-number-with-edit-icon {
-    opacity: 0;
 }
 
 .editable-cell:hover .edit-icon {
