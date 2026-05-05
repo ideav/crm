@@ -20,6 +20,7 @@ assert(
 const helperSource = [
     extractFunction(template, 'scheduleShowReportScrollbarUpdate'),
     extractFunction(template, 'updateShowReportScrollbar'),
+    extractFunction(template, 'handleShowReportScrollbarWindowScroll'),
     extractFunction(template, 'attachShowReportScrollbar')
 ].join('\n\n');
 
@@ -103,6 +104,16 @@ assert(stickyScrollbar.scrollLeft === 240, 'scrolling #ShowReport should move th
 stickyScrollbar.scrollLeft = 360;
 listeners.scrollbar.scroll();
 assert(report.scrollLeft === 360, 'scrolling the sticky scrollbar should move #ShowReport');
+
+report.scrollLeft = 0;
+stickyScrollbar.scrollLeft = 0;
+stickyScrollbar.scrollLeft = 480;
+listeners.window.find(listener => listener.type === 'scroll' && listener.capture === true).callback({ target: stickyScrollbar });
+listeners.scrollbar.scroll();
+assert(
+    report.scrollLeft === 480,
+    'dragging the sticky scrollbar should not be reset by the captured window scroll listener'
+);
 
 reportRect = {
     top: 120,

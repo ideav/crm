@@ -1041,6 +1041,13 @@ function updateShowReportScrollbar(){
     if(!showReportScrollbarSyncing)
         scrollbar.scrollLeft=report.scrollLeft;
 }
+function handleShowReportScrollbarWindowScroll(event){
+    var report=byId('ShowReport'),
+        scrollbar=byId('ShowReportStickyScrollbar');
+    if(event&&event.target&&(event.target===report||event.target===scrollbar))
+        return;
+    scheduleShowReportScrollbarUpdate();
+}
 function attachShowReportScrollbar(){
     var report=byId('ShowReport'),
         scrollbar=byId('ShowReportStickyScrollbar');
@@ -1065,7 +1072,7 @@ function attachShowReportScrollbar(){
             showReportScrollbarSyncing=false;
         }
     });
-    window.addEventListener('scroll',scheduleShowReportScrollbarUpdate,true);
+    window.addEventListener('scroll',handleShowReportScrollbarWindowScroll,true);
     window.addEventListener('resize',scheduleShowReportScrollbarUpdate);
     showReportScrollbarAttached=true;
     scheduleShowReportScrollbarUpdate();
