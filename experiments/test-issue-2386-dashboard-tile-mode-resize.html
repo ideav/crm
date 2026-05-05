@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Issue 2386 dashboard tile resize</title>
+    <link rel="stylesheet" href="../assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="../css/dash.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 1rem;
+            background: #fff;
+            color: #212529;
+            font-family: Arial, sans-serif;
+        }
+        #dash-model { margin: 0; }
+        #panel { padding: 0.5rem 1rem; background: #f8f9fa; border-bottom: 1px solid #dee2e6;
+                 display: flex; gap: 0.5rem; align-items: center; }
+        #status { color: #6c757d; font-size: 0.85rem; }
+        button { padding: 0.25rem 0.75rem; border: 1px solid #6c757d; background: #fff; border-radius: 0.25rem; cursor: pointer; }
+        button:hover { background: #e9ecef; }
+    </style>
+</head>
+<body>
+<div id="panel">
+    <button id="toggle">Toggle tile mode</button>
+    <button id="reset">Reset width cookie</button>
+    <span id="status"></span>
+</div>
+<div id="dash-model" class="f-model">
+    <div id="ds-demo" class="f-sheet">
+        <div class="dash-filter-bar">
+            <button type="button" class="dash-tile-mode-icon" title="Включить режим плитки" aria-label="Режим плитки" aria-pressed="false"><i class="pi pi-th-large"></i></button>
+        </div>
+
+        <div class="f-panel pt-3" data-panel-id="1">
+            <div class="f-panel-header"><h4>Панель A</h4></div>
+            <div class="f-panel-content">
+                <div class="f-table-wrap">
+                    <table class="table table-sm table-bordered w-auto">
+                        <thead><tr class="dash-head f-head"><th>Дата</th><th>Значение</th></tr></thead>
+                        <tbody>
+                            <tr><td>2025-01-01</td><td>10</td></tr>
+                            <tr><td>2025-02-01</td><td>20</td></tr>
+                            <tr><td>2025-03-01</td><td>30</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="f-panel pt-3" data-panel-id="2">
+            <div class="f-panel-header"><h4>Панель B</h4></div>
+            <div class="f-panel-content">
+                <div class="f-table-wrap">
+                    <table class="table table-sm table-bordered w-auto">
+                        <thead><tr class="dash-head f-head"><th>Дата</th><th>Значение</th></tr></thead>
+                        <tbody>
+                            <tr><td>2025-01-01</td><td>11</td></tr>
+                            <tr><td>2025-02-01</td><td>21</td></tr>
+                            <tr><td>2025-03-01</td><td>31</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="f-panel pt-3" data-panel-id="3">
+            <div class="f-panel-header"><h4>Панель C</h4></div>
+            <div class="f-panel-content">
+                <div class="f-table-wrap">
+                    <table class="table table-sm table-bordered w-auto">
+                        <thead><tr class="dash-head f-head"><th>Дата</th><th>Значение</th></tr></thead>
+                        <tbody>
+                            <tr><td>2025-01-01</td><td>12</td></tr>
+                            <tr><td>2025-02-01</td><td>22</td></tr>
+                            <tr><td>2025-03-01</td><td>32</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="f-panel pt-3" data-panel-id="4">
+            <div class="f-panel-header"><h4>Панель D</h4></div>
+            <div class="f-panel-content">
+                <div class="f-table-wrap">
+                    <table class="table table-sm table-bordered w-auto">
+                        <thead><tr class="dash-head f-head"><th>Дата</th><th>Значение</th></tr></thead>
+                        <tbody>
+                            <tr><td>2025-01-01</td><td>13</td></tr>
+                            <tr><td>2025-02-01</td><td>23</td></tr>
+                            <tr><td>2025-03-01</td><td>33</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    // Self-contained tile-mode functions extracted from js/dash.js. We mirror
+    // the production implementation here (rather than loading dash.js) because
+    // dash.js is wrapped in an IIFE and wires up modal elements that this
+    // minimal demo does not include.
+    var DASH_CHART_RESIZE_COOKIE_MAX_AGE = 31536000;
+    var DASH_TILE_PANEL_MIN_WIDTH = 200;
+    var dashRecordId = 'dash-2386-demo';
+    var dashCurrentId = null;
+    function dashScheduleVisibleVizRefresh() {}
+    function dashSetStatus(text) {
+        var el = document.getElementById('status-msg');
+        if (el) el.textContent = text || '';
+    }
+
+    function dashCookieGet(name) {
+        var escaped, match;
+        if (typeof document === 'undefined' || !document.cookie) return '';
+        escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        match = document.cookie.match(new RegExp('(?:^|; )' + escaped + '=([^;]*)'));
+        return match ? decodeURIComponent(match[1]) : '';
+    }
+    function dashCookieSet(name, value, maxAge) {
+        document.cookie = String(name) + '=' + encodeURIComponent(String(value))
+            + '; path=/; max-age=' + String(maxAge || DASH_CHART_RESIZE_COOKIE_MAX_AGE);
+    }
+    function dashCookieRemove(name) {
+        document.cookie = String(name) + '=; path=/; max-age=0';
+    }
+    function dashCookieNamePart(value) {
+        return String(value || '0').replace(/[^A-Za-z0-9_-]/g, '_');
+    }
+    function dashSheetTileModeCookieName(sheetEl) {
+        var dashId = dashRecordId || dashCurrentId || 'dash'
+            , sheetId = sheetEl && sheetEl.id ? sheetEl.id : 'sheet';
+        return 'dash_tile_mode_' + dashCookieNamePart(dashId) + '_' + dashCookieNamePart(sheetId);
+    }
+    function dashSheetTilePanelWidthCookieName(sheetEl) {
+        var dashId = dashRecordId || dashCurrentId || 'dash'
+            , sheetId = sheetEl && sheetEl.id ? sheetEl.id : 'sheet';
+        return 'dash_tile_panel_width_' + dashCookieNamePart(dashId) + '_' + dashCookieNamePart(sheetId);
+    }
+    function dashReadSheetTilePanelWidth(sheetEl) {
+        var raw = dashCookieGet(dashSheetTilePanelWidthCookieName(sheetEl)), value;
+        if (!raw) return 0;
+        value = parseInt(raw, 10);
+        return isFinite(value) && value > 0 ? value : 0;
+    }
+    function dashWriteSheetTilePanelWidth(sheetEl, width) {
+        if (!sheetEl) return;
+        dashCookieSet(dashSheetTilePanelWidthCookieName(sheetEl), String(Math.round(width)),
+            DASH_CHART_RESIZE_COOKIE_MAX_AGE);
+    }
+    function dashRemoveSheetTilePanelWidth(sheetEl) {
+        if (!sheetEl) return;
+        dashCookieRemove(dashSheetTilePanelWidthCookieName(sheetEl));
+    }
+    function dashReadSheetTileMode(sheetEl) {
+        if (!sheetEl) return false;
+        return dashCookieGet(dashSheetTileModeCookieName(sheetEl)) === '1';
+    }
+    function dashSetSheetTileModeButtonState(sheetEl, enabled) {
+        var button = sheetEl && sheetEl.querySelector ? sheetEl.querySelector('.dash-tile-mode-icon') : null;
+        if (!button) return;
+        if (button.classList && button.classList.toggle)
+            button.classList.toggle('active', !!enabled);
+        if (button.setAttribute) {
+            button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+            button.setAttribute('title', enabled ? 'Выключить режим плитки' : 'Включить режим плитки');
+        }
+        button.title = enabled ? 'Выключить режим плитки' : 'Включить режим плитки';
+    }
+    function dashMeasureSheetTilePanelMinWidth(sheetEl) {
+        var maxWidth = 0;
+        if (!sheetEl || !sheetEl.querySelectorAll) return 0;
+        sheetEl.querySelectorAll('.f-panel').forEach(function(panelEl) {
+            var rect = panelEl && panelEl.getBoundingClientRect ? panelEl.getBoundingClientRect() : null
+                , width = rect && isFinite(rect.width) ? rect.width : 0;
+            if (width > maxWidth) maxWidth = width;
+        });
+        return maxWidth > 0 ? Math.ceil(maxWidth) : 0;
+    }
+    function dashApplySheetTilePanelMinWidth(sheetEl, width) {
+        if (!sheetEl || !sheetEl.style) return;
+        if (!(width > 0)) {
+            if (sheetEl.style.removeProperty)
+                sheetEl.style.removeProperty('--dash-tile-panel-min-width');
+            else
+                sheetEl.style['--dash-tile-panel-min-width'] = '';
+            return;
+        }
+        if (sheetEl.style.setProperty)
+            sheetEl.style.setProperty('--dash-tile-panel-min-width', width + 'px');
+        else
+            sheetEl.style['--dash-tile-panel-min-width'] = width + 'px';
+    }
+    function dashClearSheetTileMode(sheetEl) {
+        dashApplySheetTilePanelMinWidth(sheetEl, 0);
+    }
+    function dashPrepareSheetTileMode(sheetEl) {
+        var savedWidth = dashReadSheetTilePanelWidth(sheetEl)
+            , width = savedWidth > 0 ? savedWidth : dashMeasureSheetTilePanelMinWidth(sheetEl);
+        if (!sheetEl || !sheetEl.style) return width;
+        if (width > 0)
+            dashApplySheetTilePanelMinWidth(sheetEl, width);
+        else
+            dashClearSheetTileMode(sheetEl);
+        return width;
+    }
+    function dashEnsureSheetTilePanelResizeHandles(sheetEl) {
+        if (!sheetEl || !sheetEl.querySelectorAll || typeof document === 'undefined' || !document.createElement) return;
+        sheetEl.querySelectorAll('.f-panel').forEach(dashEnsureTilePanelResizeHandle);
+    }
+    function dashApplySheetTileMode(sheetEl, enabled, persist) {
+        var wasEnabled;
+        enabled = !!enabled;
+        if (!sheetEl || !sheetEl.classList) return enabled;
+        wasEnabled = sheetEl.classList.contains('dash-tile-mode');
+        if (enabled && !wasEnabled) dashPrepareSheetTileMode(sheetEl);
+        sheetEl.classList.toggle('dash-tile-mode', enabled);
+        if (!enabled) dashClearSheetTileMode(sheetEl);
+        dashSetSheetTileModeButtonState(sheetEl, enabled);
+        if (enabled) dashEnsureSheetTilePanelResizeHandles(sheetEl);
+        if (persist) {
+            if (enabled)
+                dashCookieSet(dashSheetTileModeCookieName(sheetEl), '1', DASH_CHART_RESIZE_COOKIE_MAX_AGE);
+            else {
+                dashCookieRemove(dashSheetTileModeCookieName(sheetEl));
+                dashRemoveSheetTilePanelWidth(sheetEl);
+            }
+        }
+        return enabled;
+    }
+    function dashToggleSheetTileMode(sheetEl) {
+        var enabled = !(sheetEl && sheetEl.classList && sheetEl.classList.contains('dash-tile-mode'));
+        dashApplySheetTileMode(sheetEl, enabled, true);
+        return enabled;
+    }
+    function dashStartTilePanelResize(e) {
+        var handle = e.currentTarget || e.target
+            , panelEl = handle && handle.closest ? handle.closest('.f-panel') : null
+            , sheetEl = panelEl && panelEl.closest ? panelEl.closest('.f-sheet') : null
+            , panelRect = panelEl && panelEl.getBoundingClientRect ? panelEl.getBoundingClientRect() : null
+            , sheetRect = sheetEl && sheetEl.getBoundingClientRect ? sheetEl.getBoundingClientRect() : null
+            , startX, startWidth, maxWidth, latestWidth = null;
+        if (e.button !== undefined && e.button !== 0) return;
+        if (!sheetEl || !sheetEl.classList || !sheetEl.classList.contains('dash-tile-mode')) return;
+        if (!panelEl || !panelRect) return;
+        e.preventDefault();
+        startX = e.clientX;
+        startWidth = panelRect.width || panelEl.offsetWidth || DASH_TILE_PANEL_MIN_WIDTH;
+        maxWidth = sheetRect && sheetRect.width ? Math.round(sheetRect.width)
+            : (typeof window !== 'undefined' && window.innerWidth ? window.innerWidth : 1200);
+        function onMove(moveEvent) {
+            var delta, nextWidth;
+            moveEvent.preventDefault();
+            delta = moveEvent.clientX - startX;
+            nextWidth = Math.max(DASH_TILE_PANEL_MIN_WIDTH, Math.min(maxWidth, Math.round(startWidth + delta)));
+            latestWidth = nextWidth;
+            dashApplySheetTilePanelMinWidth(sheetEl, nextWidth);
+            refreshStatus();
+        }
+        function onUp(upEvent) {
+            if (upEvent && upEvent.preventDefault) upEvent.preventDefault();
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            sheetEl.classList.remove('f-sheet--tile-resizing');
+            if (document.body && document.body.classList) document.body.classList.remove('dash-tile-resizing');
+            if (latestWidth) dashWriteSheetTilePanelWidth(sheetEl, latestWidth);
+            refreshStatus();
+        }
+        sheetEl.classList.add('f-sheet--tile-resizing');
+        if (document.body && document.body.classList) document.body.classList.add('dash-tile-resizing');
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    }
+    function dashEnsureTilePanelResizeHandle(panelEl) {
+        var handle;
+        if (!panelEl || typeof document === 'undefined' || !document.createElement) return;
+        handle = panelEl.querySelector ? panelEl.querySelector('.f-tile-resize-handle') : null;
+        if (handle) return handle;
+        handle = document.createElement('button');
+        handle.type = 'button';
+        handle.className = 'f-tile-resize-handle';
+        handle.title = 'Изменить ширину плитки';
+        handle.setAttribute('aria-label', 'Изменить ширину плитки');
+        handle.addEventListener('mousedown', dashStartTilePanelResize);
+        panelEl.appendChild(handle);
+        return handle;
+    }
+
+    var sheet = document.getElementById('ds-demo');
+    var btn = sheet.querySelector('.dash-tile-mode-icon');
+    btn.addEventListener('click', function() {
+        dashToggleSheetTileMode(sheet);
+        refreshStatus();
+    });
+    document.getElementById('toggle').addEventListener('click', function() {
+        dashToggleSheetTileMode(sheet);
+        refreshStatus();
+    });
+    document.getElementById('reset').addEventListener('click', function() {
+        dashRemoveSheetTilePanelWidth(sheet);
+        if (sheet.classList.contains('dash-tile-mode')) dashApplySheetTilePanelMinWidth(sheet, 0);
+        refreshStatus();
+    });
+    function refreshStatus() {
+        var st = document.getElementById('status');
+        var widthCookie = dashSheetTilePanelWidthCookieName(sheet);
+        var modeCookie = dashSheetTileModeCookieName(sheet);
+        st.textContent = 'tile=' + (document.cookie.indexOf(modeCookie + '=1') !== -1)
+            + '  width=' + (dashReadSheetTilePanelWidth(sheet) || 'auto')
+            + '  var=' + (sheet.style.getPropertyValue('--dash-tile-panel-min-width') || 'auto');
+    }
+    dashApplySheetTileMode(sheet, true, false);
+    refreshStatus();
+</script>
+</body>
+</html>

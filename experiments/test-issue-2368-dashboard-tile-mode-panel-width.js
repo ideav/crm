@@ -121,11 +121,17 @@ ${extractFunction('dashCookieSet')}
 ${extractFunction('dashCookieRemove')}
 ${extractFunction('dashCookieNamePart')}
 ${extractFunction('dashSheetTileModeCookieName')}
+${extractFunction('dashSheetTilePanelWidthCookieName')}
+${extractFunction('dashReadSheetTilePanelWidth')}
+${extractFunction('dashWriteSheetTilePanelWidth')}
+${extractFunction('dashRemoveSheetTilePanelWidth')}
 ${extractFunction('dashReadSheetTileMode')}
 ${extractFunction('dashSetSheetTileModeButtonState')}
 ${extractFunction('dashMeasureSheetTilePanelMinWidth')}
+${extractFunction('dashApplySheetTilePanelMinWidth')}
 ${extractFunction('dashPrepareSheetTileMode')}
 ${extractFunction('dashClearSheetTileMode')}
+${extractFunction('dashEnsureSheetTilePanelResizeHandles')}
 ${extractFunction('dashApplySheetTileMode')}
 ${extractFunction('dashToggleSheetTileMode')}
 `;

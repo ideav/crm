@@ -686,6 +686,51 @@ body.dash-chart-resizing {
     cursor: nwse-resize;
     user-select: none;
 }
+.f-tile-resize-handle {
+    display: none;
+    position: absolute;
+    top: 0;
+    right: -0.5rem;
+    width: 0.7rem;
+    height: 100%;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    background: transparent;
+    cursor: ew-resize;
+    z-index: 6;
+    touch-action: none;
+}
+.f-tile-resize-handle::before {
+    content: "";
+    position: absolute;
+    top: 25%;
+    bottom: 25%;
+    left: 50%;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--border-color, #dee2e6);
+    border-radius: 1px;
+    opacity: 0;
+    transition: opacity 0.15s, background-color 0.15s;
+}
+#dash-model .f-sheet.dash-tile-mode .f-panel {
+    position: relative;
+}
+#dash-model .f-sheet.dash-tile-mode .f-panel .f-tile-resize-handle {
+    display: block;
+}
+#dash-model .f-sheet.dash-tile-mode .f-panel:hover .f-tile-resize-handle::before,
+#dash-model .f-sheet.dash-tile-mode .f-tile-resize-handle:hover::before,
+#dash-model .f-sheet.dash-tile-mode .f-tile-resize-handle:focus::before,
+.f-sheet--tile-resizing .f-tile-resize-handle::before {
+    opacity: 0.85;
+    background: var(--text-secondary, #6c757d);
+}
+body.dash-tile-resizing {
+    cursor: ew-resize;
+    user-select: none;
+}
 
 .f-pivot-wrap {
     overflow: auto;
