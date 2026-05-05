@@ -409,7 +409,10 @@ elseif(($z == "my") && !empty($_GET['code'])){
         	setcookie("idb_$z", $GLOBALS["GLOBAL_VARS"]["token"], time() + 2592000*12, "/"); # 30*12 days
         	createDb($id, $name, $email);
         }
-		header("Location: ".(!$isYandex && isset($_GET['state'])?$_GET['state']:"/$z"));
+		# Redirect to a validated local workspace only — never to raw $_GET['state'],
+		# which an attacker can set to an arbitrary URL (open redirect, issue #2123).
+		# $db was already validated against USER_DB_MASK at line 317 (Yandex) and 360 (Google).
+		header("Location: /".(!$isYandex && strlen($db) ? $db : $z));
     }
     else
         login("", "", "oauthError", isset($data['error_description']) ? $data['error_description'] : (isset($data['error']) ? $data['error'] : "tokenExchangeFailed"));
