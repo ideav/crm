@@ -1897,21 +1897,6 @@ class IntegramTable{
             return `<span class="${ className }">${ rowIndex + 1 }</span>`;
         }
 
-        addSubordinateRowNumberToCellContent(cellHtml, rowIndex) {
-            if (cellHtml.includes('subordinate-row-number')) {
-                return cellHtml;
-            }
-
-            const hasEditIcon = cellHtml.includes('class="edit-icon"');
-            const rowNumberHtml = this.renderSubordinateRowNumber(rowIndex, hasEditIcon);
-
-            if (cellHtml.includes('class="cell-content-wrapper"')) {
-                return cellHtml.replace(/<\/div>\s*$/, `${ rowNumberHtml }</div>`);
-            }
-
-            return `<div class="cell-content-wrapper"><span>${ cellHtml }</span>${ rowNumberHtml }</div>`;
-        }
-
         renderCell(column, value, rowIndex, colIndex) {
             // Determine display format:
             // 1. For report data sources, column.format may already be a symbolic format like 'BOOLEAN'
@@ -2422,11 +2407,13 @@ class IntegramTable{
                 }
             }
 
+            let rowNumberHtml = '';
             if (this.shouldRenderSubordinateRowNumber(rowIndex, colIndex)) {
-                escapedValue = this.addSubordinateRowNumberToCellContent(escapedValue, rowIndex);
+                const withEditIcon = escapedValue.includes('class="edit-icon"');
+                rowNumberHtml = this.renderSubordinateRowNumber(rowIndex, withEditIcon);
             }
 
-            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }${ editableAttrs }>${ escapedValue }</td>`;
+            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }${ editableAttrs }>${ escapedValue }${ rowNumberHtml }</td>`;
         }
 
         /**
@@ -19330,7 +19317,7 @@ class IntegramCreateFormHelper {
 
                 // Main value column (clickable)
                 const mainValue = values[0] || '';
-                html += `<td class="subordinate-cell-clickable subordinate-cell-with-row-number" data-row="${rowIndex}" data-record-id="${recordId}" data-type-id="${arrId}"><div class="cell-content-wrapper"><span>${this.escapeHtml(mainValue)}</span><span class="subordinate-row-number">${rowIndex + 1}</span></div></td>`;
+                html += `<td class="subordinate-cell-clickable subordinate-cell-with-row-number" data-row="${rowIndex}" data-record-id="${recordId}" data-type-id="${arrId}">${this.escapeHtml(mainValue)}<span class="subordinate-row-number">${rowIndex + 1}</span></td>`;
 
                 // Requisite columns
                 let valIdx = 1;

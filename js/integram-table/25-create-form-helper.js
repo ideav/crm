@@ -1634,7 +1634,7 @@ class IntegramCreateFormHelper {
 
                 // Main value column (clickable)
                 const mainValue = values[0] || '';
-                html += `<td class="subordinate-cell-clickable subordinate-cell-with-row-number" data-row="${rowIndex}" data-record-id="${recordId}" data-type-id="${arrId}"><div class="cell-content-wrapper"><span>${this.escapeHtml(mainValue)}</span><span class="subordinate-row-number">${rowIndex + 1}</span></div></td>`;
+                html += `<td class="subordinate-cell-clickable subordinate-cell-with-row-number" data-row="${rowIndex}" data-record-id="${recordId}" data-type-id="${arrId}">${this.escapeHtml(mainValue)}<span class="subordinate-row-number">${rowIndex + 1}</span></td>`;
 
                 // Requisite columns
                 let valIdx = 1;
