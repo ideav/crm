@@ -384,7 +384,7 @@ elseif(($z == "my") && !empty($_GET['code'])){
         	        if($row["tok"])
             	        $token = $row["tok"];
             	    else{
-            			$token = md5(microtime(TRUE));
+            			$token = secureToken();
                         Insert($row["id"], 1, TOKEN, $token, "Reset token for $socialName admin");
             	    }
         	        if(!$row["xsrf"])
@@ -398,7 +398,7 @@ elseif(($z == "my") && !empty($_GET['code'])){
         	setcookie("idb_$z", $token, time() + 2592000*12, "/"); # 30*12 days
     	}
         else{
-			$GLOBALS["GLOBAL_VARS"]["token"] = md5(microtime(TRUE));
+			$GLOBALS["GLOBAL_VARS"]["token"] = secureToken();
 			$GLOBALS["GLOBAL_VARS"]["xsrf"] = xsrf($GLOBALS["GLOBAL_VARS"]["token"], $z);
             $id = newUser($socialId, $email, "115", $name, $picture);
             Insert($id, 1, 274, $socialName, "Set social for new $socialName user");
@@ -558,14 +558,15 @@ function createDb($id, $name, $email, $pwd=""){
 }
 function updateTokens($row){
 	global $z;
-	$xsrf = $GLOBALS["GLOBAL_VARS"]["xsrf"] = xsrf($token, $z);
-	setcookie("idb_$z", $token, time() + 2592000*12, "/"); # 30*12 days
+	# Token must be assigned before deriving xsrf (issue #2122).
 	if($row["tok"])
     	$token = $GLOBALS["GLOBAL_VARS"]["token"] = $row["token"];
 	else{
-    	$token = $GLOBALS["GLOBAL_VARS"]["token"] = md5(microtime(TRUE));
+    	$token = $GLOBALS["GLOBAL_VARS"]["token"] = secureToken();
 		Insert($row["uid"], 1, TOKEN, $token, "Save token");
 	}
+	$xsrf = $GLOBALS["GLOBAL_VARS"]["xsrf"] = xsrf($token, $z);
+	setcookie("idb_$z", $token, time() + 2592000*12, "/"); # 30*12 days
 	if($row["xsrf"])
 		Update_Val($row["xsrf"], $xsrf);
 	else
@@ -674,6 +675,18 @@ function isApi(){
 }
 function xsrf($a, $b){
 	return substr(hash("sha512", Salt($a, $b)), 0, 22);
+}
+// Cryptographically secure session/auth token. random_bytes() throws if no
+// CSPRNG is available; we fall back to openssl_random_pseudo_bytes (which
+// is also CSPRNG on supported platforms). Issue #2122.
+function secureToken(){
+	try {
+		return bin2hex(random_bytes(32));
+	} catch (Exception $e) {
+		$bytes = openssl_random_pseudo_bytes(32, $strong);
+		if ($bytes !== false && $strong) return bin2hex($bytes);
+		throw $e;
+	}
 }
 function login($z="", $u="", $message="", $details=""){
 	wlog(" @".$_SERVER["REMOTE_ADDR"], "log");
@@ -8179,7 +8192,7 @@ switch($a)  # Check actions, which don't require authentication
 						die(json_encode(["error" => t9n("[RU]Превышено количество попыток входа с кодом. Войдите с паролем.[EN]Too many code login attempts. Please sign in with your password.")], JSON_UNESCAPED_UNICODE));
 					die(json_encode(["error" => t9n("[RU]Неверный код[EN]Invalid code")], JSON_UNESCAPED_UNICODE));
 				}
-    			$token = md5(microtime(TRUE));
+    			$token = secureToken();
     			$xsrf = xsrf($token, $u);
 				Update_Val($row["tok"], $token);
 
