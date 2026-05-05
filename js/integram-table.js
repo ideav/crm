@@ -8296,6 +8296,15 @@ class IntegramTable{
             // Cancel button handler
             modal.querySelector(`#cancel-add-column-btn-${instanceName}`).addEventListener('click', closeAddColumnModal);
 
+            // Enter in any form field triggers Создать (issue #2398)
+            modal.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && suggestionsDiv.style.display === 'none') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    modal.querySelector(`#create-column-btn-${instanceName}`).click();
+                }
+            });
+
             // Create button handler
             modal.querySelector(`#create-column-btn-${instanceName}`).addEventListener('click', async () => {
                 const columnName = modal.querySelector(`#new-column-name-${instanceName}`).value.trim();
