@@ -312,6 +312,52 @@ function dashMatrixLabelMatches(dashLabel, matrixLabel) {
     return dashMatrixLabelScore(dashLabel, matrixLabel) > 0;
 }
 
+// Find the cached metadata entry for a given object type id.
+// dashMetadata may be an array of {id, reqs, ...} (the typical /metadata
+// payload — see js/integram-table/16-state.js) or an object keyed by id.
+function dashFindTypeMetadata(typeId) {
+    if (!dashMetadata) return null;
+    var key = String(typeId);
+    var num = Number(typeId);
+    if (Array.isArray(dashMetadata)) {
+        for (var i = 0; i < dashMetadata.length; i++) {
+            var item = dashMetadata[i];
+            if (item && (String(item.id) === key || item.id === num)) return item;
+        }
+        return null;
+    }
+    if (typeof dashMetadata === 'object') {
+        return dashMetadata[key] || dashMetadata[num] || null;
+    }
+    return null;
+}
+
+// Returns the index in a JSON_OBJ record's `r` array where the given req
+// field lives, or -1 if not resolvable. Layout: r[0] = main value,
+// r[1..N] = reqs in metadata.reqs order (issue #857).
+function dashRecordReqIndex(typeId, fieldId) {
+    var meta = dashFindTypeMetadata(typeId);
+    if (!meta || !Array.isArray(meta.reqs)) return -1;
+    for (var i = 0; i < meta.reqs.length; i++) {
+        if (meta.reqs[i] && String(meta.reqs[i].id) === String(fieldId)) return i + 1;
+    }
+    return -1;
+}
+
+// Reads the dashboard label off a record returned by object/<type>?JSON_OBJ.
+// JSON_OBJ payloads expose values only via the positional `r` array — there
+// is no `rec['Метка']` key — so we resolve the index via cached metadata
+// and fall back to the last req when metadata is unavailable (the dashboard
+// schemas keep the label field as the trailing req on both 1010 and 155551).
+function dashRecordLabel(rec, typeId, labelFieldId) {
+    if (!rec) return '';
+    if (Object.prototype.hasOwnProperty.call(rec, 'Метка')) return rec['Метка'] || '';
+    if (!Array.isArray(rec.r)) return '';
+    var idx = dashRecordReqIndex(typeId, labelFieldId);
+    if (idx >= 0 && idx < rec.r.length) return rec.r[idx] || '';
+    return rec.r[rec.r.length - 1] || '';
+}
+
 function dashSumMatrixValues(rows) {
     var acc = 0, hasNumeric = false, vals = [], ids = [];
     rows.forEach(function(row) {
@@ -4926,10 +4972,12 @@ function dashMatrixValueSearchDone(json, ctx) {
     if (!Array.isArray(json)) json = [];
     var td = ctx.td, newVal = ctx.newVal;
 
-    // Filter results by label matching rules (а/б/в) using the row's dashboard label
+    // Filter results by label matching rules (а/б/в) using the row's dashboard label.
+    // The server-side filter is the literal F_155557=% / =!% per the issue spec, which
+    // narrows to "any label" / "no label" — we still need the substring rules client-side.
     var dashLabel = dashMatrixDashLabel(td);
     json = json.filter(function(rec) {
-        return dashMatrixLabelMatches(dashLabel, (rec && rec['Метка']) || '');
+        return dashMatrixLabelMatches(dashLabel, dashRecordLabel(rec, '155551', DASH_MATRIX_LABEL_FIELD_ID));
     });
 
     if (json.length === 0) {
@@ -5043,9 +5091,11 @@ window.dashValueSearchDone = function(json, ctx) {
     var fr = ctx.fr, to = ctx.to, rgHead = ctx.rgHead;
     var dashLabel = ctx.dashLabel || '';
 
-    // Filter results by label matching rules (а/б/в) using the row's dashboard label
+    // Filter results by label matching rules (а/б/в) using the row's dashboard label.
+    // The server-side filter is the literal F_155556=% / =!% per the issue spec, which
+    // narrows to "any label" / "no label" — we still need the substring rules client-side.
     json = (json || []).filter(function(rec) {
-        return dashMatrixLabelMatches(dashLabel, (rec && rec['Метка']) || '');
+        return dashMatrixLabelMatches(dashLabel, dashRecordLabel(rec, '1010', DASH_VALUE_LABEL_FIELD_ID));
     });
 
     if (json.length === 0) {
