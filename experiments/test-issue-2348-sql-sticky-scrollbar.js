@@ -64,13 +64,16 @@ const stickyScrollbar = {
 const stickyContent = {
     style: {}
 };
+let activeReport = report;
+let activeStickyScrollbar = stickyScrollbar;
+let activeStickyContent = stickyContent;
 
 const context = {
     Math,
     byId(id) {
-        if (id === 'ShowReport') return report;
-        if (id === 'ShowReportStickyScrollbar') return stickyScrollbar;
-        if (id === 'ShowReportStickyScrollbarContent') return stickyContent;
+        if (id === 'ShowReport') return activeReport;
+        if (id === 'ShowReportStickyScrollbar') return activeStickyScrollbar;
+        if (id === 'ShowReportStickyScrollbarContent') return activeStickyContent;
         return null;
     },
     window: {
@@ -84,7 +87,9 @@ const context = {
         }
     },
     showReportScrollbarAttached: false,
-    showReportScrollbarSyncing: false
+    showReportScrollbarSyncing: false,
+    showReportScrollbarReport: null,
+    showReportScrollbarSticky: null
 };
 
 vm.createContext(context);
@@ -142,6 +147,54 @@ assert(
 assert(
     listeners.window.some(listener => listener.type === 'resize'),
     'sticky scrollbar should update when the viewport is resized'
+);
+
+const replacementListeners = {
+    report: {},
+    scrollbar: {}
+};
+const replacementTable = {
+    scrollWidth: 1280
+};
+const replacementReport = {
+    clientWidth: 520,
+    scrollWidth: 1280,
+    scrollLeft: 0,
+    querySelector(selector) {
+        return selector === 'table' ? replacementTable : null;
+    },
+    getBoundingClientRect() {
+        return reportRect;
+    },
+    addEventListener(type, callback) {
+        replacementListeners.report[type] = callback;
+    }
+};
+const replacementStickyScrollbar = {
+    style: {},
+    scrollLeft: 0,
+    addEventListener(type, callback) {
+        replacementListeners.scrollbar[type] = callback;
+    }
+};
+const replacementStickyContent = {
+    style: {}
+};
+
+activeReport = replacementReport;
+activeStickyScrollbar = replacementStickyScrollbar;
+activeStickyContent = replacementStickyContent;
+context.attachShowReportScrollbar();
+
+assert(
+    typeof replacementListeners.scrollbar.scroll === 'function',
+    'reattaching after #one innerHTML replacement should bind the new sticky scrollbar'
+);
+replacementStickyScrollbar.scrollLeft = 520;
+replacementListeners.scrollbar.scroll();
+assert(
+    replacementReport.scrollLeft === 520,
+    'scrolling the replaced sticky scrollbar should move the replaced #ShowReport'
 );
 
 console.log('issue 2348 sql sticky scrollbar test passed');

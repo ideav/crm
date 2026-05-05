@@ -464,7 +464,7 @@ center:hover .add-id-for-col {
 </div>
 <script>
 var timer,lastK,froms,repList=byId('list').innerHTML;
-var showReportScrollbarAttached=false,showReportScrollbarSyncing=false;
+var showReportScrollbarAttached=false,showReportScrollbarSyncing=false,showReportScrollbarReport,showReportScrollbarSticky;
 function getFrom(json){
     var i,alias,right,f='',h='<option value=""> </option>';
     for(i in json.object){
@@ -1053,7 +1053,7 @@ function attachShowReportScrollbar(){
         scrollbar=byId('ShowReportStickyScrollbar');
     if(!report||!scrollbar)
         return;
-    if(showReportScrollbarAttached){
+    if(showReportScrollbarAttached&&showReportScrollbarReport===report&&showReportScrollbarSticky===scrollbar){
         scheduleShowReportScrollbarUpdate();
         return;
     }
@@ -1072,9 +1072,13 @@ function attachShowReportScrollbar(){
             showReportScrollbarSyncing=false;
         }
     });
-    window.addEventListener('scroll',handleShowReportScrollbarWindowScroll,true);
-    window.addEventListener('resize',scheduleShowReportScrollbarUpdate);
+    if(!showReportScrollbarAttached){
+        window.addEventListener('scroll',handleShowReportScrollbarWindowScroll,true);
+        window.addEventListener('resize',scheduleShowReportScrollbarUpdate);
+    }
     showReportScrollbarAttached=true;
+    showReportScrollbarReport=report;
+    showReportScrollbarSticky=scrollbar;
     scheduleShowReportScrollbarUpdate();
 }
 function drawCol(id, drawIdButton){
