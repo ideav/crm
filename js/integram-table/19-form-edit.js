@@ -693,6 +693,8 @@
                         if (!targetContent.dataset.loaded) {
                             await this.loadSubordinateTable(targetContent, arrId, parentRecordId, reqId);
                             targetContent.dataset.loaded = 'true';
+                        } else {
+                            this.attachSubordinateScrollListener(targetContent);
                         }
                     }
 
@@ -733,15 +735,15 @@
                 const hasMore = rows.length > pageSize;
                 const firstPageRows = hasMore ? rows.slice(0, pageSize) : rows;
 
-                // Render the subordinate table with first page data
-                this.renderSubordinateTable(container, metadata, firstPageRows, arrId, parentRecordId);
-
                 // Store pagination state on container for infinite scroll (issue #1640)
                 container._subordinateHasMore = hasMore;
                 container._subordinateLoadedCount = firstPageRows.length;
                 container._subordinateIsLoading = false;
                 container._subordinateArrIdForScroll = arrId;
                 container._subordinateParentRecordIdForScroll = parentRecordId;
+
+                // Render the subordinate table with first page data
+                this.renderSubordinateTable(container, metadata, firstPageRows, arrId, parentRecordId);
 
                 // Attach infinite scroll listener to the modal's scrollable body (issue #1640)
                 this.attachSubordinateScrollListener(container);
@@ -756,19 +758,38 @@
          * Attach scroll listener to the subordinate modal's .edit-form-body for infinite scroll (issue #1640).
          * Loads next page when user scrolls near the bottom. Shows Ajax spinner while loading.
          */
+        getSubordinateScrollElement(container) {
+            const modal = container && typeof container.closest === 'function'
+                ? container.closest('.edit-form-modal')
+                : null;
+            if (!modal || typeof modal.querySelector !== 'function') return null;
+            return modal.querySelector('.edit-form-body');
+        }
+
+        isSubordinateContainerActive(container) {
+            const tabContent = container && typeof container.closest === 'function'
+                ? container.closest('.edit-form-tab-content')
+                : null;
+
+            // Cell-opened .subordinate-modal tables are not inside tab content.
+            if (!tabContent) return true;
+            if (!tabContent.classList || typeof tabContent.classList.contains !== 'function') return true;
+            return tabContent.classList.contains('active');
+        }
+
         attachSubordinateScrollListener(container) {
-            // Find the scrollable modal body
-            const modal = container.closest('.edit-form-modal.subordinate-modal');
-            if (!modal) return;
-            const scrollEl = modal.querySelector('.edit-form-body');
+            const scrollEl = this.getSubordinateScrollElement(container);
             if (!scrollEl) return;
 
-            // Remove previous listener if re-attached (e.g. after re-render)
-            if (scrollEl._subordinateScrollListener) {
-                scrollEl.removeEventListener('scroll', scrollEl._subordinateScrollListener);
+            // Remove this container's previous listener if re-attached (e.g. after re-render).
+            // The same .edit-form-body can host several subordinate tabs, so listeners are
+            // tracked per container instead of replacing a shared scrollEl listener.
+            if (container._subordinateScrollElement && container._subordinateScrollListener) {
+                container._subordinateScrollElement.removeEventListener('scroll', container._subordinateScrollListener);
             }
 
             const scrollListener = () => {
+                if (!this.isSubordinateContainerActive(container)) return;
                 if (container._subordinateIsLoading || !container._subordinateHasMore) return;
 
                 const threshold = 200;
@@ -778,7 +799,8 @@
                 }
             };
 
-            scrollEl._subordinateScrollListener = scrollListener;
+            container._subordinateScrollElement = scrollEl;
+            container._subordinateScrollListener = scrollListener;
             scrollEl.addEventListener('scroll', scrollListener);
 
             // Check immediately in case the first page already fits the screen (issue #1640)
@@ -1545,11 +1567,14 @@
                 const hasMore = rows.length > pageSize;
                 const firstPageRows = hasMore ? rows.slice(0, pageSize) : rows;
 
-                this.renderSubordinateTable(container, metadata_new, firstPageRows, arrId, parentRecordId);
-
                 container._subordinateHasMore = hasMore;
                 container._subordinateLoadedCount = firstPageRows.length;
                 container._subordinateIsLoading = false;
+                container._subordinateArrIdForScroll = arrId;
+                container._subordinateParentRecordIdForScroll = parentRecordId;
+
+                this.renderSubordinateTable(container, metadata_new, firstPageRows, arrId, parentRecordId);
+                this.attachSubordinateScrollListener(container);
 
                 this.showToast(`Вставлено ${successCount} записей${errorCount > 0 ? `, ошибок: ${errorCount}` : ''}`, successCount > 0 ? 'success' : 'error');
             } catch (error) {
@@ -1949,4 +1974,3 @@
                 this.showToast(`Ошибка: ${ error.message }`, 'error');
             }
         }
-
