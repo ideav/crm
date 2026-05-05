@@ -1373,8 +1373,8 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .edit-icon {
     position: absolute;
-    bottom: 4px;
-    right: 4px;
+    bottom: 0;
+    right: 0;
     opacity: 0;
     transition: var(--md-transition);
     cursor: pointer;
