@@ -1627,14 +1627,14 @@ class IntegramCreateFormHelper {
             html += `</tr></thead><tbody>`;
 
             // Data rows
-            records.forEach(record => {
+            records.forEach((record, rowIndex) => {
                 const recordId = record.i;
                 const values = record.r || [];
                 html += `<tr data-row-id="${recordId}" style="cursor:pointer;">`;
 
                 // Main value column (clickable)
                 const mainValue = values[0] || '';
-                html += `<td class="subordinate-cell-clickable" data-record-id="${recordId}" data-type-id="${arrId}">${this.escapeHtml(mainValue)}</td>`;
+                html += `<td class="subordinate-cell-clickable subordinate-cell-with-row-number" data-row="${rowIndex}" data-record-id="${recordId}" data-type-id="${arrId}"><div class="cell-content-wrapper"><span>${this.escapeHtml(mainValue)}</span><span class="subordinate-row-number">${rowIndex + 1}</span></div></td>`;
 
                 // Requisite columns
                 let valIdx = 1;

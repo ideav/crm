@@ -860,7 +860,10 @@
                     const dbName = pathParts.length >= 2 ? pathParts[1] : '';
                     const searchTerm = container._subordinateSearchTerm || '';
 
-                    pageRows.forEach(row => {
+                    const startRowIndex = tbody.querySelectorAll('tr[data-row-id]').length;
+
+                    pageRows.forEach((row, rowOffset) => {
+                        const rowIndex = startRowIndex + rowOffset;
                         const rowId = row.i;
                         const values = row.r || [];
                         const tr = document.createElement('tr');
@@ -870,7 +873,8 @@
                         // Drag handle cell (issue #1617)
                         const dragTd = document.createElement('td');
                         dragTd.className = 'subordinate-drag-handle-td';
-                        dragTd.innerHTML = '<span class="subordinate-drag-handle" title="Перетащить строку"><i class="pi pi-equals"></i></span>';
+                        dragTd.dataset.row = rowIndex;
+                        dragTd.innerHTML = `<span class="subordinate-row-number">${ rowIndex + 1 }</span><span class="subordinate-drag-handle" title="Перетащить строку"><i class="pi pi-equals"></i></span>`;
                         tr.appendChild(dragTd);
 
                         // First column (main value)
@@ -1165,14 +1169,14 @@
                 html += `</tr></thead><tbody>`;
 
                 // Data rows
-                rows.forEach(row => {
+                rows.forEach((row, rowIndex) => {
                     const rowId = row.i;
                     const values = row.r || [];
 
                     html += `<tr data-row-id="${ rowId }" draggable="false">`;
 
                     // Drag handle cell (issue #1617)
-                    html += `<td class="subordinate-drag-handle-td"><span class="subordinate-drag-handle" title="Перетащить строку"><i class="pi pi-equals"></i></span></td>`;
+                    html += `<td class="subordinate-drag-handle-td" data-row="${ rowIndex }"><span class="subordinate-row-number">${ rowIndex + 1 }</span><span class="subordinate-drag-handle" title="Перетащить строку"><i class="pi pi-equals"></i></span></td>`;
 
                     // First column (main value) - clickable to edit
                     const mainValue = values[0] || '';
