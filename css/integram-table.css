@@ -447,6 +447,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 .integram-table td {
+    position: relative;
     padding: 10px;
     border-bottom: 1px solid var(--md-divider);
     border-left: none;
@@ -1392,8 +1393,8 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .subordinate-row-number {
     position: absolute;
-    bottom: 4px;
-    right: 4px;
+    top: 2px;
+    left: 2px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
