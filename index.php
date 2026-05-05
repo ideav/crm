@@ -7988,6 +7988,7 @@ $GLOBALS["GLOBAL_VARS"]["id"] = $id;
 
 #Exec_sql("Set transaction isolation level read uncommitted", "No lock");
 Exec_sql("SET SESSION optimizer_search_depth = 9", "Search depth");
+Exec_sql("SET SESSION sort_buffer_size = 33554432", "Search depth");
 
 switch($a)  # Check actions, which don't require authentication
 {
