@@ -4,8 +4,7 @@ const repRegex  = /^\[([A-Za-яЁё][A-Za-яЁё0-9 ]*)(\.[A-Za-яЁё][A-Za-я�
     , itemRegex = /^\[([A-Za-яЁё][ A-Za-яЁё0-9\(\)-]*)\]$/
     , exprRegex = /(СУММА)\(\[(.*?)\]:\[(.*?)\]\)/g
     , itemIdRegex = /\[\d+\]/g;
-const DASH_MATRIX_TYPE_ID = '155551'
-    , DASH_MATRIX_DATE_FIELD_ID = '155552'
+const DASH_MATRIX_DATE_FIELD_ID = '155552'
     , DASH_MATRIX_LINE_FIELD_ID = '155553'
     , DASH_MATRIX_COL_FIELD_ID = '155554';
 
@@ -4736,7 +4735,7 @@ function dashMatrixSheetInputValue(td, selector) {
 }
 
 function dashMatrixSearchUrl(td) {
-    var url = 'object/' + DASH_MATRIX_TYPE_ID + '?JSON_OBJ';
+    var url = 'object/155551?JSON_OBJ';
     if (dashMatrixUsesDates(td)) {
         var fr = dashMatrixSheetInputValue(td, '.dash-fr-input');
         var to = dashMatrixSheetInputValue(td, '.dash-to-input');
@@ -4760,7 +4759,7 @@ function dashMatrixListUrl(url) {
 }
 
 function dashMatrixCreateParams(td, newVal) {
-    var params = 't' + DASH_MATRIX_TYPE_ID + '=' + encodeURIComponent(newVal);
+    var params = 't155551=' + encodeURIComponent(newVal);
     if (dashMatrixUsesDates(td))
         params += '&t' + DASH_MATRIX_DATE_FIELD_ID + '=' + encodeURIComponent(dashTodayYMD());
     params += '&t' + DASH_MATRIX_LINE_FIELD_ID + '=' + encodeURIComponent(td.dataset.matrixLine || '');
@@ -4773,7 +4772,7 @@ function dashSaveMatrixExisting(recId, td, newVal) {
         newApi('POST', '_m_del/' + recId + '?JSON', 'dashMatrixValueSaveDone', '', { td: td, newVal: newVal, recId: recId });
     else
         newApi('POST', '_m_save/' + recId + '?JSON', 'dashMatrixValueSaveDone',
-            't' + DASH_MATRIX_TYPE_ID + '=' + encodeURIComponent(newVal), { td: td, newVal: newVal, recId: recId });
+            't155551=' + encodeURIComponent(newVal), { td: td, newVal: newVal, recId: recId });
 }
 
 function dashSaveMatrixValue(td, newVal, originalVal) {
@@ -4797,7 +4796,7 @@ function dashMatrixValueSearchDone(json, ctx) {
             td.style.backgroundColor = '';
             return;
         }
-        newApi('POST', '_m_new/' + DASH_MATRIX_TYPE_ID + '?JSON&up=1', 'dashMatrixValueSaveDone',
+        newApi('POST', '_m_new/155551?JSON&up=1', 'dashMatrixValueSaveDone',
             dashMatrixCreateParams(td, newVal), { td: td, newVal: newVal, recId: '' });
     } else if (json.length === 1) {
         dashSaveMatrixExisting(json[0].i, td, newVal);
@@ -4805,7 +4804,7 @@ function dashMatrixValueSearchDone(json, ctx) {
         td.style.backgroundColor = '';
         dashShowMultivalModal(json, dashMatrixListUrl(ctx.searchUrl || dashMatrixSearchUrl(td)), td, newVal, {
             saveCallback: 'dashMatrixValueSaveDone',
-            saveParam: 't' + DASH_MATRIX_TYPE_ID
+            saveParam: 't155551'
         }, ctx.originalVal);
     }
 }
