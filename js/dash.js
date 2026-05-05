@@ -4877,7 +4877,9 @@ function dashMatrixSearchUrl(td) {
     url += '&F_' + DASH_MATRIX_LINE_FIELD_ID + '=' + encodeURIComponent(td.dataset.matrixLine || '');
     url += '&F_' + DASH_MATRIX_COL_FIELD_ID + '=' + encodeURIComponent(td.dataset.matrixCol || '');
     var dashLabel = dashMatrixDashLabel(td);
-    url += '&F_' + DASH_MATRIX_LABEL_FIELD_ID + '=' + (dashLabel ? '%' : '!%');
+    // Match the actual label substring server-side; JSON_OBJ doesn't expose named columns,
+    // so the previous client-side post-filter on rec['Метка'] never matched and is removed.
+    url += '&F_' + DASH_MATRIX_LABEL_FIELD_ID + '=' + (dashLabel ? '%' + encodeURIComponent(dashLabel) + '%' : '!%');
     return url;
 }
 
@@ -4925,12 +4927,6 @@ function dashSaveMatrixValue(td, newVal, originalVal) {
 function dashMatrixValueSearchDone(json, ctx) {
     if (!Array.isArray(json)) json = [];
     var td = ctx.td, newVal = ctx.newVal;
-
-    // Filter results by label matching rules (а/б/в) using the row's dashboard label
-    var dashLabel = dashMatrixDashLabel(td);
-    json = json.filter(function(rec) {
-        return dashMatrixLabelMatches(dashLabel, (rec && rec['Метка']) || '');
-    });
 
     if (json.length === 0) {
         if (newVal === '') {
@@ -5013,7 +5009,9 @@ function dashValueSearchUrl(td) {
     if (valueItemId) url += '&FR_1042=@' + encodeURIComponent(valueItemId);
     else url += '&FR_1042=' + encodeURIComponent(itemRef);
     if (rgHead) url += '&F_1104=' + encodeURIComponent(rgHead);
-    url += '&F_' + DASH_VALUE_LABEL_FIELD_ID + '=' + (dashLabel ? '%' : '!%');
+    // Match the actual label substring server-side; JSON_OBJ doesn't expose named columns,
+    // so the previous client-side post-filter on rec['Метка'] never matched and is removed.
+    url += '&F_' + DASH_VALUE_LABEL_FIELD_ID + '=' + (dashLabel ? '%' + encodeURIComponent(dashLabel) + '%' : '!%');
     return url;
 }
 
@@ -5042,11 +5040,6 @@ window.dashValueSearchDone = function(json, ctx) {
     var td = ctx.td, newVal = ctx.newVal, itemRef = ctx.itemRef;
     var fr = ctx.fr, to = ctx.to, rgHead = ctx.rgHead;
     var dashLabel = ctx.dashLabel || '';
-
-    // Filter results by label matching rules (а/б/в) using the row's dashboard label
-    json = (json || []).filter(function(rec) {
-        return dashMatrixLabelMatches(dashLabel, (rec && rec['Метка']) || '');
-    });
 
     if (json.length === 0) {
         // Delete: nothing to do if value is already empty
