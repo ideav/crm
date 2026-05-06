@@ -2561,7 +2561,9 @@ function dashApplyPanelMaxWidth(panelEl) {
 // Panel-wide chart settings (applied across all visualizations of the panel
 // where each chart property supports them).
 
-var DASH_GENERAL_AXIS_FONT_SIZES = [10, 12, 14, 16];
+var DASH_GENERAL_AXIS_FONT_SIZES = [8, 9, 10, 12, 14, 16];
+var DASH_GENERAL_LEGEND_FONT_SIZES = [8, 9, 10, 12, 14, 16];
+var DASH_GENERAL_LEGEND_POSITIONS = ['top', 'bottom', 'left', 'right'];
 var DASH_GENERAL_X_ROTATIONS = [0, 45, 90];
 var DASH_GENERAL_TOOLTIP_DECIMALS = [0, 1, 2, 3];
 
@@ -2602,6 +2604,12 @@ function dashNormalizeGeneralSettings(general) {
 
     val = dashNormalizeEnum(general.axisFontSize, DASH_GENERAL_AXIS_FONT_SIZES);
     if (val !== null) { result.axisFontSize = val; has = true; }
+
+    val = dashNormalizeEnum(general.legendFontSize, DASH_GENERAL_LEGEND_FONT_SIZES);
+    if (val !== null) { result.legendFontSize = val; has = true; }
+
+    val = dashNormalizeEnum(general.legendPosition, DASH_GENERAL_LEGEND_POSITIONS);
+    if (val !== null) { result.legendPosition = val; has = true; }
 
     val = dashNormalizePositiveNumber(general.yMaxTicksLimit, 100);
     if (val !== null) { result.yMaxTicksLimit = Math.round(val); has = true; }
@@ -2710,6 +2718,17 @@ function dashApplyGeneralChartOptions(options, vizType, general) {
         if (general.xLabelAutoSkip) {
             xAxis.ticks = xAxis.ticks || {};
             xAxis.ticks.autoSkip = true;
+        }
+    }
+
+    if (typeof general.legendFontSize === 'number' || typeof general.legendPosition === 'string') {
+        plugins.legend = plugins.legend || {};
+        if (typeof general.legendPosition === 'string') {
+            plugins.legend.position = general.legendPosition;
+        }
+        if (typeof general.legendFontSize === 'number') {
+            plugins.legend.labels = plugins.legend.labels || {};
+            plugins.legend.labels.font = Object.assign({}, plugins.legend.labels.font || {}, { size: general.legendFontSize });
         }
     }
 
@@ -4404,6 +4423,9 @@ function dashBuildSelectOptions(values, selected, valueFormatter) {
 function dashBuildPanelGeneralHtml(general) {
     var g = general || {}
         , fontOptions = dashBuildSelectOptions(DASH_GENERAL_AXIS_FONT_SIZES, g.axisFontSize, function(v) { return v + ' px'; })
+        , legendFontOptions = dashBuildSelectOptions(DASH_GENERAL_LEGEND_FONT_SIZES, g.legendFontSize, function(v) { return v + ' px'; })
+        , legendPositionLabels = { top: 'Сверху', bottom: 'Снизу', left: 'Слева', right: 'Справа' }
+        , legendPositionOptions = dashBuildSelectOptions(DASH_GENERAL_LEGEND_POSITIONS, g.legendPosition, function(v) { return legendPositionLabels[v] || v; })
         , rotationOptions = dashBuildSelectOptions(DASH_GENERAL_X_ROTATIONS, g.xLabelRotation, function(v) { return v + '°'; })
         , decimalOptions = dashBuildSelectOptions(DASH_GENERAL_TOOLTIP_DECIMALS, g.tooltipDecimals);
     return '<div class="dash-panel-general-group">'
@@ -4416,6 +4438,15 @@ function dashBuildPanelGeneralHtml(general) {
         + '<div class="dash-viz-size-title">Размер шрифта подписей осей</div>'
         + '<div class="dash-viz-field-row"><label>Размер</label>'
         + '<select name="generalAxisFontSize"><option value="">(по умолчанию)</option>' + fontOptions + '</select>'
+        + '</div>'
+        + '</div>'
+        + '<div class="dash-panel-general-group">'
+        + '<div class="dash-viz-size-title">Легенда</div>'
+        + '<div class="dash-viz-field-row"><label>Положение</label>'
+        + '<select name="generalLegendPosition"><option value="">(по умолчанию)</option>' + legendPositionOptions + '</select>'
+        + '</div>'
+        + '<div class="dash-viz-field-row"><label>Размер шрифта</label>'
+        + '<select name="generalLegendFontSize"><option value="">(по умолчанию)</option>' + legendFontOptions + '</select>'
         + '</div>'
         + '</div>'
         + '<div class="dash-panel-general-group">'
@@ -4469,6 +4500,12 @@ function dashCollectPanelGeneral() {
 
     val = dashNormalizeEnum(read('generalAxisFontSize'), DASH_GENERAL_AXIS_FONT_SIZES);
     if (val !== null) { result.axisFontSize = val; has = true; }
+
+    val = dashNormalizeEnum(read('generalLegendFontSize'), DASH_GENERAL_LEGEND_FONT_SIZES);
+    if (val !== null) { result.legendFontSize = val; has = true; }
+
+    val = dashNormalizeEnum(read('generalLegendPosition'), DASH_GENERAL_LEGEND_POSITIONS);
+    if (val !== null) { result.legendPosition = val; has = true; }
 
     val = dashNormalizePositiveNumber(read('generalYMaxTicksLimit'), 100);
     if (val !== null) { result.yMaxTicksLimit = Math.round(val); has = true; }
