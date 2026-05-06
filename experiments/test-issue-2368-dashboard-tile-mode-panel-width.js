@@ -111,6 +111,7 @@ assert(
 
 const code = `
 var DASH_CHART_RESIZE_COOKIE_MAX_AGE = 31536000;
+var DASH_TILE_PANEL_MIN_WIDTH = 200;
 var dashRecordId = 'dash-2368';
 var dashCurrentId = null;
 var scheduledRoots = [];
@@ -122,13 +123,18 @@ ${extractFunction('dashCookieRemove')}
 ${extractFunction('dashCookieNamePart')}
 ${extractFunction('dashSheetTileModeCookieName')}
 ${extractFunction('dashSheetTilePanelWidthCookieName')}
+${extractFunction('dashSheetTilePanelWidthsCookieName')}
 ${extractFunction('dashReadSheetTilePanelWidth')}
 ${extractFunction('dashWriteSheetTilePanelWidth')}
 ${extractFunction('dashRemoveSheetTilePanelWidth')}
+${extractFunction('dashReadSheetTilePanelWidths')}
+${extractFunction('dashWriteSheetTilePanelWidths')}
+${extractFunction('dashRemoveSheetTilePanelWidths')}
 ${extractFunction('dashReadSheetTileMode')}
 ${extractFunction('dashSetSheetTileModeButtonState')}
 ${extractFunction('dashMeasureSheetTilePanelMinWidth')}
 ${extractFunction('dashApplySheetTilePanelMinWidth')}
+${extractFunction('dashApplySheetTileColumnWidths')}
 ${extractFunction('dashPrepareSheetTileMode')}
 ${extractFunction('dashClearSheetTileMode')}
 ${extractFunction('dashEnsureSheetTilePanelResizeHandles')}

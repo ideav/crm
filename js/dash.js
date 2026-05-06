@@ -2747,6 +2747,14 @@ function dashSheetTilePanelWidthCookieName(sheetEl) {
         + dashCookieNamePart(sheetId);
 }
 
+function dashSheetTilePanelWidthsCookieName(sheetEl) {
+    var dashId = dashRecordId || dashCurrentId || 'dash'
+        , sheetId = sheetEl && sheetEl.id ? sheetEl.id : 'sheet';
+    return 'dash_tile_panel_widths_'
+        + dashCookieNamePart(dashId) + '_'
+        + dashCookieNamePart(sheetId);
+}
+
 function dashReadSheetTilePanelWidth(sheetEl) {
     var raw = dashCookieGet(dashSheetTilePanelWidthCookieName(sheetEl))
         , value;
@@ -2764,6 +2772,38 @@ function dashWriteSheetTilePanelWidth(sheetEl, width) {
 function dashRemoveSheetTilePanelWidth(sheetEl) {
     if (!sheetEl) return;
     dashCookieRemove(dashSheetTilePanelWidthCookieName(sheetEl));
+}
+
+function dashReadSheetTilePanelWidths(sheetEl) {
+    var raw = dashCookieGet(dashSheetTilePanelWidthsCookieName(sheetEl))
+        , parts, widths = [];
+    if (!raw) return widths;
+    parts = String(raw).split(',');
+    parts.forEach(function(token) {
+        var v = parseInt(token, 10);
+        widths.push(isFinite(v) && v > 0 ? v : 0);
+    });
+    while (widths.length && !widths[widths.length - 1]) widths.pop();
+    return widths;
+}
+
+function dashWriteSheetTilePanelWidths(sheetEl, widths) {
+    var serialized;
+    if (!sheetEl) return;
+    if (!widths || !widths.length) {
+        dashCookieRemove(dashSheetTilePanelWidthsCookieName(sheetEl));
+        return;
+    }
+    serialized = widths.map(function(w) {
+        return String(Math.round(w > 0 ? w : 0));
+    }).join(',');
+    dashCookieSet(dashSheetTilePanelWidthsCookieName(sheetEl), serialized,
+        DASH_CHART_RESIZE_COOKIE_MAX_AGE);
+}
+
+function dashRemoveSheetTilePanelWidths(sheetEl) {
+    if (!sheetEl) return;
+    dashCookieRemove(dashSheetTilePanelWidthsCookieName(sheetEl));
 }
 
 function dashReadSheetTileMode(sheetEl) {
@@ -2809,19 +2849,80 @@ function dashApplySheetTilePanelMinWidth(sheetEl, width) {
         sheetEl.style['--dash-tile-panel-min-width'] = width + 'px';
 }
 
+function dashApplySheetTileColumnWidths(sheetEl, widths) {
+    var parts, value;
+    if (!sheetEl || !sheetEl.style) return;
+    if (!widths || !widths.length) {
+        if (sheetEl.style.removeProperty) sheetEl.style.removeProperty('grid-template-columns');
+        else sheetEl.style['grid-template-columns'] = '';
+        return;
+    }
+    parts = widths.map(function(w) {
+        return Math.round(w > 0 ? w : DASH_TILE_PANEL_MIN_WIDTH) + 'px';
+    });
+    parts.push('repeat(auto-fit, minmax(min(100%, ' + DASH_TILE_PANEL_MIN_WIDTH + 'px), 1fr))');
+    value = parts.join(' ');
+    if (sheetEl.style.setProperty) sheetEl.style.setProperty('grid-template-columns', value);
+    else sheetEl.style['grid-template-columns'] = value;
+}
+
+function dashGetSheetGap(sheetEl) {
+    var cs, gap;
+    if (!sheetEl || typeof window === 'undefined' || !window.getComputedStyle) return 0;
+    cs = window.getComputedStyle(sheetEl);
+    gap = parseFloat(cs.columnGap || cs.gap || 0);
+    return isFinite(gap) ? gap : 0;
+}
+
+function dashGetSheetResolvedColumnTracks(sheetEl) {
+    var cs, value, tokens;
+    if (!sheetEl || typeof window === 'undefined' || !window.getComputedStyle) return [];
+    cs = window.getComputedStyle(sheetEl);
+    value = cs.gridTemplateColumns || '';
+    if (!value || value === 'none') return [];
+    tokens = String(value).trim().split(/\s+/);
+    return tokens.map(function(t) {
+        var v = parseFloat(t);
+        return isFinite(v) ? v : 0;
+    });
+}
+
+function dashFindPanelColumnIndex(sheetEl, panelEl) {
+    var sheetRect, panelRect, tracks, gap, x, cumulative, i;
+    if (!sheetEl || !panelEl) return 0;
+    sheetRect = sheetEl.getBoundingClientRect ? sheetEl.getBoundingClientRect() : null;
+    panelRect = panelEl.getBoundingClientRect ? panelEl.getBoundingClientRect() : null;
+    if (!sheetRect || !panelRect) return 0;
+    tracks = dashGetSheetResolvedColumnTracks(sheetEl);
+    if (!tracks.length) return 0;
+    gap = dashGetSheetGap(sheetEl);
+    x = panelRect.left - sheetRect.left + 1;
+    cumulative = 0;
+    for (i = 0; i < tracks.length; i++) {
+        cumulative += tracks[i];
+        if (x <= cumulative + gap / 2) return i;
+        cumulative += gap;
+    }
+    return tracks.length - 1;
+}
+
 function dashPrepareSheetTileMode(sheetEl) {
-    var savedWidth = dashReadSheetTilePanelWidth(sheetEl)
+    var savedWidths = dashReadSheetTilePanelWidths(sheetEl)
+        , savedWidth = dashReadSheetTilePanelWidth(sheetEl)
         , width = savedWidth > 0 ? savedWidth : dashMeasureSheetTilePanelMinWidth(sheetEl);
     if (!sheetEl || !sheetEl.style) return width;
     if (width > 0)
         dashApplySheetTilePanelMinWidth(sheetEl, width);
-    else
+    if (savedWidths.length)
+        dashApplySheetTileColumnWidths(sheetEl, savedWidths);
+    else if (!(width > 0))
         dashClearSheetTileMode(sheetEl);
     return width;
 }
 
 function dashClearSheetTileMode(sheetEl) {
     dashApplySheetTilePanelMinWidth(sheetEl, 0);
+    dashApplySheetTileColumnWidths(sheetEl, null);
 }
 
 function dashEnsureSheetTilePanelResizeHandles(sheetEl) {
@@ -2845,6 +2946,7 @@ function dashApplySheetTileMode(sheetEl, enabled, persist) {
         else {
             dashCookieRemove(dashSheetTileModeCookieName(sheetEl));
             dashRemoveSheetTilePanelWidth(sheetEl);
+            dashRemoveSheetTilePanelWidths(sheetEl);
         }
     }
     if (typeof dashScheduleVisibleVizRefresh === 'function')
@@ -3171,7 +3273,8 @@ function dashStartTilePanelResize(e) {
         , sheetEl = panelEl && panelEl.closest ? panelEl.closest('.f-sheet') : null
         , panelRect = panelEl && panelEl.getBoundingClientRect ? panelEl.getBoundingClientRect() : null
         , sheetRect = sheetEl && sheetEl.getBoundingClientRect ? sheetEl.getBoundingClientRect() : null
-        , startX, startWidth, maxWidth, latestWidth = null;
+        , startX, startWidth, maxWidth, columnIndex
+        , savedWidths, startWidths, workingWidths, tracks, latestWidths = null;
     if (e.button !== undefined && e.button !== 0) return;
     if (!sheetEl || !sheetEl.classList || !sheetEl.classList.contains('dash-tile-mode')) return;
     if (!panelEl || !panelRect) return;
@@ -3180,14 +3283,33 @@ function dashStartTilePanelResize(e) {
     startWidth = panelRect.width || panelEl.offsetWidth || DASH_TILE_PANEL_MIN_WIDTH;
     maxWidth = sheetRect && sheetRect.width ? Math.round(sheetRect.width)
         : (typeof window !== 'undefined' && window.innerWidth ? window.innerWidth : 1200);
+    columnIndex = dashFindPanelColumnIndex(sheetEl, panelEl);
+    tracks = dashGetSheetResolvedColumnTracks(sheetEl);
+    savedWidths = dashReadSheetTilePanelWidths(sheetEl);
+    startWidths = [];
+    (function() {
+        var i, baseLen = Math.max(savedWidths.length, columnIndex + 1, tracks.length || 0);
+        for (i = 0; i < baseLen; i++) {
+            if (savedWidths[i] > 0) startWidths.push(Math.round(savedWidths[i]));
+            else if (tracks[i] > 0) startWidths.push(Math.round(tracks[i]));
+            else startWidths.push(0);
+        }
+    })();
+    if (!startWidths[columnIndex] || startWidths[columnIndex] <= 0)
+        startWidths[columnIndex] = Math.round(startWidth);
 
     function onMove(moveEvent) {
-        var delta, nextWidth;
+        var delta, nextWidth, i;
         moveEvent.preventDefault();
         delta = moveEvent.clientX - startX;
         nextWidth = Math.max(DASH_TILE_PANEL_MIN_WIDTH, Math.min(maxWidth, Math.round(startWidth + delta)));
-        latestWidth = nextWidth;
-        dashApplySheetTilePanelMinWidth(sheetEl, nextWidth);
+        workingWidths = [];
+        for (i = 0; i <= columnIndex; i++) {
+            if (i === columnIndex) workingWidths.push(nextWidth);
+            else workingWidths.push(startWidths[i] > 0 ? startWidths[i] : Math.round(tracks[i] || DASH_TILE_PANEL_MIN_WIDTH));
+        }
+        latestWidths = workingWidths.slice();
+        dashApplySheetTileColumnWidths(sheetEl, workingWidths);
     }
 
     function onUp(upEvent) {
@@ -3196,7 +3318,7 @@ function dashStartTilePanelResize(e) {
         document.removeEventListener('mouseup', onUp);
         sheetEl.classList.remove('f-sheet--tile-resizing');
         if (document.body && document.body.classList) document.body.classList.remove('dash-tile-resizing');
-        if (latestWidth) dashWriteSheetTilePanelWidth(sheetEl, latestWidth);
+        if (latestWidths && latestWidths.length) dashWriteSheetTilePanelWidths(sheetEl, latestWidths);
     }
 
     sheetEl.classList.add('f-sheet--tile-resizing');
