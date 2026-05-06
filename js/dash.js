@@ -3988,7 +3988,7 @@ function dashBuildFieldMapHtml(vizType, fieldMap, panelEl) {
             + '<option value="combo"' + (barMode === 'combo' ? ' selected' : '') + '>Комбинация</option>'
             + '<option value="pairedStacked"' + (barMode === 'pairedStacked' ? ' selected' : '') + '>Пары со стеком</option>'
             + '</select></div>'
-            + sel('stackField', 'Стек (план/факт)', fm.stackField || '');
+            + sel('stackField', 'Стек', fm.stackField || '');
     }
     if (vizType === 'area') {
         return dashBuildAreaModeHtml(fm)
@@ -4043,12 +4043,12 @@ function dashBuildReportFieldMapHtml(vizType, fieldMap, report) {
             + '<option value="grouped"' + (barMode === 'grouped' ? ' selected' : '') + '>Группы столбиков</option>'
             + '<option value="stacked"' + (barMode === 'stacked' ? ' selected' : '') + '>Сегменты</option>'
             + '<option value="combo"' + (barMode === 'combo' ? ' selected' : '') + '>Комбинация</option>'
-            + '<option value="pairedStacked"' + (barMode === 'pairedStacked' ? ' selected' : '') + '>Пары со стеком (план/факт + сегменты)</option>'
+            + '<option value="pairedStacked"' + (barMode === 'pairedStacked' ? ' selected' : '') + '>Пары со стеком</option>'
             + '</select></div>'
             + sel('labelField', 'Ось X', fm.labelField || fm.xField || '', dashReportColumnIsDimension)
             + sel('valueField', 'Значение', fm.valueField || '', dashReportColumnIsMeasure)
             + sel('seriesField', 'Серии (цвет)', fm.seriesField || '', dashReportColumnIsDimension)
-            + sel('stackField', 'Стек (план/факт)', fm.stackField || '', dashReportColumnIsDimension);
+            + sel('stackField', 'Стек', fm.stackField || '', dashReportColumnIsDimension);
     }
     if (vizType === 'line') {
         return sel('labelField', 'Ось X', fm.labelField || fm.xField || '', dashReportColumnIsDimension)
