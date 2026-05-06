@@ -40,7 +40,7 @@
 #dash-model .f-sheet.dash-tile-mode {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, max(30rem, var(--dash-tile-panel-min-width, 30rem))), 1fr));
-    align-items: stretch;
+    align-items: start;
 }
 .dash-filter-bar {
     flex-basis: 100%;
@@ -52,21 +52,15 @@
 #dash-model .f-sheet.dash-tile-mode .f-panel {
     display: flex;
     flex-direction: column;
-    align-self: stretch;
+    align-self: start;
     width: 100% !important;
     max-width: none !important;
     padding-right: 0;
 }
 #dash-model .f-sheet.dash-tile-mode .f-panel-content {
     display: flex;
-    flex: 1 1 auto;
     flex-direction: column;
     min-height: 0;
-}
-#dash-model .f-sheet.dash-tile-mode .f-table-wrap,
-#dash-model .f-sheet.dash-tile-mode .f-chart-wrap,
-#dash-model .f-sheet.dash-tile-mode .f-pivot-wrap {
-    flex: 1 1 auto;
 }
 #dash-model .f-sheet.dash-tile-mode .f-table-wrap {
     width: 100%;
@@ -74,7 +68,6 @@
 #dash-model .f-sheet.dash-tile-mode .f-table-wrap > table {
     /* table-layout: fixed; */
     width: 100% !important;
-    height: 100%;
     white-space: normal;
 }
 #dash-model .f-sheet.dash-tile-mode .f-table-wrap th,
