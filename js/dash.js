@@ -2557,6 +2557,186 @@ function dashApplyPanelMaxWidth(panelEl) {
     panelEl.style.maxWidth = dashCombineMaxWidthCss(vizWidthCss, panelMaxWidthCss);
 }
 
+// ─── General panel chart settings ───────────────────────────────────────────
+// Panel-wide chart settings (applied across all visualizations of the panel
+// where each chart property supports them).
+
+var DASH_GENERAL_AXIS_FONT_SIZES = [10, 12, 14, 16];
+var DASH_GENERAL_X_ROTATIONS = [0, 45, 90];
+var DASH_GENERAL_TOOLTIP_DECIMALS = [0, 1, 2, 3];
+
+function dashNormalizePositiveNumber(value, max) {
+    var raw = String(value === undefined || value === null ? '' : value).trim().replace(',', '.')
+        , n;
+    if (!raw || !/^\d+(\.\d+)?$/.test(raw)) return null;
+    n = parseFloat(raw);
+    if (!isFinite(n) || n <= 0) return null;
+    if (max !== undefined && n > max) return null;
+    return n;
+}
+
+function dashNormalizeIntegerInRange(value, min, max) {
+    var raw = String(value === undefined || value === null ? '' : value).trim()
+        , n;
+    if (!raw || !/^-?\d+$/.test(raw)) return null;
+    n = parseInt(raw, 10);
+    if (!isFinite(n)) return null;
+    if (min !== undefined && n < min) return null;
+    if (max !== undefined && n > max) return null;
+    return n;
+}
+
+function dashNormalizeEnum(value, allowed) {
+    var n;
+    if (value === undefined || value === null || value === '') return null;
+    n = (typeof value === 'number') ? value : (/^-?\d+$/.test(String(value).trim()) ? parseInt(String(value).trim(), 10) : value);
+    return allowed.indexOf(n) === -1 ? null : n;
+}
+
+function dashNormalizeGeneralSettings(general) {
+    var result = {}, has = false, val;
+    if (!general || typeof general !== 'object') return null;
+
+    val = dashNormalizePositiveNumber(general.barThickness, 200);
+    if (val !== null) { result.barThickness = val; has = true; }
+
+    val = dashNormalizeEnum(general.axisFontSize, DASH_GENERAL_AXIS_FONT_SIZES);
+    if (val !== null) { result.axisFontSize = val; has = true; }
+
+    val = dashNormalizePositiveNumber(general.yMaxTicksLimit, 100);
+    if (val !== null) { result.yMaxTicksLimit = Math.round(val); has = true; }
+
+    val = dashNormalizePositiveNumber(general.yStepSize);
+    if (val !== null) { result.yStepSize = val; has = true; }
+
+    val = dashNormalizeEnum(general.xLabelRotation, DASH_GENERAL_X_ROTATIONS);
+    if (val !== null) { result.xLabelRotation = val; has = true; }
+
+    if (general.xLabelAutoSkip === true || general.xLabelAutoSkip === 'true' || general.xLabelAutoSkip === 1 || general.xLabelAutoSkip === '1') {
+        result.xLabelAutoSkip = true;
+        has = true;
+    }
+
+    val = dashNormalizeEnum(general.tooltipDecimals, DASH_GENERAL_TOOLTIP_DECIMALS);
+    if (val !== null) { result.tooltipDecimals = val; has = true; }
+
+    if (typeof general.tooltipPrefix === 'string' && general.tooltipPrefix !== '') {
+        result.tooltipPrefix = general.tooltipPrefix.slice(0, 16);
+        has = true;
+    }
+    if (typeof general.tooltipSuffix === 'string' && general.tooltipSuffix !== '') {
+        result.tooltipSuffix = general.tooltipSuffix.slice(0, 16);
+        has = true;
+    }
+
+    return has ? result : null;
+}
+
+function dashGeneralSettingsFromSettings(settings) {
+    var list = settings ? (Array.isArray(settings) ? settings : [settings]) : []
+        , found = null;
+    list.forEach(function(entry) {
+        if (!found && entry && entry.general)
+            found = dashNormalizeGeneralSettings(entry.general);
+    });
+    return found;
+}
+
+function dashSetGeneralSettingsInSettings(settings, general) {
+    var list = settings ? (Array.isArray(settings) ? settings.slice() : [settings]) : []
+        , normalized = dashNormalizeGeneralSettings(general)
+        , result = [];
+    list.forEach(function(entry) {
+        if (entry && entry.general) return;
+        result.push(entry);
+    });
+    if (normalized) result.push({ general: normalized });
+    return result;
+}
+
+function dashFormatTooltipValue(value, general) {
+    var n = parseFloat(value)
+        , decimals
+        , prefix
+        , suffix
+        , str;
+    if (!general) return null;
+    decimals = (typeof general.tooltipDecimals === 'number') ? general.tooltipDecimals : null;
+    prefix = general.tooltipPrefix || '';
+    suffix = general.tooltipSuffix || '';
+    if (!isFinite(n)) {
+        str = String(value === undefined || value === null ? '' : value);
+    } else if (decimals !== null) {
+        str = n.toFixed(decimals);
+    } else {
+        str = String(n);
+    }
+    return prefix + str + suffix;
+}
+
+function dashApplyGeneralChartOptions(options, vizType, general) {
+    if (!general) return options || {};
+    var opts = options || {}
+        , scales = opts.scales || (opts.scales = {})
+        , plugins = opts.plugins || (opts.plugins = {})
+        , supportsAxes = vizType === 'bar' || vizType === 'line' || vizType === 'area' || vizType === 'bubble'
+        , xAxis, yAxis;
+
+    if (supportsAxes) {
+        xAxis = scales.x || (scales.x = {});
+        yAxis = scales.y || (scales.y = {});
+
+        if (typeof general.axisFontSize === 'number') {
+            xAxis.ticks = xAxis.ticks || {};
+            xAxis.ticks.font = Object.assign({}, xAxis.ticks.font || {}, { size: general.axisFontSize });
+            yAxis.ticks = yAxis.ticks || {};
+            yAxis.ticks.font = Object.assign({}, yAxis.ticks.font || {}, { size: general.axisFontSize });
+        }
+
+        if (typeof general.yMaxTicksLimit === 'number') {
+            yAxis.ticks = yAxis.ticks || {};
+            yAxis.ticks.maxTicksLimit = general.yMaxTicksLimit;
+        }
+        if (typeof general.yStepSize === 'number') {
+            yAxis.ticks = yAxis.ticks || {};
+            yAxis.ticks.stepSize = general.yStepSize;
+        }
+
+        if (typeof general.xLabelRotation === 'number') {
+            xAxis.ticks = xAxis.ticks || {};
+            xAxis.ticks.maxRotation = general.xLabelRotation;
+            xAxis.ticks.minRotation = general.xLabelRotation;
+        }
+        if (general.xLabelAutoSkip) {
+            xAxis.ticks = xAxis.ticks || {};
+            xAxis.ticks.autoSkip = true;
+        }
+    }
+
+    if (general.tooltipDecimals !== undefined || general.tooltipPrefix || general.tooltipSuffix) {
+        plugins.tooltip = plugins.tooltip || {};
+        plugins.tooltip.callbacks = plugins.tooltip.callbacks || {};
+        plugins.tooltip.callbacks.label = function(context) {
+            var raw = context && context.parsed !== undefined ? context.parsed : (context ? context.raw : null)
+                , value = (raw && typeof raw === 'object') ? (raw.y !== undefined ? raw.y : (raw.value !== undefined ? raw.value : raw)) : raw
+                , label = context && context.dataset && context.dataset.label ? context.dataset.label + ': ' : ''
+                , formatted = dashFormatTooltipValue(value, general);
+            return label + (formatted === null ? value : formatted);
+        };
+    }
+
+    return opts;
+}
+
+function dashApplyGeneralBarDataset(dataset, general) {
+    if (!general || !dataset) return dataset;
+    if (typeof general.barThickness === 'number') {
+        dataset.barThickness = general.barThickness;
+        dataset.maxBarThickness = general.barThickness;
+    }
+    return dataset;
+}
+
 function dashResetVizSizeStyles(el) {
     if (!el || !el.style) return;
     el.style.flex = '';
@@ -3386,6 +3566,8 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
     dashEnsureChartJs(function() {
         var labels = data.labels;
         var chartType, chartDatasets, options = {};
+        var modelData = dashModelData[panelEl.id] || {};
+        var general = dashGeneralSettingsFromSettings(modelData.settings);
 
         if (dashElementHiddenForRender(panelEl)) {
             dashQueueHiddenVizRender(panelEl, vizType, fieldMap, vizConfig);
@@ -3425,12 +3607,12 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
                 chartDatasets = data.datasets.map(function(ds) {
                     var key = ds._series == null ? ds.label : ds._series;
                     var color = CHART_COLORS[seriesIndex[key] % CHART_COLORS.length];
-                    return { label: ds.label, data: ds.data, backgroundColor: color, stack: String(ds._stack || 'default') };
+                    return dashApplyGeneralBarDataset({ label: ds.label, data: ds.data, backgroundColor: color, stack: String(ds._stack || 'default') }, general);
                 });
                 options = { scales: { x: { stacked: true }, y: { stacked: true } } };
             } else {
                 chartDatasets = data.datasets.map(function(ds, i) {
-                    return { label: ds.label, data: ds.data, backgroundColor: CHART_COLORS[i % CHART_COLORS.length] };
+                    return dashApplyGeneralBarDataset({ label: ds.label, data: ds.data, backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }, general);
                 });
                 options = { scales: { x: { stacked: barMode === 'stacked' || barMode === 'combo' }, y: { stacked: barMode === 'stacked' } } };
             }
@@ -3451,6 +3633,8 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
         }
 
         if (vizSize && vizSize.height) options.maintainAspectRatio = false;
+
+        options = dashApplyGeneralChartOptions(options, vizType, general);
 
         canvas._chartInstance = new Chart(canvas, {
             type: chartType,
@@ -3909,6 +4093,10 @@ function dashOpenPanelVizSettings(panelEl) {
     var panelMaxWidthEl = document.getElementById('dash-panel-max-width-settings');
     if (panelMaxWidthEl)
         panelMaxWidthEl.innerHTML = dashBuildPanelMaxWidthHtml(dashPanelMaxWidthFromSettings(settings));
+    var panelGeneralEl = document.getElementById('dash-panel-general-settings');
+    if (panelGeneralEl)
+        panelGeneralEl.innerHTML = dashBuildPanelGeneralHtml(dashGeneralSettingsFromSettings(settings));
+    dashVizModalActivateTab('panels');
 
     // Skip 'table' in the accordion (it's always available)
     DASH_VIZ_TYPES.filter(function(t) { return t.id !== 'table'; }).forEach(function(typeInfo) {
@@ -4204,6 +4392,122 @@ function dashBuildPanelMaxWidthHtml(panelMaxWidth) {
         + '</div>';
 }
 
+function dashBuildSelectOptions(values, selected, valueFormatter) {
+    var fmt = valueFormatter || function(v) { return v; };
+    return values.map(function(value) {
+        var attrValue = String(value)
+            , isSelected = selected !== null && selected !== undefined && String(selected) === attrValue;
+        return '<option value="' + dashAttr(attrValue) + '"' + (isSelected ? ' selected' : '') + '>' + fmt(value) + '</option>';
+    }).join('');
+}
+
+function dashBuildPanelGeneralHtml(general) {
+    var g = general || {}
+        , fontOptions = dashBuildSelectOptions(DASH_GENERAL_AXIS_FONT_SIZES, g.axisFontSize, function(v) { return v + ' px'; })
+        , rotationOptions = dashBuildSelectOptions(DASH_GENERAL_X_ROTATIONS, g.xLabelRotation, function(v) { return v + '°'; })
+        , decimalOptions = dashBuildSelectOptions(DASH_GENERAL_TOOLTIP_DECIMALS, g.tooltipDecimals);
+    return '<div class="dash-panel-general-group">'
+        + '<div class="dash-viz-size-title">Толщина столбцов (px)</div>'
+        + '<div class="dash-viz-field-row"><label>Толщина</label>'
+        + '<input type="number" min="0" max="200" step="1" name="generalBarThickness" value="' + dashAttr(g.barThickness !== undefined ? g.barThickness : '') + '">'
+        + '</div>'
+        + '</div>'
+        + '<div class="dash-panel-general-group">'
+        + '<div class="dash-viz-size-title">Размер шрифта подписей осей</div>'
+        + '<div class="dash-viz-field-row"><label>Размер</label>'
+        + '<select name="generalAxisFontSize"><option value="">(по умолчанию)</option>' + fontOptions + '</select>'
+        + '</div>'
+        + '</div>'
+        + '<div class="dash-panel-general-group">'
+        + '<div class="dash-viz-size-title">Деления оси Y</div>'
+        + '<div class="dash-viz-field-row"><label>Макс. меток</label>'
+        + '<input type="number" min="0" max="100" step="1" name="generalYMaxTicksLimit" value="' + dashAttr(g.yMaxTicksLimit !== undefined ? g.yMaxTicksLimit : '') + '">'
+        + '</div>'
+        + '<div class="dash-viz-field-row"><label>Шаг</label>'
+        + '<input type="number" min="0" step="0.1" name="generalYStepSize" value="' + dashAttr(g.yStepSize !== undefined ? g.yStepSize : '') + '">'
+        + '</div>'
+        + '</div>'
+        + '<div class="dash-panel-general-group">'
+        + '<div class="dash-viz-size-title">Подписи оси X</div>'
+        + '<div class="dash-viz-field-row"><label>Поворот</label>'
+        + '<select name="generalXLabelRotation"><option value="">(авто)</option>' + rotationOptions + '</select>'
+        + '</div>'
+        + '<div class="dash-viz-field-row"><label></label>'
+        + '<label class="dash-viz-check-label"><input type="checkbox" name="generalXLabelAutoSkip"' + (g.xLabelAutoSkip ? ' checked' : '') + '>'
+        + '<span>Прятать метки, если не влезают</span></label>'
+        + '</div>'
+        + '</div>'
+        + '<div class="dash-panel-general-group">'
+        + '<div class="dash-viz-size-title">Формат подсказки (Tooltip)</div>'
+        + '<div class="dash-viz-field-row"><label>Знаков после запятой</label>'
+        + '<select name="generalTooltipDecimals"><option value="">(по умолчанию)</option>' + decimalOptions + '</select>'
+        + '</div>'
+        + '<div class="dash-viz-field-row"><label>Префикс</label>'
+        + '<input type="text" maxlength="16" name="generalTooltipPrefix" value="' + dashAttr(g.tooltipPrefix || '') + '">'
+        + '</div>'
+        + '<div class="dash-viz-field-row"><label>Суффикс</label>'
+        + '<input type="text" maxlength="16" name="generalTooltipSuffix" value="' + dashAttr(g.tooltipSuffix || '') + '">'
+        + '</div>'
+        + '</div>';
+}
+
+function dashCollectPanelGeneral() {
+    var container = document.getElementById('dash-panel-general-settings')
+        , result = {}
+        , has = false
+        , val
+        , el;
+    if (!container) return null;
+
+    function read(name) {
+        var input = container.querySelector('[name="' + name + '"]');
+        return input ? input.value : '';
+    }
+
+    val = dashNormalizePositiveNumber(read('generalBarThickness'), 200);
+    if (val !== null) { result.barThickness = val; has = true; }
+
+    val = dashNormalizeEnum(read('generalAxisFontSize'), DASH_GENERAL_AXIS_FONT_SIZES);
+    if (val !== null) { result.axisFontSize = val; has = true; }
+
+    val = dashNormalizePositiveNumber(read('generalYMaxTicksLimit'), 100);
+    if (val !== null) { result.yMaxTicksLimit = Math.round(val); has = true; }
+
+    val = dashNormalizePositiveNumber(read('generalYStepSize'));
+    if (val !== null) { result.yStepSize = val; has = true; }
+
+    val = dashNormalizeEnum(read('generalXLabelRotation'), DASH_GENERAL_X_ROTATIONS);
+    if (val !== null) { result.xLabelRotation = val; has = true; }
+
+    el = container.querySelector('[name="generalXLabelAutoSkip"]');
+    if (el && el.checked) { result.xLabelAutoSkip = true; has = true; }
+
+    val = dashNormalizeEnum(read('generalTooltipDecimals'), DASH_GENERAL_TOOLTIP_DECIMALS);
+    if (val !== null) { result.tooltipDecimals = val; has = true; }
+
+    val = read('generalTooltipPrefix');
+    if (val) { result.tooltipPrefix = String(val).slice(0, 16); has = true; }
+
+    val = read('generalTooltipSuffix');
+    if (val) { result.tooltipSuffix = String(val).slice(0, 16); has = true; }
+
+    return has ? result : null;
+}
+
+function dashVizModalActivateTab(name) {
+    var modal = document.getElementById('dash-viz-modal');
+    if (!modal) return;
+    var tabs = modal.querySelectorAll('.dash-viz-tab');
+    tabs.forEach(function(tab) {
+        var active = tab.dataset.vizTab === name;
+        tab.classList.toggle('active', active);
+        tab.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    modal.querySelectorAll('.dash-viz-tab-pane').forEach(function(pane) {
+        pane.classList.toggle('active', pane.dataset.vizTabPane === name);
+    });
+}
+
 function dashCollectVizSizeDimension(item, axis) {
     var valueEl = item.querySelector(axis === 'width' ? '[name="sizeWidthValue"]' : '[name="sizeHeightValue"]')
         , unitEl = item.querySelector(axis === 'width' ? '[name="sizeWidthUnit"]' : '[name="sizeHeightUnit"]')
@@ -4272,7 +4576,9 @@ function dashVizModalCollectSettings() {
         if (isDefault) entry.default = true;
         result.push(entry);
     });
-    return dashSetPanelMaxWidthInSettings(result, dashCollectPanelMaxWidth());
+    result = dashSetPanelMaxWidthInSettings(result, dashCollectPanelMaxWidth());
+    result = dashSetGeneralSettingsInSettings(result, dashCollectPanelGeneral());
+    return result;
 }
 
 document.getElementById('dash-viz-cancel').addEventListener('click', function() {
@@ -4280,8 +4586,21 @@ document.getElementById('dash-viz-cancel').addEventListener('click', function() 
     dashVizModalCtx = null;
 });
 
+document.querySelectorAll('#dash-viz-modal .dash-viz-tab').forEach(function(tab) {
+    tab.addEventListener('click', function() {
+        dashVizModalActivateTab(tab.dataset.vizTab);
+    });
+    tab.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            dashVizModalActivateTab(tab.dataset.vizTab);
+        }
+    });
+});
+
 document.getElementById('dash-viz-modal').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') {
+        if (e.target && e.target.classList && e.target.classList.contains('dash-viz-tab')) return;
         e.preventDefault();
         document.getElementById('dash-viz-save').click();
     }

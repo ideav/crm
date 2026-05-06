@@ -163,6 +163,8 @@ ${extractFunction('dashCollectPanelData')}
 function dashCollectVizSize() { return null; }
 function dashCollectPanelMaxWidth() { return null; }
 function dashSetPanelMaxWidthInSettings(settings) { return settings; }
+function dashCollectPanelGeneral() { return null; }
+function dashSetGeneralSettingsInSettings(settings) { return settings; }
 ${extractFunction('dashVizModalCollectSettings')}
 `;
 

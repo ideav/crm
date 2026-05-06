@@ -146,6 +146,11 @@ ${extractFunction('dashCollectVizSize')}
 ${extractFunction('dashCollectPanelMaxWidthDimension')}
 ${extractFunction('dashCollectPanelMaxWidth')}
 ${extractFunction('dashCollectVizSelectedRows')}
+function dashCollectPanelGeneral() { return null; }
+function dashSetGeneralSettingsInSettings(settings) { return settings; }
+function dashGeneralSettingsFromSettings() { return null; }
+function dashApplyGeneralChartOptions(options) { return options; }
+function dashApplyGeneralBarDataset(dataset) { return dataset; }
 ${extractFunction('dashVizModalCollectSettings')}
 ${extractFunction('dashRenderChart')}
 `;
