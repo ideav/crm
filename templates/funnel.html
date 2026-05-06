@@ -743,30 +743,40 @@
         return rows.reduce(function(s, r) { return s + funnelNum(r[stage]); }, 0);
     }
 
-    // Cumulative count: everyone who reached stage i or further
-    function funnelCumulativeTotals(rows, stages) {
-        var raw = stages.map(function(s) { return funnelSumStage(rows, s); });
-        var cumulative = raw.slice();
-        for (var i = raw.length - 2; i >= 0; i--) {
-            cumulative[i] = raw[i] + cumulative[i + 1];
+    // Hide a zero-count stage only if any later stage is non-zero.
+    // Trailing zero stages stay visible (the funnel may simply not have completed).
+    function funnelVisibleStageIndices(totals) {
+        var lastNonZero = -1;
+        for (var i = totals.length - 1; i >= 0; i--) {
+            if (totals[i] > 0) { lastNonZero = i; break; }
         }
-        return cumulative;
+        var visible = [];
+        for (var j = 0; j < totals.length; j++) {
+            if (totals[j] > 0 || j > lastNonZero) visible.push(j);
+        }
+        return visible;
     }
 
     function funnelRenderChart(rows) {
-        var totals = funnelCumulativeTotals(rows, funnelStages);
-        var maxVal = totals[0] || 1;
+        var totals = funnelStages.map(function(s) { return funnelSumStage(rows, s); });
+        var visibleIdxs = funnelVisibleStageIndices(totals);
+        var maxVal = visibleIdxs.length ? totals[visibleIdxs[0]] : 0;
+        if (!maxVal) maxVal = 1;
 
         var html = '';
 
-        // Summary cards: first, last, and up to 2 middle stages
+        // Summary cards: first, last, and up to 2 middle visible stages
         html += '<div class="funnel-summary">';
-        var cardIdxs = [0];
-        if (funnelStages.length > 2) {
-            var mid = Math.floor(funnelStages.length / 2);
-            cardIdxs.push(mid);
+        var cardIdxs = [];
+        if (visibleIdxs.length) {
+            cardIdxs.push(visibleIdxs[0]);
+            if (visibleIdxs.length > 2) {
+                cardIdxs.push(visibleIdxs[Math.floor(visibleIdxs.length / 2)]);
+            }
+            if (visibleIdxs.length > 1) {
+                cardIdxs.push(visibleIdxs[visibleIdxs.length - 1]);
+            }
         }
-        if (funnelStages.length > 1) cardIdxs.push(funnelStages.length - 1);
         cardIdxs.forEach(function(i) {
             html += '<div class="funnel-summary-card">'
                 + '<div class="funnel-summary-label">' + esc(funnelStages[i]) + '</div>'
@@ -778,14 +788,15 @@
         html += '<div class="funnel-chart">';
         html += '<div class="funnel-chart-title">Этапы воронки (сумма по выбранным фильтрам, ' + rows.length + ' записей)</div>';
 
-        funnelStages.forEach(function(s, i) {
-            var cnt = totals[i];
+        visibleIdxs.forEach(function(stageIdx, pos) {
+            var s = funnelStages[stageIdx];
+            var cnt = totals[stageIdx];
             var pct = maxVal > 0 ? Math.round(cnt / maxVal * 100) : 0;
-            var prevCnt = i > 0 ? totals[i - 1] : null;
+            var prevCnt = pos > 0 ? totals[visibleIdxs[pos - 1]] : null;
             var convPct = (prevCnt !== null && prevCnt > 0) ? Math.round(cnt / prevCnt * 100) : null;
             var conv = convPct !== null ? convPct + '%' : '—';
 
-            if (i > 0) {
+            if (pos > 0) {
                 html += '<div class="funnel-stage-arrow">'
                     + '<div class="funnel-stage-arrow-line"></div>'
                     + '<span style="color:' + (convPct !== null && convPct < 50 ? '#ef4444' : '#10b981') + ';font-weight:500;font-size:0.78rem;">'
@@ -798,10 +809,10 @@
                 +   '<div class="funnel-stage-name">' + esc(s) + '</div>'
                 +   '<div class="funnel-stage-count">' + cnt.toLocaleString('ru') + '</div>'
                 +   '<div class="funnel-stage-pct">' + pct + '%</div>'
-                +   '<div class="funnel-stage-conv" title="Конверсия от предыдущего этапа">' + (i > 0 ? conv : '—') + '</div>'
+                +   '<div class="funnel-stage-conv" title="Конверсия от предыдущего видимого этапа">' + (pos > 0 ? conv : '—') + '</div>'
                 + '</div>'
                 + '<div class="funnel-stage-bar-wrap">'
-                +   '<div class="funnel-stage-bar" style="width:' + pct + '%;background:' + funnelStageColor(i) + ';">'
+                +   '<div class="funnel-stage-bar" style="width:' + pct + '%;background:' + funnelStageColor(stageIdx) + ';">'
                 +   (pct >= 8 ? '<span class="funnel-stage-bar-text">' + pct + '%</span>' : '')
                 +   '</div>'
                 + '</div>'
