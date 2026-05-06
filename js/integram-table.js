@@ -7588,7 +7588,15 @@ class IntegramTable{
 
             const showStatus = (msg, isError) => {
                 const el = colEditModal.querySelector(`#col-edit-status-${instanceName}`);
-                el.textContent = msg;
+                // Issue #2402: server errors may contain HTML links (e.g. references to
+                // reports/roles that block deletion). Render those safely so users can
+                // click through to the offending records.
+                const sanitized = this.sanitizeInlineMessageHtml(msg);
+                if (/<(a|br)\b/i.test(sanitized)) {
+                    el.innerHTML = sanitized;
+                } else {
+                    el.textContent = msg;
+                }
                 el.className = 'col-edit-status' + (isError ? ' col-edit-status-error' : ' col-edit-status-ok');
                 el.style.display = 'block';
             };
@@ -7930,10 +7938,17 @@ class IntegramTable{
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: params.toString()
                 });
-                if (!resp.ok) return { success: false, error: `HTTP ${resp.status}` };
-                const result = await resp.json();
+                // Issue #2402: parse response body even when HTTP status is not OK
+                // so the user sees the actual error instead of a generic "HTTP 400".
+                const responseText = await resp.text();
+                let result = null;
+                try { result = JSON.parse(responseText); } catch (_) { /* not JSON */ }
+                if (!resp.ok) {
+                    const serverError = result ? this.getServerError(result) : null;
+                    return { success: false, error: serverError || responseText || `HTTP ${resp.status}` };
+                }
                 if (result && result.id) return { success: true };
-                const err = (Array.isArray(result) && result[0]?.error) || result?.error || 'Неизвестная ошибка';
+                const err = (result && this.getServerError(result)) || 'Неизвестная ошибка';
                 return { success: false, error: err };
             } catch (err) {
                 return { success: false, error: err.message };
@@ -7958,11 +7973,20 @@ class IntegramTable{
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: params.toString()
                 });
-                if (!resp.ok) return { success: false, error: `HTTP ${resp.status}` };
-                const result = await resp.json();
+                // Issue #2402: parse response body even when HTTP status is not OK
+                // so the user sees the actual error (e.g. "Этот реквизит используется в ...")
+                // instead of a generic "HTTP 400".
+                const responseText = await resp.text();
+                let result = null;
+                try { result = JSON.parse(responseText); } catch (_) { /* not JSON */ }
+                const serverError = result ? this.getServerError(result) : null;
+                if (!resp.ok) {
+                    const errMsg = serverError || responseText || `HTTP ${resp.status}`;
+                    return { success: false, error: errMsg };
+                }
                 // When column has data, API returns an error; treat it as hasData=true
-                if (Array.isArray(result) && result[0]?.error) {
-                    return { success: false, hasData: true, error: result[0].error };
+                if (serverError) {
+                    return { success: false, hasData: true, error: serverError };
                 }
                 return { success: true };
             } catch (err) {

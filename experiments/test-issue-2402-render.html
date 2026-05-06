@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Issue #2402 — render delete-column error</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        .col-edit-status {
+            margin-top: 12px; padding: 10px 12px;
+            border-radius: 4px; font-size: 0.875rem;
+        }
+        .col-edit-status-error {
+            background: #fdecea; color: #842029; border: 1px solid #f5c2c7;
+        }
+        .col-edit-status a { color: #842029; text-decoration: underline; }
+        h2 { margin-top: 24px; }
+    </style>
+</head>
+<body>
+    <h1>Issue #2402: full server error rendering</h1>
+
+    <h2>Before (current behavior in production)</h2>
+    <div class="col-edit-status col-edit-status-error" id="before"></div>
+
+    <h2>After (fix)</h2>
+    <div class="col-edit-status col-edit-status-error" id="after"></div>
+
+    <script>
+        function sanitizeInlineMessageHtml(html) {
+            if (html === null || html === undefined) return '';
+            const str = String(html);
+            const placeholderPrefix = '__SAFE_ANCHOR__';
+            const safeAnchors = [];
+            const withAnchorPlaceholders = str.replace(
+                /<a\b[^>]*href\s*=\s*(["'])(.*?)\1[^>]*>(.*?)<\/a>/gi,
+                (match, quote, href, text) => {
+                    const trimmedHref = String(href || '').trim();
+                    const trimmedText = String(text || '').trim();
+                    if (!trimmedText) return match;
+                    if (!/^(https?:\/\/|\/)/i.test(trimmedHref)) return match;
+                    if (/^\s*javascript:/i.test(trimmedHref)) return match;
+                    const safeHref = trimmedHref
+                        .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+                        .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    const safeText = trimmedText
+                        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+                        .replace(/'/g, '&#039;');
+                    const anchorHtml = '<a href="' + safeHref + '" target="_blank" rel="noopener noreferrer">' + safeText + '</a>';
+                    const placeholder = placeholderPrefix + safeAnchors.length + '__';
+                    safeAnchors.push(anchorHtml);
+                    return placeholder;
+                }
+            );
+            let escaped = withAnchorPlaceholders
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+            escaped = escaped.replace(/&lt;br\s*\/?&gt;/gi, '<br>');
+            safeAnchors.forEach((anchorHtml, index) => {
+                const placeholder = placeholderPrefix + index + '__';
+                escaped = escaped.replace(placeholder, anchorHtml);
+            });
+            return escaped;
+        }
+
+        const fullError = 'Этот реквизит используется в <a href="/sportzania/object/22/?F_28=6265">отчетах</a> или <a href="/sportzania/object/42/?F_116=6265">ролях</a>!';
+
+        // BEFORE: showStatus did textContent on "Ошибка удаления: HTTP 400"
+        document.getElementById('before').textContent = 'Ошибка удаления: HTTP 400';
+
+        // AFTER: showStatus sanitizes the full error and renders safe HTML
+        const msg = 'Ошибка удаления: ' + fullError;
+        const sanitized = sanitizeInlineMessageHtml(msg);
+        const el = document.getElementById('after');
+        if (/<(a|br)\b/i.test(sanitized)) {
+            el.innerHTML = sanitized;
+        } else {
+            el.textContent = msg;
+        }
+    </script>
+</body>
+</html>
