@@ -80,6 +80,7 @@ function makeWidthControlDocument() {
         getElementById(id) {
             if (id === 'dash-viz-accordion') return accordion;
             if (id === 'dash-panel-max-width-settings') return maxWidthEl;
+            if (id === 'dash-panel-general-settings') return null;
             return null;
         }
     };
@@ -92,6 +93,9 @@ var DASH_PANEL_MAX_WIDTH_MOBILE_BREAKPOINT = 767;
 var DASH_CHART_RESIZE_MIN_WIDTH = 260;
 var DASH_CHART_RESIZE_MIN_HEIGHT = 180;
 var DASH_CHART_RESIZE_COOKIE_MAX_AGE = 31536000;
+var DASH_GENERAL_AXIS_FONT_SIZES = [10, 12, 14, 16];
+var DASH_GENERAL_X_ROTATIONS = [0, 45, 90];
+var DASH_GENERAL_TOOLTIP_DECIMALS = [0, 1, 2, 3];
 var dashRecordId = 'dash-test';
 var dashCurrentId = null;
 var dashModelData = {};
@@ -116,6 +120,13 @@ ${extractFunction('dashPanelMaxWidthForPanel')}
 ${extractFunction('dashPanelMaxWidthCss')}
 ${extractFunction('dashCombineMaxWidthCss')}
 ${extractFunction('dashApplyPanelMaxWidth')}
+${extractFunction('dashNormalizePositiveNumber')}
+${extractFunction('dashNormalizeIntegerInRange')}
+${extractFunction('dashNormalizeEnum')}
+${extractFunction('dashNormalizeGeneralSettings')}
+${extractFunction('dashGeneralSettingsFromSettings')}
+${extractFunction('dashSetGeneralSettingsInSettings')}
+${extractFunction('dashCollectPanelGeneral')}
 ${extractFunction('dashResetVizSizeStyles')}
 ${extractFunction('dashIsResizableChartViz')}
 ${extractFunction('dashCookieGet')}

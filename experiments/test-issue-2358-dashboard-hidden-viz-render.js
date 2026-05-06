@@ -81,6 +81,9 @@ function dashApplyVizSize() { return null; }
 function dashEnsureChartJs(cb) { cb(); }
 function dashBuildAreaDatasets(datasets) { return datasets; }
 function dashBuildAreaChartOptions() { return {}; }
+function dashGeneralSettingsFromSettings() { return null; }
+function dashApplyGeneralChartOptions(options) { return options; }
+function dashApplyGeneralBarDataset(dataset) { return dataset; }
 function dashRenderPivot() { pivotRenders++; }
 function dashRenderReportTable() { tableRenders++; }
 function dashEnsureTableResizeHandle() {}

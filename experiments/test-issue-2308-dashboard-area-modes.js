@@ -55,6 +55,7 @@ function makePanel() {
 
 const code = `
 var CHART_COLORS = ['rgba(54,162,235,0.7)', 'rgba(255,99,132,0.7)'];
+var dashModelData = {};
 function dashPanelGetVizReportData() { return null; }
 function dashPanelGetColumns() { return ['Январь', 'Февраль']; }
 function dashPanelGetRows() { return ['План', 'Факт']; }
@@ -73,6 +74,9 @@ function dashRenderPivot() {}
 function dashElementHiddenForRender() { return false; }
 function dashReportColumnIsDimension(column) { return column && column.kind !== 'measure'; }
 function dashReportColumnIsMeasure(column) { return column && column.kind === 'measure'; }
+function dashGeneralSettingsFromSettings() { return null; }
+function dashApplyGeneralChartOptions(options) { return options; }
+function dashApplyGeneralBarDataset(dataset) { return dataset; }
 function Chart(canvas, config) {
     Chart.lastConfig = config;
     canvas._chartInstance = { destroy: function() {} };
