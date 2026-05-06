@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Issue 2409 dashboard tile mode height stretching</title>
+    <link rel="stylesheet" href="../assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="../css/dash.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 1rem;
+            background: #fff;
+            color: #212529;
+            font-family: Arial, sans-serif;
+        }
+        #dash-model { margin: 0; }
+        table { border-collapse: collapse; }
+        th, td { padding: 0.4rem 0.6rem; border: 1px solid #dee2e6; }
+        th { background: #f8f9fa; font-weight: 600; }
+        h4 { margin: 0 0 0.4rem; }
+        .f-panel { border: 1px dashed #adb5bd; padding: 0.5rem; }
+    </style>
+</head>
+<body>
+<div id="dash-model" class="f-model">
+    <div id="ds-demo" class="f-sheet dash-tile-mode">
+        <div class="f-panel" data-panel-id="left">
+            <div class="f-panel-header"><h4>Left table (6 rows)</h4></div>
+            <div class="f-panel-content">
+                <div class="f-table-wrap">
+                    <table>
+                        <thead><tr class="dash-head f-head"><th>Ссылка</th></tr></thead>
+                        <tbody>
+                            <tr><td>PDF</td></tr>
+                            <tr><td>PDF</td></tr>
+                            <tr><td>PDF</td></tr>
+                            <tr><td>PDF</td></tr>
+                            <tr><td>PDF</td></tr>
+                            <tr><td>PDF</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="f-panel" data-panel-id="right">
+            <div class="f-panel-header"><h4>Right table (3 rows) - should NOT be stretched</h4></div>
+            <div class="f-panel-content">
+                <div class="f-table-wrap">
+                    <table>
+                        <thead><tr class="dash-head f-head"><th>Дата документа</th></tr></thead>
+                        <tbody>
+                            <tr><td>31.01.2025</td></tr>
+                            <tr><td>10.04.2025</td></tr>
+                            <tr><td>10.05.2025</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>
