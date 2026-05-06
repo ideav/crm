@@ -36,7 +36,9 @@ const code = `
 var DASH_VIZ_SIZE_UNITS = ['%', 'px', 'rem'];
 var DASH_PANEL_MAX_WIDTH_UNITS = ['%', 'px'];
 var DASH_PANEL_MAX_WIDTH_MOBILE_BREAKPOINT = 767;
-var DASH_GENERAL_AXIS_FONT_SIZES = [10, 12, 14, 16];
+var DASH_GENERAL_AXIS_FONT_SIZES = [8, 9, 10, 12, 14, 16];
+var DASH_GENERAL_LEGEND_FONT_SIZES = [8, 9, 10, 12, 14, 16];
+var DASH_GENERAL_LEGEND_POSITIONS = ['top', 'bottom', 'left', 'right'];
 var DASH_GENERAL_X_ROTATIONS = [0, 45, 90];
 var DASH_GENERAL_TOOLTIP_DECIMALS = [0, 1, 2, 3];
 var dashModelData = {};
@@ -189,6 +191,67 @@ vm.runInContext(code, ctx);
     assertEqual(opts.plugins.legend.position, 'right', 'preserves existing plugin config');
 }
 
+// Legend size and position normalization (issue #2414)
+{
+    const g = ctx.dashNormalizeGeneralSettings({
+        legendFontSize: '8',
+        legendPosition: 'top'
+    });
+    assert(g, 'legend-only settings produce a non-null normalized object');
+    assertEqual(g.legendFontSize, 8, 'legendFontSize 8px accepted');
+    assertEqual(g.legendPosition, 'top', 'legendPosition top accepted');
+
+    const g2 = ctx.dashNormalizeGeneralSettings({
+        legendFontSize: '9',
+        legendPosition: 'bottom'
+    });
+    assertEqual(g2.legendFontSize, 9, 'legendFontSize 9px accepted');
+    assertEqual(g2.legendPosition, 'bottom', 'legendPosition bottom accepted');
+
+    const invalid = ctx.dashNormalizeGeneralSettings({
+        legendFontSize: '7',
+        legendPosition: 'middle'
+    });
+    assert(invalid === null, 'invalid legend values rejected');
+}
+
+// Axis font sizes 8px and 9px accepted (issue #2414)
+{
+    const g8 = ctx.dashNormalizeGeneralSettings({ axisFontSize: '8' });
+    assertEqual(g8.axisFontSize, 8, 'axisFontSize 8px accepted');
+    const g9 = ctx.dashNormalizeGeneralSettings({ axisFontSize: '9' });
+    assertEqual(g9.axisFontSize, 9, 'axisFontSize 9px accepted');
+}
+
+// Legend options applied to chart (issue #2414)
+{
+    const opts = ctx.dashApplyGeneralChartOptions({}, 'bar', {
+        legendFontSize: 9,
+        legendPosition: 'bottom'
+    });
+    assertEqual(opts.plugins.legend.position, 'bottom', 'legend position applied');
+    assertEqual(opts.plugins.legend.labels.font.size, 9, 'legend font size applied');
+}
+
+// Legend position overrides existing chart-default legend position (issue #2414)
+{
+    const initial = { plugins: { legend: { position: 'right' } } };
+    const opts = ctx.dashApplyGeneralChartOptions(initial, 'pie', { legendPosition: 'top' });
+    assertEqual(opts.plugins.legend.position, 'top', 'general legend position overrides default');
+}
+
+// Legend settings round-trip through settings array (issue #2414)
+{
+    let settings = [{ type: 'bar' }];
+    settings = ctx.dashSetGeneralSettingsInSettings(settings, {
+        legendFontSize: '8',
+        legendPosition: 'top'
+    });
+    const general = ctx.dashGeneralSettingsFromSettings(settings);
+    assertEqual(general.legendFontSize, 8, 'legendFontSize persisted');
+    assertEqual(general.legendPosition, 'top', 'legendPosition persisted');
+}
+
 // HTML builder produces all expected fields
 {
     const html = ctx.dashBuildPanelGeneralHtml({
@@ -205,6 +268,8 @@ vm.runInContext(code, ctx);
     [
         'generalBarThickness',
         'generalAxisFontSize',
+        'generalLegendFontSize',
+        'generalLegendPosition',
         'generalYMaxTicksLimit',
         'generalYStepSize',
         'generalXLabelRotation',
@@ -226,6 +291,8 @@ vm.runInContext(code, ctx);
     const inputs = {
         '[name="generalBarThickness"]': { value: '60' },
         '[name="generalAxisFontSize"]': { value: '14' },
+        '[name="generalLegendFontSize"]': { value: '8' },
+        '[name="generalLegendPosition"]': { value: 'top' },
         '[name="generalYMaxTicksLimit"]': { value: '4' },
         '[name="generalYStepSize"]': { value: '25' },
         '[name="generalXLabelRotation"]': { value: '90' },
@@ -241,6 +308,8 @@ vm.runInContext(code, ctx);
     const collected = ctx.dashCollectPanelGeneral();
     assertEqual(collected.barThickness, 60, 'bar thickness collected');
     assertEqual(collected.axisFontSize, 14, 'axis font size collected');
+    assertEqual(collected.legendFontSize, 8, 'legend font size collected');
+    assertEqual(collected.legendPosition, 'top', 'legend position collected');
     assertEqual(collected.yMaxTicksLimit, 4, 'y ticks limit collected');
     assertEqual(collected.yStepSize, 25, 'y step size collected');
     assertEqual(collected.xLabelRotation, 90, 'x label rotation collected');
