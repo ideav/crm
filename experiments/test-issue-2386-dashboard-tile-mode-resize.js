@@ -1,12 +1,8 @@
 'use strict';
 
-// Issue #2386 + #2407: when tile mode is enabled, the user must be able to
-// drag the vertical border of each individual tile column. Per-column widths
-// are persisted to a cookie (`dash_tile_panel_widths_*`) and removed when tile
-// mode is turned off. Issue #2407 explicitly requires that dragging affects
-// the dragged column's track only — it must not stretch every column at once
-// and must allow tiles from later rows to flow up when the right side gains
-// enough space for an extra auto-fit column.
+// Issue #2386: when tile mode is enabled, the user must be able to drag
+// the vertical border between tiles. The chosen width is persisted to a cookie
+// and removed when tile mode is turned off.
 
 const assert = require('assert');
 const fs = require('fs');
@@ -123,12 +119,11 @@ function makeButton(tag) {
     return node;
 }
 
-function makePanel(width, left) {
+function makePanel(width) {
     const handlers = {};
     let appendedHandle = null;
-    const panelLeft = typeof left === 'number' ? left : 0;
     const panel = {
-        getBoundingClientRect() { return { width, height: 200, top: 0, left: panelLeft, right: panelLeft + width, bottom: 200 }; },
+        getBoundingClientRect() { return { width, height: 200, top: 0, left: 0 }; },
         offsetWidth: width,
         querySelector(selector) {
             if (selector === '.f-tile-resize-handle') return appendedHandle;
@@ -147,23 +142,14 @@ function makePanel(width, left) {
     return panel;
 }
 
-function makeSheet(id, panelWidths, button, opts) {
-    const options = opts || {};
-    const sheetWidth = options.sheetWidth || 1200;
-    const gap = options.gap || 0;
-    let cursor = 0;
-    const panels = panelWidths.map(width => {
-        const panel = makePanel(width, cursor);
-        cursor += width + gap;
-        return panel;
-    });
-    const trackTokens = options.tracks || panelWidths.map(w => w + 'px');
+function makeSheet(id, panelWidths, button) {
+    const panels = panelWidths.map(makePanel);
     const sheet = {
         id,
         style: makeStyle(),
         classList: makeClassList('f-sheet'),
         getBoundingClientRect() {
-            return { width: sheetWidth, height: 800, top: 0, left: 0 };
+            return { width: 1200, height: 800, top: 0, left: 0 };
         },
         querySelector(selector) {
             if (selector === '.dash-tile-mode-icon') return button;
@@ -172,9 +158,7 @@ function makeSheet(id, panelWidths, button, opts) {
         querySelectorAll(selector) {
             if (selector === '.f-panel') return panels;
             return [];
-        },
-        _trackTokens: trackTokens,
-        _gap: gap
+        }
     };
     panels.forEach(p => { p._sheet = sheet; });
     return { sheet, panels };
@@ -201,21 +185,13 @@ ${extractFunction('dashCookieRemove')}
 ${extractFunction('dashCookieNamePart')}
 ${extractFunction('dashSheetTileModeCookieName')}
 ${extractFunction('dashSheetTilePanelWidthCookieName')}
-${extractFunction('dashSheetTilePanelWidthsCookieName')}
 ${extractFunction('dashReadSheetTilePanelWidth')}
 ${extractFunction('dashWriteSheetTilePanelWidth')}
 ${extractFunction('dashRemoveSheetTilePanelWidth')}
-${extractFunction('dashReadSheetTilePanelWidths')}
-${extractFunction('dashWriteSheetTilePanelWidths')}
-${extractFunction('dashRemoveSheetTilePanelWidths')}
 ${extractFunction('dashReadSheetTileMode')}
 ${extractFunction('dashSetSheetTileModeButtonState')}
 ${extractFunction('dashMeasureSheetTilePanelMinWidth')}
 ${extractFunction('dashApplySheetTilePanelMinWidth')}
-${extractFunction('dashApplySheetTileColumnWidths')}
-${extractFunction('dashGetSheetGap')}
-${extractFunction('dashGetSheetResolvedColumnTracks')}
-${extractFunction('dashFindPanelColumnIndex')}
 ${extractFunction('dashPrepareSheetTileMode')}
 ${extractFunction('dashClearSheetTileMode')}
 ${extractFunction('dashEnsureSheetTilePanelResizeHandles')}
@@ -230,28 +206,14 @@ const doc = createCookieDocument();
 const ctx = {
     console,
     document: doc,
-    window: {
-        innerWidth: 1400,
-        innerHeight: 900,
-        getComputedStyle(el) {
-            const tracks = (el && el._trackTokens) || [];
-            const gap = (el && el._gap) || 0;
-            return {
-                gridTemplateColumns: tracks.join(' '),
-                columnGap: String(gap) + 'px',
-                gap: String(gap) + 'px'
-            };
-        }
-    }
+    window: { innerWidth: 1400, innerHeight: 900 }
 };
 vm.createContext(ctx);
 vm.runInContext(code, ctx);
 
 const button = makeButton('button');
-const { sheet, panels } = makeSheet('ds-resize', [400, 400, 400], button,
-    { sheetWidth: 1200, gap: 0, tracks: ['400px', '400px', '400px'] });
-const widthsCookie = ctx.dashSheetTilePanelWidthsCookieName(sheet);
-const legacyWidthCookie = ctx.dashSheetTilePanelWidthCookieName(sheet);
+const { sheet, panels } = makeSheet('ds-resize', [400, 400, 400], button);
+const widthCookie = ctx.dashSheetTilePanelWidthCookieName(sheet);
 
 // Enabling tile mode adds the resize handle to every panel
 ctx.dashApplySheetTileMode(sheet, true, true);
@@ -262,20 +224,19 @@ panels.forEach((panel, idx) => {
 });
 
 // No saved width yet
-assert(!doc.hasCookie(widthsCookie), 'no per-column widths cookie before any drag');
+assert(!doc.hasCookie(widthCookie), 'no width cookie before any drag');
 
-// Simulate dragging the first panel's handle to the LEFT by 150 pixels.
-// The dragged column shrinks; the remaining columns auto-fit, so the rest
-// of the row gains room for additional auto-fit tiles.
+// Simulate a drag right by 120 pixels on the first panel handle
 const handle = panels[0].appendedHandle;
-const targetWidth = 250; // 400 - 150
+const targetWidth = 520; // 400 + 120
 
+let lastDownEvent;
 handle.dispatch('mousedown', {
     button: 0,
-    clientX: 400, // right edge of the first panel
+    clientX: 800,
     currentTarget: handle,
     target: handle,
-    preventDefault() {}
+    preventDefault() { lastDownEvent = true; }
 });
 
 assert(sheet.classList.contains('f-sheet--tile-resizing'),
@@ -284,15 +245,12 @@ assert(doc.body.classList.contains('dash-tile-resizing'),
     'document body gets a resizing class while drag is in progress');
 
 doc.dispatch('mousemove', {
-    clientX: 400 - 150,
+    clientX: 800 + 120,
     preventDefault() {}
 });
 
-const midDragColumns = sheet.style.getPropertyValue('grid-template-columns');
-assert(midDragColumns.indexOf(targetWidth + 'px') === 0,
-    'mid-drag pins the dragged column to the new width: ' + midDragColumns);
-assert(/repeat\(auto-fit/.test(midDragColumns),
-    'mid-drag keeps remaining tracks as auto-fit so they absorb the freed space');
+assert.strictEqual(sheet.style.getPropertyValue('--dash-tile-panel-min-width'), targetWidth + 'px',
+    'mid-drag updates the sheet column width to the new pixel value');
 
 doc.dispatch('mouseup', { preventDefault() {} });
 
@@ -300,29 +258,21 @@ assert(!sheet.classList.contains('f-sheet--tile-resizing'),
     'sheet drops the resizing class on mouse up');
 assert(!doc.body.classList.contains('dash-tile-resizing'),
     'body drops the resizing class on mouse up');
-const persisted = doc.getCookie(widthsCookie);
-assert(persisted, 'per-column widths cookie is written on mouse up');
-assert.strictEqual(persisted.split(',')[0], String(targetWidth),
-    'first column width persisted to the array cookie: ' + persisted);
+assert.strictEqual(doc.getCookie(widthCookie), String(targetWidth),
+    'final tile width is persisted to a cookie');
 
-// Re-entering tile mode restores the saved per-column widths
+// Re-entering tile mode (same dashboard) restores the saved width
 const restoredButton = makeButton('button');
-const { sheet: restored, panels: restoredPanels } = makeSheet('ds-resize', [250],
-    restoredButton, { sheetWidth: 1200, tracks: ['250px'] });
+const { sheet: restored, panels: restoredPanels } = makeSheet('ds-resize', [400], restoredButton);
 ctx.dashApplySheetTileMode(restored, true, false);
-const restoredColumns = restored.style.getPropertyValue('grid-template-columns');
-assert(restoredColumns.indexOf(targetWidth + 'px') === 0,
-    'restored tile mode pins the previously saved first column: ' + restoredColumns);
+assert.strictEqual(restored.style.getPropertyValue('--dash-tile-panel-min-width'), targetWidth + 'px',
+    'restored tile mode reads the saved width from the cookie instead of measuring panels');
 assert(restoredPanels[0].appendedHandle, 'restored tile mode also gets handles');
 
-// Disabling tile mode removes the saved width cookies
+// Disabling tile mode removes the saved width cookie
 ctx.dashApplySheetTileMode(restored, false, true);
-assert(!doc.hasCookie(widthsCookie),
-    'turning off tile mode resets the saved per-column widths');
-assert(!doc.hasCookie(legacyWidthCookie),
-    'turning off tile mode also clears the legacy single-width cookie');
-assert.strictEqual(restored.style.getPropertyValue('grid-template-columns'), '',
-    'turning off tile mode clears the inline grid-template-columns');
+assert(!doc.hasCookie(widthCookie),
+    'turning off tile mode resets the saved tile width');
 assert.strictEqual(restored.style.getPropertyValue('--dash-tile-panel-min-width'), '',
     'turning off tile mode clears the inline custom property');
 
