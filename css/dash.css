@@ -72,7 +72,7 @@
     width: 100%;
 }
 #dash-model .f-sheet.dash-tile-mode .f-table-wrap > table {
-    table-layout: fixed;
+    /* table-layout: fixed; */
     width: 100% !important;
     height: 100%;
     white-space: normal;
