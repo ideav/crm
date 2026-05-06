@@ -104,7 +104,7 @@ $locale = isset($_COOKIE[$z."_locale"]) ? $_COOKIE[$z."_locale"] : (isset($_COOK
 																									
 # The trace cookie to be deleted upon the session close
 if(isset($_GET["TRACE_IT"]) || isset($_COOKIE["TRACE_IT"])){
-	$GLOBALS["TRACE"] = "****".$_SERVER["REQUEST_URI"]."<br/>\n";
+	$GLOBALS["TRACE"] = "****".preg_replace('/([?&](secret|token|c|code|reset)=)[^&]*/i', '$1***', $_SERVER["REQUEST_URI"])."<br/>\n";
     if(isset($_GET["TRACE_IT"]))
 	    setcookie("TRACE_IT", 1, time() + 3600*3, "/$z"); // 3 hours
 	$logPath = "templates/custom/$z/logs";
@@ -115,8 +115,11 @@ if(isset($_GET["TRACE_IT"]) || isset($_COOKIE["TRACE_IT"])){
     fwrite($file, $GLOBALS["TRACE"]."\n");
     $headers =  getallheaders();
     $hdr = "";
-    foreach($headers as $key=>$val)
-        $hdr .= $key . ': ' . $val . '<br>';
+    $sensitiveHeaders = ['authorization', 'x-authorization', 'cookie', 'set-cookie'];
+    foreach($headers as $key=>$val){
+        $masked = in_array(strtolower($key), $sensitiveHeaders) ? '***' : $val;
+        $hdr .= $key . ': ' . $masked . '<br>';
+    }
     wlog(" headers: $hdr", "log");
     fclose($file);
 }
@@ -131,13 +134,15 @@ if(strlen(file_get_contents('php://input'))){
         foreach($json AS $key => $value)
             $_POST[$key] = $_REQUEST[$key] = $value;
 }
+$sensitivePostKeys = ['pwd', 'password', 'token', 'secret', 'reset', 'regpwd', 'regpwd1'];
 foreach($_POST AS $key => $value)
 	if(is_array($value))
 		$params .= "\n $key " . print_r($value, true) . "\n";
 	else
-		if(strlen($value) && ($key != "pwd"))	# Do not log passwords
+		if(strlen($value) && !in_array(strtolower($key), $sensitivePostKeys))
 			$params .= " $key=$value;";
-wlog($_SERVER["REMOTE_ADDR"]." ".$_SERVER["REQUEST_URI"]." $params", "log");
+$safeUri = preg_replace('/([?&](secret|token|c|code|reset)=)[^&]*/i', '$1***', $_SERVER["REQUEST_URI"]);
+wlog($_SERVER["REMOTE_ADDR"]." ".$safeUri." $params", "log");
 if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Register the user
     # Check if this is a confirmation request
     if(isset($_GET["c"]) && isset($_GET["u"])){
@@ -1409,7 +1414,6 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
 	elseif(isApi()){
 		foreach(getallheaders() as $key => $value){
 	        $value = htmlentities($value);
-	        wlog("$key => $value");
     		if(strtolower($key) === "x-authorization"){
         		$tok = htmlentities($value);
         		break;
