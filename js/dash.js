@@ -1055,16 +1055,26 @@ function dashCollectReportVizData(report, vizConfig) {
     labelCol = dashReportDefaultColumn(columns, fieldMap.labelField || fieldMap.xField, dashReportColumnIsDimension) || columns[0];
     valueCol = dashReportDefaultColumn(columns, fieldMap.valueField, dashReportColumnIsMeasure);
     seriesCol = dashReportColumnByField(columns, fieldMap.seriesField);
+    var stackCol = dashReportColumnByField(columns, fieldMap.stackField);
+    if (stackCol && seriesCol && stackCol.id === seriesCol.id) stackCol = null;
+    var stackOrder = [], stackSeen = {};
 
     rows.forEach(function(row) {
         var label = dashReportValueLabel(dashReportRowValue(row, labelCol))
             , series = seriesCol ? dashReportValueLabel(dashReportRowValue(row, seriesCol)) : (valueCol ? valueCol.name : 'Количество')
+            , stack = stackCol ? dashReportValueLabel(dashReportRowValue(row, stackCol)) : null
             , value = valueCol ? dashGetFloat(dashReportRowValue(row, valueCol)) : 1;
         if (isNaN(value)) value = 0;
         dashReportAddOrdered(labels, labelSeen, label);
         dashReportAddOrdered(seriesOrder, seriesSeen, series);
+        if (stackCol) dashReportAddOrdered(stackOrder, stackSeen, stack);
         if (!buckets[series]) buckets[series] = {};
-        buckets[series][label] = (buckets[series][label] || 0) + value;
+        if (stackCol) {
+            if (!buckets[series][stack]) buckets[series][stack] = {};
+            buckets[series][stack][label] = (buckets[series][stack][label] || 0) + value;
+        } else {
+            buckets[series][label] = (buckets[series][label] || 0) + value;
+        }
     });
 
     if (type === 'pie') {
@@ -1073,10 +1083,29 @@ function dashCollectReportVizData(report, vizConfig) {
             data: labels.map(function(label) {
                 var sum = 0;
                 seriesOrder.forEach(function(series) {
-                    sum += (buckets[series] && buckets[series][label]) || 0;
+                    if (stackCol) {
+                        stackOrder.forEach(function(stack) {
+                            sum += (buckets[series] && buckets[series][stack] && buckets[series][stack][label]) || 0;
+                        });
+                    } else {
+                        sum += (buckets[series] && buckets[series][label]) || 0;
+                    }
                 });
                 return sum;
             })
+        });
+    } else if (stackCol) {
+        seriesOrder.forEach(function(series) {
+            stackOrder.forEach(function(stack) {
+                datasets.push({
+                    label: series + ' / ' + stack,
+                    data: labels.map(function(label) {
+                        return (buckets[series] && buckets[series][stack] && buckets[series][stack][label]) || 0;
+                    }),
+                    _series: series,
+                    _stack: stack
+                });
+            });
         });
     } else {
         seriesOrder.forEach(function(series) {
@@ -3386,10 +3415,25 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
         } else if (vizType === 'bar') {
             var barMode = (fieldMap && fieldMap.barMode) || 'grouped';
             chartType = 'bar';
-            chartDatasets = data.datasets.map(function(ds, i) {
-                return { label: ds.label, data: ds.data, backgroundColor: CHART_COLORS[i % CHART_COLORS.length] };
-            });
-            options = { scales: { x: { stacked: barMode === 'stacked' || barMode === 'combo' }, y: { stacked: barMode === 'stacked' } } };
+            var hasPairedMeta = data.datasets.some(function(ds) { return ds && ds._stack; });
+            if (barMode === 'pairedStacked' && hasPairedMeta) {
+                var seriesIndex = {}, nextSeriesIdx = 0;
+                data.datasets.forEach(function(ds) {
+                    var key = ds._series == null ? ds.label : ds._series;
+                    if (!(key in seriesIndex)) seriesIndex[key] = nextSeriesIdx++;
+                });
+                chartDatasets = data.datasets.map(function(ds) {
+                    var key = ds._series == null ? ds.label : ds._series;
+                    var color = CHART_COLORS[seriesIndex[key] % CHART_COLORS.length];
+                    return { label: ds.label, data: ds.data, backgroundColor: color, stack: String(ds._stack || 'default') };
+                });
+                options = { scales: { x: { stacked: true }, y: { stacked: true } } };
+            } else {
+                chartDatasets = data.datasets.map(function(ds, i) {
+                    return { label: ds.label, data: ds.data, backgroundColor: CHART_COLORS[i % CHART_COLORS.length] };
+                });
+                options = { scales: { x: { stacked: barMode === 'stacked' || barMode === 'combo' }, y: { stacked: barMode === 'stacked' } } };
+            }
 
         } else if (vizType === 'bubble') {
             chartType = 'bubble';
@@ -3942,7 +3986,9 @@ function dashBuildFieldMapHtml(vizType, fieldMap, panelEl) {
             + '<option value="grouped"' + (barMode === 'grouped' ? ' selected' : '') + '>Группы столбиков</option>'
             + '<option value="stacked"' + (barMode === 'stacked' ? ' selected' : '') + '>Сегменты</option>'
             + '<option value="combo"' + (barMode === 'combo' ? ' selected' : '') + '>Комбинация</option>'
-            + '</select></div>';
+            + '<option value="pairedStacked"' + (barMode === 'pairedStacked' ? ' selected' : '') + '>Пары со стеком</option>'
+            + '</select></div>'
+            + sel('stackField', 'Стек (план/факт)', fm.stackField || '');
     }
     if (vizType === 'area') {
         return dashBuildAreaModeHtml(fm)
@@ -3997,10 +4043,12 @@ function dashBuildReportFieldMapHtml(vizType, fieldMap, report) {
             + '<option value="grouped"' + (barMode === 'grouped' ? ' selected' : '') + '>Группы столбиков</option>'
             + '<option value="stacked"' + (barMode === 'stacked' ? ' selected' : '') + '>Сегменты</option>'
             + '<option value="combo"' + (barMode === 'combo' ? ' selected' : '') + '>Комбинация</option>'
+            + '<option value="pairedStacked"' + (barMode === 'pairedStacked' ? ' selected' : '') + '>Пары со стеком (план/факт + сегменты)</option>'
             + '</select></div>'
             + sel('labelField', 'Ось X', fm.labelField || fm.xField || '', dashReportColumnIsDimension)
             + sel('valueField', 'Значение', fm.valueField || '', dashReportColumnIsMeasure)
-            + sel('seriesField', 'Серии', fm.seriesField || '', dashReportColumnIsDimension);
+            + sel('seriesField', 'Серии (цвет)', fm.seriesField || '', dashReportColumnIsDimension)
+            + sel('stackField', 'Стек (план/факт)', fm.stackField || '', dashReportColumnIsDimension);
     }
     if (vizType === 'line') {
         return sel('labelField', 'Ось X', fm.labelField || fm.xField || '', dashReportColumnIsDimension)
