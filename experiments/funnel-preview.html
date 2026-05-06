@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Funnel preview</title>
+    <link rel="stylesheet" href="https://unpkg.com/primeicons@6.0.1/primeicons.css">
+    <style>
+        body { font-family: -apple-system, sans-serif; margin: 0; background: #f8fafc; }
+        :root {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8fafc;
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+            --border-color: #e2e8f0;
+        }
+        #host { height: 100vh; }
+    </style>
+</head>
+<body>
+    <script>
+        // Stub DB id required by funnel script
+        var db = 'preview';
+
+        // Stub XHR so funnelLoad() returns the preview data instead of hitting the server.
+        var SAMPLE = [
+            { 'Вакансия': 'Менеджер по продажам', 'Имя': 'Дарий', 'Месяц': '202501', 'Тип найма': 'Штат',
+              'Первый контакт': 50, 'Анкета': 32, 'Интервью': 0, 'Отправлено руководителю': 0,
+              'Оффер': 12, 'Оффер принят': 8, 'Старт обучения': 5, 'Аттестация сдана': 3 },
+            { 'Вакансия': 'Менеджер по продажам', 'Имя': 'Анна', 'Месяц': '202502', 'Тип найма': 'Штат',
+              'Первый контакт': 30, 'Анкета': 18, 'Интервью': 10, 'Отправлено руководителю': 4,
+              'Оффер': 0, 'Оффер принят': 0, 'Старт обучения': 0, 'Аттестация сдана': 0 }
+        ];
+
+        var OriginalXHR = window.XMLHttpRequest;
+        window.XMLHttpRequest = function() {
+            var xhr = {
+                open: function() {},
+                send: function() {
+                    var self = this;
+                    setTimeout(function() {
+                        self.responseText = JSON.stringify(SAMPLE);
+                        if (self.onload) self.onload();
+                    }, 10);
+                },
+                onload: null,
+                onerror: null,
+                responseText: ''
+            };
+            return xhr;
+        };
+    </script>
+    <div id="template-mount"></div>
+    <script>
+        fetch('../templates/funnel.html')
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+                document.getElementById('template-mount').innerHTML = html;
+                document.querySelectorAll('#template-mount script').forEach(function(old) {
+                    var s = document.createElement('script');
+                    s.textContent = old.textContent;
+                    document.body.appendChild(s);
+                });
+                // Manually fire the load handler since DOMContentLoaded already happened.
+                setTimeout(function() {
+                    if (window.funnelLoad) window.funnelLoad();
+                }, 50);
+            });
+    </script>
+</body>
+</html>
