@@ -154,6 +154,8 @@ function dashGeneralSettingsFromSettings() { return null; }
 function dashApplyGeneralChartOptions(options) { return options; }
 function dashApplyGeneralBarDataset(dataset) { return dataset; }
 function dashApplyPanelLayout(panelEl) { dashApplyPanelMaxWidth(panelEl); }
+function dashCollectVizCustomOptions() { return ''; }
+function dashApplyCustomChartConfig(chartConfig) { return chartConfig; }
 ${extractFunction('dashChartPaletteFromGeneral')}
 ${extractFunction('dashChartColor')}
 ${extractFunction('dashVizModalCollectSettings')}

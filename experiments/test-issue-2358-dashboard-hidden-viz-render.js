@@ -84,6 +84,9 @@ function dashBuildAreaChartOptions() { return {}; }
 function dashGeneralSettingsFromSettings() { return null; }
 function dashApplyGeneralChartOptions(options) { return options; }
 function dashApplyGeneralBarDataset(dataset) { return dataset; }
+function dashChartPaletteFromGeneral() { return CHART_COLORS; }
+function dashChartColor(palette, index) { return palette[index % palette.length]; }
+function dashApplyCustomChartConfig(chartConfig) { return chartConfig; }
 function dashRenderPivot() { pivotRenders++; }
 function dashRenderReportTable() { tableRenders++; }
 function dashEnsureTableResizeHandle() {}

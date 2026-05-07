@@ -2777,15 +2777,38 @@ function dashSetPanelColumnsInSettings(settings, panelColumns) {
     return result;
 }
 
-function dashApplyPanelHeight(panelEl) {
+function dashApplyPanelHeight(panelEl, activeVizType) {
     var modelData = panelEl ? dashModelData[panelEl.id] : null
         , panelHeight = dashPanelHeightFromSettings(modelData && modelData.settings)
-        , content = panelEl && panelEl.querySelector ? panelEl.querySelector('.f-panel-content') : null;
-    if (!content || !content.style) return;
-    content.style.minHeight = '';
-    content.style.maxHeight = '';
-    content.style.overflow = '';
+        , content = panelEl && panelEl.querySelector ? panelEl.querySelector('.f-panel-content') : null
+        , chartWrap = panelEl && panelEl.querySelector ? panelEl.querySelector('.f-chart-wrap') : null
+        , canvas = panelEl && panelEl.querySelector ? panelEl.querySelector('.f-chart-canvas') : null
+        , applyToChart = false;
+    activeVizType = activeVizType || dashPanelActiveVizType(panelEl);
+    applyToChart = !!(panelHeight && chartWrap && chartWrap.style && dashIsResizableChartViz(activeVizType));
+    if (panelEl) panelEl._dashPanelHeightAppliesToChart = false;
+    if (content && content.style) {
+        content.style.minHeight = '';
+        content.style.maxHeight = '';
+        content.style.overflow = '';
+    }
     if (!panelHeight) return;
+
+    if (applyToChart) {
+        if (panelHeight.min !== undefined) chartWrap.style.minHeight = panelHeight.min + 'px';
+        if (panelHeight.max !== undefined) {
+            chartWrap.style.maxHeight = panelHeight.max + 'px';
+            chartWrap.style.overflow = 'auto';
+        }
+        if (canvas && canvas.style) {
+            canvas.style.height = '100%';
+            canvas.style.maxHeight = '100%';
+        }
+        if (panelEl) panelEl._dashPanelHeightAppliesToChart = true;
+        return;
+    }
+
+    if (!content || !content.style) return;
     if (panelHeight.min !== undefined) content.style.minHeight = panelHeight.min + 'px';
     if (panelHeight.max !== undefined) {
         content.style.maxHeight = panelHeight.max + 'px';
@@ -2810,9 +2833,9 @@ function dashApplyPanelColumns(panelEl) {
     });
 }
 
-function dashApplyPanelLayout(panelEl) {
+function dashApplyPanelLayout(panelEl, activeVizType) {
     dashApplyPanelMaxWidth(panelEl);
-    dashApplyPanelHeight(panelEl);
+    dashApplyPanelHeight(panelEl, activeVizType);
     dashApplyPanelColumns(panelEl);
 }
 
@@ -3158,6 +3181,7 @@ function dashResetVizSizeStyles(el) {
     el.style.height = '';
     el.style.maxHeight = '';
     el.style.minHeight = '';
+    el.style.overflow = '';
 }
 
 function dashIsResizableChartViz(vizType) {
@@ -3593,7 +3617,7 @@ function dashApplyChartPixelSize(panelEl, vizType, width, height) {
         canvas.style.maxHeight = '';
     }
     dashApplyVizSizeStyles(panelEl, vizType, size);
-    dashApplyPanelLayout(panelEl);
+    dashApplyPanelLayout(panelEl, vizType);
     dashResizeChartInstance(panelEl);
     return size;
 }
@@ -3618,7 +3642,7 @@ function dashApplyTablePixelSize(panelEl, width, height) {
         canvas.style.maxHeight = '';
     }
     dashApplyVizSizeStyles(panelEl, 'table', size);
-    dashApplyPanelLayout(panelEl);
+    dashApplyPanelLayout(panelEl, 'table');
     dashUpdateTableWrapOverflow();
     return size;
 }
@@ -3792,14 +3816,14 @@ function dashApplyVizSize(panelEl, vizType, vizConfig) {
     if (vizType === 'table') {
         dashEnsureTableResizeHandle(panelEl);
         if (size) appliedSize = dashApplyVizSizeStyles(panelEl, vizType, size);
-        dashApplyPanelLayout(panelEl);
+        dashApplyPanelLayout(panelEl, 'table');
         return appliedSize;
     }
 
     dashEnsureChartResizeHandle(panelEl, vizType);
 
     if (size) appliedSize = dashApplyVizSizeStyles(panelEl, vizType, size);
-    dashApplyPanelLayout(panelEl);
+    dashApplyPanelLayout(panelEl, vizType);
     return appliedSize;
 }
 
@@ -4026,7 +4050,8 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
             };
         }
 
-        if (vizSize && vizSize.height) options.maintainAspectRatio = false;
+        if ((vizSize && vizSize.height) || panelEl._dashPanelHeightAppliesToChart)
+            options.maintainAspectRatio = false;
 
         options = dashApplyGeneralChartOptions(options, vizType, general);
 
@@ -4426,7 +4451,8 @@ function dashPanelApplySettings(panelKey, settings, renderChart) {
     // Normalize: settings can be a single object {type:...} or an array
     var vizList = Array.isArray(settings) ? settings : [settings];
     var enabled = vizList.filter(function(v) { return v && v.type; });
-    dashApplyPanelLayout(panel);
+    var def = enabled.find(function(v) { return v.default; }) || enabled[0];
+    dashApplyPanelLayout(panel, def && def.type ? def.type : 'table');
     if (!enabled.length) return;
 
     // Build visualization type icons
@@ -4435,7 +4461,6 @@ function dashPanelApplySettings(panelKey, settings, renderChart) {
     if (!renderChart) return;
 
     // Find default or first enabled
-    var def = enabled.find(function(v) { return v.default; }) || enabled[0];
     if (def && def.type) {
         dashRenderChart(panel, def.type, def.fieldMap || {}, def);
     }
@@ -4785,7 +4810,7 @@ function dashBuildVizCustomOptionsHtml(customOptions) {
 function dashBuildPanelHeightHtml(panelHeight) {
     var normalized = dashNormalizePanelHeight(panelHeight) || {};
     return '<div class="dash-panel-general-group dash-panel-height-group">'
-        + '<div class="dash-viz-size-title">Высота панели</div>'
+        + '<div class="dash-viz-size-title">Высота панели / графика</div>'
         + '<div class="dash-viz-field-row dash-panel-height-row"><label>Минимальная</label>'
         + '<input type="number" min="0" max="4000" step="1" name="panelHeightMin" value="' + dashAttr(normalized.min !== undefined ? normalized.min : '') + '">'
         + '<span>px</span></div>'

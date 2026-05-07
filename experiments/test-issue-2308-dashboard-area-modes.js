@@ -77,6 +77,9 @@ function dashReportColumnIsMeasure(column) { return column && column.kind === 'm
 function dashGeneralSettingsFromSettings() { return null; }
 function dashApplyGeneralChartOptions(options) { return options; }
 function dashApplyGeneralBarDataset(dataset) { return dataset; }
+function dashChartPaletteFromGeneral() { return CHART_COLORS; }
+function dashChartColor(palette, index) { return palette[index % palette.length]; }
+function dashApplyCustomChartConfig(chartConfig) { return chartConfig; }
 function Chart(canvas, config) {
     Chart.lastConfig = config;
     canvas._chartInstance = { destroy: function() {} };
