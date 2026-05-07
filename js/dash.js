@@ -2454,10 +2454,11 @@ function dashBuildAreaDatasets(datasets, fieldMap, palette) {
         var dataset = {
             label: ds.label,
             data: ds.data,
-            borderColor: color,
-            backgroundColor: dashColorWithAlpha(color, 0.3),
+            borderWidth: 0,
+            backgroundColor: color,
             tension: 0.3,
-            fill: true
+            fill: true,
+            pointRadius: 0
         };
         if (areaMode !== 'plain') dataset.stack = 'area';
         return dataset;
@@ -2466,8 +2467,9 @@ function dashBuildAreaDatasets(datasets, fieldMap, palette) {
 
 function dashBuildAreaChartOptions(fieldMap) {
     var areaMode = dashNormalizeAreaMode(fieldMap && fieldMap.areaMode)
-        , yScale;
-    if (areaMode === 'plain') return {};
+        , yScale
+        , base = { plugins: { legend: { labels: { borderWidth: 0 } } } };
+    if (areaMode === 'plain') return base;
 
     yScale = { stacked: true };
     if (areaMode === 'normalized') {
@@ -2480,7 +2482,7 @@ function dashBuildAreaChartOptions(fieldMap) {
             }
         };
     }
-    return { scales: { y: yScale } };
+    return Object.assign(base, { scales: { y: yScale } });
 }
 
 function dashEnsureChartJs(cb) {
