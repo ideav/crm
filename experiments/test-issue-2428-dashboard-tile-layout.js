@@ -164,6 +164,8 @@ ${extractFunction('dashNormalizePanelColumns')}
 ${extractFunction('dashPanelColumnsWithDefaults')}
 ${extractFunction('dashPanelColumnsFromSettings')}
 ${extractFunction('dashSetPanelColumnsInSettings')}
+${extractFunction('dashIsResizableChartViz')}
+${extractFunction('dashPanelActiveVizType')}
 ${extractFunction('dashApplyPanelHeight')}
 ${extractFunction('dashApplyPanelColumns')}
 ${extractFunction('dashApplyPanelLayout')}
@@ -188,7 +190,7 @@ assert.strictEqual(doc.getCookie(tileCookie), '0', 'disabling tile mode stores a
 assert.strictEqual(ctx.dashReadSheetTileMode(sheet), false, 'explicit off cookie disables tile mode');
 
 const heightHtml = ctx.dashBuildPanelHeightHtml({ min: 180, max: 360 });
-assert(heightHtml.includes('Высота панели'), 'panel height settings are rendered');
+assert(heightHtml.includes('Высота панели / графика'), 'panel/chart height settings are rendered');
 assert(heightHtml.includes('name="panelHeightMin"'), 'minimum panel height input is rendered');
 assert(heightHtml.includes('name="panelHeightMax"'), 'maximum panel height input is rendered');
 
