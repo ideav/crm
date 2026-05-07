@@ -1077,7 +1077,7 @@ function dashCollectReportVizData(report, vizConfig) {
         }
     });
 
-    if (type === 'pie') {
+    if (type === 'pie' || type === 'funnel') {
         datasets.push({
             label: valueCol ? valueCol.name : 'Количество',
             data: labels.map(function(label) {
@@ -2172,6 +2172,7 @@ var DASH_VIZ_TYPES = [
     { id: 'bar',    label: 'Столбчатая диаграмма',   icon: 'pi-chart-bar' },
     { id: 'area',   label: 'Диаграмма с областями',  icon: 'pi-chart-line' },
     { id: 'bubble', label: 'Пузырьковая диаграмма',  icon: 'pi-circle' },
+    { id: 'funnel', label: 'Диаграмма-воронка',      icon: 'pi-filter' },
     { id: 'pivot',  label: 'Сводная таблица',        icon: 'pi-objects-column' }
 ];
 
@@ -3649,6 +3650,28 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
                 }),
                 backgroundColor: CHART_COLORS[0]
             }];
+
+        } else if (vizType === 'funnel') {
+            chartType = 'bar';
+            var funnelVals = data.datasets.length ? data.datasets[0].data : [];
+            var funnelPairs = labels.map(function(lbl, i) {
+                return { label: lbl, value: Number(funnelVals[i]) || 0 };
+            }).sort(function(a, b) { return b.value - a.value; });
+            labels = funnelPairs.map(function(p) { return p.label; });
+            chartDatasets = [{
+                label: data.datasets[0] && data.datasets[0].label ? data.datasets[0].label : '',
+                data: funnelPairs.map(function(p) { return p.value; }),
+                backgroundColor: funnelPairs.map(function(_, i) { return CHART_COLORS[i % CHART_COLORS.length]; }),
+                borderWidth: 0
+            }];
+            options = {
+                indexAxis: 'y',
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { beginAtZero: true },
+                    y: { ticks: { autoSkip: false } }
+                }
+            };
         }
 
         if (vizSize && vizSize.height) options.maintainAspectRatio = false;
@@ -4270,6 +4293,10 @@ function dashBuildReportFieldMapHtml(vizType, fieldMap, report) {
     }
     if (vizType === 'pie') {
         return sel('labelField', 'Сектор', fm.labelField || '', dashReportColumnIsDimension)
+            + sel('valueField', 'Значение', fm.valueField || '', dashReportColumnIsMeasure);
+    }
+    if (vizType === 'funnel') {
+        return sel('labelField', 'Этап', fm.labelField || '', dashReportColumnIsDimension)
             + sel('valueField', 'Значение', fm.valueField || '', dashReportColumnIsMeasure);
     }
     if (vizType === 'bubble') {
