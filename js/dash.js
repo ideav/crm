@@ -2688,7 +2688,7 @@ function dashApplyGeneralChartOptions(options, vizType, general) {
     var opts = options || {}
         , scales = opts.scales || (opts.scales = {})
         , plugins = opts.plugins || (opts.plugins = {})
-        , supportsAxes = vizType === 'bar' || vizType === 'line' || vizType === 'area' || vizType === 'bubble'
+        , supportsAxes = vizType === 'bar' || vizType === 'line' || vizType === 'area' || vizType === 'bubble' || vizType === 'funnel'
         , xAxis, yAxis;
 
     if (supportsAxes) {
