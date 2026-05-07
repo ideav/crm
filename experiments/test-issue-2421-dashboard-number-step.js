@@ -47,6 +47,10 @@ ${extractFunction('dashNormalizePanelMaxWidth')}
 ${extractFunction('dashBuildPanelMaxWidthUnitOptions')}
 ${extractFunction('dashBuildPanelMaxWidthRow')}
 ${extractFunction('dashBuildPanelMaxWidthHtml')}
+${extractFunction('dashBrowserSupportsColor')}
+${extractFunction('dashNormalizeColorToken')}
+${extractFunction('dashNormalizeColorPalette')}
+${extractFunction('dashColorPaletteToText')}
 ${extractFunction('dashBuildSelectOptions')}
 ${extractFunction('dashBuildPanelGeneralHtml')}
 `;
