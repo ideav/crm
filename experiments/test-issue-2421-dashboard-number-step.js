@@ -36,10 +36,9 @@ var DASH_PANEL_COLUMN_BREAKPOINTS = [
 ];
 var DASH_GENERAL_AXIS_FONT_SIZES = [8, 9, 10, 12, 14, 16];
 var DASH_GENERAL_LEGEND_FONT_SIZES = [8, 9, 10, 12, 14, 16];
-var DASH_GENERAL_LEGEND_POSITIONS = ['top', 'bottom', 'left', 'right'];
+var DASH_GENERAL_LEGEND_POSITIONS = ['top', 'bottom', 'left', 'right', 'none'];
 var DASH_GENERAL_X_ROTATIONS = [0, 45, 90];
 var DASH_GENERAL_TOOLTIP_DECIMALS = [0, 1, 2, 3];
-function dashColorPaletteToText() { return ''; }
 ${extractFunction('dashAttr')}
 ${extractFunction('dashNormalizeIntegerInRange')}
 ${extractFunction('dashNormalizePanelHeight')}
@@ -47,6 +46,10 @@ ${extractFunction('dashNormalizePanelColumns')}
 ${extractFunction('dashPanelColumnsWithDefaults')}
 ${extractFunction('dashBuildPanelHeightHtml')}
 ${extractFunction('dashBuildPanelColumnsHtml')}
+${extractFunction('dashBrowserSupportsColor')}
+${extractFunction('dashNormalizeColorToken')}
+${extractFunction('dashNormalizeColorPalette')}
+${extractFunction('dashColorPaletteToText')}
 ${extractFunction('dashBuildSelectOptions')}
 ${extractFunction('dashBuildPanelGeneralHtml')}
 `;

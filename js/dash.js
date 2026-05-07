@@ -2794,7 +2794,7 @@ function dashApplyPanelLayout(panelEl) {
 
 var DASH_GENERAL_AXIS_FONT_SIZES = [8, 9, 10, 12, 14, 16];
 var DASH_GENERAL_LEGEND_FONT_SIZES = [8, 9, 10, 12, 14, 16];
-var DASH_GENERAL_LEGEND_POSITIONS = ['top', 'bottom', 'left', 'right'];
+var DASH_GENERAL_LEGEND_POSITIONS = ['top', 'bottom', 'left', 'right', 'none'];
 var DASH_GENERAL_X_ROTATIONS = [0, 45, 90];
 var DASH_GENERAL_TOOLTIP_DECIMALS = [0, 1, 2, 3];
 
@@ -2958,7 +2958,11 @@ function dashApplyGeneralChartOptions(options, vizType, general) {
     if (typeof general.legendFontSize === 'number' || typeof general.legendPosition === 'string') {
         plugins.legend = plugins.legend || {};
         if (typeof general.legendPosition === 'string') {
-            plugins.legend.position = general.legendPosition;
+            if (general.legendPosition === 'none') {
+                plugins.legend.display = false;
+            } else {
+                plugins.legend.position = general.legendPosition;
+            }
         }
         if (typeof general.legendFontSize === 'number') {
             plugins.legend.labels = plugins.legend.labels || {};
@@ -4609,7 +4613,7 @@ function dashBuildPanelGeneralHtml(general) {
     var g = general || {}
         , fontOptions = dashBuildSelectOptions(DASH_GENERAL_AXIS_FONT_SIZES, g.axisFontSize, function(v) { return v + ' px'; })
         , legendFontOptions = dashBuildSelectOptions(DASH_GENERAL_LEGEND_FONT_SIZES, g.legendFontSize, function(v) { return v + ' px'; })
-        , legendPositionLabels = { top: 'Сверху', bottom: 'Снизу', left: 'Слева', right: 'Справа' }
+        , legendPositionLabels = { top: 'Сверху', bottom: 'Снизу', left: 'Слева', right: 'Справа', none: 'Без легенды' }
         , legendPositionOptions = dashBuildSelectOptions(DASH_GENERAL_LEGEND_POSITIONS, g.legendPosition, function(v) { return legendPositionLabels[v] || v; })
         , rotationOptions = dashBuildSelectOptions(DASH_GENERAL_X_ROTATIONS, g.xLabelRotation, function(v) { return v + '°'; })
         , decimalOptions = dashBuildSelectOptions(DASH_GENERAL_TOOLTIP_DECIMALS, g.tooltipDecimals)
