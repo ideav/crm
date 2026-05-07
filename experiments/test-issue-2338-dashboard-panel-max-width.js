@@ -1,5 +1,5 @@
-// Test for issue #2338: dashboard visualization settings persist and apply a
-// panel-wide responsive max-width for desktop and mobile.
+// Test for issue #2338: legacy dashboard panel max-width settings still apply
+// when present in saved settings. Issue #2428 removes the modal controls.
 
 const fs = require('fs');
 const vm = require('vm');
@@ -58,34 +58,6 @@ function makePanel() {
     return panel;
 }
 
-function makeWidthControlDocument() {
-    const accordion = {
-        querySelectorAll(selector) {
-            if (selector === '.dash-viz-accordion-item') return [];
-            return [];
-        }
-    };
-    const maxWidthControls = {
-        '[name="panelMaxWidthDesktopValue"]': { value: '960' },
-        '[name="panelMaxWidthDesktopUnit"]': { value: 'px' },
-        '[name="panelMaxWidthMobileValue"]': { value: '100' },
-        '[name="panelMaxWidthMobileUnit"]': { value: '%' }
-    };
-    const maxWidthEl = {
-        querySelector(selector) {
-            return maxWidthControls[selector] || null;
-        }
-    };
-    return {
-        getElementById(id) {
-            if (id === 'dash-viz-accordion') return accordion;
-            if (id === 'dash-panel-max-width-settings') return maxWidthEl;
-            if (id === 'dash-panel-general-settings') return null;
-            return null;
-        }
-    };
-}
-
 const code = `
 var DASH_VIZ_SIZE_UNITS = ['%', 'px', 'rem'];
 var DASH_PANEL_MAX_WIDTH_UNITS = ['%', 'px'];
@@ -93,9 +65,6 @@ var DASH_PANEL_MAX_WIDTH_MOBILE_BREAKPOINT = 767;
 var DASH_CHART_RESIZE_MIN_WIDTH = 260;
 var DASH_CHART_RESIZE_MIN_HEIGHT = 180;
 var DASH_CHART_RESIZE_COOKIE_MAX_AGE = 31536000;
-var DASH_GENERAL_AXIS_FONT_SIZES = [10, 12, 14, 16];
-var DASH_GENERAL_X_ROTATIONS = [0, 45, 90];
-var DASH_GENERAL_TOOLTIP_DECIMALS = [0, 1, 2, 3];
 var dashRecordId = 'dash-test';
 var dashCurrentId = null;
 var dashModelData = {};
@@ -109,24 +78,12 @@ ${extractFunction('dashNormalizePanelMaxWidthUnit')}
 ${extractFunction('dashNormalizePanelMaxWidthDimension')}
 ${extractFunction('dashNormalizePanelMaxWidth')}
 ${extractFunction('dashPanelMaxWidthFromSettings')}
-${extractFunction('dashSetPanelMaxWidthInSettings')}
-${extractFunction('dashBuildPanelMaxWidthUnitOptions')}
-${extractFunction('dashBuildPanelMaxWidthRow')}
-${extractFunction('dashBuildPanelMaxWidthHtml')}
-${extractFunction('dashCollectPanelMaxWidthDimension')}
-${extractFunction('dashCollectPanelMaxWidth')}
 ${extractFunction('dashPanelMaxWidthDevice')}
 ${extractFunction('dashPanelMaxWidthForPanel')}
 ${extractFunction('dashPanelMaxWidthCss')}
 ${extractFunction('dashCombineMaxWidthCss')}
 ${extractFunction('dashApplyPanelMaxWidth')}
-${extractFunction('dashNormalizePositiveNumber')}
-${extractFunction('dashNormalizeIntegerInRange')}
-${extractFunction('dashNormalizeEnum')}
-${extractFunction('dashNormalizeGeneralSettings')}
-${extractFunction('dashGeneralSettingsFromSettings')}
-${extractFunction('dashSetGeneralSettingsInSettings')}
-${extractFunction('dashCollectPanelGeneral')}
+function dashApplyPanelLayout(panelEl) { dashApplyPanelMaxWidth(panelEl); }
 ${extractFunction('dashResetVizSizeStyles')}
 ${extractFunction('dashIsResizableChartViz')}
 ${extractFunction('dashCookieGet')}
@@ -146,10 +103,6 @@ ${extractFunction('dashClampChartSize')}
 ${extractFunction('dashStartChartResize')}
 ${extractFunction('dashEnsureChartResizeHandle')}
 ${extractFunction('dashApplyVizSize')}
-${extractFunction('dashCollectVizSizeDimension')}
-${extractFunction('dashCollectVizSize')}
-${extractFunction('dashCollectVizSelectedRows')}
-${extractFunction('dashVizModalCollectSettings')}
 `;
 
 const ctx = {
@@ -175,25 +128,6 @@ vm.runInContext(code, ctx);
         mobile: { value: '-1', unit: 'px' }
     });
     assert(!invalid, 'invalid panel max-width values are omitted');
-}
-
-{
-    const html = ctx.dashBuildPanelMaxWidthHtml({
-        desktop: { value: '960', unit: 'px' },
-        mobile: { value: '100', unit: '%' }
-    });
-    assert(html.indexOf('panelMaxWidthDesktopValue') !== -1, 'desktop max-width control is rendered');
-    assert(html.indexOf('panelMaxWidthMobileValue') !== -1, 'mobile max-width control is rendered');
-    assert(html.indexOf('value="rem"') === -1, 'panel max-width unit options exclude rem');
-}
-
-{
-    ctx.document = makeWidthControlDocument();
-    const settings = ctx.dashVizModalCollectSettings();
-    assertEqual(settings.length, 1, 'panel max-width can be saved without enabled visualizations');
-    assert(!settings[0].type, 'panel max-width entry is not treated as a visualization');
-    assertEqual(settings[0].panelMaxWidth.desktop.value, '960', 'desktop max-width is collected');
-    assertEqual(settings[0].panelMaxWidth.mobile.unit, '%', 'mobile max-width unit is collected');
 }
 
 {

@@ -142,6 +142,7 @@ ${extractFunction('dashPanelMaxWidthForPanel')}
 ${extractFunction('dashPanelMaxWidthCss')}
 ${extractFunction('dashCombineMaxWidthCss')}
 ${extractFunction('dashApplyPanelMaxWidth')}
+function dashApplyPanelLayout(panelEl) { dashApplyPanelMaxWidth(panelEl); }
 ${extractFunction('dashResetVizSizeStyles')}
 ${extractFunction('dashIsResizableChartViz')}
 ${extractFunction('dashCookieGet')}

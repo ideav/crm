@@ -39,7 +39,7 @@
 }
 #dash-model .f-sheet.dash-tile-mode {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, max(30rem, var(--dash-tile-panel-min-width, 30rem))), 1fr));
+    grid-template-columns: repeat(12, minmax(0, 1fr));
     align-items: start;
 }
 .dash-filter-bar {
@@ -52,10 +52,36 @@
 #dash-model .f-sheet.dash-tile-mode .f-panel {
     display: flex;
     flex-direction: column;
+    grid-column: span var(--dash-panel-cols-xs, 12);
     align-self: start;
     width: 100% !important;
     max-width: none !important;
     padding-right: 0;
+}
+@media (min-width: 576px) {
+    #dash-model .f-sheet.dash-tile-mode .f-panel {
+        grid-column: span var(--dash-panel-cols-sm, 12);
+    }
+}
+@media (min-width: 768px) {
+    #dash-model .f-sheet.dash-tile-mode .f-panel {
+        grid-column: span var(--dash-panel-cols-md, 6);
+    }
+}
+@media (min-width: 992px) {
+    #dash-model .f-sheet.dash-tile-mode .f-panel {
+        grid-column: span var(--dash-panel-cols-lg, 4);
+    }
+}
+@media (min-width: 1200px) {
+    #dash-model .f-sheet.dash-tile-mode .f-panel {
+        grid-column: span var(--dash-panel-cols-xl, 4);
+    }
+}
+@media (min-width: 1400px) {
+    #dash-model .f-sheet.dash-tile-mode .f-panel {
+        grid-column: span var(--dash-panel-cols-xxl, 3);
+    }
 }
 #dash-model .f-sheet.dash-tile-mode .f-panel-content {
     display: flex;
@@ -236,7 +262,6 @@
     display: none;
     align-items: center;
     justify-content: center;
-    margin-left: auto;
     border: 0;
     background: transparent;
     color: var(--text-secondary, #6c757d);
@@ -254,7 +279,6 @@
     background: var(--bg-secondary, #f0f0f0);
     outline: none;
 }
-.dash-reset-size-icon.dash-reset-size-icon--visible + .dash-settings-icon { margin-left: 0; }
 .dash-settings-icon {
     margin-left: auto;
     color: var(--text-secondary, #6c757d);
@@ -685,52 +709,6 @@ body.dash-chart-resizing {
     cursor: nwse-resize;
     user-select: none;
 }
-.f-tile-resize-handle {
-    display: none;
-    position: absolute;
-    top: 0;
-    right: -0.5rem;
-    width: 0.7rem;
-    height: 100%;
-    padding: 0;
-    margin: 0;
-    border: 0;
-    background: transparent;
-    cursor: ew-resize;
-    z-index: 6;
-    touch-action: none;
-}
-.f-tile-resize-handle::before {
-    content: "";
-    position: absolute;
-    top: 25%;
-    bottom: 25%;
-    left: 50%;
-    width: 2px;
-    margin-left: -1px;
-    background: var(--border-color, #dee2e6);
-    border-radius: 1px;
-    opacity: 0;
-    transition: opacity 0.15s, background-color 0.15s;
-}
-#dash-model .f-sheet.dash-tile-mode .f-panel {
-    position: relative;
-}
-#dash-model .f-sheet.dash-tile-mode .f-panel .f-tile-resize-handle {
-    display: block;
-}
-#dash-model .f-sheet.dash-tile-mode .f-panel:hover .f-tile-resize-handle::before,
-#dash-model .f-sheet.dash-tile-mode .f-tile-resize-handle:hover::before,
-#dash-model .f-sheet.dash-tile-mode .f-tile-resize-handle:focus::before,
-.f-sheet--tile-resizing .f-tile-resize-handle::before {
-    opacity: 0.85;
-    background: var(--text-secondary, #6c757d);
-}
-body.dash-tile-resizing {
-    cursor: ew-resize;
-    user-select: none;
-}
-
 .f-pivot-wrap {
     overflow: auto;
     font-size: 0.85rem;
@@ -909,11 +887,8 @@ body.dash-tile-resizing {
     padding-top: 0.6rem;
     border-top: 1px solid var(--border-color, #dee2e6);
 }
-.dash-panel-max-width-settings {
-    margin-top: 0.25rem;
-}
 .dash-panel-general-settings {
-    margin-top: 0.75rem;
+    margin-top: 0.25rem;
 }
 .dash-panel-general-group {
     border: 1px solid var(--border-color, #dee2e6);
@@ -922,12 +897,6 @@ body.dash-tile-resizing {
     background: var(--bg-primary, #fff);
     margin-bottom: 0.6rem;
 }
-.dash-panel-max-width-group {
-    border: 1px solid var(--border-color, #dee2e6);
-    border-radius: 4px;
-    padding: 0.6rem 0.75rem 0.2rem;
-    background: var(--bg-primary, #fff);
-}
 .dash-viz-size-title {
     margin-bottom: 0.4rem;
     color: var(--text-secondary, #6c757d);
@@ -935,12 +904,12 @@ body.dash-tile-resizing {
     font-weight: 600;
 }
 .dash-viz-size-row input[type="number"],
-.dash-panel-max-width-row input[type="number"] {
+.dash-panel-height-row input[type="number"],
+.dash-panel-columns-row input[type="number"] {
     flex: 0 1 7rem;
     min-width: 0;
 }
-.dash-viz-size-row select,
-.dash-panel-max-width-row select {
+.dash-viz-size-row select {
     flex: 0 0 4.5rem;
 }
 .dash-viz-field-hint {

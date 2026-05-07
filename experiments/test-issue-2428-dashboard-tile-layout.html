@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Issue 2428 dashboard tile layout</title>
+    <link rel="stylesheet" href="../assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="../css/dash.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 1rem;
+            background: #f5f6f8;
+            color: #212529;
+            font-family: Arial, sans-serif;
+        }
+        #dash-model {
+            max-width: 1180px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 0.75rem;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+        }
+        .f-panel {
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 0.75rem;
+            background: #fff;
+        }
+        .f-panel-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .f-panel-header h4 {
+            margin: 0;
+            font-size: 0.95rem;
+        }
+        .sample-value {
+            font-size: 1.4rem;
+            font-weight: 600;
+        }
+        #dash-viz-modal {
+            position: static;
+            display: flex;
+            margin: 1rem auto 0;
+            max-width: 1180px;
+            min-height: 0;
+            background: transparent;
+            align-items: stretch;
+            justify-content: flex-start;
+        }
+        #dash-viz-modal .dash-viz-modal-box {
+            width: min(560px, 100%);
+            max-height: none;
+        }
+    </style>
+</head>
+<body>
+<div id="dash-model" class="f-model">
+    <div id="ds-demo" class="f-sheet dash-tile-mode">
+        <div class="dash-filter-bar">
+            <input type="date" class="dash-fr-input" value="2026-01-01">
+            <span class="dash-filter-sep">-</span>
+            <input type="date" class="dash-to-input" value="2026-12-31">
+            <select class="dash-period-sel"><option>Месяц</option></select>
+            <button class="dash-apply-btn">Применить</button>
+            <input type="text" class="dash-search-input" placeholder="Поиск...">
+            <a class="dash-settings-icon" title="Настройки дэшборда"><i class="pi pi-cog"></i></a>
+            <button type="button" class="dash-tile-mode-icon active" title="Выключить режим плитки" aria-label="Режим плитки" aria-pressed="true"><i class="pi pi-th-large"></i></button>
+            <button type="button" class="dash-reset-size-icon" title="Сбросить размеры панелей" aria-label="Сбросить размеры панелей" aria-hidden="true" disabled><i class="pi pi-refresh"></i></button>
+        </div>
+
+        <div class="f-panel pt-3" style="--dash-panel-cols-md: 6; --dash-panel-cols-lg: 4;">
+            <div class="f-panel-header"><div class="f-panel-viz-icons"></div><h4>Выручка</h4></div>
+            <div class="f-panel-content"><div class="sample-value">12.8 млн</div></div>
+        </div>
+        <div class="f-panel pt-3" style="--dash-panel-cols-md: 6; --dash-panel-cols-lg: 4;">
+            <div class="f-panel-header"><div class="f-panel-viz-icons"></div><h4>Сделки</h4></div>
+            <div class="f-panel-content"><div class="sample-value">48</div></div>
+        </div>
+        <div class="f-panel pt-3" style="--dash-panel-cols-md: 12; --dash-panel-cols-lg: 4;">
+            <div class="f-panel-header"><div class="f-panel-viz-icons"></div><h4>План на месяц</h4></div>
+            <div class="f-panel-content"><div class="sample-value">84%</div></div>
+        </div>
+    </div>
+</div>
+
+<div id="dash-viz-modal" role="dialog" aria-modal="true">
+    <div class="dash-modal-box dash-viz-modal-box">
+        <h6>Варианты отображения панели</h6>
+        <ul class="dash-viz-tabs" role="tablist">
+            <li class="dash-viz-tab" data-viz-tab="panels" role="tab" aria-selected="false" tabindex="0">Диаграммы</li>
+            <li class="dash-viz-tab active" data-viz-tab="general" role="tab" aria-selected="true" tabindex="0">Общие настройки</li>
+        </ul>
+        <div class="dash-viz-tab-pane active" data-viz-tab-pane="general">
+            <div id="dash-panel-general-settings" class="dash-panel-general-settings">
+                <div class="dash-panel-general-group dash-panel-height-group">
+                    <div class="dash-viz-size-title">Высота панели</div>
+                    <div class="dash-viz-field-row dash-panel-height-row"><label>Минимальная</label><input type="number" min="0" max="4000" step="1" name="panelHeightMin" value="220"><span>px</span></div>
+                    <div class="dash-viz-field-row dash-panel-height-row"><label>Максимальная</label><input type="number" min="0" max="4000" step="1" name="panelHeightMax" value="520"><span>px</span></div>
+                </div>
+                <div class="dash-panel-general-group dash-panel-columns-group">
+                    <div class="dash-viz-size-title">Ширина панели (12 колонок)</div>
+                    <div class="dash-viz-field-row dash-panel-columns-row"><label>XS &lt;576px</label><input type="number" min="1" max="12" step="1" name="panelColumnsXS" value="12"></div>
+                    <div class="dash-viz-field-row dash-panel-columns-row"><label>SM &gt;=576px</label><input type="number" min="1" max="12" step="1" name="panelColumnsSM" value="12"></div>
+                    <div class="dash-viz-field-row dash-panel-columns-row"><label>MD &gt;=768px</label><input type="number" min="1" max="12" step="1" name="panelColumnsMD" value="6"></div>
+                    <div class="dash-viz-field-row dash-panel-columns-row"><label>LG &gt;=992px</label><input type="number" min="1" max="12" step="1" name="panelColumnsLG" value="4"></div>
+                    <div class="dash-viz-field-row dash-panel-columns-row"><label>XL &gt;=1200px</label><input type="number" min="1" max="12" step="1" name="panelColumnsXL" value="4"></div>
+                    <div class="dash-viz-field-row dash-panel-columns-row"><label>XXL &gt;=1400px</label><input type="number" min="1" max="12" step="1" name="panelColumnsXXL" value="3"></div>
+                </div>
+            </div>
+        </div>
+        <div class="dash-modal-btns">
+            <button class="dash-apply-btn dash-btn-primary">Сохранить</button>
+            <button class="dash-apply-btn dash-btn-secondary">Отменить</button>
+        </div>
+    </div>
+</div>
+</body>
+</html>

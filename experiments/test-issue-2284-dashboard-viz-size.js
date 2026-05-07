@@ -92,6 +92,7 @@ var DASH_CHART_RESIZE_COOKIE_MAX_AGE = 31536000;
 var dashRecordId = 'dash-test';
 var dashCurrentId = null;
 var dashModelData = {};
+var CHART_COLORS = ['#1B50F3', '#A4B9FA'];
 function dashCollectPanelData(panelEl) {
     return { labels: ['Январь'], datasets: [{ label: 'План', data: [12] }] };
 }
@@ -111,7 +112,6 @@ ${extractFunction('dashNormalizePanelMaxWidthUnit')}
 ${extractFunction('dashNormalizePanelMaxWidthDimension')}
 ${extractFunction('dashNormalizePanelMaxWidth')}
 ${extractFunction('dashPanelMaxWidthFromSettings')}
-${extractFunction('dashSetPanelMaxWidthInSettings')}
 ${extractFunction('dashPanelMaxWidthDevice')}
 ${extractFunction('dashPanelMaxWidthForPanel')}
 ${extractFunction('dashPanelMaxWidthCss')}
@@ -143,14 +143,19 @@ ${extractFunction('dashEnsureTableResizeHandle')}
 ${extractFunction('dashApplyVizSize')}
 ${extractFunction('dashCollectVizSizeDimension')}
 ${extractFunction('dashCollectVizSize')}
-${extractFunction('dashCollectPanelMaxWidthDimension')}
-${extractFunction('dashCollectPanelMaxWidth')}
 ${extractFunction('dashCollectVizSelectedRows')}
+function dashCollectPanelHeight() { return null; }
+function dashSetPanelHeightInSettings(settings) { return settings; }
+function dashCollectPanelColumns() { return null; }
+function dashSetPanelColumnsInSettings(settings) { return settings; }
 function dashCollectPanelGeneral() { return null; }
 function dashSetGeneralSettingsInSettings(settings) { return settings; }
 function dashGeneralSettingsFromSettings() { return null; }
 function dashApplyGeneralChartOptions(options) { return options; }
 function dashApplyGeneralBarDataset(dataset) { return dataset; }
+function dashApplyPanelLayout(panelEl) { dashApplyPanelMaxWidth(panelEl); }
+${extractFunction('dashChartPaletteFromGeneral')}
+${extractFunction('dashChartColor')}
 ${extractFunction('dashVizModalCollectSettings')}
 ${extractFunction('dashRenderChart')}
 `;
