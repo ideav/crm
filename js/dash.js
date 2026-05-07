@@ -3006,6 +3006,134 @@ function dashApplyGeneralBarDataset(dataset, general) {
     return dataset;
 }
 
+// ─── Custom chart options ────────────────────────────────────────────────────
+// Per-chart-type user-supplied JSON options (e.g. to recolor the last bar of
+// a bar chart). Stored on the viz entry as { customOptions: "<json string>" }.
+
+var DASH_CUSTOM_OPTIONS_MAX_LENGTH = 8000;
+var DASH_CUSTOM_OPTIONS_DOC_URL = 'https://github.com/ideav/crm/blob/main/docs/CHART_CUSTOM_OPTIONS.md';
+
+function dashNormalizeCustomOptionsString(value) {
+    var raw;
+    if (value === undefined || value === null) return '';
+    raw = String(value).trim();
+    if (!raw) return '';
+    if (raw.length > DASH_CUSTOM_OPTIONS_MAX_LENGTH) raw = raw.slice(0, DASH_CUSTOM_OPTIONS_MAX_LENGTH);
+    return raw;
+}
+
+function dashParseCustomOptions(value) {
+    var raw = dashNormalizeCustomOptionsString(value)
+        , parsed;
+    if (!raw) return null;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (e) {
+        return null;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return parsed;
+}
+
+function dashIsPlainObject(value) {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function dashDeepMergeOptions(target, source) {
+    var result, key, srcVal, dstVal;
+    if (!dashIsPlainObject(source)) return target;
+    result = dashIsPlainObject(target) ? target : {};
+    for (key in source) {
+        if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+        srcVal = source[key];
+        dstVal = result[key];
+        if (dashIsPlainObject(srcVal) && dashIsPlainObject(dstVal)) {
+            result[key] = dashDeepMergeOptions(dstVal, srcVal);
+        } else if (Array.isArray(srcVal)) {
+            result[key] = srcVal.slice();
+        } else {
+            result[key] = srcVal;
+        }
+    }
+    return result;
+}
+
+function dashResolveDatasetIndex(idx, length) {
+    var n = parseInt(idx, 10);
+    if (!isFinite(n) || !length) return -1;
+    if (n < 0) n = length + n;
+    if (n < 0 || n >= length) return -1;
+    return n;
+}
+
+function dashApplyDatasetOverride(dataset, override) {
+    var data, key, val, idx, mapKey;
+    if (!dataset || !dashIsPlainObject(override)) return;
+    data = Array.isArray(dataset.data) ? dataset.data : [];
+    for (key in override) {
+        if (!Object.prototype.hasOwnProperty.call(override, key)) continue;
+        val = override[key];
+        if (key === 'pointColors' && dashIsPlainObject(val)) {
+            dataset.backgroundColor = Array.isArray(dataset.backgroundColor)
+                ? dataset.backgroundColor.slice()
+                : data.map(function() { return dataset.backgroundColor; });
+            for (mapKey in val) {
+                if (!Object.prototype.hasOwnProperty.call(val, mapKey)) continue;
+                idx = dashResolveDatasetIndex(mapKey, data.length);
+                if (idx >= 0) dataset.backgroundColor[idx] = val[mapKey];
+            }
+        } else if (key === 'pointBorderColors' && dashIsPlainObject(val)) {
+            dataset.borderColor = Array.isArray(dataset.borderColor)
+                ? dataset.borderColor.slice()
+                : data.map(function() { return dataset.borderColor; });
+            for (mapKey in val) {
+                if (!Object.prototype.hasOwnProperty.call(val, mapKey)) continue;
+                idx = dashResolveDatasetIndex(mapKey, data.length);
+                if (idx >= 0) dataset.borderColor[idx] = val[mapKey];
+            }
+        } else if (Array.isArray(val)) {
+            dataset[key] = val.slice();
+        } else if (dashIsPlainObject(val)) {
+            dataset[key] = dashDeepMergeOptions(dashIsPlainObject(dataset[key]) ? dataset[key] : {}, val);
+        } else {
+            dataset[key] = val;
+        }
+    }
+}
+
+function dashApplyCustomChartConfig(chartConfig, customOptions) {
+    var custom = dashParseCustomOptions(customOptions)
+        , datasets, datasetsCfg, eachDataset, i, idx, override;
+    if (!custom || !chartConfig) return chartConfig;
+
+    if (dashIsPlainObject(custom.options))
+        chartConfig.options = dashDeepMergeOptions(chartConfig.options || {}, custom.options);
+
+    datasets = chartConfig.data && Array.isArray(chartConfig.data.datasets)
+        ? chartConfig.data.datasets : [];
+
+    eachDataset = custom.dataset || custom.eachDataset;
+    if (dashIsPlainObject(eachDataset))
+        datasets.forEach(function(ds) { dashApplyDatasetOverride(ds, eachDataset); });
+
+    datasetsCfg = custom.datasets;
+    if (Array.isArray(datasetsCfg)) {
+        for (i = 0; i < datasetsCfg.length; i++) {
+            if (!datasets[i]) continue;
+            dashApplyDatasetOverride(datasets[i], datasetsCfg[i]);
+        }
+    } else if (dashIsPlainObject(datasetsCfg)) {
+        for (var dsKey in datasetsCfg) {
+            if (!Object.prototype.hasOwnProperty.call(datasetsCfg, dsKey)) continue;
+            override = datasetsCfg[dsKey];
+            idx = dashResolveDatasetIndex(dsKey, datasets.length);
+            if (idx >= 0) dashApplyDatasetOverride(datasets[idx], override);
+        }
+    }
+
+    return chartConfig;
+}
+
 function dashResetVizSizeStyles(el) {
     if (!el || !el.style) return;
     el.style.flex = '';
@@ -3886,11 +4014,14 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
 
         options = dashApplyGeneralChartOptions(options, vizType, general);
 
-        canvas._chartInstance = new Chart(canvas, {
+        var chartConfig = {
             type: chartType,
             data: { labels: labels, datasets: chartDatasets },
             options: options
-        });
+        };
+        dashApplyCustomChartConfig(chartConfig, vizConfig && vizConfig.customOptions);
+
+        canvas._chartInstance = new Chart(canvas, chartConfig);
     });
 }
 
@@ -4373,6 +4504,7 @@ function dashOpenPanelVizSettings(panelEl) {
         fieldMapHtml += dashBuildFieldMapHtml(typeInfo.id, existing ? existing.fieldMap : null, panelEl);
         if (!dashPanelGetVizReportData(panelEl))
             fieldMapHtml += dashBuildVizRowsHtml(existing ? existing.selectedRows : null, panelEl);
+        fieldMapHtml += dashBuildVizCustomOptionsHtml(existing ? existing.customOptions : '');
         fieldMapHtml += '</div>';
 
         item.innerHTML = headerHtml + fieldMapHtml;
@@ -4387,6 +4519,7 @@ function dashOpenPanelVizSettings(panelEl) {
             }
         });
         dashInitVizRowBulkControls(item);
+        dashInitVizCustomOptionsControl(item);
 
         accordion.appendChild(item);
     });
@@ -4586,6 +4719,51 @@ function dashInitVizRowBulkControls(item) {
 
         dashSyncVizRowAllCheck(group);
     });
+}
+
+function dashInitVizCustomOptionsControl(item) {
+    var textarea = item ? item.querySelector('.dash-viz-custom-options') : null
+        , statusEl = item ? item.querySelector('.dash-viz-custom-options-status') : null;
+    if (!textarea || !statusEl) return;
+    textarea.addEventListener('input', function() {
+        var raw = dashNormalizeCustomOptionsString(textarea.value);
+        if (!raw) {
+            statusEl.classList.remove('dash-viz-custom-options-status--error');
+            statusEl.textContent = 'Опционально. JSON-объект с полями options / datasets, переопределяющий настройки Chart.js.';
+            return;
+        }
+        if (dashParseCustomOptions(raw) === null) {
+            statusEl.classList.add('dash-viz-custom-options-status--error');
+            statusEl.textContent = 'Некорректный JSON — настройки не будут применены, пока ошибка не исправлена.';
+        } else {
+            statusEl.classList.remove('dash-viz-custom-options-status--error');
+            statusEl.textContent = 'JSON корректен.';
+        }
+    });
+}
+
+function dashCollectVizCustomOptions(item) {
+    var textarea = item ? item.querySelector('.dash-viz-custom-options') : null
+        , raw = textarea ? dashNormalizeCustomOptionsString(textarea.value) : '';
+    return raw || '';
+}
+
+function dashBuildVizCustomOptionsHtml(customOptions) {
+    var raw = dashNormalizeCustomOptionsString(customOptions)
+        , isInvalid = raw && dashParseCustomOptions(raw) === null;
+    return '<div class="dash-viz-custom-options-group">'
+        + '<div class="dash-viz-custom-options-head">'
+        + '<div class="dash-viz-rows-title">Кастомные настройки диаграммы (JSON)</div>'
+        + '<a class="dash-viz-custom-options-help" href="' + DASH_CUSTOM_OPTIONS_DOC_URL + '" target="_blank" rel="noopener noreferrer" title="Описание правил кастомных настроек">Правила и примеры</a>'
+        + '</div>'
+        + '<textarea class="dash-viz-custom-options" name="customOptions" rows="4" maxlength="' + DASH_CUSTOM_OPTIONS_MAX_LENGTH
+        + '" placeholder=\'{"datasets":{"-1":{"pointColors":{"-1":"#e53935"}}}}\'>'
+        + dashAttr(raw)
+        + '</textarea>'
+        + '<div class="dash-viz-custom-options-status' + (isInvalid ? ' dash-viz-custom-options-status--error' : '') + '">'
+        + (isInvalid ? 'Некорректный JSON — настройки не будут применены, пока ошибка не исправлена.' : 'Опционально. JSON-объект с полями options / datasets, переопределяющий настройки Chart.js.')
+        + '</div>'
+        + '</div>';
 }
 
 function dashBuildPanelHeightHtml(panelHeight) {
@@ -4825,12 +5003,14 @@ function dashVizModalCollectSettings() {
         var fieldMap = {};
         var size = dashCollectVizSize(item);
         var selectedRows = dashCollectVizSelectedRows(item);
+        var customOptions = dashCollectVizCustomOptions(item);
         item.querySelectorAll('.dash-viz-fieldmap .dash-viz-field-select').forEach(function(sel) {
             if (sel.name && sel.value) fieldMap[sel.name] = sel.value;
         });
         var entry = { type: vizType, fieldMap: fieldMap };
         if (size) entry.size = size;
         if (selectedRows !== null) entry.selectedRows = selectedRows;
+        if (customOptions) entry.customOptions = customOptions;
         if (isDefault) entry.default = true;
         result.push(entry);
     });
