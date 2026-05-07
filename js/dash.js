@@ -2294,6 +2294,103 @@ var CHART_COLORS = [
     'rgba(99,255,132,0.7)', 'rgba(235,54,162,0.7)'
 ];
 
+function dashBrowserSupportsColor(value) {
+    var probe;
+    value = String(value || '').trim();
+    if (!value) return false;
+    try {
+        if (typeof CSS !== 'undefined' && CSS.supports && CSS.supports('color', value)) return true;
+    } catch (e) {}
+    try {
+        if (typeof document !== 'undefined' && document.createElement) {
+            probe = document.createElement('span');
+            probe.style.color = '';
+            probe.style.color = value;
+            return !!probe.style.color;
+        }
+    } catch (e) {}
+    return /^[A-Za-z]+$/.test(value);
+}
+
+function dashNormalizeColorToken(value) {
+    var raw = String(value === undefined || value === null ? '' : value).trim();
+    if (!raw) return null;
+    if (/^#?([0-9A-Fa-f]{3}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(raw))
+        return raw.charAt(0) === '#' ? raw : '#' + raw;
+    if (dashBrowserSupportsColor(raw)) return /^[A-Za-z]+$/.test(raw) ? raw.toLowerCase() : raw;
+    return null;
+}
+
+function dashNormalizeColorPalette(value) {
+    var source = Array.isArray(value) ? value : String(value === undefined || value === null ? '' : value).split(',')
+        , result = [];
+    source.forEach(function(part) {
+        var color;
+        if (result.length >= 32) return;
+        color = dashNormalizeColorToken(part);
+        if (color) result.push(color);
+    });
+    return result.length ? result : null;
+}
+
+function dashColorPaletteToText(palette) {
+    var normalized = dashNormalizeColorPalette(palette);
+    return normalized ? normalized.join(', ') : '';
+}
+
+function dashChartPaletteFromGeneral(general) {
+    return general && Array.isArray(general.colorPalette) && general.colorPalette.length ? general.colorPalette : CHART_COLORS;
+}
+
+function dashChartColor(palette, index) {
+    var colors = Array.isArray(palette) && palette.length ? palette : CHART_COLORS;
+    return colors[index % colors.length];
+}
+
+function dashColorWithAlpha(color, alpha) {
+    var value = String(color || '').trim()
+        , a = parseFloat(alpha)
+        , hex, rgb, r, g, b, m, canvas, ctx, normalized;
+    if (!isFinite(a)) return value;
+    a = Math.max(0, Math.min(1, a));
+
+    m = value.match(/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/);
+    if (m) {
+        hex = m[1];
+        if (hex.length === 3 || hex.length === 4)
+            hex = hex.charAt(0) + hex.charAt(0) + hex.charAt(1) + hex.charAt(1) + hex.charAt(2) + hex.charAt(2);
+        else
+            hex = hex.slice(0, 6);
+        r = parseInt(hex.slice(0, 2), 16);
+        g = parseInt(hex.slice(2, 4), 16);
+        b = parseInt(hex.slice(4, 6), 16);
+        return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+    }
+
+    rgb = value.match(/^rgba?\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)(?:\s*,\s*[0-9.]+)?\s*\)$/i);
+    if (rgb) {
+        r = Math.max(0, Math.min(255, Math.round(parseFloat(rgb[1]))));
+        g = Math.max(0, Math.min(255, Math.round(parseFloat(rgb[2]))));
+        b = Math.max(0, Math.min(255, Math.round(parseFloat(rgb[3]))));
+        return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+    }
+
+    try {
+        if (typeof document !== 'undefined' && document.createElement) {
+            canvas = document.createElement('canvas');
+            ctx = canvas && canvas.getContext ? canvas.getContext('2d') : null;
+            if (ctx) {
+                ctx.fillStyle = '#000000';
+                ctx.fillStyle = value;
+                normalized = ctx.fillStyle;
+                if (normalized && normalized !== value) return dashColorWithAlpha(normalized, a);
+            }
+        }
+    } catch (e) {}
+
+    return value;
+}
+
 function dashNormalizeAreaMode(mode) {
     mode = String(mode || 'plain');
     return ['plain', 'stacked', 'normalized'].indexOf(mode) === -1 ? 'plain' : mode;
@@ -2330,16 +2427,17 @@ function dashNormalizePercentDatasets(datasets) {
     });
 }
 
-function dashBuildAreaDatasets(datasets, fieldMap) {
+function dashBuildAreaDatasets(datasets, fieldMap, palette) {
     var areaMode = dashNormalizeAreaMode(fieldMap && fieldMap.areaMode)
         , source = areaMode === 'normalized' ? dashNormalizePercentDatasets(datasets) : (datasets || []);
 
     return source.map(function(ds, i) {
+        var color = dashChartColor(palette, i);
         var dataset = {
             label: ds.label,
             data: ds.data,
-            borderColor: CHART_COLORS[i % CHART_COLORS.length],
-            backgroundColor: CHART_COLORS[i % CHART_COLORS.length].replace('0.7', '0.3'),
+            borderColor: color,
+            backgroundColor: dashColorWithAlpha(color, 0.3),
             tension: 0.3,
             fill: true
         };
@@ -2611,6 +2709,9 @@ function dashNormalizeGeneralSettings(general) {
 
     val = dashNormalizeEnum(general.legendPosition, DASH_GENERAL_LEGEND_POSITIONS);
     if (val !== null) { result.legendPosition = val; has = true; }
+
+    val = dashNormalizeColorPalette(general.colorPalette);
+    if (val !== null) { result.colorPalette = val; has = true; }
 
     val = dashNormalizePositiveNumber(general.yMaxTicksLimit, 100);
     if (val !== null) { result.yMaxTicksLimit = Math.round(val); has = true; }
@@ -3588,6 +3689,7 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
         var chartType, chartDatasets, options = {};
         var modelData = dashModelData[panelEl.id] || {};
         var general = dashGeneralSettingsFromSettings(modelData.settings);
+        var palette = dashChartPaletteFromGeneral(general);
 
         if (dashElementHiddenForRender(panelEl)) {
             dashQueueHiddenVizRender(panelEl, vizType, fieldMap, vizConfig);
@@ -3599,19 +3701,20 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
             var vals = data.datasets.length ? data.datasets[0].data : [];
             chartDatasets = [{
                 data: vals,
-                backgroundColor: labels.map(function(_, i) { return CHART_COLORS[i % CHART_COLORS.length]; })
+                backgroundColor: labels.map(function(_, i) { return dashChartColor(palette, i); })
             }];
             options = { plugins: { legend: { position: 'right' } } };
 
         } else if (vizType === 'line') {
             chartType = 'line';
             chartDatasets = data.datasets.map(function(ds, i) {
-                return { label: ds.label, data: ds.data, borderColor: CHART_COLORS[i % CHART_COLORS.length], backgroundColor: CHART_COLORS[i % CHART_COLORS.length], tension: 0.3, fill: false };
+                var color = dashChartColor(palette, i);
+                return { label: ds.label, data: ds.data, borderColor: color, backgroundColor: color, tension: 0.3, fill: false };
             });
 
         } else if (vizType === 'area') {
             chartType = 'line';
-            chartDatasets = dashBuildAreaDatasets(data.datasets, fieldMap);
+            chartDatasets = dashBuildAreaDatasets(data.datasets, fieldMap, palette);
             options = dashBuildAreaChartOptions(fieldMap);
 
         } else if (vizType === 'bar') {
@@ -3626,13 +3729,13 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
                 });
                 chartDatasets = data.datasets.map(function(ds) {
                     var key = ds._series == null ? ds.label : ds._series;
-                    var color = CHART_COLORS[seriesIndex[key] % CHART_COLORS.length];
+                    var color = dashChartColor(palette, seriesIndex[key]);
                     return dashApplyGeneralBarDataset({ label: ds.label, data: ds.data, backgroundColor: color, stack: String(ds._stack || 'default') }, general);
                 });
                 options = { scales: { x: { stacked: true }, y: { stacked: true } } };
             } else {
                 chartDatasets = data.datasets.map(function(ds, i) {
-                    return dashApplyGeneralBarDataset({ label: ds.label, data: ds.data, backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }, general);
+                    return dashApplyGeneralBarDataset({ label: ds.label, data: ds.data, backgroundColor: dashChartColor(palette, i) }, general);
                 });
                 options = { scales: { x: { stacked: barMode === 'stacked' || barMode === 'combo' }, y: { stacked: barMode === 'stacked' } } };
             }
@@ -3648,7 +3751,7 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
                 data: labels.map(function(lbl, i) {
                     return { x: xData[i] || 0, y: yData[i] || 0, r: Math.max(3, Math.abs(rData[i] || 5)) };
                 }),
-                backgroundColor: CHART_COLORS[0]
+                backgroundColor: dashChartColor(palette, 0)
             }];
 
         } else if (vizType === 'funnel') {
@@ -3661,7 +3764,7 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
             chartDatasets = [{
                 label: data.datasets[0] && data.datasets[0].label ? data.datasets[0].label : '',
                 data: funnelPairs.map(function(p) { return p.value; }),
-                backgroundColor: funnelPairs.map(function(_, i) { return CHART_COLORS[i % CHART_COLORS.length]; }),
+                backgroundColor: funnelPairs.map(function(_, i) { return dashChartColor(palette, i); }),
                 borderWidth: 0
             }];
             options = {
@@ -4454,11 +4557,18 @@ function dashBuildPanelGeneralHtml(general) {
         , legendPositionLabels = { top: 'Сверху', bottom: 'Снизу', left: 'Слева', right: 'Справа' }
         , legendPositionOptions = dashBuildSelectOptions(DASH_GENERAL_LEGEND_POSITIONS, g.legendPosition, function(v) { return legendPositionLabels[v] || v; })
         , rotationOptions = dashBuildSelectOptions(DASH_GENERAL_X_ROTATIONS, g.xLabelRotation, function(v) { return v + '°'; })
-        , decimalOptions = dashBuildSelectOptions(DASH_GENERAL_TOOLTIP_DECIMALS, g.tooltipDecimals);
+        , decimalOptions = dashBuildSelectOptions(DASH_GENERAL_TOOLTIP_DECIMALS, g.tooltipDecimals)
+        , paletteText = dashColorPaletteToText(g.colorPalette);
     return '<div class="dash-panel-general-group">'
         + '<div class="dash-viz-size-title">Толщина столбцов (px)</div>'
         + '<div class="dash-viz-field-row"><label>Толщина</label>'
         + '<input type="number" min="0" max="200" step="1" name="generalBarThickness" value="' + dashAttr(g.barThickness !== undefined ? g.barThickness : '') + '">'
+        + '</div>'
+        + '</div>'
+        + '<div class="dash-panel-general-group">'
+        + '<div class="dash-viz-size-title">Цветовая гамма</div>'
+        + '<div class="dash-viz-field-row"><label>Цвета</label>'
+        + '<input type="text" maxlength="512" name="generalColorPalette" placeholder="#1B50F3, cyan, A4B9FA" value="' + dashAttr(paletteText) + '">'
         + '</div>'
         + '</div>'
         + '<div class="dash-panel-general-group">'
@@ -4533,6 +4643,9 @@ function dashCollectPanelGeneral() {
 
     val = dashNormalizeEnum(read('generalLegendPosition'), DASH_GENERAL_LEGEND_POSITIONS);
     if (val !== null) { result.legendPosition = val; has = true; }
+
+    val = dashNormalizeColorPalette(read('generalColorPalette'));
+    if (val !== null) { result.colorPalette = val; has = true; }
 
     val = dashNormalizePositiveNumber(read('generalYMaxTicksLimit'), 100);
     if (val !== null) { result.yMaxTicksLimit = Math.round(val); has = true; }
