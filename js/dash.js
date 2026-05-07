@@ -4949,6 +4949,30 @@ function dashCollectPanelGeneral() {
     return has ? result : null;
 }
 
+function dashVizModalIsOpen() {
+    var modal = document.getElementById('dash-viz-modal');
+    return !!(modal && modal.classList.contains('open'));
+}
+
+function dashCloseVizModal() {
+    var modal = document.getElementById('dash-viz-modal');
+    if (modal) modal.classList.remove('open');
+    dashVizModalCtx = null;
+}
+
+function dashHandleVizModalKeydown(e) {
+    if (!e || (e.key !== 'Escape' && e.keyCode !== 27)) return;
+    if (!dashVizModalIsOpen()) return;
+    if (e.preventDefault) e.preventDefault();
+    if (e.stopPropagation) e.stopPropagation();
+    dashCloseVizModal();
+}
+
+function dashHandleVizModalBackdropClick(e) {
+    var modal = document.getElementById('dash-viz-modal');
+    if (modal && e && e.target === modal) dashCloseVizModal();
+}
+
 function dashVizModalActivateTab(name) {
     var modal = document.getElementById('dash-viz-modal');
     if (!modal) return;
@@ -5021,8 +5045,7 @@ function dashVizModalCollectSettings() {
 }
 
 document.getElementById('dash-viz-cancel').addEventListener('click', function() {
-    document.getElementById('dash-viz-modal').classList.remove('open');
-    dashVizModalCtx = null;
+    dashCloseVizModal();
 });
 
 document.querySelectorAll('#dash-viz-modal .dash-viz-tab').forEach(function(tab) {
@@ -5044,6 +5067,8 @@ document.getElementById('dash-viz-modal').addEventListener('keydown', function(e
         document.getElementById('dash-viz-save').click();
     }
 });
+document.addEventListener('keydown', dashHandleVizModalKeydown);
+document.getElementById('dash-viz-modal').addEventListener('click', dashHandleVizModalBackdropClick);
 
 document.getElementById('dash-viz-save').addEventListener('click', function() {
     if (!dashVizModalCtx) return;
