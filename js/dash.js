@@ -4396,7 +4396,7 @@ function dashBuildVizSizeRow(axis, label, dim) {
         , unit = dim ? dim.unit : 'px';
     return '<div class="dash-viz-field-row dash-viz-size-row">'
         + '<label>' + label + '</label>'
-        + '<input type="number" min="0" step="0.1" name="' + valueName + '" value="' + dashAttr(value) + '">'
+        + '<input type="number" min="0" step="1" name="' + valueName + '" value="' + dashAttr(value) + '">'
         + '<select name="' + unitName + '">' + dashBuildVizSizeUnitOptions(unit) + '</select>'
         + '</div>';
 }
@@ -4424,7 +4424,7 @@ function dashBuildPanelMaxWidthRow(device, label, dim) {
         , unit = dim ? dim.unit : 'px';
     return '<div class="dash-viz-field-row dash-panel-max-width-row">'
         + '<label>' + label + '</label>'
-        + '<input type="number" min="0" step="0.1" name="' + valueName + '" value="' + dashAttr(value) + '">'
+        + '<input type="number" min="0" step="1" name="' + valueName + '" value="' + dashAttr(value) + '">'
         + '<select name="' + unitName + '">' + dashBuildPanelMaxWidthUnitOptions(unit) + '</select>'
         + '</div>';
 }
@@ -4482,7 +4482,7 @@ function dashBuildPanelGeneralHtml(general) {
         + '<input type="number" min="0" max="100" step="1" name="generalYMaxTicksLimit" value="' + dashAttr(g.yMaxTicksLimit !== undefined ? g.yMaxTicksLimit : '') + '">'
         + '</div>'
         + '<div class="dash-viz-field-row"><label>Шаг</label>'
-        + '<input type="number" min="0" step="0.1" name="generalYStepSize" value="' + dashAttr(g.yStepSize !== undefined ? g.yStepSize : '') + '">'
+        + '<input type="number" min="0" step="1" name="generalYStepSize" value="' + dashAttr(g.yStepSize !== undefined ? g.yStepSize : '') + '">'
         + '</div>'
         + '</div>'
         + '<div class="dash-panel-general-group">'
