@@ -1,7 +1,8 @@
 'use strict';
 
-// Issue #2368: entering dashboard tile mode must not make the new grid
-// columns narrower than the panels were immediately before the switch.
+// Issue #2368 was superseded by issue #2428: tile mode no longer captures
+// the widest panel as a min column width. Panels now occupy configurable
+// spans in a 12-column grid.
 
 const assert = require('assert');
 const fs = require('fs');
@@ -59,6 +60,7 @@ function makeClassList(initial) {
     (initial || '').split(/\s+/).filter(Boolean).forEach(name => { values[name] = true; });
     return {
         values,
+        remove(name) { delete values[name]; },
         toggle(name, force) {
             const enabled = force === undefined ? !values[name] : !!force;
             if (enabled) values[name] = true;
@@ -79,16 +81,7 @@ function makeButton() {
     };
 }
 
-function makePanel(width) {
-    return {
-        getBoundingClientRect() {
-            return { width };
-        }
-    };
-}
-
-function makeSheet(id, panelWidths, button) {
-    const panels = panelWidths.map(makePanel);
+function makeSheet(id, button) {
     return {
         id,
         style: makeStyle(),
@@ -98,15 +91,31 @@ function makeSheet(id, panelWidths, button) {
             return null;
         },
         querySelectorAll(selector) {
-            if (selector === '.f-panel') return panels;
+            if (selector === '.f-panel') return [
+                { getBoundingClientRect() { return { width: 420.2 }; } },
+                { getBoundingClientRect() { return { width: 720.6 }; } }
+            ];
+            if (selector === '.f-tile-resize-handle') return [];
             return [];
         }
     };
 }
 
 assert(
-    /grid-template-columns:\s*repeat\(auto-fit,[^;]*var\(--dash-tile-panel-min-width/.test(css),
-    'tile grid uses the captured panel width as a minimum column width'
+    /grid-template-columns:\s*repeat\(12,\s*minmax\(0,\s*1fr\)\)/.test(css),
+    'tile grid uses twelve fixed tracks'
+);
+assert(
+    !/grid-template-columns:\s*repeat\(auto-fit,[^;]*--dash-tile-panel-min-width/.test(css),
+    'tile grid no longer depends on a captured panel width'
+);
+assert(
+    /grid-column:\s*span\s+var\(--dash-panel-cols-md,\s*6\)/.test(css),
+    'medium screens default panels to six of twelve columns'
+);
+assert(
+    /grid-column:\s*span\s+var\(--dash-panel-cols-lg,\s*4\)/.test(css),
+    'large screens default panels to four of twelve columns'
 );
 
 const code = `
@@ -131,6 +140,7 @@ ${extractFunction('dashMeasureSheetTilePanelMinWidth')}
 ${extractFunction('dashApplySheetTilePanelMinWidth')}
 ${extractFunction('dashPrepareSheetTileMode')}
 ${extractFunction('dashClearSheetTileMode')}
+${extractFunction('dashRemoveSheetTilePanelResizeHandles')}
 ${extractFunction('dashEnsureSheetTilePanelResizeHandles')}
 ${extractFunction('dashApplySheetTileMode')}
 ${extractFunction('dashToggleSheetTileMode')}
@@ -144,20 +154,20 @@ vm.createContext(ctx);
 vm.runInContext(code, ctx);
 
 const button = makeButton();
-const sheet = makeSheet('ds-main', [420.2, 720.6, 0], button);
+const sheet = makeSheet('ds-main', button);
 
 assert.strictEqual(ctx.dashMeasureSheetTilePanelMinWidth(sheet), 721,
-    'measurement rounds up the widest visible panel');
+    'legacy measurement helper still reports the widest panel for compatibility');
 
 ctx.dashApplySheetTileMode(sheet, true, true);
 assert(sheet.classList.contains('dash-tile-mode'), 'applying tile mode adds the sheet class');
-assert.strictEqual(sheet.style.getPropertyValue('--dash-tile-panel-min-width'), '721px',
-    'tile mode stores the current widest panel width before narrowing can occur');
+assert.strictEqual(sheet.style.getPropertyValue('--dash-tile-panel-min-width'), '',
+    'tile mode does not store the current widest panel width');
 assert(ctx.document.hasCookie(ctx.dashSheetTileModeCookieName(sheet)), 'tile mode still persists');
 assert.strictEqual(ctx.scheduledRoots.join(','), 'ds-main', 'tile mode still schedules visualization refresh');
 
 ctx.dashApplySheetTileMode(sheet, false, true);
 assert.strictEqual(sheet.style.getPropertyValue('--dash-tile-panel-min-width'), '',
-    'disabling tile mode clears the captured width');
+    'disabling tile mode leaves the obsolete captured width cleared');
 
 console.log('issue-2368 dashboard tile mode panel width: ok');

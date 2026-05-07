@@ -56,9 +56,9 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
         + '<select class="dash-period-sel"><option value="Неделя">Неделя</option><option value="Месяц">Месяц</option><option value="Год">Год</option></select>'
         + '<button class="dash-apply-btn" onclick="dashApplyFilter(this.closest(\'.f-sheet\'))">Применить</button>'
         + '<input type="text" class="dash-search-input" placeholder="Поиск..." oninput="dashApplySearch(this.value,this.closest(\'.f-sheet\'))">'
-        + '<button type="button" class="dash-tile-mode-icon" onclick="dashToggleSheetTileMode(this.closest(\'.f-sheet\'))" title="Включить режим плитки" aria-label="Режим плитки" aria-pressed="false"><i class="pi pi-th-large"></i></button>'
-        + '<button type="button" class="dash-reset-size-icon" onclick="dashResetSheetSizeCookies(this.closest(\'.f-sheet\'))" title="Сбросить размеры панелей" aria-label="Сбросить размеры панелей" aria-hidden="true" disabled><i class="pi pi-refresh"></i></button>'
         + (dashIsAdmin ? '<a class="dash-settings-icon" onclick="dashOpenSettings()" title="Настройки дэшборда"><i class="pi pi-cog"></i></a>' : '')
+        + '<button type="button" class="dash-tile-mode-icon" onclick="dashToggleSheetTileMode(this.closest(\'.f-sheet\'))" title="Выключить режим плитки" aria-label="Режим плитки" aria-pressed="true"><i class="pi pi-th-large"></i></button>'
+        + '<button type="button" class="dash-reset-size-icon" onclick="dashResetSheetSizeCookies(this.closest(\'.f-sheet\'))" title="Сбросить размеры панелей" aria-label="Сбросить размеры панелей" aria-hidden="true" disabled><i class="pi pi-refresh"></i></button>'
         + '</div></div>'
     , panelTpl    = '<div id=":id:" f-period=":period:" class="f-panel pt-3" data-panel-id=":panelid:">'
         + '<div class="f-panel-header">'
@@ -2179,6 +2179,14 @@ var DASH_VIZ_TYPES = [
 var DASH_VIZ_SIZE_UNITS = ['%', 'px', 'rem'];
 var DASH_PANEL_MAX_WIDTH_UNITS = ['%', 'px'];
 var DASH_PANEL_MAX_WIDTH_MOBILE_BREAKPOINT = 767;
+var DASH_PANEL_COLUMN_BREAKPOINTS = [
+    { key: 'xs', label: 'XS', range: '<576px', minWidth: 0, defaultValue: 12 },
+    { key: 'sm', label: 'SM', range: '>=576px', minWidth: 576, defaultValue: 12 },
+    { key: 'md', label: 'MD', range: '>=768px', minWidth: 768, defaultValue: 6 },
+    { key: 'lg', label: 'LG', range: '>=992px', minWidth: 992, defaultValue: 4 },
+    { key: 'xl', label: 'XL', range: '>=1200px', minWidth: 1200, defaultValue: 4 },
+    { key: 'xxl', label: 'XXL', range: '>=1400px', minWidth: 1400, defaultValue: 3 }
+];
 var DASH_CHART_RESIZE_MIN_WIDTH = 260;
 var DASH_CHART_RESIZE_MIN_HEIGHT = 180;
 var DASH_TABLE_RESIZE_MIN_WIDTH = 260;
@@ -2656,6 +2664,130 @@ function dashApplyPanelMaxWidth(panelEl) {
     panelEl.style.maxWidth = dashCombineMaxWidthCss(vizWidthCss, panelMaxWidthCss);
 }
 
+function dashNormalizePanelHeight(panelHeight) {
+    var minRaw, maxRaw, minValue, maxValue, result = {};
+    if (!panelHeight || typeof panelHeight !== 'object') return null;
+    minRaw = panelHeight.min;
+    maxRaw = panelHeight.max;
+    if (minRaw === undefined && panelHeight.minValue !== undefined) minRaw = panelHeight.minValue;
+    if (maxRaw === undefined && panelHeight.maxValue !== undefined) maxRaw = panelHeight.maxValue;
+    minValue = dashNormalizeIntegerInRange(minRaw, 0, 4000);
+    maxValue = dashNormalizeIntegerInRange(maxRaw, 0, 4000);
+    if (minValue !== null) result.min = minValue;
+    if (maxValue !== null) result.max = maxValue;
+    if (result.min !== undefined && result.max !== undefined && result.max < result.min)
+        result.max = result.min;
+    return result.min !== undefined || result.max !== undefined ? result : null;
+}
+
+function dashPanelHeightFromSettings(settings) {
+    var list = settings ? (Array.isArray(settings) ? settings : [settings]) : []
+        , found = null;
+    list.forEach(function(entry) {
+        if (!found && entry && entry.panelHeight)
+            found = dashNormalizePanelHeight(entry.panelHeight);
+    });
+    return found;
+}
+
+function dashSetPanelHeightInSettings(settings, panelHeight) {
+    var list = settings ? (Array.isArray(settings) ? settings.slice() : [settings]) : []
+        , normalized = dashNormalizePanelHeight(panelHeight)
+        , result = [];
+    list.forEach(function(entry) {
+        if (entry && entry.panelHeight) return;
+        result.push(entry);
+    });
+    if (normalized) result.push({ panelHeight: normalized });
+    return result;
+}
+
+function dashNormalizePanelColumns(panelColumns) {
+    var result = {}, hasCustom = false;
+    if (!panelColumns || typeof panelColumns !== 'object') return null;
+    DASH_PANEL_COLUMN_BREAKPOINTS.forEach(function(bp) {
+        var raw = panelColumns[bp.key]
+            , val;
+        if (raw === undefined && panelColumns[bp.key + 'Value'] !== undefined)
+            raw = panelColumns[bp.key + 'Value'];
+        val = dashNormalizeIntegerInRange(raw, 1, 12);
+        if (val === null) return;
+        result[bp.key] = val;
+        if (val !== bp.defaultValue) hasCustom = true;
+    });
+    return hasCustom ? result : null;
+}
+
+function dashPanelColumnsWithDefaults(panelColumns) {
+    var normalized = dashNormalizePanelColumns(panelColumns) || {}
+        , result = {};
+    DASH_PANEL_COLUMN_BREAKPOINTS.forEach(function(bp) {
+        result[bp.key] = normalized[bp.key] || bp.defaultValue;
+    });
+    return result;
+}
+
+function dashPanelColumnsFromSettings(settings) {
+    var list = settings ? (Array.isArray(settings) ? settings : [settings]) : []
+        , found = null;
+    list.forEach(function(entry) {
+        if (!found && entry && entry.panelColumns)
+            found = dashNormalizePanelColumns(entry.panelColumns);
+    });
+    return found;
+}
+
+function dashSetPanelColumnsInSettings(settings, panelColumns) {
+    var list = settings ? (Array.isArray(settings) ? settings.slice() : [settings]) : []
+        , normalized = dashNormalizePanelColumns(panelColumns)
+        , result = [];
+    list.forEach(function(entry) {
+        if (entry && entry.panelColumns) return;
+        result.push(entry);
+    });
+    if (normalized) result.push({ panelColumns: normalized });
+    return result;
+}
+
+function dashApplyPanelHeight(panelEl) {
+    var modelData = panelEl ? dashModelData[panelEl.id] : null
+        , panelHeight = dashPanelHeightFromSettings(modelData && modelData.settings)
+        , content = panelEl && panelEl.querySelector ? panelEl.querySelector('.f-panel-content') : null;
+    if (!content || !content.style) return;
+    content.style.minHeight = '';
+    content.style.maxHeight = '';
+    content.style.overflow = '';
+    if (!panelHeight) return;
+    if (panelHeight.min !== undefined) content.style.minHeight = panelHeight.min + 'px';
+    if (panelHeight.max !== undefined) {
+        content.style.maxHeight = panelHeight.max + 'px';
+        content.style.overflow = 'auto';
+    }
+}
+
+function dashApplyPanelColumns(panelEl) {
+    var modelData = panelEl ? dashModelData[panelEl.id] : null
+        , panelColumns = dashPanelColumnsFromSettings(modelData && modelData.settings);
+    if (!panelEl || !panelEl.style) return;
+    DASH_PANEL_COLUMN_BREAKPOINTS.forEach(function(bp) {
+        var prop = '--dash-panel-cols-' + bp.key;
+        if (panelColumns && panelColumns[bp.key]) {
+            if (panelEl.style.setProperty) panelEl.style.setProperty(prop, panelColumns[bp.key]);
+            else panelEl.style[prop] = panelColumns[bp.key];
+        } else if (panelEl.style.removeProperty) {
+            panelEl.style.removeProperty(prop);
+        } else {
+            panelEl.style[prop] = '';
+        }
+    });
+}
+
+function dashApplyPanelLayout(panelEl) {
+    dashApplyPanelMaxWidth(panelEl);
+    dashApplyPanelHeight(panelEl);
+    dashApplyPanelColumns(panelEl);
+}
+
 // ─── General panel chart settings ───────────────────────────────────────────
 // Panel-wide chart settings (applied across all visualizations of the panel
 // where each chart property supports them).
@@ -3068,8 +3200,12 @@ function dashRemoveSheetTilePanelWidth(sheetEl) {
 }
 
 function dashReadSheetTileMode(sheetEl) {
+    var raw;
     if (!sheetEl) return false;
-    return dashCookieGet(dashSheetTileModeCookieName(sheetEl)) === '1';
+    raw = dashCookieGet(dashSheetTileModeCookieName(sheetEl));
+    if (raw === '0') return false;
+    if (raw === '1') return true;
+    return true;
 }
 
 function dashSetSheetTileModeButtonState(sheetEl, enabled) {
@@ -3111,23 +3247,32 @@ function dashApplySheetTilePanelMinWidth(sheetEl, width) {
 }
 
 function dashPrepareSheetTileMode(sheetEl) {
-    var savedWidth = dashReadSheetTilePanelWidth(sheetEl)
-        , width = savedWidth > 0 ? savedWidth : dashMeasureSheetTilePanelMinWidth(sheetEl);
-    if (!sheetEl || !sheetEl.style) return width;
-    if (width > 0)
-        dashApplySheetTilePanelMinWidth(sheetEl, width);
-    else
-        dashClearSheetTileMode(sheetEl);
-    return width;
+    dashApplySheetTilePanelMinWidth(sheetEl, 0);
+    dashRemoveSheetTilePanelResizeHandles(sheetEl);
+    return 0;
 }
 
 function dashClearSheetTileMode(sheetEl) {
     dashApplySheetTilePanelMinWidth(sheetEl, 0);
+    dashRemoveSheetTilePanelResizeHandles(sheetEl);
+    if (sheetEl && sheetEl.classList)
+        sheetEl.classList.remove('f-sheet--tile-resizing');
+    if (typeof document !== 'undefined' && document.body && document.body.classList)
+        document.body.classList.remove('dash-tile-resizing');
+}
+
+function dashRemoveSheetTilePanelResizeHandles(sheetEl) {
+    if (!sheetEl || !sheetEl.querySelectorAll) return;
+    sheetEl.querySelectorAll('.f-tile-resize-handle').forEach(function(handle) {
+        if (handle && handle.parentNode && handle.parentNode.removeChild)
+            handle.parentNode.removeChild(handle);
+        else if (handle && handle.remove)
+            handle.remove();
+    });
 }
 
 function dashEnsureSheetTilePanelResizeHandles(sheetEl) {
-    if (!sheetEl || !sheetEl.querySelectorAll || typeof document === 'undefined' || !document.createElement) return;
-    sheetEl.querySelectorAll('.f-panel').forEach(dashEnsureTilePanelResizeHandle);
+    dashRemoveSheetTilePanelResizeHandles(sheetEl);
 }
 
 function dashApplySheetTileMode(sheetEl, enabled, persist) {
@@ -3139,12 +3284,12 @@ function dashApplySheetTileMode(sheetEl, enabled, persist) {
     sheetEl.classList.toggle('dash-tile-mode', enabled);
     if (!enabled) dashClearSheetTileMode(sheetEl);
     dashSetSheetTileModeButtonState(sheetEl, enabled);
-    if (enabled) dashEnsureSheetTilePanelResizeHandles(sheetEl);
+    dashRemoveSheetTilePanelResizeHandles(sheetEl);
     if (persist) {
         if (enabled)
             dashCookieSet(dashSheetTileModeCookieName(sheetEl), '1', DASH_CHART_RESIZE_COOKIE_MAX_AGE);
         else {
-            dashCookieRemove(dashSheetTileModeCookieName(sheetEl));
+            dashCookieSet(dashSheetTileModeCookieName(sheetEl), '0', DASH_CHART_RESIZE_COOKIE_MAX_AGE);
             dashRemoveSheetTilePanelWidth(sheetEl);
         }
     }
@@ -3288,7 +3433,7 @@ function dashApplyChartPixelSize(panelEl, vizType, width, height) {
         canvas.style.maxHeight = '';
     }
     dashApplyVizSizeStyles(panelEl, vizType, size);
-    dashApplyPanelMaxWidth(panelEl);
+    dashApplyPanelLayout(panelEl);
     dashResizeChartInstance(panelEl);
     return size;
 }
@@ -3313,7 +3458,7 @@ function dashApplyTablePixelSize(panelEl, width, height) {
         canvas.style.maxHeight = '';
     }
     dashApplyVizSizeStyles(panelEl, 'table', size);
-    dashApplyPanelMaxWidth(panelEl);
+    dashApplyPanelLayout(panelEl);
     dashUpdateTableWrapOverflow();
     return size;
 }
@@ -3464,63 +3609,6 @@ function dashEnsureTableResizeHandle(panelEl) {
     handle.style.display = '';
 }
 
-var DASH_TILE_PANEL_MIN_WIDTH = 200;
-
-function dashStartTilePanelResize(e) {
-    var handle = e.currentTarget || e.target
-        , panelEl = handle && handle.closest ? handle.closest('.f-panel') : null
-        , sheetEl = panelEl && panelEl.closest ? panelEl.closest('.f-sheet') : null
-        , panelRect = panelEl && panelEl.getBoundingClientRect ? panelEl.getBoundingClientRect() : null
-        , sheetRect = sheetEl && sheetEl.getBoundingClientRect ? sheetEl.getBoundingClientRect() : null
-        , startX, startWidth, maxWidth, latestWidth = null;
-    if (e.button !== undefined && e.button !== 0) return;
-    if (!sheetEl || !sheetEl.classList || !sheetEl.classList.contains('dash-tile-mode')) return;
-    if (!panelEl || !panelRect) return;
-    e.preventDefault();
-    startX = e.clientX;
-    startWidth = panelRect.width || panelEl.offsetWidth || DASH_TILE_PANEL_MIN_WIDTH;
-    maxWidth = sheetRect && sheetRect.width ? Math.round(sheetRect.width)
-        : (typeof window !== 'undefined' && window.innerWidth ? window.innerWidth : 1200);
-
-    function onMove(moveEvent) {
-        var delta, nextWidth;
-        moveEvent.preventDefault();
-        delta = moveEvent.clientX - startX;
-        nextWidth = Math.max(DASH_TILE_PANEL_MIN_WIDTH, Math.min(maxWidth, Math.round(startWidth + delta)));
-        latestWidth = nextWidth;
-        dashApplySheetTilePanelMinWidth(sheetEl, nextWidth);
-    }
-
-    function onUp(upEvent) {
-        if (upEvent && upEvent.preventDefault) upEvent.preventDefault();
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-        sheetEl.classList.remove('f-sheet--tile-resizing');
-        if (document.body && document.body.classList) document.body.classList.remove('dash-tile-resizing');
-        if (latestWidth) dashWriteSheetTilePanelWidth(sheetEl, latestWidth);
-    }
-
-    sheetEl.classList.add('f-sheet--tile-resizing');
-    if (document.body && document.body.classList) document.body.classList.add('dash-tile-resizing');
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-}
-
-function dashEnsureTilePanelResizeHandle(panelEl) {
-    var handle;
-    if (!panelEl || typeof document === 'undefined' || !document.createElement) return;
-    handle = panelEl.querySelector ? panelEl.querySelector('.f-tile-resize-handle') : null;
-    if (handle) return handle;
-    handle = document.createElement('button');
-    handle.type = 'button';
-    handle.className = 'f-tile-resize-handle';
-    handle.title = 'Изменить ширину плитки';
-    handle.setAttribute('aria-label', 'Изменить ширину плитки');
-    handle.addEventListener('mousedown', dashStartTilePanelResize);
-    panelEl.appendChild(handle);
-    return handle;
-}
-
 function dashApplyVizSize(panelEl, vizType, vizConfig) {
     var chartWrap = panelEl.querySelector('.f-chart-wrap')
         , tableWrap = panelEl.querySelector('.f-table-wrap')
@@ -3544,14 +3632,14 @@ function dashApplyVizSize(panelEl, vizType, vizConfig) {
     if (vizType === 'table') {
         dashEnsureTableResizeHandle(panelEl);
         if (size) appliedSize = dashApplyVizSizeStyles(panelEl, vizType, size);
-        dashApplyPanelMaxWidth(panelEl);
+        dashApplyPanelLayout(panelEl);
         return appliedSize;
     }
 
     dashEnsureChartResizeHandle(panelEl, vizType);
 
     if (size) appliedSize = dashApplyVizSizeStyles(panelEl, vizType, size);
-    dashApplyPanelMaxWidth(panelEl);
+    dashApplyPanelLayout(panelEl);
     return appliedSize;
 }
 
@@ -4174,7 +4262,7 @@ function dashPanelApplySettings(panelKey, settings, renderChart) {
     // Normalize: settings can be a single object {type:...} or an array
     var vizList = Array.isArray(settings) ? settings : [settings];
     var enabled = vizList.filter(function(v) { return v && v.type; });
-    dashApplyPanelMaxWidth(panel);
+    dashApplyPanelLayout(panel);
     if (!enabled.length) return;
 
     // Build visualization type icons
@@ -4235,12 +4323,11 @@ function dashOpenPanelVizSettings(panelEl) {
 
     var accordion = document.getElementById('dash-viz-accordion');
     accordion.innerHTML = '';
-    var panelMaxWidthEl = document.getElementById('dash-panel-max-width-settings');
-    if (panelMaxWidthEl)
-        panelMaxWidthEl.innerHTML = dashBuildPanelMaxWidthHtml(dashPanelMaxWidthFromSettings(settings));
     var panelGeneralEl = document.getElementById('dash-panel-general-settings');
     if (panelGeneralEl)
-        panelGeneralEl.innerHTML = dashBuildPanelGeneralHtml(dashGeneralSettingsFromSettings(settings));
+        panelGeneralEl.innerHTML = dashBuildPanelHeightHtml(dashPanelHeightFromSettings(settings))
+            + dashBuildPanelColumnsHtml(dashPanelColumnsFromSettings(settings))
+            + dashBuildPanelGeneralHtml(dashGeneralSettingsFromSettings(settings));
     dashVizModalActivateTab('panels');
 
     // Skip 'table' in the accordion (it's always available)
@@ -4269,7 +4356,6 @@ function dashOpenPanelVizSettings(panelEl) {
         fieldMapHtml += dashBuildFieldMapHtml(typeInfo.id, existing ? existing.fieldMap : null, panelEl);
         if (!dashPanelGetVizReportData(panelEl))
             fieldMapHtml += dashBuildVizRowsHtml(existing ? existing.selectedRows : null, panelEl);
-        fieldMapHtml += dashBuildVizSizeHtml(existing ? existing.size : null);
         fieldMapHtml += '</div>';
 
         item.innerHTML = headerHtml + fieldMapHtml;
@@ -4485,60 +4571,29 @@ function dashInitVizRowBulkControls(item) {
     });
 }
 
-function dashBuildVizSizeUnitOptions(selected) {
-    selected = dashNormalizeVizSizeUnit(selected);
-    return DASH_VIZ_SIZE_UNITS.map(function(unit) {
-        return '<option value="' + unit + '"' + (unit === selected ? ' selected' : '') + '>' + unit + '</option>';
-    }).join('');
-}
-
-function dashBuildVizSizeRow(axis, label, dim) {
-    var valueName = axis === 'width' ? 'sizeWidthValue' : 'sizeHeightValue'
-        , unitName = axis === 'width' ? 'sizeWidthUnit' : 'sizeHeightUnit'
-        , value = dim ? dim.value : ''
-        , unit = dim ? dim.unit : 'px';
-    return '<div class="dash-viz-field-row dash-viz-size-row">'
-        + '<label>' + label + '</label>'
-        + '<input type="number" min="0" step="1" name="' + valueName + '" value="' + dashAttr(value) + '">'
-        + '<select name="' + unitName + '">' + dashBuildVizSizeUnitOptions(unit) + '</select>'
+function dashBuildPanelHeightHtml(panelHeight) {
+    var normalized = dashNormalizePanelHeight(panelHeight) || {};
+    return '<div class="dash-panel-general-group dash-panel-height-group">'
+        + '<div class="dash-viz-size-title">Высота панели</div>'
+        + '<div class="dash-viz-field-row dash-panel-height-row"><label>Минимальная</label>'
+        + '<input type="number" min="0" max="4000" step="1" name="panelHeightMin" value="' + dashAttr(normalized.min !== undefined ? normalized.min : '') + '">'
+        + '<span>px</span></div>'
+        + '<div class="dash-viz-field-row dash-panel-height-row"><label>Максимальная</label>'
+        + '<input type="number" min="0" max="4000" step="1" name="panelHeightMax" value="' + dashAttr(normalized.max !== undefined ? normalized.max : '') + '">'
+        + '<span>px</span></div>'
         + '</div>';
 }
 
-function dashBuildVizSizeHtml(size) {
-    var normalized = dashNormalizeVizSize(size) || {};
-    return '<div class="dash-viz-size-group">'
-        + '<div class="dash-viz-size-title">Размер</div>'
-        + dashBuildVizSizeRow('width', 'Ширина', normalized.width)
-        + dashBuildVizSizeRow('height', 'Высота', normalized.height)
-        + '</div>';
-}
-
-function dashBuildPanelMaxWidthUnitOptions(selected) {
-    selected = dashNormalizePanelMaxWidthUnit(selected);
-    return DASH_PANEL_MAX_WIDTH_UNITS.map(function(unit) {
-        return '<option value="' + unit + '"' + (unit === selected ? ' selected' : '') + '>' + unit + '</option>';
-    }).join('');
-}
-
-function dashBuildPanelMaxWidthRow(device, label, dim) {
-    var valueName = device === 'desktop' ? 'panelMaxWidthDesktopValue' : 'panelMaxWidthMobileValue'
-        , unitName = device === 'desktop' ? 'panelMaxWidthDesktopUnit' : 'panelMaxWidthMobileUnit'
-        , value = dim ? dim.value : ''
-        , unit = dim ? dim.unit : 'px';
-    return '<div class="dash-viz-field-row dash-panel-max-width-row">'
-        + '<label>' + label + '</label>'
-        + '<input type="number" min="0" step="1" name="' + valueName + '" value="' + dashAttr(value) + '">'
-        + '<select name="' + unitName + '">' + dashBuildPanelMaxWidthUnitOptions(unit) + '</select>'
-        + '</div>';
-}
-
-function dashBuildPanelMaxWidthHtml(panelMaxWidth) {
-    var normalized = dashNormalizePanelMaxWidth(panelMaxWidth) || {};
-    return '<div class="dash-panel-max-width-group">'
-        + '<div class="dash-viz-size-title">Максимальная ширина панели</div>'
-        + dashBuildPanelMaxWidthRow('desktop', 'Десктоп', normalized.desktop)
-        + dashBuildPanelMaxWidthRow('mobile', 'Мобильная', normalized.mobile)
-        + '</div>';
+function dashBuildPanelColumnsHtml(panelColumns) {
+    var cols = dashPanelColumnsWithDefaults(panelColumns)
+        , html = '<div class="dash-panel-general-group dash-panel-columns-group">'
+            + '<div class="dash-viz-size-title">Ширина панели (12 колонок)</div>';
+    DASH_PANEL_COLUMN_BREAKPOINTS.forEach(function(bp) {
+        html += '<div class="dash-viz-field-row dash-panel-columns-row"><label>' + bp.label + ' ' + bp.range + '</label>'
+            + '<input type="number" min="1" max="12" step="1" name="panelColumns' + bp.key.toUpperCase() + '" value="' + dashAttr(cols[bp.key]) + '">'
+            + '</div>';
+    });
+    return html + '</div>';
 }
 
 function dashBuildSelectOptions(values, selected, valueFormatter) {
@@ -4617,6 +4672,34 @@ function dashBuildPanelGeneralHtml(general) {
         + '<input type="text" maxlength="16" name="generalTooltipSuffix" value="' + dashAttr(g.tooltipSuffix || '') + '">'
         + '</div>'
         + '</div>';
+}
+
+function dashCollectPanelHeight() {
+    var container = document.getElementById('dash-panel-general-settings')
+        , result;
+    if (!container) return null;
+
+    function read(name) {
+        var input = container.querySelector('[name="' + name + '"]');
+        return input ? input.value : '';
+    }
+
+    result = dashNormalizePanelHeight({
+        min: read('panelHeightMin'),
+        max: read('panelHeightMax')
+    });
+    return result;
+}
+
+function dashCollectPanelColumns() {
+    var container = document.getElementById('dash-panel-general-settings')
+        , result = {};
+    if (!container) return null;
+    DASH_PANEL_COLUMN_BREAKPOINTS.forEach(function(bp) {
+        var input = container.querySelector('[name="panelColumns' + bp.key.toUpperCase() + '"]');
+        if (input) result[bp.key] = input.value;
+    });
+    return dashNormalizePanelColumns(result);
 }
 
 function dashCollectPanelGeneral() {
@@ -4702,25 +4785,6 @@ function dashCollectVizSize(item) {
     return result.width || result.height ? result : null;
 }
 
-function dashCollectPanelMaxWidthDimension(container, device) {
-    var valueEl = container ? container.querySelector(device === 'desktop' ? '[name="panelMaxWidthDesktopValue"]' : '[name="panelMaxWidthMobileValue"]') : null
-        , unitEl = container ? container.querySelector(device === 'desktop' ? '[name="panelMaxWidthDesktopUnit"]' : '[name="panelMaxWidthMobileUnit"]') : null
-        , value = valueEl ? valueEl.value : ''
-        , unit = unitEl ? unitEl.value : 'px';
-    return dashNormalizePanelMaxWidthDimension({ value: value, unit: unit });
-}
-
-function dashCollectPanelMaxWidth() {
-    var container = document.getElementById('dash-panel-max-width-settings')
-        , result = {}
-        , desktop = dashCollectPanelMaxWidthDimension(container, 'desktop')
-        , mobile = dashCollectPanelMaxWidthDimension(container, 'mobile');
-    if (!container) return null;
-    if (desktop) result.desktop = desktop;
-    if (mobile) result.mobile = mobile;
-    return result.desktop || result.mobile ? result : null;
-}
-
 function dashCollectVizSelectedRows(item) {
     var checks = Array.from(item.querySelectorAll('.dash-viz-row-check'))
         , selected = []
@@ -4753,7 +4817,8 @@ function dashVizModalCollectSettings() {
         if (isDefault) entry.default = true;
         result.push(entry);
     });
-    result = dashSetPanelMaxWidthInSettings(result, dashCollectPanelMaxWidth());
+    result = dashSetPanelHeightInSettings(result, dashCollectPanelHeight());
+    result = dashSetPanelColumnsInSettings(result, dashCollectPanelColumns());
     result = dashSetGeneralSettingsInSettings(result, dashCollectPanelGeneral());
     return result;
 }
@@ -4827,7 +4892,7 @@ function dashApplyNewVizSettings(panelEl, panelKey, settings) {
 }
 
 function dashRefreshPanelMaxWidths() {
-    document.querySelectorAll('#dash-model .f-panel').forEach(dashApplyPanelMaxWidth);
+    document.querySelectorAll('#dash-model .f-panel').forEach(dashApplyPanelLayout);
 }
 
 // ─── Panel filters ──────────────────────────────────────────────────────────

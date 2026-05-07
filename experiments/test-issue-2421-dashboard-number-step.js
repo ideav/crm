@@ -26,27 +26,27 @@ function assert(condition, message) {
 }
 
 const code = `
-var DASH_VIZ_SIZE_UNITS = ['%', 'px', 'rem'];
-var DASH_PANEL_MAX_WIDTH_UNITS = ['%', 'px'];
+var DASH_PANEL_COLUMN_BREAKPOINTS = [
+    { key: 'xs', label: 'XS', range: '<576px', minWidth: 0, defaultValue: 12 },
+    { key: 'sm', label: 'SM', range: '>=576px', minWidth: 576, defaultValue: 12 },
+    { key: 'md', label: 'MD', range: '>=768px', minWidth: 768, defaultValue: 6 },
+    { key: 'lg', label: 'LG', range: '>=992px', minWidth: 992, defaultValue: 4 },
+    { key: 'xl', label: 'XL', range: '>=1200px', minWidth: 1200, defaultValue: 4 },
+    { key: 'xxl', label: 'XXL', range: '>=1400px', minWidth: 1400, defaultValue: 3 }
+];
 var DASH_GENERAL_AXIS_FONT_SIZES = [8, 9, 10, 12, 14, 16];
 var DASH_GENERAL_LEGEND_FONT_SIZES = [8, 9, 10, 12, 14, 16];
 var DASH_GENERAL_LEGEND_POSITIONS = ['top', 'bottom', 'left', 'right'];
 var DASH_GENERAL_X_ROTATIONS = [0, 45, 90];
 var DASH_GENERAL_TOOLTIP_DECIMALS = [0, 1, 2, 3];
+function dashColorPaletteToText() { return ''; }
 ${extractFunction('dashAttr')}
-${extractFunction('dashNormalizeVizSizeValue')}
-${extractFunction('dashNormalizeVizSizeUnit')}
-${extractFunction('dashNormalizeVizSizeDimension')}
-${extractFunction('dashNormalizeVizSize')}
-${extractFunction('dashBuildVizSizeUnitOptions')}
-${extractFunction('dashBuildVizSizeRow')}
-${extractFunction('dashBuildVizSizeHtml')}
-${extractFunction('dashNormalizePanelMaxWidthUnit')}
-${extractFunction('dashNormalizePanelMaxWidthDimension')}
-${extractFunction('dashNormalizePanelMaxWidth')}
-${extractFunction('dashBuildPanelMaxWidthUnitOptions')}
-${extractFunction('dashBuildPanelMaxWidthRow')}
-${extractFunction('dashBuildPanelMaxWidthHtml')}
+${extractFunction('dashNormalizeIntegerInRange')}
+${extractFunction('dashNormalizePanelHeight')}
+${extractFunction('dashNormalizePanelColumns')}
+${extractFunction('dashPanelColumnsWithDefaults')}
+${extractFunction('dashBuildPanelHeightHtml')}
+${extractFunction('dashBuildPanelColumnsHtml')}
 ${extractFunction('dashBuildSelectOptions')}
 ${extractFunction('dashBuildPanelGeneralHtml')}
 `;
@@ -56,28 +56,35 @@ vm.createContext(ctx);
 vm.runInContext(code, ctx);
 
 const html = [
-    ctx.dashBuildVizSizeHtml({
-        width: { value: 640, unit: 'px' },
-        height: { value: 360, unit: 'px' }
-    }),
-    ctx.dashBuildPanelMaxWidthHtml({
-        desktop: { value: 960, unit: 'px' },
-        mobile: { value: 100, unit: '%' }
-    }),
+    ctx.dashBuildPanelHeightHtml({ min: 240, max: 720 }),
+    ctx.dashBuildPanelColumnsHtml({ md: 5, lg: 3 }),
     ctx.dashBuildPanelGeneralHtml({ yStepSize: 50 })
 ].join('\n');
 
 [
-    'name="sizeWidthValue"',
-    'name="sizeHeightValue"',
-    'name="panelMaxWidthDesktopValue"',
-    'name="panelMaxWidthMobileValue"',
+    'name="panelHeightMin"',
+    'name="panelHeightMax"',
+    'name="panelColumnsXS"',
+    'name="panelColumnsSM"',
+    'name="panelColumnsMD"',
+    'name="panelColumnsLG"',
+    'name="panelColumnsXL"',
+    'name="panelColumnsXXL"',
     'name="generalYStepSize"'
 ].forEach(function(nameAttr) {
     const inputMatch = html.match(new RegExp('<input[^>]*' + nameAttr + '[^>]*>'));
     assert(inputMatch, nameAttr + ' input is rendered');
     assert(inputMatch[0].indexOf('step="1"') !== -1, nameAttr + ' uses step=1');
     assert(inputMatch[0].indexOf('step="0.1"') === -1, nameAttr + ' does not use step=0.1');
+});
+
+[
+    'name="sizeWidthValue"',
+    'name="sizeHeightValue"',
+    'name="panelMaxWidthDesktopValue"',
+    'name="panelMaxWidthMobileValue"'
+].forEach(function(nameAttr) {
+    assert(html.indexOf(nameAttr) === -1, nameAttr + ' is not rendered in panel display settings');
 });
 
 console.log('\nissue-2421 dashboard number step: ok');
