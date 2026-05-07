@@ -112,28 +112,11 @@ function checkErrorLimit($file, $limit = 3) {
 }
 // ========================================================
 
-// Проверка сброса
-if (isset($_GET['reset']) && $_GET['reset'] == 1) {
-    if (file_exists($stateFile)) unlink($stateFile);
-    resetErrorCounter($errorLogFile);
-    echo "Состояние сброшено. <a href='".str_replace('?reset=1', '', $_SERVER['REQUEST_URI'])."'>Начать заново</a><br>\n";
-    exit;
-}
-
-header('Content-Type: text/html; charset=utf-8');
-ob_implicit_flush(true);
-while (ob_get_level()) ob_end_flush();
-
-// Создаём директорию для CSV
-if (!is_dir($csvPath)) {
-    mkdir($csvPath, 0755, true);
-}
-
 // ==================== ФУНКЦИИ API ====================
 
 function callBitrix($bitrix24_webhook, $method, $params = []) {
     $url = $bitrix24_webhook . $method;
-    
+
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_URL, $url);
     curl_setopt($ch, CURLOPT_POST, true);
@@ -142,78 +125,141 @@ function callBitrix($bitrix24_webhook, $method, $params = []) {
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
     curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-    
+
     $response = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
-    
+
     if ($httpCode !== 200) {
         throw new Exception("HTTP Error: $httpCode");
     }
-    
+
     $result = json_decode($response, true);
-    
+
     if (isset($result['error'])) {
         throw new Exception("API Error: " . ($result['error_description'] ?? $result['error']));
     }
-    
+
     return $result;
 }
 
-function getLeadsBatch($bitrix24_webhook, $year, $lastId = 0, $limit = 50, $selectFields = []) {
+function getLeadsBatch($bitrix24_webhook, $year, $lastId = 0, $limit = 50, $selectFields = [], $apiCaller = null) {
     $yearStart = $year . '-01-01T00:00:00';
     $yearEnd = $year . '-12-31T23:59:59';
-    
+
     $filter = [
         '>=DATE_CREATE' => $yearStart,
         '<=DATE_CREATE' => $yearEnd
     ];
-    
+
     if ($lastId > 0) {
         $filter['>ID'] = $lastId;
     }
-    
+
     $params = [
         'order' => ['ID' => 'ASC'],
         'filter' => $filter,
         'select' => $selectFields,
         'limit' => $limit
     ];
-    
-    $result = callBitrix($bitrix24_webhook, 'crm.lead.list', $params);
-    
+
+    $apiCaller = $apiCaller ?: 'callBitrix';
+    $result = $apiCaller($bitrix24_webhook, 'crm.lead.list', $params);
+
     return [
         'leads' => $result['result'] ?? [],
         'total' => $result['total'] ?? 0
     ];
 }
 
-function getDealsByLeadIds($bitrix24_webhook, $leadIds, $selectFields = []) {
-    if (empty($leadIds)) {
-        return [];
+function getDealsBatch($bitrix24_webhook, $year, $lastId = 0, $limit = 50, $selectFields = [], $apiCaller = null) {
+    $yearStart = $year . '-01-01T00:00:00';
+    $yearEnd = $year . '-12-31T23:59:59';
+
+    $filter = [
+        '>=DATE_CREATE' => $yearStart,
+        '<=DATE_CREATE' => $yearEnd
+    ];
+
+    if ($lastId > 0) {
+        $filter['>ID'] = $lastId;
     }
-    
-    $result = callBitrix($bitrix24_webhook, 'crm.deal.list', [
-        'filter' => ['@LEAD_ID' => implode(',', $leadIds)],
-        'select' => $selectFields
-    ]);
-    
-    return $result['result'] ?? [];
+
+    $params = [
+        'order' => ['ID' => 'ASC'],
+        'filter' => $filter,
+        'select' => $selectFields,
+        'limit' => $limit
+    ];
+
+    $apiCaller = $apiCaller ?: 'callBitrix';
+    $result = $apiCaller($bitrix24_webhook, 'crm.deal.list', $params);
+
+    return [
+        'deals' => $result['result'] ?? [],
+        'total' => $result['total'] ?? 0
+    ];
+}
+
+function isExportComplete($state) {
+    return !empty($state['leads_complete']) && !empty($state['deals_complete']);
+}
+
+function getDefaultExportState() {
+    return [
+        'state_version' => 2,
+        'last_id' => 0,
+        'last_lead_id' => 0,
+        'last_deal_id' => 0,
+        'leads_complete' => false,
+        'deals_complete' => false,
+        'is_complete' => false,
+        'total_leads' => 0,
+        'total_deals' => 0
+    ];
+}
+
+function normalizeExportState($state) {
+    $default = getDefaultExportState();
+
+    if (!is_array($state)) {
+        return $default;
+    }
+
+    $isLegacyState = !array_key_exists('state_version', $state)
+        || !array_key_exists('last_lead_id', $state)
+        || !array_key_exists('last_deal_id', $state);
+
+    if ($isLegacyState) {
+        $state['last_lead_id'] = (int)($state['last_id'] ?? 0);
+        $state['last_deal_id'] = 0;
+        $state['leads_complete'] = !empty($state['is_complete']);
+        $state['deals_complete'] = false;
+        $state['total_deals'] = 0;
+    }
+
+    $state = array_merge($default, $state);
+    $state['state_version'] = 2;
+    $state['last_lead_id'] = (int)$state['last_lead_id'];
+    $state['last_deal_id'] = (int)$state['last_deal_id'];
+    $state['total_leads'] = (int)$state['total_leads'];
+    $state['total_deals'] = (int)$state['total_deals'];
+    $state['last_id'] = $state['last_lead_id'];
+    $state['is_complete'] = isExportComplete($state);
+
+    return $state;
 }
 
 function getExportState($stateFile) {
     if (!file_exists($stateFile)) {
-        return [
-            'last_id' => 0, 
-            'is_complete' => false, 
-            'total_leads' => 0, 
-            'total_deals' => 0
-        ];
+        return getDefaultExportState();
     }
-    return json_decode(file_get_contents($stateFile), true);
+
+    return normalizeExportState(json_decode(file_get_contents($stateFile), true));
 }
 
 function saveExportState($stateFile, $state) {
+    $state = normalizeExportState($state);
     file_put_contents($stateFile, json_encode($state, JSON_PRETTY_PRINT));
 }
 
@@ -249,7 +295,7 @@ function formatFieldValue($value) {
     if (is_null($value)) {
         return '';
     }
-    
+
     // Если массив - обрабатываем как множественное поле
     if (is_array($value)) {
         $parts = [];
@@ -266,17 +312,17 @@ function formatFieldValue($value) {
         }
         return implode(', ', $parts);
     }
-    
+
     // Если булево значение
     if (is_bool($value)) {
         return $value ? 'Да' : 'Нет';
     }
-    
+
     // Для строк - очищаем переносы
     if (is_string($value)) {
         return trim(preg_replace('/\s+/', ' ', str_replace(["\n", "\r"], ' ', $value)));
     }
-    
+
     // Для чисел и прочего - просто приводим к строке
     return (string)$value;
 }
@@ -293,18 +339,42 @@ function prepareRowData($item, $fields) {
     return $row;
 }
 
+if (defined('EXPORT_B3X_SKIP_RUN') && EXPORT_B3X_SKIP_RUN) {
+    return;
+}
+
+// Проверка сброса
+if (isset($_GET['reset']) && $_GET['reset'] == 1) {
+    if (file_exists($stateFile)) unlink($stateFile);
+    resetErrorCounter($errorLogFile);
+    echo "Состояние сброшено. <a href='".str_replace('?reset=1', '', $_SERVER['REQUEST_URI'])."'>Начать заново</a><br>\n";
+    exit;
+}
+
+header('Content-Type: text/html; charset=utf-8');
+ob_implicit_flush(true);
+while (ob_get_level()) ob_end_flush();
+
+// Создаём директорию для CSV
+if (!is_dir($csvPath)) {
+    mkdir($csvPath, 0755, true);
+}
+
 // ==================== ОСНОВНАЯ ЛОГИКА ====================
 
 global $bitrix24_webhook;
 
 $startTime = time();
 $state = getExportState($stateFile);
-$lastId = $state['last_id'];
-$isComplete = $state['is_complete'];
+$lastLeadId = $state['last_lead_id'];
+$lastDealId = $state['last_deal_id'];
+$isComplete = isExportComplete($state);
 
 // Очищаем файлы при первом запуске
-if ($lastId == 0 && !$isComplete) {
+if ($lastLeadId == 0 && empty($state['leads_complete'])) {
     if (file_exists($leadsCsvFile)) unlink($leadsCsvFile);
+}
+if ($lastDealId == 0 && empty($state['deals_complete'])) {
     if (file_exists($dealsCsvFile)) unlink($dealsCsvFile);
 }
 
@@ -332,11 +402,14 @@ echo "<!DOCTYPE html>
 ";
 
 echo ">>> ЭКСПОРТ ЛИДОВ И СДЕЛОК ЗА {$TARGET_YEAR} ГОД <<<\n";
-echo "   Таймаут: {$timeLimit} сек | Пачка: {$batchSize} лидов\n";
+echo "   Таймаут: {$timeLimit} сек | Пачка: {$batchSize} записей\n";
 echo "   URL: " . parse_url($bitrix24_webhook, PHP_URL_HOST) . "\n";
 echo "   Полей лидов: " . count($leadFields) . "\n";
 echo "   Полей сделок: " . count($dealFields) . "\n";
-echo "   Последний ID лида: {$lastId}\n";
+echo "   Последний ID лида: {$lastLeadId}\n";
+echo "   Последний ID сделки: {$lastDealId}\n";
+echo "   Лиды завершены: " . (!empty($state['leads_complete']) ? 'Да' : 'Нет') . "\n";
+echo "   Сделки завершены: " . (!empty($state['deals_complete']) ? 'Да' : 'Нет') . "\n";
 echo "   Выгружено лидов: " . ($state['total_leads'] ?? 0) . "\n";
 echo "   Выгружено сделок: " . ($state['total_deals'] ?? 0) . "\n\n";
 
@@ -350,17 +423,14 @@ if ($isComplete) {
     exit(0);
 }
 
-$processedLeads = 0;
-$processedDeals = 0;
 $batchesProcessed = 0;
 $shouldStop = false;
 $errorCount = 0;
-$maxLeadId = $lastId;
+$maxLeadId = $lastLeadId;
+$maxDealId = $lastDealId;
 
 try {
-    $hasMore = true;
-    
-    while ($hasMore && !$shouldStop) {
+    while (!isExportComplete($state) && !$shouldStop) {
         // Проверка времени
         if (time() - $startTime >= $timeLimit) {
             echo "\n<span class='info'>[ВРЕМЯ] Лимит ({$timeLimit} сек). Перезагрузка...</span>\n";
@@ -368,90 +438,118 @@ try {
             $shouldStop = true;
             break;
         }
-        
-        echo "   Запрос лидов (ID > {$lastId})... ";
-        
-        try {
-            $batch = getLeadsBatch($bitrix24_webhook, $TARGET_YEAR, $lastId, $batchSize, $leadFields);
-            $leads = $batch['leads'];
-            $errorCount = 0;
-            resetErrorCounter($errorLogFile);
-        } catch (Exception $e) {
-            $errorCount++;
-            incrementErrorCounter($errorLogFile);
-            checkErrorLimit($errorLogFile, 3);
-            echo "<span class='error'>Ошибка: " . $e->getMessage() . "</span>\n";
-            sleep(2);
-            continue;
-        }
-        
-        $leadsCount = count($leads);
-        
-        if ($leadsCount == 0) {
-            echo "<span class='info'>0 лидов — выгрузка завершена</span>\n";
-            $hasMore = false;
-            $state['is_complete'] = true;
-            saveExportState($stateFile, $state);
-            break;
-        }
-        
-        echo "<span class='progress'>получено {$leadsCount} лидов</span>\n";
-        
-        // Собираем ID лидов для запроса сделок
-        $leadIds = array_column($leads, 'ID');
-        
-        echo "   Запрос сделок для " . count($leadIds) . " лидов... ";
-        
-        $deals = [];
-        try {
-            $deals = getDealsByLeadIds($bitrix24_webhook, $leadIds, $dealFields);
-            echo "<span class='success'>OK (" . count($deals) . " сделок)</span>\n";
-        } catch (Exception $e) {
-            echo "<span class='warning'>Предупреждение: " . $e->getMessage() . "</span>\n";
-        }
-        
-        // Записываем лидов
-        foreach ($leads as $lead) {
-            $leadRow = prepareRowData($lead, $leadFields);
-            appendCsvRow($leadsCsvFile, $leadRow);
-            $processedLeads++;
-            
-            if ($lead['ID'] > $maxLeadId) {
-                $maxLeadId = $lead['ID'];
-            }
-        }
-        
-        // Записываем сделки
-        foreach ($deals as $deal) {
-            $dealRow = prepareRowData($deal, $dealFields);
-            appendCsvRow($dealsCsvFile, $dealRow);
-            $processedDeals++;
-        }
-        
-        $batchesProcessed++;
-        
-        // Обновляем состояние
-        $state['last_id'] = $maxLeadId;
-        $state['total_leads'] = ($state['total_leads'] ?? 0) + $processedLeads;
-        $state['total_deals'] = ($state['total_deals'] ?? 0) + $processedDeals;
-        saveExportState($stateFile, $state);
-        
-        echo "      Пачка {$batchesProcessed}: +{$processedLeads} лидов, +{$processedDeals} сделок | ID: {$maxLeadId}\n";
-        
-        $lastId = $maxLeadId;
+
         $processedLeads = 0;
         $processedDeals = 0;
+
+        if (empty($state['leads_complete'])) {
+            echo "   Запрос лидов (ID > {$lastLeadId})... ";
+
+            try {
+                $batch = getLeadsBatch($bitrix24_webhook, $TARGET_YEAR, $lastLeadId, $batchSize, $leadFields);
+                $leads = $batch['leads'];
+                $errorCount = 0;
+                resetErrorCounter($errorLogFile);
+            } catch (Exception $e) {
+                $errorCount++;
+                incrementErrorCounter($errorLogFile);
+                checkErrorLimit($errorLogFile, 3);
+                echo "<span class='error'>Ошибка: " . $e->getMessage() . "</span>\n";
+                sleep(2);
+                continue;
+            }
+
+            $leadsCount = count($leads);
+
+            if ($leadsCount == 0) {
+                echo "<span class='info'>0 лидов — блок лидов завершен</span>\n";
+                $state['leads_complete'] = true;
+            } else {
+                echo "<span class='progress'>получено {$leadsCount} лидов</span>\n";
+
+                // Записываем лидов
+                foreach ($leads as $lead) {
+                    $leadRow = prepareRowData($lead, $leadFields);
+                    appendCsvRow($leadsCsvFile, $leadRow);
+                    $processedLeads++;
+
+                    if ($lead['ID'] > $maxLeadId) {
+                        $maxLeadId = $lead['ID'];
+                    }
+                }
+            }
+
+            $state['last_lead_id'] = $maxLeadId;
+            $state['total_leads'] = ($state['total_leads'] ?? 0) + $processedLeads;
+            saveExportState($stateFile, $state);
+            $lastLeadId = $maxLeadId;
+        }
+
+        if (time() - $startTime >= $timeLimit) {
+            echo "\n<span class='info'>[ВРЕМЯ] Лимит ({$timeLimit} сек). Перезагрузка...</span>\n";
+            resetErrorCounter($errorLogFile);
+            $shouldStop = true;
+            break;
+        }
+
+        if (empty($state['deals_complete'])) {
+            echo "   Запрос всех сделок (ID > {$lastDealId})... ";
+
+            try {
+                $batch = getDealsBatch($bitrix24_webhook, $TARGET_YEAR, $lastDealId, $batchSize, $dealFields);
+                $deals = $batch['deals'];
+                $errorCount = 0;
+                resetErrorCounter($errorLogFile);
+            } catch (Exception $e) {
+                $errorCount++;
+                incrementErrorCounter($errorLogFile);
+                checkErrorLimit($errorLogFile, 3);
+                echo "<span class='error'>Ошибка: " . $e->getMessage() . "</span>\n";
+                sleep(2);
+                continue;
+            }
+
+            $dealsCount = count($deals);
+
+            if ($dealsCount == 0) {
+                echo "<span class='info'>0 сделок — блок сделок завершен</span>\n";
+                $state['deals_complete'] = true;
+            } else {
+                echo "<span class='success'>OK (" . $dealsCount . " сделок)</span>\n";
+
+                // Записываем все сделки независимо от привязки к лидам
+                foreach ($deals as $deal) {
+                    $dealRow = prepareRowData($deal, $dealFields);
+                    appendCsvRow($dealsCsvFile, $dealRow);
+                    $processedDeals++;
+
+                    if ($deal['ID'] > $maxDealId) {
+                        $maxDealId = $deal['ID'];
+                    }
+                }
+            }
+
+            $state['last_deal_id'] = $maxDealId;
+            $state['total_deals'] = ($state['total_deals'] ?? 0) + $processedDeals;
+            saveExportState($stateFile, $state);
+            $lastDealId = $maxDealId;
+        }
+
+        $batchesProcessed++;
+        saveExportState($stateFile, $state);
+
+        echo "      Пачка {$batchesProcessed}: +{$processedLeads} лидов, +{$processedDeals} сделок | лид ID: {$maxLeadId}, сделка ID: {$maxDealId}\n";
     }
-    
+
     $totalLeads = $state['total_leads'] ?? 0;
     $totalDeals = $state['total_deals'] ?? 0;
-    
+
     echo "\n<span class='info'>ИТОГИ СЕССИИ:</span>\n";
     echo "   Обработано пачек: {$batchesProcessed}\n";
     echo "   Всего лидов: {$totalLeads}\n";
     echo "   Всего сделок: {$totalDeals}\n";
-    
-    if ($state['is_complete']) {
+
+    if (isExportComplete($state)) {
         echo "\n<span class='success'>[ГОТОВО] ВСЕ ДАННЫЕ ЗА {$TARGET_YEAR} ГОД ВЫГРУЖЕНЫ!</span>\n";
         echo "<hr>\n";
         echo "📁 <a href='" . basename($leadsCsvFile) . "' download>Скачать лидов ({$totalLeads})</a>\n";
@@ -461,14 +559,17 @@ try {
         echo "\n<span class='progress'>[ПЕРЕЗАГРУЗКА] Через 0,1 секунду...</span>\n";
         echo "</pre><script>setTimeout(function(){ location.reload(); }, 100);</script>";
     }
-    
+
 } catch (Exception $e) {
     echo "\n<span class='error'>[ОШИБКА] " . $e->getMessage() . "</span>\n";
-    if ($maxLeadId > $state['last_id']) {
-        $state['last_id'] = $maxLeadId;
+    if ($maxLeadId > $state['last_lead_id']) {
+        $state['last_lead_id'] = $maxLeadId;
+    }
+    if ($maxDealId > $state['last_deal_id']) {
+        $state['last_deal_id'] = $maxDealId;
     }
     saveExportState($stateFile, $state);
-    
+
     $errorCount = incrementErrorCounter($errorLogFile);
     if ($errorCount >= 3) {
         echo "\n<span class='error'>[ПРЕРВАНО] 3 ошибки подряд.</span>\n";
