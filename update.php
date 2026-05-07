@@ -363,7 +363,11 @@ function syncWithCache($config, $configName) {
     $kept = [];
     foreach ($tasks as $t) $kept[$t['target']] = true;
     $configEntry['files'] = array_intersect_key($configEntry['files'], $kept);
-    $configEntry['commit_sha'] = $head['commit_sha'];
+    // Only advance the cached commit SHA when every pending download succeeded.
+    // If any download failed the next run must retry rather than fast-pathing.
+    if (empty($results['errors'])) {
+        $configEntry['commit_sha'] = $head['commit_sha'];
+    }
     $configEntry['updated_at'] = date('c');
     $manifest['configs'][$configName] = $configEntry;
 
