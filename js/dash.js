@@ -1816,6 +1816,7 @@ function dashDrawPeriods() {
                 if (!activeIcon || activeIcon.dataset.vizType === 'table')
                     dashRenderReportTable(panel);
             }
+            dashUpdateSubheadStickyTop(panel);
         });
     }
     dashDebug();
@@ -1823,6 +1824,15 @@ function dashDrawPeriods() {
 
 function dashUpdateTableWrapOverflow() {
     // overflow-x: auto is set via CSS; no dynamic toggle needed.
+}
+
+function dashUpdateSubheadStickyTop(panelEl) {
+    var tableWrap = panelEl ? panelEl.querySelector('.f-table-wrap') : null;
+    if (!tableWrap) return;
+    var headRow = tableWrap.querySelector('thead .dash-head');
+    if (!headRow) return;
+    var headHeight = headRow.getBoundingClientRect().height;
+    tableWrap.style.setProperty('--dash-head-height', headHeight + 'px');
 }
 
 function dashDebug() {
@@ -3670,6 +3680,7 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
         tableWrap.style.display = '';
         chartWrap.style.display = 'none';
         panelEl.classList.remove('f-panel--chart');
+        dashUpdateSubheadStickyTop(panelEl);
         return;
     }
 

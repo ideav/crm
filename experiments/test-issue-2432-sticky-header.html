@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Issue 2432: Sticky table header when panel has max-height</title>
+    <link rel="stylesheet" href="../assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="../css/dash.css">
+    <style>
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: #eef1f5;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            padding: 1rem;
+        }
+        h2 {
+            margin: 0 0 0.5rem;
+        }
+        .test-case {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            background: #fff;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+        }
+        .test-label {
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #6c757d;
+        }
+        .pass { color: green; }
+        .fail { color: red; }
+    </style>
+</head>
+<body>
+<h2>Issue 2432: Sticky table header in panel with height constraint</h2>
+<p>Test: when a table panel has a max-height set (height constraint), the table header should stick to the top while scrolling vertically.</p>
+
+<!-- Test 1: f-table-wrap with height set inline (simulates JS setting height) -->
+<div class="test-case">
+    <div class="test-label">Test 1: f-table-wrap with explicit height (should have sticky header)</div>
+    <div class="f-panel" style="max-width: 600px;">
+        <div class="f-panel-header">
+            <h4>Panel with height constraint (300px)</h4>
+        </div>
+        <div class="f-panel-content">
+            <div class="f-table-wrap" style="height: 300px; max-height: 300px; min-height: 0;">
+                <table class="table table-sm table-bordered w-auto">
+                    <thead>
+                        <tr class="dash-head f-head">
+                            <th>Name</th>
+                            <th>Value 1</th>
+                            <th>Value 2</th>
+                            <th>Value 3</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="dash-item"><td>Row 1</td><td>100</td><td>200</td><td>300</td></tr>
+                        <tr class="dash-item"><td>Row 2</td><td>150</td><td>250</td><td>350</td></tr>
+                        <tr class="dash-item"><td>Row 3</td><td>200</td><td>300</td><td>400</td></tr>
+                        <tr class="dash-item"><td>Row 4</td><td>250</td><td>350</td><td>450</td></tr>
+                        <tr class="dash-item"><td>Row 5</td><td>300</td><td>400</td><td>500</td></tr>
+                        <tr class="dash-item"><td>Row 6</td><td>350</td><td>450</td><td>550</td></tr>
+                        <tr class="dash-item"><td>Row 7</td><td>400</td><td>500</td><td>600</td></tr>
+                        <tr class="dash-item"><td>Row 8</td><td>450</td><td>550</td><td>650</td></tr>
+                        <tr class="dash-item"><td>Row 9</td><td>500</td><td>600</td><td>700</td></tr>
+                        <tr class="dash-item"><td>Row 10</td><td>550</td><td>650</td><td>750</td></tr>
+                        <tr class="dash-item"><td>Row 11</td><td>600</td><td>700</td><td>800</td></tr>
+                        <tr class="dash-item"><td>Row 12</td><td>650</td><td>750</td><td>850</td></tr>
+                        <tr class="dash-item"><td>Row 13</td><td>700</td><td>800</td><td>900</td></tr>
+                        <tr class="dash-item"><td>Row 14</td><td>750</td><td>850</td><td>950</td></tr>
+                        <tr class="dash-item"><td>Row 15</td><td>800</td><td>900</td><td>1000</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <p>Expected: scroll vertically within the box, header row stays visible at the top</p>
+</div>
+
+<!-- Test 2: f-table-wrap WITHOUT height (no constraint) -->
+<div class="test-case">
+    <div class="test-label">Test 2: f-table-wrap without height (no constraint - natural behavior)</div>
+    <div class="f-panel" style="max-width: 600px;">
+        <div class="f-panel-header">
+            <h4>Panel without height constraint</h4>
+        </div>
+        <div class="f-panel-content">
+            <div class="f-table-wrap">
+                <table class="table table-sm table-bordered w-auto">
+                    <thead>
+                        <tr class="dash-head f-head">
+                            <th>Name</th>
+                            <th>Value 1</th>
+                            <th>Value 2</th>
+                            <th>Value 3</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="dash-item"><td>Row 1</td><td>100</td><td>200</td><td>300</td></tr>
+                        <tr class="dash-item"><td>Row 2</td><td>150</td><td>250</td><td>350</td></tr>
+                        <tr class="dash-item"><td>Row 3</td><td>200</td><td>300</td><td>400</td></tr>
+                        <tr class="dash-item"><td>Row 4</td><td>250</td><td>350</td><td>450</td></tr>
+                        <tr class="dash-item"><td>Row 5</td><td>300</td><td>400</td><td>500</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <p>Expected: no vertical scroll on the container, table just shows all rows</p>
+</div>
+
+<!-- Test 3: f-table-wrap with height AND wide table -->
+<div class="test-case">
+    <div class="test-label">Test 3: f-table-wrap with height constraint AND wide table (both scrollbars)</div>
+    <div class="f-panel" style="max-width: 300px;">
+        <div class="f-panel-header">
+            <h4>Wide table in narrow container (200px height)</h4>
+        </div>
+        <div class="f-panel-content">
+            <div class="f-table-wrap" style="height: 200px; max-height: 200px; min-height: 0;">
+                <table class="table table-sm table-bordered w-auto">
+                    <thead>
+                        <tr class="dash-head f-head">
+                            <th>Name</th>
+                            <th>Value 1</th>
+                            <th>Value 2</th>
+                            <th>Value 3</th>
+                            <th>Value 4</th>
+                            <th>Value 5</th>
+                            <th>Value 6</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="dash-item"><td>Row 1</td><td>100</td><td>200</td><td>300</td><td>400</td><td>500</td><td>600</td></tr>
+                        <tr class="dash-item"><td>Row 2</td><td>150</td><td>250</td><td>350</td><td>450</td><td>550</td><td>650</td></tr>
+                        <tr class="dash-item"><td>Row 3</td><td>200</td><td>300</td><td>400</td><td>500</td><td>600</td><td>700</td></tr>
+                        <tr class="dash-item"><td>Row 4</td><td>250</td><td>350</td><td>450</td><td>550</td><td>650</td><td>750</td></tr>
+                        <tr class="dash-item"><td>Row 5</td><td>300</td><td>400</td><td>500</td><td>600</td><td>700</td><td>800</td></tr>
+                        <tr class="dash-item"><td>Row 6</td><td>350</td><td>450</td><td>550</td><td>650</td><td>750</td><td>850</td></tr>
+                        <tr class="dash-item"><td>Row 7</td><td>400</td><td>500</td><td>600</td><td>700</td><td>800</td><td>900</td></tr>
+                        <tr class="dash-item"><td>Row 8</td><td>450</td><td>550</td><td>650</td><td>750</td><td>850</td><td>950</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <p>Expected: scroll both horizontally AND vertically, header row stays visible at the top when scrolling vertically</p>
+</div>
+
+<script>
+// Verify sticky header behavior
+window.addEventListener('load', function() {
+    var wraps = document.querySelectorAll('.f-table-wrap');
+    wraps.forEach(function(wrap, i) {
+        var ths = wrap.querySelectorAll('.dash-head th');
+        ths.forEach(function(th, j) {
+            var cs = window.getComputedStyle(th);
+            var wrapCs = window.getComputedStyle(wrap);
+            console.log('Test ' + (i+1) + ' th[' + j + '] position=' + cs.position + ' top=' + cs.top);
+            console.log('Test ' + (i+1) + ' wrap overflow-x=' + wrapCs.overflowX + ' overflow-y=' + wrapCs.overflowY);
+        });
+    });
+});
+</script>
+</body>
+</html>
