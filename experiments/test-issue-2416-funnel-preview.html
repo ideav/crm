@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Issue #2416 — Funnel chart preview</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 24px; background: #f8fafc; color: #1e293b; }
+        h1 { font-size: 1.1rem; margin: 0 0 16px 0; }
+        .panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; max-width: 760px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+        .canvas-wrap { height: 360px; }
+    </style>
+</head>
+<body>
+    <h1>Диаграмма-воронка (funnel chart) — preview for issue #2416</h1>
+    <div class="panel">
+        <div class="canvas-wrap"><canvas id="funnel"></canvas></div>
+    </div>
+<script>
+var CHART_COLORS = [
+    'rgba(54,162,235,0.7)', 'rgba(255,99,132,0.7)', 'rgba(255,206,86,0.7)',
+    'rgba(75,192,192,0.7)', 'rgba(153,102,255,0.7)', 'rgba(255,159,64,0.7)',
+    'rgba(99,255,132,0.7)', 'rgba(235,54,162,0.7)'
+];
+
+// Replicates the funnel branch added to js/dash.js.
+var data = {
+    labels: ['Заявка', 'Собеседование', 'Лид', 'Оффер', 'Найм'],
+    datasets: [{ label: 'Кол-во', data: [50, 30, 100, 20, 10] }]
+};
+var pairs = data.labels.map(function(lbl, i) {
+    return { label: lbl, value: Number(data.datasets[0].data[i]) || 0 };
+}).sort(function(a, b) { return b.value - a.value; });
+
+new Chart(document.getElementById('funnel'), {
+    type: 'bar',
+    data: {
+        labels: pairs.map(function(p) { return p.label; }),
+        datasets: [{
+            label: 'Кол-во',
+            data: pairs.map(function(p) { return p.value; }),
+            backgroundColor: pairs.map(function(_, i) { return CHART_COLORS[i % CHART_COLORS.length]; }),
+            borderWidth: 0
+        }]
+    },
+    options: {
+        indexAxis: 'y',
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { x: { beginAtZero: true }, y: { ticks: { autoSkip: false } } }
+    }
+});
+</script>
+</body>
+</html>
