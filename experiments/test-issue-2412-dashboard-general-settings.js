@@ -54,6 +54,10 @@ ${extractFunction('dashSetPanelMaxWidthInSettings')}
 ${extractFunction('dashNormalizePositiveNumber')}
 ${extractFunction('dashNormalizeIntegerInRange')}
 ${extractFunction('dashNormalizeEnum')}
+${extractFunction('dashBrowserSupportsColor')}
+${extractFunction('dashNormalizeColorToken')}
+${extractFunction('dashNormalizeColorPalette')}
+${extractFunction('dashColorPaletteToText')}
 ${extractFunction('dashNormalizeGeneralSettings')}
 ${extractFunction('dashGeneralSettingsFromSettings')}
 ${extractFunction('dashSetGeneralSettingsInSettings')}
@@ -270,6 +274,7 @@ vm.runInContext(code, ctx);
         'generalAxisFontSize',
         'generalLegendFontSize',
         'generalLegendPosition',
+        'generalColorPalette',
         'generalYMaxTicksLimit',
         'generalYStepSize',
         'generalXLabelRotation',
