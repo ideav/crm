@@ -42,10 +42,6 @@ var DASH_GENERAL_LEGEND_POSITIONS = ['top', 'bottom', 'left', 'right'];
 var DASH_GENERAL_X_ROTATIONS = [0, 45, 90];
 var DASH_GENERAL_TOOLTIP_DECIMALS = [0, 1, 2, 3];
 ${extractFunction('dashAttr')}
-${extractFunction('dashBrowserSupportsColor')}
-${extractFunction('dashNormalizeColorToken')}
-${extractFunction('dashNormalizeColorPalette')}
-${extractFunction('dashColorPaletteToText')}
 ${extractFunction('dashNormalizePositiveNumber')}
 ${extractFunction('dashNormalizeIntegerInRange')}
 ${extractFunction('dashNormalizeEnum')}
