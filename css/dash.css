@@ -100,6 +100,15 @@
 #dash-model .f-sheet.dash-tile-mode .f-table-wrap td {
     overflow-wrap: anywhere;
 }
+#dash-model .f-table-wrap td[data-format="DATE"],
+#dash-model .f-table-wrap td[data-format="SIGNED"],
+#dash-model .f-table-wrap td[data-format="NUMBER"],
+#dash-model .f-sheet.dash-tile-mode .f-table-wrap td[data-format="DATE"],
+#dash-model .f-sheet.dash-tile-mode .f-table-wrap td[data-format="SIGNED"],
+#dash-model .f-sheet.dash-tile-mode .f-table-wrap td[data-format="NUMBER"] {
+    white-space: nowrap;
+    overflow-wrap: normal;
+}
 .f-panel {
     margin-top: 1rem;
     margin-bottom: 0;

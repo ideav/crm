@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Issue 2446 dashboard nowrap</title>
+    <link rel="stylesheet" href="../css/dash.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 1rem;
+            background: #f5f6f8;
+            color: #212529;
+            font-family: Arial, sans-serif;
+        }
+        #dash-model {
+            max-width: 760px;
+            margin: 0;
+            background: #fff;
+            padding: 0.75rem;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+        }
+        .f-panel {
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 0.75rem;
+            background: #fff;
+        }
+        .f-panel-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .f-panel-header h4 {
+            margin: 0;
+        }
+        .f-table-wrap {
+            max-width: 100%;
+        }
+        .dash-nowrap-fixture-text {
+            max-width: 14rem;
+        }
+    </style>
+</head>
+<body>
+<div id="dash-model" class="f-model">
+    <div id="ds-demo" class="f-sheet dash-tile-mode">
+        <div class="f-panel pt-3">
+            <div class="f-panel-header"><h4>Форматы значений</h4></div>
+            <div class="f-panel-content">
+                <div class="f-table-wrap">
+                    <table class="table table-sm table-bordered w-auto">
+                        <thead>
+                            <tr class="dash-head f-head">
+                                <th>Дата</th>
+                                <th>Signed</th>
+                                <th>Number</th>
+                                <th>Текст</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td data-format="DATE">31.12.2026</td>
+                                <td data-format="SIGNED">-1 234 567.89</td>
+                                <td data-format="NUMBER">123 456 789</td>
+                                <td class="dash-nowrap-fixture-text">длинное текстовое значение может переноситься в режиме плитки</td>
+                            </tr>
+                            <tr>
+                                <td data-format="DATE">01.01.2027</td>
+                                <td data-format="SIGNED">2 061 818.88</td>
+                                <td data-format="NUMBER">987 654 321</td>
+                                <td class="dash-nowrap-fixture-text">обычный текст остается гибким для узких панелей</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>

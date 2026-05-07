@@ -98,6 +98,16 @@ function dashAttr(v) {
         .replace(/</g, '&lt;');
 }
 
+function dashCellValueFormat(rowId) {
+    var item = dashItems && dashItems[rowId];
+    return String((item && item.format) || '').toUpperCase();
+}
+
+function dashCellFormatAttribute(rowId) {
+    var format = dashCellValueFormat(rowId);
+    return format ? ' data-format="' + dashAttr(format) + '"' : '';
+}
+
 function dashEscapeHtml(v) {
     return String(v === null || v === undefined ? '' : v)
         .replace(/&/g, '&amp;')
@@ -1616,7 +1626,8 @@ function dashDrawPeriods() {
                                         + (valueItemId ? ' data-value-item-id="' + valueItemId + '"' : '')
                                         + (rgHeadVal ? ' data-rg-head="' + rgHeadVal.replace(/"/g, '&quot;') + '"' : '')
                                         + (rowLabel ? ' data-dash-label="' + dashAttr(rowLabel) + '"' : '')
-                                        + ' data-rg-col="' + colName.replace(/"/g, '&quot;') + '"';
+                                        + ' data-rg-col="' + colName.replace(/"/g, '&quot;') + '"'
+                                        + dashCellFormatAttribute(row.id);
                                     row.insertAdjacentHTML('beforeend',
                                         cellTpl.replace(':val:', dashFormatNumberText(v || ''))
                                             .replace(':ready:', '1')
@@ -1651,7 +1662,8 @@ function dashDrawPeriods() {
                                     + (valueItemId ? ' data-value-item-id="' + valueItemId + '"' : '')
                                     + (rgHeadVal ? ' data-rg-head="' + rgHeadVal.replace(/"/g, '&quot;') + '"' : '')
                                     + (rowLabel ? ' data-dash-label="' + dashAttr(rowLabel) + '"' : '')
-                                    + ' data-rg-col="' + dashAttr(periodLabel) + '"';
+                                    + ' data-rg-col="' + dashAttr(periodLabel) + '"'
+                                    + dashCellFormatAttribute(row.id);
                                 row.insertAdjacentHTML('beforeend',
                                     cellTpl.replace(':val:', dashFormatNumberText(v || ''))
                                         .replace(':ready:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? '1' : '0')
@@ -1684,7 +1696,8 @@ function dashDrawPeriods() {
                         var cellExtra = s.extra
                             + (valueItemId ? ' data-value-item-id="' + valueItemId + '"' : '')
                             + (rgHeadVal ? ' data-rg-head="' + rgHeadVal.replace(/"/g, '&quot;') + '"' : '')
-                            + (rowLabel ? ' data-dash-label="' + dashAttr(rowLabel) + '"' : '');
+                            + (rowLabel ? ' data-dash-label="' + dashAttr(rowLabel) + '"' : '')
+                            + dashCellFormatAttribute(row.id);
                         row.insertAdjacentHTML('beforeend',
                             cellTpl.replace(':val:', dashFormatNumberText(v || ''))
                                 .replace(':classes:', 'f-values')
@@ -1701,7 +1714,9 @@ function dashDrawPeriods() {
                         headTpl.replace(':head:', dashModelData[panelId].rgs[rg].head || '')
                                .replace(':from:-:to:', '-'));
                     panel.querySelectorAll('.f-item').forEach(function(row) {
-                        var rgf = dashModelData[panelId].rgs[rg].rgFormulas || '';
+                        var rgf = dashModelData[panelId].rgs[rg].rgFormulas || ''
+                            , cellExtra = (rgf ? ' data-rg-formula="' + rgf.replace(/"/g, '&quot;') + '"' : '')
+                                + dashCellFormatAttribute(row.id);
                         row.insertAdjacentHTML('beforeend',
                             cellTpl.replace(':val:', '')
                                 .replace(':classes:', 'f-rg-formula-cell')
@@ -1710,7 +1725,7 @@ function dashDrawPeriods() {
                                 .replace(':title:', rgf)
                                 .replace(':src:', 'rgformula')
                                 .replace(':item-id:', row.id)
-                                .replace(':extra:', rgf ? ' data-rg-formula="' + rgf.replace(/"/g, '&quot;') + '"' : ''));
+                                .replace(':extra:', cellExtra));
                     });
                     break;
                 case 'mu':
@@ -1778,6 +1793,7 @@ function dashDrawPeriods() {
                                         }
                                         if (rowLabel) extra += ' data-dash-label="' + dashAttr(rowLabel) + '"';
                                         extra += ' data-rg-col="' + dashAttr(col) + '"';
+                                        extra += dashCellFormatAttribute(row.id);
                                         row.insertAdjacentHTML('beforeend',
                                             cellTpl.replace(':val:', dashFormatNumberText(dashNormalizeVal(row.id, v || '')))
                                                 .replace(':ready:', ready)
