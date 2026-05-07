@@ -84,21 +84,47 @@ function urlPath($path) {
     return str_replace('%2F', '/', rawurlencode($path));
 }
 
+function describeApiFailure($what, $url, $r) {
+    $code = $r['http_code'] === null ? 0 : (int) $r['http_code'];
+    $msg = "Failed to fetch {$what} (HTTP {$code})";
+    if ($code === 0) {
+        $err = isset($r['error']) ? trim((string) $r['error']) : '';
+        if ($err === '') $err = 'no response from server (network / DNS / TLS / timeout)';
+        $msg .= " — {$err}";
+    } elseif ($code === 404) {
+        $msg .= ' — not found (check repository and branch in update.conf)';
+    } elseif ($code === 401) {
+        $msg .= ' — unauthorized (invalid token in update.conf)';
+    } elseif ($code === 403) {
+        $msg .= ' — forbidden (rate limit, or token lacks access)';
+    }
+    $msg .= " [url: {$url}]";
+    return $msg;
+}
+
 function ghCommit($info, $branch, $token) {
     $url = "https://api.github.com/repos/{$info['owner']}/{$info['repo']}/commits/" . urlBranch($branch);
     $r = httpGet($url, ghHeaders($token), 30);
-    if ($r['body'] === false || $r['http_code'] !== 200) return null;
+    if ($r['body'] === false || $r['http_code'] !== 200) {
+        return ['error' => describeApiFailure("HEAD commit for branch '{$branch}'", $url, $r)];
+    }
     $j = json_decode($r['body'], true);
-    if (!isset($j['sha'], $j['commit']['tree']['sha'])) return null;
+    if (!isset($j['sha'], $j['commit']['tree']['sha'])) {
+        return ['error' => "Failed to parse commit response for branch '{$branch}' [url: {$url}]"];
+    }
     return ['commit_sha' => $j['sha'], 'tree_sha' => $j['commit']['tree']['sha']];
 }
 
 function ghTree($info, $treeSha, $token) {
     $url = "https://api.github.com/repos/{$info['owner']}/{$info['repo']}/git/trees/{$treeSha}?recursive=1";
     $r = httpGet($url, ghHeaders($token), HTTP_TIMEOUT);
-    if ($r['body'] === false || $r['http_code'] !== 200) return null;
+    if ($r['body'] === false || $r['http_code'] !== 200) {
+        return ['error' => describeApiFailure('repository tree', $url, $r)];
+    }
     $j = json_decode($r['body'], true);
-    if (!isset($j['tree'])) return null;
+    if (!isset($j['tree'])) {
+        return ['error' => "Failed to parse tree response [url: {$url}]"];
+    }
     $files = [];
     foreach ($j['tree'] as $item) {
         if (isset($item['type'], $item['path'], $item['sha']) && $item['type'] === 'blob') {
@@ -281,6 +307,31 @@ function ensureDir($dir) {
     return is_dir($dir) || @mkdir($dir, 0755, true);
 }
 
+function formatDownloadError($d, $info, $branch) {
+    $t = $d['task'];
+    $code = $d['http_code'] === null ? 0 : (int) $d['http_code'];
+    $url = rawUrl($info, $branch, $t['source']);
+    $msg = "Download failed (HTTP {$code}): {$t['source']}";
+
+    // HTTP 0 means cURL never received an HTTP response: DNS, TCP, TLS, or
+    // timeout failure. Surface the cURL error so the user can act on it
+    // instead of guessing.
+    if ($code === 0) {
+        $err = isset($d['error']) ? trim((string) $d['error']) : '';
+        if ($err === '') $err = 'no response from server (network / DNS / TLS / timeout)';
+        $msg .= " — {$err}";
+        $msg .= " [url: {$url}]";
+    } elseif ($code === 404) {
+        $msg .= " — file not found on branch '{$branch}' (check path and branch in update.conf)";
+    } elseif ($code === 403) {
+        $msg .= " — forbidden (rate limit or token without access; check 'token' in update.conf)";
+    } elseif ($code === 401) {
+        $msg .= " — unauthorized (invalid 'token' in update.conf)";
+    }
+
+    return $msg;
+}
+
 function syncWithCache($config, $configName) {
     $results = ['fast_path' => false, 'success' => [], 'skipped' => [], 'errors' => [], 'cleaned' => 0];
 
@@ -295,8 +346,8 @@ function syncWithCache($config, $configName) {
     if (!isset($configEntry['files']) || !is_array($configEntry['files'])) $configEntry['files'] = [];
 
     $head = ghCommit($info, $config['branch'], $config['token']);
-    if (!$head) {
-        $results['errors'][] = "Failed to fetch HEAD commit for branch {$config['branch']}";
+    if (isset($head['error'])) {
+        $results['errors'][] = $head['error'];
         return $results;
     }
     $results['commit'] = $head['commit_sha'];
@@ -307,8 +358,8 @@ function syncWithCache($config, $configName) {
     }
 
     $tree = ghTree($info, $head['tree_sha'], $config['token']);
-    if (!$tree) {
-        $results['errors'][] = "Failed to fetch repository tree";
+    if (isset($tree['error'])) {
+        $results['errors'][] = $tree['error'];
         return $results;
     }
     if ($tree['truncated']) {
@@ -337,8 +388,7 @@ function syncWithCache($config, $configName) {
     foreach ($downloads as $d) {
         $t = $d['task'];
         if (!$d['ok']) {
-            $code = $d['http_code'] === null ? '?' : $d['http_code'];
-            $results['errors'][] = "Download failed (HTTP {$code}): {$t['source']}";
+            $results['errors'][] = formatDownloadError($d, $info, $config['branch']);
             continue;
         }
         if (!ensureDir(dirname($t['target']))) {
