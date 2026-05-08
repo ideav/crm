@@ -309,7 +309,6 @@ function gss_extract_sheet_records($sheetName, $values, $rowMatchers, $columnMat
     $matrix = gss_normalize_matrix($values);
     $maxColumns = gss_max_columns($matrix);
     $records = [];
-    $lastMatchedRows = [];
 
     foreach ($matrix as $rowIndex => $row) {
         $rowSpecMatches = gss_match_specs($row, $rowMatchers);
@@ -320,29 +319,21 @@ function gss_extract_sheet_records($sheetName, $values, $rowMatchers, $columnMat
         for ($columnIndex = 0; $columnIndex < $maxColumns; $columnIndex++) {
             $matchedRows = [];
             $matchedColumns = [];
-            $matchedStateKeys = [];
+            $hasColumnMatch = false;
+            $column = gss_column_values_between($matrix, $columnIndex, 0, $rowIndex);
 
             foreach ($rowSpecMatches as $rowSpecMatch) {
-                foreach ($columnMatchers as $columnSpecKey => $columnSpec) {
-                    $stateKey = $rowSpecMatch['key'] . "\0" . $columnSpecKey . "\0" . $columnIndex;
-                    $startRow = array_key_exists($stateKey, $lastMatchedRows)
-                        ? $lastMatchedRows[$stateKey] + 1
-                        : 0;
-                    if ($startRow > $rowIndex) {
-                        continue;
-                    }
-
-                    $column = gss_column_values_between($matrix, $columnIndex, $startRow, $rowIndex);
+                foreach ($columnMatchers as $columnSpec) {
                     $columnMatch = gss_match_spec($column, $columnSpec);
                     if ($columnMatch['matched']) {
                         $matchedRows = array_merge($matchedRows, $rowSpecMatch['values']);
                         $matchedColumns = array_merge($matchedColumns, $columnMatch['values']);
-                        $matchedStateKeys[$stateKey] = true;
+                        $hasColumnMatch = true;
                     }
                 }
             }
 
-            if (empty($matchedStateKeys)) {
+            if (!$hasColumnMatch) {
                 continue;
             }
 
@@ -360,10 +351,6 @@ function gss_extract_sheet_records($sheetName, $values, $rowMatchers, $columnMat
                 'row_index' => $rowIndex,
                 'column_index' => $columnIndex,
             ];
-
-            foreach ($matchedStateKeys as $stateKey => $_) {
-                $lastMatchedRows[$stateKey] = $rowIndex;
-            }
         }
     }
 
