@@ -491,11 +491,13 @@
         }
 
         var selected = String(state.archiveMonth || '');
+        if (!selected) return '';
+
         var hasSelected = monthOptions.some(function(option) {
             return option.key === selected;
         });
         if (!hasSelected) {
-            selected = monthOptions[0].key;
+            selected = '';
             state.archiveMonth = selected;
         }
         return selected;
@@ -837,6 +839,7 @@
             '<label class="procvac-archive-month-filter" for="procvac-archive-month-filter">',
             '<span>Месяц</span>',
             '<select id="procvac-archive-month-filter" aria-label="Месяц открытия архивных вакансий">',
+            '<option value=""' + (!selectedMonth ? ' selected' : '') + '>Все</option>',
             options.map(function(option) {
                 var selected = option.key === selectedMonth ? ' selected' : '';
                 return '<option value="' + escapeHtml(option.key) + '"' + selected + '>' + escapeHtml(option.label) + '</option>';
@@ -1578,6 +1581,7 @@
         getSectionHireTypeSummary: getSectionHireTypeSummary,
         getArchiveMonthOptions: getArchiveMonthOptions,
         filterRowsByArchiveMonth: filterRowsByArchiveMonth,
+        normalizeArchiveMonthSelection: normalizeArchiveMonthSelection,
         renderArchiveMonthFilter: renderArchiveMonthFilter,
         renderSectionHireTypeSummary: renderSectionHireTypeSummary,
         renderColumn: renderColumn,
