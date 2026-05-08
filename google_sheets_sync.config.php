@@ -11,13 +11,13 @@
 return [
     'credentials_path' => __DIR__ . '/include/credentials.json',
     'spreadsheet_id' => '',
-    'output_file' => __DIR__ . '/google_sheets_sync.bki',
+    'output_file' => __DIR__ . '/logs/google_sheets_sync.bki',
     'skip_empty_values' => false,
     'debug' => false,
 
     'sheets' => [
         [
-            'name' => 'Выручка (ддо - b2b)',
+            'name' => '(План-Факт) (2026)',
             'rows' => [
                 'Выручка (ддл)',
                 'Выручка (ддо)',
