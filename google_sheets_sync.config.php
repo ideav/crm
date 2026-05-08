@@ -10,7 +10,7 @@
 return [
     'credentials_path' => __DIR__ . '/include/credentials.json',
     'spreadsheet_id' => '',
-    'output_file' => __DIR__ . '/google_sheets_sync.bki',
+    'output_file' => __DIR__ . '/logs/google_sheets_sync.bki',
     'skip_empty_values' => false,
     'debug' => false,
 
