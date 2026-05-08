@@ -31,6 +31,13 @@
         'вышел': 'Вышел',
         'пауза': 'Пауза',
     };
+    var HIRE_TYPE_SUMMARY_ORDER = ['штат', 'лагерь', 'ош'];
+    var HIRE_TYPE_SUMMARY_LABELS = {
+        'штат': 'Штат',
+        'лагерь': 'Лагерь',
+        'ош': 'ОШ',
+    };
+    var MONTH_SHORT_LABELS = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 
     var FIELD_DEFS = [
         { key: 'title', label: 'Вакансия актуальная', names: ['Вакансия актуальная'] },
@@ -73,6 +80,7 @@
         search: '',
         archiveOpen: false,
         archivePage: 0,
+        archiveMonth: '',
         editing: null,
         refOptionsCache: {},
         columnWidths: {},
@@ -307,6 +315,18 @@
         return value;
     }
 
+    function formatMonthKey(date) {
+        if (!date) return '';
+        return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0');
+    }
+
+    function formatArchiveMonthLabel(monthKey) {
+        var match = String(monthKey || '').match(/^(\d{4})-(\d{2})$/);
+        if (!match) return String(monthKey || '');
+        var monthIndex = Number(match[2]) - 1;
+        return (MONTH_SHORT_LABELS[monthIndex] || match[2]) + ' ' + match[1];
+    }
+
     function sameMonth(date, now) {
         return !!date && date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
     }
@@ -397,6 +417,88 @@
             if (bOrder === -1) bOrder = STATUS_SUMMARY_ORDER.length + firstIndex[b.key];
             return aOrder - bOrder;
         });
+    }
+
+    function getSectionHireTypeSummary(rows) {
+        var counters = {};
+        var firstIndex = {};
+
+        (rows || []).forEach(function(row, index) {
+            var label = String((row && row.values && row.values.hireType) || '').trim();
+            var key = normalizeStatusKey(label);
+            if (!key) return;
+
+            if (!counters[key]) {
+                counters[key] = {
+                    key: key,
+                    label: HIRE_TYPE_SUMMARY_LABELS[key] || label,
+                    count: 0,
+                };
+                firstIndex[key] = index;
+            }
+            counters[key].count += 1;
+        });
+
+        return Object.keys(counters).map(function(key) {
+            return counters[key];
+        }).sort(function(a, b) {
+            var aOrder = HIRE_TYPE_SUMMARY_ORDER.indexOf(a.key);
+            var bOrder = HIRE_TYPE_SUMMARY_ORDER.indexOf(b.key);
+            if (aOrder === -1) aOrder = HIRE_TYPE_SUMMARY_ORDER.length + firstIndex[a.key];
+            if (bOrder === -1) bOrder = HIRE_TYPE_SUMMARY_ORDER.length + firstIndex[b.key];
+            return aOrder - bOrder;
+        });
+    }
+
+    function getArchiveMonthKey(row) {
+        var rawValue = row && row.rawValues && row.rawValues.startDate;
+        var displayValue = row && row.values && row.values.startDate;
+        return formatMonthKey(parseDate(rawValue || displayValue));
+    }
+
+    function getArchiveMonthOptions(rows) {
+        var months = {};
+
+        (rows || []).forEach(function(row) {
+            var key = getArchiveMonthKey(row);
+            if (key) months[key] = true;
+        });
+
+        return Object.keys(months).sort(function(a, b) {
+            if (a === b) return 0;
+            return a > b ? -1 : 1;
+        }).map(function(key) {
+            return {
+                key: key,
+                label: formatArchiveMonthLabel(key),
+            };
+        });
+    }
+
+    function filterRowsByArchiveMonth(rows, monthKey) {
+        var selected = String(monthKey || '');
+        if (!selected) return (rows || []).slice();
+        return (rows || []).filter(function(row) {
+            return getArchiveMonthKey(row) === selected;
+        });
+    }
+
+    function normalizeArchiveMonthSelection(options) {
+        var monthOptions = options || [];
+        if (!monthOptions.length) {
+            state.archiveMonth = '';
+            return '';
+        }
+
+        var selected = String(state.archiveMonth || '');
+        var hasSelected = monthOptions.some(function(option) {
+            return option.key === selected;
+        });
+        if (!hasSelected) {
+            selected = monthOptions[0].key;
+            state.archiveMonth = selected;
+        }
+        return selected;
     }
 
     function getRowSection(row, now) {
@@ -719,12 +821,39 @@
         }).join('') + '</span>';
     }
 
-    function renderSectionHeader(key, title, rows) {
-        var button = '';
+    function renderSectionHireTypeSummary(key, rows) {
+        if (key !== 'active') return '';
+        var summary = getSectionHireTypeSummary(rows);
+        if (!summary.length) return '';
+
+        return '<span class="procvac-section-hire-types">' + summary.map(function(item) {
+            return '<span class="procvac-section-hire-type-badge">' + escapeHtml(item.label) + ' ' + item.count + '</span>';
+        }).join('') + '</span>';
+    }
+
+    function renderArchiveMonthFilter(options, selectedMonth) {
+        if (!options || !options.length) return '';
+        return [
+            '<label class="procvac-archive-month-filter" for="procvac-archive-month-filter">',
+            '<span>Месяц</span>',
+            '<select id="procvac-archive-month-filter" aria-label="Месяц открытия архивных вакансий">',
+            options.map(function(option) {
+                var selected = option.key === selectedMonth ? ' selected' : '';
+                return '<option value="' + escapeHtml(option.key) + '"' + selected + '>' + escapeHtml(option.label) + '</option>';
+            }).join(''),
+            '</select>',
+            '</label>',
+        ].join('');
+    }
+
+    function renderSectionHeader(key, title, rows, archiveMonthOptions, selectedArchiveMonth) {
+        var actions = '';
         if (key === 'archive') {
             var icon = state.archiveOpen ? 'pi-chevron-up' : 'pi-chevron-down';
             var label = state.archiveOpen ? 'Свернуть' : 'Развернуть';
-            button = '<button type="button" class="procvac-section-toggle" id="procvac-archive-toggle" title="' + label + '"><i class="pi ' + icon + '"></i><span>' + label + '</span></button>';
+            var monthFilter = state.archiveOpen ? renderArchiveMonthFilter(archiveMonthOptions || [], selectedArchiveMonth || '') : '';
+            var button = '<button type="button" class="procvac-section-toggle" id="procvac-archive-toggle" title="' + label + '"><i class="pi ' + icon + '"></i><span>' + label + '</span></button>';
+            actions = '<span class="procvac-section-actions">' + monthFilter + button + '</span>';
         }
 
         return [
@@ -735,7 +864,8 @@
             '<span class="procvac-section-title">' + escapeHtml(title) + '</span>',
             '<span class="procvac-section-count">' + rows.length + '</span>',
             renderSectionStatusSummary(rows),
-            button,
+            renderSectionHireTypeSummary(key, rows),
+            actions,
             '</div>',
             '</th>',
             '</tr>',
@@ -765,19 +895,32 @@
     }
 
     function renderSection(key, title, rows) {
-        var html = renderSectionHeader(key, title, rows);
+        var sectionRows = rows;
+        var archiveMonthOptions = [];
+        var selectedArchiveMonth = '';
+
+        if (key === 'archive' && state.archiveOpen) {
+            archiveMonthOptions = getArchiveMonthOptions(rows);
+            selectedArchiveMonth = normalizeArchiveMonthSelection(archiveMonthOptions);
+            sectionRows = filterRowsByArchiveMonth(rows, selectedArchiveMonth);
+        }
+
+        var html = renderSectionHeader(key, title, sectionRows, archiveMonthOptions, selectedArchiveMonth);
         if (key === 'archive' && !state.archiveOpen) {
             return html;
         }
 
-        if (!rows.length) {
+        if (!sectionRows.length) {
             return html + renderEmptySection(key, 'Нет записей');
         }
 
-        var visibleRows = rows;
+        var visibleRows = sectionRows;
         if (key === 'archive') {
+            var pageCount = Math.ceil(sectionRows.length / ARCHIVE_PAGE_SIZE);
+            if (pageCount && state.archivePage >= pageCount) state.archivePage = pageCount - 1;
+            if (state.archivePage < 0) state.archivePage = 0;
             var start = state.archivePage * ARCHIVE_PAGE_SIZE;
-            visibleRows = rows.slice(start, start + ARCHIVE_PAGE_SIZE);
+            visibleRows = sectionRows.slice(start, start + ARCHIVE_PAGE_SIZE);
         }
 
         html += visibleRows.map(function(row) {
@@ -785,7 +928,7 @@
         }).join('');
 
         if (key === 'archive') {
-            html += renderArchivePager(rows);
+            html += renderArchivePager(sectionRows);
         }
         return html;
     }
@@ -1371,6 +1514,9 @@
                     return;
                 }
 
+                var archiveMonthFilter = event.target.closest('.procvac-archive-month-filter');
+                if (archiveMonthFilter) return;
+
                 var archiveToggle = event.target.closest('#procvac-archive-toggle');
                 var archiveHeader = event.target.closest('.procvac-section-row--archive');
                 if (archiveToggle || archiveHeader) {
@@ -1391,6 +1537,14 @@
                 if (event.target.closest('a, button, input, select, textarea')) return;
                 var cell = event.target.closest('.procvac-cell--editable');
                 if (cell) startCellEdit(cell);
+            });
+
+            grid.addEventListener('change', function(event) {
+                var archiveMonthFilter = event.target.closest('#procvac-archive-month-filter');
+                if (!archiveMonthFilter) return;
+                state.archiveMonth = archiveMonthFilter.value || '';
+                state.archivePage = 0;
+                render();
             });
         }
 
@@ -1421,6 +1575,11 @@
         normalizeColumnWidths: normalizeColumnWidths,
         applyColumnWidths: applyColumnWidths,
         getSectionStatusSummary: getSectionStatusSummary,
+        getSectionHireTypeSummary: getSectionHireTypeSummary,
+        getArchiveMonthOptions: getArchiveMonthOptions,
+        filterRowsByArchiveMonth: filterRowsByArchiveMonth,
+        renderArchiveMonthFilter: renderArchiveMonthFilter,
+        renderSectionHireTypeSummary: renderSectionHireTypeSummary,
         renderColumn: renderColumn,
         renderHeaderCell: renderHeaderCell,
         renderCell: renderCell,
