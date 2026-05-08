@@ -290,12 +290,174 @@ function gss_fetch_google_sheet_values($spreadsheetId, $sheetConfig, $accessToke
 
     gss_assert_success($response, "Google Sheets values request for range {$range}");
     $json = gss_decode_json($response['body'], "Google Sheets values response for range {$range}");
+    $values = isset($json['values']) && is_array($json['values']) ? $json['values'] : [];
 
-    return isset($json['values']) && is_array($json['values']) ? $json['values'] : [];
+    if (gss_should_expand_merged_cells($sheetConfig)) {
+        $sheetTitle = gss_sheet_title_for_merge_lookup($sheetConfig, $range);
+        if ($sheetTitle !== '') {
+            $merges = gss_fetch_google_sheet_merges($spreadsheetId, $sheetTitle, $accessToken, $httpOptions);
+            if (!empty($merges)) {
+                $rangeStart = gss_value_range_start_indexes($range, $json['range'] ?? '');
+                $values = gss_apply_google_sheet_merges($values, $merges, $rangeStart['row'], $rangeStart['column']);
+            }
+        }
+    }
+
+    return $values;
 }
 
 function gss_quote_sheet_name($sheetName) {
     return "'" . str_replace("'", "''", $sheetName) . "'";
+}
+
+function gss_should_expand_merged_cells($sheetConfig) {
+    if (array_key_exists('expand_merged_cells', $sheetConfig)) {
+        return !empty($sheetConfig['expand_merged_cells']);
+    }
+    return true;
+}
+
+function gss_sheet_title_for_merge_lookup($sheetConfig, $range) {
+    $parts = gss_split_a1_notation($range);
+    if ($parts['sheet'] !== '') {
+        return $parts['sheet'];
+    }
+
+    if (!empty($sheetConfig['name'])) {
+        return (string)$sheetConfig['name'];
+    }
+
+    return $parts['sheet'];
+}
+
+function gss_fetch_google_sheet_merges($spreadsheetId, $sheetTitle, $accessToken, $httpOptions = []) {
+    if ($sheetTitle === '') {
+        return [];
+    }
+
+    $query = http_build_query([
+        'fields' => 'sheets(properties(sheetId,title),merges)',
+    ], '', '&');
+    $url = 'https://sheets.googleapis.com/v4/spreadsheets/'
+        . rawurlencode($spreadsheetId)
+        . '?' . $query;
+
+    $response = gss_http_request('GET', $url, [
+        'Authorization: Bearer ' . $accessToken,
+        'Accept: application/json',
+    ], null, $httpOptions);
+
+    gss_assert_success($response, "Google Sheets metadata request for sheet {$sheetTitle}");
+    $json = gss_decode_json($response['body'], "Google Sheets metadata response for sheet {$sheetTitle}");
+
+    foreach ($json['sheets'] ?? [] as $sheet) {
+        $title = $sheet['properties']['title'] ?? '';
+        if ($title === $sheetTitle) {
+            return isset($sheet['merges']) && is_array($sheet['merges']) ? $sheet['merges'] : [];
+        }
+    }
+
+    return [];
+}
+
+function gss_value_range_start_indexes($requestedRange, $responseRange = '') {
+    foreach ([$responseRange, $requestedRange] as $range) {
+        if ($range === '') {
+            continue;
+        }
+
+        $start = gss_a1_range_start_indexes($range);
+        if ($start !== null) {
+            return $start;
+        }
+    }
+
+    return ['row' => 0, 'column' => 0];
+}
+
+function gss_a1_range_start_indexes($range) {
+    $parts = gss_split_a1_notation($range);
+    $cells = trim($parts['cells']);
+    if ($cells === '') {
+        return ['row' => 0, 'column' => 0];
+    }
+
+    $rangeParts = explode(':', $cells, 2);
+    $startCell = trim($rangeParts[0]);
+    if ($startCell === '') {
+        return ['row' => 0, 'column' => 0];
+    }
+
+    if (preg_match('/^([A-Za-z]*)([0-9]*)$/', $startCell, $matches) !== 1) {
+        return null;
+    }
+
+    $columnLetters = $matches[1] ?? '';
+    $rowNumber = $matches[2] ?? '';
+    if ($columnLetters === '' && $rowNumber === '') {
+        return null;
+    }
+
+    if ($parts['sheet'] === '' && strlen($columnLetters) > 3) {
+        return null;
+    }
+
+    return [
+        'row' => $rowNumber === '' ? 0 : max(0, ((int)$rowNumber) - 1),
+        'column' => $columnLetters === '' ? 0 : gss_column_letters_to_index($columnLetters),
+    ];
+}
+
+function gss_column_letters_to_index($letters) {
+    $letters = strtoupper($letters);
+    $index = 0;
+    $length = strlen($letters);
+    for ($i = 0; $i < $length; $i++) {
+        $index = ($index * 26) + (ord($letters[$i]) - ord('A') + 1);
+    }
+    return $index - 1;
+}
+
+function gss_split_a1_notation($range) {
+    $range = trim(gss_cell_to_string($range));
+    if ($range === '') {
+        return ['sheet' => '', 'cells' => ''];
+    }
+
+    $length = strlen($range);
+    if ($range[0] === "'") {
+        $sheet = '';
+        for ($i = 1; $i < $length; $i++) {
+            $char = $range[$i];
+            if ($char === "'") {
+                if ($i + 1 < $length && $range[$i + 1] === "'") {
+                    $sheet .= "'";
+                    $i++;
+                    continue;
+                }
+                if ($i + 1 < $length && $range[$i + 1] === '!') {
+                    return ['sheet' => $sheet, 'cells' => substr($range, $i + 2)];
+                }
+                if ($i + 1 === $length) {
+                    return ['sheet' => $sheet, 'cells' => ''];
+                }
+                break;
+            }
+            $sheet .= $char;
+        }
+
+        return ['sheet' => '', 'cells' => $range];
+    }
+
+    $bangIndex = strpos($range, '!');
+    if ($bangIndex !== false) {
+        return [
+            'sheet' => substr($range, 0, $bangIndex),
+            'cells' => substr($range, $bangIndex + 1),
+        ];
+    }
+
+    return ['sheet' => '', 'cells' => $range];
 }
 
 function gss_extract_sheet_records($sheetName, $values, $rowMatchers, $columnMatchers, $skipEmptyValues = false) {
@@ -371,6 +533,80 @@ function gss_normalize_matrix($values) {
         $matrix[] = $normalizedRow;
     }
     return $matrix;
+}
+
+function gss_apply_google_sheet_merges($values, $merges, $rangeStartRow = 0, $rangeStartColumn = 0) {
+    if (!is_array($merges) || empty($merges)) {
+        return $values;
+    }
+
+    $matrix = gss_normalize_matrix($values);
+    $rangeStartRow = max(0, (int)$rangeStartRow);
+    $rangeStartColumn = max(0, (int)$rangeStartColumn);
+
+    foreach ($merges as $merge) {
+        if (!is_array($merge)) {
+            continue;
+        }
+        if (!isset($merge['endRowIndex'], $merge['endColumnIndex'])) {
+            continue;
+        }
+
+        $startRow = isset($merge['startRowIndex']) ? (int)$merge['startRowIndex'] : 0;
+        $endRow = (int)$merge['endRowIndex'];
+        $startColumn = isset($merge['startColumnIndex']) ? (int)$merge['startColumnIndex'] : 0;
+        $endColumn = (int)$merge['endColumnIndex'];
+
+        if ($endRow <= $startRow || $endColumn <= $startColumn) {
+            continue;
+        }
+
+        $sourceRow = $startRow - $rangeStartRow;
+        $sourceColumn = $startColumn - $rangeStartColumn;
+        if ($sourceRow < 0 || $sourceColumn < 0 || $sourceRow >= count($matrix)) {
+            continue;
+        }
+        if (!array_key_exists($sourceColumn, $matrix[$sourceRow])) {
+            continue;
+        }
+
+        $sourceValue = gss_cell_to_string($matrix[$sourceRow][$sourceColumn]);
+        if (trim($sourceValue) === '') {
+            continue;
+        }
+
+        $firstRow = max($startRow, $rangeStartRow);
+        $lastRow = $endRow - 1;
+        $firstColumn = max($startColumn, $rangeStartColumn);
+        $lastColumn = $endColumn - 1;
+
+        for ($rowIndex = $firstRow; $rowIndex <= $lastRow; $rowIndex++) {
+            $localRow = $rowIndex - $rangeStartRow;
+            if ($localRow < 0 || $localRow >= count($matrix)) {
+                continue;
+            }
+
+            for ($columnIndex = $firstColumn; $columnIndex <= $lastColumn; $columnIndex++) {
+                $localColumn = $columnIndex - $rangeStartColumn;
+                if ($localColumn < 0) {
+                    continue;
+                }
+
+                gss_ensure_row_column($matrix[$localRow], $localColumn);
+                if (trim(gss_cell_to_string($matrix[$localRow][$localColumn])) === '') {
+                    $matrix[$localRow][$localColumn] = $sourceValue;
+                }
+            }
+        }
+    }
+
+    return $matrix;
+}
+
+function gss_ensure_row_column(&$row, $columnIndex) {
+    while (count($row) <= $columnIndex) {
+        $row[] = '';
+    }
 }
 
 function gss_cell_to_string($value) {
