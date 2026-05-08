@@ -1,0 +1,755 @@
+<?php
+/**
+ * Google Sheets -> Integram BKI synchronization script.
+ *
+ * Usage:
+ *   php google_sheets_sync.php [google_sheets_sync.config.php] [--dry-run]
+ *   php google_sheets_sync.php --config=/path/to/config.php --upload
+ *   php google_sheets_sync.php --output=/path/to/import.bki --no-upload
+ */
+
+function gss_is_absolute_path($path) {
+    return is_string($path) && ($path === '' ? false : ($path[0] === '/' || preg_match('/^[A-Za-z]:[\/\\\\]/', $path) === 1));
+}
+
+function gss_resolve_path($path, $baseDir) {
+    if ($path === null || $path === '') return $path;
+    if (gss_is_absolute_path($path)) return $path;
+    return rtrim($baseDir, '/\\') . DIRECTORY_SEPARATOR . $path;
+}
+
+function gss_parse_cli_options($argv) {
+    $options = [
+        'config' => __DIR__ . '/google_sheets_sync.config.php',
+        'dry_run' => false,
+        'force_upload' => null,
+        'output' => null,
+        'help' => false,
+    ];
+
+    $args = $argv;
+    array_shift($args);
+
+    foreach ($args as $arg) {
+        if ($arg === '--help' || $arg === '-h') {
+            $options['help'] = true;
+        } elseif ($arg === '--dry-run' || $arg === '--no-upload') {
+            $options['dry_run'] = true;
+            $options['force_upload'] = false;
+        } elseif ($arg === '--upload') {
+            $options['dry_run'] = false;
+            $options['force_upload'] = true;
+        } elseif (strpos($arg, '--config=') === 0) {
+            $options['config'] = substr($arg, strlen('--config='));
+        } elseif (strpos($arg, '--output=') === 0) {
+            $options['output'] = substr($arg, strlen('--output='));
+        } elseif ($arg !== '' && $arg[0] !== '-') {
+            $options['config'] = $arg;
+        } else {
+            throw new InvalidArgumentException("Unknown option: {$arg}");
+        }
+    }
+
+    return $options;
+}
+
+function gss_usage() {
+    return "Usage:\n"
+        . "  php google_sheets_sync.php [config.php] [--dry-run|--no-upload|--upload]\n"
+        . "  php google_sheets_sync.php --config=/path/config.php --output=/path/import.bki\n";
+}
+
+function gss_load_config($configPath) {
+    if (!file_exists($configPath)) {
+        throw new RuntimeException("Config file not found: {$configPath}");
+    }
+
+    $config = require $configPath;
+    if (!is_array($config)) {
+        throw new RuntimeException("Config file must return an array: {$configPath}");
+    }
+
+    return gss_normalize_config($config, dirname(realpath($configPath)));
+}
+
+function gss_normalize_config($config, $configDir) {
+    $defaults = [
+        'credentials_path' => __DIR__ . '/credentials.json',
+        'spreadsheet_id' => '',
+        'output_file' => __DIR__ . '/google_sheets_sync.bki',
+        'skip_empty_values' => false,
+        'debug' => false,
+        'http_timeout' => 60,
+        'google_scope' => 'https://www.googleapis.com/auth/spreadsheets.readonly',
+        'sheets' => [],
+        'integram' => [],
+    ];
+
+    $config = array_merge($defaults, $config);
+    $config['credentials_path'] = gss_resolve_path($config['credentials_path'], $configDir);
+    $config['output_file'] = gss_resolve_path($config['output_file'], $configDir);
+
+    $integramDefaults = [
+        'enabled' => false,
+        'base_url' => '',
+        'database' => '',
+        'login' => '',
+        'password' => '',
+        'token' => '',
+        'xsrf' => '',
+        'object' => '',
+        'auth_endpoint' => 'auth?JSON',
+        'xsrf_endpoint' => 'xsrf?JSON',
+        'upload_endpoint' => 'object/{object}?JSON&import=1',
+        'base_url_has_database' => false,
+        'url_template' => '',
+    ];
+    $config['integram'] = array_merge($integramDefaults, $config['integram']);
+
+    return $config;
+}
+
+function gss_sync($config) {
+    if (empty($config['sheets']) || !is_array($config['sheets'])) {
+        throw new RuntimeException('Config key "sheets" must contain at least one sheet configuration.');
+    }
+
+    $httpOptions = ['timeout' => (int)$config['http_timeout']];
+    $debug = !empty($config['debug']);
+    gss_debug($debug, 'Requesting Google Sheets access token');
+    $accessToken = gss_google_access_token(
+        $config['credentials_path'],
+        $config['google_scope'],
+        $httpOptions
+    );
+
+    $allRecords = [];
+    $sheetSummaries = [];
+
+    foreach ($config['sheets'] as $sheetConfig) {
+        $sheetName = isset($sheetConfig['name']) ? (string)$sheetConfig['name'] : '';
+        if ($sheetName === '' && empty($sheetConfig['range'])) {
+            throw new RuntimeException('Each sheet config must define "name" or "range".');
+        }
+
+        $spreadsheetId = isset($sheetConfig['spreadsheet_id']) && $sheetConfig['spreadsheet_id'] !== ''
+            ? $sheetConfig['spreadsheet_id']
+            : $config['spreadsheet_id'];
+        if ($spreadsheetId === '') {
+            throw new RuntimeException("Spreadsheet id is missing for sheet '{$sheetName}'.");
+        }
+
+        gss_debug($debug, "Fetching sheet '{$sheetName}'");
+        $values = gss_fetch_google_sheet_values($spreadsheetId, $sheetConfig, $accessToken, $httpOptions);
+        $records = gss_extract_sheet_records(
+            $sheetName !== '' ? $sheetName : (string)$sheetConfig['range'],
+            $values,
+            $sheetConfig['rows'] ?? [],
+            $sheetConfig['columns'] ?? [],
+            !empty($config['skip_empty_values'])
+        );
+
+        $allRecords = array_merge($allRecords, $records);
+        $sheetSummaries[] = [
+            'sheet' => $sheetName !== '' ? $sheetName : (string)$sheetConfig['range'],
+            'rows' => count($values),
+            'records' => count($records),
+        ];
+    }
+
+    $content = gss_build_bki_content($allRecords);
+    gss_debug($debug, "Writing BKI file '{$config['output_file']}'");
+    gss_write_file($config['output_file'], $content);
+
+    $uploadResult = null;
+    if (!empty($config['integram']['enabled'])) {
+        gss_debug($debug, 'Uploading BKI file to Integram');
+        $uploadResult = gss_upload_to_integram($config['output_file'], $config['integram'], $httpOptions);
+    }
+
+    return [
+        'output_file' => $config['output_file'],
+        'record_count' => count($allRecords),
+        'sheet_summaries' => $sheetSummaries,
+        'upload' => $uploadResult,
+    ];
+}
+
+function gss_debug($enabled, $message) {
+    if (!$enabled) return;
+    $line = '[google_sheets_sync] ' . $message . "\n";
+    if (defined('STDERR')) {
+        fwrite(STDERR, $line);
+    } else {
+        echo $line;
+    }
+}
+
+function gss_write_file($path, $content) {
+    $dir = dirname($path);
+    if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+        throw new RuntimeException("Failed to create directory: {$dir}");
+    }
+
+    if (file_put_contents($path, $content) === false) {
+        throw new RuntimeException("Failed to write file: {$path}");
+    }
+}
+
+function gss_google_access_token($credentialsPath, $scope, $httpOptions = []) {
+    if (!file_exists($credentialsPath)) {
+        throw new RuntimeException("Google credentials file not found: {$credentialsPath}");
+    }
+
+    $credentials = gss_read_json_file($credentialsPath, 'Google credentials');
+    if (!empty($credentials['access_token'])) {
+        return $credentials['access_token'];
+    }
+
+    foreach (['client_email', 'private_key'] as $key) {
+        if (empty($credentials[$key])) {
+            throw new RuntimeException("Google service account credentials must contain '{$key}'.");
+        }
+    }
+
+    $tokenUri = $credentials['token_uri'] ?? 'https://oauth2.googleapis.com/token';
+    $now = time();
+    $header = ['alg' => 'RS256', 'typ' => 'JWT'];
+    $claim = [
+        'iss' => $credentials['client_email'],
+        'scope' => $scope,
+        'aud' => $tokenUri,
+        'iat' => $now,
+        'exp' => $now + 3600,
+    ];
+
+    $unsigned = gss_base64url_json($header) . '.' . gss_base64url_json($claim);
+    $signature = '';
+    $ok = openssl_sign($unsigned, $signature, $credentials['private_key'], OPENSSL_ALGO_SHA256);
+    if (!$ok) {
+        throw new RuntimeException('Failed to sign Google service account JWT.');
+    }
+
+    $jwt = $unsigned . '.' . gss_base64url($signature);
+    $body = http_build_query([
+        'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        'assertion' => $jwt,
+    ], '', '&');
+
+    $response = gss_http_request('POST', $tokenUri, [
+        'Content-Type: application/x-www-form-urlencoded',
+    ], $body, $httpOptions);
+
+    gss_assert_success($response, 'Google OAuth token request');
+    $json = gss_decode_json($response['body'], 'Google OAuth token response');
+    if (empty($json['access_token'])) {
+        throw new RuntimeException('Google OAuth token response does not contain access_token.');
+    }
+
+    return $json['access_token'];
+}
+
+function gss_read_json_file($path, $description) {
+    $raw = file_get_contents($path);
+    if ($raw === false) {
+        throw new RuntimeException("Failed to read {$description}: {$path}");
+    }
+
+    $json = json_decode($raw, true);
+    if (!is_array($json)) {
+        throw new RuntimeException("Failed to parse {$description} JSON: {$path}");
+    }
+
+    return $json;
+}
+
+function gss_fetch_google_sheet_values($spreadsheetId, $sheetConfig, $accessToken, $httpOptions = []) {
+    $range = '';
+    if (!empty($sheetConfig['range'])) {
+        $range = (string)$sheetConfig['range'];
+    } elseif (!empty($sheetConfig['name'])) {
+        $range = gss_quote_sheet_name((string)$sheetConfig['name']);
+    }
+
+    if ($range === '') {
+        throw new RuntimeException('Google sheet range is empty.');
+    }
+
+    $query = http_build_query([
+        'majorDimension' => 'ROWS',
+        'valueRenderOption' => 'FORMATTED_VALUE',
+    ], '', '&');
+    $url = 'https://sheets.googleapis.com/v4/spreadsheets/'
+        . rawurlencode($spreadsheetId)
+        . '/values/'
+        . rawurlencode($range)
+        . '?' . $query;
+
+    $response = gss_http_request('GET', $url, [
+        'Authorization: Bearer ' . $accessToken,
+        'Accept: application/json',
+    ], null, $httpOptions);
+
+    gss_assert_success($response, "Google Sheets values request for range {$range}");
+    $json = gss_decode_json($response['body'], "Google Sheets values response for range {$range}");
+
+    return isset($json['values']) && is_array($json['values']) ? $json['values'] : [];
+}
+
+function gss_quote_sheet_name($sheetName) {
+    return "'" . str_replace("'", "''", $sheetName) . "'";
+}
+
+function gss_extract_sheet_records($sheetName, $values, $rowMatchers, $columnMatchers, $skipEmptyValues = false) {
+    if (!is_array($rowMatchers) || empty($rowMatchers)) {
+        throw new RuntimeException("Sheet '{$sheetName}' must define non-empty row matchers.");
+    }
+    if (!is_array($columnMatchers) || empty($columnMatchers)) {
+        throw new RuntimeException("Sheet '{$sheetName}' must define non-empty column matchers.");
+    }
+
+    $matrix = gss_normalize_matrix($values);
+    $rowMatches = [];
+    $columnMatches = [];
+    $maxColumns = gss_max_columns($matrix);
+
+    foreach ($matrix as $rowIndex => $row) {
+        $matches = gss_match_any_spec($row, $rowMatchers);
+        if (!empty($matches)) {
+            $rowMatches[$rowIndex] = $matches;
+        }
+    }
+
+    for ($columnIndex = 0; $columnIndex < $maxColumns; $columnIndex++) {
+        $column = gss_column_values($matrix, $columnIndex);
+        $matches = gss_match_any_spec($column, $columnMatchers);
+        if (!empty($matches)) {
+            $columnMatches[$columnIndex] = $matches;
+        }
+    }
+
+    $records = [];
+    foreach ($rowMatches as $rowIndex => $matchedRows) {
+        foreach ($columnMatches as $columnIndex => $matchedColumns) {
+            $value = isset($matrix[$rowIndex][$columnIndex]) ? $matrix[$rowIndex][$columnIndex] : '';
+            if ($skipEmptyValues && trim((string)$value) === '') {
+                continue;
+            }
+            $records[] = [
+                'sheet' => $sheetName,
+                'rows' => $matchedRows,
+                'columns' => $matchedColumns,
+                'value' => $value,
+                'row_index' => $rowIndex,
+                'column_index' => $columnIndex,
+            ];
+        }
+    }
+
+    return $records;
+}
+
+function gss_normalize_matrix($values) {
+    $matrix = [];
+    foreach ($values as $row) {
+        $normalizedRow = [];
+        if (is_array($row)) {
+            foreach ($row as $value) {
+                $normalizedRow[] = gss_cell_to_string($value);
+            }
+        } else {
+            $normalizedRow[] = gss_cell_to_string($row);
+        }
+        $matrix[] = $normalizedRow;
+    }
+    return $matrix;
+}
+
+function gss_cell_to_string($value) {
+    if ($value === null) return '';
+    if (is_bool($value)) return $value ? 'TRUE' : 'FALSE';
+    if (is_array($value) || is_object($value)) return json_encode($value, JSON_UNESCAPED_UNICODE);
+    return (string)$value;
+}
+
+function gss_max_columns($matrix) {
+    $max = 0;
+    foreach ($matrix as $row) {
+        $max = max($max, count($row));
+    }
+    return $max;
+}
+
+function gss_column_values($matrix, $columnIndex) {
+    $values = [];
+    foreach ($matrix as $row) {
+        $values[] = isset($row[$columnIndex]) ? $row[$columnIndex] : '';
+    }
+    return $values;
+}
+
+function gss_match_any_spec($cells, $specs) {
+    $matches = [];
+    foreach ($specs as $spec) {
+        $match = gss_match_spec($cells, $spec);
+        if ($match['matched']) {
+            $matches = array_merge($matches, $match['values']);
+        }
+    }
+    return gss_unique_preserve_order($matches);
+}
+
+function gss_match_spec($cells, $spec) {
+    $patterns = is_array($spec) ? array_values($spec) : [$spec];
+    $values = [];
+    $usedIndexes = [];
+
+    foreach ($patterns as $pattern) {
+        $match = gss_find_matching_cell_entry($cells, $pattern, $usedIndexes);
+        if ($match === null) {
+            return ['matched' => false, 'values' => []];
+        }
+        $usedIndexes[$match['index']] = true;
+        $values[] = $match['value'];
+    }
+
+    return ['matched' => true, 'values' => $values];
+}
+
+function gss_find_matching_cell($cells, $pattern) {
+    $match = gss_find_matching_cell_entry($cells, $pattern);
+    return $match === null ? null : $match['value'];
+}
+
+function gss_find_matching_cell_entry($cells, $pattern, $usedIndexes = []) {
+    foreach ($cells as $index => $cell) {
+        if (isset($usedIndexes[$index])) {
+            continue;
+        }
+        $cellValue = trim(gss_cell_to_string($cell));
+        if (gss_pattern_matches($pattern, $cellValue)) {
+            return ['index' => $index, 'value' => $cellValue];
+        }
+    }
+    return null;
+}
+
+function gss_pattern_matches($pattern, $value) {
+    $pattern = trim(gss_cell_to_string($pattern));
+    $value = trim(gss_cell_to_string($value));
+
+    if (strpos($pattern, '*') === false) {
+        return $value === $pattern;
+    }
+
+    $parts = explode('*', $pattern);
+    $regexParts = [];
+    foreach ($parts as $part) {
+        $regexParts[] = preg_quote($part, '/');
+    }
+    $regex = '/^' . implode('.*', $regexParts) . '$/us';
+
+    return preg_match($regex, $value) === 1;
+}
+
+function gss_unique_preserve_order($values) {
+    $seen = [];
+    $result = [];
+    foreach ($values as $value) {
+        $key = (string)$value;
+        if (!array_key_exists($key, $seen)) {
+            $seen[$key] = true;
+            $result[] = $value;
+        }
+    }
+    return $result;
+}
+
+function gss_build_bki_content($records) {
+    $lines = ['DATA'];
+    foreach ($records as $record) {
+        $lines[] = gss_escape_bki_value($record['sheet'])
+            . ':' . gss_escape_bki_list($record['rows'])
+            . ':' . gss_escape_bki_list($record['columns'])
+            . ';' . gss_escape_bki_value($record['value'])
+            . ';';
+    }
+
+    return implode("\r\n", $lines) . "\r\n";
+}
+
+function gss_escape_bki_list($values) {
+    $escaped = [];
+    foreach ($values as $value) {
+        $escaped[] = gss_escape_bki_value($value);
+    }
+    return implode(',', $escaped);
+}
+
+function gss_escape_bki_value($value) {
+    return strtr(gss_cell_to_string($value), [
+        ':' => '\\:',
+        ';' => '\\;',
+        ',' => '\\,',
+    ]);
+}
+
+function gss_upload_to_integram($filePath, $integramConfig, $httpOptions = []) {
+    if (!file_exists($filePath)) {
+        throw new RuntimeException("Upload file not found: {$filePath}");
+    }
+    if (empty($integramConfig['object'])) {
+        throw new RuntimeException('Integram upload requires integram.object in config.');
+    }
+
+    $session = gss_integram_session($integramConfig, $httpOptions);
+    if (empty($session['xsrf'])) {
+        throw new RuntimeException('Integram session does not contain XSRF token.');
+    }
+
+    $endpoint = str_replace(
+        '{object}',
+        rawurlencode((string)$integramConfig['object']),
+        $integramConfig['upload_endpoint']
+    );
+    $url = gss_integram_url($integramConfig, $endpoint);
+    $headers = gss_integram_auth_headers($session);
+    $postFields = [
+        '_xsrf' => $session['xsrf'],
+        'import' => '1',
+        'bki_file' => new CURLFile($filePath, 'application/octet-stream', 'import.bki'),
+    ];
+
+    $response = gss_http_request('POST', $url, $headers, $postFields, $httpOptions);
+    gss_assert_success($response, 'Integram BKI upload');
+
+    $decoded = json_decode($response['body'], true);
+    return [
+        'status' => $response['status'],
+        'url' => $url,
+        'response' => is_array($decoded) ? $decoded : $response['body'],
+    ];
+}
+
+function gss_integram_session($config, $httpOptions = []) {
+    if (!empty($config['token'])) {
+        return [
+            'token' => $config['token'],
+            'xsrf' => $config['xsrf'] ?? '',
+        ];
+    }
+
+    foreach (['base_url', 'database', 'login', 'password'] as $key) {
+        if (empty($config[$key]) && empty($config['url_template'])) {
+            throw new RuntimeException("Integram upload requires integram.{$key} in config.");
+        }
+    }
+
+    $authUrl = gss_integram_url($config, $config['auth_endpoint']);
+    $body = gss_form_encode([
+        'login' => $config['login'],
+        'pwd' => $config['password'],
+    ]);
+    $response = gss_http_request('POST', $authUrl, [
+        'Content-Type: application/x-www-form-urlencoded',
+        'Accept: application/json',
+    ], $body, $httpOptions);
+
+    gss_assert_success($response, 'Integram auth request');
+    $json = gss_decode_json($response['body'], 'Integram auth response');
+    if (!empty($json['failed'])) {
+        throw new RuntimeException('Integram auth failed.');
+    }
+
+    $session = [
+        'token' => $json['token'] ?? '',
+        'xsrf' => $json['_xsrf'] ?? '',
+    ];
+
+    if (!empty($session['token']) && !empty($config['xsrf_endpoint'])) {
+        $xsrfUrl = gss_integram_url($config, $config['xsrf_endpoint']);
+        $xsrfResponse = gss_http_request('GET', $xsrfUrl, gss_integram_auth_headers($session), null, $httpOptions);
+        if ($xsrfResponse['status'] >= 200 && $xsrfResponse['status'] < 300) {
+            $xsrfJson = json_decode($xsrfResponse['body'], true);
+            if (is_array($xsrfJson)) {
+                $session['token'] = $xsrfJson['token'] ?? $session['token'];
+                $session['xsrf'] = $xsrfJson['_xsrf'] ?? $session['xsrf'];
+            }
+        }
+    }
+
+    return $session;
+}
+
+function gss_integram_url($config, $endpoint) {
+    $endpoint = ltrim((string)$endpoint, '/');
+
+    if (!empty($config['url_template'])) {
+        return strtr($config['url_template'], [
+            '{base_url}' => rtrim((string)$config['base_url'], '/'),
+            '{database}' => trim((string)$config['database'], '/'),
+            '{endpoint}' => $endpoint,
+        ]);
+    }
+
+    $baseUrl = rtrim((string)$config['base_url'], '/');
+    if ($baseUrl === '') {
+        throw new RuntimeException('Integram base_url is empty.');
+    }
+
+    if (!empty($config['base_url_has_database'])) {
+        return $baseUrl . '/' . $endpoint;
+    }
+
+    $database = trim((string)$config['database'], '/');
+    if ($database === '') {
+        throw new RuntimeException('Integram database is empty.');
+    }
+
+    return $baseUrl . '/' . $database . '/' . $endpoint;
+}
+
+function gss_integram_auth_headers($session) {
+    $headers = ['Accept: application/json'];
+    if (!empty($session['token'])) {
+        $headers[] = 'X-Authorization: ' . $session['token'];
+        $headers[] = 'Cookie: token=' . $session['token'];
+    }
+    return $headers;
+}
+
+function gss_form_encode($data) {
+    $parts = [];
+    foreach ($data as $key => $value) {
+        if ($value !== null) {
+            $parts[] = rawurlencode((string)$key) . '=' . rawurlencode((string)$value);
+        }
+    }
+    return implode('&', $parts);
+}
+
+function gss_http_request($method, $url, $headers = [], $body = null, $options = []) {
+    if (!function_exists('curl_init')) {
+        throw new RuntimeException('The PHP cURL extension is required.');
+    }
+
+    $ch = curl_init();
+    $curlOptions = [
+        CURLOPT_URL => $url,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HEADER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_CUSTOMREQUEST => strtoupper($method),
+        CURLOPT_HTTPHEADER => $headers,
+        CURLOPT_USERAGENT => 'Integram-Google-Sheets-Sync/1.0',
+    ];
+
+    if (!empty($options['timeout'])) {
+        $curlOptions[CURLOPT_TIMEOUT] = (int)$options['timeout'];
+    }
+
+    if ($body !== null) {
+        $curlOptions[CURLOPT_POSTFIELDS] = $body;
+    }
+
+    curl_setopt_array($ch, $curlOptions);
+    $raw = curl_exec($ch);
+    if ($raw === false) {
+        $error = curl_error($ch);
+        curl_close($ch);
+        throw new RuntimeException("HTTP request failed: {$error}");
+    }
+
+    $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+    $responseHeaders = substr($raw, 0, $headerSize);
+    $responseBody = substr($raw, $headerSize);
+    curl_close($ch);
+
+    return [
+        'status' => (int)$status,
+        'headers' => $responseHeaders,
+        'body' => $responseBody,
+        'url' => $url,
+    ];
+}
+
+function gss_assert_success($response, $context) {
+    if ($response['status'] < 200 || $response['status'] >= 300) {
+        $body = trim((string)$response['body']);
+        if (strlen($body) > 1000) {
+            $body = substr($body, 0, 1000) . '...';
+        }
+        throw new RuntimeException("{$context} failed with HTTP {$response['status']}: {$body}");
+    }
+}
+
+function gss_decode_json($body, $context) {
+    $json = json_decode($body, true);
+    if (!is_array($json)) {
+        throw new RuntimeException("Failed to parse {$context} JSON.");
+    }
+    return $json;
+}
+
+function gss_base64url_json($data) {
+    return gss_base64url(json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+}
+
+function gss_base64url($data) {
+    return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+}
+
+function gss_apply_overrides($config, $options) {
+    if (!empty($options['output'])) {
+        $config['output_file'] = gss_resolve_path($options['output'], getcwd());
+    }
+    if ($options['force_upload'] !== null) {
+        $config['integram']['enabled'] = (bool)$options['force_upload'];
+    }
+    if (!empty($options['dry_run'])) {
+        $config['integram']['enabled'] = false;
+    }
+    return $config;
+}
+
+function gss_print_summary($summary) {
+    echo "Output file: {$summary['output_file']}\n";
+    echo "Records: {$summary['record_count']}\n";
+    foreach ($summary['sheet_summaries'] as $sheetSummary) {
+        echo "- {$sheetSummary['sheet']}: {$sheetSummary['records']} records from {$sheetSummary['rows']} rows\n";
+    }
+    if ($summary['upload'] !== null) {
+        echo "Upload: HTTP {$summary['upload']['status']} {$summary['upload']['url']}\n";
+    } else {
+        echo "Upload: skipped\n";
+    }
+}
+
+function gss_main($argv) {
+    $options = gss_parse_cli_options($argv);
+    if ($options['help']) {
+        echo gss_usage();
+        return 0;
+    }
+
+    $config = gss_load_config($options['config']);
+    $config = gss_apply_overrides($config, $options);
+    $summary = gss_sync($config);
+    gss_print_summary($summary);
+    return 0;
+}
+
+if (realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === __FILE__) {
+    try {
+        exit(gss_main($argv ?? []));
+    } catch (Throwable $e) {
+        if (defined('STDERR')) {
+            fwrite(STDERR, 'Error: ' . $e->getMessage() . "\n");
+        } else {
+            echo 'Error: ' . $e->getMessage() . "\n";
+        }
+        exit(1);
+    }
+}
