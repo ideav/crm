@@ -2,9 +2,10 @@
 /**
  * Settings for google_sheets_sync.php.
  *
- * Copy real Google service-account credentials to credentials.json, share the
- * spreadsheet with that service-account email, then fill spreadsheet_id and
- * Integram credentials below. credentials.json is ignored by git.
+ * Copy real Google service-account credentials to include/credentials.json,
+ * share the spreadsheet with that service-account email, then fill
+ * spreadsheet_id and Integram upload tokens below. credentials.json is ignored
+ * by git.
  */
 
 return [
@@ -36,12 +37,8 @@ return [
     'integram' => [
         'enabled' => false,
         'base_url' => 'https://ideav.ru',
-        'database' => '',
-        'login' => '',
-        'password' => '',
-        'object' => '',
-        'auth_endpoint' => 'auth?JSON',
-        'xsrf_endpoint' => 'xsrf?JSON',
-        'upload_endpoint' => 'object/{object}?JSON&import=1',
+        'token' => '',
+        'xsrf' => '',
+        'upload_endpoint' => '/object/443296?JSON&import=1',
     ],
 ];

@@ -93,18 +93,15 @@ function gss_normalize_config($config, $configDir) {
         'enabled' => false,
         'base_url' => '',
         'database' => '',
-        'login' => '',
-        'password' => '',
         'token' => '',
         'xsrf' => '',
         'object' => '',
-        'auth_endpoint' => 'auth?JSON',
-        'xsrf_endpoint' => 'xsrf?JSON',
-        'upload_endpoint' => 'object/{object}?JSON&import=1',
+        'upload_endpoint' => '/object/443296?JSON&import=1',
         'base_url_has_database' => false,
         'url_template' => '',
     ];
     $config['integram'] = array_merge($integramDefaults, $config['integram']);
+    unset($config['integram']['auth_endpoint'], $config['integram']['xsrf_endpoint']);
 
     return $config;
 }
@@ -498,27 +495,10 @@ function gss_upload_to_integram($filePath, $integramConfig, $httpOptions = []) {
     if (!file_exists($filePath)) {
         throw new RuntimeException("Upload file not found: {$filePath}");
     }
-    if (empty($integramConfig['object'])) {
-        throw new RuntimeException('Integram upload requires integram.object in config.');
-    }
-
-    $session = gss_integram_session($integramConfig, $httpOptions);
-    if (empty($session['xsrf'])) {
-        throw new RuntimeException('Integram session does not contain XSRF token.');
-    }
-
-    $endpoint = str_replace(
-        '{object}',
-        rawurlencode((string)$integramConfig['object']),
-        $integramConfig['upload_endpoint']
-    );
+    $endpoint = gss_integram_upload_endpoint($integramConfig);
     $url = gss_integram_url($integramConfig, $endpoint);
-    $headers = gss_integram_auth_headers($session);
-    $postFields = [
-        '_xsrf' => $session['xsrf'],
-        'import' => '1',
-        'bki_file' => new CURLFile($filePath, 'application/octet-stream', 'import.bki'),
-    ];
+    $headers = ['Accept: application/json'];
+    $postFields = gss_integram_upload_post_fields($filePath, $integramConfig);
 
     $response = gss_http_request('POST', $url, $headers, $postFields, $httpOptions);
     gss_assert_success($response, 'Integram BKI upload');
@@ -531,101 +511,111 @@ function gss_upload_to_integram($filePath, $integramConfig, $httpOptions = []) {
     ];
 }
 
-function gss_integram_session($config, $httpOptions = []) {
-    if (!empty($config['token'])) {
-        return [
-            'token' => $config['token'],
-            'xsrf' => $config['xsrf'] ?? '',
-        ];
+function gss_integram_upload_endpoint($config) {
+    $endpoint = isset($config['upload_endpoint']) ? (string)$config['upload_endpoint'] : '';
+    if ($endpoint === '') {
+        throw new RuntimeException('Integram upload requires integram.upload_endpoint in config.');
     }
 
-    foreach (['base_url', 'database', 'login', 'password'] as $key) {
-        if (empty($config[$key]) && empty($config['url_template'])) {
-            throw new RuntimeException("Integram upload requires integram.{$key} in config.");
+    if (strpos($endpoint, '{object}') !== false) {
+        if (empty($config['object'])) {
+            throw new RuntimeException('Integram upload endpoint uses {object}, but integram.object is empty.');
         }
+        $endpoint = str_replace('{object}', rawurlencode((string)$config['object']), $endpoint);
     }
 
-    $authUrl = gss_integram_url($config, $config['auth_endpoint']);
-    $body = gss_form_encode([
-        'login' => $config['login'],
-        'pwd' => $config['password'],
-    ]);
-    $response = gss_http_request('POST', $authUrl, [
-        'Content-Type: application/x-www-form-urlencoded',
-        'Accept: application/json',
-    ], $body, $httpOptions);
+    return $endpoint;
+}
 
-    gss_assert_success($response, 'Integram auth request');
-    $json = gss_decode_json($response['body'], 'Integram auth response');
-    if (!empty($json['failed'])) {
-        throw new RuntimeException('Integram auth failed.');
-    }
+function gss_integram_upload_post_fields($filePath, $config) {
+    $tokens = gss_integram_tokens($config);
 
-    $session = [
-        'token' => $json['token'] ?? '',
-        'xsrf' => $json['_xsrf'] ?? '',
+    return [
+        'token' => $tokens['token'],
+        '_xsrf' => $tokens['xsrf'],
+        'import' => '1',
+        'bki_file' => new CURLFile($filePath, 'application/octet-stream', 'import.bki'),
     ];
+}
 
-    if (!empty($session['token']) && !empty($config['xsrf_endpoint'])) {
-        $xsrfUrl = gss_integram_url($config, $config['xsrf_endpoint']);
-        $xsrfResponse = gss_http_request('GET', $xsrfUrl, gss_integram_auth_headers($session), null, $httpOptions);
-        if ($xsrfResponse['status'] >= 200 && $xsrfResponse['status'] < 300) {
-            $xsrfJson = json_decode($xsrfResponse['body'], true);
-            if (is_array($xsrfJson)) {
-                $session['token'] = $xsrfJson['token'] ?? $session['token'];
-                $session['xsrf'] = $xsrfJson['_xsrf'] ?? $session['xsrf'];
-            }
-        }
+function gss_integram_tokens($config) {
+    $token = isset($config['token']) ? (string)$config['token'] : '';
+    $xsrf = isset($config['xsrf']) ? (string)$config['xsrf'] : '';
+
+    if ($token === '') {
+        throw new RuntimeException('Integram upload requires integram.token in config.');
+    }
+    if ($xsrf === '') {
+        throw new RuntimeException('Integram upload requires integram.xsrf in config.');
     }
 
-    return $session;
+    return [
+        'token' => $token,
+        'xsrf' => $xsrf,
+    ];
 }
 
 function gss_integram_url($config, $endpoint) {
-    $endpoint = ltrim((string)$endpoint, '/');
+    $endpoint = (string)$endpoint;
+    if ($endpoint === '') {
+        throw new RuntimeException('Integram endpoint is empty.');
+    }
+
+    if (preg_match('/^https?:\/\//i', $endpoint) === 1) {
+        return $endpoint;
+    }
 
     if (!empty($config['url_template'])) {
+        $baseUrl = isset($config['base_url']) ? rtrim((string)$config['base_url'], '/') : '';
+        $database = isset($config['database']) ? trim((string)$config['database'], '/') : '';
+
         return strtr($config['url_template'], [
-            '{base_url}' => rtrim((string)$config['base_url'], '/'),
-            '{database}' => trim((string)$config['database'], '/'),
-            '{endpoint}' => $endpoint,
+            '{base_url}' => $baseUrl,
+            '{database}' => $database,
+            '{endpoint}' => ltrim($endpoint, '/'),
         ]);
     }
 
-    $baseUrl = rtrim((string)$config['base_url'], '/');
-    if ($baseUrl === '') {
-        throw new RuntimeException('Integram base_url is empty.');
+    if ($endpoint[0] === '/') {
+        return rtrim(gss_integram_host_url($config), '/') . $endpoint;
     }
+
+    $endpoint = ltrim($endpoint, '/');
+    $baseUrl = rtrim(gss_integram_host_url($config), '/');
 
     if (!empty($config['base_url_has_database'])) {
         return $baseUrl . '/' . $endpoint;
     }
 
-    $database = trim((string)$config['database'], '/');
+    $database = isset($config['database']) ? trim((string)$config['database'], '/') : '';
     if ($database === '') {
-        throw new RuntimeException('Integram database is empty.');
+        return $baseUrl . '/' . $endpoint;
     }
 
     return $baseUrl . '/' . $database . '/' . $endpoint;
 }
 
-function gss_integram_auth_headers($session) {
-    $headers = ['Accept: application/json'];
-    if (!empty($session['token'])) {
-        $headers[] = 'X-Authorization: ' . $session['token'];
-        $headers[] = 'Cookie: token=' . $session['token'];
+function gss_integram_host_url($config) {
+    $baseUrl = isset($config['base_url']) ? rtrim((string)$config['base_url'], '/') : '';
+    if ($baseUrl !== '') {
+        return $baseUrl;
     }
-    return $headers;
-}
 
-function gss_form_encode($data) {
-    $parts = [];
-    foreach ($data as $key => $value) {
-        if ($value !== null) {
-            $parts[] = rawurlencode((string)$key) . '=' . rawurlencode((string)$value);
+    $host = $_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? '';
+    if ($host === '') {
+        throw new RuntimeException('Integram base_url is empty and current host is unavailable.');
+    }
+
+    $https = $_SERVER['HTTPS'] ?? '';
+    $scheme = (!empty($https) && strtolower((string)$https) !== 'off') ? 'https' : 'http';
+    if (strpos($host, ':') === false && !empty($_SERVER['SERVER_PORT'])) {
+        $port = (string)$_SERVER['SERVER_PORT'];
+        if (($scheme === 'https' && $port !== '443') || ($scheme === 'http' && $port !== '80')) {
+            $host .= ':' . $port;
         }
     }
-    return implode('&', $parts);
+
+    return $scheme . '://' . $host;
 }
 
 function gss_http_request($method, $url, $headers = [], $body = null, $options = []) {
