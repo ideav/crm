@@ -188,7 +188,8 @@ function gss_write_file($path, $content) {
         throw new RuntimeException("Failed to create directory: {$dir}");
     }
 
-    if (file_put_contents($path, $content) === false) {
+    $bytes = file_put_contents($path, $content, LOCK_EX);
+    if ($bytes === false || $bytes !== strlen($content)) {
         throw new RuntimeException("Failed to write file: {$path}");
     }
 }
