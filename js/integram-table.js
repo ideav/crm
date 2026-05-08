@@ -4407,6 +4407,31 @@ class IntegramTable{
             }
         }
 
+        _isReferenceCreateModalClick(target) {
+            if (!target || typeof target.closest !== 'function') {
+                return false;
+            }
+            return Boolean(
+                target.closest('[data-is-reference-create="true"]') ||
+                target.closest('.edit-form-overlay')
+            );
+        }
+
+        _shouldCancelReferenceEditorForClick(target, cell) {
+            if (!target || !cell) {
+                return false;
+            }
+            if (this._isReferenceCreateModalClick(target)) {
+                return false;
+            }
+            // Issue #1384: dropdown is detached from cell (appended to body), so check it separately
+            const fixedDropdown = this.currentEditingCell && this.currentEditingCell.fixedDropdown;
+            if (fixedDropdown && fixedDropdown.contains(target)) {
+                return false;
+            }
+            return !cell.contains(target);
+        }
+
         async renderReferenceEditor(cell, currentValue) {
             // Save original content for cancel
             const originalContent = cell.innerHTML;
@@ -4650,29 +4675,27 @@ class IntegramTable{
                 const editingCellRef = this.currentEditingCell;
                 setTimeout(() => {
                     const outsideClickHandler = (e) => {
-                        // Don't cancel if clicking inside reference creation modal
-                        const refModal = e.target.closest('[data-is-reference-create="true"]');
-                        const refOverlay = e.target.closest('.edit-form-overlay');
-                        if (refModal || refOverlay) {
-                            return;
-                        }
-                        // Issue #1384: dropdown is detached from cell (appended to body), so check it separately
-                        const fixedDropdown = this.currentEditingCell && this.currentEditingCell.fixedDropdown;
-                        if (fixedDropdown && fixedDropdown.contains(e.target)) {
-                            return;
-                        }
-                        if (!cell.contains(e.target)) {
-                            document.removeEventListener('click', outsideClickHandler);
-
-                            // Check if click is on another editable cell - preserve focus (issue #518)
-                            const clickedCell = e.target.closest('td[data-editable="true"]');
-                            if (clickedCell && clickedCell !== cell) {
-                                // Remember the clicked cell to edit after cancel completes
-                                this.pendingCellClick = clickedCell;
+                        if (!this._shouldCancelReferenceEditorForClick(e.target, cell)) {
+                            if (window.INTEGRAM_DEBUG && this._isReferenceCreateModalClick(e.target)) {
+                                console.log('[TRACE] renderReferenceEditor - ignored click inside reference create modal');
                             }
-
-                            this.cancelInlineEdit(originalContent);
+                            return;
                         }
+                        if (window.INTEGRAM_DEBUG) {
+                            console.log('[TRACE] renderReferenceEditor - outside click cancels reference editor');
+                        }
+                        document.removeEventListener('click', outsideClickHandler);
+
+                        // Check if click is on another editable cell - preserve focus (issue #518)
+                        const clickedCell = e.target && typeof e.target.closest === 'function'
+                            ? e.target.closest('td[data-editable="true"]')
+                            : null;
+                        if (clickedCell && clickedCell !== cell) {
+                            // Remember the clicked cell to edit after cancel completes
+                            this.pendingCellClick = clickedCell;
+                        }
+
+                        this.cancelInlineEdit(originalContent);
                     };
                     document.addEventListener('click', outsideClickHandler);
 
@@ -5790,6 +5813,15 @@ class IntegramTable{
                 // Use the value from the response (result.val) if available, otherwise use the input value
                 const createdValue = this.decodeHtmlEntities(result.val || mainValue);
 
+                if (window.INTEGRAM_DEBUG) {
+                    console.log('[TRACE] saveRecordForReference - created reference response', {
+                        result,
+                        createdId,
+                        createdValue,
+                        hasCurrentEditingCell: Boolean(this.currentEditingCell),
+                        isMultiReference: Boolean(this.currentEditingCell && this.currentEditingCell.isMultiReference)
+                    });
+                }
 
                 // Close the create form modal
                 modal.remove();
@@ -5806,6 +5838,12 @@ class IntegramTable{
                 // Now set the created record in the reference field that's still open
                 if (this.currentEditingCell && createdId) {
                     if (this.currentEditingCell.isMultiReference) {
+                        if (window.INTEGRAM_DEBUG) {
+                            console.log('[TRACE] saveRecordForReference - adding created record to multi-reference editor', {
+                                createdId,
+                                createdValue
+                            });
+                        }
                         // Issue #875: For multi-reference, add the new item to selected items
                         if (!this.currentEditingCell.selectedItems.find(s => s.id === String(createdId))) {
                             this.currentEditingCell.selectedItems.push({ id: String(createdId), text: createdValue });
@@ -5817,9 +5855,21 @@ class IntegramTable{
                             this.currentEditingCell.cell.querySelector('.inline-editor-reference-search')?.focus();
                         }
                     } else {
+                        if (window.INTEGRAM_DEBUG) {
+                            console.log('[TRACE] saveRecordForReference - applying created record to reference editor', {
+                                createdId,
+                                createdValue
+                            });
+                        }
                         await this.saveReferenceEdit(createdId, createdValue);
                     }
                 } else {
+                    if (window.INTEGRAM_DEBUG) {
+                        console.log('[TRACE] saveRecordForReference - cannot apply created record to reference editor', {
+                            hasCurrentEditingCell: Boolean(this.currentEditingCell),
+                            createdId
+                        });
+                    }
                     // Fallback: just close the inline editor
                     if (this.currentEditingCell) {
                         this.cancelInlineEdit(this.currentEditingCell.cell.innerHTML);
