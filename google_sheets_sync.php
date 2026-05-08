@@ -307,40 +307,63 @@ function gss_extract_sheet_records($sheetName, $values, $rowMatchers, $columnMat
     }
 
     $matrix = gss_normalize_matrix($values);
-    $rowMatches = [];
-    $columnMatches = [];
     $maxColumns = gss_max_columns($matrix);
+    $records = [];
+    $lastMatchedRows = [];
 
     foreach ($matrix as $rowIndex => $row) {
-        $matches = gss_match_any_spec($row, $rowMatchers);
-        if (!empty($matches)) {
-            $rowMatches[$rowIndex] = $matches;
+        $rowSpecMatches = gss_match_specs($row, $rowMatchers);
+        if (empty($rowSpecMatches)) {
+            continue;
         }
-    }
 
-    for ($columnIndex = 0; $columnIndex < $maxColumns; $columnIndex++) {
-        $column = gss_column_values($matrix, $columnIndex);
-        $matches = gss_match_any_spec($column, $columnMatchers);
-        if (!empty($matches)) {
-            $columnMatches[$columnIndex] = $matches;
-        }
-    }
+        for ($columnIndex = 0; $columnIndex < $maxColumns; $columnIndex++) {
+            $matchedRows = [];
+            $matchedColumns = [];
+            $matchedStateKeys = [];
 
-    $records = [];
-    foreach ($rowMatches as $rowIndex => $matchedRows) {
-        foreach ($columnMatches as $columnIndex => $matchedColumns) {
+            foreach ($rowSpecMatches as $rowSpecMatch) {
+                foreach ($columnMatchers as $columnSpecKey => $columnSpec) {
+                    $stateKey = $rowSpecMatch['key'] . "\0" . $columnSpecKey . "\0" . $columnIndex;
+                    $startRow = array_key_exists($stateKey, $lastMatchedRows)
+                        ? $lastMatchedRows[$stateKey] + 1
+                        : 0;
+                    if ($startRow > $rowIndex) {
+                        continue;
+                    }
+
+                    $column = gss_column_values_between($matrix, $columnIndex, $startRow, $rowIndex);
+                    $columnMatch = gss_match_spec($column, $columnSpec);
+                    if ($columnMatch['matched']) {
+                        $matchedRows = array_merge($matchedRows, $rowSpecMatch['values']);
+                        $matchedColumns = array_merge($matchedColumns, $columnMatch['values']);
+                        $matchedStateKeys[$stateKey] = true;
+                    }
+                }
+            }
+
+            if (empty($matchedStateKeys)) {
+                continue;
+            }
+
             $value = isset($matrix[$rowIndex][$columnIndex]) ? $matrix[$rowIndex][$columnIndex] : '';
             if ($skipEmptyValues && trim((string)$value) === '') {
                 continue;
             }
+
             $records[] = [
                 'sheet' => $sheetName,
-                'rows' => $matchedRows,
-                'columns' => $matchedColumns,
+                'row_number' => $rowIndex + 1,
+                'rows' => gss_unique_preserve_order($matchedRows),
+                'columns' => gss_unique_preserve_order($matchedColumns),
                 'value' => $value,
                 'row_index' => $rowIndex,
                 'column_index' => $columnIndex,
             ];
+
+            foreach ($matchedStateKeys as $stateKey => $_) {
+                $lastMatchedRows[$stateKey] = $rowIndex;
+            }
         }
     }
 
@@ -386,13 +409,37 @@ function gss_column_values($matrix, $columnIndex) {
     return $values;
 }
 
-function gss_match_any_spec($cells, $specs) {
+function gss_column_values_between($matrix, $columnIndex, $startRow, $endRow) {
+    $values = [];
+    $startRow = max(0, (int)$startRow);
+    $endRow = min(count($matrix) - 1, (int)$endRow);
+
+    for ($rowIndex = $startRow; $rowIndex <= $endRow; $rowIndex++) {
+        $row = $matrix[$rowIndex];
+        $values[] = isset($row[$columnIndex]) ? $row[$columnIndex] : '';
+    }
+
+    return $values;
+}
+
+function gss_match_specs($cells, $specs) {
     $matches = [];
-    foreach ($specs as $spec) {
+    foreach ($specs as $specKey => $spec) {
         $match = gss_match_spec($cells, $spec);
         if ($match['matched']) {
-            $matches = array_merge($matches, $match['values']);
+            $matches[] = [
+                'key' => (string)$specKey,
+                'values' => gss_unique_preserve_order($match['values']),
+            ];
         }
+    }
+    return $matches;
+}
+
+function gss_match_any_spec($cells, $specs) {
+    $matches = [];
+    foreach (gss_match_specs($cells, $specs) as $match) {
+        $matches = array_merge($matches, $match['values']);
     }
     return gss_unique_preserve_order($matches);
 }
@@ -463,13 +510,23 @@ function gss_unique_preserve_order($values) {
     return $result;
 }
 
-function gss_build_bki_content($records) {
+function gss_build_bki_content($records, $timestamp = null) {
+    if ($timestamp === null) {
+        $timestamp = time();
+    }
+
     $lines = ['DATA'];
     foreach ($records as $record) {
+        $rowNumber = isset($record['row_number'])
+            ? $record['row_number']
+            : (isset($record['row_index']) ? ((int)$record['row_index'] + 1) : '');
+
         $lines[] = gss_escape_bki_value($record['sheet'])
+            . ':' . gss_escape_bki_value($rowNumber)
             . ':' . gss_escape_bki_list($record['rows'])
             . ':' . gss_escape_bki_list($record['columns'])
             . ';' . gss_escape_bki_value($record['value'])
+            . ';' . gss_escape_bki_value($timestamp)
             . ';';
     }
 

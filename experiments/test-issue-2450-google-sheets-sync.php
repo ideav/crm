@@ -40,10 +40,10 @@ assertSameValue(['01.01.2026', '31.01.2026', 'ПЛАН'], $records[0]['columns']
 assertSameValue('123:45;6,7', $records[0]['value'], 'keeps source cell value unchanged before BKI escaping');
 assertSameValue(['2025'], $records[1]['columns'], 'matches scalar column matcher');
 
-$content = gss_build_bki_content($records);
+$content = gss_build_bki_content($records, 1773328460);
 $expected = "DATA\r\n"
-    . "Выручка (ддо - b2b):Выручка (ддо - b2b):01.01.2026,31.01.2026,ПЛАН;123\\:45\\;6\\,7;\r\n"
-    . "Выручка (ддо - b2b):Выручка (ддо - b2b):2025;89;\r\n";
+    . "Выручка (ддо - b2b):4:Выручка (ддо - b2b):01.01.2026,31.01.2026,ПЛАН;123\\:45\\;6\\,7;1773328460;\r\n"
+    . "Выручка (ддо - b2b):4:Выручка (ддо - b2b):2025;89;1773328460;\r\n";
 
 assertSameValue($expected, $content, 'builds DATA-prefixed BKI content and escapes delimiters');
 assertTrueValue(gss_pattern_matches('*.2026', '31.01.2026'), 'asterisk mask matches arbitrary leading text');
