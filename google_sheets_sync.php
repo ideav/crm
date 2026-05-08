@@ -433,19 +433,34 @@ function gss_match_any_spec($cells, $specs) {
 
 function gss_match_spec($cells, $spec) {
     $patterns = is_array($spec) ? array_values($spec) : [$spec];
-    $values = [];
-    $usedIndexes = [];
-
-    foreach ($patterns as $pattern) {
-        $match = gss_find_matching_cell_entry($cells, $pattern, $usedIndexes);
-        if ($match === null) {
-            return ['matched' => false, 'values' => []];
-        }
-        $usedIndexes[$match['index']] = true;
-        $values[] = $match['value'];
+    $values = gss_match_pattern_sequence($cells, $patterns, 0, [], []);
+    if ($values === null) {
+        return ['matched' => false, 'values' => []];
     }
 
     return ['matched' => true, 'values' => $values];
+}
+
+function gss_match_pattern_sequence($cells, $patterns, $patternIndex, $usedIndexes, $values) {
+    if ($patternIndex >= count($patterns)) {
+        return $values;
+    }
+
+    $matches = gss_find_matching_cell_entries($cells, $patterns[$patternIndex], $usedIndexes);
+    foreach ($matches as $match) {
+        $nextUsedIndexes = $usedIndexes;
+        $nextUsedIndexes[$match['index']] = true;
+
+        $nextValues = $values;
+        $nextValues[] = $match['value'];
+
+        $result = gss_match_pattern_sequence($cells, $patterns, $patternIndex + 1, $nextUsedIndexes, $nextValues);
+        if ($result !== null) {
+            return $result;
+        }
+    }
+
+    return null;
 }
 
 function gss_find_matching_cell($cells, $pattern) {
@@ -454,19 +469,65 @@ function gss_find_matching_cell($cells, $pattern) {
 }
 
 function gss_find_matching_cell_entry($cells, $pattern, $usedIndexes = []) {
+    $matches = gss_find_matching_cell_entries($cells, $pattern, $usedIndexes);
+    return empty($matches) ? null : $matches[0];
+}
+
+function gss_find_matching_cell_entries($cells, $pattern, $usedIndexes = []) {
+    $matches = [];
     foreach ($cells as $index => $cell) {
         if (isset($usedIndexes[$index])) {
             continue;
         }
         $cellValue = trim(gss_cell_to_string($cell));
         if (gss_pattern_matches($pattern, $cellValue)) {
-            return ['index' => $index, 'value' => $cellValue];
+            $matches[] = ['index' => $index, 'value' => $cellValue];
         }
     }
-    return null;
+    return $matches;
 }
 
 function gss_pattern_matches($pattern, $value) {
+    $value = trim(gss_cell_to_string($value));
+
+    foreach (gss_pattern_options($pattern) as $patternOption) {
+        if (gss_single_pattern_matches($patternOption, $value)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function gss_pattern_options($pattern) {
+    $pattern = trim(gss_cell_to_string($pattern));
+    if (strpos($pattern, '||') === false) {
+        return [$pattern];
+    }
+
+    $options = [];
+    foreach (explode('||', $pattern) as $option) {
+        $options[] = gss_unquote_pattern_option(trim($option));
+    }
+    return $options;
+}
+
+function gss_unquote_pattern_option($pattern) {
+    $length = strlen($pattern);
+    if ($length < 2) {
+        return $pattern;
+    }
+
+    $first = $pattern[0];
+    $last = $pattern[$length - 1];
+    if (($first === "'" && $last === "'") || ($first === '"' && $last === '"')) {
+        return substr($pattern, 1, -1);
+    }
+
+    return $pattern;
+}
+
+function gss_single_pattern_matches($pattern, $value) {
     $pattern = trim(gss_cell_to_string($pattern));
     $value = trim(gss_cell_to_string($value));
 
