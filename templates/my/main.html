@@ -70,9 +70,6 @@
             <span title="Ваш Личный кабинет Интеграм">ЛК Интеграм</span>
         </div>
         <div class="navbar-right">
-            <button id="ai-chat-toggle" class="ai-chat-toggle" type="button" title="ИИ-чат" aria-label="Открыть ИИ-чат" aria-controls="ai-chat-panel" aria-expanded="false">
-                <i class="pi pi-comments"></i>
-            </button>
             <div class="user-menu-wrapper">
                 <button id="user-menu-toggle" class="account-info" type="button" title="Меню пользователя">
                     <div id="account-avatar" class="account-avatar">U</div>
@@ -103,108 +100,6 @@
             </div>
         </div>
     </nav>
-
-    <div id="ai-chat-backdrop" class="ai-chat-backdrop" hidden></div>
-    <aside id="ai-chat-panel" class="ai-chat-panel" aria-hidden="true" aria-labelledby="ai-chat-title" inert>
-        <div class="ai-chat-header">
-            <div>
-                <h2 id="ai-chat-title">ИИ-чат</h2>
-                <span id="ai-chat-status" class="ai-chat-status">Не подключен</span>
-            </div>
-            <button id="ai-chat-close" class="ai-chat-icon-btn" type="button" title="Закрыть" aria-label="Закрыть ИИ-чат">
-                <i class="pi pi-times"></i>
-            </button>
-        </div>
-
-        <div class="ai-chat-body">
-            <section class="ai-chat-config" aria-label="Настройки ИИ-сервиса">
-                <div class="ai-chat-config-grid">
-                    <div class="database-field-group">
-                        <label for="ai-service-provider" class="database-field-label">Сервис</label>
-                        <select id="ai-service-provider" class="database-field-input">
-                            <option value="integram">Интеграм AI</option>
-                            <option value="openai">ChatGPT / OpenAI</option>
-                            <option value="gigachat">ГигаЧат</option>
-                            <option value="deepseek">DeepSeek</option>
-                            <option value="custom">Другой API</option>
-                        </select>
-                    </div>
-                    <div class="database-field-group">
-                        <label for="ai-token-mode" class="database-field-label">Токен</label>
-                        <select id="ai-token-mode" class="database-field-input">
-                            <option value="rotating">Токены Интеграма</option>
-                            <option value="own">Мой токен</option>
-                        </select>
-                    </div>
-                    <div class="database-field-group ai-chat-config-wide">
-                        <label for="ai-service-endpoint" class="database-field-label">API endpoint</label>
-                        <input id="ai-service-endpoint" class="database-field-input" type="text" autocomplete="off">
-                    </div>
-                    <div class="database-field-group">
-                        <label for="ai-service-model" class="database-field-label">Модель</label>
-                        <input id="ai-service-model" class="database-field-input" type="text" autocomplete="off">
-                    </div>
-                    <div class="database-field-group">
-                        <label for="ai-service-token" class="database-field-label">API token</label>
-                        <input id="ai-service-token" class="database-field-input" type="password" autocomplete="off">
-                    </div>
-                    <div class="database-field-group">
-                        <label for="ai-target-db" class="database-field-label">База данных</label>
-                        <select id="ai-target-db" class="database-field-input"></select>
-                    </div>
-                    <label class="ai-chat-checkbox-label">
-                        <input id="ai-charge-balance" type="checkbox">
-                        <span>Оплата с баланса ЛК</span>
-                    </label>
-                </div>
-                <div class="ai-chat-config-actions">
-                    <button id="ai-save-settings-btn" type="button" class="btn-secondary btn-small">
-                        <i class="pi pi-save"></i>
-                        <span>Сохранить</span>
-                    </button>
-                    <button id="ai-connect-service-btn" type="button" class="btn-primary btn-small">
-                        <i class="pi pi-link"></i>
-                        <span>Подключить</span>
-                    </button>
-                </div>
-                <span id="ai-settings-state" class="field-hint"></span>
-            </section>
-
-            <section class="ai-chat-presets" aria-label="Типовые команды">
-                <button type="button" class="ai-preset-btn" data-ai-command="create_table">
-                    <i class="pi pi-table"></i>
-                    <span>Создай таблицу</span>
-                </button>
-                <button type="button" class="ai-preset-btn" data-ai-command="create_structure">
-                    <i class="pi pi-sitemap"></i>
-                    <span>Создай структуру</span>
-                </button>
-                <button type="button" class="ai-preset-btn" data-ai-command="create_workspace">
-                    <i class="pi pi-desktop"></i>
-                    <span>Создай рабочее место</span>
-                </button>
-            </section>
-
-            <div id="ai-chat-messages" class="ai-chat-messages" role="log" aria-live="polite">
-                <div class="ai-chat-message ai-chat-message-assistant">
-                    <div class="ai-chat-message-author">Интеграм AI</div>
-                    <div class="ai-chat-message-text">Готов принять задачу для выбранной базы данных.</div>
-                </div>
-            </div>
-
-            <section id="ai-command-queue" class="ai-command-queue" aria-label="Команды ИИ">
-                <div class="ai-command-empty">Команд пока нет</div>
-            </section>
-        </div>
-
-        <div class="ai-chat-composer">
-            <textarea id="ai-chat-input" class="database-field-input" rows="3" placeholder="Опишите задачу"></textarea>
-            <button id="ai-chat-send" type="button" class="btn-primary" title="Отправить">
-                <i class="pi pi-send"></i>
-                <span>Отправить</span>
-            </button>
-        </div>
-    </aside>
 
     <!-- Cabinet Layout -->
     <div class="cabinet-layout">
