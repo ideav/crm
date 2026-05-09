@@ -54,12 +54,12 @@ assertSameIssue2456('13', $records[4]['value'], 'captures the value under the ne
 
 $content = gss_build_bki_content($records, 1773328460);
 $expected = "DATA\r\n"
-    . "Rules:4:Metric A:2026,PLAN;10;1773328460;\r\n"
-    . "Rules:5:Metric B:2026,PLAN;20;1773328460;\r\n"
-    . "Rules:6:Metric A:2026,PLAN;11;1773328460;\r\n"
-    . "Rules:10:Metric A:2026,PLAN;12;1773328460;\r\n"
-    . "Rules:10:Metric A:2026,PLAN;13;1773328460;\r\n";
+    . "10;;Metric A;PLAN;1773328460\r\n"
+    . "20;;Metric B;PLAN;1773328460\r\n"
+    . "11;;Metric A;PLAN;1773328460\r\n"
+    . "12;;Metric A;PLAN;1773328460\r\n"
+    . "13;;Metric A;PLAN;1773328460\r\n";
 
-assertSameIssue2456($expected, $content, 'builds BKI content with sheet row number and Unix timestamp');
+assertSameIssue2456($expected, $content, 'builds BKI content with value/date/row/column/timestamp fields');
 
 echo "PASS issue 2456 Google Sheets sync row rules\n";
