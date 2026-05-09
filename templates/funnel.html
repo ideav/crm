@@ -84,18 +84,24 @@
         letter-spacing: 0.04em;
     }
 
-    .funnel-filter-select {
+    .funnel-filter-select,
+    .funnel-filter-date {
         padding: 5px 8px;
         border: 1px solid var(--input-border, var(--border-color, var(--funnel-border)));
         border-radius: 4px;
         background: var(--input-bg, var(--funnel-surface));
         color: var(--text-primary, var(--funnel-text-primary));
         font-size: 0.85rem;
-        cursor: pointer;
         width: 100%;
+        box-sizing: border-box;
     }
 
-    .funnel-filter-select:focus {
+    .funnel-filter-select {
+        cursor: pointer;
+    }
+
+    .funnel-filter-select:focus,
+    .funnel-filter-date:focus {
         outline: none;
         border-color: var(--funnel-primary);
         box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
@@ -546,7 +552,8 @@
             min-width: 0;
         }
 
-        .funnel-filter-select {
+        .funnel-filter-select,
+        .funnel-filter-date {
             min-height: 38px;
         }
 
@@ -640,6 +647,14 @@
             </select>
         </div>
         <div class="funnel-filter-group">
+            <div class="funnel-filter-label">Дата с</div>
+            <input type="date" id="funnel-filter-date-from" class="funnel-filter-date" onchange="funnelApplyFilters()">
+        </div>
+        <div class="funnel-filter-group">
+            <div class="funnel-filter-label">Дата по</div>
+            <input type="date" id="funnel-filter-date-to" class="funnel-filter-date" onchange="funnelApplyFilters()">
+        </div>
+        <div class="funnel-filter-group">
             <div class="funnel-filter-label">Тип найма</div>
             <select id="funnel-filter-hire-type" class="funnel-filter-select" onchange="funnelApplyFilters()">
                 <option value="">— Все —</option>
@@ -666,6 +681,14 @@
 <script>
 (function() {
     var FILTER_FIELDS = ['Вакансия', 'Имя', 'Месяц', 'Тип найма'];
+    var DATE_FIELD_CANDIDATES = [
+        'Дата', 'Дата события', 'Старт работы', 'СтартРаботы',
+        'Дата старта', 'Дата начала', 'Начало', 'Выход', 'Дата выхода',
+        'Date', 'StartDate', 'Start Date'
+    ];
+    var DATE_FIELD_NAMES = DATE_FIELD_CANDIDATES.map(function(name) {
+        return funnelNormalizeFieldName(name);
+    });
 
     var STAGE_PALETTE = [
         '#2563eb', '#3b82f6', '#0ea5e9', '#06b6d4',
@@ -675,13 +698,103 @@
 
     var funnelAllData = [];
     var funnelStages = [];
+    var funnelDateField = '';
     var funnelView = 'chart';
+
+    function funnelNormalizeFieldName(name) {
+        return String(name || '').toLowerCase().replace(/[\s_\-.:]/g, '');
+    }
+
+    function funnelNameContainsDateWord(name) {
+        var normalized = funnelNormalizeFieldName(name);
+        return normalized.indexOf('дата') !== -1 || normalized.indexOf('date') !== -1;
+    }
+
+    function funnelIsDateFieldName(name) {
+        var normalized = funnelNormalizeFieldName(name);
+        return DATE_FIELD_NAMES.indexOf(normalized) !== -1
+            || funnelNameContainsDateWord(name);
+    }
+
+    function funnelDateKeyFromParts(year, month, day) {
+        var y = parseInt(year, 10);
+        var m = parseInt(month, 10);
+        var d = parseInt(day, 10);
+        if (!y || !m || !d || y < 1900 || y > 2200 || m < 1 || m > 12 || d < 1 || d > 31) return null;
+        var dt = new Date(y, m - 1, d);
+        if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+        return y * 10000 + m * 100 + d;
+    }
+
+    function funnelParseDateValue(value) {
+        var s = String(value || '').trim();
+        var m;
+        if (!s) return null;
+        m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+        if (m) return funnelDateKeyFromParts(m[1], m[2], m[3]);
+        m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+        if (m) return funnelDateKeyFromParts(m[3], m[2], m[1]);
+        m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+        if (m) return funnelDateKeyFromParts(m[1], m[2], m[3]);
+        m = s.match(/^(\d{4})(\d{2})$/);
+        if (m) return funnelDateKeyFromParts(m[1], m[2], 1);
+        m = s.match(/^(\d{4})-(\d{1,2})$/);
+        if (m) return funnelDateKeyFromParts(m[1], m[2], 1);
+        m = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+        if (m) return funnelDateKeyFromParts(m[1], m[2], m[3]);
+        m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if (m) return funnelDateKeyFromParts(m[3], m[2], m[1]);
+        return null;
+    }
+
+    function funnelFieldHasDateValues(field, data) {
+        var checked = 0;
+        for (var i = 0; i < data.length && checked < 20; i++) {
+            var value = data[i][field];
+            if (value === null || value === undefined || value === '') continue;
+            checked++;
+            if (funnelParseDateValue(value) === null) return false;
+        }
+        return checked > 0;
+    }
+
+    function funnelFindDateField(data) {
+        if (!data || !data.length) return '';
+        var keys = Object.keys(data[0]);
+        var normalizedCandidate;
+        var i;
+        var j;
+
+        for (i = 0; i < DATE_FIELD_NAMES.length; i++) {
+            normalizedCandidate = DATE_FIELD_NAMES[i];
+            for (j = 0; j < keys.length; j++) {
+                if (funnelNormalizeFieldName(keys[j]) === normalizedCandidate && funnelFieldHasDateValues(keys[j], data)) {
+                    return keys[j];
+                }
+            }
+        }
+
+        for (i = 0; i < keys.length; i++) {
+            if (funnelIsDateFieldName(keys[i]) && funnelFieldHasDateValues(keys[i], data)) {
+                return keys[i];
+            }
+        }
+        return '';
+    }
+
+    function funnelIsNonStageField(key, data) {
+        if (FILTER_FIELDS.indexOf(key) !== -1) return true;
+        if (key === funnelDateField) return true;
+        if (funnelNameContainsDateWord(key)) return true;
+        return DATE_FIELD_NAMES.indexOf(funnelNormalizeFieldName(key)) !== -1 && funnelFieldHasDateValues(key, data);
+    }
 
     function funnelDetectStages(data) {
         if (!data || !data.length) return [];
+        funnelDateField = funnelFindDateField(data);
         var stages = [];
         Object.keys(data[0]).forEach(function(key) {
-            if (FILTER_FIELDS.indexOf(key) === -1) stages.push(key);
+            if (!funnelIsNonStageField(key, data)) stages.push(key);
         });
         return stages;
     }
@@ -691,12 +804,28 @@
     }
 
     function funnelFormatMonth(val) {
-        if (!val || val.length !== 6) return val;
+        var s = String(val || '').trim();
+        var match = s.match(/^(\d{4})(\d{2})(?:\d{2})?$/) || s.match(/^(\d{4})-(\d{1,2})/);
+        if (!match) return val;
         var months = ['янв', 'фев', 'мар', 'апр', 'май', 'июн',
                       'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
-        var y = val.slice(0, 4);
-        var m = parseInt(val.slice(4, 6), 10);
-        return months[m - 1] + ' ' + y;
+        var y = match[1];
+        var m = parseInt(match[2], 10);
+        return months[m - 1] ? months[m - 1] + ' ' + y : val;
+    }
+
+    function funnelFormatDate(val) {
+        var key = funnelParseDateValue(val);
+        var s;
+        if (key === null) return val || '';
+        s = String(key);
+        return s.slice(6, 8) + '.' + s.slice(4, 6) + '.' + s.slice(0, 4);
+    }
+
+    function funnelRowDateKey(row) {
+        var key = funnelDateField ? funnelParseDateValue(row[funnelDateField]) : null;
+        if (key !== null) return key;
+        return funnelParseDateValue(row['Месяц']);
     }
 
     function funnelNum(v) {
@@ -729,12 +858,22 @@
         var name = document.getElementById('funnel-filter-name').value;
         var month = document.getElementById('funnel-filter-month').value;
         var hireType = document.getElementById('funnel-filter-hire-type').value;
+        var dateFrom = funnelParseDateValue(document.getElementById('funnel-filter-date-from').value);
+        var dateTo = funnelParseDateValue(document.getElementById('funnel-filter-date-to').value);
+        var hasDateRange = dateFrom !== null || dateTo !== null;
 
         return funnelAllData.filter(function(row) {
+            var rowDate;
             if (vacancy && row['Вакансия'] !== vacancy) return false;
             if (name && row['Имя'] !== name) return false;
             if (month && row['Месяц'] !== month) return false;
             if (hireType && row['Тип найма'] !== hireType) return false;
+            if (hasDateRange) {
+                rowDate = funnelRowDateKey(row);
+                if (rowDate === null) return false;
+                if (dateFrom !== null && rowDate < dateFrom) return false;
+                if (dateTo !== null && rowDate > dateTo) return false;
+            }
             return true;
         });
     }
@@ -825,11 +964,15 @@
 
     function funnelRenderTable(rows) {
         if (!rows.length) return '';
+        var hasDateColumn = !!funnelDateField;
 
         var html = '<div class="funnel-section">'
             + '<div class="funnel-section-title">Детальные данные</div>'
             + '<div class="funnel-table-wrap"><table class="funnel-table"><thead><tr>'
             + '<th>Имя / Вакансия</th><th>Месяц</th><th>Тип найма</th>';
+        if (hasDateColumn) {
+            html += '<th>' + esc(funnelDateField) + '</th>';
+        }
         funnelStages.forEach(function(s) {
             html += '<th>' + esc(s) + '</th>';
         });
@@ -840,6 +983,9 @@
                 + '<td>' + esc((row['Имя'] || '—') + ' / ' + (row['Вакансия'] || '—')) + '</td>'
                 + '<td>' + esc(funnelFormatMonth(row['Месяц'] || '')) + '</td>'
                 + '<td>' + esc(row['Тип найма'] || '—') + '</td>';
+            if (hasDateColumn) {
+                html += '<td>' + esc(funnelFormatDate(row[funnelDateField] || '')) + '</td>';
+            }
             funnelStages.forEach(function(s) {
                 var v = funnelNum(row[s]);
                 html += '<td>' + (v > 0 ? v.toLocaleString('ru') : '<span class="funnel-empty-val">—</span>') + '</td>';
@@ -848,7 +994,7 @@
         });
 
         // Totals
-        html += '</tbody><tfoot><tr><td colspan="3">Итого (' + rows.length + ' записей)</td>';
+        html += '</tbody><tfoot><tr><td colspan="' + (hasDateColumn ? 4 : 3) + '">Итого (' + rows.length + ' записей)</td>';
         funnelStages.forEach(function(s) {
             html += '<td>' + funnelSumStage(rows, s).toLocaleString('ru') + '</td>';
         });
@@ -879,6 +1025,8 @@
         document.getElementById('funnel-filter-vacancy').value = '';
         document.getElementById('funnel-filter-name').value = '';
         document.getElementById('funnel-filter-month').value = '';
+        document.getElementById('funnel-filter-date-from').value = '';
+        document.getElementById('funnel-filter-date-to').value = '';
         document.getElementById('funnel-filter-hire-type').value = '';
         funnelRender(funnelAllData);
     };
