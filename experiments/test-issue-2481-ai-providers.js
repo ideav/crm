@@ -105,6 +105,7 @@ assert(profiles.groq, 'Groq profile should exist');
 assert(profiles.mistral, 'Mistral AI profile should exist');
 assert.strictEqual(profiles.gemini.tokenMode, 'adc', 'Gemini should use Application Default Credentials');
 assert.strictEqual(profiles.gemini.model, 'google/gemini-2.5-flash', 'Gemini should use a Vertex Gemini model id');
+assert.strictEqual(profiles.gemini.defaultProjectNumber, '944712482341', 'Gemini should include the default Vertex AI project number');
 assert(
     profiles.gemini.endpoint.includes('aiplatform.googleapis.com') &&
         profiles.gemini.endpoint.includes('/endpoints/openapi/chat/completions'),
@@ -124,6 +125,7 @@ const saved = JSON.parse(storage.integram_ai_chat_settings);
 assert.strictEqual(saved.activeProviderId, 'gemini', 'Saved localStorage settings should keep Gemini selected');
 assert.strictEqual(saved.profiles.gemini.tokenMode, 'adc', 'Saved Gemini profile should keep ADC mode');
 assert.strictEqual(saved.profiles.gemini.token, '', 'Saved Gemini profile should not store an API token');
+assert.strictEqual(saved.profiles.gemini.defaultProjectNumber, '944712482341', 'Saved Gemini profile should keep the default project number');
 assert.strictEqual(saved.profiles.groq.endpoint, 'https://api.groq.com/openai/v1/chat/completions');
 assert.strictEqual(saved.profiles.mistral.endpoint, 'https://api.mistral.ai/v1/chat/completions');
 

@@ -37,6 +37,7 @@
                 gemini: {
                     label: 'Google Gemini',
                     endpoint: 'https://aiplatform.googleapis.com/v1/projects/{project_id}/locations/global/endpoints/openapi/chat/completions',
+                    defaultProjectNumber: '944712482341',
                     model: 'google/gemini-2.5-flash',
                     tokenMode: 'adc',
                     defaultTokenMode: 'adc',

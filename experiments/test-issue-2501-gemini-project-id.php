@@ -45,6 +45,9 @@ function resetGoogleProjectEnvIssue2501(){
         "GCLOUD_PROJECT",
         "GCP_PROJECT",
         "CLOUDSDK_CORE_PROJECT",
+        "GOOGLE_CLOUD_PROJECT_NUMBER",
+        "GOOGLE_PROJECT_NUMBER",
+        "GCP_PROJECT_NUMBER",
         "GOOGLE_APPLICATION_CREDENTIALS",
         "GOOGLE_APPLICATION_CREDENTIALS_JSON"
     ) as $name){

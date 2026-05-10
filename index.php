@@ -8010,6 +8010,7 @@ function getDefaultAiProviderConfig($id){
         "gemini" => array(
             "label" => "Google Gemini",
             "endpoint" => "https://aiplatform.googleapis.com/v1/projects/{project_id}/locations/global/endpoints/openapi/chat/completions",
+            "defaultProjectNumber" => "944712482341",
             "model" => "google/gemini-2.5-flash",
             "tokenMode" => "adc",
             "chargeBalance" => false
@@ -8073,27 +8074,40 @@ function prepareAiProviderEndpoint($provider, $settings){
     if(strpos($endpoint, "{project_id}") !== false){
         $projectId = getAiProviderProjectId($provider, $settings);
         if($projectId === "")
-            throw new Exception(t9n("[RU]Не указан Google Cloud project_id для Gemini[EN]Google Cloud project_id is not set for Gemini"), 503);
+            throw new Exception(t9n("[RU]Не указан Google Cloud project_id/project number для Gemini[EN]Google Cloud project_id/project number is not set for Gemini"), 503);
         $endpoint = str_replace("{project_id}", rawurlencode($projectId), $endpoint);
     }
     return $endpoint;
 }
 function getAiProviderProjectId($provider, $settings){
     $id = isset($provider["id"]) ? $provider["id"] : "";
-    foreach(array("projectId", "project_id", "googleProjectId") as $key)
+    $projectKeys = array("projectId", "project_id", "googleProjectId", "projectNumber", "project_number", "googleProjectNumber");
+    foreach($projectKeys as $key)
         if(isset($provider[$key]) && trim((string)$provider[$key]) !== "")
             return trim((string)$provider[$key]);
     if(isset($settings["profiles"]) && isset($settings["profiles"][$id]) && is_array($settings["profiles"][$id])){
-        foreach(array("projectId", "project_id", "googleProjectId") as $key)
+        foreach($projectKeys as $key)
             if(isset($settings["profiles"][$id][$key]) && trim((string)$settings["profiles"][$id][$key]) !== "")
                 return trim((string)$settings["profiles"][$id][$key]);
     }
-    $projectId = aiConfigValue(array("GOOGLE_CLOUD_PROJECT", "GOOGLE_PROJECT_ID", "GCLOUD_PROJECT", "GCP_PROJECT", "CLOUDSDK_CORE_PROJECT"));
+    $projectId = aiConfigValue(array("GOOGLE_CLOUD_PROJECT", "GOOGLE_PROJECT_ID", "GCLOUD_PROJECT", "GCP_PROJECT", "CLOUDSDK_CORE_PROJECT", "GOOGLE_CLOUD_PROJECT_NUMBER", "GOOGLE_PROJECT_NUMBER", "GCP_PROJECT_NUMBER"));
     if($projectId !== "")
         return $projectId;
-    return getGoogleApplicationDefaultProjectId();
+    $projectId = getGoogleApplicationDefaultProjectId(false);
+    if($projectId !== "")
+        return $projectId;
+    $defaultProjectKeys = array("defaultProjectId", "default_project_id", "defaultGoogleProjectId", "defaultProjectNumber", "default_project_number", "defaultGoogleProjectNumber");
+    foreach($defaultProjectKeys as $key)
+        if(isset($provider[$key]) && trim((string)$provider[$key]) !== "")
+            return trim((string)$provider[$key]);
+    if(isset($settings["profiles"]) && isset($settings["profiles"][$id]) && is_array($settings["profiles"][$id])){
+        foreach($defaultProjectKeys as $key)
+            if(isset($settings["profiles"][$id][$key]) && trim((string)$settings["profiles"][$id][$key]) !== "")
+                return trim((string)$settings["profiles"][$id][$key]);
+    }
+    return getGoogleMetadataProjectId();
 }
-function getGoogleApplicationDefaultProjectId(){
+function getGoogleApplicationDefaultProjectId($includeMetadata = true){
     $credentialsJson = aiConfigValue(array("GOOGLE_APPLICATION_CREDENTIALS_JSON"));
     if($credentialsJson !== ""){
         $projectId = getGoogleCredentialsProjectId(json_decode($credentialsJson, true));
@@ -8108,12 +8122,14 @@ function getGoogleApplicationDefaultProjectId(){
             return $projectId;
     }
 
+    if(!$includeMetadata)
+        return "";
     return getGoogleMetadataProjectId();
 }
 function getGoogleCredentialsProjectId($credentials){
     if(!is_array($credentials))
         return "";
-    foreach(array("project_id", "quota_project_id", "projectId") as $key)
+    foreach(array("project_id", "quota_project_id", "projectId", "project_number", "quota_project_number", "projectNumber") as $key)
         if(isset($credentials[$key]) && trim((string)$credentials[$key]) !== "")
             return trim((string)$credentials[$key]);
     return "";
