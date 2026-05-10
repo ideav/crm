@@ -498,6 +498,11 @@
             return select && select.value ? select.value : (this.getCurrentDbName() || 'my');
         }
 
+        getAiChatServerUrl() {
+            const dbName = this.getCurrentDbName() || this.getSelectedAiDb() || 'my';
+            return '/' + encodeURIComponent(dbName) + '/ai/chat?JSON=1';
+        }
+
         async sendAiChatMessage(commandType, presetText) {
             const input = document.getElementById('ai-chat-input');
             const text = (presetText || (input ? input.value : '')).trim();
@@ -615,7 +620,7 @@
                 throw new Error('Fetch API недоступен');
             }
 
-            const response = await fetchFn('/my/ai/chat?JSON=1', {
+            const response = await fetchFn(this.getAiChatServerUrl(), {
                 method: 'POST',
                 credentials: 'include',
                 headers: {

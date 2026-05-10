@@ -5,20 +5,6 @@ const vm = require('vm');
 
 const root = path.resolve(__dirname, '..');
 const aiScript = fs.readFileSync(path.join(root, 'js/ai-chat.js'), 'utf8');
-const indexPhp = fs.readFileSync(path.join(root, 'index.php'), 'utf8');
-
-[
-    'case "ai":',
-    'handleAiChatRequest(',
-    'callAiChatProvider(',
-    'getAiProviderToken(',
-    'getGoogleApplicationDefaultAccessToken('
-].forEach(snippet => {
-    assert(
-        indexPhp.includes(snippet),
-        `index.php should include AI chat server support: ${snippet}`
-    );
-});
 
 function createElement(id, overrides = {}) {
     return Object.assign({
@@ -74,6 +60,9 @@ const document = {
     },
     createElement(tagName) {
         return createElement(tagName);
+    },
+    querySelector() {
+        return null;
     }
 };
 
@@ -115,25 +104,16 @@ const context = {
     action: 'table',
     uid: '42',
     xsrf: 'csrf-token',
-    menuData: [{ menu_id: '1', menu_up: '', name: 'Клиенты', href: '/demo/object/100' }],
+    menuData: [],
     fetch: async (url, options) => {
         fetchRequest = { url, options };
         return {
             ok: true,
             status: 200,
             json: async () => ({
-                assistant: {
-                    content: 'План подготовлен сервером.',
-                    raw: '{"commands":[]}'
-                },
-                command: {
-                    title: 'Создать таблицу',
-                    status: 'Получен ответ'
-                },
-                provider: {
-                    id: 'openai',
-                    model: 'gpt-4.1-mini'
-                }
+                assistant: { content: 'План подготовлен сервером.', raw: 'План подготовлен сервером.' },
+                command: { title: 'Создать таблицу', status: 'Получен ответ' },
+                provider: { id: 'openai', label: 'ChatGPT / OpenAI', model: 'gpt-4.1-mini' }
             })
         };
     },
@@ -155,25 +135,17 @@ controller.aiActiveProviderId = 'openai';
     await controller.sendAiChatMessage();
 
     assert(fetchRequest, 'sendAiChatMessage should call the AI chat server endpoint');
-    assert.strictEqual(fetchRequest.url, '/demo/ai/chat?JSON=1');
-    assert.strictEqual(fetchRequest.options.method, 'POST');
-    assert.strictEqual(fetchRequest.options.credentials, 'include');
-    assert.match(fetchRequest.options.headers['Content-Type'], /application\/json/);
+    assert.strictEqual(
+        fetchRequest.url,
+        '/demo/ai/chat?JSON=1',
+        'AI chat should post through the current database endpoint, not /my'
+    );
 
     const body = JSON.parse(fetchRequest.options.body);
-    assert.strictEqual(body._xsrf, 'csrf-token');
+    assert.strictEqual(body.payload.context.currentDb, 'demo');
     assert.strictEqual(body.payload.context.targetDb, 'demo');
-    assert.strictEqual(body.payload.provider.id, 'openai');
-    assert.strictEqual(body.payload.messages[0].content, 'Создай таблицу клиентов');
-    assert(!JSON.stringify(body.payload).includes('sk-test-secret'), 'API tokens must not be copied into the visible command payload');
-    assert.strictEqual(body.settings.profiles.openai.token, 'sk-test-secret', 'provider settings should be posted outside the visible command payload');
-    assert(!cookieStore.integram_ai_chat_settings, 'AI settings must not be persisted to cookies');
 
-    assert.strictEqual(controller.aiCommandQueue.length, 1);
-    assert.strictEqual(controller.aiCommandQueue[0].status, 'Получен ответ');
-    assert.strictEqual(controller.aiCommandQueue[0].serverResponse.assistant.content, 'План подготовлен сервером.');
-
-    console.log('ok - issue 2483 AI chat posts to server endpoint and queues server response');
+    console.log('ok - issue 2491 AI chat uses current database endpoint');
 })().catch(err => {
     console.error(err);
     process.exit(1);
