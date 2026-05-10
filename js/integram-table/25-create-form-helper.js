@@ -86,34 +86,7 @@ class IntegramCreateFormHelper {
     }
 
     parseAttrs(attrs) {
-        const result = {
-            required: false,
-            multi: false,
-            alias: null,
-            defaultValue: null
-        };
-
-        if (!attrs) return result;
-
-        result.required = attrs.includes(':!NULL:');
-        result.multi = attrs.includes(':MULTI:');
-
-        const aliasMatch = attrs.match(/:ALIAS=(.*?):/u);
-        if (aliasMatch) {
-            result.alias = aliasMatch[1];
-        }
-
-        // Extract default value: strip all known flags and use the remainder
-        let stripped = attrs
-            .replace(/:!NULL:/g, '')
-            .replace(/:MULTI:/g, '')
-            .replace(/:ALIAS=(.*?):/gu, '')
-            .trim();
-        if (stripped.length > 0) {
-            result.defaultValue = stripped;
-        }
-
-        return result;
+        return parseIntegramAttrs(attrs);
     }
 
     normalizeFormat(baseTypeId) {

@@ -117,6 +117,44 @@ function unEscapeHtml(text){ // Restore the escaped HTML characters
     var map={'&amp;':'&','&lt;':'<','&gt;':'>','&quot;':'"','&#039;':"'"};
     return text.replace(/&.+;/g,function(m){return map[m];});
 }
+function parseFieldAttrs(attrs){
+    var result={required:false,multi:false,alias:null,defaultValue:''};
+    if(!attrs) return result;
+    attrs=String(attrs);
+    var raw=attrs.trim();
+    function parseBool(value){
+        if(value===true||value===false) return value;
+        if(typeof value==='number') return value!==0;
+        if(typeof value==='string')
+            return ['', '0', 'false', 'no', 'off'].indexOf(value.trim().toLowerCase())===-1;
+        return !!value;
+    }
+    function parseJson(text){
+        if(!text||text.charAt(0)!=='{') return null;
+        try{
+            var parsed=JSON.parse(text);
+            return parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?parsed:null;
+        }
+        catch(e){
+            return null;
+        }
+    }
+    var json=parseJson(raw)||parseJson(raw.replace(/\\"/g,'"'));
+    if(json){
+        result.required=parseBool(json.required!==undefined?json.required:(json.notNull!==undefined?json.notNull:json.not_null));
+        result.multi=parseBool(json.multi);
+        result.alias=json.alias?String(json.alias):null;
+        var defaultValue=json.default!==undefined?json.default:json.defaultValue;
+        result.defaultValue=defaultValue!==undefined&&defaultValue!==null?String(defaultValue):'';
+        return result;
+    }
+    result.required=attrs.indexOf(':!NULL:')!==-1;
+    result.multi=attrs.indexOf(':MULTI:')!==-1;
+    var alias=attrs.match(/:ALIAS=(.*?):/u);
+    result.alias=alias?alias[1]:null;
+    result.defaultValue=attrs.replace(/:!NULL:/g,'').replace(/:MULTI:/g,'').replace(/:ALIAS=(.*?):/gu,'').trim();
+    return result;
+}
 function defaults(v,i){
     switch(v){
         case "[NOW]":
@@ -554,6 +592,7 @@ function myApi(m,u,b,prefix,vars){
                 for(j in f)
                     if(f[j].p==PanelID){
                         base=0;
+                        var reqAttrs={required:false,multi:false,alias:null,defaultValue:''};
                         // This is a report field
                         if(f[j].ReportField!=''){
                             if(f[j].FieldAlias=='')
@@ -563,23 +602,21 @@ function myApi(m,u,b,prefix,vars){
                         // This is a form's type requisite - find it among requisites
                         for(k in r[typ])
                             if(r[typ][k].i==f[j].Field){
+                                reqAttrs=parseFieldAttrs(r[typ][k].a);
                                 if(r[r[typ][k].t] && t[r[typ][k].t].r=='') // In case the requisite has reqs - it is an array
                                     base=1;
                                 else
                                     base=t[r[typ][k].t].t;
                                 if(f[j].FieldAlias=='')
                                     f[j].FieldAlias=t[r[typ][k].t].v;
-                                if(r[typ][k].a.indexOf(':ALIAS=')+1){ // This requisite has an Alias
-                                    tmp=r[typ][k].a.split(':ALIAS=').pop().split(':').shift();
+                                if(reqAttrs.alias){ // This requisite has an Alias
+                                    tmp=reqAttrs.alias;
                                     f[j].FieldAlias=tmp+' ('+f[j].FieldAlias+')';
-                                    r[typ][k].a=r[typ][k].a.replace(':ALIAS='+tmp+':','');
                                 }
-                                if(r[typ][k].a.indexOf(':!NULL:')+1){ // This field must not be empty
+                                if(reqAttrs.required){ // This field must not be empty
                                     notNull[PanelID][f[j].i]=f[j].FieldAlias;
                                     f[j].FieldAlias='<b><font color="red">'+f[j].FieldAlias+'</font></b>';
-                                    r[typ][k].a=r[typ][k].a.replace(':!NULL:','');
                                 }
-                                r[typ][k].a=r[typ][k].a.replace(':MULTI:','');
                                 break;
                             }
                         if(edit){
@@ -600,17 +637,17 @@ function myApi(m,u,b,prefix,vars){
                         else if(byId(bt[base])){ // This is a known base type
                             fields+=field.replace(':Type:',f[j].Field)
                                         .replace(':FieldLabel:',f[j].FieldAlias)
-                                        .replace(':control:',byId(bt[base]).innerHTML.replace(':val:',f[j].FieldValue.length?f[j].FieldValue:defaults(r[typ][k].a,f[j].i))
+                                        .replace(':control:',byId(bt[base]).innerHTML.replace(':val:',f[j].FieldValue.length?f[j].FieldValue:defaults(reqAttrs.defaultValue,f[j].i))
                                                                                 .replace(bt[base],'')
                                                                                 .replace(':fid:',f[j].i)
-                                                                                .replace(':checked:',f[j].FieldValue.length||defaults(r[typ][k].a.length)?'checked':'')
+                                                                                .replace(':checked:',f[j].FieldValue.length||defaults(reqAttrs.defaultValue).length?'checked':'')
                                                                                 .replace(/:typ:/g,f[j].Field))
                                         .replace(':ctrl:',ctrl);
                         }
                         else if(r[typ][k].r){ // This is a reference
 							if(id==0){
 								myApi('GET','object/'+t[r[typ][k].t].t+'?JSON','FillDDL',f[j].i);
-								def[f[j].i]=defaults(r[typ][k].a,f[j].i); // Fetch and save the default value
+								def[f[j].i]=defaults(reqAttrs.defaultValue,f[j].i); // Fetch and save the default value
 							}
                             fields+=field.replace(':Type:',f[j].Field)
                                         .replace(':FieldLabel:',f[j].FieldAlias)
@@ -661,9 +698,10 @@ function myApi(m,u,b,prefix,vars){
                     h='';
                 	for(i in r[typ])
                 	    if($('input[name=t'+r[typ][i].i+'],select[name=t'+r[typ][i].i+'],textarea[name=t'+r[typ][i].i+']').length===0){
+                            var itemAttrs=parseFieldAttrs(r[typ][i].a);
                     		h+='<option value="'+r[typ][i].i+'">';
-                    		if(r[typ][i].a.indexOf(':ALIAS=')+1) // We have an alias for this ref requisite
-                    		    h+=r[typ][i].a.split(':ALIAS=').pop().split(':').shift()+' ('+t[r[typ][i].t].v+')</option>';
+							if(itemAttrs.alias) // We have an alias for this ref requisite
+								h+=itemAttrs.alias+' ('+t[r[typ][i].t].v+')</option>';
                     		else
                     		    h+=t[r[typ][i].t].v+'</option>';
                     	}

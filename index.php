@@ -484,10 +484,7 @@ define("SETTINGS", 269);
 define("SETTINGS_TYPE", 271);
 define("SETTINGS_VAL", 273);
 
-define("NOT_NULL_MASK", ":!NULL:");
-define("MULTI_MASK", ":MULTI:");
-define("ALIAS_MASK", "/:ALIAS=(.*?):/u");
-define("ALIAS_DEF", ":ALIAS=");
+require_once __DIR__ . "/include/field_attrs.php";
 # Default LIMIT parameter for queries with no filter
 define("DEFAULT_LIMIT", isset($_COOKIE["default_limit"])&&(int)$_COOKIE["default_limit"]>4&&(int)$_COOKIE["default_limit"]<1001?(int)$_COOKIE["default_limit"]:20);
 define("UPLOAD_DIR", "download/$z/");  # Uploaded files folder
@@ -1955,8 +1952,8 @@ function constructHeader($id, $parent=0){
 					if(!isset($GLOBALS["local_struct"][$row["ref_t"]]))
 						constructHeader($row["ref_t"], $id);
 		            $GLOBALS["refs"][$row["id"]] = $row["ref_t"];
-            		if(strpos($row["attr"], MULTI_MASK) !== FALSE)
-            			$GLOBALS["MULTI"][$row["id"]] = $row["ref_t"];
+					if(FieldAttrsHasMulti($row["attr"]))
+						$GLOBALS["MULTI"][$row["id"]] = $row["ref_t"];
 				}
 				elseif($row["arr"]){
 					$GLOBALS["local_struct"][$id][$row["id"]] = "arr:".$row["req_t"].($row["attr"]?":".MaskDelimiters($row["attr"]):"");
@@ -2218,10 +2215,10 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			while($row = mysqli_fetch_array($data_set))
 # Save all the links from and to this Req and its Peers and Parent
 				if($row["refr"]){
-            		if(strpos($row["attr"], MULTI_MASK) !== FALSE){
-            			$GLOBALS["MULTI"][$row["req"]] = $row["refr"];
+					if(FieldAttrsHasMulti($row["attr"])){
+						$GLOBALS["MULTI"][$row["req"]] = $row["refr"];
 						$distinct = "DISTINCT";	# Multies might return more than one row
-            		}
+					}
 					$GLOBALS["STORED_REPS"][$id]["references"][$row["typ"]][$row["refr"]] = $row["req"];
 					$GLOBALS["STORED_REPS"][$id]["ref_typ"][$row["req"]] = $row["refr"];
 				}
@@ -4272,8 +4269,7 @@ function Download_send_headers($filename)
     header("Content-Type: text/html; charset=UTF-8");
 }
 function FetchAlias($attr, $orig){
-	preg_match(ALIAS_MASK, $attr, $alias); # Check if we got an alias
-	return isset($alias[1]) ? $alias[1] : $orig;
+	return FieldAttrsAlias($attr, $orig);
 }
 function sendJsonHeaders($filename){
 # force download
@@ -4619,12 +4615,15 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					   , "Get Typs & Reqs");
 //#[AS]07.01.2019				, CASE WHEN ref_typs.id!=ref_typs.t THEN ref_typs.val ELSE req_typs.val END req_val
 
+			$apiEditTypes = array();
 			while($row = mysqli_fetch_array($data_set))
-				foreach($row as $key => $value)
-					$blocks[$block][$key][] = str_replace("\\","\\\\","$value");
+				foreach($row as $key => $value){
+					$apiEditTypes[$key][] = "$value";
+					$blocks[$block][$key][] = FieldAttrsJsString($value);
+				}
 			if(isApi())
 			{
-    			$GLOBALS["GLOBAL_VARS"]["api"]["edit_types"] = $blocks[$block];
+				$GLOBALS["GLOBAL_VARS"]["api"]["edit_types"] = $apiEditTypes;
                 $GLOBALS["GLOBAL_VARS"]["api"]["types"] = $GLOBALS["basics"];			    
     			if(Check_Types_Grant() == "WRITE")
                     $GLOBALS["GLOBAL_VARS"]["api"]["editable"] = 1;			    
@@ -4988,7 +4987,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				else
 					$row = array();
 				$row["attrs"] = $GLOBALS["REQS"][$key]["attrs"];
-				$attrs = strlen($row["attrs"]) ? removeMasks($row["attrs"]) : "";
+				$attrs = strlen($row["attrs"]) ? FieldAttrsDefaultValue($row["attrs"]) : "";
 #print_r($GLOBALS);print_r($rows);die();
 				$base_typ = $GLOBALS["REQS"][$key]["base_typ"];
 				$GLOBALS["REV_BT"][$key] = $GLOBALS["REV_BT"][$base_typ];
@@ -5065,8 +5064,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				$blocks[$block]["restrict"][] = $GLOBALS["REQS"][$key]["restrict"];
 				$blocks[$block]["up"][] = $id;
 				$blocks[$block]["typ_name"][] = $GLOBALS["REQS"][$key]["val"];
-				$blocks[$block]["not_null"][] = strpos($row["attrs"], NOT_NULL_MASK) === false ? 0 : 1;
-				$blocks[$block]["multi"][] = strpos($row["attrs"], MULTI_MASK) === false ? 0 : 1;
+				$blocks[$block]["not_null"][] = FieldAttrsHasRequired($row["attrs"]) ? 1 : 0;
+				$blocks[$block]["multi"][] = FieldAttrsHasMulti($row["attrs"]) ? 1 : 0;
 				$blocks[$block]["arr_num"][] = isset($row["arr_num"]) ? $row["arr_num"] : 0;
 				$blocks[$block]["arr"][] = isset($GLOBALS["ARR_typs"][$key]) ? $GLOBALS["ARR_typs"][$key] : 0;
 				$blocks[$block]["attrs"][] = $row["attrs"];
@@ -5200,7 +5199,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			$cur_ref_req = $blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["ref"];  # Get the current link's type
 			$cur_ref_typ = $blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["typ"];
 			$row["attrs"] = $GLOBALS["REQS"][$cur_ref_typ]["attrs"];
-			$attrs = strlen($row["attrs"]) ? removeMasks($row["attrs"]) : "";
+			$attrs = strlen($row["attrs"]) ? FieldAttrsDefaultValue($row["attrs"]) : "";
 			if(strlen($attrs)){
 			    if(!isset($blocks[$attrs])){
     				$id_bak = $id;
@@ -5727,11 +5726,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     							}
                                 else
                                     exec_sql("INSERT INTO $z (id, up, ord, t, val) VALUES ($reqID, $parent, $order, $refID, '')", "Import ref Req with ID");
-                                trace("  attrs:".(isset($typ[3])?UnMaskDelimiters($typ[3]):""). " - ".MULTI_MASK);
-                        		if(strpos(isset($typ[3])?UnMaskDelimiters($typ[3]):"", MULTI_MASK) !== FALSE){
-                        			$GLOBALS["MULTI"][$reqID] = $refID;
-                        			trace("set $reqID = $refID MULTI");
-                        		}
+                                trace("  attrs:".(isset($typ[3])?UnMaskDelimiters($typ[3]):""). " - multi");
+								if(FieldAttrsHasMulti(isset($typ[3])?UnMaskDelimiters($typ[3]):"")){
+									$GLOBALS["MULTI"][$reqID] = $refID;
+									trace("set $reqID = $refID MULTI");
+								}
     	    		            $GLOBALS["refs"][$reqID] = $refID;
                                 $GLOBALS["local_types"][$par][$order] = CheckSubst($reqID);
     				        }
@@ -6116,7 +6115,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				$blocks[$block]["ref_type"][] = $row["ref_id"] ? "ref-type=\"".$row["ref_id"]."\"" : "";
 				$blocks[$block]["arr_type"][] = $row["arr_id"] ? "arr-type=\"".$row["t"]."\"" : "";
 				$blocks[$block]["id"][] = $id;
-				$blocks[$block]["mandatory"][] = strpos($row["attrs"], NOT_NULL_MASK) === false ? "" : "mandatory";
+				$blocks[$block]["mandatory"][] = FieldAttrsHasRequired($row["attrs"]) ? "mandatory" : "";
 				$blocks[$block]["array"][] = $row["arr_id"] != 0 ? "arr" : "";
 
 				$GLOBALS["attrs"][$row["t"]] = $row["attrs"];  # The template name for BUTTON
@@ -6140,15 +6139,15 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				}
 				if($row["ref_id"] != 0){
 					$GLOBALS["REF_typs"][$row["t"]] = $row["ref_id"];  # Save the Typ of the referenced Object
-            		if(strpos($row["attrs"], MULTI_MASK) !== FALSE){
-            			$GLOBALS["MULTI"][$row["t"]] = $row["ref_id"];
-    				    $blocks[$block]["multi"][] = "t-multi";
-            		}
-            		else
+					if(FieldAttrsHasMulti($row["attrs"])){
+						$GLOBALS["MULTI"][$row["t"]] = $row["ref_id"];
+						$blocks[$block]["multi"][] = "t-multi";
+					}
+					else
     				    $blocks[$block]["multi"][] = "";
     				$blocks[$block]["ref"][] = "t-ref";
     				# Check if we got a query for the DDL
-				    $attrs = removeMasks($row["attrs"]);
+				    $attrs = FieldAttrsDefaultValue($row["attrs"]);
 					if(strlen($attrs) > 0)
 						if(BuiltIn($attrs) == $attrs) # Calc predefined value
 						    $GLOBALS["STORED_REPS"][$row["id"]]["ddl"] = $attrs; # BuiltIn gave nothing - try calculatables
@@ -6775,7 +6774,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                 $blocks[$block]["typ"][] = $key;
                 
 				if($literal_typ == "BUTTON"){
-				    $tmp = removeMasks($GLOBALS["attrs"][$key]);
+				    $tmp = FieldAttrsDefaultValue($GLOBALS["attrs"][$key]);
 					$btnLink = str_replace("[ID]", $blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["id"]
 										, str_replace("[VAL]", $blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["val"], $tmp));
 				}
@@ -6896,7 +6895,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			if(isset($blocks["BUTTONS"]))
 				foreach($blocks["BUTTONS"] as $key => $value)
 				{
-				    $value = removeMasks($value);
+				    $value = FieldAttrsDefaultValue($value);
 					$blocks[$block]["val"][] = $key;
 					$blocks[$block]["attrs"][] = str_replace("[ID]", $GLOBALS["cur_id"]
 														, str_replace("[VAL]", $blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["val"], $value));
@@ -7235,8 +7234,8 @@ function GetObjectReqs($typ, $id)
 	$data_set = Exec_sql($sql, "Get the Reqs meta");
 	while($row = mysqli_fetch_array($data_set)){
 		if($row["ref_id"]){
-    		if(strpos($row["attrs"], MULTI_MASK) !== FALSE){
-    			$GLOBALS["MULTI"][$row["t"]] = $row["ref_id"];
+			if(FieldAttrsHasMulti($row["attrs"])){
+				$GLOBALS["MULTI"][$row["t"]] = $row["ref_id"];
 				# Collect comma-separated ref IDs
 				$GLOBALS["REF_typs"][$row["t"]] = $row["ref_id"];
 				# $GLOBALS["REF_typs"][$row["t"]] = isset($GLOBALS["REF_typs"][$row["t"]]) ? $GLOBALS["REF_typs"][$row["t"]].",".$row["ref_id"] : $row["ref_id"];
@@ -7372,7 +7371,7 @@ function Get_Current_Values($id, $typ)
 	{
 		if(!is_array($value))
 			continue;
-		if(!(strpos($GLOBALS["REQS"][$key]["attrs"], NOT_NULL_MASK) === FALSE))
+		if(FieldAttrsHasRequired($GLOBALS["REQS"][$key]["attrs"]))
 			$GLOBALS["NOT_NULL"][$key] = "";
 		# Remember the base Type
 		$GLOBALS["REV_BT"][$key] = $GLOBALS["REV_BT"][$GLOBALS["REQS"][$key]["base_typ"]];
@@ -8433,9 +8432,7 @@ function verifyJWT($jwt, $publicKey) {
         return false;
 }
 function removeMasks($attrs){
-	$attrs = str_replace(NOT_NULL_MASK, "", $attrs); # Remove NOT_NULL, MULTI, and ALIAS by mask
-	$attrs = str_replace(MULTI_MASK, "", $attrs);
-	return preg_replace(ALIAS_MASK, "", $attrs);
+	return FieldAttrsDefaultValue($attrs);
 }
 function authJWT($u){
 	global $z;
@@ -8843,8 +8840,8 @@ if(Validate_Token())
         			if($row = mysqli_fetch_array($result)){
         				$cur_id = $row["id"];
         				if(!isset($GLOBALS["basics"][$row["t"]])){	# Reference - its type is not a base one
-        				    if(strpos($row["attrs"], MULTI_MASK) !== false){
-        				        $deft = $row["t"];
+							if(FieldAttrsHasMulti($row["attrs"])){
+								$deft = $row["t"];
         				        # Get the current set of Refs
         				        do{
 									if($row["id"]){ 
@@ -9351,9 +9348,9 @@ if(Validate_Token())
 			    do{
 			        $req_list[$row["id"]] = $row["reqt"];
 			        if(!isset($_REQUEST["t".$row["id"]]) && ($GLOBALS["basics"][$row["base"]] !== "BUTTON")){
-                		if(strpos($row["val"], MULTI_MASK) !== FALSE)
-                			$GLOBALS["MULTI"][$row["id"]] = $row["reqt"];
-    				    $attrs = removeMasks($row["val"]);
+					if(FieldAttrsHasMulti($row["val"]))
+						$GLOBALS["MULTI"][$row["id"]] = $row["reqt"];
+					$attrs = FieldAttrsDefaultValue($row["val"]);
     					if($attrs !== ""){
     					    if(isset($_REQUEST["NEW_".$row["id"]]) && isset($GLOBALS["REF_typs"][$t])) 
     					        continue; // "NEW_" was submitted for the Ref, skip the default value
@@ -9626,7 +9623,7 @@ if(Validate_Token())
 				my_die(t9n("[RU]Не найден тип $id [EN]$id type not found"));
 			$obj = $id;
 			if(!isset($GLOBALS["basics"][$row["t"]]) && isset($_REQUEST["multiselect"]))
-			    $attr = MULTI_MASK; # It is a reference and it must be multi-selectable
+			    $attr = FieldAttrsBuild("", false, true); # It is a reference and it must be multi-selectable
 			else
 			    $attr = "";
 			$id = Insert($id, Get_Ord($id), $t, $attr, "Add Req");
@@ -9665,19 +9662,7 @@ if(Validate_Token())
 				if($row["up"] != 0)
 					my_die(t9n("[RU]Ошибка подчиненности объекта ссылки [EN]Error in subordination of the link object"));
 				$up = $row["myup"];
-				$alias = explode(ALIAS_DEF, $row["val"]);
-				if(isset($alias[1])) # $alias[1] is OldAlias::bla-bla...
-				{
-					if(mb_strlen($alias[1]) > mb_strpos($alias[1],":")+1)
-						$alias[1] = mb_substr($alias[1],mb_strpos($alias[1],":")+1);
-					else
-						$alias[1] = "";
-					if($val != "")
-						$alias[1] = ALIAS_DEF.$val.":".$alias[1];
-					Exec_sql("UPDATE $z SET val='".implode($alias)."' WHERE id=$id", "Update alias");
-				}
-				else
-					Exec_sql("UPDATE $z SET val=CONCAT(val,'".ALIAS_DEF.addslashes($val).":') WHERE id=$id", "Set alias");
+				Update_Val($id, FieldAttrsSetAlias($row["val"], $val));
 			}
 			else
 				my_die(t9n("[RU]Тип $id не найден [EN]Type $id not found"));
@@ -9722,11 +9707,10 @@ if(Validate_Token())
 
 		case "_d_null":
 		case "_setnull":
-			$result = Exec_sql("SELECT obj.id FROM $z req LEFT JOIN $z obj ON obj.id=req.up WHERE req.id=$id and obj.up=0"
+			$result = Exec_sql("SELECT obj.id, req.val FROM $z req LEFT JOIN $z obj ON obj.id=req.up WHERE req.id=$id and obj.up=0"
 							, "Check the req and obj");
 			if($row = mysqli_fetch_array($result))
-    			Exec_sql("UPDATE $z SET val=CASE WHEN val LIKE '%".NOT_NULL_MASK."%' THEN REPLACE(val, '".NOT_NULL_MASK
-    									."', '') ELSE CONCAT(val, '".NOT_NULL_MASK."') END WHERE id=$id", "Switch NULL-able");
+				Update_Val($id, FieldAttrsToggleFlag($row["val"], "required"));
     		else
     		    my_die(t9n("[RU]Неверный реквизит $id [EN]Invalid requisite $id "));
     		$obj = $row["id"];
@@ -9734,11 +9718,10 @@ if(Validate_Token())
 
 		case "_d_multi":
 		case "_setmulti":
-			$result = Exec_sql("SELECT obj.id FROM $z req LEFT JOIN $z obj ON obj.id=req.up WHERE req.id=$id and obj.up=0"
+			$result = Exec_sql("SELECT obj.id, req.val FROM $z req LEFT JOIN $z obj ON obj.id=req.up WHERE req.id=$id and obj.up=0"
 							, "Check the req and obj");
 			if($row = mysqli_fetch_array($result))
-    			Exec_sql("UPDATE $z SET val=CASE WHEN val LIKE '%".MULTI_MASK."%' THEN REPLACE(val, '".MULTI_MASK
-    									."', '') ELSE CONCAT(val, '".MULTI_MASK."') END WHERE id=$id", "Switch Multi-select flag");
+				Update_Val($id, FieldAttrsToggleFlag($row["val"], "multi"));
     		else
     		    my_die(t9n("[RU]Неверный реквизит $id [EN]Invalid requisite $id "));
     		$obj = $row["id"];
@@ -9746,13 +9729,12 @@ if(Validate_Token())
 
 		case "_d_attrs":
 		case "_modifiers":
-			if(isset($_REQUEST["alias"])) # Append alias, if it's set
-				if(strlen($_REQUEST["alias"]))
-					$val = ALIAS_DEF.$_REQUEST["alias"].":$val";
-			if(isset($_REQUEST["set_null"])) # Append NOT_NULL_MASK
-				$val = NOT_NULL_MASK.$val;
-			if(isset($_REQUEST["multi"])) # Append MULTI_MASK
-				$val = MULTI_MASK.$val;
+			$val = FieldAttrsBuild(
+				$val,
+				isset($_REQUEST["set_null"]),
+				isset($_REQUEST["multi"]),
+				isset($_REQUEST["alias"]) ? $_REQUEST["alias"] : null
+			);
 			Update_Val($id, $val);
 			$obj = $up;
 			break;
@@ -9922,7 +9904,7 @@ if(Validate_Token())
                             .",\"type\":\"".$row["base_typ"]."\""
                             .($row["arr_id"]?",\"arr_id\":\"".$row["arr_id"]."\"":"")
                             .($row["ref"]?",\"ref\":\"".$row["ref"]."\",\"ref_id\":\"".$row["ref_id"]."\"":"")
-                            .($row["attrs"]?",\"attrs\":\"".$row["attrs"]."\"":"")
+                            .FieldAttrsJsonProperty($row["attrs"])
                         ."}";
         	}
             if(isset($reqs))
@@ -9981,7 +9963,7 @@ if(Validate_Token())
                                 .",\"type\":\"".($row["base_typ"]??"1")."\""
                                 .($row["arr_id"]?",\"arr_id\":\"".$row["arr_id"]."\"":"")
                                 .($row["ref"]?",\"ref\":\"".$row["ref"]."\",\"ref_id\":\"".$row["ref_id"]."\"":"")
-                                .($row["attrs"]?",\"attrs\":\"".$row["attrs"]."\"":"")
+                                .FieldAttrsJsonProperty($row["attrs"])
 								.(isset($GLOBALS["GRANTS"][$row["req_t"]]) ? ",\"granted\":\"".$GLOBALS["GRANTS"][$row["req_t"]]."\"" : "")."}";
         	}
 	        foreach($meta as $k => $m)
@@ -10072,7 +10054,7 @@ if(Validate_Token())
 			    if(!isset($dic)){
     			    $dic = $row["dic"];
     			    if(strlen($row["attr"]) > 0){
-    			        $attrs = removeMasks($row["attr"]);
+					$attrs = FieldAttrsDefaultValue($row["attr"]);
     					if(strlen($attrs) > 0){ # Some value - this might be a report
     						$id_bak = $id;
     						$block_bak = $block;

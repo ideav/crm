@@ -1921,7 +1921,7 @@ class IntegramTable{
             const isRefField = column.ref_id != null || (column.ref && column.ref !== 0);
             // Issue #1794: "link to any record" type — orig === "1" with no ref_id and no ref
             const isAnyRecordLink = column.orig === '1' && column.ref_id == null && !column.ref;
-            const isArrayField = column.attrs && column.attrs.includes(':MULTI:');
+            const isArrayField = this.parseAttrs(column.attrs).multi;
             const dataTypeAttrs = ` data-type="${format}"${isRefField ? ' data-ref="1"' : ''}${isAnyRecordLink ? ' data-any-ref="1"' : ''}${isArrayField ? ' data-array="1"' : ''}`;
 
             // In object format, reference fields and GRANT/REPORT_COLUMN fields return values as "id:Value"
@@ -3563,7 +3563,7 @@ class IntegramTable{
                 const colIndex = parseInt(td.dataset.col);
                 if (isNaN(colIndex)) return;
                 const column = orderedColumns[colIndex];
-                if (column && column.attrs && column.attrs.includes(':!NULL:')) {
+                if (column && this.parseAttrs(column.attrs).required) {
                     td.classList.add('required-field-new-row');
                 }
             });
@@ -3937,7 +3937,7 @@ class IntegramTable{
                 const colIndex = parseInt(td.dataset.col);
                 if (isNaN(colIndex)) return;
                 const column = orderedColumns[colIndex];
-                if (column && column.attrs && column.attrs.includes(':!NULL:')) {
+                if (column && this.parseAttrs(column.attrs).required) {
                     // Only highlight if the cell is currently empty (issue #785)
                     const currentValue = this.extractCellValue(td);
                     if (!currentValue) {
@@ -7681,12 +7681,7 @@ class IntegramTable{
                                 saveBtn.disabled = false;
                                 return;
                             }
-                            // Update attrs
-                            if (newRequired) {
-                                col.attrs = (col.attrs || '') + ':!NULL:';
-                            } else {
-                                col.attrs = (col.attrs || '').replace(/:!NULL:/g, '');
-                            }
+                            col.attrs = setIntegramAttrFlag(col.attrs, 'required', newRequired);
                         }
                     }
 
@@ -7700,11 +7695,7 @@ class IntegramTable{
                                 saveBtn.disabled = false;
                                 return;
                             }
-                            // Update attrs alias
-                            col.attrs = (col.attrs || '').replace(/:ALIAS=.*?:/g, '');
-                            if (newAlias) {
-                                col.attrs = (col.attrs || '') + `:ALIAS=${newAlias}:`;
-                            }
+                            col.attrs = setIntegramAttrAlias(col.attrs, newAlias);
                             col.name = newAlias || (this.parseAttrs(col.attrs).alias) || col.name;
                         }
 
@@ -7717,11 +7708,7 @@ class IntegramTable{
                                 saveBtn.disabled = false;
                                 return;
                             }
-                            if (newMulti) {
-                                col.attrs = (col.attrs || '') + ':MULTI:';
-                            } else {
-                                col.attrs = (col.attrs || '').replace(/:MULTI:/g, '');
-                            }
+                            col.attrs = setIntegramAttrFlag(col.attrs, 'multi', newMulti);
                         }
                     }
 
@@ -8374,7 +8361,7 @@ class IntegramTable{
                                 type: baseTypeId,
                                 format: isListValue ? 'REF' : this.mapTypeIdToFormat(baseTypeId),
                                 granted: 1,
-                                attrs: isMultiselect ? ':MULTI:' : '',
+                                attrs: buildIntegramAttrs('', false, isMultiselect),
                                 paramId: newColumnId,
                                 // For list columns, set ref_id, ref, and orig so showColumnEditForm treats them
                                 // as reference columns immediately (without requiring a page refresh, issue #1678)
@@ -11173,34 +11160,7 @@ class IntegramTable{
         }
 
         parseAttrs(attrs) {
-            const result = {
-                required: false,
-                multi: false,
-                alias: null,
-                defaultValue: null
-            };
-
-            if (!attrs) return result;
-
-            result.required = attrs.includes(':!NULL:');
-            result.multi = attrs.includes(':MULTI:');
-
-            const aliasMatch = attrs.match(/:ALIAS=(.*?):/u);
-            if (aliasMatch) {
-                result.alias = aliasMatch[1];
-            }
-
-            // Extract default value: strip all known flags and use the remainder
-            let stripped = attrs
-                .replace(/:!NULL:/g, '')
-                .replace(/:MULTI:/g, '')
-                .replace(/:ALIAS=(.*?):/gu, '')
-                .trim();
-            if (stripped.length > 0) {
-                result.defaultValue = stripped;
-            }
-
-            return result;
+            return parseIntegramAttrs(attrs);
         }
 
         /**
@@ -17579,6 +17539,116 @@ if (typeof window !== 'undefined') {
     window._integramTableInstances = window._integramTableInstances || [];
 }
 
+function parseIntegramAttrs(attrs) {
+    const result = {
+        required: false,
+        multi: false,
+        alias: null,
+        defaultValue: null
+    };
+
+    if (!attrs) return result;
+
+    const parseBool = (value) => {
+        if (typeof value === 'boolean') return value;
+        if (typeof value === 'number') return value !== 0;
+        if (typeof value === 'string') {
+            return !['', '0', 'false', 'no', 'off'].includes(value.trim().toLowerCase());
+        }
+        return Boolean(value);
+    };
+    const raw = String(attrs).trim();
+    const parseJson = (text) => {
+        if (!text || text.charAt(0) !== '{') return null;
+        try {
+            const parsed = JSON.parse(text);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+        } catch (e) {
+            return null;
+        }
+    };
+    const jsonAttrs = parseJson(raw) || parseJson(raw.replace(/\\"/g, '"'));
+
+    if (jsonAttrs) {
+        Object.keys(jsonAttrs).forEach((key) => {
+            if (!['required', 'notNull', 'not_null', 'multi', 'alias', 'default', 'defaultValue'].includes(key)) {
+                result[key] = jsonAttrs[key];
+            }
+        });
+        result.required = parseBool(jsonAttrs.required ?? jsonAttrs.notNull ?? jsonAttrs.not_null);
+        result.multi = parseBool(jsonAttrs.multi);
+        result.alias = jsonAttrs.alias ? String(jsonAttrs.alias) : null;
+        const defaultValue = jsonAttrs.default ?? jsonAttrs.defaultValue;
+        result.defaultValue = defaultValue !== undefined && defaultValue !== null && String(defaultValue).length > 0
+            ? String(defaultValue)
+            : null;
+        return result;
+    }
+
+    result.required = raw.includes(':!NULL:');
+    result.multi = raw.includes(':MULTI:');
+
+    const aliasMatch = raw.match(/:ALIAS=(.*?):/u);
+    if (aliasMatch) {
+        result.alias = aliasMatch[1];
+    }
+
+    const stripped = raw
+        .replace(/:!NULL:/g, '')
+        .replace(/:MULTI:/g, '')
+        .replace(/:ALIAS=(.*?):/gu, '')
+        .trim();
+    if (stripped.length > 0) {
+        result.defaultValue = stripped;
+    }
+
+    return result;
+}
+
+function serializeIntegramAttrs(attrs) {
+    const source = attrs || {};
+    const result = {};
+    Object.keys(source).forEach((key) => {
+        if (!['required', 'notNull', 'not_null', 'multi', 'alias', 'default', 'defaultValue'].includes(key) && source[key] !== null) {
+            result[key] = source[key];
+        }
+    });
+    if (source.required) result.required = true;
+    if (source.multi) result.multi = true;
+    if (source.alias) result.alias = String(source.alias);
+    const defaultValue = source.defaultValue ?? source.default;
+    if (defaultValue !== undefined && defaultValue !== null && String(defaultValue).length > 0) {
+        result.default = String(defaultValue);
+    }
+    return Object.keys(result).length ? JSON.stringify(result) : '';
+}
+
+function setIntegramAttrFlag(attrs, flag, enabled) {
+    const parsed = parseIntegramAttrs(attrs);
+    parsed[flag] = Boolean(enabled);
+    return serializeIntegramAttrs(parsed);
+}
+
+function setIntegramAttrAlias(attrs, alias) {
+    const parsed = parseIntegramAttrs(attrs);
+    parsed.alias = alias || null;
+    return serializeIntegramAttrs(parsed);
+}
+
+function buildIntegramAttrs(defaultValue = '', required = false, multi = false, alias = null) {
+    return serializeIntegramAttrs({ defaultValue, required, multi, alias });
+}
+
+if (typeof IntegramTable !== 'undefined') {
+    IntegramTable.parseAttrsValue = parseIntegramAttrs;
+    IntegramTable.serializeAttrsValue = serializeIntegramAttrs;
+}
+if (typeof window !== 'undefined') {
+    window.parseIntegramAttrs = parseIntegramAttrs;
+    window.serializeIntegramAttrs = serializeIntegramAttrs;
+    window.buildIntegramAttrs = buildIntegramAttrs;
+}
+
 /**
  * Global function to reload all IntegramTable instances
  * Reloads all table components with their current filter parameters
@@ -17802,34 +17872,7 @@ class IntegramCreateFormHelper {
     }
 
     parseAttrs(attrs) {
-        const result = {
-            required: false,
-            multi: false,
-            alias: null,
-            defaultValue: null
-        };
-
-        if (!attrs) return result;
-
-        result.required = attrs.includes(':!NULL:');
-        result.multi = attrs.includes(':MULTI:');
-
-        const aliasMatch = attrs.match(/:ALIAS=(.*?):/u);
-        if (aliasMatch) {
-            result.alias = aliasMatch[1];
-        }
-
-        // Extract default value: strip all known flags and use the remainder
-        let stripped = attrs
-            .replace(/:!NULL:/g, '')
-            .replace(/:MULTI:/g, '')
-            .replace(/:ALIAS=(.*?):/gu, '')
-            .trim();
-        if (stripped.length > 0) {
-            result.defaultValue = stripped;
-        }
-
-        return result;
+        return parseIntegramAttrs(attrs);
     }
 
     normalizeFormat(baseTypeId) {

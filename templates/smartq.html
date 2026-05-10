@@ -1150,6 +1150,32 @@ function deleteFile(el){
 function deleteFileDone(json,el){
     $(el).closest('td').html('');
 }
+function parseFieldAttrs(attrs){
+    var result={multi:false};
+    if(!attrs) return result;
+    attrs=String(attrs);
+    var raw=attrs.trim();
+    function parseBool(value){
+        if(value===true||value===false) return value;
+        if(typeof value==='number') return value!==0;
+        if(typeof value==='string')
+            return ['', '0', 'false', 'no', 'off'].indexOf(value.trim().toLowerCase())===-1;
+        return !!value;
+    }
+    function parseJson(text){
+        if(!text||text.charAt(0)!=='{') return null;
+        try{
+            var parsed=JSON.parse(text);
+            return parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?parsed:null;
+        }
+        catch(e){
+            return null;
+        }
+    }
+    var json=parseJson(raw)||parseJson(raw.replace(/\\"/g,'"'));
+    result.multi=json?parseBool(json.multi):attrs.indexOf(':MULTI:')!==-1;
+    return result;
+}
 function getMeta(json,refId){
     baseType[json.id]=bt[json.type];
     uniq[json.id]=json.unique;
@@ -1159,7 +1185,7 @@ function getMeta(json,refId){
                                 ,arrId:json.reqs[i].arr_id
                                 ,refId:json.reqs[i].ref_id
                                 ,ref:json.reqs[i].ref
-                                ,multi:json.reqs[i].attrs&&json.reqs[i].attrs.indexOf(":MULTI:")!==-1
+                                ,multi:parseFieldAttrs(json.reqs[i].attrs).multi
                                 ,type:json.reqs[i].type};
         if(json.reqs[i].arr_id)
             arrs[json.reqs[i].arr_id]=metas[json.reqs[i].arr_id]=refId||json.id;

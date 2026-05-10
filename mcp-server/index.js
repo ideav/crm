@@ -85,6 +85,50 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import axios from 'axios';
 
+function parseFieldAttrs(attrs) {
+  const result = { alias: null, multi: false, required: false, defaultValue: null };
+  if (!attrs) return result;
+
+  const parseBool = (value) => {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+    if (typeof value === 'string') {
+      return !['', '0', 'false', 'no', 'off'].includes(value.trim().toLowerCase());
+    }
+    return Boolean(value);
+  };
+  const raw = String(attrs).trim();
+  const parseJson = (text) => {
+    if (!text || text.charAt(0) !== '{') return null;
+    try {
+      const parsed = JSON.parse(text);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+    } catch (e) {
+      return null;
+    }
+  };
+  const jsonAttrs = parseJson(raw) || parseJson(raw.replace(/\\"/g, '"'));
+  if (jsonAttrs) {
+    result.alias = jsonAttrs.alias ? String(jsonAttrs.alias) : null;
+    result.multi = parseBool(jsonAttrs.multi);
+    result.required = parseBool(jsonAttrs.required ?? jsonAttrs.notNull ?? jsonAttrs.not_null);
+    const defaultValue = jsonAttrs.default ?? jsonAttrs.defaultValue;
+    result.defaultValue = defaultValue !== undefined && defaultValue !== null ? String(defaultValue) : null;
+    return result;
+  }
+
+  result.alias = raw.match(/:ALIAS=([^:]+):/)?.[1] || null;
+  result.multi = raw.includes(':MULTI:');
+  result.required = raw.includes(':!NULL:');
+  const defaultValue = raw
+    .replace(/:!NULL:/g, '')
+    .replace(/:MULTI:/g, '')
+    .replace(/:ALIAS=(.*?):/gu, '')
+    .trim();
+  result.defaultValue = defaultValue || null;
+  return result;
+}
+
 /**
  * Validate that baseTypeId is a SYSTEM base type, not a custom table ID.
  *
@@ -3761,7 +3805,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 for (const req of metadata.reqs) {
                   const field = {
                     id: parseInt(req.id),
-                    name: req.attrs?.match(/:ALIAS=([^:]+):/)?.[1] || req.val || `field_${req.id}`
+                    name: parseFieldAttrs(req.attrs).alias || req.val || `field_${req.id}`
                   };
 
                   // Determine field type
@@ -4020,7 +4064,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 for (const req of metadata.reqs) {
                   fields.push({
                     id: parseInt(req.id),
-                    name: req.attrs?.match(/:ALIAS=([^:]+):/)?.[1] || req.val
+                    name: parseFieldAttrs(req.attrs).alias || req.val
                   });
                 }
               }
