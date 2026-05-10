@@ -7528,6 +7528,7 @@ class IntegramTable{
             const nameFieldHtml = isRef
                 ? `<a href="${ this.escapeHtml(refTableUrl) }" target="${ refTypeId }" style="color: grey;">${ this.escapeHtml(currentName) }</a>`
                 : `<input type="text" id="col-edit-name-${instanceName}" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(currentName) }" placeholder="Введите название колонки" autocomplete="off">`;
+            const uniqueKeyTitle = 'Система контролирует уникальность комбинации первой колонки и всех ключей';
 
             colEditModal.innerHTML = `
                 <h3 style="margin: 0 0 16px 0; font-weight: 500; font-size: 1.125rem;">Редактирование колонки: <em style="font-style: normal; color: var(--md-primary, #1976d2);">${ this.escapeHtml(col.name) }</em></h3>
@@ -7550,7 +7551,7 @@ class IntegramTable{
                         </label>
                     </div>` : '' }
                     ${ !isFirstColumn ? `<div class="col-edit-row">
-                        <label class="col-edit-label col-edit-check-label">
+                        <label class="col-edit-label col-edit-check-label" title="${ this.escapeHtml(uniqueKeyTitle) }">
                             <input type="checkbox" id="col-edit-key-${instanceName}" ${ isKey ? 'checked' : '' }>
                             Входит в проверку уникальности
                         </label>
