@@ -347,10 +347,7 @@
         saveAiServiceSettings() {
             this.collectAiServiceForm();
             try {
-                this.writeAiServiceCookie(JSON.stringify({
-                    activeProviderId: this.aiActiveProviderId,
-                    profiles: this.aiServiceProfiles
-                }));
+                this.persistAiServiceSettings();
                 const stateEl = document.getElementById('ai-settings-state');
                 if (stateEl) stateEl.textContent = 'Настройки сохранены в cookies';
                 this.notify('Настройки ИИ-сервиса сохранены', 'success');
@@ -358,6 +355,14 @@
                 console.error('[ai-chat] settings save failed:', err);
                 this.notify('Не удалось сохранить настройки ИИ-сервиса', 'error');
             }
+        }
+
+        persistAiServiceSettings() {
+            this.normalizeAiServiceProfiles();
+            this.writeAiServiceCookie(JSON.stringify({
+                activeProviderId: this.aiActiveProviderId,
+                profiles: this.aiServiceProfiles
+            }));
         }
 
         writeAiServiceCookie(value) {
@@ -378,7 +383,7 @@
             const credentialText = profile.tokenMode === 'adc'
                 ? ' через Application Default Credentials'
                 : '';
-            this.addAiChatMessage('assistant', 'Подключение' + credentialText + ' подготовлено. Реальный запрос к сервису будет включен после добавления серверного endpoint.');
+            this.addAiChatMessage('assistant', 'Подключение' + credentialText + ' подготовлено. Запросы будут отправляться через серверный endpoint.');
         }
 
         getActiveAiProfile() {
@@ -460,7 +465,7 @@
             return select && select.value ? select.value : (this.getCurrentDbName() || 'my');
         }
 
-        sendAiChatMessage(commandType, presetText) {
+        async sendAiChatMessage(commandType, presetText) {
             const input = document.getElementById('ai-chat-input');
             const text = (presetText || (input ? input.value : '')).trim();
             if (!text) return;
@@ -472,13 +477,22 @@
             const inferredCommand = commandType || this.inferAiCommandType(text);
             const payload = this.buildAiRequestPayload(text, inferredCommand);
             const command = this.createAiCommandFromPayload(payload);
+            command.status = 'Отправляется';
             this.aiCommandQueue.unshift(command);
             this.renderAiCommandQueue();
 
-            this.addAiChatMessage(
-                'assistant',
-                'Запрос подготовлен для ' + payload.provider.label + '. Команда добавлена в очередь: ' + command.title + '.'
-            );
+            try {
+                this.persistAiServiceSettings();
+                const result = await this.callAiChatServer(payload);
+                this.applyAiServerResponse(command, result);
+            } catch (err) {
+                console.error('[ai-chat] server request failed:', err);
+                command.status = 'Ошибка';
+                command.error = err && err.message ? err.message : 'Неизвестная ошибка';
+                this.renderAiCommandQueue();
+                this.addAiChatMessage('assistant', 'Не удалось получить ответ сервера: ' + command.error);
+                this.notify('ИИ-сервер вернул ошибку', 'error');
+            }
         }
 
         inferAiCommandType(text) {
@@ -558,6 +572,75 @@
                 status: 'Подготовлена',
                 payload: payload
             };
+        }
+
+        async callAiChatServer(payload) {
+            const fetchFn = typeof fetch === 'function'
+                ? fetch
+                : (typeof window !== 'undefined' && typeof window.fetch === 'function' ? window.fetch.bind(window) : null);
+            if (!fetchFn) {
+                throw new Error('Fetch API недоступен');
+            }
+
+            const response = await fetchFn('/my/ai/chat?JSON=1', {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json; charset=UTF-8'
+                },
+                body: JSON.stringify({
+                    _xsrf: this.getXsrfToken(),
+                    payload: payload
+                })
+            });
+
+            let data = null;
+            try {
+                data = await response.json();
+            } catch (err) {
+                data = null;
+            }
+
+            if (!response.ok || this.getAiServerError(data)) {
+                throw new Error(this.getAiServerError(data) || ('HTTP ' + response.status));
+            }
+
+            return data || {};
+        }
+
+        applyAiServerResponse(command, response) {
+            command.serverResponse = response;
+            if (response && response.command) {
+                command.title = response.command.title || command.title;
+                command.status = response.command.status || 'Получен ответ';
+            } else {
+                command.status = 'Получен ответ';
+            }
+            if (response && response.provider) {
+                command.provider = response.provider.label || response.provider.id || command.provider;
+            }
+            this.renderAiCommandQueue();
+
+            const content = response && response.assistant && response.assistant.content
+                ? response.assistant.content
+                : 'Ответ сервера получен. Команда обновлена в очереди.';
+            this.addAiChatMessage('assistant', content);
+        }
+
+        getAiServerError(data) {
+            if (!data) return '';
+            if (typeof data.error === 'string') return data.error;
+            if (Array.isArray(data) && data[0] && data[0].error) return data[0].error;
+            if (Array.isArray(data.error) && data.error[0] && data.error[0].message) return data.error[0].message;
+            if (data.error && data.error.message) return data.error.message;
+            return '';
+        }
+
+        getXsrfToken() {
+            if (typeof xsrf !== 'undefined' && xsrf) return String(xsrf);
+            if (typeof window !== 'undefined' && window.xsrf) return String(window.xsrf);
+            const meta = document.querySelector ? document.querySelector('meta[name="_xsrf"]') : null;
+            return meta ? meta.getAttribute('content') : '';
         }
 
         getAiCommandLabel(commandType) {

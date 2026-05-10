@@ -133,19 +133,22 @@ if(isset($row["val"]) && ((int)$row["val"] < 0.01))
 	trace("Billing: read only");
 # Fetch all the parameters from the body and log them
 $params = "";
-if(strlen(file_get_contents('php://input'))){
-    $json = json_decode(file_get_contents('php://input'), true);
+$rawInput = file_get_contents('php://input');
+if(strlen($rawInput)){
+    $json = json_decode($rawInput, true);
     if(json_last_error() === JSON_ERROR_NONE)
         foreach($json AS $key => $value)
             $_POST[$key] = $_REQUEST[$key] = $value;
 }
 $sensitivePostKeys = ['pwd', 'password', 'token', 'secret', 'reset', 'regpwd', 'regpwd1'];
-foreach($_POST AS $key => $value)
+foreach($_POST AS $key => $value){
+    $value = maskSensitiveLogValue($key, $value, $sensitivePostKeys);
 	if(is_array($value))
 		$params .= "\n $key " . print_r($value, true) . "\n";
 	else
 		if(strlen($value) && !in_array(strtolower($key), $sensitivePostKeys))
 			$params .= " $key=$value;";
+}
 $safeUri = preg_replace('/([?&](secret|token|c|code|reset)=)[^&]*/i', '$1***', $_SERVER["REQUEST_URI"]);
 wlog($_SERVER["REMOTE_ADDR"]." ".$safeUri." $params", "log");
 if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Register the user
@@ -7846,6 +7849,493 @@ function api_dump($json, $name="api.json")
 	updateBilling();
 	die();
 }
+function maskSensitiveLogValue($key, $value, $sensitiveKeys=array()){
+    $key = strtolower((string)$key);
+    if(in_array($key, $sensitiveKeys) || preg_match('/(token|secret|password|pwd|authorization|credential|api[_-]?key|bearer)/i', $key))
+        return '***';
+    if(is_array($value)){
+        $masked = array();
+        foreach($value as $childKey => $childValue)
+            $masked[$childKey] = maskSensitiveLogValue($childKey, $childValue, $sensitiveKeys);
+        return $masked;
+    }
+    return $value;
+}
+function handleAiChatRequest($com){
+    global $z;
+    if(!isset($com[3]) || $com[3] !== "chat")
+        aiChatError(t9n("[RU]ИИ endpoint не найден[EN]AI endpoint was not found"), 404);
+    if($_SERVER["REQUEST_METHOD"] !== "POST")
+        aiChatError(t9n("[RU]ИИ endpoint принимает только POST[EN]AI endpoint accepts POST only"), 405);
+
+    check();
+    $payload = isset($_POST["payload"]) ? $_POST["payload"] : null;
+    if(!is_array($payload))
+        aiChatError(t9n("[RU]Не передан payload ИИ-запроса[EN]AI request payload is missing"), 400);
+    if(!isset($payload["messages"]) || !is_array($payload["messages"]) || !count($payload["messages"]))
+        aiChatError(t9n("[RU]Сообщение для ИИ не передано[EN]AI message is missing"), 400);
+
+    if(!isset($payload["context"]) || !is_array($payload["context"]))
+        $payload["context"] = array();
+    $targetDb = isset($payload["context"]["targetDb"]) ? (string)$payload["context"]["targetDb"] : $z;
+    if($targetDb === "")
+        $targetDb = $z;
+    if(!checkDbName(DB_MASK, $targetDb))
+        aiChatError(t9n("[RU]Неверное имя базы для ИИ-запроса[EN]Wrong AI target database name"), 400);
+
+    $accessibleDbs = getAiAccessibleDbs();
+    if(!in_array($targetDb, $accessibleDbs, true))
+        aiChatError(t9n("[RU]Нет доступа к базе ИИ-запроса[EN]No access to the AI target database"), 403);
+    $payload["context"]["targetDb"] = $targetDb;
+    $payload["context"]["currentDb"] = isset($payload["context"]["currentDb"]) ? $payload["context"]["currentDb"] : $z;
+    $payload["context"]["accessibleDbs"] = $accessibleDbs;
+
+    try {
+        $response = callAiChatProvider($payload, getAiChatSettings());
+        api_dump(json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-chat.json");
+    } catch(Exception $e) {
+        $code = (int)$e->getCode();
+        if($code < 400 || $code > 599)
+            $code = 502;
+        aiChatError($e->getMessage(), $code);
+    }
+}
+function aiChatError($message, $code=400){
+    header("HTTP/1.0 ".$code." ".aiChatHttpStatusText($code));
+    api_dump(json_encode(array("error" => $message), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-chat.json");
+}
+function aiChatHttpStatusText($code){
+    $statuses = array(
+        400 => "Bad Request",
+        403 => "Forbidden",
+        404 => "Not Found",
+        405 => "Method Not Allowed",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable"
+    );
+    return isset($statuses[$code]) ? $statuses[$code] : "Error";
+}
+function getAiAccessibleDbs(){
+    global $z;
+    $dbs = array();
+    if(isset($z) && checkDbName(DB_MASK, $z))
+        $dbs[] = $z;
+    foreach($_COOKIE as $key => $value)
+        if(strpos($key, "idb_") === 0 && strlen((string)$value)){
+            $db = substr($key, 4);
+            if(checkDbName(DB_MASK, $db))
+                $dbs[] = $db;
+        }
+    if(!in_array("my", $dbs, true))
+        $dbs[] = "my";
+    return array_values(array_unique($dbs));
+}
+function getAiChatSettings(){
+    if(!isset($_COOKIE["integram_ai_chat_settings"]) || $_COOKIE["integram_ai_chat_settings"] === "")
+        return array();
+    $settings = json_decode(urldecode($_COOKIE["integram_ai_chat_settings"]), true);
+    return is_array($settings) ? $settings : array();
+}
+function callAiChatProvider($payload, $settings){
+    $provider = getAiProviderConfig($payload, $settings);
+    $endpoint = prepareAiProviderEndpoint($provider, $settings);
+    validateAiProviderEndpoint($endpoint);
+    if($provider["id"] === "integram" && $provider["model"] === "auto"){
+        $model = aiConfigValue(array("INTEGRAM_AI_MODEL", "AI_CHAT_DEFAULT_MODEL", "OPENAI_MODEL"));
+        $provider["model"] = $model !== "" ? $model : "gpt-4.1-mini";
+    }
+    $token = getAiProviderToken($provider, $settings);
+    if($token === ""){
+        $code = $provider["tokenMode"] === "own" ? 400 : 503;
+        throw new Exception(t9n("[RU]Не найден token для выбранного ИИ-сервиса[EN]No token found for the selected AI service"), $code);
+    }
+    if(trim($provider["model"]) === "")
+        throw new Exception(t9n("[RU]Не указана модель ИИ-сервиса[EN]AI service model is not set"), 400);
+
+    $request = array(
+        "model" => $provider["model"],
+        "messages" => buildAiProviderMessages($payload),
+        "temperature" => 0.2
+    );
+    $headers = array(
+        "Content-Type: application/json; charset=UTF-8",
+        "Accept: application/json",
+        "Authorization: Bearer ".$token,
+        "User-Agent: Integram AI Chat"
+    );
+    $raw = aiChatPostJson($endpoint, $request, $headers);
+    $decoded = json_decode($raw, true);
+    $content = extractAiProviderContent($decoded, $raw);
+    if(trim($content) === "")
+        throw new Exception(t9n("[RU]ИИ-сервис вернул пустой ответ[EN]AI service returned an empty response"), 502);
+
+    return array(
+        "assistant" => array(
+            "content" => $content,
+            "raw" => $content
+        ),
+        "command" => array(
+            "title" => getAiCommandTitleFromPayload($payload),
+            "status" => t9n("[RU]Получен ответ[EN]Response received")
+        ),
+        "provider" => array(
+            "id" => $provider["id"],
+            "label" => $provider["label"],
+            "model" => $provider["model"]
+        ),
+        "usage" => isset($decoded["usage"]) ? $decoded["usage"] : null
+    );
+}
+function getAiProviderConfig($payload, $settings){
+    $payloadProvider = isset($payload["provider"]) && is_array($payload["provider"]) ? $payload["provider"] : array();
+    $id = isset($payloadProvider["id"]) ? preg_replace('/[^a-z0-9_-]/i', '', strtolower($payloadProvider["id"])) : "gemini";
+    if($id === "")
+        $id = "gemini";
+    $settingsProfile = array();
+    if(isset($settings["profiles"]) && isset($settings["profiles"][$id]) && is_array($settings["profiles"][$id]))
+        $settingsProfile = $settings["profiles"][$id];
+    $token = isset($settingsProfile["token"]) ? trim((string)$settingsProfile["token"]) : "";
+    $provider = array_merge(getDefaultAiProviderConfig($id), $settingsProfile, $payloadProvider);
+    $provider["id"] = $id;
+    $provider["token"] = $token;
+    $provider["label"] = isset($provider["label"]) ? (string)$provider["label"] : $id;
+    $provider["endpoint"] = isset($provider["endpoint"]) ? trim((string)$provider["endpoint"]) : "";
+    $provider["model"] = isset($provider["model"]) ? trim((string)$provider["model"]) : "";
+    $provider["tokenMode"] = isset($provider["tokenMode"]) ? trim((string)$provider["tokenMode"]) : "own";
+    $provider["chargeBalance"] = !empty($provider["chargeBalance"]);
+    return $provider;
+}
+function getDefaultAiProviderConfig($id){
+    $profiles = array(
+        "gemini" => array(
+            "label" => "Google Gemini",
+            "endpoint" => "https://aiplatform.googleapis.com/v1/projects/{project_id}/locations/global/endpoints/openapi/chat/completions",
+            "model" => "google/gemini-2.5-flash",
+            "tokenMode" => "adc",
+            "chargeBalance" => false
+        ),
+        "integram" => array(
+            "label" => "Интеграм AI",
+            "endpoint" => "/my/ai/chat",
+            "model" => "auto",
+            "tokenMode" => "rotating",
+            "chargeBalance" => true
+        ),
+        "openai" => array(
+            "label" => "ChatGPT / OpenAI",
+            "endpoint" => "https://api.openai.com/v1/chat/completions",
+            "model" => "gpt-4.1-mini",
+            "tokenMode" => "own",
+            "chargeBalance" => false
+        ),
+        "gigachat" => array(
+            "label" => "ГигаЧат",
+            "endpoint" => "https://gigachat.devices.sberbank.ru/api/v1/chat/completions",
+            "model" => "GigaChat",
+            "tokenMode" => "own",
+            "chargeBalance" => false
+        ),
+        "deepseek" => array(
+            "label" => "DeepSeek",
+            "endpoint" => "https://api.deepseek.com/chat/completions",
+            "model" => "deepseek-chat",
+            "tokenMode" => "own",
+            "chargeBalance" => false
+        ),
+        "groq" => array(
+            "label" => "Groq",
+            "endpoint" => "https://api.groq.com/openai/v1/chat/completions",
+            "model" => "llama-3.3-70b-versatile",
+            "tokenMode" => "own",
+            "chargeBalance" => false
+        ),
+        "mistral" => array(
+            "label" => "Mistral AI",
+            "endpoint" => "https://api.mistral.ai/v1/chat/completions",
+            "model" => "mistral-large-latest",
+            "tokenMode" => "own",
+            "chargeBalance" => false
+        ),
+        "custom" => array(
+            "label" => "Другой API",
+            "endpoint" => "",
+            "model" => "",
+            "tokenMode" => "own",
+            "chargeBalance" => false
+        )
+    );
+    return isset($profiles[$id]) ? $profiles[$id] : $profiles["custom"];
+}
+function prepareAiProviderEndpoint($provider, $settings){
+    $endpoint = trim($provider["endpoint"]);
+    if($provider["id"] === "integram" && (strpos($endpoint, "/") === 0 || $endpoint === ""))
+        $endpoint = aiConfigValue(array("INTEGRAM_AI_ENDPOINT", "AI_CHAT_DEFAULT_ENDPOINT", "OPENAI_API_ENDPOINT"));
+    if(strpos($endpoint, "{project_id}") !== false){
+        $projectId = getAiProviderProjectId($provider, $settings);
+        if($projectId === "")
+            throw new Exception(t9n("[RU]Не указан Google Cloud project_id для Gemini[EN]Google Cloud project_id is not set for Gemini"), 503);
+        $endpoint = str_replace("{project_id}", rawurlencode($projectId), $endpoint);
+    }
+    return $endpoint;
+}
+function getAiProviderProjectId($provider, $settings){
+    $id = $provider["id"];
+    if(isset($settings["profiles"]) && isset($settings["profiles"][$id]) && is_array($settings["profiles"][$id])){
+        foreach(array("projectId", "project_id", "googleProjectId") as $key)
+            if(isset($settings["profiles"][$id][$key]) && trim((string)$settings["profiles"][$id][$key]) !== "")
+                return trim((string)$settings["profiles"][$id][$key]);
+    }
+    return aiConfigValue(array("GOOGLE_CLOUD_PROJECT", "GOOGLE_PROJECT_ID", "GCLOUD_PROJECT", "GCP_PROJECT"));
+}
+function validateAiProviderEndpoint($endpoint){
+    if($endpoint === "")
+        throw new Exception(t9n("[RU]Endpoint ИИ-сервиса не настроен[EN]AI service endpoint is not configured"), 503);
+    $parts = parse_url($endpoint);
+    if(!$parts || empty($parts["scheme"]) || empty($parts["host"]))
+        throw new Exception(t9n("[RU]Endpoint ИИ-сервиса должен быть абсолютным HTTPS URL[EN]AI service endpoint must be an absolute HTTPS URL"), 400);
+    if(strtolower($parts["scheme"]) !== "https")
+        throw new Exception(t9n("[RU]Endpoint ИИ-сервиса должен использовать HTTPS[EN]AI service endpoint must use HTTPS"), 400);
+    $host = strtolower($parts["host"]);
+    if($host === "localhost" || $host === "127.0.0.1" || $host === "::1" || preg_match('/(^|\.)local$/', $host))
+        throw new Exception(t9n("[RU]Локальный endpoint ИИ-сервиса запрещен[EN]Local AI service endpoint is forbidden"), 400);
+    if(filter_var($host, FILTER_VALIDATE_IP) !== false
+        && filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false)
+        throw new Exception(t9n("[RU]Приватный IP endpoint ИИ-сервиса запрещен[EN]Private AI service endpoint IP is forbidden"), 400);
+}
+function buildAiProviderMessages($payload){
+    $messages = array();
+    $prompts = isset($payload["prompts"]) && is_array($payload["prompts"]) ? $payload["prompts"] : array();
+    if(isset($prompts["system"]) && trim((string)$prompts["system"]) !== "")
+        $messages[] = array("role" => "system", "content" => (string)$prompts["system"]);
+    if(isset($prompts["command"]) && trim((string)$prompts["command"]) !== "")
+        $messages[] = array("role" => "system", "content" => (string)$prompts["command"]);
+    if(isset($payload["context"]) && is_array($payload["context"]))
+        $messages[] = array("role" => "system", "content" => "Контекст Integram: ".json_encode($payload["context"], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+    foreach($payload["messages"] as $message){
+        if(!is_array($message) || !isset($message["content"]))
+            continue;
+        $role = isset($message["role"]) ? (string)$message["role"] : "user";
+        if(!in_array($role, array("user", "assistant", "system"), true))
+            $role = "user";
+        $content = trim((string)$message["content"]);
+        if($content !== "")
+            $messages[] = array("role" => $role, "content" => mb_substr($content, 0, 12000));
+    }
+    return $messages;
+}
+function aiChatPostJson($endpoint, $request, $headers){
+    if(!function_exists("curl_init"))
+        throw new Exception(t9n("[RU]PHP cURL недоступен для ИИ-запросов[EN]PHP cURL is not available for AI requests"), 503);
+    $ch = curl_init($endpoint);
+    curl_setopt($ch, CURLOPT_POST, 1);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($request, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HEADER, false);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 60);
+    $raw = curl_exec($ch);
+    $errno = curl_errno($ch);
+    $error = curl_error($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if($errno)
+        throw new Exception(t9n("[RU]Ошибка подключения к ИИ-сервису[EN]AI service connection error").": ".$error, 502);
+    if($httpCode >= 400){
+        $providerError = extractAiProviderError($raw);
+        throw new Exception(t9n("[RU]ИИ-сервис вернул ошибку[EN]AI service returned an error")." HTTP ".$httpCode.($providerError !== "" ? ": ".$providerError : ""), 502);
+    }
+    return $raw;
+}
+function extractAiProviderError($raw){
+    $decoded = json_decode((string)$raw, true);
+    if(is_array($decoded)){
+        if(isset($decoded["error"]["message"]))
+            return mb_substr((string)$decoded["error"]["message"], 0, 500);
+        if(isset($decoded["error"]))
+            return mb_substr(is_string($decoded["error"]) ? $decoded["error"] : json_encode($decoded["error"], JSON_UNESCAPED_UNICODE), 0, 500);
+        if(isset($decoded["message"]))
+            return mb_substr((string)$decoded["message"], 0, 500);
+    }
+    return mb_substr(trim(strip_tags((string)$raw)), 0, 500);
+}
+function extractAiProviderContent($decoded, $raw){
+    $content = "";
+    if(is_array($decoded)){
+        if(isset($decoded["choices"][0]["message"]["content"]))
+            $content = $decoded["choices"][0]["message"]["content"];
+        elseif(isset($decoded["choices"][0]["text"]))
+            $content = $decoded["choices"][0]["text"];
+        elseif(isset($decoded["candidates"][0]["content"]["parts"][0]["text"]))
+            $content = $decoded["candidates"][0]["content"]["parts"][0]["text"];
+        elseif(isset($decoded["content"]))
+            $content = $decoded["content"];
+        if(is_array($content))
+            $content = json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+    if(trim((string)$content) === "")
+        $content = (string)$raw;
+    return trim((string)$content);
+}
+function getAiCommandTitleFromPayload($payload){
+    $labels = array(
+        "create_table" => t9n("[RU]Создать таблицу[EN]Create table"),
+        "create_structure" => t9n("[RU]Создать структуру[EN]Create structure"),
+        "create_workspace" => t9n("[RU]Создать рабочее место[EN]Create workspace"),
+        "free_task" => t9n("[RU]Задача ИИ[EN]AI task")
+    );
+    $type = isset($payload["commandType"]) ? (string)$payload["commandType"] : "free_task";
+    return isset($labels[$type]) ? $labels[$type] : $labels["free_task"];
+}
+function getAiProviderToken($provider, $settings){
+    $mode = isset($provider["tokenMode"]) ? $provider["tokenMode"] : "own";
+    if($mode === "adc")
+        return getGoogleApplicationDefaultAccessToken();
+    if($mode === "rotating"){
+        $pool = aiConfigValue(array("INTEGRAM_AI_TOKENS", "AI_CHAT_SERVICE_TOKENS", "AI_PROVIDER_TOKENS"));
+        if($pool !== ""){
+            $tokens = preg_split('/[\s,;]+/', $pool, -1, PREG_SPLIT_NO_EMPTY);
+            if(count($tokens)){
+                $seed = isset($GLOBALS["GLOBAL_VARS"]["user_id"]) ? (string)$GLOBALS["GLOBAL_VARS"]["user_id"] : "0";
+                $index = (int)(sprintf("%u", crc32($seed)) % count($tokens));
+                return trim($tokens[$index]);
+            }
+        }
+    }
+    if(isset($provider["token"]) && trim((string)$provider["token"]) !== "")
+        return trim((string)$provider["token"]);
+    return getAiProviderEnvToken(isset($provider["id"]) ? $provider["id"] : "");
+}
+function getAiProviderEnvToken($providerId){
+    $map = array(
+        "openai" => array("OPENAI_API_KEY", "OPENAI_TOKEN"),
+        "groq" => array("GROQ_API_KEY", "GROQ_TOKEN"),
+        "mistral" => array("MISTRAL_API_KEY", "MISTRAL_TOKEN"),
+        "deepseek" => array("DEEPSEEK_API_KEY", "DEEPSEEK_TOKEN"),
+        "gigachat" => array("GIGACHAT_API_KEY", "GIGACHAT_TOKEN"),
+        "gemini" => array("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+        "custom" => array("AI_CUSTOM_API_KEY", "AI_API_KEY")
+    );
+    return isset($map[$providerId]) ? aiConfigValue($map[$providerId]) : aiConfigValue(array("AI_API_KEY"));
+}
+function aiConfigValue($names){
+    foreach($names as $name){
+        if(defined($name) && trim((string)constant($name)) !== "")
+            return trim((string)constant($name));
+        $value = getenv($name);
+        if($value !== false && trim((string)$value) !== "")
+            return trim((string)$value);
+    }
+    return "";
+}
+function getGoogleApplicationDefaultAccessToken(){
+    $direct = aiConfigValue(array("GOOGLE_ADC_ACCESS_TOKEN", "GOOGLE_OAUTH_ACCESS_TOKEN", "GOOGLE_ACCESS_TOKEN"));
+    if($direct !== "")
+        return $direct;
+
+    $credentialsJson = aiConfigValue(array("GOOGLE_APPLICATION_CREDENTIALS_JSON"));
+    if($credentialsJson !== ""){
+        $credentials = json_decode($credentialsJson, true);
+        if(is_array($credentials)){
+            $token = getGoogleCredentialsAccessToken($credentials);
+            if($token !== "")
+                return $token;
+        }
+    }
+
+    $credentialsPath = aiConfigValue(array("GOOGLE_APPLICATION_CREDENTIALS"));
+    if($credentialsPath !== "" && is_readable($credentialsPath)){
+        $credentials = json_decode(file_get_contents($credentialsPath), true);
+        if(is_array($credentials)){
+            $token = getGoogleCredentialsAccessToken($credentials);
+            if($token !== "")
+                return $token;
+        }
+    }
+
+    return getGoogleMetadataAccessToken();
+}
+function getGoogleCredentialsAccessToken($credentials){
+    $type = isset($credentials["type"]) ? $credentials["type"] : "";
+    if($type === "service_account")
+        return getGoogleServiceAccountAccessToken($credentials);
+    if($type === "authorized_user")
+        return getGoogleRefreshAccessToken($credentials);
+    return "";
+}
+function getGoogleServiceAccountAccessToken($credentials){
+    if(empty($credentials["client_email"]) || empty($credentials["private_key"]))
+        return "";
+    if(!function_exists("openssl_sign"))
+        return "";
+    $tokenUri = !empty($credentials["token_uri"]) ? $credentials["token_uri"] : "https://oauth2.googleapis.com/token";
+    $now = time();
+    $header = array("alg" => "RS256", "typ" => "JWT");
+    $claim = array(
+        "iss" => $credentials["client_email"],
+        "scope" => "https://www.googleapis.com/auth/cloud-platform",
+        "aud" => $tokenUri,
+        "iat" => $now,
+        "exp" => $now + 3600
+    );
+    $unsigned = aiBase64UrlEncode(json_encode($header, JSON_UNESCAPED_SLASHES)).".".aiBase64UrlEncode(json_encode($claim, JSON_UNESCAPED_SLASHES));
+    $signature = "";
+    if(!openssl_sign($unsigned, $signature, $credentials["private_key"], OPENSSL_ALGO_SHA256))
+        return "";
+    return getGoogleTokenFromForm($tokenUri, array(
+        "grant_type" => "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        "assertion" => $unsigned.".".aiBase64UrlEncode($signature)
+    ));
+}
+function getGoogleRefreshAccessToken($credentials){
+    if(empty($credentials["client_id"]) || empty($credentials["client_secret"]) || empty($credentials["refresh_token"]))
+        return "";
+    $tokenUri = !empty($credentials["token_uri"]) ? $credentials["token_uri"] : "https://oauth2.googleapis.com/token";
+    return getGoogleTokenFromForm($tokenUri, array(
+        "grant_type" => "refresh_token",
+        "client_id" => $credentials["client_id"],
+        "client_secret" => $credentials["client_secret"],
+        "refresh_token" => $credentials["refresh_token"]
+    ));
+}
+function getGoogleTokenFromForm($url, $params){
+    if(!function_exists("curl_init"))
+        return "";
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_POST, 1);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($params));
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HEADER, false);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, array("Content-Type: application/x-www-form-urlencoded"));
+    curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+    $raw = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if($httpCode < 200 || $httpCode >= 300)
+        return "";
+    $decoded = json_decode($raw, true);
+    return isset($decoded["access_token"]) ? $decoded["access_token"] : "";
+}
+function getGoogleMetadataAccessToken(){
+    if(!function_exists("curl_init"))
+        return "";
+    $ch = curl_init("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token");
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HEADER, false);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, array("Metadata-Flavor: Google"));
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 1);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 2);
+    $raw = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if($httpCode < 200 || $httpCode >= 300)
+        return "";
+    $decoded = json_decode($raw, true);
+    return isset($decoded["access_token"]) ? $decoded["access_token"] : "";
+}
+function aiBase64UrlEncode($value){
+    return rtrim(strtr(base64_encode($value), '+/', '-_'), '=');
+}
 function myexit(){
     global $z, $logFile;
 	if(isset($GLOBALS["TRACE"])){
@@ -8272,6 +8762,10 @@ if(Validate_Token())
 			die($GLOBALS["GLOBAL_VARS"]["role"].": ".t9n("[RU]У вас нет прав на редактирование типов(".$GLOBALS["GRANTS"][0].").[EN]You don't have permission to edit types (".$GLOBALS["GRANTS"][0].")."));
 	switch ($a)
 	{
+        case "ai":
+            handleAiChatRequest($com);
+            break;
+
 		case "_m_up":
 			Check_Grant($id);
 			$result = Exec_sql("SELECT obj.t, obj.up, obj.ord, max(peers.ord) new_ord
