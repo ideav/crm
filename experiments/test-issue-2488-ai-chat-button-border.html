@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Issue 2488 AI Chat Button Border</title>
+    <link rel="stylesheet" href="../css/ai-chat.css">
+    <style>
+        :root {
+            --border-color: #d7dce3;
+            --bg-primary: #ffffff;
+            --bg-secondary: #f5f7fa;
+            --card-bg: #ffffff;
+            --text-primary: #1f2937;
+            --text-secondary: #6b7280;
+            --button-primary: #2563eb;
+        }
+
+        body {
+            margin: 0;
+            padding: 32px;
+            background: #eef2f7;
+            color: var(--text-primary);
+            font-family: Arial, sans-serif;
+        }
+
+        .preview {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+            width: max-content;
+            padding: 24px;
+            border-radius: 8px;
+            background: var(--card-bg);
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+        }
+
+        .navbar-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .label {
+            min-width: 92px;
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="preview">
+        <span class="label">AI controls</span>
+        <div class="navbar-right">
+            <button id="ai-chat-toggle" class="ai-chat-toggle" type="button" title="ИИ-чат" aria-label="Открыть ИИ-чат">AI</button>
+            <button id="ai-chat-close" class="ai-chat-icon-btn" type="button" title="Закрыть" aria-label="Закрыть ИИ-чат">&times;</button>
+        </div>
+    </div>
+</body>
+</html>
