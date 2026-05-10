@@ -53,13 +53,19 @@ function createCookieDocument() {
 
 function createController() {
     const { document, elements, cookieStore } = createCookieDocument();
+    const storage = {};
     const context = {
         console,
         document,
         localStorage: {
-            getItem() { return null; },
-            setItem() {
-                throw new Error('AI provider settings must be saved to cookies, not localStorage');
+            getItem(key) {
+                return Object.prototype.hasOwnProperty.call(storage, key) ? storage[key] : null;
+            },
+            setItem(key, value) {
+                storage[key] = String(value);
+            },
+            removeItem(key) {
+                delete storage[key];
             }
         },
         navigator: {},
@@ -73,7 +79,7 @@ function createController() {
 
     vm.runInNewContext(aiScript, context, { filename: 'js/ai-chat.js' });
     const Controller = context.window.IntegramAiChatController;
-    return { controller: new Controller(), elements, cookieStore };
+    return { controller: new Controller(), elements, cookieStore, storage };
 }
 
 function assertTemplateProviders(template, label) {
@@ -90,7 +96,7 @@ function assertTemplateProviders(template, label) {
 assertTemplateProviders(mainTemplate, 'templates/main.html');
 assertTemplateProviders(ruMainTemplate, 'templates/ru/main.html');
 
-const { controller, elements, cookieStore } = createController();
+const { controller, elements, cookieStore, storage } = createController();
 assert.strictEqual(controller.aiActiveProviderId, 'gemini', 'Gemini should be the default provider');
 
 const profiles = controller.getDefaultAiServiceProfiles();
@@ -111,10 +117,11 @@ assert.strictEqual(elements['ai-token-mode'].disabled, true, 'Gemini credential 
 assert.strictEqual(elements['ai-service-token'].disabled, true, 'Gemini token input should be disabled');
 
 controller.saveAiServiceSettings();
-assert(cookieStore.integram_ai_chat_settings, 'AI settings should be saved into the settings cookie');
+assert(storage.integram_ai_chat_settings, 'AI settings should be saved into localStorage');
+assert(!cookieStore.integram_ai_chat_settings, 'AI settings should not be saved into a cookie');
 
-const saved = JSON.parse(decodeURIComponent(cookieStore.integram_ai_chat_settings));
-assert.strictEqual(saved.activeProviderId, 'gemini', 'Saved cookie should keep Gemini selected');
+const saved = JSON.parse(storage.integram_ai_chat_settings);
+assert.strictEqual(saved.activeProviderId, 'gemini', 'Saved localStorage settings should keep Gemini selected');
 assert.strictEqual(saved.profiles.gemini.tokenMode, 'adc', 'Saved Gemini profile should keep ADC mode');
 assert.strictEqual(saved.profiles.gemini.token, '', 'Saved Gemini profile should not store an API token');
 assert.strictEqual(saved.profiles.groq.endpoint, 'https://api.groq.com/openai/v1/chat/completions');
@@ -126,4 +133,4 @@ assert.strictEqual(payload.provider.credentialSource, 'application_default_crede
 assert.strictEqual(payload.provider.applicationDefaultCredentials, true);
 assert.strictEqual(payload.provider.hasUserToken, false);
 
-console.log('ok - issue 2481 AI providers use Gemini ADC defaults and cookie settings');
+console.log('ok - issue 2481 AI providers use Gemini ADC defaults and localStorage settings');
