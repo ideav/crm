@@ -8079,13 +8079,60 @@ function prepareAiProviderEndpoint($provider, $settings){
     return $endpoint;
 }
 function getAiProviderProjectId($provider, $settings){
-    $id = $provider["id"];
+    $id = isset($provider["id"]) ? $provider["id"] : "";
+    foreach(array("projectId", "project_id", "googleProjectId") as $key)
+        if(isset($provider[$key]) && trim((string)$provider[$key]) !== "")
+            return trim((string)$provider[$key]);
     if(isset($settings["profiles"]) && isset($settings["profiles"][$id]) && is_array($settings["profiles"][$id])){
         foreach(array("projectId", "project_id", "googleProjectId") as $key)
             if(isset($settings["profiles"][$id][$key]) && trim((string)$settings["profiles"][$id][$key]) !== "")
                 return trim((string)$settings["profiles"][$id][$key]);
     }
-    return aiConfigValue(array("GOOGLE_CLOUD_PROJECT", "GOOGLE_PROJECT_ID", "GCLOUD_PROJECT", "GCP_PROJECT"));
+    $projectId = aiConfigValue(array("GOOGLE_CLOUD_PROJECT", "GOOGLE_PROJECT_ID", "GCLOUD_PROJECT", "GCP_PROJECT", "CLOUDSDK_CORE_PROJECT"));
+    if($projectId !== "")
+        return $projectId;
+    return getGoogleApplicationDefaultProjectId();
+}
+function getGoogleApplicationDefaultProjectId(){
+    $credentialsJson = aiConfigValue(array("GOOGLE_APPLICATION_CREDENTIALS_JSON"));
+    if($credentialsJson !== ""){
+        $projectId = getGoogleCredentialsProjectId(json_decode($credentialsJson, true));
+        if($projectId !== "")
+            return $projectId;
+    }
+
+    $credentialsPath = aiConfigValue(array("GOOGLE_APPLICATION_CREDENTIALS"));
+    if($credentialsPath !== "" && is_readable($credentialsPath)){
+        $projectId = getGoogleCredentialsProjectId(json_decode(file_get_contents($credentialsPath), true));
+        if($projectId !== "")
+            return $projectId;
+    }
+
+    return getGoogleMetadataProjectId();
+}
+function getGoogleCredentialsProjectId($credentials){
+    if(!is_array($credentials))
+        return "";
+    foreach(array("project_id", "quota_project_id", "projectId") as $key)
+        if(isset($credentials[$key]) && trim((string)$credentials[$key]) !== "")
+            return trim((string)$credentials[$key]);
+    return "";
+}
+function getGoogleMetadataProjectId(){
+    if(!function_exists("curl_init"))
+        return "";
+    $ch = curl_init("http://metadata.google.internal/computeMetadata/v1/project/project-id");
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HEADER, false);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, array("Metadata-Flavor: Google"));
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 1);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 2);
+    $projectId = trim((string)curl_exec($ch));
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if($httpCode < 200 || $httpCode >= 300)
+        return "";
+    return $projectId;
 }
 function validateAiProviderEndpoint($endpoint){
     if($endpoint === "")
