@@ -503,12 +503,7 @@
                                 saveBtn.disabled = false;
                                 return;
                             }
-                            // Update attrs
-                            if (newRequired) {
-                                col.attrs = (col.attrs || '') + ':!NULL:';
-                            } else {
-                                col.attrs = (col.attrs || '').replace(/:!NULL:/g, '');
-                            }
+                            col.attrs = setIntegramAttrFlag(col.attrs, 'required', newRequired);
                         }
                     }
 
@@ -522,11 +517,7 @@
                                 saveBtn.disabled = false;
                                 return;
                             }
-                            // Update attrs alias
-                            col.attrs = (col.attrs || '').replace(/:ALIAS=.*?:/g, '');
-                            if (newAlias) {
-                                col.attrs = (col.attrs || '') + `:ALIAS=${newAlias}:`;
-                            }
+                            col.attrs = setIntegramAttrAlias(col.attrs, newAlias);
                             col.name = newAlias || (this.parseAttrs(col.attrs).alias) || col.name;
                         }
 
@@ -539,11 +530,7 @@
                                 saveBtn.disabled = false;
                                 return;
                             }
-                            if (newMulti) {
-                                col.attrs = (col.attrs || '') + ':MULTI:';
-                            } else {
-                                col.attrs = (col.attrs || '').replace(/:MULTI:/g, '');
-                            }
+                            col.attrs = setIntegramAttrFlag(col.attrs, 'multi', newMulti);
                         }
                     }
 
@@ -1196,7 +1183,7 @@
                                 type: baseTypeId,
                                 format: isListValue ? 'REF' : this.mapTypeIdToFormat(baseTypeId),
                                 granted: 1,
-                                attrs: isMultiselect ? ':MULTI:' : '',
+                                attrs: buildIntegramAttrs('', false, isMultiselect),
                                 paramId: newColumnId,
                                 // For list columns, set ref_id, ref, and orig so showColumnEditForm treats them
                                 // as reference columns immediately (without requiring a page refresh, issue #1678)

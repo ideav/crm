@@ -236,7 +236,7 @@
                 const colIndex = parseInt(td.dataset.col);
                 if (isNaN(colIndex)) return;
                 const column = orderedColumns[colIndex];
-                if (column && column.attrs && column.attrs.includes(':!NULL:')) {
+                if (column && this.parseAttrs(column.attrs).required) {
                     td.classList.add('required-field-new-row');
                 }
             });
@@ -610,7 +610,7 @@
                 const colIndex = parseInt(td.dataset.col);
                 if (isNaN(colIndex)) return;
                 const column = orderedColumns[colIndex];
-                if (column && column.attrs && column.attrs.includes(':!NULL:')) {
+                if (column && this.parseAttrs(column.attrs).required) {
                     // Only highlight if the cell is currently empty (issue #785)
                     const currentValue = this.extractCellValue(td);
                     if (!currentValue) {

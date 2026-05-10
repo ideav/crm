@@ -45,7 +45,7 @@
             const isRefField = column.ref_id != null || (column.ref && column.ref !== 0);
             // Issue #1794: "link to any record" type — orig === "1" with no ref_id and no ref
             const isAnyRecordLink = column.orig === '1' && column.ref_id == null && !column.ref;
-            const isArrayField = column.attrs && column.attrs.includes(':MULTI:');
+            const isArrayField = this.parseAttrs(column.attrs).multi;
             const dataTypeAttrs = ` data-type="${format}"${isRefField ? ' data-ref="1"' : ''}${isAnyRecordLink ? ' data-any-ref="1"' : ''}${isArrayField ? ' data-array="1"' : ''}`;
 
             // In object format, reference fields and GRANT/REPORT_COLUMN fields return values as "id:Value"

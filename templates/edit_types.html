@@ -72,11 +72,46 @@ function validateAddForm(e) {
 }
 document.title='Редактор структуры таблиц';
 var editable=ext=false,curid=0,isRef=false,prefix=0
-    ,ajax='<img width="25px" src="/i/ajax.gif">'
-	,nullmask=/:!NULL:/i
-	,multimask=/:MULTI:/i
-	,aliasmask=/:ALIAS=(.+):/i;
+    ,ajax='<img width="25px" src="/i/ajax.gif">';
 var HTML='',o=[],s=[],a=[],v=[];
+function parseFieldAttrs(attrs){
+    var result={required:false,multi:false,alias:null,defaultValue:''};
+    if(!attrs) return result;
+    attrs=String(attrs);
+    var raw=attrs.trim();
+    function parseBool(value){
+        if(value===true||value===false) return value;
+        if(typeof value==='number') return value!==0;
+        if(typeof value==='string')
+            return ['', '0', 'false', 'no', 'off'].indexOf(value.trim().toLowerCase())===-1;
+        return !!value;
+    }
+    function parseJson(text){
+        if(!text||text.charAt(0)!=='{') return null;
+        try{
+            var parsed=JSON.parse(text);
+            return parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?parsed:null;
+        }
+        catch(e){
+            return null;
+        }
+    }
+    var json=parseJson(raw)||parseJson(raw.replace(/\\"/g,'"'));
+    if(json){
+        result.required=parseBool(json.required!==undefined?json.required:(json.notNull!==undefined?json.notNull:json.not_null));
+        result.multi=parseBool(json.multi);
+        result.alias=json.alias?String(json.alias):null;
+        var defaultValue=json.default!==undefined?json.default:json.defaultValue;
+        result.defaultValue=defaultValue!==undefined&&defaultValue!==null?String(defaultValue):'';
+        return result;
+    }
+    result.required=attrs.indexOf(':!NULL:')!==-1;
+    result.multi=attrs.indexOf(':MULTI:')!==-1;
+    var alias=attrs.match(/:ALIAS=(.*?):/u);
+    result.alias=alias?alias[1]:null;
+    result.defaultValue=attrs.replace(/:!NULL:/g,'').replace(/:MULTI:/g,'').replace(/:ALIAS=(.*?):/gu,'').trim();
+    return result;
+}
 <!-- Begin:_ID -->
 curid='{_global_.id}';
 <!-- End:_ID -->
@@ -399,16 +434,15 @@ function checkHash(i){
 }
 function drawReqs(i,ext,force){
 	var def_ref_dd,def_ref_class,base,reqs=id=def_val=alias='',nullable,multiple;
-	var seek_alias=new Array();
+	var parsedAttrs;
 	if(ext)
 		reqs+='<table class="table" width="100%">';
 	for(var req in r[i]){
-		nullable=r[i][req].a.search(nullmask)!==-1;
-		multiple=r[i][req].a.search(multimask)===-1;
-		def_val=r[i][req].a.replace(nullmask, '')
-		                    .replace(multimask, '');
-		seek_alias=def_val.match(aliasmask);
-        if(!t[r[i][req].t]){
+        parsedAttrs=parseFieldAttrs(r[i][req].a);
+		nullable=parsedAttrs.required;
+		multiple=!parsedAttrs.multi;
+		def_val=parsedAttrs.defaultValue;
+		if(!t[r[i][req].t]){
 		    console.log('No t[r['+i+']['+req+'].t]');
 		    continue;
         }
@@ -437,12 +471,7 @@ function drawReqs(i,ext,force){
     			def_ref_dd=def_ref_class='';
 		}
 		else{ // Reference req
-			if(seek_alias===null)
-				alias='';
-			else{
-				alias=seek_alias[1];
-				def_val=def_val.replace(aliasmask, '');
-			}
+			alias=parsedAttrs.alias||'';
 			id=t[r[i][req].t].t;
 			aid=r[i][req].i;
 			if(alias=='')

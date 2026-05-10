@@ -728,7 +728,31 @@ function deselectTable(){
     $('.selected-type,.edit-panel,#form,#addfields').hide(50);
     $('#fields').html('');
 }
-var iquiz={ form:[] },iquizId,dataList=$('#sources').html(),savedIquiz={},dataItems,dataTypes,edited,aliasmask=/:ALIAS=(.+):/i,grants,addRefItems='',view;
+var iquiz={ form:[] },iquizId,dataList=$('#sources').html(),savedIquiz={},dataItems,dataTypes,edited,grants,addRefItems='',view;
+function parseFieldAttrs(attrs){
+    var result={alias:null};
+    if(!attrs) return result;
+    attrs=String(attrs);
+    var raw=attrs.trim();
+    function parseJson(text){
+        if(!text||text.charAt(0)!=='{') return null;
+        try{
+            var parsed=JSON.parse(text);
+            return parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?parsed:null;
+        }
+        catch(e){
+            return null;
+        }
+    }
+    var json=parseJson(raw)||parseJson(raw.replace(/\\"/g,'"'));
+    if(json){
+        result.alias=json.alias?String(json.alias):null;
+        return result;
+    }
+    var alias=attrs.match(/:ALIAS=(.+):/i);
+    result.alias=alias?alias[1]:null;
+    return result;
+}
 function saveIquiz(){
     var name=$('#iquizName').val();
     if(name.length>0){
@@ -1232,13 +1256,13 @@ function typeName(i){
             return dataItems.val[j];
 }
 function reqName(i){
-    var alias;
+    var attrs;
     for(var j in dataItems.id)
         if(dataItems.req_id[j]==i){
             if(dataItems.ref_val[j]!==''){
-                alias=dataItems.attrs[j].match(aliasmask);
-                if(alias!==null)
-				    return alias[1];
+                attrs=parseFieldAttrs(dataItems.attrs[j]);
+                if(attrs.alias!==null)
+				    return attrs.alias;
             }
             return typeName(dataItems.req_t[j]);
         }
