@@ -38,10 +38,14 @@ const chatMarkup = [
     'id="ai-chat-toggle"',
     'id="ai-chat-panel"',
     'id="ai-service-provider"',
+    'value="gemini"',
     'value="integram"',
     'value="openai"',
     'value="gigachat"',
     'value="deepseek"',
+    'value="groq"',
+    'value="mistral"',
+    'value="adc"',
     'data-ai-command="create_table"',
     'data-ai-command="create_structure"',
     'data-ai-command="create_workspace"',
@@ -67,10 +71,11 @@ includesAll(aiScript, [
     'getDefaultAiServiceProfiles()',
     'getAiCommandPrompts()',
     'buildAiRequestPayload(',
+    'writeAiServiceCookie(',
     'create_table',
     'create_structure',
     'create_workspace',
-    'localStorage.setItem(this.aiChatStorageKey',
+    "this.aiActiveProviderId = 'gemini'",
     'renderAiCommandQueue()'
 ], 'js/ai-chat.js');
 
