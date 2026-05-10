@@ -48,8 +48,6 @@ define("SECRET", 130);
 define("VERSION", 8);
 define("VAL_LIM", 127);  # Maximum length of the value (val) field on UI
 
-include "include/db_errors.php";
-
 $com = explode("?", strtolower($_SERVER["REQUEST_URI"]));
 $com = explode("/", $com[0]);
 if(isset($com[1]))
@@ -102,7 +100,11 @@ $billing = mysqli_query($connection
 				LEFT JOIN my bal ON bal.up=db.up AND bal.t=285
 				LIMIT 1");
 if(!$billing && ($z !== "auth.asp")){
-    handleDatabaseBootstrapError($z, mysqli_errno($connection));
+	if ((int)$errno === 1146)
+		login($dbName, "", "dBNotExists", t9n("[RU]База $dbName не найдена[EN]The $dbName database was not found"));
+	
+	header("HTTP/1.0 404 Not found");
+	die("$dbName does not exist");
 }
 																									
 # The trace cookie to be deleted upon the session close
