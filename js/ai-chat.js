@@ -7,10 +7,11 @@
 
     class IntegramAiChatController {
         constructor() {
+            this.aiChatCookieKey = 'integram_ai_chat_settings';
             this.aiChatStorageKey = 'integram_ai_chat_settings';
             this.legacyAiChatStorageKey = 'cabinet_ai_chat_settings';
             this.aiServiceProfiles = this.getDefaultAiServiceProfiles();
-            this.aiActiveProviderId = 'integram';
+            this.aiActiveProviderId = 'gemini';
             this.aiCommandPrompts = this.getAiCommandPrompts();
             this.aiCommandQueue = [];
             this.aiChatConnected = false;
@@ -33,6 +34,16 @@
 
         getDefaultAiServiceProfiles() {
             return {
+                gemini: {
+                    label: 'Google Gemini',
+                    endpoint: 'https://aiplatform.googleapis.com/v1/projects/{project_id}/locations/global/endpoints/openapi/chat/completions',
+                    model: 'google/gemini-2.5-flash',
+                    tokenMode: 'adc',
+                    defaultTokenMode: 'adc',
+                    credentialModeLocked: true,
+                    token: '',
+                    chargeBalance: false
+                },
                 integram: {
                     label: 'Интеграм AI',
                     endpoint: '/my/ai/chat',
@@ -61,6 +72,22 @@
                     label: 'DeepSeek',
                     endpoint: 'https://api.deepseek.com/chat/completions',
                     model: 'deepseek-chat',
+                    tokenMode: 'own',
+                    token: '',
+                    chargeBalance: false
+                },
+                groq: {
+                    label: 'Groq',
+                    endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+                    model: 'llama-3.3-70b-versatile',
+                    tokenMode: 'own',
+                    token: '',
+                    chargeBalance: false
+                },
+                mistral: {
+                    label: 'Mistral AI',
+                    endpoint: 'https://api.mistral.ai/v1/chat/completions',
+                    model: 'mistral-large-latest',
                     tokenMode: 'own',
                     token: '',
                     chargeBalance: false
@@ -208,7 +235,7 @@
 
         loadAiServiceSettings() {
             try {
-                const raw = localStorage.getItem(this.aiChatStorageKey) || localStorage.getItem(this.legacyAiChatStorageKey);
+                const raw = this.readAiServiceCookie() || this.readLegacyAiServiceStorage();
                 if (!raw) return;
 
                 const saved = JSON.parse(raw);
@@ -222,9 +249,39 @@
                 if (saved && saved.activeProviderId && this.aiServiceProfiles[saved.activeProviderId]) {
                     this.aiActiveProviderId = saved.activeProviderId;
                 }
+                this.normalizeAiServiceProfiles();
             } catch (err) {
                 console.warn('[ai-chat] settings ignored:', err);
             }
+        }
+
+        readAiServiceCookie() {
+            if (typeof document === 'undefined' || !document.cookie) return '';
+
+            const match = document.cookie.match(new RegExp('(?:^|; )' + this.escapeRegExp(this.aiChatCookieKey) + '=([^;]*)'));
+            if (!match) return '';
+
+            try {
+                return decodeURIComponent(match[1]);
+            } catch (err) {
+                return match[1];
+            }
+        }
+
+        readLegacyAiServiceStorage() {
+            if (typeof localStorage === 'undefined' || !localStorage.getItem) return '';
+
+            return localStorage.getItem(this.aiChatStorageKey) || localStorage.getItem(this.legacyAiChatStorageKey) || '';
+        }
+
+        normalizeAiServiceProfiles() {
+            Object.keys(this.aiServiceProfiles).forEach(id => {
+                const profile = this.aiServiceProfiles[id];
+                if (profile.credentialModeLocked) {
+                    profile.tokenMode = profile.defaultTokenMode || profile.tokenMode;
+                    profile.token = '';
+                }
+            });
         }
 
         populateAiServiceForm() {
@@ -257,8 +314,13 @@
 
             profile.endpoint = endpointInput ? endpointInput.value.trim() : profile.endpoint;
             profile.model = modelInput ? modelInput.value.trim() : profile.model;
-            profile.tokenMode = tokenModeSelect ? tokenModeSelect.value : profile.tokenMode;
-            profile.token = tokenInput ? tokenInput.value.trim() : profile.token;
+            if (profile.credentialModeLocked) {
+                profile.tokenMode = profile.defaultTokenMode || profile.tokenMode;
+                profile.token = '';
+            } else {
+                profile.tokenMode = tokenModeSelect ? tokenModeSelect.value : profile.tokenMode;
+                profile.token = tokenInput ? tokenInput.value.trim() : profile.token;
+            }
             profile.chargeBalance = chargeCheckbox ? chargeCheckbox.checked : profile.chargeBalance;
 
             return profile;
@@ -268,29 +330,38 @@
             const tokenModeSelect = document.getElementById('ai-token-mode');
             const tokenInput = document.getElementById('ai-service-token');
             const chargeCheckbox = document.getElementById('ai-charge-balance');
+            const profile = this.getActiveAiProfile();
             if (!tokenModeSelect || !tokenInput) return;
 
             const useRotatingTokens = tokenModeSelect.value === 'rotating';
-            tokenInput.disabled = useRotatingTokens;
-            tokenInput.placeholder = useRotatingTokens ? 'Ротация токенов' : 'Введите API token';
-            if (useRotatingTokens) tokenInput.value = '';
+            const useApplicationDefaultCredentials = tokenModeSelect.value === 'adc';
+            tokenModeSelect.disabled = !!profile.credentialModeLocked;
+            tokenInput.disabled = useRotatingTokens || useApplicationDefaultCredentials;
+            tokenInput.placeholder = useApplicationDefaultCredentials
+                ? 'Application Default Credentials'
+                : (useRotatingTokens ? 'Ротация токенов' : 'Введите API token');
+            if (useRotatingTokens || useApplicationDefaultCredentials) tokenInput.value = '';
             if (chargeCheckbox && useRotatingTokens) chargeCheckbox.checked = true;
         }
 
         saveAiServiceSettings() {
             this.collectAiServiceForm();
             try {
-                localStorage.setItem(this.aiChatStorageKey, JSON.stringify({
+                this.writeAiServiceCookie(JSON.stringify({
                     activeProviderId: this.aiActiveProviderId,
                     profiles: this.aiServiceProfiles
                 }));
                 const stateEl = document.getElementById('ai-settings-state');
-                if (stateEl) stateEl.textContent = 'Настройки сохранены локально';
+                if (stateEl) stateEl.textContent = 'Настройки сохранены в cookies';
                 this.notify('Настройки ИИ-сервиса сохранены', 'success');
             } catch (err) {
                 console.error('[ai-chat] settings save failed:', err);
                 this.notify('Не удалось сохранить настройки ИИ-сервиса', 'error');
             }
+        }
+
+        writeAiServiceCookie(value) {
+            document.cookie = this.aiChatCookieKey + '=' + encodeURIComponent(value) + '; path=/; max-age=31536000; SameSite=Lax';
         }
 
         connectAiService() {
@@ -304,7 +375,10 @@
             this.updateAiStatus('Подключен: ' + profile.label);
             const stateEl = document.getElementById('ai-settings-state');
             if (stateEl) stateEl.textContent = 'Подключение подготовлено';
-            this.addAiChatMessage('assistant', 'Подключение подготовлено. Реальный запрос к сервису будет включен после добавления серверного endpoint.');
+            const credentialText = profile.tokenMode === 'adc'
+                ? ' через Application Default Credentials'
+                : '';
+            this.addAiChatMessage('assistant', 'Подключение' + credentialText + ' подготовлено. Реальный запрос к сервису будет включен после добавления серверного endpoint.');
         }
 
         getActiveAiProfile() {
@@ -427,6 +501,8 @@
                     model: profile.model,
                     tokenMode: profile.tokenMode,
                     hasUserToken: !!profile.token,
+                    credentialSource: this.getAiCredentialSource(profile),
+                    applicationDefaultCredentials: profile.tokenMode === 'adc',
                     tokenRotation: profile.tokenMode === 'rotating' ? 'integram_service_tokens' : null,
                     chargeBalance: !!profile.chargeBalance
                 },
@@ -447,6 +523,13 @@
                     { role: 'user', content: message }
                 ]
             };
+        }
+
+        getAiCredentialSource(profile) {
+            if (profile.tokenMode === 'adc') return 'application_default_credentials';
+            if (profile.tokenMode === 'rotating') return 'integram_service_tokens';
+            if (profile.token) return 'user_api_token';
+            return 'not_configured';
         }
 
         getMenuContext() {
@@ -598,6 +681,10 @@
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#039;');
+        }
+
+        escapeRegExp(value) {
+            return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         }
     }
 

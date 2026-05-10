@@ -256,16 +256,20 @@
                     <div class="database-field-group">
                         <label for="ai-service-provider" class="database-field-label">Сервис</label>
                         <select id="ai-service-provider" class="database-field-input">
+                            <option value="gemini">Google Gemini</option>
                             <option value="integram">Интеграм AI</option>
                             <option value="openai">ChatGPT / OpenAI</option>
                             <option value="gigachat">ГигаЧат</option>
                             <option value="deepseek">DeepSeek</option>
+                            <option value="groq">Groq</option>
+                            <option value="mistral">Mistral AI</option>
                             <option value="custom">Другой API</option>
                         </select>
                     </div>
                     <div class="database-field-group">
                         <label for="ai-token-mode" class="database-field-label">Токен</label>
                         <select id="ai-token-mode" class="database-field-input">
+                            <option value="adc">Application Default Credentials</option>
                             <option value="rotating">Токены Интеграма</option>
                             <option value="own">Мой токен</option>
                         </select>
