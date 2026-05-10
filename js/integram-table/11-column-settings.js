@@ -79,6 +79,7 @@
                         const parsedAttrs = this.parseAttrs(col.attrs);
                         const isMulti = parsedAttrs.multi;
                         const isRequired = parsedAttrs.required;
+                        const isKey = parsedAttrs.key;
                         const alias = parsedAttrs.alias;
                         const originalName = col.val || col.name;
                         const displayName = alias
@@ -101,6 +102,7 @@
                                 ${ displayName }
                                 ${ isRequired ? '<span class="col-required-badge" title="Обязательно к заполнению">*</span>' : '' }
                                 ${ isMulti ? '<span class="col-multi-badge" title="Выбор нескольких значений">&#9641;</span>' : '' }
+                                ${ isKey ? '<span class="col-key-badge" title="Поле входит в проверку уникальности"><i class="pi pi-key" aria-hidden="true"></i></span>' : '' }
                             </label>
                             <button class="btn-col-edit" data-col-id="${ col.id }" title="Редактировать колонку">
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12.146 0.146009C12.2408 0.0522494 12.3679 0 12.5005 0C12.6331 0 12.7602 0.0522494 12.854 0.146009L15.854 3.14601C15.9006 3.19245 15.9375 3.24763 15.9627 3.30838C15.9879 3.36912 16.0009 3.43424 16.0009 3.50001C16.0009 3.56578 15.9879 3.6309 15.9627 3.69164C15.9375 3.75239 15.9006 3.80756 15.854 3.85401L5.85399 13.854C5.806 13.9017 5.74885 13.9391 5.68599 13.964L0.685989 15.964C0.595125 16.0004 0.495585 16.0093 0.399709 15.9896C0.303832 15.9699 0.215836 15.9226 0.14663 15.8534C0.0774234 15.7842 0.0300499 15.6962 0.0103825 15.6003C-0.00928499 15.5044 -0.000381488 15.4049 0.0359892 15.314L2.03599 10.314C2.06092 10.2511 2.09834 10.194 2.14599 10.146L12.146 0.146009ZM11.207 2.50001L13.5 4.79301L14.793 3.50001L12.5 1.20701L11.207 2.50001ZM12.793 5.50001L10.5 3.20701L3.99999 9.70701V10H4.49999C4.6326 10 4.75977 10.0527 4.85354 10.1465C4.94731 10.2402 4.99999 10.3674 4.99999 10.5V11H5.49999C5.6326 11 5.75977 11.0527 5.85354 11.1465C5.94731 11.2402 5.99999 11.3674 5.99999 11.5V12H6.29299L12.793 5.50001ZM3.03199 10.675L2.92599 10.781L1.39799 14.602L5.21899 13.074L5.32499 12.968C5.22961 12.9324 5.14738 12.8685 5.0893 12.7848C5.03123 12.7012 5.00007 12.6018 4.99999 12.5V12H4.49999C4.36738 12 4.2402 11.9473 4.14644 11.8536C4.05267 11.7598 3.99999 11.6326 3.99999 11.5V11H3.49999C3.39817 10.9999 3.2988 10.9688 3.21517 10.9107C3.13153 10.8526 3.06763 10.7704 3.03199 10.675Z" fill="currentColor"/></svg>
@@ -289,6 +291,7 @@
             const isFreeLink = String(col.type) === '1';
             const isMulti = parsedAttrs.multi;
             const isRequired = parsedAttrs.required;
+            const isKey = parsedAttrs.key;
             const isFirstColumn = col.id === String(this.objectTableId || this.options.tableTypeId);
             const isUnique = col.unique === '1' || col.unique === 1 || col.unique === true;
 
@@ -366,6 +369,12 @@
                         <label class="col-edit-label col-edit-check-label">
                             <input type="checkbox" id="col-edit-unique-${instanceName}" ${ isUnique ? 'checked' : '' }>
                             Уникальные значения
+                        </label>
+                    </div>` : '' }
+                    ${ !isFirstColumn ? `<div class="col-edit-row">
+                        <label class="col-edit-label col-edit-check-label">
+                            <input type="checkbox" id="col-edit-key-${instanceName}" ${ isKey ? 'checked' : '' }>
+                            Входит в проверку уникальности
                         </label>
                     </div>` : '' }
                     <div class="col-edit-row">
@@ -492,7 +501,21 @@
                         }
                     }
 
-                    // 2. Required flag (skip for first column - issue #1873)
+                    // 2. Composite uniqueness key flag (requisites only)
+                    if (!isFirstColumn) {
+                        const newKey = colEditModal.querySelector(`#col-edit-key-${instanceName}`)?.checked ?? isKey;
+                        if (newKey !== isKey) {
+                            const result = await this.toggleColumnKey(col.id);
+                            if (!result.success) {
+                                showStatus('Ошибка изменения проверки уникальности: ' + result.error, true);
+                                saveBtn.disabled = false;
+                                return;
+                            }
+                            col.attrs = setIntegramAttrFlag(col.attrs, 'key', newKey);
+                        }
+                    }
+
+                    // 3. Required flag (skip for first column - issue #1873)
                     // First column is always required and cannot have _d_null sent to server
                     if (!isFirstColumn) {
                         const newRequired = colEditModal.querySelector(`#col-edit-required-${instanceName}`).checked;
@@ -507,7 +530,7 @@
                         }
                     }
 
-                    // 3. Alias (ref only)
+                    // 4. Alias (ref only)
                     if (isRef) {
                         const newAlias = colEditModal.querySelector(`#col-edit-alias-${instanceName}`).value.trim();
                         if (newAlias !== currentAlias) {
@@ -521,7 +544,7 @@
                             col.name = newAlias || (this.parseAttrs(col.attrs).alias) || col.name;
                         }
 
-                        // 4. Multiselect toggle (ref only)
+                        // 5. Multiselect toggle (ref only)
                         const newMulti = colEditModal.querySelector(`#col-edit-multi-${instanceName}`).checked;
                         if (newMulti !== isMulti) {
                             const result = await this.toggleColumnMulti(col.id);
@@ -720,6 +743,28 @@
                 if (typeof xsrf !== 'undefined') params.append('_xsrf', xsrf);
 
                 const resp = await fetch(`${apiBase}/_d_multi/${colId}?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+                if (!resp.ok) return { success: false, error: `HTTP ${resp.status}` };
+                return { success: true };
+            } catch (err) {
+                return { success: false, error: err.message };
+            }
+        }
+
+        /**
+         * Toggle whether a requisite participates in the composite uniqueness key.
+         * Uses _d_key/{colId}?JSON as in edit_types.html.
+         */
+        async toggleColumnKey(colId) {
+            const apiBase = this.getApiBase();
+            try {
+                const params = new URLSearchParams();
+                if (typeof xsrf !== 'undefined') params.append('_xsrf', xsrf);
+
+                const resp = await fetch(`${apiBase}/_d_key/${colId}?JSON`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: params.toString()
