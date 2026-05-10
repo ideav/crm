@@ -23,6 +23,8 @@ header('Access-Control-Allow-Headers: X-Authorization, x-authorization,Content-T
 header('Access-Control-Allow-Methods: *');
 header('Access-Control-Allow-Origin: *');
 mb_internal_encoding("UTF-8");
+if(function_exists('mysqli_report'))
+    mysqli_report(MYSQLI_REPORT_OFF);
 
 define("DB_MASK", "/^[a-z0-9_]{1,15}$/i");
 define("USER_DB_MASK", "/^[a-z]\w{2,14}$/i");  # Mask for the DB name validation
@@ -45,6 +47,8 @@ define("TOKEN", 125);
 define("SECRET", 130);
 define("VERSION", 8);
 define("VAL_LIM", 127);  # Maximum length of the value (val) field on UI
+
+include "include/db_errors.php";
 
 $com = explode("?", strtolower($_SERVER["REQUEST_URI"]));
 $com = explode("/", $com[0]);
@@ -90,6 +94,7 @@ elseif($z==="auth.asp" && !empty($_GET['error'])){
 elseif(!preg_match(DB_MASK, $z))
     die("Invalid database");
 
+$locale = isset($_COOKIE[$z."_locale"]) ? $_COOKIE[$z."_locale"] : (isset($_COOKIE["my_locale"]) ? $_COOKIE["my_locale"] : "RU");
 include "include/connection.php";
 # Check the DB existence
 $billing = mysqli_query($connection
@@ -97,10 +102,8 @@ $billing = mysqli_query($connection
 				LEFT JOIN my bal ON bal.up=db.up AND bal.t=285
 				LIMIT 1");
 if(!$billing && ($z !== "auth.asp")){
-    header("HTTP/1.0 404 Not found");
-    die("$z does not exist");
+    handleDatabaseBootstrapError($z, mysqli_errno($connection));
 }
-$locale = isset($_COOKIE[$z."_locale"]) ? $_COOKIE[$z."_locale"] : (isset($_COOKIE["my_locale"]) ? $_COOKIE["my_locale"] : "RU");
 																									
 # The trace cookie to be deleted upon the session close
 if(isset($_GET["TRACE_IT"]) || isset($_COOKIE["TRACE_IT"])){

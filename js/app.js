@@ -954,9 +954,20 @@ class App {
         // Check auth state from cookies
         this.auth.init();
 
-        // Handle r=InvalidToken URL parameter: show login form
+        // Handle redirect reasons from the backend: show login form and a visible message
         const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('r') === 'InvalidToken') {
+        if (urlParams.get('r') === 'dBNotExists') {
+            const dbParam = urlParams.get('db');
+            const details = urlParams.get('d');
+            const msg = details || (dbParam ? 'База ' + dbParam + ' не найдена' : 'База не найдена');
+
+            if (dbParam && dbParam !== 'my' && !this.auth.validDbs.includes(dbParam)) {
+                this.auth.validDbs.push(dbParam);
+            }
+
+            this.showAuthPanel(dbParam || undefined, msg);
+            showToast(msg, 'error');
+        } else if (urlParams.get('r') === 'InvalidToken') {
             const dbParam = urlParams.get('db');
             const uriParam = urlParams.get('uri');
 
@@ -1021,7 +1032,22 @@ class App {
         }
     }
 
-    showAuthPanel(preselect) {
+    showAuthMessage(message, type = 'error') {
+        const authMessage = document.getElementById('auth-message');
+        if (!authMessage) return;
+        authMessage.className = type === 'success' ? 'success-message' : 'error-message';
+        authMessage.textContent = message;
+        authMessage.style.display = message ? '' : 'none';
+    }
+
+    hideAuthMessage() {
+        const authMessage = document.getElementById('auth-message');
+        if (!authMessage) return;
+        authMessage.textContent = '';
+        authMessage.style.display = 'none';
+    }
+
+    showAuthPanel(preselect, message) {
         const authPanel = document.getElementById('auth-panel');
         if (authPanel) authPanel.style.display = '';
         const welcomeSection = document.getElementById('welcome-section');
@@ -1029,6 +1055,11 @@ class App {
         this.switchTab('login');
         // Build DB options with the preselected db
         this.auth.buildAuthDbOptions(preselect);
+        if (message) {
+            this.showAuthMessage(message, 'error');
+        } else {
+            this.hideAuthMessage();
+        }
         this._initCaptchaWidgets();
     }
 
