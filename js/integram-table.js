@@ -17543,6 +17543,7 @@ function parseIntegramAttrs(attrs) {
     const result = {
         required: false,
         multi: false,
+        key: false,
         alias: null,
         defaultValue: null
     };
@@ -17571,12 +17572,13 @@ function parseIntegramAttrs(attrs) {
 
     if (jsonAttrs) {
         Object.keys(jsonAttrs).forEach((key) => {
-            if (!['required', 'notNull', 'not_null', 'multi', 'alias', 'default', 'defaultValue'].includes(key)) {
+            if (!['required', 'notNull', 'not_null', 'multi', 'key', 'alias', 'default', 'defaultValue'].includes(key)) {
                 result[key] = jsonAttrs[key];
             }
         });
         result.required = parseBool(jsonAttrs.required ?? jsonAttrs.notNull ?? jsonAttrs.not_null);
         result.multi = parseBool(jsonAttrs.multi);
+        result.key = parseBool(jsonAttrs.key);
         result.alias = jsonAttrs.alias ? String(jsonAttrs.alias) : null;
         const defaultValue = jsonAttrs.default ?? jsonAttrs.defaultValue;
         result.defaultValue = defaultValue !== undefined && defaultValue !== null && String(defaultValue).length > 0
@@ -17587,6 +17589,7 @@ function parseIntegramAttrs(attrs) {
 
     result.required = raw.includes(':!NULL:');
     result.multi = raw.includes(':MULTI:');
+    result.key = raw.includes(':KEY:');
 
     const aliasMatch = raw.match(/:ALIAS=(.*?):/u);
     if (aliasMatch) {
@@ -17596,6 +17599,7 @@ function parseIntegramAttrs(attrs) {
     const stripped = raw
         .replace(/:!NULL:/g, '')
         .replace(/:MULTI:/g, '')
+        .replace(/:KEY:/g, '')
         .replace(/:ALIAS=(.*?):/gu, '')
         .trim();
     if (stripped.length > 0) {
@@ -17609,12 +17613,13 @@ function serializeIntegramAttrs(attrs) {
     const source = attrs || {};
     const result = {};
     Object.keys(source).forEach((key) => {
-        if (!['required', 'notNull', 'not_null', 'multi', 'alias', 'default', 'defaultValue'].includes(key) && source[key] !== null) {
+        if (!['required', 'notNull', 'not_null', 'multi', 'key', 'alias', 'default', 'defaultValue'].includes(key) && source[key] !== null) {
             result[key] = source[key];
         }
     });
     if (source.required) result.required = true;
     if (source.multi) result.multi = true;
+    if (source.key) result.key = true;
     if (source.alias) result.alias = String(source.alias);
     const defaultValue = source.defaultValue ?? source.default;
     if (defaultValue !== undefined && defaultValue !== null && String(defaultValue).length > 0) {
@@ -17635,8 +17640,8 @@ function setIntegramAttrAlias(attrs, alias) {
     return serializeIntegramAttrs(parsed);
 }
 
-function buildIntegramAttrs(defaultValue = '', required = false, multi = false, alias = null) {
-    return serializeIntegramAttrs({ defaultValue, required, multi, alias });
+function buildIntegramAttrs(defaultValue = '', required = false, multi = false, alias = null, key = false) {
+    return serializeIntegramAttrs({ defaultValue, required, multi, alias, key });
 }
 
 if (typeof IntegramTable !== 'undefined') {

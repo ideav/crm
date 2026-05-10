@@ -66,6 +66,15 @@
     color: var(--text-secondary);
 }
 
+/* Composite uniqueness key indicator */
+.icon-key-enabled {
+    color: var(--color-warning, #b7791f);
+}
+
+.icon-key-disabled {
+    color: var(--text-secondary);
+}
+
 /* Disabled input field */
 .input-disabled {
     background-color: var(--bg-secondary);
