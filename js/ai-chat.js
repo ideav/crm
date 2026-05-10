@@ -234,10 +234,13 @@
         }
 
         loadAiServiceSettings() {
-            try {
-                const raw = this.readAiServiceCookie() || this.readLegacyAiServiceStorage();
-                if (!raw) return;
+            const raw = this.readAiServiceStorage() || this.readAiServiceCookie();
+            if (!raw) {
+                this.clearAiServiceCookie();
+                return;
+            }
 
+            try {
                 const saved = JSON.parse(raw);
                 if (saved && saved.profiles) {
                     Object.keys(saved.profiles).forEach(id => {
@@ -250,8 +253,10 @@
                     this.aiActiveProviderId = saved.activeProviderId;
                 }
                 this.normalizeAiServiceProfiles();
+                this.persistAiServiceSettings();
             } catch (err) {
                 console.warn('[ai-chat] settings ignored:', err);
+                this.clearAiServiceCookie();
             }
         }
 
@@ -268,10 +273,27 @@
             }
         }
 
-        readLegacyAiServiceStorage() {
-            if (typeof localStorage === 'undefined' || !localStorage.getItem) return '';
+        readAiServiceStorage() {
+            const storage = this.getAiLocalStorage();
+            if (!storage || !storage.getItem) return '';
 
-            return localStorage.getItem(this.aiChatStorageKey) || localStorage.getItem(this.legacyAiChatStorageKey) || '';
+            return storage.getItem(this.aiChatStorageKey) || storage.getItem(this.legacyAiChatStorageKey) || '';
+        }
+
+        writeAiServiceStorage(value) {
+            const storage = this.getAiLocalStorage();
+            if (!storage || !storage.setItem) throw new Error('localStorage недоступен');
+
+            storage.setItem(this.aiChatStorageKey, value);
+            if (this.legacyAiChatStorageKey !== this.aiChatStorageKey && storage.removeItem) {
+                storage.removeItem(this.legacyAiChatStorageKey);
+            }
+        }
+
+        getAiLocalStorage() {
+            if (typeof localStorage !== 'undefined') return localStorage;
+            if (typeof window !== 'undefined' && window.localStorage) return window.localStorage;
+            return null;
         }
 
         normalizeAiServiceProfiles() {
@@ -349,7 +371,7 @@
             try {
                 this.persistAiServiceSettings();
                 const stateEl = document.getElementById('ai-settings-state');
-                if (stateEl) stateEl.textContent = 'Настройки сохранены в cookies';
+                if (stateEl) stateEl.textContent = 'Настройки сохранены в localStorage';
                 this.notify('Настройки ИИ-сервиса сохранены', 'success');
             } catch (err) {
                 console.error('[ai-chat] settings save failed:', err);
@@ -358,15 +380,26 @@
         }
 
         persistAiServiceSettings() {
-            this.normalizeAiServiceProfiles();
-            this.writeAiServiceCookie(JSON.stringify({
-                activeProviderId: this.aiActiveProviderId,
-                profiles: this.aiServiceProfiles
-            }));
+            this.writeAiServiceStorage(this.serializeAiServiceSettings());
+            this.clearAiServiceCookie();
         }
 
-        writeAiServiceCookie(value) {
-            document.cookie = this.aiChatCookieKey + '=' + encodeURIComponent(value) + '; path=/; max-age=31536000; SameSite=Lax';
+        serializeAiServiceSettings() {
+            return JSON.stringify(this.getAiServiceSettingsSnapshot());
+        }
+
+        getAiServiceSettingsSnapshot() {
+            this.normalizeAiServiceProfiles();
+            return {
+                activeProviderId: this.aiActiveProviderId,
+                profiles: this.aiServiceProfiles
+            };
+        }
+
+        clearAiServiceCookie() {
+            if (typeof document === 'undefined') return;
+
+            document.cookie = this.aiChatCookieKey + '=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0; SameSite=Lax';
         }
 
         connectAiService() {
@@ -590,7 +623,8 @@
                 },
                 body: JSON.stringify({
                     _xsrf: this.getXsrfToken(),
-                    payload: payload
+                    payload: payload,
+                    settings: this.getAiServiceSettingsSnapshot()
                 })
             });
 
