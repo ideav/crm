@@ -71,7 +71,7 @@ includesAll(aiScript, [
     'getDefaultAiServiceProfiles()',
     'getAiCommandPrompts()',
     'buildAiRequestPayload(',
-    'writeAiServiceCookie(',
+    'writeAiServiceStorage(',
     'create_table',
     'create_structure',
     'create_workspace',

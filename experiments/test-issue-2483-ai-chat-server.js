@@ -52,6 +52,7 @@ function createElement(id, overrides = {}) {
 }
 
 const cookieStore = {};
+const storage = {};
 const elements = {
     'ai-chat-input': createElement('ai-chat-input', { value: 'Создай таблицу клиентов' }),
     'ai-target-db': createElement('ai-target-db', { value: 'demo' }),
@@ -98,7 +99,17 @@ const context = {
     console,
     document,
     navigator: {},
-    localStorage: { getItem() { return null; } },
+    localStorage: {
+        getItem(key) {
+            return Object.prototype.hasOwnProperty.call(storage, key) ? storage[key] : null;
+        },
+        setItem(key, value) {
+            storage[key] = String(value);
+        },
+        removeItem(key) {
+            delete storage[key];
+        }
+    },
     setTimeout(fn) { fn(); },
     db: 'demo',
     action: 'table',
@@ -133,6 +144,7 @@ const context = {
 context.window.window = context.window;
 context.window.document = document;
 context.window.fetch = context.fetch;
+context.window.localStorage = context.localStorage;
 
 vm.runInNewContext(aiScript, context, { filename: 'js/ai-chat.js' });
 const Controller = context.window.IntegramAiChatController;
@@ -153,7 +165,9 @@ controller.aiActiveProviderId = 'openai';
     assert.strictEqual(body.payload.context.targetDb, 'demo');
     assert.strictEqual(body.payload.provider.id, 'openai');
     assert.strictEqual(body.payload.messages[0].content, 'Создай таблицу клиентов');
-    assert(!fetchRequest.options.body.includes('sk-test-secret'), 'API tokens must not be copied into the visible command payload');
+    assert(!JSON.stringify(body.payload).includes('sk-test-secret'), 'API tokens must not be copied into the visible command payload');
+    assert.strictEqual(body.settings.profiles.openai.token, 'sk-test-secret', 'provider settings should be posted outside the visible command payload');
+    assert(!cookieStore.integram_ai_chat_settings, 'AI settings must not be persisted to cookies');
 
     assert.strictEqual(controller.aiCommandQueue.length, 1);
     assert.strictEqual(controller.aiCommandQueue[0].status, 'Получен ответ');

@@ -7891,7 +7891,7 @@ function handleAiChatRequest($com){
     $payload["context"]["accessibleDbs"] = $accessibleDbs;
 
     try {
-        $response = callAiChatProvider($payload, getAiChatSettings());
+        $response = callAiChatProvider($payload, getAiChatSettings(isset($_POST["settings"]) ? $_POST["settings"] : array()));
         api_dump(json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-chat.json");
     } catch(Exception $e) {
         $code = (int)$e->getCode();
@@ -7930,10 +7930,11 @@ function getAiAccessibleDbs(){
         $dbs[] = "my";
     return array_values(array_unique($dbs));
 }
-function getAiChatSettings(){
-    if(!isset($_COOKIE["integram_ai_chat_settings"]) || $_COOKIE["integram_ai_chat_settings"] === "")
-        return array();
-    $settings = json_decode(urldecode($_COOKIE["integram_ai_chat_settings"]), true);
+function getAiChatSettings($settings=array()){
+    if(is_string($settings)){
+        $decoded = json_decode($settings, true);
+        return is_array($decoded) ? $decoded : array();
+    }
     return is_array($settings) ? $settings : array();
 }
 function callAiChatProvider($payload, $settings){
