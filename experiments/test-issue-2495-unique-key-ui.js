@@ -253,6 +253,13 @@ async function testColumnEditCanToggleUniqueKey() {
 
     table.showColumnEditForm(column);
 
+    const modal = fakeDocument.body.children.find(el => el.className.includes('col-edit-modal'));
+    const uniqueKeyTitle = 'Система контролирует уникальность комбинации первой колонки и всех ключей';
+    assert(
+        modal.innerHTML.includes(`title="${uniqueKeyTitle}"`),
+        'uniqueness-check checkbox label should explain the full composite uniqueness rule'
+    );
+
     const keyCheckbox = fakeDocument.getElementById('col-edit-key-issue2495Table');
     assert(keyCheckbox, 'column edit modal should render the uniqueness-check checkbox for requisites');
     assert.strictEqual(keyCheckbox.checked, true, 'checkbox should reflect the current attrs.key state');
