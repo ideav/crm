@@ -8395,6 +8395,179 @@ function checkDuplicatedReqs($id, $t){
     while($row = mysqli_fetch_array($data_set))
         Delete($row["id"]);
 }
+function UniqueKeyReqs($typ){
+	global $z;
+	$typ = (int)$typ;
+	$reqs = array();
+	$sql = "SELECT req.id, req.t, req.val attrs"
+			.", CASE WHEN req.t=1 THEN 1 ELSE refs.id END ref_id"
+			.", CASE WHEN req.t=1 THEN 1 WHEN refs.id IS NULL THEN typs.t ELSE refs.t END base_typ"
+			." FROM $z req"
+			." LEFT JOIN $z typs ON typs.id=req.t AND req.t!=1"
+			." LEFT JOIN $z refs ON refs.id=typs.t AND refs.t!=refs.id"
+			." WHERE req.up=$typ ORDER BY req.ord";
+	$data_set = Exec_sql($sql, "Get unique key reqs");
+	while($row = mysqli_fetch_array($data_set))
+		if(FieldAttrsHasKey($row["attrs"])){
+			$row["id"] = (int)$row["id"];
+			$row["ref_id"] = is_null($row["ref_id"]) ? 0 : (int)$row["ref_id"];
+			$row["multi"] = FieldAttrsHasMulti($row["attrs"]);
+			$reqs[$row["id"]] = $row;
+		}
+	return $reqs;
+}
+function UniqueKeyNormalizeValue($t, $value){
+	if(is_array($value))
+		$value = implode(",", $value);
+	if(!in_array((string)$t, array("101", "102", "103", "132", "49"), true))
+		$value = BuiltIn($value);
+	return Format_Val($t, $value);
+}
+function UniqueKeyNormalizeRefs($req, $value){
+	global $z;
+	$refs = is_array($value) ? $value : explode(",", (string)$value);
+	$ids = array();
+	$seen = array();
+	$hasMissingRef = false;
+	foreach($refs as $ref){
+		$ref = trim((string)$ref);
+		if($ref === "")
+			continue;
+		if(is_numeric($ref)){
+			$ref = (int)$ref;
+			if($ref > 0 && !isset($seen[$ref])){
+				$ids[] = $ref;
+				$seen[$ref] = true;
+			}
+			continue;
+		}
+		if((int)$req["ref_id"] === 1){
+			$hasMissingRef = true;
+			continue;
+		}
+		$escaped = addcslashes($ref, "\\\'");
+		$result = Exec_sql("SELECT id FROM $z WHERE val='$escaped' AND t=".(int)$req["ref_id"]." LIMIT 1", "Resolve unique key ref");
+		if($row = mysqli_fetch_array($result)){
+			$ref = (int)$row["id"];
+			if(!isset($seen[$ref])){
+				$ids[] = $ref;
+				$seen[$ref] = true;
+			}
+		}
+		else
+			$hasMissingRef = true;
+	}
+	if(!$req["multi"] && count($ids) > 1)
+		$ids = array($ids[0]);
+	elseif($req["multi"])
+		sort($ids);
+	return array(
+		"kind" => "ref",
+		"ref_id" => (int)$req["ref_id"],
+		"values" => $ids,
+		"multi" => $req["multi"],
+		"has_missing_ref" => $hasMissingRef
+	);
+}
+function UniqueKeyStoredValues($recordId, $keyReqs){
+	global $z;
+	$values = array();
+	foreach($keyReqs as $reqId => $req)
+		$values[$reqId] = $req["ref_id"]
+			? array("kind" => "ref", "ref_id" => (int)$req["ref_id"], "values" => array(), "multi" => $req["multi"], "has_missing_ref" => false)
+			: array("kind" => "value", "value" => "");
+	if((int)$recordId <= 0 || !count($keyReqs))
+		return $values;
+
+	foreach($keyReqs as $reqId => $req){
+		if($req["ref_id"]){
+			$refType = (int)$req["ref_id"];
+			$result = Exec_sql("SELECT reqs.t FROM $z reqs JOIN $z refs ON refs.id=reqs.t"
+							." WHERE reqs.up=".(int)$recordId." AND reqs.val='".addcslashes((string)$reqId, "\\\'")."'"
+							." AND (refs.t=$refType OR $refType=1) ORDER BY reqs.ord", "Get stored unique key refs");
+			while($row = mysqli_fetch_array($result))
+				$values[$reqId]["values"][(int)$row["t"]] = (int)$row["t"];
+			$values[$reqId]["values"] = array_values(array_unique($values[$reqId]["values"]));
+			sort($values[$reqId]["values"]);
+		}
+		else{
+			$result = Exec_sql("SELECT val FROM $z WHERE up=".(int)$recordId." AND t=".(int)$reqId." ORDER BY id DESC LIMIT 1", "Get stored unique key value");
+			if($row = mysqli_fetch_array($result))
+				$values[$reqId] = array("kind" => "value", "value" => $row["val"]);
+		}
+	}
+	return $values;
+}
+function UniqueKeyValuesFromRequest($typ, $recordId, $request, $keyReqs=false){
+	$keyReqs = $keyReqs === false ? UniqueKeyReqs($typ) : $keyReqs;
+	$values = UniqueKeyStoredValues($recordId, $keyReqs);
+	foreach($keyReqs as $reqId => $req){
+		$field = "t$reqId";
+		$newField = "NEW_$reqId";
+		if($req["ref_id"] && isset($request[$newField]) && trim((string)$request[$newField]) !== ""){
+			$values[$reqId] = UniqueKeyNormalizeRefs($req, $request[$newField]);
+			continue;
+		}
+		if(!array_key_exists($field, $request))
+			continue;
+		$values[$reqId] = $req["ref_id"]
+			? UniqueKeyNormalizeRefs($req, $request[$field])
+			: array("kind" => "value", "value" => UniqueKeyNormalizeValue($reqId, $request[$field]));
+	}
+	return $values;
+}
+function FindUniqueRecordDuplicate($typ, $skipId, $up, $val, $keyValues){
+	global $z;
+	foreach($keyValues as $keyValue)
+		if($keyValue["kind"] === "ref" && $keyValue["has_missing_ref"])
+			return false;
+	$sql = "SELECT obj.id, obj.ord FROM $z obj WHERE obj.t=".(int)$typ
+			." AND obj.up=".(int)$up
+			." AND obj.val='".addcslashes($val, "\\\'")."'";
+	if((int)$skipId > 0)
+		$sql .= " AND obj.id!=".(int)$skipId;
+	$i = 0;
+	foreach($keyValues as $reqId => $keyValue){
+		$i++;
+		$reqId = (int)$reqId;
+		if($keyValue["kind"] === "ref"){
+			$reqVal = addcslashes((string)$reqId, "\\\'");
+			$refType = (int)$keyValue["ref_id"];
+			if(!count($keyValue["values"])){
+				$sql .= " AND NOT EXISTS(SELECT 1 FROM $z uk$i JOIN $z ukref$i ON ukref$i.id=uk$i.t WHERE uk$i.up=obj.id AND uk$i.val='$reqVal' AND (ukref$i.t=$refType OR $refType=1))";
+				continue;
+			}
+			if($keyValue["multi"])
+				$sql .= " AND (SELECT COUNT(DISTINCT ukc$i.t) FROM $z ukc$i JOIN $z ukcref$i ON ukcref$i.id=ukc$i.t WHERE ukc$i.up=obj.id AND ukc$i.val='$reqVal' AND (ukcref$i.t=$refType OR $refType=1))=".count($keyValue["values"]);
+			foreach($keyValue["values"] as $ref){
+				$i++;
+				$sql .= " AND EXISTS(SELECT 1 FROM $z uk$i JOIN $z ukref$i ON ukref$i.id=uk$i.t WHERE uk$i.up=obj.id AND uk$i.val='$reqVal' AND uk$i.t=".(int)$ref." AND (ukref$i.t=$refType OR $refType=1))";
+				if(!$keyValue["multi"])
+					break;
+			}
+		}
+		else{
+			$value = (string)$keyValue["value"];
+			if($value === "")
+				$sql .= " AND NOT EXISTS(SELECT 1 FROM $z uk$i WHERE uk$i.up=obj.id AND uk$i.t=$reqId AND uk$i.val!='')";
+			else
+				$sql .= " AND EXISTS(SELECT 1 FROM $z uk$i WHERE uk$i.up=obj.id AND uk$i.t=$reqId AND uk$i.val='".addcslashes($value, "\\\'")."')";
+		}
+	}
+	$sql .= " LIMIT 1";
+	$result = Exec_sql($sql, "Check composite unique Obj");
+	return mysqli_fetch_array($result);
+}
+function FindUniqueRecordDuplicateFromRequest($typ, $skipId, $up, $val, $request){
+	$keyReqs = UniqueKeyReqs($typ);
+	$keyValues = UniqueKeyValuesFromRequest($typ, $skipId, $request, $keyReqs);
+	return FindUniqueRecordDuplicate($typ, $skipId, $up, $val, $keyValues);
+}
+function CheckUniqueRecordFromRequest($typ, $recordId, $up, $val, $request){
+	$row = FindUniqueRecordDuplicateFromRequest($typ, $recordId, $up, $val, $request);
+	if($row)
+		my_die(t9n("[RU]Запись с таким ключом уже существует[EN]The record with this key already exists")." #".$row["id"]);
+}
 function base64UrlDecode($input) {
     $remainder = strlen($input) % 4;
     if ($remainder) {
@@ -8970,7 +9143,7 @@ if(Validate_Token())
 			# Get the Object's ID value and Type
 			if($id === "")
 			    my_die(t9n("[RU]Неверный ID[EN]Invalid ID"));
-			$result = Exec_sql("SELECT a.val, a.t typ, a.up, a.ord, typs.t FROM $z typs, $z a WHERE typs.id=a.t AND a.id=$id", "Get current Val and Type");
+			$result = Exec_sql("SELECT a.val, a.t typ, a.up, a.ord, typs.t, typs.ord uniq FROM $z typs, $z a WHERE typs.id=a.t AND a.id=$id", "Get current Val and Type");
 			if($row = mysqli_fetch_array($result))
 				$cur_val = $row["val"];
 			else
@@ -8979,6 +9152,7 @@ if(Validate_Token())
 				exit("Cannot update meta-data");
 			$typ = $row["typ"];
 			$base_typ = $GLOBALS["basics"][$row["t"]];
+			$unique = (int)$row["uniq"];
 			$up = $row["up"];
 			if($up > 1)
 				$arg = "F_U=$up";  # Retain this for Array elements only
@@ -9019,6 +9193,12 @@ if(Validate_Token())
 			$GLOBALS["REQ_TYPS"][$typ] = $id;
 			Get_Current_Values($id, $typ);
 			$GLOBALS["REQS"][$typ] = $cur_val;
+			if($unique && !$copy){
+				$uniqueVal = $cur_val;
+				if(isset($_REQUEST["t$typ"]) && !(($typ == TOKEN || $typ == XSRF || $typ == PASSWORD) && $_REQUEST["t$typ"] === PASSWORDSTARS))
+					$uniqueVal = UniqueKeyNormalizeValue($typ, $_REQUEST["t$typ"]);
+				CheckUniqueRecordFromRequest($typ, $id, $up, $uniqueVal, $_REQUEST);
+			}
 			trace("GLOBALS[REQS] " . print_r($GLOBALS["REQS"], TRUE));
 
 			foreach($_REQUEST as $key => $value){
@@ -9430,8 +9610,7 @@ if(Validate_Token())
 					$val = Format_Val($base_typ, BuiltIn($val));
 				# The Type must be unique - let's check this
 				if($unique && !isset($max_val))
-					if($row = mysqli_fetch_array(Exec_sql("SELECT id, ord FROM $z WHERE t=$id AND val='".addslashes($val)."' AND up=$up LIMIT 1"
-														, "Check Obj's uniquity")))
+					if($row = FindUniqueRecordDuplicateFromRequest($id, 0, $up, $val, $_REQUEST))
 						if(strlen($row[0])){
 						    $msg = t9n("[RU]Запись уже существует[EN]The record already exists");
                 			$arg = "exists1=1";
@@ -9711,9 +9890,9 @@ if(Validate_Token())
 							, "Check the req and obj");
 			if($row = mysqli_fetch_array($result))
 				Update_Val($id, FieldAttrsToggleFlag($row["val"], "required"));
-    		else
-    		    my_die(t9n("[RU]Неверный реквизит $id [EN]Invalid requisite $id "));
-    		$obj = $row["id"];
+			else
+				my_die(t9n("[RU]Неверный реквизит $id [EN]Invalid requisite $id "));
+			$obj = $row["id"];
 			break;
 
 		case "_d_multi":
@@ -9727,13 +9906,25 @@ if(Validate_Token())
     		$obj = $row["id"];
 			break;
 
+		case "_d_key":
+		case "_setkey":
+			$result = Exec_sql("SELECT obj.id, req.val FROM $z req LEFT JOIN $z obj ON obj.id=req.up WHERE req.id=$id and obj.up=0"
+							, "Check the req and obj");
+			if($row = mysqli_fetch_array($result))
+				Update_Val($id, FieldAttrsToggleFlag($row["val"], "key"));
+			else
+				my_die(t9n("[RU]Неверный реквизит $id [EN]Invalid requisite $id "));
+			$obj = $row["id"];
+			break;
+
 		case "_d_attrs":
 		case "_modifiers":
 			$val = FieldAttrsBuild(
 				$val,
 				isset($_REQUEST["set_null"]),
 				isset($_REQUEST["multi"]),
-				isset($_REQUEST["alias"]) ? $_REQUEST["alias"] : null
+				isset($_REQUEST["alias"]) ? $_REQUEST["alias"] : null,
+				isset($_REQUEST["key"])
 			);
 			Update_Val($id, $val);
 			$obj = $up;

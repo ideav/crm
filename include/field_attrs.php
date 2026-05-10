@@ -2,6 +2,7 @@
 
 defined("NOT_NULL_MASK") || define("NOT_NULL_MASK", ":!NULL:");
 defined("MULTI_MASK") || define("MULTI_MASK", ":MULTI:");
+defined("KEY_MASK") || define("KEY_MASK", ":KEY:");
 defined("ALIAS_MASK") || define("ALIAS_MASK", "/:ALIAS=(.*?):/u");
 defined("ALIAS_DEF") || define("ALIAS_DEF", ":ALIAS=");
 
@@ -10,6 +11,7 @@ function FieldAttrsEmpty()
 	return array(
 		"required" => false,
 		"multi" => false,
+		"key" => false,
 		"alias" => null,
 		"default" => ""
 	);
@@ -49,6 +51,9 @@ function FieldAttrsParse($attrs)
 					case "multi":
 						$result["multi"] = FieldAttrsBool($value);
 						break;
+					case "key":
+						$result["key"] = FieldAttrsBool($value);
+						break;
 					case "alias":
 						$result["alias"] = is_null($value) ? null : (string)$value;
 						break;
@@ -67,9 +72,10 @@ function FieldAttrsParse($attrs)
 
 	$result["required"] = strpos($attrs, NOT_NULL_MASK) !== false;
 	$result["multi"] = strpos($attrs, MULTI_MASK) !== false;
+	$result["key"] = strpos($attrs, KEY_MASK) !== false;
 	if(preg_match(ALIAS_MASK, $attrs, $alias))
 		$result["alias"] = $alias[1];
-	$result["default"] = preg_replace(ALIAS_MASK, "", str_replace(MULTI_MASK, "", str_replace(NOT_NULL_MASK, "", $attrs)));
+	$result["default"] = preg_replace(ALIAS_MASK, "", str_replace(KEY_MASK, "", str_replace(MULTI_MASK, "", str_replace(NOT_NULL_MASK, "", $attrs))));
 	return $result;
 }
 
@@ -79,7 +85,7 @@ function FieldAttrsSerialize($attrs)
 	$json = array();
 
 	foreach($parsed as $key => $value){
-		if(in_array($key, array("required", "notNull", "not_null", "multi", "alias", "default", "defaultValue"), true))
+		if(in_array($key, array("required", "notNull", "not_null", "multi", "key", "alias", "default", "defaultValue"), true))
 			continue;
 		if(!is_null($value))
 			$json[$key] = $value;
@@ -88,6 +94,8 @@ function FieldAttrsSerialize($attrs)
 		$json["required"] = true;
 	if(FieldAttrsBool($parsed["multi"]))
 		$json["multi"] = true;
+	if(FieldAttrsBool($parsed["key"]))
+		$json["key"] = true;
 	if(isset($parsed["alias"]) && $parsed["alias"] !== "")
 		$json["alias"] = (string)$parsed["alias"];
 	$default = isset($parsed["default"]) ? $parsed["default"] : (isset($parsed["defaultValue"]) ? $parsed["defaultValue"] : "");
@@ -107,6 +115,12 @@ function FieldAttrsHasMulti($attrs)
 {
 	$parsed = FieldAttrsParse($attrs);
 	return $parsed["multi"];
+}
+
+function FieldAttrsHasKey($attrs)
+{
+	$parsed = FieldAttrsParse($attrs);
+	return $parsed["key"];
 }
 
 function FieldAttrsAlias($attrs, $fallback="")
@@ -142,11 +156,12 @@ function FieldAttrsSetAlias($attrs, $alias)
 	return FieldAttrsSerialize($parsed);
 }
 
-function FieldAttrsBuild($default="", $required=false, $multi=false, $alias=null)
+function FieldAttrsBuild($default="", $required=false, $multi=false, $alias=null, $key=false)
 {
 	return FieldAttrsSerialize(array(
 		"required" => $required,
 		"multi" => $multi,
+		"key" => $key,
 		"alias" => $alias,
 		"default" => $default
 	));
