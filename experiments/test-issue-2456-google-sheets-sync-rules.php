@@ -54,11 +54,11 @@ assertSameIssue2456('13', $records[4]['value'], 'captures the value under the ne
 
 $content = gss_build_bki_content($records, 1773328460);
 $expected = "DATA\r\n"
-    . "10;;Metric A;PLAN;1773328460\r\n"
-    . "20;;Metric B;PLAN;1773328460\r\n"
-    . "11;;Metric A;PLAN;1773328460\r\n"
-    . "12;;Metric A;PLAN;1773328460\r\n"
-    . "13;;Metric A;PLAN;1773328460\r\n";
+    . "10;;Metric A;PLAN;1773328460;\r\n"
+    . "20;;Metric B;PLAN;1773328460;\r\n"
+    . "11;;Metric A;PLAN;1773328460;\r\n"
+    . "12;;Metric A;PLAN;1773328460;\r\n"
+    . "13;;Metric A;PLAN;1773328460;\r\n";
 
 assertSameIssue2456($expected, $content, 'builds BKI content with value/date/row/column/timestamp fields');
 
