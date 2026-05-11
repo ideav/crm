@@ -99,6 +99,8 @@ function gss_normalize_config($config, $configDir) {
         'upload_endpoint' => '/object/443296?JSON&import=1',
         'base_url_has_database' => false,
         'url_template' => '',
+        'createParent' => '1',
+        'autoParent' => '449960',
     ];
     $config['integram'] = array_merge($integramDefaults, $config['integram']);
     unset($config['integram']['auth_endpoint'], $config['integram']['xsrf_endpoint']);
@@ -918,8 +920,10 @@ function gss_build_bki_content($records, $timestamp = null) {
             : gss_last_list_value($columns);
 
         $sheetRowNumber = array_key_exists('sheet_row_number', $record) ? $record['sheet_row_number'] : '';
+        $sheet = array_key_exists('sheet', $record) ? $record['sheet'] : '';
 
-        $lines[] = gss_escape_bki_value($record['value'])
+        $lines[] = gss_escape_bki_value($sheet)
+            . ';' . gss_escape_bki_value($record['value'])
             . ';' . gss_escape_bki_value($date)
             . ';' . gss_escape_bki_value($row)
             . ';' . gss_escape_bki_value($column)
@@ -993,12 +997,21 @@ function gss_integram_upload_endpoint($config) {
 function gss_integram_upload_post_fields($filePath, $config) {
     $tokens = gss_integram_tokens($config);
 
-    return [
+    $fields = [
         'token' => $tokens['token'],
         '_xsrf' => $tokens['xsrf'],
         'import' => '1',
         'bki_file' => new CURLFile($filePath, 'application/octet-stream', 'import.bki'),
     ];
+
+    if (isset($config['createParent']) && (string)$config['createParent'] !== '') {
+        $fields['createParent'] = (string)$config['createParent'];
+    }
+    if (isset($config['autoParent']) && (string)$config['autoParent'] !== '') {
+        $fields['autoParent'] = (string)$config['autoParent'];
+    }
+
+    return $fields;
 }
 
 function gss_integram_tokens($config) {

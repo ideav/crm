@@ -49,22 +49,22 @@ $records2 = gss_extract_sheet_records(
 assertSameIssue2518(1, count($records2), 'extracts 1 record with range offset');
 assertSameIssue2518(6, $records2[0]['sheet_row_number'], 'sheet_row_number is 6 when rangeStartRow=4 and rowIndex=1');
 
-// Test 3: BKI output includes sheet_row_number between column and timestamp
+// Test 3: BKI output includes sheet name as first column and sheet_row_number between column and timestamp
 $content = gss_build_bki_content($records, 1773328460);
 $expected = "DATA\r\n"
-    . "123;31.01.2026;Выручка;ПЛАН;4;1773328460;\r\n"
-    . "89;;Выручка;2025;4;1773328460;\r\n";
+    . "TestSheet;123;31.01.2026;Выручка;ПЛАН;4;1773328460;\r\n"
+    . "TestSheet;89;;Выручка;2025;4;1773328460;\r\n";
 
-assertSameIssue2518($expected, $content, 'BKI output includes sheet_row_number as {value};{date};{row};{column};{sheet_row_number};{timestamp};');
+assertSameIssue2518($expected, $content, 'BKI output includes sheet name as {sheet};{value};{date};{row};{column};{sheet_row_number};{timestamp};');
 
 // Test 4: BKI output with range offset
 $content2 = gss_build_bki_content($records2, 1773328460);
 $expected2 = "DATA\r\n"
-    . "89;;Выручка;2025;6;1773328460;\r\n";
+    . "TestSheet;89;;Выручка;2025;6;1773328460;\r\n";
 
 assertSameIssue2518($expected2, $content2, 'BKI output uses correct sheet_row_number with range offset');
 
-// Test 5: record without sheet_row_number (backward compat) produces empty field
+// Test 5: record without sheet or sheet_row_number (backward compat) produces empty fields
 $manualRecord = [
     'value' => 'Val',
     'date' => '01.01.2026',
@@ -75,8 +75,8 @@ $manualRecord = [
 ];
 $content3 = gss_build_bki_content([$manualRecord], 12345);
 $expected3 = "DATA\r\n"
-    . "Val;01.01.2026;Row;Col;;12345;\r\n";
+    . ";Val;01.01.2026;Row;Col;;12345;\r\n";
 
-assertSameIssue2518($expected3, $content3, 'record without sheet_row_number produces empty field in BKI');
+assertSameIssue2518($expected3, $content3, 'record without sheet or sheet_row_number produces empty fields in BKI');
 
 echo "PASS issue 2518 Google Sheets row number in BKI format\n";
