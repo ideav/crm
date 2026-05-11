@@ -7264,7 +7264,16 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                 mkdir($gssDir, 0775, true);
             if(isApi())
             {
-                if(isset($_REQUEST["config"]))
+                if(isset($_REQUEST["metadata"]) && $_REQUEST["metadata"] === "tables")
+                {
+                    $tables = [];
+                    $sql = "SELECT id, val FROM $z WHERE up=0 AND id!=t AND id>300 ORDER BY val";
+                    $data_set = Exec_sql($sql, "List tables for gssync");
+                    while($row = mysqli_fetch_array($data_set))
+                        $tables[] = ["id" => $row["id"], "val" => $row["val"]];
+                    api_dump(json_encode(["tables" => $tables], JSON_UNESCAPED_UNICODE));
+                }
+                elseif(isset($_REQUEST["config"]))
                 {
                     $configName = trim($_REQUEST["config"]);
                     if(!preg_match(FILE_MASK, $configName))
@@ -7280,6 +7289,18 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                         mkdir($logsDir, 0775, true);
                     if(!isset($configData['output_file']))
                         $configData['output_file'] = "$logsDir/google_sheets_sync.bki";
+                    # Force current site / current DB at sync time
+                    if(isset($configData['integram']) && is_array($configData['integram']))
+                    {
+                        $configData['integram']['base_url'] = '';
+                        $configData['integram']['database'] = '';
+                        if(!empty($configData['integram']['table_id']))
+                        {
+                            $tableId = preg_replace('/\D+/', '', (string)$configData['integram']['table_id']);
+                            if($tableId !== '')
+                                $configData['integram']['upload_endpoint'] = "/$z/object/$tableId?JSON&import=1";
+                        }
+                    }
                     require_once "include/google_sheets_sync.php";
                     $configData = gss_normalize_config($configData, realpath($gssDir));
                     try {
@@ -7309,6 +7330,16 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                     $data = json_decode($json, true);
                     if(!is_array($data))
                         my_error(t9n("[RU]Ошибка разбора JSON[EN]Invalid JSON"), "400");
+                    # Strip client-supplied site / DB and persist only table_id; URL is built from current $z at sync time
+                    if(isset($data['integram']) && is_array($data['integram']))
+                    {
+                        unset($data['integram']['base_url'], $data['integram']['database'], $data['integram']['upload_endpoint']);
+                        if(isset($data['integram']['table_id']))
+                        {
+                            $tableId = preg_replace('/\D+/', '', (string)$data['integram']['table_id']);
+                            $data['integram']['table_id'] = $tableId;
+                        }
+                    }
                     file_put_contents("$gssDir/$configName.json", json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
                     api_dump(json_encode(["ok" => true], JSON_UNESCAPED_UNICODE));
                 }
