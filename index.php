@@ -5872,6 +5872,37 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                                 continue;
 						    }
 						    array_shift($object);
+						    // issue #2524: under getParent the type value lives in the second column (now $object[0]
+						    // after the shift). If it was cleared in the source and the type has a composite uniqueness
+						    // key, find the existing record by the key reqs under the resolved parent and delete it —
+						    // mirroring the issue-2522 logic that only handled the first-column case.
+						    if($object[0] === "" && count($keyReqsForDelete)){
+						        $keyValuesForDelete = array();
+						        $ord = 0;
+						        foreach($GLOBALS["local_struct"][$id] as $reqId => $reqName){
+						            if($reqId == 0) continue;
+						            $ord++;
+						            if(!isset($keyReqsForDelete[$reqId])) continue;
+						            $req = $keyReqsForDelete[$reqId];
+						            $rawVal = isset($object[$ord]) ? UnMaskDelimiters($object[$ord]) : "";
+						            $keyValuesForDelete[$reqId] = $req["ref_id"]
+						                ? UniqueKeyNormalizeRefs($req, $rawVal)
+						                : array("kind" => "value", "value" => UniqueKeyNormalizeValue($req["t"], $rawVal));
+						        }
+						        foreach($keyReqsForDelete as $reqId => $req){
+						            if(!isset($keyValuesForDelete[$reqId]))
+						                $keyValuesForDelete[$reqId] = $req["ref_id"]
+						                    ? array("kind" => "ref", "ref_id" => (int)$req["ref_id"], "values" => array(), "multi" => $req["multi"], "has_missing_ref" => false)
+						                    : array("kind" => "value", "value" => "");
+						        }
+						        if($existingRow = FindUniqueRecordDuplicate($id, 0, $parent, "", $keyValuesForDelete, false)){
+						            trace(" issue-2524: empty value under getParent, deleting existing #".$existingRow["id"]." by composite key (parent=$parent)");
+						            Delete($existingRow["id"]);
+						            $GLOBALS["warning"] .= t9n("[RU]Удалена запись типа $id с пустым значением (строка $count)[EN]Deleted record of type $id with empty value (string #$count)");
+						            $count++;
+						            continue;
+						        }
+						    }
     					}
     					$object[0] = Format_Val($GLOBALS["base"][$id], UnMaskDelimiters($object[0]));
 					    $reqs = Array();
