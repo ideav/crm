@@ -167,17 +167,24 @@
     display: none;
 }
 
+.user-menu-divider-mobile {
+    display: none;
+}
+
 @media (max-width: 768px) {
     .user-menu-userinfo {
         display: flex;
         align-items: center;
-        gap: 0.75rem;
         padding: 0.875rem 1rem;
         color: var(--text-primary);
         font-size: 0.9rem;
         font-weight: 600;
         pointer-events: none;
         cursor: default;
+    }
+
+    .user-menu-divider-mobile {
+        display: block;
     }
 }
 
