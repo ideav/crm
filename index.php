@@ -7277,13 +7277,13 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                 {
                     $configName = trim($_REQUEST["config"]);
                     if(!preg_match(FILE_MASK, $configName))
-                        my_error(t9n("[RU]Неверное имя файла конфигурации[EN]Invalid config file name"), "400");
+                        my_die(t9n("[RU]Неверное имя файла конфигурации[EN]Invalid config file name"), "400");
                     $configFile = "$gssDir/$configName.json";
                     if(!file_exists($configFile))
-                        my_error(t9n("[RU]Файл конфигурации не найден[EN]Config file not found"), "404");
+                        my_die(t9n("[RU]Файл конфигурации не найден[EN]Config file not found"), "404");
                     $configData = json_decode(file_get_contents($configFile), true);
                     if(!is_array($configData))
-                        my_error(t9n("[RU]Ошибка разбора конфигурации[EN]Config parse error"), "400");
+                        my_die(t9n("[RU]Ошибка разбора конфигурации[EN]Config parse error"), "400");
                     $logsDir = "templates/logs/$z";
                     if(!file_exists($logsDir))
                         mkdir($logsDir, 0775, true);
@@ -7307,17 +7307,17 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                         $summary = gss_sync($configData);
                         api_dump(json_encode($summary, JSON_UNESCAPED_UNICODE));
                     } catch (Throwable $e) {
-                        my_error($e->getMessage(), "500");
+                        my_die($e->getMessage(), "500");
                     }
                 }
                 elseif(isset($_REQUEST["load"]))
                 {
                     $configName = trim($_REQUEST["load"]);
                     if(!preg_match(FILE_MASK, $configName))
-                        my_error(t9n("[RU]Неверное имя файла конфигурации[EN]Invalid config file name"), "400");
+                        my_die(t9n("[RU]Неверное имя файла конфигурации[EN]Invalid config file name"), "400");
                     $configFile = "$gssDir/$configName.json";
                     if(!file_exists($configFile))
-                        my_error(t9n("[RU]Файл конфигурации не найден[EN]Config file not found"), "404");
+                        my_die(t9n("[RU]Файл конфигурации не найден[EN]Config file not found"), "404");
                     api_dump(file_get_contents($configFile));
                 }
                 elseif(isset($_REQUEST["save"]))
@@ -7325,11 +7325,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                     check();
                     $configName = trim($_REQUEST["save"]);
                     if(!preg_match(FILE_MASK, $configName))
-                        my_error(t9n("[RU]Неверное имя файла конфигурации[EN]Invalid config file name"), "400");
+                        my_die(t9n("[RU]Неверное имя файла конфигурации[EN]Invalid config file name"), "400");
                     $json = isset($_POST["config"]) ? $_POST["config"] : "";
                     $data = json_decode($json, true);
                     if(!is_array($data))
-                        my_error(t9n("[RU]Ошибка разбора JSON[EN]Invalid JSON"), "400");
+                        my_die(t9n("[RU]Ошибка разбора JSON[EN]Invalid JSON"), "400");
                     # Strip client-supplied site / DB and persist only table_id; URL is built from current $z at sync time
                     if(isset($data['integram']) && is_array($data['integram']))
                     {
@@ -7348,14 +7348,14 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                     check();
                     $configName = trim($_REQUEST["delete"]);
                     if(!preg_match(FILE_MASK, $configName))
-                        my_error(t9n("[RU]Неверное имя файла конфигурации[EN]Invalid config file name"), "400");
+                        my_die(t9n("[RU]Неверное имя файла конфигурации[EN]Invalid config file name"), "400");
                     $configFile = "$gssDir/$configName.json";
                     if(file_exists($configFile))
                         unlink($configFile);
                     api_dump(json_encode(["ok" => true], JSON_UNESCAPED_UNICODE));
                 }
                 else
-                    my_error(t9n("[RU]Не указано действие[EN]No action specified"), "400");
+                    my_die(t9n("[RU]Не указано действие[EN]No action specified"), "400");
             }
             # Populate config list for HTML rendering
             $GLOBALS["gss_configs"] = [];
