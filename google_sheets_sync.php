@@ -917,7 +917,8 @@ function gss_build_bki_content($records, $timestamp = null) {
             . ';' . gss_escape_bki_value($date)
             . ';' . gss_escape_bki_value($row)
             . ';' . gss_escape_bki_value($column)
-            . ';' . gss_escape_bki_value($timestamp);
+            . ';' . gss_escape_bki_value($timestamp)
+            . ';';
     }
 
     return implode("\r\n", $lines) . "\r\n";
