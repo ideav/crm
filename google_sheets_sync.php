@@ -137,13 +137,16 @@ function gss_sync($config) {
         }
 
         gss_debug($debug, "Fetching sheet '{$sheetName}'");
+        $sheetRange = !empty($sheetConfig['range']) ? (string)$sheetConfig['range'] : gss_quote_sheet_name($sheetName);
+        $rangeStartRow = gss_value_range_start_indexes($sheetRange)['row'];
         $values = gss_fetch_google_sheet_values($spreadsheetId, $sheetConfig, $accessToken, $httpOptions);
         $records = gss_extract_sheet_records(
             $sheetName !== '' ? $sheetName : (string)$sheetConfig['range'],
             $values,
             $sheetConfig['rows'] ?? [],
             $sheetConfig['columns'] ?? [],
-            !empty($config['skip_empty_values'])
+            !empty($config['skip_empty_values']),
+            $rangeStartRow
         );
 
         $allRecords = array_merge($allRecords, $records);
@@ -460,7 +463,7 @@ function gss_split_a1_notation($range) {
     return ['sheet' => '', 'cells' => $range];
 }
 
-function gss_extract_sheet_records($sheetName, $values, $rowMatchers, $columnMatchers, $skipEmptyValues = false) {
+function gss_extract_sheet_records($sheetName, $values, $rowMatchers, $columnMatchers, $skipEmptyValues = false, $rangeStartRow = 0) {
     if (!is_array($rowMatchers) || empty($rowMatchers)) {
         throw new RuntimeException("Sheet '{$sheetName}' must define non-empty row matchers.");
     }
@@ -511,6 +514,7 @@ function gss_extract_sheet_records($sheetName, $values, $rowMatchers, $columnMat
             $records[] = [
                 'sheet' => $sheetName,
                 'row_number' => $rowIndex + 1,
+                'sheet_row_number' => $rangeStartRow + $rowIndex + 1,
                 'rows' => gss_unique_preserve_order($matchedRows),
                 'columns' => gss_unique_preserve_order($matchedColumns),
                 'date' => gss_max_ddmmyyyy_value(gss_match_entry_values(array_merge($matchedRowEntries, $matchedColumnEntries))),
@@ -913,10 +917,13 @@ function gss_build_bki_content($records, $timestamp = null) {
             ? $record['column']
             : gss_last_list_value($columns);
 
+        $sheetRowNumber = array_key_exists('sheet_row_number', $record) ? $record['sheet_row_number'] : '';
+
         $lines[] = gss_escape_bki_value($record['value'])
             . ';' . gss_escape_bki_value($date)
             . ';' . gss_escape_bki_value($row)
             . ';' . gss_escape_bki_value($column)
+            . ';' . gss_escape_bki_value($sheetRowNumber)
             . ';' . gss_escape_bki_value($timestamp)
             . ';';
     }

@@ -34,8 +34,8 @@ assertSameIssue2469('ПЛАН', $records[0]['column'], 'uses the lowest matched 
 
 $content = gss_build_bki_content($records, 1773328460);
 $expected = "DATA\r\n"
-    . "900;01.01.2026;Region West;ПЛАН;1773328460;\r\n";
+    . "900;01.01.2026;Region West;ПЛАН;4;1773328460;\r\n";
 
-assertSameIssue2469($expected, $content, 'builds value/date/row/column/timestamp import lines');
+assertSameIssue2469($expected, $content, 'builds value/date/row/column/sheet_row_number/timestamp import lines');
 
 echo "PASS issue 2469 Google Sheets sync output format\n";

@@ -22,9 +22,9 @@ $records = [
 
 $content = gss_build_bki_content($records, 1000000000);
 
-// Each data line must end with a semicolon: value;date;row;column;timestamp;
+// Each data line must end with a semicolon: value;date;row;column;sheet_row_number;timestamp;
 $expected = "DATA\r\n"
-    . "TestValue;01.01.2026;Row A;Col B;1000000000;\r\n";
+    . "TestValue;01.01.2026;Row A;Col B;;1000000000;\r\n";
 
 assertSameIssue2514($expected, $content, 'each BKI data line ends with a trailing semicolon');
 
