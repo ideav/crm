@@ -47,7 +47,7 @@
 
     <div class="gss-help-box" id="gss-help" style="display:none">
         <h5>Как пользоваться</h5>
-        <p><b>1. credentials.json</b> — сервисный аккаунт Google (скачивается в <a target="googel" href="https://console.cloud.google.com/apis/credentials?project=ideavpro">Google Cloud Console</a>). Если путь не указан, используется <code>include/credentials.json</code> на сервере. Дайте аккаунту доступ к таблице.</p>
+        <p><b>1. credentials.json</b> — сервисный аккаунт Google (скачивается в <a target="googel" href="https://console.cloud.google.com/apis/credentials?project=ideavpro">Google Cloud Console</a>). Если путь не указан, используется служебная учетная запись Интеграма <code>ideav-430@ideavpro.iam.gserviceaccount.com</code>. Дайте ей доступ на чтение к нужной таблице.</p>
         <p><b>2. Spreadsheet ID</b> — из ссылки Google Sheets: <code>docs.google.com/spreadsheets/d/<b>ИДЕНТИФИКАТОР</b>/edit</code></p>
         <p><b>3. Sheets</b> — JSON-массив листов. Пример: <code>[{"name":"Лист1","rows":["Метрика"],"columns":[["01.**.202*","31.**.202*","'ПЛАН'||'ФАКТ'"]]}]</code></p>
         <p><b>4. Integram</b> — укажите URL базы, endpoint и токен авторизации. autoParent — ID родительского типа.</p>
