@@ -175,6 +175,7 @@
     .user-menu-userinfo {
         display: flex;
         align-items: center;
+        justify-content: center;
         padding: 0.875rem 1rem;
         color: var(--text-primary);
         font-size: 0.9rem;
