@@ -137,6 +137,37 @@
             const dataResponse = await fetch(dataUrl);
             const dataArray = await dataResponse.json();
 
+            // Detect metadata drift: the metadata response and the data response
+            // were fetched separately, so they may disagree if the schema
+            // changed between the two requests (issue #2526). When a row's `r`
+            // length differs from the column count built above, re-fetch the
+            // metadata and rebuild columns from the fresh response.
+            if (Array.isArray(dataArray) && dataArray.length > 0 &&
+                dataArray.some(item => Array.isArray(item.r) && item.r.length !== columns.length)) {
+                delete this.metadataCache[tableId];
+                this.globalMetadata = null;
+                this.globalMetadataPromise = null;
+                const refreshedMetadata = await this.fetchMetadata(tableId);
+                columns.length = 0;
+                columns.push({
+                    id: String(refreshedMetadata.id),
+                    type: refreshedMetadata.type || 'SHORT',
+                    format: this.mapTypeIdToFormat(refreshedMetadata.type || 'SHORT'),
+                    name: refreshedMetadata.val || 'Значение',
+                    granted: mainColGranted,
+                    ref: 0,
+                    orig: refreshedMetadata.id,
+                    unique: refreshedMetadata.unique,
+                    paramId: refreshedMetadata.id
+                });
+                if (refreshedMetadata.reqs && Array.isArray(refreshedMetadata.reqs)) {
+                    refreshedMetadata.reqs.forEach(req => {
+                        columns.push(this.buildColumnFromMetadataReq(req));
+                    });
+                }
+                this.tableGranted = refreshedMetadata.granted !== undefined ? refreshedMetadata.granted : null;
+            }
+
             // Transform object format data to row format
             // Input: [{ i: 5151, u: 333, o: 1, r: ["val1", "val2"] }]
             // Output: [["val1", "val2"]]
@@ -216,6 +247,13 @@
                 throw new Error(`Cannot determine typeId from apiUrl: ${this.options.apiUrl}. Expected patterns: /object/{id}, /metadata/{id}, or /{id}`);
             }
             this.objectTableId = typeId;  // Store table ID for _count=1 queries
+
+            // Detect metadata drift: if the cached columns don't match the row
+            // shape, drop them so the block below re-fetches fresh metadata
+            // (issue #2526).
+            if (this.hasRowColumnCountMismatch(dataArray)) {
+                this.invalidateMetadataCache();
+            }
 
             // Fetch metadata if columns are not yet loaded
             if (this.columns.length === 0) {

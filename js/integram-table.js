@@ -235,6 +235,40 @@ class IntegramTable{
             return !isNaN(id) && id >= 2 && id <= 17;
         }
 
+        /**
+         * Detect whether the server response has a different column count than
+         * the cached metadata (issue #2526). Each row's `r` array carries
+         * [mainValue, req1, req2, ..., reqN]; its length should equal the
+         * current `this.columns.length`. When they differ, metadata has changed
+         * on the server (e.g. a column was added or removed by another user)
+         * and the cached columns are stale.
+         * @param {Array} dataArray - Server response array of {i, u, o, r}.
+         * @returns {boolean} True when at least one row's `r` length differs from this.columns.length.
+         */
+        hasRowColumnCountMismatch(dataArray) {
+            if (!Array.isArray(dataArray) || dataArray.length === 0) {
+                return false;
+            }
+            if (!Array.isArray(this.columns) || this.columns.length === 0) {
+                return false;
+            }
+            const expected = this.columns.length;
+            return dataArray.some(item => Array.isArray(item.r) && item.r.length !== expected);
+        }
+
+        /**
+         * Clear cached metadata and columns so the next load fetches fresh
+         * data (issue #2526). Mirrors the pattern used after column edits in
+         * issue #1400.
+         */
+        invalidateMetadataCache() {
+            this.metadataCache = {};
+            this.metadataFetchPromises = {};
+            this.globalMetadata = null;
+            this.globalMetadataPromise = null;
+            this.columns = [];
+        }
+
         init() {
             // Remove padding from the parent container so the table fills full width (issue #887)
             if (this.container && this.container.parentElement) {
@@ -886,6 +920,41 @@ class IntegramTable{
             const dataResponse = await fetch(dataUrl);
             const data = await dataResponse.json();
 
+            // Detect metadata drift: rows whose `r` length differs from the
+            // current column count mean another user changed the table schema
+            // while we were viewing it (issue #2526). Refresh metadata and
+            // rebuild the columns from scratch.
+            if (this.hasRowColumnCountMismatch(data)) {
+                this.invalidateMetadataCache();
+                const refreshedMetadata = await this.fetchMetadata(this.options.tableTypeId);
+
+                if (!this.options.title && (refreshedMetadata.val || refreshedMetadata.value || refreshedMetadata.name)) {
+                    this.options.title = refreshedMetadata.val || refreshedMetadata.value || refreshedMetadata.name;
+                }
+                this.tableExportAllowed = refreshedMetadata.export === '1' || refreshedMetadata.export === 1;
+                this.tableGranted = refreshedMetadata.granted !== undefined ? refreshedMetadata.granted : null;
+
+                const refreshedColumns = [];
+                const mainColGranted = this.isTableWritable() ? 1 : 0;
+                refreshedColumns.push({
+                    id: String(refreshedMetadata.id),
+                    type: refreshedMetadata.type || 'SHORT',
+                    format: this.mapTypeIdToFormat(refreshedMetadata.type || 'SHORT'),
+                    name: refreshedMetadata.val || refreshedMetadata.name || 'Значение',
+                    granted: mainColGranted,
+                    ref: 0,
+                    orig: refreshedMetadata.id,
+                    unique: refreshedMetadata.unique,
+                    paramId: refreshedMetadata.id
+                });
+                if (refreshedMetadata.reqs && Array.isArray(refreshedMetadata.reqs)) {
+                    refreshedMetadata.reqs.forEach(req => {
+                        refreshedColumns.push(this.buildColumnFromMetadataReq(req));
+                    });
+                }
+                this.columns = refreshedColumns;
+            }
+
             // Transform table format to row format
             // Input format: [{ i: 5151, u: 333, o: 1, r: ["val1", "val2"] }]
             // Output format: [["val1", "val2"]]
@@ -1045,6 +1114,37 @@ class IntegramTable{
             const dataResponse = await fetch(dataUrl);
             const dataArray = await dataResponse.json();
 
+            // Detect metadata drift: the metadata response and the data response
+            // were fetched separately, so they may disagree if the schema
+            // changed between the two requests (issue #2526). When a row's `r`
+            // length differs from the column count built above, re-fetch the
+            // metadata and rebuild columns from the fresh response.
+            if (Array.isArray(dataArray) && dataArray.length > 0 &&
+                dataArray.some(item => Array.isArray(item.r) && item.r.length !== columns.length)) {
+                delete this.metadataCache[tableId];
+                this.globalMetadata = null;
+                this.globalMetadataPromise = null;
+                const refreshedMetadata = await this.fetchMetadata(tableId);
+                columns.length = 0;
+                columns.push({
+                    id: String(refreshedMetadata.id),
+                    type: refreshedMetadata.type || 'SHORT',
+                    format: this.mapTypeIdToFormat(refreshedMetadata.type || 'SHORT'),
+                    name: refreshedMetadata.val || 'Значение',
+                    granted: mainColGranted,
+                    ref: 0,
+                    orig: refreshedMetadata.id,
+                    unique: refreshedMetadata.unique,
+                    paramId: refreshedMetadata.id
+                });
+                if (refreshedMetadata.reqs && Array.isArray(refreshedMetadata.reqs)) {
+                    refreshedMetadata.reqs.forEach(req => {
+                        columns.push(this.buildColumnFromMetadataReq(req));
+                    });
+                }
+                this.tableGranted = refreshedMetadata.granted !== undefined ? refreshedMetadata.granted : null;
+            }
+
             // Transform object format data to row format
             // Input: [{ i: 5151, u: 333, o: 1, r: ["val1", "val2"] }]
             // Output: [["val1", "val2"]]
@@ -1124,6 +1224,13 @@ class IntegramTable{
                 throw new Error(`Cannot determine typeId from apiUrl: ${this.options.apiUrl}. Expected patterns: /object/{id}, /metadata/{id}, or /{id}`);
             }
             this.objectTableId = typeId;  // Store table ID for _count=1 queries
+
+            // Detect metadata drift: if the cached columns don't match the row
+            // shape, drop them so the block below re-fetches fresh metadata
+            // (issue #2526).
+            if (this.hasRowColumnCountMismatch(dataArray)) {
+                this.invalidateMetadataCache();
+            }
 
             // Fetch metadata if columns are not yet loaded
             if (this.columns.length === 0) {
@@ -7114,7 +7221,7 @@ class IntegramTable{
             }, 0);
         }
 
-        async reorderColumns(draggedId, targetId) {
+        reorderColumns(draggedId, targetId) {
             const draggedIndex = this.columnOrder.indexOf(draggedId);
             const targetIndex = this.columnOrder.indexOf(targetId);
 
@@ -7143,14 +7250,10 @@ class IntegramTable{
             const newOrderIndex = this.columnOrder.indexOf(draggedId);
             if (newOrderIndex >= 0) {
                 const newOrder = newOrderIndex; // 1-based position among requisites (first column at index 0 is not counted)
-                await this.saveColumnOrderToServer(draggedId, newOrder);
+                this.saveColumnOrderToServer(draggedId, newOrder);
             }
 
-            // Reload data so rows reflect the new server-side column order (issue #2516)
-            this.metadataCache = {};
-            this.columns = [];
-            this.data = [];
-            await this.loadData(false);
+            this.render();
         }
 
         /**
@@ -7387,7 +7490,7 @@ class IntegramTable{
                 }
             });
 
-            columnList.addEventListener('drop', async (e) => {
+            columnList.addEventListener('drop', (e) => {
                 e.preventDefault();
                 const target = e.target.closest('.column-settings-item');
                 if (target && target !== dragItem && dragItem) {
@@ -7423,13 +7526,9 @@ class IntegramTable{
                                 this.saveColumnState();
                                 const newOrderIndex = this.columnOrder.indexOf(draggedId);
                                 if (newOrderIndex >= 0) {
-                                    // Reload data so rows reflect the new server-side column order (issue #2516)
-                                    await this.saveColumnOrderToServer(draggedId, newOrderIndex);
-                                    this.metadataCache = {};
-                                    this.columns = [];
-                                    this.data = [];
-                                    await this.loadData(false);
+                                    this.saveColumnOrderToServer(draggedId, newOrderIndex);
                                 }
+                                this.render();
                             }
                         }
                     } else {
@@ -8487,15 +8586,14 @@ class IntegramTable{
                             this.visibleColumns.push(newColumnId);
                         }
 
-                        // Save state and reload data so rows include the new column (issue #2516)
+                        // Save state and re-render
                         this._columnSettingsChanged = true;
                         this.saveColumnState();
-                        // Clear metadata cache so fresh column metadata is fetched (issue #1424, #2516)
+                        this.render();
+
+                        // Clear metadata cache so edit/add forms fetch fresh metadata (issue #1424)
                         this.metadataCache = {};
                         this.metadataFetchPromises = {};  // Clear in-progress fetches (issue #1455)
-                        this.columns = [];
-                        this.data = [];
-                        await this.loadData(false);
                         // Clear and refresh globalMetadata so edit/add forms and column suggestions use fresh column info
                         // (issue #1424, issue #2138)
                         this.globalMetadata = null;

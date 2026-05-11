@@ -218,6 +218,40 @@
             return !isNaN(id) && id >= 2 && id <= 17;
         }
 
+        /**
+         * Detect whether the server response has a different column count than
+         * the cached metadata (issue #2526). Each row's `r` array carries
+         * [mainValue, req1, req2, ..., reqN]; its length should equal the
+         * current `this.columns.length`. When they differ, metadata has changed
+         * on the server (e.g. a column was added or removed by another user)
+         * and the cached columns are stale.
+         * @param {Array} dataArray - Server response array of {i, u, o, r}.
+         * @returns {boolean} True when at least one row's `r` length differs from this.columns.length.
+         */
+        hasRowColumnCountMismatch(dataArray) {
+            if (!Array.isArray(dataArray) || dataArray.length === 0) {
+                return false;
+            }
+            if (!Array.isArray(this.columns) || this.columns.length === 0) {
+                return false;
+            }
+            const expected = this.columns.length;
+            return dataArray.some(item => Array.isArray(item.r) && item.r.length !== expected);
+        }
+
+        /**
+         * Clear cached metadata and columns so the next load fetches fresh
+         * data (issue #2526). Mirrors the pattern used after column edits in
+         * issue #1400.
+         */
+        invalidateMetadataCache() {
+            this.metadataCache = {};
+            this.metadataFetchPromises = {};
+            this.globalMetadata = null;
+            this.globalMetadataPromise = null;
+            this.columns = [];
+        }
+
         init() {
             // Remove padding from the parent container so the table fills full width (issue #887)
             if (this.container && this.container.parentElement) {
@@ -868,6 +902,41 @@
 
             const dataResponse = await fetch(dataUrl);
             const data = await dataResponse.json();
+
+            // Detect metadata drift: rows whose `r` length differs from the
+            // current column count mean another user changed the table schema
+            // while we were viewing it (issue #2526). Refresh metadata and
+            // rebuild the columns from scratch.
+            if (this.hasRowColumnCountMismatch(data)) {
+                this.invalidateMetadataCache();
+                const refreshedMetadata = await this.fetchMetadata(this.options.tableTypeId);
+
+                if (!this.options.title && (refreshedMetadata.val || refreshedMetadata.value || refreshedMetadata.name)) {
+                    this.options.title = refreshedMetadata.val || refreshedMetadata.value || refreshedMetadata.name;
+                }
+                this.tableExportAllowed = refreshedMetadata.export === '1' || refreshedMetadata.export === 1;
+                this.tableGranted = refreshedMetadata.granted !== undefined ? refreshedMetadata.granted : null;
+
+                const refreshedColumns = [];
+                const mainColGranted = this.isTableWritable() ? 1 : 0;
+                refreshedColumns.push({
+                    id: String(refreshedMetadata.id),
+                    type: refreshedMetadata.type || 'SHORT',
+                    format: this.mapTypeIdToFormat(refreshedMetadata.type || 'SHORT'),
+                    name: refreshedMetadata.val || refreshedMetadata.name || 'Значение',
+                    granted: mainColGranted,
+                    ref: 0,
+                    orig: refreshedMetadata.id,
+                    unique: refreshedMetadata.unique,
+                    paramId: refreshedMetadata.id
+                });
+                if (refreshedMetadata.reqs && Array.isArray(refreshedMetadata.reqs)) {
+                    refreshedMetadata.reqs.forEach(req => {
+                        refreshedColumns.push(this.buildColumnFromMetadataReq(req));
+                    });
+                }
+                this.columns = refreshedColumns;
+            }
 
             // Transform table format to row format
             // Input format: [{ i: 5151, u: 333, o: 1, r: ["val1", "val2"] }]
