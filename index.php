@@ -5789,6 +5789,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					if($getParent)
 					    $typesCount++;
 					$isUnique = $GLOBALS["uniq"][$id] === "1";
+					$keyReqsForDelete = UniqueKeyReqs($id);
 				    trace("$id is ".($isUnique?"":"not ")."unique");
     				while(!feof($handle)){
     					$buffer = fgets($handle);	# Read the line
@@ -5796,6 +5797,48 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     						continue;
     					$object = UnHideDelimiters(explode(";", HideDelimiters($buffer)));	# Get fields array
                         if($object[0] == ""){
+                            // issue #2522: if the Type has uniqueness defined by composite key reqs, an emptied
+                            // first column means the source row was cleared — find the existing record by the
+                            // remaining columns and delete it. Without uniqueness keep the legacy skip behavior.
+                            if(count($keyReqsForDelete) && !$getParent){
+                                while(count($object) <= $typesCount){	# There might be line breaks
+                                    if(feof($handle))
+                                        my_die(t9n("[RU]Неожиданный конец файла [EN]Unexpected end of file"));
+                                    $buffer .= fgets($handle);
+                                    $object = UnHideDelimiters(explode(";", HideDelimiters($buffer)));
+                                    $count++;
+                                }
+                                end($object);
+                                $object[key($object)] = rtrim(current($object), "\t\n\r\0\x0B");
+                                // Build composite key values from the remaining columns
+                                $keyValuesForDelete = array();
+                                $ord = 0;
+                                foreach($GLOBALS["local_struct"][$id] as $reqId => $reqName){
+                                    if($reqId == 0) continue;
+                                    $ord++;
+                                    if(!isset($keyReqsForDelete[$reqId])) continue;
+                                    $req = $keyReqsForDelete[$reqId];
+                                    $rawVal = isset($object[$ord]) ? UnMaskDelimiters($object[$ord]) : "";
+                                    $keyValuesForDelete[$reqId] = $req["ref_id"]
+                                        ? UniqueKeyNormalizeRefs($req, $rawVal)
+                                        : array("kind" => "value", "value" => UniqueKeyNormalizeValue($req["t"], $rawVal));
+                                }
+                                foreach($keyReqsForDelete as $reqId => $req){
+                                    if(!isset($keyValuesForDelete[$reqId]))
+                                        $keyValuesForDelete[$reqId] = $req["ref_id"]
+                                            ? array("kind" => "ref", "ref_id" => (int)$req["ref_id"], "values" => array(), "multi" => $req["multi"], "has_missing_ref" => false)
+                                            : array("kind" => "value", "value" => "");
+                                }
+                                $parentForDelete = isset($parent) ? $parent : 1;
+                                // Pass includeVal=false: the first column is empty, so do not filter by obj.val
+                                if($existingRow = FindUniqueRecordDuplicate($id, 0, $parentForDelete, "", $keyValuesForDelete, false)){
+                                    trace(" issue-2522: empty first column, deleting existing #".$existingRow["id"]." by composite key");
+                                    Delete($existingRow["id"]);
+                                    $GLOBALS["warning"] .= t9n("[RU]Удалена запись типа $id с пустым значением (строка $count)[EN]Deleted record of type $id with empty value (string #$count)");
+                                    $count++;
+                                    continue;
+                                }
+                            }
                             $GLOBALS["warning"] .= t9n("[RU]Пропущен пустой объект типа $id (строка $count)[EN]Empty object of type $id skipped (string #$count)");
                             #my_die(t9n("[RU]Пустой объект типа $id (строка $count)[EN]Empty object of type $id (string $count)"));
                             continue;
