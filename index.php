@@ -10776,11 +10776,6 @@ if(Validate_Token())
     			Make_tree(Get_file("dir_admin.html"), ""); # thus, avoid UI header and styles
     			die(Parse_block(""));
     		}
-    		elseif($a == "gssync")
-    		{
-    			Make_tree(Get_file("gssync.html"), "");
-    			die(Parse_block(""));
-    		}
     		else
     			$text = Get_file("main.html");
 #    		wlog("$user@".$_SERVER["REMOTE_ADDR"], "log");
