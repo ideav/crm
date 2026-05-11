@@ -5833,8 +5833,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     					$object[0] = Format_Val($GLOBALS["base"][$id], UnMaskDelimiters($object[0]));
 					    $reqs = Array();
 					    $ids = Array();
-    					if($isUnique){
-    					    $keyReqs = UniqueKeyReqs($id);
+    					$keyReqs = UniqueKeyReqs($id);
+    					if($isUnique || count($keyReqs)){
     					    if(count($keyReqs)){
     					        // Build key values from CSV columns to support composite uniqueness key
     					        $keyValues = array();
@@ -5855,7 +5855,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     					                    ? array("kind" => "ref", "ref_id" => (int)$req["ref_id"], "values" => array(), "multi" => $req["multi"], "has_missing_ref" => false)
     					                    : array("kind" => "value", "value" => "");
     					        }
-    					        if($existingRow = FindUniqueRecordDuplicate($id, 0, $parent, $object[0], $keyValues)){
+    					        if($existingRow = FindUniqueRecordDuplicate($id, 0, $parent, $object[0], $keyValues, (bool)$isUnique)){
     					            $existing = $existingRow["id"];
     					            trace(" found existing $existing ".$object[0]." (composite key)");
     					            $reqs_data = Exec_sql("SELECT reqs.t, reqs.val, reqs.id reqid FROM $z reqs WHERE reqs.up=$existing AND reqs.t!=0", "Load reqs of existing Obj for import");
@@ -8612,14 +8612,32 @@ function UniqueKeyValuesFromRequest($typ, $recordId, $request, $keyReqs=false){
 	}
 	return $values;
 }
-function FindUniqueRecordDuplicate($typ, $skipId, $up, $val, $keyValues){
+function FindUniqueRecordDuplicate($typ, $skipId, $up, $val, $keyValues, $includeVal=true){
 	global $z;
+	// When uniqueness is enforced solely by composite-key reqs (the first column is not marked unique),
+	// there must be at least one key req with a non-empty value to detect a real duplicate.
+	if(!$includeVal){
+		if(!count($keyValues))
+			return false;
+		$hasValue = false;
+		foreach($keyValues as $keyValue){
+			if($keyValue["kind"] === "ref"){
+				if(count($keyValue["values"])){ $hasValue = true; break; }
+			}
+			elseif((string)$keyValue["value"] !== ""){
+				$hasValue = true; break;
+			}
+		}
+		if(!$hasValue)
+			return false;
+	}
 	foreach($keyValues as $keyValue)
 		if($keyValue["kind"] === "ref" && $keyValue["has_missing_ref"])
 			return false;
 	$sql = "SELECT obj.id, obj.ord FROM $z obj WHERE obj.t=".(int)$typ
-			." AND obj.up=".(int)$up
-			." AND obj.val='".addcslashes($val, "\\\'")."'";
+			." AND obj.up=".(int)$up;
+	if($includeVal)
+		$sql .= " AND obj.val='".addcslashes($val, "\\\'")."'";
 	if((int)$skipId > 0)
 		$sql .= " AND obj.id!=".(int)$skipId;
 	$i = 0;
@@ -8654,13 +8672,13 @@ function FindUniqueRecordDuplicate($typ, $skipId, $up, $val, $keyValues){
 	$result = Exec_sql($sql, "Check composite unique Obj");
 	return mysqli_fetch_array($result);
 }
-function FindUniqueRecordDuplicateFromRequest($typ, $skipId, $up, $val, $request){
+function FindUniqueRecordDuplicateFromRequest($typ, $skipId, $up, $val, $request, $includeVal=true){
 	$keyReqs = UniqueKeyReqs($typ);
 	$keyValues = UniqueKeyValuesFromRequest($typ, $skipId, $request, $keyReqs);
-	return FindUniqueRecordDuplicate($typ, $skipId, $up, $val, $keyValues);
+	return FindUniqueRecordDuplicate($typ, $skipId, $up, $val, $keyValues, $includeVal);
 }
-function CheckUniqueRecordFromRequest($typ, $recordId, $up, $val, $request){
-	$row = FindUniqueRecordDuplicateFromRequest($typ, $recordId, $up, $val, $request);
+function CheckUniqueRecordFromRequest($typ, $recordId, $up, $val, $request, $includeVal=true){
+	$row = FindUniqueRecordDuplicateFromRequest($typ, $recordId, $up, $val, $request, $includeVal);
 	if($row)
 		my_die(t9n("[RU]Запись с таким ключом уже существует[EN]The record with this key already exists")." #".$row["id"]);
 }
@@ -9289,11 +9307,14 @@ if(Validate_Token())
 			$GLOBALS["REQ_TYPS"][$typ] = $id;
 			Get_Current_Values($id, $typ);
 			$GLOBALS["REQS"][$typ] = $cur_val;
-			if($unique && !$copy){
-				$uniqueVal = $cur_val;
-				if(isset($_REQUEST["t$typ"]) && !(($typ == TOKEN || $typ == XSRF || $typ == PASSWORD) && $_REQUEST["t$typ"] === PASSWORDSTARS))
-					$uniqueVal = UniqueKeyNormalizeValue($typ, $_REQUEST["t$typ"]);
-				CheckUniqueRecordFromRequest($typ, $id, $up, $uniqueVal, $_REQUEST);
+			if(!$copy){
+				$hasKeyReqs = $unique ? false : (count(UniqueKeyReqs($typ)) > 0);
+				if($unique || $hasKeyReqs){
+					$uniqueVal = $cur_val;
+					if(isset($_REQUEST["t$typ"]) && !(($typ == TOKEN || $typ == XSRF || $typ == PASSWORD) && $_REQUEST["t$typ"] === PASSWORDSTARS))
+						$uniqueVal = UniqueKeyNormalizeValue($typ, $_REQUEST["t$typ"]);
+					CheckUniqueRecordFromRequest($typ, $id, $up, $uniqueVal, $_REQUEST, (bool)$unique);
+				}
 			}
 			trace("GLOBALS[REQS] " . print_r($GLOBALS["REQS"], TRUE));
 
@@ -9705,8 +9726,9 @@ if(Validate_Token())
 				else
 					$val = Format_Val($base_typ, BuiltIn($val));
 				# The Type must be unique - let's check this
-				if($unique && !isset($max_val))
-					if($row = FindUniqueRecordDuplicateFromRequest($id, 0, $up, $val, $_REQUEST))
+				$hasKeyReqs = $unique ? false : (!isset($max_val) && count(UniqueKeyReqs($id)) > 0);
+				if(!isset($max_val) && ($unique || $hasKeyReqs))
+					if($row = FindUniqueRecordDuplicateFromRequest($id, 0, $up, $val, $_REQUEST, (bool)$unique))
 						if(strlen($row[0])){
 						    $msg = t9n("[RU]Запись уже существует[EN]The record already exists");
                 			$arg = "exists1=1";
