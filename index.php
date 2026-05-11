@@ -7273,6 +7273,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                 $configData = json_decode(file_get_contents($configFile), true);
                 if(!is_array($configData))
                     my_error(t9n("[RU]Ошибка разбора конфигурации[EN]Config parse error"), "400");
+                $logsDir = "templates/logs/$z";
+                if(!file_exists($logsDir))
+                    mkdir($logsDir, 0775, true);
+                if(!isset($configData['output_file']))
+                    $configData['output_file'] = "$logsDir/google_sheets_sync.bki";
                 require_once "include/google_sheets_sync.php";
                 $configData = gss_normalize_config($configData, realpath($gssDir));
                 try {
