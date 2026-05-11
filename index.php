@@ -7264,28 +7264,67 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                 mkdir($gssDir, 0775, true);
             if(isApi())
             {
-                $configName = isset($_REQUEST["config"]) ? trim($_REQUEST["config"]) : "";
-                if(!preg_match(FILE_MASK, $configName))
-                    my_error(t9n("[RU]Неверное имя файла конфигурации[EN]Invalid config file name"), "400");
-                $configFile = "$gssDir/$configName.json";
-                if(!file_exists($configFile))
-                    my_error(t9n("[RU]Файл конфигурации не найден[EN]Config file not found"), "404");
-                $configData = json_decode(file_get_contents($configFile), true);
-                if(!is_array($configData))
-                    my_error(t9n("[RU]Ошибка разбора конфигурации[EN]Config parse error"), "400");
-                $logsDir = "templates/logs/$z";
-                if(!file_exists($logsDir))
-                    mkdir($logsDir, 0775, true);
-                if(!isset($configData['output_file']))
-                    $configData['output_file'] = "$logsDir/google_sheets_sync.bki";
-                require_once "include/google_sheets_sync.php";
-                $configData = gss_normalize_config($configData, realpath($gssDir));
-                try {
-                    $summary = gss_sync($configData);
-                    api_dump(json_encode($summary, JSON_UNESCAPED_UNICODE));
-                } catch (Throwable $e) {
-                    my_error($e->getMessage(), "500");
+                if(isset($_REQUEST["config"]))
+                {
+                    $configName = trim($_REQUEST["config"]);
+                    if(!preg_match(FILE_MASK, $configName))
+                        my_error(t9n("[RU]Неверное имя файла конфигурации[EN]Invalid config file name"), "400");
+                    $configFile = "$gssDir/$configName.json";
+                    if(!file_exists($configFile))
+                        my_error(t9n("[RU]Файл конфигурации не найден[EN]Config file not found"), "404");
+                    $configData = json_decode(file_get_contents($configFile), true);
+                    if(!is_array($configData))
+                        my_error(t9n("[RU]Ошибка разбора конфигурации[EN]Config parse error"), "400");
+                    $logsDir = "templates/logs/$z";
+                    if(!file_exists($logsDir))
+                        mkdir($logsDir, 0775, true);
+                    if(!isset($configData['output_file']))
+                        $configData['output_file'] = "$logsDir/google_sheets_sync.bki";
+                    require_once "include/google_sheets_sync.php";
+                    $configData = gss_normalize_config($configData, realpath($gssDir));
+                    try {
+                        $summary = gss_sync($configData);
+                        api_dump(json_encode($summary, JSON_UNESCAPED_UNICODE));
+                    } catch (Throwable $e) {
+                        my_error($e->getMessage(), "500");
+                    }
                 }
+                elseif(isset($_REQUEST["load"]))
+                {
+                    $configName = trim($_REQUEST["load"]);
+                    if(!preg_match(FILE_MASK, $configName))
+                        my_error(t9n("[RU]Неверное имя файла конфигурации[EN]Invalid config file name"), "400");
+                    $configFile = "$gssDir/$configName.json";
+                    if(!file_exists($configFile))
+                        my_error(t9n("[RU]Файл конфигурации не найден[EN]Config file not found"), "404");
+                    api_dump(file_get_contents($configFile));
+                }
+                elseif(isset($_REQUEST["save"]))
+                {
+                    check();
+                    $configName = trim($_REQUEST["save"]);
+                    if(!preg_match(FILE_MASK, $configName))
+                        my_error(t9n("[RU]Неверное имя файла конфигурации[EN]Invalid config file name"), "400");
+                    $json = isset($_POST["config"]) ? $_POST["config"] : "";
+                    $data = json_decode($json, true);
+                    if(!is_array($data))
+                        my_error(t9n("[RU]Ошибка разбора JSON[EN]Invalid JSON"), "400");
+                    file_put_contents("$gssDir/$configName.json", json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+                    api_dump(json_encode(["ok" => true], JSON_UNESCAPED_UNICODE));
+                }
+                elseif(isset($_REQUEST["delete"]))
+                {
+                    check();
+                    $configName = trim($_REQUEST["delete"]);
+                    if(!preg_match(FILE_MASK, $configName))
+                        my_error(t9n("[RU]Неверное имя файла конфигурации[EN]Invalid config file name"), "400");
+                    $configFile = "$gssDir/$configName.json";
+                    if(file_exists($configFile))
+                        unlink($configFile);
+                    api_dump(json_encode(["ok" => true], JSON_UNESCAPED_UNICODE));
+                }
+                else
+                    my_error(t9n("[RU]Не указано действие[EN]No action specified"), "400");
             }
             # Populate config list for HTML rendering
             $GLOBALS["gss_configs"] = [];

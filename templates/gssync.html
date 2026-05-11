@@ -1,47 +1,295 @@
+<style>
+.gss-wrap { padding: 1.5rem; max-width: 860px; }
+.gss-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem; }
+.gss-header h4 { margin: 0; font-size: 1.25rem; color: var(--text-primary); }
+.gss-btn-icon { background: none; border: none; cursor: pointer; color: var(--text-secondary); font-size: 1.1rem; padding: 0.2rem 0.4rem; border-radius: 4px; }
+.gss-btn-icon:hover { background: var(--bg-secondary); color: var(--text-primary); }
+.gss-help-box { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1.25rem; font-size: 0.9rem; line-height: 1.6; }
+.gss-help-box h5 { margin: 0 0 0.5rem; color: var(--text-primary); }
+.gss-help-box p { margin: 0.4rem 0; }
+.gss-help-box code { background: var(--bg-primary); padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.82rem; }
+.gss-card { border: 1px solid var(--border-color); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.75rem; background: var(--card-bg, var(--bg-primary)); }
+.gss-card-name { font-weight: 600; flex: 1; color: var(--text-primary); }
+.gss-card-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
+.gss-btn { padding: 0.3rem 0.75rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); cursor: pointer; font-size: 0.85rem; font-family: inherit; transition: background 0.15s; }
+.gss-btn:hover { background: var(--bg-primary); }
+.gss-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.gss-btn-primary { background: var(--color-primary, #1283da); color: #fff; border-color: transparent; }
+.gss-btn-primary:hover { opacity: 0.85; background: var(--color-primary, #1283da); }
+.gss-btn-danger { color: var(--color-danger, #dc3545); }
+.gss-btn-danger:hover { background: rgba(220,53,69,0.1); }
+.gss-empty { padding: 1rem; border: 1px dashed var(--border-color); border-radius: 6px; color: var(--text-secondary); font-size: 0.9rem; }
+.gss-result { margin-bottom: 0.5rem; }
+.gss-result pre { white-space: pre-wrap; font-size: 0.8rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; padding: 0.75rem; margin: 0; color: var(--text-primary); }
+.gss-form-box { border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-top: 1rem; background: var(--card-bg, var(--bg-primary)); }
+.gss-form-box h5 { margin: 0 0 1rem; color: var(--text-primary); font-size: 1rem; }
+.gss-section-label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin: 1rem 0 0.5rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.25rem; }
+.gss-field { margin-bottom: 0.75rem; }
+.gss-field label { display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.2rem; }
+.gss-field input[type=text], .gss-field textarea { width: 100%; box-sizing: border-box; padding: 0.45rem 0.6rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--input-bg, var(--bg-secondary)); color: var(--text-primary); font-size: 0.9rem; font-family: inherit; }
+.gss-field textarea { font-family: monospace; resize: vertical; }
+.gss-field input[type=text]:focus, .gss-field textarea:focus { outline: none; border-color: var(--color-primary, #1283da); }
+.gss-row { display: flex; gap: 1rem; }
+.gss-row .gss-field { flex: 1; }
+.gss-checkbox { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: var(--text-primary); cursor: pointer; margin-bottom: 0.5rem; }
+.gss-form-actions { display: flex; gap: 0.75rem; margin-top: 1.25rem; align-items: center; flex-wrap: wrap; }
+.gss-msg { font-size: 0.85rem; }
+.gss-msg.ok { color: var(--color-success, #28a745); }
+.gss-msg.err { color: var(--color-danger, #dc3545); }
+</style>
 <!-- Begin:&Gssync -->
-<div style="padding: 1rem;">
-    <h4>Google Sheets Sync</h4>
-    <p>Запуск синхронизации данных из Google Sheets в Integram по конфигурационным файлам.</p>
-    <p>Файлы конфигурации хранятся в <code>templates/gss/{_global_.z}/</code> (формат JSON).</p>
-    <p>Лог-файлы (BKI) сохраняются в <a href="/{_global_.z}/dir_admin/?templates=1&add_path=/logs/{_global_.z}"><code>templates/logs/{_global_.z}/</code></a>.</p>
-    <div id="config-list" data-db="{DB}">
+<div class="gss-wrap">
+    <div class="gss-header">
+        <h4>Google Sheets Sync</h4>
+        <button class="gss-btn-icon" id="gss-help-btn" title="Справка"><i class="pi pi-question-circle"></i></button>
+        <button class="gss-btn gss-btn-primary" id="gss-new-btn" style="margin-left:auto"><i class="pi pi-plus"></i> Новая конфигурация</button>
+    </div>
+
+    <div class="gss-help-box" id="gss-help" style="display:none">
+        <h5>Как пользоваться</h5>
+        <p><b>1. credentials.json</b> — сервисный аккаунт Google (скачивается в Google Cloud Console). Если путь не указан, используется <code>include/credentials.json</code> на сервере. Дайте аккаунту доступ к таблице.</p>
+        <p><b>2. Spreadsheet ID</b> — из ссылки Google Sheets: <code>docs.google.com/spreadsheets/d/<b>ИДЕНТИФИКАТОР</b>/edit</code></p>
+        <p><b>3. Sheets</b> — JSON-массив листов. Пример: <code>[{"name":"Лист1","rows":["Метрика"],"columns":[["01.**.202*","31.**.202*","'ПЛАН'||'ФАКТ'"]]}]</code></p>
+        <p><b>4. Integram</b> — укажите URL базы, endpoint и токен авторизации. autoParent — ID родительского типа.</p>
+        <p><b>5. Логи</b> (BKI-файлы) сохраняются в <a href="/{_global_.z}/dir_admin/?templates=1&add_path=/logs/{_global_.z}"><code>templates/logs/{_global_.z}/</code></a>.</p>
+        <p>Конфигурации хранятся в <code>templates/gss/{_global_.z}/</code>.</p>
+    </div>
+
+    <div id="gss-list" data-db="{DB}">
 <!-- Begin:&Config_item -->
-        <div style="border: 1px solid var(--border-color); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 1rem;">
-            <b>{CONFIG}</b>
-            <button class="run-btn" data-config="{CONFIG}" style="margin-left: auto; padding: 0.35rem 0.9rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); cursor: pointer;">
-                Запустить
-            </button>
+        <div class="gss-card" id="card-{CONFIG}">
+            <span class="gss-card-name"><i class="pi pi-file" style="margin-right:0.4rem;color:var(--text-secondary)"></i>{CONFIG}</span>
+            <div class="gss-card-actions">
+                <button class="gss-btn gss-edit-btn" data-config="{CONFIG}"><i class="pi pi-pencil"></i> Изменить</button>
+                <button class="gss-btn gss-run-btn" data-config="{CONFIG}"><i class="pi pi-play"></i> Запустить</button>
+                <button class="gss-btn gss-btn-danger gss-del-btn" data-config="{CONFIG}" title="Удалить конфигурацию"><i class="pi pi-trash"></i></button>
+            </div>
         </div>
-        <div class="result-box" id="result-{CONFIG}" style="display:none; margin-bottom: 0.5rem;">
-            <pre style="white-space:pre-wrap; font-size:12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius:4px; padding: 0.75rem;"></pre>
-        </div>
+        <div class="gss-result" id="result-{CONFIG}" style="display:none"><pre></pre></div>
 <!-- End:&Config_item -->
     </div>
-    <div id="no-configs" style="display:none;">
-        <div style="padding: 1rem; border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-secondary);">
-            Нет файлов конфигурации. Создайте файл <code>*.json</code> в директории <code>templates/gss/{_global_.z}/</code>.
+
+    <div class="gss-empty" id="gss-empty" style="display:none">
+        Нет конфигураций. Нажмите «Новая конфигурация» чтобы создать первую.
+    </div>
+
+    <div class="gss-form-box" id="gss-form" style="display:none">
+        <h5 id="gss-form-title">Новая конфигурация</h5>
+
+        <div class="gss-section-label">Основные</div>
+        <div class="gss-field">
+            <label>Имя конфигурации (латиница, цифры, дефис, точка) *</label>
+            <input type="text" id="gss-name" placeholder="my_config">
+        </div>
+        <div class="gss-field">
+            <label>Google Spreadsheet ID *</label>
+            <input type="text" id="gss-spreadsheet-id" placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms">
+        </div>
+        <div class="gss-field">
+            <label>Путь к credentials.json (оставьте пустым — используется <code>include/credentials.json</code>)</label>
+            <input type="text" id="gss-credentials" placeholder="">
+        </div>
+        <label class="gss-checkbox"><input type="checkbox" id="gss-skip-empty"> Пропускать пустые значения</label>
+
+        <div class="gss-section-label">Integram</div>
+        <div class="gss-row">
+            <div class="gss-field">
+                <label>Base URL *</label>
+                <input type="text" id="gss-base-url" placeholder="https://ideav.ru">
+            </div>
+            <div class="gss-field">
+                <label>Upload endpoint *</label>
+                <input type="text" id="gss-endpoint" placeholder="/object/443296?JSON&import=1">
+            </div>
+        </div>
+        <div class="gss-field">
+            <label>Токен авторизации</label>
+            <input type="text" id="gss-token" placeholder="">
+        </div>
+        <div class="gss-row">
+            <div class="gss-field">
+                <label>autoParent (ID родительского типа)</label>
+                <input type="text" id="gss-auto-parent" placeholder="449960">
+            </div>
+            <div class="gss-field">
+                <label>createParent (0 или 1)</label>
+                <input type="text" id="gss-create-parent" placeholder="1">
+            </div>
+        </div>
+        <label class="gss-checkbox"><input type="checkbox" id="gss-enabled"> Включить загрузку в Integram</label>
+
+        <div class="gss-section-label">Листы (sheets)</div>
+        <div class="gss-field">
+            <label>JSON-массив листов</label>
+            <textarea id="gss-sheets" rows="8" placeholder='[{"name":"Лист1","rows":["Метрика A"],"columns":[["01.**.202*","31.**.202*","'"'"'ПЛАН'"'"'||'"'"'ФАКТ'"'"'"]]}]'></textarea>
+        </div>
+
+        <div class="gss-form-actions">
+            <button class="gss-btn gss-btn-primary" id="gss-save-btn">Сохранить</button>
+            <button class="gss-btn" id="gss-cancel-btn">Отмена</button>
+            <span class="gss-msg" id="gss-save-msg"></span>
         </div>
     </div>
 </div>
 <!-- End:&Gssync -->
 <script>
-    if (document.querySelectorAll('.run-btn').length === 0) {
-        document.getElementById('no-configs').style.display = '';
+(function() {
+    var db = document.getElementById('gss-list').dataset.db;
+    var editingConfig = null;
+
+    function updateEmpty() {
+        var hasCards = document.querySelectorAll('.gss-card').length > 0;
+        document.getElementById('gss-empty').style.display = hasCards ? 'none' : '';
     }
+    updateEmpty();
+
+    document.getElementById('gss-help-btn').addEventListener('click', function() {
+        var h = document.getElementById('gss-help');
+        h.style.display = h.style.display === 'none' ? '' : 'none';
+    });
+
+    document.getElementById('gss-new-btn').addEventListener('click', function() {
+        editingConfig = null;
+        document.getElementById('gss-form-title').textContent = 'Новая конфигурация';
+        document.getElementById('gss-name').disabled = false;
+        clearForm();
+        document.getElementById('gss-form').style.display = '';
+        document.getElementById('gss-form').scrollIntoView({behavior:'smooth', block:'nearest'});
+    });
+
+    document.getElementById('gss-cancel-btn').addEventListener('click', function() {
+        document.getElementById('gss-form').style.display = 'none';
+        editingConfig = null;
+    });
+
     document.addEventListener('click', function(e) {
-        var btn = e.target.closest('.run-btn');
+        var btn = e.target.closest('.gss-edit-btn');
         if (!btn) return;
         var config = btn.dataset.config;
-        var db = document.getElementById('config-list').dataset.db;
+        editingConfig = config;
+        document.getElementById('gss-form-title').textContent = 'Редактирование: ' + config;
+        document.getElementById('gss-name').value = config;
+        document.getElementById('gss-name').disabled = true;
+        document.getElementById('gss-save-msg').textContent = '';
+        fetch('/' + db + '/gssync?JSON&load=' + encodeURIComponent(config))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                fillForm(data);
+                document.getElementById('gss-form').style.display = '';
+                document.getElementById('gss-form').scrollIntoView({behavior:'smooth', block:'nearest'});
+            })
+            .catch(function(err) { alert('Ошибка загрузки: ' + err); });
+    });
+
+    document.addEventListener('click', function(e) {
+        var btn = e.target.closest('.gss-run-btn');
+        if (!btn) return;
+        var config = btn.dataset.config;
         var box = document.getElementById('result-' + config);
         btn.disabled = true;
-        btn.textContent = 'Выполняется...';
+        var orig = btn.innerHTML;
+        btn.innerHTML = '<i class="pi pi-spin pi-spinner"></i> Выполняется...';
         box.style.display = '';
         box.querySelector('pre').textContent = 'Ожидание...';
         fetch('/' + db + '/gssync?JSON&config=' + encodeURIComponent(config))
             .then(function(r) { return r.json(); })
-            .then(function(data) { box.querySelector('pre').textContent = JSON.stringify(data, null, 2); })
+            .then(function(d) { box.querySelector('pre').textContent = JSON.stringify(d, null, 2); })
             .catch(function(err) { box.querySelector('pre').textContent = 'Ошибка: ' + err; })
-            .finally(function() { btn.disabled = false; btn.textContent = 'Запустить'; });
+            .finally(function() { btn.disabled = false; btn.innerHTML = orig; });
     });
+
+    document.addEventListener('click', function(e) {
+        var btn = e.target.closest('.gss-del-btn');
+        if (!btn) return;
+        var config = btn.dataset.config;
+        if (!confirm('Удалить конфигурацию «' + config + '»?')) return;
+        var fd = new FormData();
+        fd.append('_xsrf', xsrf);
+        fetch('/' + db + '/gssync?JSON&delete=' + encodeURIComponent(config), {method:'POST', body:fd})
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.ok) {
+                    var card = document.getElementById('card-' + config);
+                    var result = document.getElementById('result-' + config);
+                    if (card) card.remove();
+                    if (result) result.remove();
+                    updateEmpty();
+                }
+            })
+            .catch(function(err) { alert('Ошибка: ' + err); });
+    });
+
+    document.getElementById('gss-save-btn').addEventListener('click', function() {
+        var name = document.getElementById('gss-name').value.trim();
+        if (!name) { showMsg('Укажите имя конфигурации', false); return; }
+        var sheetsRaw = document.getElementById('gss-sheets').value.trim();
+        var sheets;
+        try { sheets = sheetsRaw ? JSON.parse(sheetsRaw) : []; }
+        catch(e) { showMsg('Ошибка в JSON листов: ' + e.message, false); return; }
+
+        var cfg = {
+            spreadsheet_id: document.getElementById('gss-spreadsheet-id').value.trim(),
+            sheets: sheets,
+            skip_empty_values: document.getElementById('gss-skip-empty').checked,
+            integram: {
+                enabled: document.getElementById('gss-enabled').checked,
+                base_url: document.getElementById('gss-base-url').value.trim(),
+                upload_endpoint: document.getElementById('gss-endpoint').value.trim(),
+                token: document.getElementById('gss-token').value.trim(),
+                autoParent: document.getElementById('gss-auto-parent').value.trim() || '449960',
+                createParent: document.getElementById('gss-create-parent').value.trim() || '1'
+            }
+        };
+        var cred = document.getElementById('gss-credentials').value.trim();
+        if (cred) cfg.credentials_path = cred;
+
+        var fd = new FormData();
+        fd.append('_xsrf', xsrf);
+        fd.append('config', JSON.stringify(cfg));
+        fetch('/' + db + '/gssync?JSON&save=' + encodeURIComponent(name), {method:'POST', body:fd})
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                if (d.ok) {
+                    showMsg('Сохранено', true);
+                    if (!editingConfig) setTimeout(function() { location.reload(); }, 800);
+                } else {
+                    showMsg('Ошибка сохранения', false);
+                }
+            })
+            .catch(function(err) { showMsg('Ошибка: ' + err, false); });
+    });
+
+    function showMsg(text, ok) {
+        var el = document.getElementById('gss-save-msg');
+        el.textContent = text;
+        el.className = 'gss-msg ' + (ok ? 'ok' : 'err');
+    }
+
+    function clearForm() {
+        ['gss-name','gss-spreadsheet-id','gss-credentials','gss-base-url','gss-endpoint','gss-token'].forEach(function(id) {
+            document.getElementById(id).value = '';
+        });
+        document.getElementById('gss-auto-parent').value = '449960';
+        document.getElementById('gss-create-parent').value = '1';
+        document.getElementById('gss-skip-empty').checked = false;
+        document.getElementById('gss-enabled').checked = false;
+        document.getElementById('gss-sheets').value = '';
+        document.getElementById('gss-save-msg').textContent = '';
+    }
+
+    function fillForm(data) {
+        document.getElementById('gss-spreadsheet-id').value = data.spreadsheet_id || '';
+        document.getElementById('gss-credentials').value = data.credentials_path || '';
+        document.getElementById('gss-skip-empty').checked = !!data.skip_empty_values;
+        var ig = data.integram || {};
+        document.getElementById('gss-base-url').value = ig.base_url || '';
+        document.getElementById('gss-endpoint').value = ig.upload_endpoint || '';
+        document.getElementById('gss-token').value = ig.token || '';
+        document.getElementById('gss-auto-parent').value = ig.autoParent !== undefined ? ig.autoParent : '449960';
+        document.getElementById('gss-create-parent').value = ig.createParent !== undefined ? ig.createParent : '1';
+        document.getElementById('gss-enabled').checked = !!ig.enabled;
+        document.getElementById('gss-sheets').value = data.sheets ? JSON.stringify(data.sheets, null, 2) : '';
+        document.getElementById('gss-save-msg').textContent = '';
+    }
+})();
 </script>
