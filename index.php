@@ -5834,26 +5834,59 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					    $reqs = Array();
 					    $ids = Array();
     					if($isUnique){
-    					    $result = Exec_sql("SELECT obj.id, reqs.t, reqs.val, reqs.id reqid
-    					                            FROM $z obj LEFT JOIN $z reqs ON reqs.up=obj.id AND reqs.t!=0
-    					                            WHERE obj.up=$parent AND obj.t=$id AND obj.val='".addcslashes($object[0], "\\\'")."'
-    					                            ORDER BY obj.id"
-    					                        , "Check unique Obj and its reqs");
-            			    if($row = mysqli_fetch_array($result)){
-				                $existing = $row["id"];
-        				        trace(" found existing $existing ".$object[0]." base=".$GLOBALS["REV_BT"][$GLOBALS["base"][$row["t"]]]);
-        				        do{
-        				            if($existing !== $row["id"]) // There may be several matches, take only the first one
-        				                break;
-        				            if($row["t"]){
-                    			        $reqs[$row["t"]] = $row["val"];
-                    			        $ids[$row["t"]] = $row["reqid"];
-                				        trace("  existing req ".$row["t"]." = ".$reqs[$row["t"]]);
-        				            }
-                			    } while($row = mysqli_fetch_array($result));
-            			    }
-        				    else
-        				        trace(" not found ".$object[0]);
+    					    $keyReqs = UniqueKeyReqs($id);
+    					    if(count($keyReqs)){
+    					        // Build key values from CSV columns to support composite uniqueness key
+    					        $keyValues = array();
+    					        $ord = 0;
+    					        foreach($GLOBALS["local_struct"][$id] as $reqId => $reqName){
+    					            if($reqId == 0) continue;
+    					            $ord++;
+    					            if(!isset($keyReqs[$reqId])) continue;
+    					            $req = $keyReqs[$reqId];
+    					            $rawVal = isset($object[$ord]) ? UnMaskDelimiters($object[$ord]) : "";
+    					            $keyValues[$reqId] = $req["ref_id"]
+    					                ? UniqueKeyNormalizeRefs($req, $rawVal)
+    					                : array("kind" => "value", "value" => UniqueKeyNormalizeValue($reqId, $rawVal));
+    					        }
+    					        foreach($keyReqs as $reqId => $req){
+    					            if(!isset($keyValues[$reqId]))
+    					                $keyValues[$reqId] = $req["ref_id"]
+    					                    ? array("kind" => "ref", "ref_id" => (int)$req["ref_id"], "values" => array(), "multi" => $req["multi"], "has_missing_ref" => false)
+    					                    : array("kind" => "value", "value" => "");
+    					        }
+    					        if($existingRow = FindUniqueRecordDuplicate($id, 0, $parent, $object[0], $keyValues)){
+    					            $existing = $existingRow["id"];
+    					            trace(" found existing $existing ".$object[0]." (composite key)");
+    					            $reqs_data = Exec_sql("SELECT reqs.t, reqs.val, reqs.id reqid FROM $z reqs WHERE reqs.up=$existing AND reqs.t!=0", "Load reqs of existing Obj for import");
+    					            while($row = mysqli_fetch_array($reqs_data)){
+    					                $reqs[$row["t"]] = $row["val"];
+    					                $ids[$row["t"]] = $row["reqid"];
+    					            }
+    					        } else
+    					            trace(" not found ".$object[0]);
+    					    } else {
+    					        $result = Exec_sql("SELECT obj.id, reqs.t, reqs.val, reqs.id reqid
+    					                                FROM $z obj LEFT JOIN $z reqs ON reqs.up=obj.id AND reqs.t!=0
+    					                                WHERE obj.up=$parent AND obj.t=$id AND obj.val='".addcslashes($object[0], "\\\'")."'
+    					                                ORDER BY obj.id"
+    					                            , "Check unique Obj and its reqs");
+    					        if($row = mysqli_fetch_array($result)){
+    					            $existing = $row["id"];
+    					            trace(" found existing $existing ".$object[0]." base=".$GLOBALS["REV_BT"][$GLOBALS["base"][$row["t"]]]);
+    					            do{
+    					                if($existing !== $row["id"]) // There may be several matches, take only the first one
+    					                    break;
+    					                if($row["t"]){
+    					                    $reqs[$row["t"]] = $row["val"];
+    					                    $ids[$row["t"]] = $row["reqid"];
+    					                    trace("  existing req ".$row["t"]." = ".$reqs[$row["t"]]);
+    					                }
+    					            } while($row = mysqli_fetch_array($result));
+    					        }
+    					        else
+    					            trace(" not found ".$object[0]);
+    					    }
     					}
     					if(isset($existing))
         					$new_id = $existing;
