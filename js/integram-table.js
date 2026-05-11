@@ -7114,7 +7114,7 @@ class IntegramTable{
             }, 0);
         }
 
-        reorderColumns(draggedId, targetId) {
+        async reorderColumns(draggedId, targetId) {
             const draggedIndex = this.columnOrder.indexOf(draggedId);
             const targetIndex = this.columnOrder.indexOf(targetId);
 
@@ -7143,10 +7143,14 @@ class IntegramTable{
             const newOrderIndex = this.columnOrder.indexOf(draggedId);
             if (newOrderIndex >= 0) {
                 const newOrder = newOrderIndex; // 1-based position among requisites (first column at index 0 is not counted)
-                this.saveColumnOrderToServer(draggedId, newOrder);
+                await this.saveColumnOrderToServer(draggedId, newOrder);
             }
 
-            this.render();
+            // Reload data so rows reflect the new server-side column order (issue #2516)
+            this.metadataCache = {};
+            this.columns = [];
+            this.data = [];
+            await this.loadData(false);
         }
 
         /**
@@ -7383,7 +7387,7 @@ class IntegramTable{
                 }
             });
 
-            columnList.addEventListener('drop', (e) => {
+            columnList.addEventListener('drop', async (e) => {
                 e.preventDefault();
                 const target = e.target.closest('.column-settings-item');
                 if (target && target !== dragItem && dragItem) {
@@ -7419,9 +7423,13 @@ class IntegramTable{
                                 this.saveColumnState();
                                 const newOrderIndex = this.columnOrder.indexOf(draggedId);
                                 if (newOrderIndex >= 0) {
-                                    this.saveColumnOrderToServer(draggedId, newOrderIndex);
+                                    // Reload data so rows reflect the new server-side column order (issue #2516)
+                                    await this.saveColumnOrderToServer(draggedId, newOrderIndex);
+                                    this.metadataCache = {};
+                                    this.columns = [];
+                                    this.data = [];
+                                    await this.loadData(false);
                                 }
-                                this.render();
                             }
                         }
                     } else {
@@ -8479,14 +8487,15 @@ class IntegramTable{
                             this.visibleColumns.push(newColumnId);
                         }
 
-                        // Save state and re-render
+                        // Save state and reload data so rows include the new column (issue #2516)
                         this._columnSettingsChanged = true;
                         this.saveColumnState();
-                        this.render();
-
-                        // Clear metadata cache so edit/add forms fetch fresh metadata (issue #1424)
+                        // Clear metadata cache so fresh column metadata is fetched (issue #1424, #2516)
                         this.metadataCache = {};
                         this.metadataFetchPromises = {};  // Clear in-progress fetches (issue #1455)
+                        this.columns = [];
+                        this.data = [];
+                        await this.loadData(false);
                         // Clear and refresh globalMetadata so edit/add forms and column suggestions use fresh column info
                         // (issue #1424, issue #2138)
                         this.globalMetadata = null;
