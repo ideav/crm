@@ -76,7 +76,7 @@ function gss_normalize_config($config, $configDir) {
     $defaults = [
         'credentials_path' => __DIR__ . '/credentials.json',
         'spreadsheet_id' => '',
-        'output_file' => __DIR__ . '/../logs/google_sheets_sync.bki',
+        'output_file' => 'google_sheets_sync.bki',
         'skip_empty_values' => false,
         'debug' => false,
         'http_timeout' => 60,
