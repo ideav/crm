@@ -5974,7 +5974,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                             $order++;
         				    trace(" Parse $key ".$object[$order]." of $value");
     						if(strlen($object[$order])){
-    						    $val = Format_Val($GLOBALS["base"][$key], UnMaskDelimiters($object[$order]));
+    						    $val = Format_Val(isset($GLOBALS["base"][$key]) ? $GLOBALS["base"][$key] : "3", UnMaskDelimiters($object[$order]));
             				    trace(" isset(existing)=".isset($existing)." && isset(reqs[$key])=".isset($reqs[$key]));
     							if(isset($GLOBALS["refs"][$key])){ // Reference object
                 				    trace(" Reference object $key");
@@ -6862,7 +6862,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					$rows[$ref]["ref_t"][] = $row["ref"];
 				}
 			trace("GLOBALS[REQS]: ".print_r($GLOBALS["REQS"], true));
-			trace("GLOBALS[REF_typs]: ".print_r($GLOBALS["REF_typs"], true));
+			if(isset($GLOBALS["REF_typs"]))
+				trace("GLOBALS[REF_typs]: ".print_r($GLOBALS["REF_typs"], true));
 			foreach($GLOBALS["REQS"] as $key => $value){
 				if(($key == $id) && !isset($GLOBALS["ARR_typs"][$key]))	# The last Req is the object itself
 					break;
@@ -10350,7 +10351,7 @@ if(Validate_Token())
 								.(isset($GLOBALS["GRANTS"][$row["req_t"]]) ? ",\"granted\":\"".$GLOBALS["GRANTS"][$row["req_t"]]."\"" : "")."}";
         	}
 	        foreach($meta as $k => $m)
-	            if($metaReqs[$k])
+	            if(isset($metaReqs[$k]))
     	            $meta[$k] = "{".$m.",\"reqs\":[".implode(",", $metaReqs[$k])."]}";
                 else
     	            $meta[$k] = "{".$m.",\"reqs\":[]}";
