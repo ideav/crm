@@ -162,6 +162,25 @@
     background-color: rgba(220, 53, 69, 0.2);
 }
 
+/* User info header in dropdown — visible only on mobile (issue #2537) */
+.user-menu-userinfo {
+    display: none;
+}
+
+@media (max-width: 768px) {
+    .user-menu-userinfo {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.875rem 1rem;
+        color: var(--text-primary);
+        font-size: 0.9rem;
+        font-weight: 600;
+        pointer-events: none;
+        cursor: default;
+    }
+}
+
 /* Application Layout */
 .app-layout {
     display: flex;
