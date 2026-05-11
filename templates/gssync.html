@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GS Sync</title>
+    <link rel="stylesheet" href="/css/bootstrap.3.3.7.min.css">
+    <link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="/css/styles.css">
+    <style>
+        [data-theme="dark"] body {
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+        }
+        [data-theme="dark"] .panel {
+            background-color: var(--bg-secondary);
+            border-color: var(--border-color);
+        }
+        [data-theme="dark"] .panel-heading {
+            background-color: var(--bg-secondary);
+            border-color: var(--border-color);
+            color: var(--text-primary);
+        }
+        [data-theme="dark"] .btn-default {
+            background-color: var(--bg-secondary);
+            border-color: var(--border-color);
+            color: var(--text-primary);
+        }
+        [data-theme="dark"] pre {
+            background-color: var(--bg-secondary);
+            border-color: var(--border-color);
+            color: var(--text-primary);
+        }
+    </style>
+    <script src="/js/jquery-3.5.1.slim.min.js"></script>
+</head>
+<body style="font-family:Verdana,Tahoma,sans-serif;line-height:normal;padding:2px">
+<div>
+    <a href="/{_global_.z}"><i class="pi pi-home" style="font-size: 2rem; color: var(--text-primary, #333);"></i></a>
+    &nbsp;
+    <div style="display: inline; margin-top: 7px"><a href="/{_global_.z}">Вернуться в&nbsp;основное меню</a></div>
+</div>
+<br />
+<div class="container" style="margin:1px;">
+    <h4>Google Sheets Sync</h4>
+    <p>Запуск синхронизации данных из Google Sheets в Integram по конфигурационным файлам.</p>
+    <p>Файлы конфигурации хранятся в <code>templates/gss/{_global_.z}/</code> (формат JSON).</p>
+<!-- Begin:&Gssync -->
+    <div id="config-list" data-db="{DB}">
+<!-- Begin:&Config_item -->
+        <div class="panel panel-default" style="margin-bottom:8px;">
+            <div class="panel-heading">
+                <b>{CONFIG}</b>
+                &nbsp;
+                <button class="btn btn-default btn-sm run-btn" data-config="{CONFIG}">
+                    Запустить синхронизацию
+                </button>
+            </div>
+            <div class="result-box" id="result-{CONFIG}" style="display:none; padding:8px;">
+                <pre style="white-space:pre-wrap; font-size:12px;"></pre>
+            </div>
+        </div>
+<!-- End:&Config_item -->
+    </div>
+    <div id="no-configs" style="display:none;">
+        <div class="alert alert-info">
+            Нет файлов конфигурации. Создайте файл <code>*.json</code> в директории <code>templates/gss/{_global_.z}/</code>.
+        </div>
+    </div>
+<!-- End:&Gssync -->
+</div>
+<script src="/js/app.js"></script>
+<script src="/js/js.js"></script>
+<script>
+    localize();
+    if ($('#config-list .run-btn').length === 0) {
+        $('#no-configs').show();
+    }
+    $(document).on('click', '.run-btn', function() {
+        var btn = $(this);
+        var config = btn.data('config');
+        var db = $('#config-list').data('db');
+        var box = $('#result-' + config);
+        btn.prop('disabled', true).text('Выполняется...');
+        box.show().find('pre').text('Ожидание...');
+        $.ajax({
+            url: '/' + db + '/gssync?JSON&config=' + encodeURIComponent(config),
+            type: 'GET',
+            dataType: 'json',
+            success: function(data) {
+                box.find('pre').text(JSON.stringify(data, null, 2));
+            },
+            error: function(xhr) {
+                box.find('pre').text('Ошибка: ' + xhr.status + ' ' + xhr.responseText);
+            },
+            complete: function() {
+                btn.prop('disabled', false).text('Запустить синхронизацию');
+            }
+        });
+    });
+</script>
+</body>
+</html>

@@ -4355,6 +4355,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			{
 				$blocks[$block]["top_menu"][] = t9n("[RU]Файлы[EN]Files");
 				$blocks[$block]["top_menu_href"][] = "dir_admin";
+				$blocks[$block]["top_menu"][] = "GS Sync";
+				$blocks[$block]["top_menu_href"][] = "gssync";
 			}
 			#$blocks[$block]["top_menu"][] = t9n("[RU]Выход[EN]Exit");
 			#$blocks[$block]["top_menu_href"][] = "exit";
@@ -7252,6 +7254,50 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			}
 			break;
 			
+		case "&gssync":
+		{
+            $grant = RepoGrant();
+            if($grant == "BARRED")
+            	die(t9n("[RU]Недостаточно прав для доступа к этому рабочему месту[EN]Insufficient permissions to access this workplace"));
+            $gssDir = "templates/gss/$z";
+            if(!file_exists($gssDir))
+                mkdir($gssDir, 0775, true);
+            if(isApi())
+            {
+                $configName = isset($_REQUEST["config"]) ? trim($_REQUEST["config"]) : "";
+                if(!preg_match(FILE_MASK, $configName))
+                    my_error(t9n("[RU]Неверное имя файла конфигурации[EN]Invalid config file name"), "400");
+                $configFile = "$gssDir/$configName.json";
+                if(!file_exists($configFile))
+                    my_error(t9n("[RU]Файл конфигурации не найден[EN]Config file not found"), "404");
+                $configData = json_decode(file_get_contents($configFile), true);
+                if(!is_array($configData))
+                    my_error(t9n("[RU]Ошибка разбора конфигурации[EN]Config parse error"), "400");
+                require_once "include/google_sheets_sync.php";
+                $configData = gss_normalize_config($configData, realpath($gssDir));
+                try {
+                    $summary = gss_sync($configData);
+                    api_dump(json_encode($summary, JSON_UNESCAPED_UNICODE));
+                } catch (Throwable $e) {
+                    my_error($e->getMessage(), "500");
+                }
+            }
+            # Populate config list for HTML rendering
+            $GLOBALS["gss_configs"] = [];
+            if(is_dir($gssDir))
+            {
+                foreach(scandir($gssDir) as $f)
+                    if(substr($f, -5) === ".json")
+                        $GLOBALS["gss_configs"][] = substr($f, 0, -5);
+            }
+            $blocks[$block]["db"][] = $z;
+			break;
+		}
+
+		case "&config_item":
+			$blocks[$block]["config"] = $GLOBALS["gss_configs"];
+			break;
+
 		case "&pattern":
 			$add_path = "";
 			foreach(explode("/", substr($blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["add_path"], 1)) as $val)
@@ -10723,6 +10769,11 @@ if(Validate_Token())
     		elseif($a == "dir_admin") # Admin should be able to fix the files anyway,
     		{
     			Make_tree(Get_file("dir_admin.html"), ""); # thus, avoid UI header and styles
+    			die(Parse_block(""));
+    		}
+    		elseif($a == "gssync")
+    		{
+    			Make_tree(Get_file("gssync.html"), "");
     			die(Parse_block(""));
     		}
     		else
