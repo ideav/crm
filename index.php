@@ -5847,7 +5847,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     					            $rawVal = isset($object[$ord]) ? UnMaskDelimiters($object[$ord]) : "";
     					            $keyValues[$reqId] = $req["ref_id"]
     					                ? UniqueKeyNormalizeRefs($req, $rawVal)
-    					                : array("kind" => "value", "value" => UniqueKeyNormalizeValue($reqId, $rawVal));
+    					                : array("kind" => "value", "value" => UniqueKeyNormalizeValue($req["t"], $rawVal));
     					        }
     					        foreach($keyReqs as $reqId => $req){
     					            if(!isset($keyValues[$reqId]))
@@ -8608,7 +8608,7 @@ function UniqueKeyValuesFromRequest($typ, $recordId, $request, $keyReqs=false){
 			continue;
 		$values[$reqId] = $req["ref_id"]
 			? UniqueKeyNormalizeRefs($req, $request[$field])
-			: array("kind" => "value", "value" => UniqueKeyNormalizeValue($reqId, $request[$field]));
+			: array("kind" => "value", "value" => UniqueKeyNormalizeValue($req["t"], $request[$field]));
 	}
 	return $values;
 }
