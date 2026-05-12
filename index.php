@@ -7264,16 +7264,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                 mkdir($gssDir, 0775, true);
             if(isApi())
             {
-                if(isset($_REQUEST["metadata"]) && $_REQUEST["metadata"] === "tables")
-                {
-                    $tables = [];
-                    $sql = "SELECT id, val FROM $z WHERE up=0 AND id!=t AND id>300 ORDER BY val";
-                    $data_set = Exec_sql($sql, "List tables for gssync");
-                    while($row = mysqli_fetch_array($data_set))
-                        $tables[] = ["id" => $row["id"], "val" => $row["val"]];
-                    api_dump(json_encode(["tables" => $tables], JSON_UNESCAPED_UNICODE));
-                }
-                elseif(isset($_REQUEST["config"]))
+                if(isset($_REQUEST["config"]))
                 {
                     $configName = trim($_REQUEST["config"]);
                     if(!preg_match(FILE_MASK, $configName))
