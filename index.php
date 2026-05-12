@@ -5877,7 +5877,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 						    // issue #2524/#2530: under getParent the type value lives in the second column (now $object[0]
 						    // after the shift). If it was cleared in the source: if uniqueness is defined, find the
 						    // existing record under the resolved parent and delete it; otherwise skip the record.
-						    if($object[0] === "" && empty($_POST["allowEmptyValue"])){
+						    if($object[0] === "" && empty($_REQUEST["allowEmptyValue"])){
 						        if(count($keyReqsForDelete)){
 						            $keyValuesForDelete = array();
 						            $ord = 0;
