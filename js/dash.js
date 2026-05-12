@@ -286,6 +286,13 @@ function dashGetFloat(v) {
     return parseFloat(dashNormalizeNumberText(v));
 }
 
+// Like dashGetFloat but treats the string 'null' (and JS null) as a chart gap (issue #2586)
+function dashChartMeasureValue(raw) {
+    if (raw === null || raw === 'null') return null;
+    var n = dashGetFloat(raw);
+    return isNaN(n) ? 0 : n;
+}
+
 function dashNumberForFormula(v) {
     var n = dashNormalizeNumberText(v);
     return n === '' ? '0' : n;
@@ -1031,8 +1038,7 @@ function dashCollectReportVizData(report, vizConfig) {
             var raw = dashReportRowValue(row, column)
                 , n;
             if (dashReportColumnIsMeasure(column)) {
-                n = dashGetFloat(raw);
-                rec[column.name] = isNaN(n) ? 0 : n;
+                rec[column.name] = dashChartMeasureValue(raw);
             } else {
                 rec[column.name] = raw;
             }
@@ -1073,17 +1079,16 @@ function dashCollectReportVizData(report, vizConfig) {
         var label = dashReportValueLabel(dashReportRowValue(row, labelCol))
             , series = seriesCol ? dashReportValueLabel(dashReportRowValue(row, seriesCol)) : (valueCol ? valueCol.name : 'Количество')
             , stack = stackCol ? dashReportValueLabel(dashReportRowValue(row, stackCol)) : null
-            , value = valueCol ? dashGetFloat(dashReportRowValue(row, valueCol)) : 1;
-        if (isNaN(value)) value = 0;
+            , value = valueCol ? dashChartMeasureValue(dashReportRowValue(row, valueCol)) : 1;
         dashReportAddOrdered(labels, labelSeen, label);
         dashReportAddOrdered(seriesOrder, seriesSeen, series);
         if (stackCol) dashReportAddOrdered(stackOrder, stackSeen, stack);
         if (!buckets[series]) buckets[series] = {};
         if (stackCol) {
             if (!buckets[series][stack]) buckets[series][stack] = {};
-            buckets[series][stack][label] = (buckets[series][stack][label] || 0) + value;
+            buckets[series][stack][label] = value === null ? null : ((buckets[series][stack][label] || 0) + value);
         } else {
-            buckets[series][label] = (buckets[series][label] || 0) + value;
+            buckets[series][label] = value === null ? null : ((buckets[series][label] || 0) + value);
         }
     });
 
@@ -1110,7 +1115,8 @@ function dashCollectReportVizData(report, vizConfig) {
                 datasets.push({
                     label: series + ' / ' + stack,
                     data: labels.map(function(label) {
-                        return (buckets[series] && buckets[series][stack] && buckets[series][stack][label]) || 0;
+                        var b = buckets[series] && buckets[series][stack];
+                        return (b && label in b) ? b[label] : 0;
                     }),
                     _series: series,
                     _stack: stack
@@ -1122,7 +1128,8 @@ function dashCollectReportVizData(report, vizConfig) {
             datasets.push({
                 label: series,
                 data: labels.map(function(label) {
-                    return (buckets[series] && buckets[series][label]) || 0;
+                    var b = buckets[series];
+                    return (b && label in b) ? b[label] : 0;
                 })
             });
         });
