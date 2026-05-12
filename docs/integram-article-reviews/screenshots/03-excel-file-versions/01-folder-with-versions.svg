@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="800" height="500" fill="#f3f3f3"/>
+  <rect x="0" y="0" width="800" height="48" fill="#0f6cbd"/>
+  <text x="20" y="30" fill="#fff" font-size="16" font-weight="600">Проводник — реестр_договоров</text>
+  <rect x="20" y="68" width="760" height="412" fill="#ffffff" stroke="#d0d7de"/>
+  <text x="40" y="100" fill="#24292f" font-size="14" font-weight="700">Имя</text>
+  <text x="380" y="100" fill="#24292f" font-size="14" font-weight="700">Дата изменения</text>
+  <text x="600" y="100" fill="#24292f" font-size="14" font-weight="700">Размер</text>
+  <line x1="40" y1="110" x2="760" y2="110" stroke="#d0d7de"/>
+
+  <g font-size="14" fill="#24292f">
+    <text x="40" y="140">📊 реестр_март.xlsx</text>
+    <text x="380" y="140" fill="#57606a">01.03.2026 10:14</text>
+    <text x="600" y="140" fill="#57606a">312 КБ</text>
+
+    <text x="40" y="170">📊 реестр_март_v2.xlsx</text>
+    <text x="380" y="170" fill="#57606a">04.03.2026 16:22</text>
+    <text x="600" y="170" fill="#57606a">318 КБ</text>
+
+    <text x="40" y="200">📊 реестр_март_финал.xlsx</text>
+    <text x="380" y="200" fill="#57606a">12.03.2026 18:55</text>
+    <text x="600" y="200" fill="#57606a">322 КБ</text>
+
+    <text x="40" y="230">📊 реестр_март_финал_правки.xlsx</text>
+    <text x="380" y="230" fill="#57606a">13.03.2026 09:31</text>
+    <text x="600" y="230" fill="#57606a">325 КБ</text>
+
+    <text x="40" y="260">📊 реестр_март_финал_правки_ИВАНОВ.xlsx</text>
+    <text x="380" y="260" fill="#57606a">13.03.2026 14:07</text>
+    <text x="600" y="260" fill="#57606a">329 КБ</text>
+
+    <text x="40" y="290">📊 реестр_март_финал_правки_ИВАНОВ_v2.xlsx</text>
+    <text x="380" y="290" fill="#57606a">14.03.2026 11:42</text>
+    <text x="600" y="290" fill="#57606a">331 КБ</text>
+
+    <text x="40" y="320">📊 реестр_март_АКТУАЛЬНЫЙ.xlsx</text>
+    <text x="380" y="320" fill="#57606a">15.03.2026 08:10</text>
+    <text x="600" y="320" fill="#57606a">335 КБ</text>
+
+    <text x="40" y="350">📊 реестр_март_АКТУАЛЬНЫЙ(1).xlsx</text>
+    <text x="380" y="350" fill="#57606a">15.03.2026 16:28</text>
+    <text x="600" y="350" fill="#57606a">337 КБ</text>
+  </g>
+
+  <rect x="40" y="395" width="720" height="70" fill="#fff8c5" stroke="#d4a72c"/>
+  <text x="60" y="425" font-size="14" fill="#54472a">Какой файл актуальный?</text>
+  <text x="60" y="448" font-size="13" fill="#54472a">Кто внёс последние правки и какие именно — без журнала не восстановить.</text>
+</svg>

@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 460" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="800" height="460" fill="#f3f3f3"/>
+  <text x="20" y="34" font-size="18" font-weight="700" fill="#24292f">История изменений: Договор № 247</text>
+  <rect x="20" y="60" width="760" height="380" fill="#ffffff" stroke="#d0d7de"/>
+
+  <rect x="20" y="60" width="760" height="40" fill="#f6f8fa"/>
+  <text x="36" y="86" font-size="13" font-weight="700" fill="#24292f">Дата и время</text>
+  <text x="180" y="86" font-size="13" font-weight="700" fill="#24292f">Пользователь</text>
+  <text x="340" y="86" font-size="13" font-weight="700" fill="#24292f">Поле</text>
+  <text x="460" y="86" font-size="13" font-weight="700" fill="#24292f">Было</text>
+  <text x="600" y="86" font-size="13" font-weight="700" fill="#24292f">Стало</text>
+  <line x1="20" y1="100" x2="780" y2="100" stroke="#d0d7de"/>
+
+  <g font-size="13" fill="#24292f">
+    <text x="36" y="128">15.03.2026 16:42</text>
+    <text x="180" y="128">Иванов А.</text>
+    <text x="340" y="128">Статус</text>
+    <text x="460" y="128" fill="#57606a">проект</text>
+    <text x="600" y="128" fill="#0a3069">в работе</text>
+
+    <text x="36" y="158">14.03.2026 11:08</text>
+    <text x="180" y="158">Петрова О.</text>
+    <text x="340" y="158">Сумма</text>
+    <text x="460" y="158" fill="#57606a">1 100 000 ₽</text>
+    <text x="600" y="158" fill="#0a3069">1 200 000 ₽</text>
+
+    <text x="36" y="188">13.03.2026 09:31</text>
+    <text x="180" y="188">Иванов А.</text>
+    <text x="340" y="188">Дата оплаты план</text>
+    <text x="460" y="188" fill="#57606a">25.03.2026</text>
+    <text x="600" y="188" fill="#0a3069">30.03.2026</text>
+
+    <text x="36" y="218">12.03.2026 18:55</text>
+    <text x="180" y="218">Иванов А.</text>
+    <text x="340" y="218">Этап</text>
+    <text x="460" y="218" fill="#57606a">первичный</text>
+    <text x="600" y="218" fill="#0a3069">согласование</text>
+
+    <text x="36" y="248">12.03.2026 10:14</text>
+    <text x="180" y="248">Иванов А.</text>
+    <text x="340" y="248">Запись создана</text>
+    <text x="460" y="248" fill="#57606a">—</text>
+    <text x="600" y="248" fill="#0a3069">проект</text>
+  </g>
+
+  <rect x="20" y="290" width="760" height="146" fill="#f6f8fa" stroke="#d0d7de"/>
+  <text x="36" y="320" font-size="14" font-weight="700" fill="#24292f">Что это даёт</text>
+  <g font-size="13" fill="#24292f">
+    <text x="36" y="346">— ответ на вопрос «кто изменил статус вчера вечером»;</text>
+    <text x="36" y="370">— возможность сверки изменений без переписок в почте;</text>
+    <text x="36" y="394">— базовая ответственность без полноценного аудит-лога;</text>
+    <text x="36" y="418">— одинаковая картина у менеджера, руководителя и финансиста.</text>
+  </g>
+</svg>
