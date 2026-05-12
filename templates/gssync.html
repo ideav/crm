@@ -25,9 +25,14 @@
 .gss-form-box h5 { margin: 0 0 1rem; color: var(--text-primary); font-size: 1rem; }
 .gss-field { margin-bottom: 0.75rem; }
 .gss-field label { display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.2rem; }
-.gss-field input[type=text], .gss-field select, .gss-field textarea { width: 100%; box-sizing: border-box; padding: 0.45rem 0.6rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--input-bg, var(--bg-secondary)); color: var(--text-primary); font-size: 0.9rem; font-family: inherit; }
+.gss-field input[type=text], .gss-field input[type=password], .gss-field select, .gss-field textarea { width: 100%; box-sizing: border-box; padding: 0.45rem 0.6rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--input-bg, var(--bg-secondary)); color: var(--text-primary); font-size: 0.9rem; font-family: inherit; }
 .gss-field textarea { font-family: monospace; resize: vertical; }
-.gss-field input[type=text]:focus, .gss-field select:focus, .gss-field textarea:focus { outline: none; border-color: var(--color-primary, #1283da); }
+.gss-field input[type=text]:focus, .gss-field input[type=password]:focus, .gss-field select:focus, .gss-field textarea:focus { outline: none; border-color: var(--color-primary, #1283da); }
+.gss-secret { position: relative; }
+.gss-secret input { padding-right: 2.2rem !important; }
+.gss-secret-toggle { position: absolute; right: 0.4rem; top: 50%; transform: translateY(-50%); background: none; border: none; padding: 0.2rem 0.35rem; cursor: pointer; color: var(--text-secondary); font-size: 0.95rem; border-radius: 3px; }
+.gss-secret-toggle:hover { color: var(--text-primary); background: var(--bg-secondary); }
+.gss-field input.gss-changed { border-color: var(--color-warning-border, #f5c518); background: var(--color-warning-bg, #fff8e1); color: var(--color-warning-text, #8a6d00); }
 #service-acc { cursor: pointer; }
 #service-acc:hover { background: var(--bg-primary); }
 .gss-row { display: flex; gap: 1rem; }
@@ -111,11 +116,17 @@
         <div class="gss-row">
             <div class="gss-field">
                 <label>Токен авторизации</label>
-                <input type="text" id="gss-token" placeholder="">
+                <div class="gss-secret">
+                    <input type="password" id="gss-token" placeholder="" autocomplete="new-password">
+                    <button type="button" class="gss-secret-toggle" data-target="gss-token" title="Показать/скрыть"><i class="pi pi-eye"></i></button>
+                </div>
             </div>
             <div class="gss-field">
                 <label>Токен xsrf (если не задан — используется Токен авторизации)</label>
-                <input type="text" id="gss-xsrf" placeholder="">
+                <div class="gss-secret">
+                    <input type="password" id="gss-xsrf" placeholder="" autocomplete="new-password">
+                    <button type="button" class="gss-secret-toggle" data-target="gss-xsrf" title="Показать/скрыть"><i class="pi pi-eye"></i></button>
+                </div>
             </div>
         </div>
         <div class="gss-row">
@@ -415,6 +426,7 @@
         document.getElementById('gss-enabled').checked = false;
         document.getElementById('gss-sheets').value = '';
         document.getElementById('gss-save-msg').textContent = '';
+        resetSecretInitials();
     }
 
     function fillForm(data) {
@@ -434,6 +446,41 @@
         document.getElementById('gss-enabled').checked = !!ig.enabled;
         document.getElementById('gss-sheets').value = data.sheets ? JSON.stringify(data.sheets, null, 2) : '';
         document.getElementById('gss-save-msg').textContent = '';
+        resetSecretInitials();
     }
+
+    function resetSecretInitials() {
+        document.querySelectorAll('.gss-secret input').forEach(function(inp) {
+            inp.dataset.initial = inp.value;
+            inp.classList.remove('gss-changed');
+            inp.type = 'password';
+            var toggle = document.querySelector('.gss-secret-toggle[data-target="' + inp.id + '"]');
+            if (toggle) {
+                var icon = toggle.querySelector('i');
+                if (icon) icon.className = 'pi pi-eye';
+            }
+        });
+    }
+
+    document.querySelectorAll('.gss-secret input').forEach(function(inp) {
+        inp.addEventListener('input', function() {
+            inp.classList.toggle('gss-changed', inp.value !== (inp.dataset.initial || ''));
+        });
+    });
+
+    document.querySelectorAll('.gss-secret-toggle').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var inp = document.getElementById(btn.dataset.target);
+            if (!inp) return;
+            var icon = btn.querySelector('i');
+            if (inp.type === 'password') {
+                inp.type = 'text';
+                if (icon) icon.className = 'pi pi-eye-slash';
+            } else {
+                inp.type = 'password';
+                if (icon) icon.className = 'pi pi-eye';
+            }
+        });
+    });
 })();
 </script>
