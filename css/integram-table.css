@@ -2268,13 +2268,26 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     font-size: 1.125rem;
 }
 
+/* Unified icon color for all actions inside .subordinate-table-actions (issue #2570) */
+.subordinate-table-actions .subordinate-copy-buffer-btn,
+.subordinate-table-actions .subordinate-paste-buffer-btn,
+.subordinate-table-actions .subordinate-table-link {
+    color: var(--md-primary);
+}
+
+.subordinate-table-actions .subordinate-copy-buffer-btn:hover,
+.subordinate-table-actions .subordinate-paste-buffer-btn:hover,
+.subordinate-table-actions .subordinate-table-link:hover {
+    color: var(--md-primary-dark);
+    background-color: rgba(25, 118, 210, 0.08);
+}
+
 /* Subordinate copy-buffer button - icon only, no background (issue #1792) */
 .subordinate-copy-buffer-btn {
     background: none;
     border: none;
     padding: 4px;
     cursor: pointer;
-    color: var(--text-secondary, #999);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -2282,9 +2295,15 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     transition: color 0.2s ease, background-color 0.2s ease;
 }
 
-.subordinate-copy-buffer-btn:hover {
-    color: var(--text-primary, #666);
-    background-color: rgba(0, 0, 0, 0.05);
+/* Subordinate paste-buffer link - icon only, no underline (issue #2570) */
+.subordinate-table-actions .subordinate-paste-buffer-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    border-radius: 4px;
+    text-decoration: none;
+    transition: color 0.2s ease, background-color 0.2s ease;
 }
 
 /* Subordinate table add button - blue icon button (issue #1792) */
@@ -2304,7 +2323,6 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 /* Subordinate table link icon - positioned on the right side (issue #589, #1790) */
 .subordinate-table-link {
-    color: var(--text-secondary, #999);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -2312,11 +2330,6 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border-radius: 4px;
     transition: color 0.2s ease, background-color 0.2s ease;
     text-decoration: none;
-}
-
-.subordinate-table-link:hover {
-    color: var(--text-primary, #666);
-    background-color: rgba(0, 0, 0, 0.05);
 }
 
 .subordinate-table-link svg {
