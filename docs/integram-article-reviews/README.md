@@ -29,6 +29,7 @@
 | 14a | Отчёты на той же базе: чем Интеграм удобнее связки Google Sheets + Looker Studio | `14a-reports.md` | `screenshots/14a-reports/` | [#2625](https://github.com/ideav/crm/issues/2625) |
 | 14b | Дашборды на тех же данных: чем Интеграм удобнее связки таблицы и внешнего BI | `14b-dashboards.md` | `screenshots/14b-dashboards/` | [#2626](https://github.com/ideav/crm/issues/2626) |
 | 15 | Локально, с доступами и своими файлами: почему Интеграм подходит компаниям с требованиями к контролю | `15-local-control-files.md` | `screenshots/15-local-control-files/` | [#2606](https://github.com/ideav/crm/issues/2606) |
+| 16 | Тарифы в токенах, а не «за пользователя»: чем тарифная политика Интеграма отличается от Airtable, Notion и Google Workspace | `16-pricing-policy.md` | `screenshots/16-pricing-policy/` | [#2630](https://github.com/ideav/crm/issues/2630) |
 
 ## Минимальный состав каждой задачи
 
