@@ -7259,7 +7259,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
             $grant = RepoGrant();
             if($grant == "BARRED")
             	die(t9n("[RU]Недостаточно прав для доступа к этому рабочему месту[EN]Insufficient permissions to access this workplace"));
-            $gssDir = "templates/gss/$z";
+            $gssDir = "templates/custom/$z/gss";
             if(!file_exists($gssDir))
                 mkdir($gssDir, 0775, true);
             if(isApi())
@@ -7284,6 +7284,15 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                             $data['integram']['table_id'] = $tableId;
                         }
                     }
+                    # Persist credentials as filename only; resolved relative to $gssDir at sync time
+                    if(isset($data['credentials_path']))
+                    {
+                        $credName = basename((string)$data['credentials_path']);
+                        if($credName === '' || $credName === '.' || $credName === '..')
+                            unset($data['credentials_path']);
+                        else
+                            $data['credentials_path'] = $credName;
+                    }
                     file_put_contents("$gssDir/$configName.json", json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
                     api_dump(json_encode(["ok" => true], JSON_UNESCAPED_UNICODE));
                 }
@@ -7298,7 +7307,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                     $configData = json_decode(file_get_contents($configFile), true);
                     if(!is_array($configData))
                         my_die(t9n("[RU]Ошибка разбора конфигурации[EN]Config parse error"), "400");
-                    $logsDir = "templates/logs/$z";
+                    $logsDir = "templates/custom/$z/logs";
                     if(!file_exists($logsDir))
                         mkdir($logsDir, 0775, true);
                     if(!isset($configData['output_file']))
