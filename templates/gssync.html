@@ -29,9 +29,12 @@
 .gss-field textarea { font-family: monospace; resize: vertical; }
 .gss-field input[type=text]:focus, .gss-field input[type=password]:focus, .gss-field select:focus, .gss-field textarea:focus { outline: none; border-color: var(--color-primary, #1283da); }
 .gss-secret { position: relative; }
-.gss-secret input { padding-right: 2.2rem !important; }
-.gss-secret-toggle { position: absolute; right: 0.4rem; top: 50%; transform: translateY(-50%); background: none; border: none; padding: 0.2rem 0.35rem; cursor: pointer; color: var(--text-secondary); font-size: 0.95rem; border-radius: 3px; }
-.gss-secret-toggle:hover { color: var(--text-primary); background: var(--bg-secondary); }
+.gss-secret input { padding-right: 4.2rem !important; }
+.gss-secret-toggle, .gss-secret-copy { position: absolute; top: 50%; transform: translateY(-50%); background: none; border: none; padding: 0.2rem 0.35rem; cursor: pointer; color: var(--text-secondary); font-size: 0.95rem; border-radius: 3px; }
+.gss-secret-toggle { right: 0.4rem; }
+.gss-secret-copy { right: 2.2rem; }
+.gss-secret-toggle:hover, .gss-secret-copy:hover { color: var(--text-primary); background: var(--bg-secondary); }
+.gss-secret-copy.gss-copied { color: var(--color-success, #28a745); }
 .gss-field input.gss-changed { border-color: var(--color-warning-border, #f5c518); background: var(--color-warning-bg, #fff8e1); color: var(--color-warning-text, #8a6d00); }
 #service-acc { cursor: pointer; }
 #service-acc:hover { background: var(--bg-primary); }
@@ -118,6 +121,7 @@
                 <label>Токен авторизации</label>
                 <div class="gss-secret">
                     <input type="password" id="gss-token" placeholder="" autocomplete="new-password">
+                    <button type="button" class="gss-secret-copy" data-target="gss-token" title="Скопировать в буфер обмена"><i class="pi pi-copy"></i></button>
                     <button type="button" class="gss-secret-toggle" data-target="gss-token" title="Показать/скрыть"><i class="pi pi-eye"></i></button>
                 </div>
             </div>
@@ -125,6 +129,7 @@
                 <label>Токен xsrf (если не задан — используется Токен авторизации)</label>
                 <div class="gss-secret">
                     <input type="password" id="gss-xsrf" placeholder="" autocomplete="new-password">
+                    <button type="button" class="gss-secret-copy" data-target="gss-xsrf" title="Скопировать в буфер обмена"><i class="pi pi-copy"></i></button>
                     <button type="button" class="gss-secret-toggle" data-target="gss-xsrf" title="Показать/скрыть"><i class="pi pi-eye"></i></button>
                 </div>
             </div>
@@ -479,6 +484,32 @@
             } else {
                 inp.type = 'password';
                 if (icon) icon.className = 'pi pi-eye';
+            }
+        });
+    });
+
+    document.querySelectorAll('.gss-secret-copy').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var inp = document.getElementById(btn.dataset.target);
+            if (!inp || !inp.value) return;
+            var text = inp.value;
+            var icon = btn.querySelector('i');
+            var origClass = icon ? icon.className : '';
+            var done = function() {
+                btn.classList.add('gss-copied');
+                if (icon) icon.className = 'pi pi-check';
+                btn.title = 'Скопировано';
+                setTimeout(function() {
+                    btn.classList.remove('gss-copied');
+                    if (icon) icon.className = origClass || 'pi pi-copy';
+                    btn.title = 'Скопировать в буфер обмена';
+                }, 1500);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(done).catch(function() { fallbackCopy(text); done(); });
+            } else {
+                fallbackCopy(text);
+                done();
             }
         });
     });
