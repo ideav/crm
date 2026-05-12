@@ -154,6 +154,7 @@
             </div>
         </div>
         <label class="gss-checkbox"><input type="checkbox" id="gss-enabled"> Загрузка включена</label>
+        <label class="gss-checkbox"><input type="checkbox" id="gss-save-empty"> Сохранять пустые значения</label>
 
         <div class="gss-field">
             <label>JSON-массив листов (каждый лист — объект с полями <code>name</code>, <code>rows</code>, <code>columns</code>)</label>
@@ -395,6 +396,7 @@
 
         var cfg = {
             spreadsheet_id: document.getElementById('gss-spreadsheet-id').value.trim(),
+            skip_empty_values: !document.getElementById('gss-save-empty').checked,
             sheets: sheets,
             integram: {
                 enabled: document.getElementById('gss-enabled').checked,
@@ -438,6 +440,7 @@
         document.getElementById('gss-auto-parent').value = '449960';
         document.getElementById('gss-create-parent').value = '1';
         document.getElementById('gss-enabled').checked = false;
+        document.getElementById('gss-save-empty').checked = false;
         document.getElementById('gss-sheets').value = '';
         document.getElementById('gss-save-msg').textContent = '';
         resetSecretInitials();
@@ -458,6 +461,7 @@
         document.getElementById('gss-auto-parent').value = ig.autoParent !== undefined ? ig.autoParent : '449960';
         document.getElementById('gss-create-parent').value = ig.createParent !== undefined ? ig.createParent : '1';
         document.getElementById('gss-enabled').checked = !!ig.enabled;
+        document.getElementById('gss-save-empty').checked = !data.skip_empty_values;
         document.getElementById('gss-sheets').value = data.sheets ? JSON.stringify(data.sheets, null, 2) : '';
         document.getElementById('gss-save-msg').textContent = '';
         resetSecretInitials();
