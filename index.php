@@ -7264,7 +7264,30 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                 mkdir($gssDir, 0775, true);
             if(isApi())
             {
-                if(isset($_REQUEST["config"]))
+                if(isset($_REQUEST["save"]))
+                {
+                    check();
+                    $configName = trim($_REQUEST["save"]);
+                    if(!preg_match(FILE_MASK, $configName))
+                        my_die(t9n("[RU]Неверное имя файла конфигурации[EN]Invalid config file name"), "400");
+                    $json = isset($_POST["config"]) ? $_POST["config"] : "";
+                    $data = json_decode($json, true);
+                    if(!is_array($data))
+                        my_die(t9n("[RU]Ошибка разбора JSON[EN]Invalid JSON"), "400");
+                    # Strip client-supplied site / DB and persist only table_id; URL is built from current $z at sync time
+                    if(isset($data['integram']) && is_array($data['integram']))
+                    {
+                        unset($data['integram']['base_url'], $data['integram']['database'], $data['integram']['upload_endpoint']);
+                        if(isset($data['integram']['table_id']))
+                        {
+                            $tableId = preg_replace('/\D+/', '', (string)$data['integram']['table_id']);
+                            $data['integram']['table_id'] = $tableId;
+                        }
+                    }
+                    file_put_contents("$gssDir/$configName.json", json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+                    api_dump(json_encode(["ok" => true], JSON_UNESCAPED_UNICODE));
+                }
+                elseif(isset($_REQUEST["config"]))
                 {
                     $configName = trim($_REQUEST["config"]);
                     if(!preg_match(FILE_MASK, $configName))
@@ -7310,29 +7333,6 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                     if(!file_exists($configFile))
                         my_die(t9n("[RU]Файл конфигурации не найден[EN]Config file not found"), "404");
                     api_dump(file_get_contents($configFile));
-                }
-                elseif(isset($_REQUEST["save"]))
-                {
-                    check();
-                    $configName = trim($_REQUEST["save"]);
-                    if(!preg_match(FILE_MASK, $configName))
-                        my_die(t9n("[RU]Неверное имя файла конфигурации[EN]Invalid config file name"), "400");
-                    $json = isset($_POST["config"]) ? $_POST["config"] : "";
-                    $data = json_decode($json, true);
-                    if(!is_array($data))
-                        my_die(t9n("[RU]Ошибка разбора JSON[EN]Invalid JSON"), "400");
-                    # Strip client-supplied site / DB and persist only table_id; URL is built from current $z at sync time
-                    if(isset($data['integram']) && is_array($data['integram']))
-                    {
-                        unset($data['integram']['base_url'], $data['integram']['database'], $data['integram']['upload_endpoint']);
-                        if(isset($data['integram']['table_id']))
-                        {
-                            $tableId = preg_replace('/\D+/', '', (string)$data['integram']['table_id']);
-                            $data['integram']['table_id'] = $tableId;
-                        }
-                    }
-                    file_put_contents("$gssDir/$configName.json", json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-                    api_dump(json_encode(["ok" => true], JSON_UNESCAPED_UNICODE));
                 }
                 elseif(isset($_REQUEST["delete"]))
                 {
