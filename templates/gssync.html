@@ -108,9 +108,15 @@
             <label>Таблица для загрузки *</label>
             <select id="gss-table-id"><option value="">— загрузка списка —</option></select>
         </div>
-        <div class="gss-field">
-            <label>Токен авторизации</label>
-            <input type="text" id="gss-token" placeholder="">
+        <div class="gss-row">
+            <div class="gss-field">
+                <label>Токен авторизации</label>
+                <input type="text" id="gss-token" placeholder="">
+            </div>
+            <div class="gss-field">
+                <label>Токен xsrf (если не задан — используется Токен авторизации)</label>
+                <input type="text" id="gss-xsrf" placeholder="">
+            </div>
         </div>
         <div class="gss-row">
             <div class="gss-field">
@@ -369,6 +375,7 @@
                 enabled: document.getElementById('gss-enabled').checked,
                 table_id: tableId,
                 token: document.getElementById('gss-token').value.trim(),
+                xsrf: document.getElementById('gss-xsrf').value.trim(),
                 autoParent: document.getElementById('gss-auto-parent').value.trim() || '449960',
                 createParent: document.getElementById('gss-create-parent').value.trim() || '1'
             }
@@ -399,7 +406,7 @@
     }
 
     function clearForm() {
-        ['gss-name','gss-spreadsheet-id','gss-credentials','gss-token'].forEach(function(id) {
+        ['gss-name','gss-spreadsheet-id','gss-credentials','gss-token','gss-xsrf'].forEach(function(id) {
             document.getElementById(id).value = '';
         });
         document.getElementById('gss-table-id').value = '';
@@ -421,6 +428,7 @@
         }
         document.getElementById('gss-table-id').value = tableId;
         document.getElementById('gss-token').value = ig.token || '';
+        document.getElementById('gss-xsrf').value = ig.xsrf || '';
         document.getElementById('gss-auto-parent').value = ig.autoParent !== undefined ? ig.autoParent : '449960';
         document.getElementById('gss-create-parent').value = ig.createParent !== undefined ? ig.createParent : '1';
         document.getElementById('gss-enabled').checked = !!ig.enabled;

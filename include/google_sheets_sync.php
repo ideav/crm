@@ -1026,7 +1026,7 @@ function gss_integram_tokens($config) {
         throw new RuntimeException('Integram upload requires integram.token in config.');
     }
     if ($xsrf === '') {
-        throw new RuntimeException('Integram upload requires integram.xsrf in config.');
+        $xsrf = $token;
     }
 
     return [
