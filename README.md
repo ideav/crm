@@ -76,6 +76,7 @@ See [ASSETS_DEPLOYMENT.md](ASSETS_DEPLOYMENT.md) for details on asset structure 
 - [TABLE_COMPONENT_README.md](TABLE_COMPONENT_README.md) — IntegramTable component reference
 - [ASSETS_DEPLOYMENT.md](ASSETS_DEPLOYMENT.md) — Asset deployment guide
 - [CRM_OVERVIEW_SCENARIO.md](CRM_OVERVIEW_SCENARIO.md) — CRM walkthrough for new users
+- [docs/INTEGRAM_ARTICLE_SERIES_PLAN.md](docs/INTEGRAM_ARTICLE_SERIES_PLAN.md) — Article series plan for positioning Integram against spreadsheets, no-code tools, custom development, and vibe coding
 - [docs/INTEGRAM_DASHBOARD_TRAINING_GUIDE.md](docs/INTEGRAM_DASHBOARD_TRAINING_GUIDE.md) — Dashboard capability overview for training videos and articles
 - [docs/VUE_INTEGRAM_REWRITE_PLAN.md](docs/VUE_INTEGRAM_REWRITE_PLAN.md) — Vue + Integram rewrite plan
 - [mcp-server/README.md](mcp-server/README.md) — MCP server setup and tools
