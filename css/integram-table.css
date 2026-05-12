@@ -2269,17 +2269,32 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 }
 
 /* Unified icon color for all actions inside .subordinate-table-actions (issue #2570) */
+.subordinate-table-actions .subordinate-refresh-btn,
 .subordinate-table-actions .subordinate-copy-buffer-btn,
 .subordinate-table-actions .subordinate-paste-buffer-btn,
 .subordinate-table-actions .subordinate-table-link {
     color: var(--md-primary);
 }
 
+.subordinate-table-actions .subordinate-refresh-btn:hover,
 .subordinate-table-actions .subordinate-copy-buffer-btn:hover,
 .subordinate-table-actions .subordinate-paste-buffer-btn:hover,
 .subordinate-table-actions .subordinate-table-link:hover {
     color: var(--md-primary-dark);
     background-color: rgba(25, 118, 210, 0.08);
+}
+
+/* Subordinate refresh button - icon only, no background (issue #2574) */
+.subordinate-refresh-btn {
+    background: none;
+    border: none;
+    padding: 4px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: color 0.2s ease, background-color 0.2s ease;
 }
 
 /* Subordinate copy-buffer button - icon only, no background (issue #1792) */

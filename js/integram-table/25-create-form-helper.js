@@ -1572,6 +1572,7 @@ class IntegramCreateFormHelper {
                     <i class="pi pi-plus"></i>
                 </button>
                 <div class="subordinate-table-actions">
+                    <button type="button" class="subordinate-refresh-btn" title="Обновить"><i class="pi pi-refresh"></i></button>
                     <button type="button" class="subordinate-copy-buffer-btn" title="Копировать в буфер"><i class="pi pi-copy"></i></button>
                     <a href="#" class="subordinate-paste-buffer-btn" title="Вставить из буфера" onclick="event.preventDefault(); event.stopPropagation();">
                         <i class="pi pi-clipboard"></i>
@@ -1638,6 +1639,14 @@ class IntegramCreateFormHelper {
                 if (typeof window.openCreateRecordForm === 'function') {
                     window.openCreateRecordForm(arrId, { parentId: parentRecordId });
                 }
+            });
+        }
+
+        // Attach refresh button handler (issue #2574)
+        const refreshBtn = container.querySelector('.subordinate-refresh-btn');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', () => {
+                this.loadSubordinateTableStandalone(container, arrId, parentRecordId);
             });
         }
 
