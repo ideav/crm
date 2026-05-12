@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 520" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1000" height="520" fill="#f3f3f3"/>
+  <text x="500" y="34" font-size="18" font-weight="700" fill="#24292f" text-anchor="middle">Одна запись «Договор № 247» — три представления</text>
+
+  <!-- Manager column -->
+  <rect x="20" y="60" width="300" height="440" fill="#ffffff" stroke="#d0d7de"/>
+  <rect x="20" y="60" width="300" height="40" fill="#dbeafe"/>
+  <text x="170" y="86" font-size="14" font-weight="700" fill="#1e3a8a" text-anchor="middle">Менеджер</text>
+  <g font-size="13" fill="#24292f">
+    <text x="36" y="130">Контрагент: ООО «Радуга»</text>
+    <text x="36" y="160">Дата заключения: 12.03.2026</text>
+    <text x="36" y="190">Статус: в работе</text>
+    <text x="36" y="220">Этап: согласование</text>
+    <text x="36" y="250">Ответственный: я</text>
+    <text x="36" y="280">Комментарий менеджера…</text>
+  </g>
+  <rect x="36" y="320" width="268" height="40" fill="#eff6ff" stroke="#bfdbfe"/>
+  <text x="170" y="345" font-size="12" fill="#1e3a8a" text-anchor="middle">Видны только свои клиенты</text>
+
+  <!-- Manager column -->
+  <rect x="350" y="60" width="300" height="440" fill="#ffffff" stroke="#d0d7de"/>
+  <rect x="350" y="60" width="300" height="40" fill="#dcfce7"/>
+  <text x="500" y="86" font-size="14" font-weight="700" fill="#14532d" text-anchor="middle">Руководитель</text>
+  <g font-size="13" fill="#24292f">
+    <text x="366" y="130">Контрагент: ООО «Радуга»</text>
+    <text x="366" y="160">Дата заключения: 12.03.2026</text>
+    <text x="366" y="190">Статус: в работе</text>
+    <text x="366" y="220">Этап: согласование</text>
+    <text x="366" y="250">Ответственный: Иванов А.</text>
+    <text x="366" y="280">План: 1 200 000 ₽</text>
+    <text x="366" y="310">Прогноз закрытия: 28.03</text>
+    <text x="366" y="340">Конверсия по этапу: 64 %</text>
+  </g>
+  <rect x="366" y="380" width="268" height="40" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text x="500" y="405" font-size="12" fill="#14532d" text-anchor="middle">Видит весь отдел + аналитика</text>
+
+  <!-- Finance column -->
+  <rect x="680" y="60" width="300" height="440" fill="#ffffff" stroke="#d0d7de"/>
+  <rect x="680" y="60" width="300" height="40" fill="#fef3c7"/>
+  <text x="830" y="86" font-size="14" font-weight="700" fill="#7c2d12" text-anchor="middle">Финансист</text>
+  <g font-size="13" fill="#24292f">
+    <text x="696" y="130">Контрагент: ООО «Радуга»</text>
+    <text x="696" y="160">Сумма по договору: 1 200 000 ₽</text>
+    <text x="696" y="190">НДС: 20 %</text>
+    <text x="696" y="220">Дата оплаты план: 30.03.2026</text>
+    <text x="696" y="250">Реквизиты счёта</text>
+    <text x="696" y="280">Признак валютного контроля</text>
+  </g>
+  <rect x="696" y="320" width="268" height="40" fill="#fffbeb" stroke="#fde68a"/>
+  <text x="830" y="345" font-size="12" fill="#7c2d12" text-anchor="middle">Видит финансовые поля</text>
+</svg>
