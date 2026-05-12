@@ -304,7 +304,7 @@
             .then(function(d) {
                 box.querySelector('pre').textContent = JSON.stringify(d, null, 2);
                 if (warn && d && typeof d === 'object' && 'upload' in d && d.upload === null) {
-                    warn.textContent = 'Файл сформирован, но не загружен, потому что загрузка пока выключена';
+                    warn.textContent = 'Файл сформирован, но не загружен, потому что загрузка пока выключена. Включите загрузку и сохраните форму.';
                     warn.style.display = '';
                 }
             })
