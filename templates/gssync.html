@@ -123,23 +123,24 @@
         <label class="gss-checkbox"><input type="checkbox" id="gss-enabled"> Загрузка включена</label>
 
         <div class="gss-field">
-            <label>JSON-массив листов</label>
-            <textarea id="gss-sheets" rows="14" placeholder="[
+            <label>JSON-массив листов (каждый лист — объект с полями <code>name</code>, <code>rows</code>, <code>columns</code>)</label>
+            <textarea id="gss-sheets" rows="14" placeholder='[
     {
-        'name' => '(План-Факт) (2026)',
-        'rows' => [
-            'Выручка *',
-            'Поступления *',
+        "name": "(План-Факт) (2026)",
+        "rows": [
+            "Выручка *",
+            "Поступления *"
         ],
-        'columns' => [
-            ['01.01.202*', '31.01.202*', &quot;'ПЛАН'||'ФАКТ'&quot;],
-            ['01.02.202*', &quot;'28.02.202*'||'29.02.202*'&quot;, &quot;'ПЛАН'||'ФАКТ'&quot;],
-            ['01.03.202*', '31.03.202*', &quot;'ПЛАН'||'ФАКТ'&quot;],
-            ...
-            ['01.12.202*', '31.12.202*', &quot;'ПЛАН'||'ФАКТ'&quot;],
-        ],
-    },
-]"></textarea>
+        "columns": [
+            ["01.01.202*", "31.01.202*", "ПЛАН||ФАКТ"],
+            ["01.02.202*", "28.02.202*", "ПЛАН||ФАКТ"],
+            ["01.03.202*", "31.03.202*", "ПЛАН||ФАКТ"],
+            ["01.12.202*", "31.12.202*", "ПЛАН||ФАКТ"],
+            "2025",
+            "2026"
+        ]
+    }
+]'></textarea>
         </div>
 
         <div class="gss-form-actions">
@@ -325,6 +326,23 @@
         var sheets;
         try { sheets = sheetsRaw ? JSON.parse(sheetsRaw) : []; }
         catch(e) { showMsg('Ошибка в JSON листов: ' + e.message, false); return; }
+        if (sheets && !Array.isArray(sheets) && typeof sheets === 'object') {
+            sheets = [sheets];
+        }
+        if (!Array.isArray(sheets)) {
+            showMsg('JSON листов должен быть массивом объектов или одним объектом листа', false); return;
+        }
+        for (var i = 0; i < sheets.length; i++) {
+            var s = sheets[i];
+            if (!s || typeof s !== 'object' || Array.isArray(s)) {
+                showMsg('Лист #' + (i + 1) + ' должен быть объектом', false); return;
+            }
+            var hasName = typeof s.name === 'string' && s.name.trim() !== '';
+            var hasRange = typeof s.range === 'string' && s.range.trim() !== '';
+            if (!hasName && !hasRange) {
+                showMsg('Лист #' + (i + 1) + ' должен содержать "name" или "range"', false); return;
+            }
+        }
 
         var cfg = {
             spreadsheet_id: document.getElementById('gss-spreadsheet-id').value.trim(),
