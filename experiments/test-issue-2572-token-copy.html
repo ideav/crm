@@ -1,0 +1,108 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Issue 2572 — token copy-to-clipboard button</title>
+<style>
+:root {
+    --text-primary: #222;
+    --text-secondary: #666;
+    --bg-primary: #fff;
+    --bg-secondary: #f5f5f7;
+    --border-color: #d0d7de;
+    --color-primary: #1283da;
+    --color-success: #28a745;
+    --color-danger: #dc3545;
+    --color-warning-bg: #fff8e1;
+    --color-warning-border: #f5c518;
+    --color-warning-text: #8a6d00;
+}
+body { font-family: sans-serif; padding: 1.5rem; background: var(--bg-primary); color: var(--text-primary); }
+.gss-field { margin-bottom: 0.75rem; }
+.gss-field label { display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.2rem; }
+.gss-field input[type=text], .gss-field input[type=password] { width: 100%; box-sizing: border-box; padding: 0.45rem 0.6rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); font-size: 0.9rem; font-family: inherit; }
+.gss-secret { position: relative; }
+.gss-secret input { padding-right: 4.2rem !important; }
+.gss-secret-toggle, .gss-secret-copy { position: absolute; top: 50%; transform: translateY(-50%); background: none; border: none; padding: 0.2rem 0.35rem; cursor: pointer; color: var(--text-secondary); font-size: 0.95rem; border-radius: 3px; }
+.gss-secret-toggle { right: 0.4rem; }
+.gss-secret-copy { right: 2.2rem; }
+.gss-secret-toggle:hover, .gss-secret-copy:hover { color: var(--text-primary); background: var(--bg-secondary); }
+.gss-secret-copy.gss-copied { color: var(--color-success, #28a745); }
+.gss-field input.gss-changed { border-color: var(--color-warning-border, #f5c518); background: var(--color-warning-bg, #fff8e1); color: var(--color-warning-text, #8a6d00); }
+.gss-row { display: flex; gap: 1rem; }
+.gss-row .gss-field { flex: 1; }
+button.act { margin-top: 1rem; padding: 0.4rem 1rem; }
+.msg { margin-top: 1rem; font-size: 0.9rem; color: var(--color-success); }
+</style>
+</head>
+<body>
+<h3>Issue 2572 — copy-to-clipboard icon next to token fields</h3>
+<p>Initial token value: <code>secret-12345</code>. Initial xsrf: <code>xsrf-abcdef</code></p>
+
+<div class="gss-row">
+    <div class="gss-field">
+        <label>Токен авторизации</label>
+        <div class="gss-secret">
+            <input type="password" id="gss-token" autocomplete="new-password" value="secret-12345">
+            <button type="button" class="gss-secret-copy" data-target="gss-token" title="Скопировать в буфер обмена">📋</button>
+            <button type="button" class="gss-secret-toggle" data-target="gss-token" title="Показать/скрыть">👁</button>
+        </div>
+    </div>
+    <div class="gss-field">
+        <label>Токен xsrf</label>
+        <div class="gss-secret">
+            <input type="password" id="gss-xsrf" autocomplete="new-password" value="xsrf-abcdef">
+            <button type="button" class="gss-secret-copy" data-target="gss-xsrf" title="Скопировать в буфер обмена">📋</button>
+            <button type="button" class="gss-secret-toggle" data-target="gss-xsrf" title="Показать/скрыть">👁</button>
+        </div>
+    </div>
+</div>
+
+<div class="msg" id="msg"></div>
+
+<script>
+function fallbackCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch(e) {}
+    document.body.removeChild(ta);
+}
+
+document.querySelectorAll('.gss-secret-toggle').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var inp = document.getElementById(btn.dataset.target);
+        if (!inp) return;
+        inp.type = inp.type === 'password' ? 'text' : 'password';
+    });
+});
+
+document.querySelectorAll('.gss-secret-copy').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var inp = document.getElementById(btn.dataset.target);
+        if (!inp || !inp.value) return;
+        var text = inp.value;
+        var done = function() {
+            btn.classList.add('gss-copied');
+            btn.title = 'Скопировано';
+            document.getElementById('msg').textContent = 'Скопировано: ' + text;
+            setTimeout(function() {
+                btn.classList.remove('gss-copied');
+                btn.title = 'Скопировать в буфер обмена';
+                document.getElementById('msg').textContent = '';
+            }, 1500);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done).catch(function() { fallbackCopy(text); done(); });
+        } else {
+            fallbackCopy(text);
+            done();
+        }
+    });
+});
+</script>
+</body>
+</html>

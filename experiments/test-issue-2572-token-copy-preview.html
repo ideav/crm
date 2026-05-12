@@ -1,0 +1,127 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Issue 2572 — preview with primeicons</title>
+<link rel="stylesheet" href="../assets/vendor/primeicons/primeicons.css">
+<style>
+:root {
+    --text-primary: #222;
+    --text-secondary: #666;
+    --bg-primary: #fff;
+    --bg-secondary: #f5f5f7;
+    --border-color: #d0d7de;
+    --color-primary: #1283da;
+    --color-success: #28a745;
+    --color-danger: #dc3545;
+    --color-warning-bg: #fff8e1;
+    --color-warning-border: #f5c518;
+    --color-warning-text: #8a6d00;
+    --card-bg: #fff;
+    --input-bg: #f5f5f7;
+}
+body { font-family: sans-serif; padding: 0; margin: 0; background: var(--bg-primary); color: var(--text-primary); }
+
+/* Imported styles from templates/gssync.html */
+.gss-wrap { padding: 1.5rem; max-width: 860px; }
+.gss-form-box { border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-top: 1rem; background: var(--card-bg, var(--bg-primary)); }
+.gss-form-box h5 { margin: 0 0 1rem; color: var(--text-primary); font-size: 1rem; }
+.gss-field { margin-bottom: 0.75rem; }
+.gss-field label { display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.2rem; }
+.gss-field input[type=text], .gss-field input[type=password] { width: 100%; box-sizing: border-box; padding: 0.45rem 0.6rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--input-bg, var(--bg-secondary)); color: var(--text-primary); font-size: 0.9rem; font-family: inherit; }
+.gss-secret { position: relative; }
+.gss-secret input { padding-right: 4.2rem !important; }
+.gss-secret-toggle, .gss-secret-copy { position: absolute; top: 50%; transform: translateY(-50%); background: none; border: none; padding: 0.2rem 0.35rem; cursor: pointer; color: var(--text-secondary); font-size: 0.95rem; border-radius: 3px; }
+.gss-secret-toggle { right: 0.4rem; }
+.gss-secret-copy { right: 2.2rem; }
+.gss-secret-toggle:hover, .gss-secret-copy:hover { color: var(--text-primary); background: var(--bg-secondary); }
+.gss-secret-copy.gss-copied { color: var(--color-success, #28a745); }
+.gss-row { display: flex; gap: 1rem; }
+.gss-row .gss-field { flex: 1; }
+.gss-msg { font-size: 0.85rem; margin-top: 0.5rem; }
+.gss-msg.ok { color: var(--color-success, #28a745); }
+</style>
+</head>
+<body>
+<div class="gss-wrap">
+<div class="gss-form-box">
+<h5>Редактирование: my_config1</h5>
+<div class="gss-row">
+    <div class="gss-field">
+        <label>Токен авторизации</label>
+        <div class="gss-secret">
+            <input type="password" id="gss-token" autocomplete="new-password" value="secret-token-12345abcdef">
+            <button type="button" class="gss-secret-copy" data-target="gss-token" title="Скопировать в буфер обмена"><i class="pi pi-copy"></i></button>
+            <button type="button" class="gss-secret-toggle" data-target="gss-token" title="Показать/скрыть"><i class="pi pi-eye"></i></button>
+        </div>
+    </div>
+    <div class="gss-field">
+        <label>Токен xsrf (если не задан — используется Токен авторизации)</label>
+        <div class="gss-secret">
+            <input type="password" id="gss-xsrf" autocomplete="new-password" value="xsrf-secret-9876">
+            <button type="button" class="gss-secret-copy" data-target="gss-xsrf" title="Скопировать в буфер обмена"><i class="pi pi-copy"></i></button>
+            <button type="button" class="gss-secret-toggle" data-target="gss-xsrf" title="Показать/скрыть"><i class="pi pi-eye"></i></button>
+        </div>
+    </div>
+</div>
+<div class="gss-msg ok" id="msg"></div>
+</div>
+</div>
+
+<script>
+function fallbackCopy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch(e) {}
+    document.body.removeChild(ta);
+}
+
+document.querySelectorAll('.gss-secret-toggle').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var inp = document.getElementById(btn.dataset.target);
+        if (!inp) return;
+        var icon = btn.querySelector('i');
+        if (inp.type === 'password') {
+            inp.type = 'text';
+            if (icon) icon.className = 'pi pi-eye-slash';
+        } else {
+            inp.type = 'password';
+            if (icon) icon.className = 'pi pi-eye';
+        }
+    });
+});
+
+document.querySelectorAll('.gss-secret-copy').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var inp = document.getElementById(btn.dataset.target);
+        if (!inp || !inp.value) return;
+        var text = inp.value;
+        var icon = btn.querySelector('i');
+        var origClass = icon ? icon.className : '';
+        var done = function() {
+            btn.classList.add('gss-copied');
+            if (icon) icon.className = 'pi pi-check';
+            btn.title = 'Скопировано';
+            document.getElementById('msg').textContent = 'Скопировано: ' + text;
+            setTimeout(function() {
+                btn.classList.remove('gss-copied');
+                if (icon) icon.className = origClass || 'pi pi-copy';
+                btn.title = 'Скопировать в буфер обмена';
+                document.getElementById('msg').textContent = '';
+            }, 1500);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done).catch(function() { fallbackCopy(text); done(); });
+        } else {
+            fallbackCopy(text);
+            done();
+        }
+    });
+});
+</script>
+</body>
+</html>
