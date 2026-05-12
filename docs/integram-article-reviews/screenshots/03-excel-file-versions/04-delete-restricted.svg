@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 460" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="800" height="460" fill="#f3f3f3"/>
+  <text x="20" y="34" font-size="18" font-weight="700" fill="#24292f">Контрагенты — попытка удаления</text>
+
+  <!-- Underlying table -->
+  <rect x="20" y="60" width="760" height="120" fill="#ffffff" stroke="#d0d7de" opacity="0.5"/>
+  <rect x="20" y="60" width="760" height="32" fill="#f6f8fa" opacity="0.6"/>
+  <text x="36" y="82" font-size="13" font-weight="700" fill="#24292f" opacity="0.6">Контрагент</text>
+  <text x="300" y="82" font-size="13" font-weight="700" fill="#24292f" opacity="0.6">ИНН</text>
+  <text x="500" y="82" font-size="13" font-weight="700" fill="#24292f" opacity="0.6">Договоров</text>
+  <g font-size="13" fill="#24292f" opacity="0.6">
+    <text x="36" y="114">ООО «Радуга»</text>
+    <text x="300" y="114">7701234567</text>
+    <text x="500" y="114">3</text>
+    <text x="36" y="142">ИП Сидоров С.</text>
+    <text x="300" y="142">770198765432</text>
+    <text x="500" y="142">1</text>
+    <text x="36" y="170">ЗАО «Стандарт»</text>
+    <text x="300" y="170">7707654321</text>
+    <text x="500" y="170">0</text>
+  </g>
+
+  <!-- Dialog -->
+  <rect x="120" y="200" width="560" height="220" fill="#ffffff" stroke="#d0d7de" rx="8"/>
+  <rect x="120" y="200" width="560" height="48" fill="#fff1f2" rx="8"/>
+  <text x="140" y="230" font-size="16" font-weight="700" fill="#9f1239">⛔ Удаление запрещено</text>
+
+  <text x="140" y="278" font-size="14" fill="#24292f">Нельзя удалить запись «ООО Радуга»:</text>
+  <text x="140" y="300" font-size="14" fill="#24292f">на неё ссылаются связанные записи в других таблицах.</text>
+
+  <rect x="140" y="316" width="520" height="60" fill="#f6f8fa" stroke="#d0d7de"/>
+  <text x="156" y="338" font-size="13" fill="#24292f">— Договоры: 3 активные записи</text>
+  <text x="156" y="360" font-size="13" fill="#24292f">— Платежи: 7 связанных операций</text>
+
+  <rect x="540" y="386" width="120" height="30" fill="#0f6cbd" rx="4"/>
+  <text x="600" y="406" font-size="13" font-weight="600" fill="#ffffff" text-anchor="middle">Понятно</text>
+
+  <text x="20" y="448" font-size="12" fill="#57606a">В Excel такой защиты нет: «лишнюю» строку можно удалить, и связь с другими листами молча обрывается.</text>
+</svg>

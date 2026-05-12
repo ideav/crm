@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 500" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="900" height="500" fill="#f3f3f3"/>
+  <text x="20" y="34" font-size="18" font-weight="700" fill="#24292f">Отчёт «Договоры» — экспорт нужного среза</text>
+
+  <!-- Filters -->
+  <rect x="20" y="56" width="860" height="60" fill="#ffffff" stroke="#d0d7de"/>
+  <text x="36" y="80" font-size="13" font-weight="700" fill="#24292f">Фильтры:</text>
+  <rect x="120" y="66" width="200" height="32" fill="#eff6ff" stroke="#bfdbfe" rx="4"/>
+  <text x="220" y="86" font-size="13" fill="#1e3a8a" text-anchor="middle">Период: II квартал 2026</text>
+  <rect x="332" y="66" width="180" height="32" fill="#eff6ff" stroke="#bfdbfe" rx="4"/>
+  <text x="422" y="86" font-size="13" fill="#1e3a8a" text-anchor="middle">Статус: оплачен</text>
+  <rect x="524" y="66" width="200" height="32" fill="#eff6ff" stroke="#bfdbfe" rx="4"/>
+  <text x="624" y="86" font-size="13" fill="#1e3a8a" text-anchor="middle">Поля: сумма, контрагент, дата</text>
+
+  <rect x="744" y="66" width="120" height="32" fill="#1f883d" rx="4"/>
+  <text x="804" y="86" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">⤓ Экспорт в Excel</text>
+
+  <!-- Report table -->
+  <rect x="20" y="130" width="860" height="260" fill="#ffffff" stroke="#d0d7de"/>
+  <rect x="20" y="130" width="860" height="36" fill="#f6f8fa"/>
+  <text x="36" y="154" font-size="13" font-weight="700" fill="#24292f">Контрагент</text>
+  <text x="300" y="154" font-size="13" font-weight="700" fill="#24292f">Дата заключения</text>
+  <text x="500" y="154" font-size="13" font-weight="700" fill="#24292f">Сумма</text>
+  <text x="700" y="154" font-size="13" font-weight="700" fill="#24292f">Статус</text>
+
+  <g font-size="13" fill="#24292f">
+    <text x="36" y="184">ООО «Радуга»</text><text x="300" y="184">12.04.2026</text><text x="500" y="184">1 200 000 ₽</text><text x="700" y="184" fill="#1f883d">оплачен</text>
+    <text x="36" y="214">АО «Светофор»</text><text x="300" y="214">18.04.2026</text><text x="500" y="214">800 000 ₽</text><text x="700" y="214" fill="#1f883d">оплачен</text>
+    <text x="36" y="244">ИП Сидоров С.</text><text x="300" y="244">02.05.2026</text><text x="500" y="244">450 000 ₽</text><text x="700" y="244" fill="#1f883d">оплачен</text>
+    <text x="36" y="274">ЗАО «Стандарт»</text><text x="300" y="274">14.05.2026</text><text x="500" y="274">2 100 000 ₽</text><text x="700" y="274" fill="#1f883d">оплачен</text>
+    <text x="36" y="304">ООО «Гермес»</text><text x="300" y="304">06.06.2026</text><text x="500" y="304">980 000 ₽</text><text x="700" y="304" fill="#1f883d">оплачен</text>
+  </g>
+
+  <rect x="20" y="338" width="860" height="48" fill="#f6f8fa"/>
+  <text x="36" y="366" font-size="13" font-weight="700" fill="#24292f">Итого по фильтру:</text>
+  <text x="500" y="366" font-size="13" font-weight="700" fill="#24292f">5 530 000 ₽</text>
+
+  <!-- Resulting file -->
+  <rect x="20" y="408" width="860" height="78" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text x="36" y="436" font-size="14" font-weight="700" fill="#14532d">⤓ договоры_Q2_2026.xlsx (5 строк, 4 колонки)</text>
+  <text x="36" y="462" font-size="13" fill="#14532d">Получен ровно нужный срез — без копирования всей базы и без риска править параллельно.</text>
+</svg>
