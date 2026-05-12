@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Issue #2570 - subordinate-table-actions icon color test</title>
+    <link rel="stylesheet" href="https://unpkg.com/primeicons@7.0.0/primeicons.css">
+    <link rel="stylesheet" href="../css/integram-table.css">
+    <style>
+        body { font-family: sans-serif; padding: 24px; background: #fff; }
+        .demo { border: 1px solid #ddd; padding: 12px; margin-bottom: 24px; }
+        h2 { margin-top: 0; }
+        .label { color: #888; font-size: 12px; }
+    </style>
+</head>
+<body>
+    <h1>Issue #2570 — Icons in <code>.subordinate-table-actions</code> should match the color of <code>.subordinate-table-link</code></h1>
+
+    <div class="demo">
+        <h2>subordinate-table-toolbar (rendered as in code)</h2>
+        <div class="subordinate-table-toolbar">
+            <button type="button" class="btn btn-sm btn-primary subordinate-add-btn" title="Добавить">
+                <i class="pi pi-plus"></i>
+            </button>
+            <div class="subordinate-search-wrapper">
+                <input type="text" class="subordinate-search-input" placeholder="Поиск..." value="" autocomplete="off">
+                <button type="button" class="subordinate-search-clear" title="Очистить поиск" style="display: none;"><i class="pi pi-times"></i></button>
+            </div>
+            <div class="subordinate-table-actions">
+                <button type="button" class="subordinate-copy-buffer-btn" title="Копировать в буфер"><i class="pi pi-copy"></i></button>
+                <a href="#" class="subordinate-paste-buffer-btn" title="Вставить из буфера" onclick="event.preventDefault(); event.stopPropagation();">
+                    <i class="pi pi-clipboard"></i>
+                </a>
+                <a href="#" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
+                    <i class="pi pi-table"></i>
+                </a>
+            </div>
+        </div>
+        <p class="label">All three icons inside the <code>.subordinate-table-actions</code> block should share the same color (matching <code>.subordinate-table-link</code>).</p>
+    </div>
+</body>
+</html>
