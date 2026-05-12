@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" font-family="-apple-system, Segoe UI, Roboto, Arial, sans-serif">
+  <rect width="900" height="520" fill="#eef2f6"/>
+  <rect x="0" y="0" width="900" height="40" fill="#2c3e50"/>
+  <text x="20" y="26" fill="#ecf0f1" font-size="14" font-weight="600">Интеграм</text>
+  <text x="80" y="26" fill="#bdc3c7" font-size="13">Сделки</text>
+  <text x="810" y="26" fill="#ecf0f1" font-size="13">Анна П. ▾</text>
+
+  <!-- Sidebar -->
+  <rect x="0" y="40" width="200" height="480" fill="#34495e"/>
+  <g font-size="13" fill="#ecf0f1">
+    <text x="20" y="75">🏠 Главная</text>
+    <text x="20" y="105">📋 Клиенты</text>
+    <rect x="0" y="120" width="200" height="34" fill="#1abc9c"/>
+    <text x="20" y="141" font-weight="700">📊 Сделки</text>
+    <text x="20" y="175">📝 Новая заявка</text>
+    <text x="20" y="205">📈 Мой отчёт</text>
+  </g>
+
+  <!-- Content -->
+  <rect x="220" y="60" width="660" height="440" rx="6" fill="#ffffff" stroke="#cbd5e0"/>
+  <text x="240" y="90" font-size="20" font-weight="700" fill="#1a202c">Мои сделки</text>
+  <text x="240" y="110" font-size="12" fill="#718096">Показаны только записи, где «Ответственный» = Анна Петрова. Маска роли «Менеджер».</text>
+
+  <!-- Filter bar -->
+  <rect x="240" y="125" width="620" height="32" rx="4" fill="#f7fafc" stroke="#e2e8f0"/>
+  <text x="252" y="146" font-size="12" fill="#4a5568">🔍 Поиск</text>
+  <text x="510" y="146" font-size="12" fill="#4a5568">Статус: все ▾</text>
+  <text x="630" y="146" font-size="12" fill="#4a5568">Дата: за месяц ▾</text>
+  <rect x="780" y="131" width="68" height="22" rx="3" fill="#3182ce"/>
+  <text x="794" y="147" fill="#ffffff" font-size="12" font-weight="600">Создать</text>
+
+  <!-- Table header -->
+  <rect x="240" y="170" width="620" height="32" fill="#edf2f7"/>
+  <g font-size="12" font-weight="700" fill="#2d3748">
+    <text x="252" y="190">№</text>
+    <text x="290" y="190">Клиент</text>
+    <text x="450" y="190">Статус</text>
+    <text x="570" y="190">Ответственный</text>
+    <text x="720" y="190">Сумма</text>
+    <text x="800" y="190">Дата</text>
+  </g>
+
+  <!-- Rows -->
+  <g font-size="12" fill="#1a202c">
+    <rect x="240" y="202" width="620" height="30" fill="#ffffff"/>
+    <text x="252" y="221">#1042</text>
+    <text x="290" y="221">ООО «Ромашка»</text>
+    <rect x="445" y="208" width="85" height="18" rx="9" fill="#feebc8"/>
+    <text x="453" y="221" fill="#7b341e">В работе</text>
+    <text x="570" y="221">Анна Петрова</text>
+    <rect x="710" y="208" width="65" height="18" rx="3" fill="#edf2f7"/>
+    <text x="720" y="221" fill="#a0aec0" font-style="italic">скрыто</text>
+    <text x="800" y="221">12.05.2026</text>
+
+    <rect x="240" y="232" width="620" height="30" fill="#f7fafc"/>
+    <text x="252" y="251">#1057</text>
+    <text x="290" y="251">ИП Сидоров А.А.</text>
+    <rect x="445" y="238" width="85" height="18" rx="9" fill="#c6f6d5"/>
+    <text x="453" y="251" fill="#22543d">Закрыта</text>
+    <text x="570" y="251">Анна Петрова</text>
+    <rect x="710" y="238" width="65" height="18" rx="3" fill="#edf2f7"/>
+    <text x="720" y="251" fill="#a0aec0" font-style="italic">скрыто</text>
+    <text x="800" y="251">09.05.2026</text>
+
+    <rect x="240" y="262" width="620" height="30" fill="#ffffff"/>
+    <text x="252" y="281">#1063</text>
+    <text x="290" y="281">ООО «Север-Сервис»</text>
+    <rect x="445" y="268" width="85" height="18" rx="9" fill="#bee3f8"/>
+    <text x="453" y="281" fill="#2a4365">Новая</text>
+    <text x="570" y="281">Анна Петрова</text>
+    <rect x="710" y="268" width="65" height="18" rx="3" fill="#edf2f7"/>
+    <text x="720" y="281" fill="#a0aec0" font-style="italic">скрыто</text>
+    <text x="800" y="281">05.05.2026</text>
+
+    <rect x="240" y="292" width="620" height="30" fill="#f7fafc"/>
+    <text x="252" y="311">#1071</text>
+    <text x="290" y="311">ООО «Линия-Т»</text>
+    <rect x="445" y="298" width="85" height="18" rx="9" fill="#feebc8"/>
+    <text x="453" y="311" fill="#7b341e">В работе</text>
+    <text x="570" y="311">Анна Петрова</text>
+    <rect x="710" y="298" width="65" height="18" rx="3" fill="#edf2f7"/>
+    <text x="720" y="311" fill="#a0aec0" font-style="italic">скрыто</text>
+    <text x="800" y="311">02.05.2026</text>
+  </g>
+
+  <!-- Footer note -->
+  <line x1="240" y1="340" x2="860" y2="340" stroke="#e2e8f0"/>
+  <text x="240" y="362" font-size="13" font-weight="600" fill="#2d3748">Что сейчас работает на этой странице</text>
+  <text x="240" y="382" font-size="12" fill="#4a5568">• Записи коллег не возвращаются сервером — Анна их не увидит даже в API и выгрузке.</text>
+  <text x="240" y="400" font-size="12" fill="#4a5568">• Колонка «Сумма» помечена BARRED для роли «Менеджер» — данных нет ни в DOM, ни в JSON.</text>
+  <text x="240" y="418" font-size="12" fill="#4a5568">• Та же маска автоматически отфильтрует сделки в отчётах, дашбордах и API-запросах.</text>
+
+  <text x="240" y="468" font-size="11" fill="#a0aec0">Источник фильтрации: index.php → getGrants() → $GLOBALS["GRANTS"]["mask"][&lt;table_id&gt;] → Construct_WHERE()</text>
+</svg>

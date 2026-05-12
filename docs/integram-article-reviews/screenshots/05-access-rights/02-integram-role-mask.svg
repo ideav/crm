@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" font-family="-apple-system, Segoe UI, Roboto, Arial, sans-serif">
+  <rect width="900" height="520" fill="#eef2f6"/>
+  <!-- App chrome -->
+  <rect x="0" y="0" width="900" height="40" fill="#2c3e50"/>
+  <text x="20" y="26" fill="#ecf0f1" font-size="14" font-weight="600">Интеграм</text>
+  <text x="80" y="26" fill="#bdc3c7" font-size="13">Администрирование → Роли</text>
+  <text x="830" y="26" fill="#ecf0f1" font-size="13">admin ▾</text>
+
+  <!-- Sidebar -->
+  <rect x="0" y="40" width="200" height="480" fill="#34495e"/>
+  <g font-size="13" fill="#ecf0f1">
+    <text x="20" y="75">📋 Таблицы</text>
+    <text x="20" y="105">📊 Отчёты</text>
+    <text x="20" y="135">📝 Формы</text>
+    <text x="20" y="165">⚙️ Структура</text>
+    <rect x="0" y="180" width="200" height="34" fill="#1abc9c"/>
+    <text x="20" y="201" font-weight="700">👥 Роли</text>
+    <text x="20" y="235">🔑 Пользователи</text>
+    <text x="20" y="265">📁 Шаблоны</text>
+  </g>
+
+  <!-- Content -->
+  <rect x="220" y="60" width="660" height="440" rx="6" fill="#ffffff" stroke="#cbd5e0"/>
+  <text x="240" y="92" font-size="20" font-weight="700" fill="#1a202c">Роль «Менеджер отдела продаж»</text>
+  <line x1="240" y1="104" x2="860" y2="104" stroke="#e2e8f0"/>
+
+  <!-- Table grants -->
+  <text x="240" y="132" font-size="14" font-weight="600" fill="#2d3748">Доступ к таблицам</text>
+  <g font-size="13">
+    <rect x="240" y="142" width="620" height="34" rx="4" fill="#f7fafc"/>
+    <text x="252" y="164" fill="#1a202c">Клиенты</text>
+    <rect x="700" y="148" width="70" height="22" rx="3" fill="#c6f6d5"/>
+    <text x="712" y="164" fill="#22543d" font-weight="700">WRITE</text>
+    <text x="785" y="164" fill="#4a5568">с маской</text>
+
+    <rect x="240" y="180" width="620" height="34" rx="4" fill="#f7fafc"/>
+    <text x="252" y="202" fill="#1a202c">Сделки</text>
+    <rect x="700" y="186" width="70" height="22" rx="3" fill="#c6f6d5"/>
+    <text x="712" y="202" fill="#22543d" font-weight="700">WRITE</text>
+    <text x="785" y="202" fill="#4a5568">с маской</text>
+
+    <rect x="240" y="218" width="620" height="34" rx="4" fill="#f7fafc"/>
+    <text x="252" y="240" fill="#1a202c">Сделки → Сумма</text>
+    <rect x="700" y="224" width="70" height="22" rx="3" fill="#feb2b2"/>
+    <text x="710" y="240" fill="#742a2a" font-weight="700">BARRED</text>
+    <text x="785" y="240" fill="#4a5568">скрыто</text>
+
+    <rect x="240" y="256" width="620" height="34" rx="4" fill="#f7fafc"/>
+    <text x="252" y="278" fill="#1a202c">Платежи</text>
+    <rect x="700" y="262" width="70" height="22" rx="3" fill="#feb2b2"/>
+    <text x="710" y="278" fill="#742a2a" font-weight="700">BARRED</text>
+    <text x="785" y="278" fill="#4a5568">скрыто</text>
+
+    <rect x="240" y="294" width="620" height="34" rx="4" fill="#f7fafc"/>
+    <text x="252" y="316" fill="#1a202c">Справочник: статусы сделок</text>
+    <rect x="700" y="300" width="70" height="22" rx="3" fill="#bee3f8"/>
+    <text x="722" y="316" fill="#2a4365" font-weight="700">READ</text>
+    <text x="785" y="316" fill="#4a5568">общий</text>
+  </g>
+
+  <!-- Mask editor -->
+  <text x="240" y="362" font-size="14" font-weight="600" fill="#2d3748">Маска «менеджер видит только свои записи»</text>
+  <rect x="240" y="372" width="620" height="70" rx="4" fill="#1a202c"/>
+  <text x="256" y="396" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="13" fill="#48bb78">
+    <tspan>Таблица: </tspan><tspan fill="#f6e05e">Клиенты</tspan>
+  </text>
+  <text x="256" y="416" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="13" fill="#48bb78">
+    <tspan>WHERE </tspan><tspan fill="#f6ad55">Ответственный</tspan><tspan fill="#cbd5e0"> = </tspan><tspan fill="#90cdf4">[CURRENT_USER]</tspan>
+  </text>
+  <text x="256" y="436" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="13" fill="#a0aec0">
+    Применяется ко всем запросам: UI, отчёты, API, выгрузка.
+  </text>
+
+  <rect x="760" y="460" width="100" height="32" rx="4" fill="#1abc9c"/>
+  <text x="780" y="481" fill="#ffffff" font-size="14" font-weight="700">Сохранить</text>
+</svg>
