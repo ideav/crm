@@ -25,7 +25,9 @@
 | 11 | AI помогает интерфейсу, но не ломает данные: чем Интеграм надежнее вайб-кодинга | `11-ai-interface-data-safety.md` | `screenshots/11-ai-interface-data-safety/` | [#2602](https://github.com/ideav/crm/issues/2602) |
 | 12 | Без переписывания с нуля после первого демо: где Интеграм практичнее вайб-кодинга | `12-ai-prototype-rewrite.md` | `screenshots/12-ai-prototype-rewrite/` | [#2603](https://github.com/ideav/crm/issues/2603) |
 | 13 | API и JSON-экспорт вместо копипаста: как Интеграм связывает учет с внешними системами | `13-api-json-export.md` | `screenshots/13-api-json-export/` | [#2604](https://github.com/ideav/crm/issues/2604) |
-| 14 | Формы, отчеты и дашборды в одном контуре: чем Интеграм удобнее набора разрозненных сервисов | `14-forms-reports-dashboards.md` | `screenshots/14-forms-reports-dashboards/` | [#2605](https://github.com/ideav/crm/issues/2605) |
+| 14 | Формы рядом с данными: чем Интеграм удобнее связки Google Forms + Google Sheets + Zapier | `14-forms.md` | `screenshots/14-forms/` | [#2622](https://github.com/ideav/crm/issues/2622) |
+| 14a | Отчёты на той же базе: чем Интеграм удобнее связки Google Sheets + Looker Studio | `14a-reports.md` | `screenshots/14a-reports/` | [#2622](https://github.com/ideav/crm/issues/2622) |
+| 14b | Дашборды на тех же данных: чем Интеграм удобнее связки таблицы и внешнего BI | `14b-dashboards.md` | `screenshots/14b-dashboards/` | [#2622](https://github.com/ideav/crm/issues/2622) |
 | 15 | Локально, с доступами и своими файлами: почему Интеграм подходит компаниям с требованиями к контролю | `15-local-control-files.md` | `screenshots/15-local-control-files/` | [#2606](https://github.com/ideav/crm/issues/2606) |
 
 ## Минимальный состав каждой задачи
