@@ -642,17 +642,17 @@
         </div>
         <div class="funnel-filter-group">
             <div class="funnel-filter-label">Месяц</div>
-            <select id="funnel-filter-month" class="funnel-filter-select" onchange="funnelApplyFilters()">
+            <select id="funnel-filter-month" class="funnel-filter-select" onchange="funnelMonthChanged()">
                 <option value="">— Все —</option>
             </select>
         </div>
         <div class="funnel-filter-group">
             <div class="funnel-filter-label">Дата с</div>
-            <input type="date" id="funnel-filter-date-from" class="funnel-filter-date" onchange="funnelApplyFilters()">
+            <input type="date" id="funnel-filter-date-from" class="funnel-filter-date" onchange="funnelDateChanged()">
         </div>
         <div class="funnel-filter-group">
             <div class="funnel-filter-label">Дата по</div>
-            <input type="date" id="funnel-filter-date-to" class="funnel-filter-date" onchange="funnelApplyFilters()">
+            <input type="date" id="funnel-filter-date-to" class="funnel-filter-date" onchange="funnelDateChanged()">
         </div>
         <div class="funnel-filter-group">
             <div class="funnel-filter-label">Тип найма</div>
@@ -803,15 +803,39 @@
         return STAGE_PALETTE[i % STAGE_PALETTE.length];
     }
 
-    function funnelFormatMonth(val) {
+    function funnelMonthParts(val) {
         var s = String(val || '').trim();
-        var match = s.match(/^(\d{4})(\d{2})(?:\d{2})?$/) || s.match(/^(\d{4})-(\d{1,2})/);
-        if (!match) return val;
+        var match = s.match(/^(\d{4})(\d{2})(?:\d{2})?$/)
+            || s.match(/^(\d{4})-(\d{1,2})/)
+            || s.match(/^(\d{4})\/(\d{1,2})/);
+        if (match) return { year: match[1], month: parseInt(match[2], 10) };
+        match = s.match(/^(\d{1,2})[.\/-](\d{4})$/);
+        if (match) return { year: match[2], month: parseInt(match[1], 10) };
+        return null;
+    }
+
+    function funnelFormatMonth(val) {
+        var parts = funnelMonthParts(val);
+        if (!parts) return val;
         var months = ['янв', 'фев', 'мар', 'апр', 'май', 'июн',
                       'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
-        var y = match[1];
-        var m = parseInt(match[2], 10);
-        return months[m - 1] ? months[m - 1] + ' ' + y : val;
+        return months[parts.month - 1] ? months[parts.month - 1] + ' ' + parts.year : val;
+    }
+
+    function funnelPad2(n) {
+        return (n < 10 ? '0' : '') + n;
+    }
+
+    function funnelMonthDateRange(val) {
+        var parts = funnelMonthParts(val);
+        if (!parts || parts.month < 1 || parts.month > 12) return null;
+        var y = parseInt(parts.year, 10);
+        var m = parts.month;
+        var lastDay = new Date(y, m, 0).getDate();
+        return {
+            from: parts.year + '-' + funnelPad2(m) + '-01',
+            to: parts.year + '-' + funnelPad2(m) + '-' + funnelPad2(lastDay)
+        };
     }
 
     function funnelFormatDate(val) {
@@ -1019,6 +1043,25 @@
 
     window.funnelApplyFilters = function() {
         funnelRender(funnelGetFiltered());
+    };
+
+    window.funnelMonthChanged = function() {
+        var month = document.getElementById('funnel-filter-month').value;
+        var range = month ? funnelMonthDateRange(month) : null;
+        if (range) {
+            document.getElementById('funnel-filter-date-from').value = range.from;
+            document.getElementById('funnel-filter-date-to').value = range.to;
+        }
+        funnelApplyFilters();
+    };
+
+    window.funnelDateChanged = function() {
+        var from = document.getElementById('funnel-filter-date-from').value;
+        var to = document.getElementById('funnel-filter-date-to').value;
+        if (from || to) {
+            document.getElementById('funnel-filter-month').value = '';
+        }
+        funnelApplyFilters();
     };
 
     window.funnelResetFilters = function() {
