@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" font-family="-apple-system, Segoe UI, Roboto, Arial, sans-serif">
+  <rect width="900" height="520" fill="#eef2f6"/>
+  <!-- Browser chrome -->
+  <rect x="0" y="0" width="900" height="50" fill="#e2e8f0"/>
+  <circle cx="22" cy="25" r="6" fill="#fc8181"/>
+  <circle cx="44" cy="25" r="6" fill="#f6e05e"/>
+  <circle cx="66" cy="25" r="6" fill="#68d391"/>
+  <rect x="100" y="14" width="700" height="22" rx="11" fill="#ffffff" stroke="#cbd5e0"/>
+  <text x="118" y="29" font-size="12" fill="#2d3748">🌐 https://crm.example.com/forms/partner-application</text>
+  <text x="830" y="30" font-size="13" fill="#4a5568">⋮</text>
+
+  <!-- Page -->
+  <rect x="0" y="50" width="900" height="470" fill="#ffffff"/>
+  <text x="60" y="100" font-size="22" font-weight="700" fill="#1a202c">Заявка на партнёрство</text>
+  <text x="60" y="124" font-size="13" fill="#718096">Заполните форму, и мы свяжемся с вами в течение рабочего дня.</text>
+
+  <!-- Form -->
+  <g font-size="13" fill="#2d3748">
+    <text x="60" y="170">Название компании *</text>
+    <rect x="60" y="178" width="500" height="36" rx="4" fill="#ffffff" stroke="#cbd5e0"/>
+    <text x="74" y="201" fill="#a0aec0">ООО «Название»</text>
+
+    <text x="60" y="240">ФИО контактного лица *</text>
+    <rect x="60" y="248" width="500" height="36" rx="4" fill="#ffffff" stroke="#cbd5e0"/>
+    <text x="74" y="271" fill="#a0aec0">Иванов Иван</text>
+
+    <text x="60" y="310">Email *</text>
+    <rect x="60" y="318" width="245" height="36" rx="4" fill="#ffffff" stroke="#cbd5e0"/>
+    <text x="74" y="341" fill="#a0aec0">name@example.com</text>
+
+    <text x="315" y="310">Телефон</text>
+    <rect x="315" y="318" width="245" height="36" rx="4" fill="#ffffff" stroke="#cbd5e0"/>
+    <text x="329" y="341" fill="#a0aec0">+7 ___ ___-__-__</text>
+
+    <text x="60" y="380">Комментарий</text>
+    <rect x="60" y="388" width="500" height="70" rx="4" fill="#ffffff" stroke="#cbd5e0"/>
+  </g>
+
+  <rect x="60" y="470" width="160" height="36" rx="4" fill="#1a73e8"/>
+  <text x="98" y="493" fill="#ffffff" font-size="14" font-weight="700">Отправить заявку</text>
+
+  <!-- Side info -->
+  <rect x="600" y="158" width="240" height="320" rx="6" fill="#f0fff4" stroke="#9ae6b4"/>
+  <text x="616" y="184" font-size="14" font-weight="700" fill="#22543d">Как это работает</text>
+  <text x="616" y="208" font-size="12" fill="#22543d">• Форма открыта без логина — под</text>
+  <text x="630" y="224" font-size="12" fill="#22543d">встроенной ролью guest.</text>
+  <text x="616" y="248" font-size="12" fill="#22543d">• Гость может только создать запись</text>
+  <text x="630" y="264" font-size="12" fill="#22543d">в таблице «Заявки» — WRITE на одну</text>
+  <text x="630" y="280" font-size="12" fill="#22543d">таблицу, BARRED на всё остальное.</text>
+  <text x="616" y="304" font-size="12" fill="#22543d">• После отправки гость не видит</text>
+  <text x="630" y="320" font-size="12" fill="#22543d">других заявок (маска по гостевому</text>
+  <text x="630" y="336" font-size="12" fill="#22543d">токену).</text>
+  <text x="616" y="360" font-size="12" fill="#22543d">• Менеджер видит заявку у себя</text>
+  <text x="630" y="376" font-size="12" fill="#22543d">в Интеграме сразу.</text>
+  <text x="616" y="416" font-size="11" fill="#38a169" font-weight="600">Нет: отдельных учётных записей,</text>
+  <text x="616" y="432" font-size="11" fill="#38a169" font-weight="600">приглашений по email,</text>
+  <text x="616" y="448" font-size="11" fill="#38a169" font-weight="600">расшаренных таблиц.</text>
+</svg>

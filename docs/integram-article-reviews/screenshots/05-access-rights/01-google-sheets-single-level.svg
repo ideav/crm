@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 480" font-family="-apple-system, Segoe UI, Roboto, Arial, sans-serif">
+  <rect width="900" height="480" fill="#f5f7fa"/>
+  <!-- Window chrome -->
+  <rect x="20" y="20" width="860" height="440" rx="8" fill="#ffffff" stroke="#d0d7de"/>
+  <rect x="20" y="20" width="860" height="36" rx="8" fill="#0f9d58"/>
+  <text x="40" y="44" fill="#ffffff" font-size="14" font-weight="600">Google Sheets — Клиенты и сделки 2026</text>
+  <text x="820" y="44" fill="#ffffff" font-size="14">⋮</text>
+
+  <!-- Share dialog -->
+  <rect x="180" y="90" width="540" height="350" rx="10" fill="#ffffff" stroke="#d0d7de" stroke-width="1.5"/>
+  <text x="210" y="125" font-size="18" font-weight="600" fill="#202124">Настройки доступа</text>
+  <line x1="210" y1="140" x2="690" y2="140" stroke="#e8eaed"/>
+
+  <!-- Users -->
+  <g font-size="13" fill="#202124">
+    <circle cx="225" cy="170" r="14" fill="#4285f4"/>
+    <text x="220" y="174" fill="#ffffff" font-weight="600">АП</text>
+    <text x="250" y="168">Анна Петрова (менеджер)</text>
+    <text x="250" y="184" fill="#5f6368" font-size="11">anna@example.com</text>
+    <rect x="540" y="158" width="130" height="26" rx="4" fill="#e8f0fe" stroke="#a8c7fa"/>
+    <text x="550" y="176" fill="#1967d2" font-weight="600">Редактор ▾</text>
+
+    <circle cx="225" cy="215" r="14" fill="#db4437"/>
+    <text x="220" y="219" fill="#ffffff" font-weight="600">ИИ</text>
+    <text x="250" y="213">Иван Иванов (менеджер)</text>
+    <text x="250" y="229" fill="#5f6368" font-size="11">ivan@example.com</text>
+    <rect x="540" y="203" width="130" height="26" rx="4" fill="#e8f0fe" stroke="#a8c7fa"/>
+    <text x="550" y="221" fill="#1967d2" font-weight="600">Редактор ▾</text>
+
+    <circle cx="225" cy="260" r="14" fill="#f4b400"/>
+    <text x="220" y="264" fill="#ffffff" font-weight="600">МС</text>
+    <text x="250" y="258">Мария Сидорова (руководитель)</text>
+    <text x="250" y="274" fill="#5f6368" font-size="11">maria@example.com</text>
+    <rect x="540" y="248" width="130" height="26" rx="4" fill="#e8f0fe" stroke="#a8c7fa"/>
+    <text x="550" y="266" fill="#1967d2" font-weight="600">Редактор ▾</text>
+
+    <circle cx="225" cy="305" r="14" fill="#0f9d58"/>
+    <text x="220" y="309" fill="#ffffff" font-weight="600">ПФ</text>
+    <text x="250" y="303">Пётр Финансов (финансист)</text>
+    <text x="250" y="319" fill="#5f6368" font-size="11">finance@example.com</text>
+    <rect x="540" y="293" width="130" height="26" rx="4" fill="#e8f0fe" stroke="#a8c7fa"/>
+    <text x="550" y="311" fill="#1967d2" font-weight="600">Редактор ▾</text>
+  </g>
+
+  <!-- Highlight -->
+  <rect x="535" y="155" width="140" height="170" rx="6" fill="none" stroke="#ea4335" stroke-width="2" stroke-dasharray="4 3"/>
+  <text x="535" y="350" font-size="12" fill="#ea4335">Один и тот же уровень доступа для всех ролей.</text>
+  <text x="535" y="367" font-size="12" fill="#ea4335">Менеджеры видят чужих клиентов, финансист видит переписку.</text>
+
+  <rect x="540" y="395" width="130" height="32" rx="4" fill="#1a73e8"/>
+  <text x="580" y="416" fill="#ffffff" font-size="14" font-weight="600">Готово</text>
+</svg>
