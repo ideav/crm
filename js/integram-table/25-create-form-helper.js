@@ -1481,7 +1481,9 @@ class IntegramCreateFormHelper {
      * Load subordinate table content (issue #837).
      */
     async loadSubordinateTableStandalone(container, arrId, parentRecordId, reqId) {
-        container.innerHTML = '<div class="subordinate-table-loading">Загрузка...</div>';
+        if (!container.querySelector('.subordinate-table')) {
+            container.innerHTML = '<div class="subordinate-table-loading">Загрузка...</div>';
+        }
 
         try {
             // Try to use an existing IntegramTable instance for rendering
