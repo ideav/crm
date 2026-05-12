@@ -730,19 +730,19 @@
         var s = String(value || '').trim();
         var m;
         if (!s) return null;
-        m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+        m = s.match(/^({\d\d\d\d})-(\d{1,2})-(\d{1,2})/);
         if (m) return funnelDateKeyFromParts(m[1], m[2], m[3]);
-        m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+        m = s.match(/^(\d{1,2})\.(\d{1,2})\.({\d\d\d\d})/);
         if (m) return funnelDateKeyFromParts(m[3], m[2], m[1]);
-        m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+        m = s.match(/^({\d\d\d\d})({\d\d})({\d\d})$/);
         if (m) return funnelDateKeyFromParts(m[1], m[2], m[3]);
-        m = s.match(/^(\d{4})(\d{2})$/);
+        m = s.match(/^({\d\d\d\d})({\d\d})$/);
         if (m) return funnelDateKeyFromParts(m[1], m[2], 1);
-        m = s.match(/^(\d{4})-(\d{1,2})$/);
+        m = s.match(/^({\d\d\d\d})-(\d{1,2})$/);
         if (m) return funnelDateKeyFromParts(m[1], m[2], 1);
-        m = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+        m = s.match(/^({\d\d\d\d})\/(\d{1,2})\/(\d{1,2})/);
         if (m) return funnelDateKeyFromParts(m[1], m[2], m[3]);
-        m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        m = s.match(/^(\d{1,2})\/(\d{1,2})\/({\d\d\d\d})/);
         if (m) return funnelDateKeyFromParts(m[3], m[2], m[1]);
         return null;
     }
@@ -805,7 +805,7 @@
 
     function funnelFormatMonth(val) {
         var s = String(val || '').trim();
-        var match = s.match(/^(\d{4})(\d{2})(?:\d{2})?$/) || s.match(/^(\d{4})-(\d{1,2})/);
+        var match = s.match(/^({\d\d\d\d})({\d\d})(?:{\d\d})?$/) || s.match(/^({\d\d\d\d})-(\d{1,2})/);
         if (!match) return val;
         var months = ['янв', 'фев', 'мар', 'апр', 'май', 'июн',
                       'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
