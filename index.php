@@ -5877,7 +5877,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 						    // issue #2524/#2530: under getParent the type value lives in the second column (now $object[0]
 						    // after the shift). If it was cleared in the source: if uniqueness is defined, find the
 						    // existing record under the resolved parent and delete it; otherwise skip the record.
-						    if($object[0] === ""){
+						    if($object[0] === "" && empty($_POST["allowEmptyValue"])){
 						        if(count($keyReqsForDelete)){
 						            $keyValuesForDelete = array();
 						            $ord = 0;
@@ -7323,7 +7323,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                         {
                             $tableId = preg_replace('/\D+/', '', (string)$configData['integram']['table_id']);
                             if($tableId !== '')
+                            {
                                 $configData['integram']['upload_endpoint'] = "/$z/object/$tableId?JSON&import=1";
+                                if(isset($configData['skip_empty_values']) && !$configData['skip_empty_values'])
+                                    $configData['integram']['upload_endpoint'] .= "&allowEmptyValue=1";
+                            }
                         }
                     }
                     require_once "include/google_sheets_sync.php";
