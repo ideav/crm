@@ -7310,8 +7310,10 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                     $logsDir = "templates/custom/$z/logs";
                     if(!file_exists($logsDir))
                         mkdir($logsDir, 0775, true);
+                    # Resolve to an absolute path so gss_normalize_config does not re-anchor it to $gssDir
+                    $logsDirAbs = realpath($logsDir);
                     if(!isset($configData['output_file']))
-                        $configData['output_file'] = "$logsDir/google_sheets_sync.bki";
+                        $configData['output_file'] = ($logsDirAbs !== false ? $logsDirAbs : $logsDir) . "/google_sheets_sync.bki";
                     # Force current site / current DB at sync time
                     if(isset($configData['integram']) && is_array($configData['integram']))
                     {
