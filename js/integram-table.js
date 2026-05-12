@@ -12145,7 +12145,18 @@ class IntegramTable{
         }
 
         async loadSubordinateTable(container, arrId, parentRecordId, reqId) {
-            container.innerHTML = '<div class="subordinate-table-loading">Загрузка...</div>';
+            const hasContent = !!container.querySelector('.subordinate-table');
+            if (hasContent) {
+                // Keep existing content visible but dimmed, show spinner overlay (issue #2580)
+                container.style.position = 'relative';
+                const existingOverlay = container.querySelector('.subordinate-refresh-overlay');
+                if (existingOverlay) existingOverlay.remove();
+                const overlay = document.createElement('div');
+                overlay.className = 'subordinate-refresh-overlay';
+                container.appendChild(overlay);
+            } else {
+                container.innerHTML = '<div class="subordinate-table-loading">Загрузка...</div>';
+            }
 
             try {
                 // Fetch metadata for subordinate table (use cache to avoid redundant requests)
@@ -19434,7 +19445,9 @@ class IntegramCreateFormHelper {
      * Load subordinate table content (issue #837).
      */
     async loadSubordinateTableStandalone(container, arrId, parentRecordId, reqId) {
-        container.innerHTML = '<div class="subordinate-table-loading">Загрузка...</div>';
+        if (!container.querySelector('.subordinate-table')) {
+            container.innerHTML = '<div class="subordinate-table-loading">Загрузка...</div>';
+        }
 
         try {
             // Try to use an existing IntegramTable instance for rendering
