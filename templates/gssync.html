@@ -185,18 +185,24 @@
 
     function loadTables() {
         if (tablesLoaded) return tablesLoaded;
-        tablesLoaded = fetch('/' + db + '/gssync?JSON&metadata=tables')
+        tablesLoaded = fetch('/' + db + '/metadata?JSON')
             .then(function(r) { return r.json(); })
             .then(function(d) {
                 var sel = document.getElementById('gss-table-id');
                 sel.innerHTML = '<option value="">— выберите таблицу —</option>';
-                (d.tables || []).forEach(function(t) {
+                var tables = (Array.isArray(d) ? d : []).filter(function(t) {
+                    return t && t.id && t.val;
+                });
+                tables.sort(function(a, b) {
+                    return String(a.val).localeCompare(String(b.val), 'ru');
+                });
+                tables.forEach(function(t) {
                     var opt = document.createElement('option');
                     opt.value = t.id;
                     opt.textContent = t.val + ' (id=' + t.id + ')';
                     sel.appendChild(opt);
                 });
-                return d.tables || [];
+                return tables;
             })
             .catch(function(err) {
                 var sel = document.getElementById('gss-table-id');
