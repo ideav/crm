@@ -89,6 +89,10 @@ function gss_normalize_config($config, $configDir) {
     $config['credentials_path'] = gss_resolve_path($config['credentials_path'], $configDir);
     $config['output_file'] = gss_resolve_path($config['output_file'], $configDir);
 
+    if (is_array($config['sheets']) && (isset($config['sheets']['name']) || isset($config['sheets']['range']))) {
+        $config['sheets'] = [$config['sheets']];
+    }
+
     $integramDefaults = [
         'enabled' => false,
         'base_url' => '',
