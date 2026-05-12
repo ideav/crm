@@ -37,6 +37,7 @@
 .gss-msg { font-size: 0.85rem; }
 .gss-msg.ok { color: var(--color-success, #28a745); }
 .gss-msg.err { color: var(--color-danger, #dc3545); }
+.gss-warn { background: var(--color-warning-bg, #fff8e1); border: 1px solid var(--color-warning-border, #f5c518); color: var(--color-warning-text, #8a6d00); border-radius: 4px; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; font-size: 0.85rem; }
 </style>
 <!-- Begin:&Gssync -->
 <div class="gss-wrap">
@@ -78,6 +79,7 @@
                 <button class="gss-btn gss-btn-danger gss-del-btn" data-config="{CONFIG}" title="Удалить конфигурацию"><i class="pi pi-trash"></i></button>
             </div>
         </div>
+        <div class="gss-warn" id="warn-{CONFIG}" style="display:none"></div>
         <div class="gss-result" id="result-{CONFIG}" style="display:none"><pre></pre></div>
 <!-- End:&Config_item -->
     </div>
@@ -290,14 +292,22 @@
         if (!btn) return;
         var config = btn.dataset.config;
         var box = document.getElementById('result-' + config);
+        var warn = document.getElementById('warn-' + config);
         btn.disabled = true;
         var orig = btn.innerHTML;
         btn.innerHTML = '<i class="pi pi-spin pi-spinner"></i> Выполняется...';
         box.style.display = '';
         box.querySelector('pre').textContent = 'Ожидание...';
+        if (warn) { warn.style.display = 'none'; warn.textContent = ''; }
         fetch('/' + db + '/gssync?JSON&config=' + encodeURIComponent(config))
             .then(function(r) { return r.json(); })
-            .then(function(d) { box.querySelector('pre').textContent = JSON.stringify(d, null, 2); })
+            .then(function(d) {
+                box.querySelector('pre').textContent = JSON.stringify(d, null, 2);
+                if (warn && d && typeof d === 'object' && 'upload' in d && d.upload === null) {
+                    warn.textContent = 'Файл сформирован, но не загружен, потому что загрузка пока выключена';
+                    warn.style.display = '';
+                }
+            })
             .catch(function(err) { box.querySelector('pre').textContent = 'Ошибка: ' + err; })
             .finally(function() { btn.disabled = false; btn.innerHTML = orig; });
     });
@@ -315,8 +325,10 @@
                 if (d.ok) {
                     var card = document.getElementById('card-' + config);
                     var result = document.getElementById('result-' + config);
+                    var warn = document.getElementById('warn-' + config);
                     if (card) card.remove();
                     if (result) result.remove();
+                    if (warn) warn.remove();
                     updateEmpty();
                 }
             })
