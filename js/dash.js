@@ -287,10 +287,13 @@ function dashGetFloat(v) {
 }
 
 // Like dashGetFloat but treats the string 'null' (and JS null) as a chart gap (issue #2586)
-function dashChartMeasureValue(raw) {
+// When convertMinusOneToNull is true, also converts -1 to null (issue #2632)
+function dashChartMeasureValue(raw, convertMinusOneToNull) {
     if (raw === null || raw === 'null') return null;
     var n = dashGetFloat(raw);
-    return isNaN(n) ? 0 : n;
+    if (isNaN(n)) return 0;
+    if (convertMinusOneToNull && n === -1) return null;
+    return n;
 }
 
 function dashNumberForFormula(v) {
@@ -1038,7 +1041,7 @@ function dashCollectReportVizData(report, vizConfig) {
             var raw = dashReportRowValue(row, column)
                 , n;
             if (dashReportColumnIsMeasure(column)) {
-                rec[column.name] = dashChartMeasureValue(raw);
+                rec[column.name] = dashChartMeasureValue(raw, config.convertMinusOneToNull);
             } else {
                 rec[column.name] = raw;
             }
@@ -1079,7 +1082,7 @@ function dashCollectReportVizData(report, vizConfig) {
         var label = dashReportValueLabel(dashReportRowValue(row, labelCol))
             , series = seriesCol ? dashReportValueLabel(dashReportRowValue(row, seriesCol)) : (valueCol ? valueCol.name : 'Количество')
             , stack = stackCol ? dashReportValueLabel(dashReportRowValue(row, stackCol)) : null
-            , value = valueCol ? dashChartMeasureValue(dashReportRowValue(row, valueCol)) : 1;
+            , value = valueCol ? dashChartMeasureValue(dashReportRowValue(row, valueCol), config.convertMinusOneToNull) : 1;
         dashReportAddOrdered(labels, labelSeen, label);
         dashReportAddOrdered(seriesOrder, seriesSeen, series);
         if (stackCol) dashReportAddOrdered(stackOrder, stackSeen, stack);
@@ -2917,6 +2920,11 @@ function dashNormalizeGeneralSettings(general) {
         has = true;
     }
 
+    if (general.convertMinusOneToNull === true || general.convertMinusOneToNull === 'true' || general.convertMinusOneToNull === 1 || general.convertMinusOneToNull === '1') {
+        result.convertMinusOneToNull = true;
+        has = true;
+    }
+
     val = dashNormalizeEnum(general.tooltipDecimals, DASH_GENERAL_TOOLTIP_DECIMALS);
     if (val !== null) { result.tooltipDecimals = val; has = true; }
 
@@ -3927,7 +3935,7 @@ function dashRenderChart(panelEl, vizType, fieldMap, vizConfig) {
         return;
     }
 
-    var data = dashCollectPanelData(panelEl, Object.assign({}, vizConfig || {}, { type: vizType, fieldMap: fieldMap || {} }));
+    var data = dashCollectPanelData(panelEl, Object.assign({}, vizConfig || {}, { type: vizType, fieldMap: fieldMap || {}, convertMinusOneToNull: !!((dashGeneralSettingsFromSettings((dashModelData[panelEl.id] || {}).settings) || {}).convertMinusOneToNull) }));
     var canvas = panelEl.querySelector('.f-chart-canvas');
     var chartWrap = panelEl.querySelector('.f-chart-wrap');
     var tableWrap = panelEl.querySelector('.f-table-wrap');
@@ -4914,6 +4922,13 @@ function dashBuildPanelGeneralHtml(general) {
         + '<div class="dash-viz-field-row"><label>Суффикс</label>'
         + '<input type="text" maxlength="16" name="generalTooltipSuffix" value="' + dashAttr(g.tooltipSuffix || '') + '">'
         + '</div>'
+        + '</div>'
+        + '<div class="dash-panel-general-group">'
+        + '<div class="dash-viz-size-title">Данные</div>'
+        + '<div class="dash-viz-field-row"><label></label>'
+        + '<label class="dash-viz-check-label"><input type="checkbox" name="generalConvertMinusOneToNull"' + (g.convertMinusOneToNull ? ' checked' : '') + '>'
+        + '<span>Преобразовывать -1 в null (для разрывов в графиках)</span></label>'
+        + '</div>'
         + '</div>';
 }
 
@@ -4984,6 +4999,9 @@ function dashCollectPanelGeneral() {
 
     el = container.querySelector('[name="generalXLabelAutoSkip"]');
     if (el && el.checked) { result.xLabelAutoSkip = true; has = true; }
+
+    el = container.querySelector('[name="generalConvertMinusOneToNull"]');
+    if (el && el.checked) { result.convertMinusOneToNull = true; has = true; }
 
     val = dashNormalizeEnum(read('generalTooltipDecimals'), DASH_GENERAL_TOOLTIP_DECIMALS);
     if (val !== null) { result.tooltipDecimals = val; has = true; }
