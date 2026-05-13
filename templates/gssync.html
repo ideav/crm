@@ -443,6 +443,7 @@
             spreadsheet_id: document.getElementById('gss-spreadsheet-id').value.trim(),
             skip_empty_values: !document.getElementById('gss-save-empty').checked,
             sheets: sheets,
+            sheets_raw: sheetsRaw,
             integram: {
                 enabled: document.getElementById('gss-enabled').checked,
                 table_id: tableId,
@@ -507,7 +508,7 @@
         document.getElementById('gss-create-parent').value = ig.createParent !== undefined ? ig.createParent : '1';
         document.getElementById('gss-enabled').checked = !!ig.enabled;
         document.getElementById('gss-save-empty').checked = !data.skip_empty_values;
-        document.getElementById('gss-sheets').value = data.sheets ? JSON.stringify(data.sheets, null, 2) : '';
+        document.getElementById('gss-sheets').value = data.sheets_raw || (data.sheets ? JSON.stringify(data.sheets, null, 2) : '');
         document.getElementById('gss-save-msg').textContent = '';
         resetSecretInitials();
     }
