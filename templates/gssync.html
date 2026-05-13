@@ -19,8 +19,10 @@
 .gss-btn-danger { color: var(--color-danger, #dc3545); }
 .gss-btn-danger:hover { background: rgba(220,53,69,0.1); }
 .gss-empty { padding: 1rem; border: 1px dashed var(--border-color); border-radius: 6px; color: var(--text-secondary); font-size: 0.9rem; }
-.gss-result { margin-bottom: 0.5rem; }
+.gss-result { margin-bottom: 0.5rem; position: relative; }
 .gss-result pre { white-space: pre-wrap; font-size: 0.8rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; padding: 0.75rem; margin: 0; color: var(--text-primary); }
+.gss-result-close { position: absolute; top: 0.35rem; right: 0.35rem; background: none; border: none; cursor: pointer; color: var(--text-secondary); font-size: 0.85rem; padding: 0.15rem 0.35rem; border-radius: 3px; line-height: 1; }
+.gss-result-close:hover { background: var(--bg-primary); color: var(--text-primary); }
 .gss-form-box { border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-top: 1rem; background: var(--card-bg, var(--bg-primary)); }
 .gss-form-box h5 { margin: 0 0 1rem; color: var(--text-primary); font-size: 1rem; }
 .gss-field { margin-bottom: 0.75rem; }
@@ -97,7 +99,7 @@
             </div>
         </div>
         <div class="gss-warn" id="warn-{CONFIG}" style="display:none"></div>
-        <div class="gss-result" id="result-{CONFIG}" style="display:none"><pre></pre></div>
+        <div class="gss-result" id="result-{CONFIG}" style="display:none"><button class="gss-result-close" title="Закрыть"><i class="pi pi-times"></i></button><pre></pre></div>
 <!-- End:&Config_item -->
     </div>
 
@@ -342,6 +344,14 @@
             })
             .catch(function(err) { box.querySelector('pre').textContent = 'Ошибка: ' + err; })
             .finally(function() { btn.disabled = false; btn.innerHTML = orig; });
+    });
+
+    document.addEventListener('click', function(e) {
+        var btn = e.target.closest('.gss-result-close');
+        if (btn) {
+            var box = btn.closest('.gss-result');
+            if (box) box.style.display = 'none';
+        }
     });
 
     document.addEventListener('click', function(e) {
