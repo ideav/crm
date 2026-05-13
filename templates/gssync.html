@@ -48,6 +48,9 @@
 .gss-msg.ok { color: var(--color-success, #28a745); }
 .gss-msg.err { color: var(--color-danger, #dc3545); }
 .gss-warn { background: var(--color-warning-bg, #fff8e1); border: 1px solid var(--color-warning-border, #f5c518); color: var(--color-warning-text, #8a6d00); border-radius: 4px; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; font-size: 0.85rem; }
+.gss-search-row { margin-bottom: 0.75rem; }
+.gss-search { width: 100%; box-sizing: border-box; padding: 0.4rem 0.75rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--input-bg, var(--bg-secondary)); color: var(--text-primary); font-size: 0.9rem; font-family: inherit; }
+.gss-search:focus { outline: none; border-color: var(--color-primary, #1283da); }
 </style>
 <!-- Begin:&Gssync -->
 <div class="gss-wrap">
@@ -56,6 +59,10 @@
         <button class="gss-btn-icon" id="gss-help-btn" title="Справка"><i class="pi pi-question-circle"></i></button>
         <button class="gss-btn" id="gss-run-all-btn" style="margin-left:auto"><i class="pi pi-play"></i> Запустить всё</button>
         <button class="gss-btn gss-btn-primary" id="gss-new-btn"><i class="pi pi-plus"></i> Новая конфигурация</button>
+    </div>
+
+    <div class="gss-search-row">
+        <input type="text" id="gss-search" class="gss-search" placeholder="Поиск по конфигурациям...">
     </div>
 
     <div class="gss-help-box" id="gss-help" style="display:none">
@@ -200,9 +207,29 @@
     }
     updateEmpty();
 
+    document.getElementById('gss-search').addEventListener('input', function() {
+        var q = this.value.trim().toLowerCase();
+        document.querySelectorAll('.gss-card').forEach(function(card) {
+            var name = (card.querySelector('.gss-card-name') || {}).textContent || '';
+            var match = !q || name.toLowerCase().indexOf(q) !== -1;
+            card.style.display = match ? '' : 'none';
+            var id = card.id || '';
+            var config = id.indexOf('card-') === 0 ? id.substring(5) : '';
+            if (config && !match) {
+                var result = document.getElementById('result-' + config);
+                var warn = document.getElementById('warn-' + config);
+                if (result) result.style.display = 'none';
+                if (warn) warn.style.display = 'none';
+            }
+        });
+    });
+
     document.getElementById('gss-run-all-btn').addEventListener('click', function() {
         var runAllBtn = this;
-        var configs = Array.from(document.querySelectorAll('.gss-run-btn')).map(function(b) { return b.dataset.config; });
+        var configs = Array.from(document.querySelectorAll('.gss-run-btn')).filter(function(b) {
+            var card = document.getElementById('card-' + b.dataset.config);
+            return !card || card.style.display !== 'none';
+        }).map(function(b) { return b.dataset.config; });
         if (!configs.length) return;
         runAllBtn.disabled = true;
         var origHtml = runAllBtn.innerHTML;
