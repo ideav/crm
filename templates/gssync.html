@@ -54,7 +54,8 @@
     <div class="gss-header">
         <h4>Google Sheets Sync</h4>
         <button class="gss-btn-icon" id="gss-help-btn" title="Справка"><i class="pi pi-question-circle"></i></button>
-        <button class="gss-btn gss-btn-primary" id="gss-new-btn" style="margin-left:auto"><i class="pi pi-plus"></i> Новая конфигурация</button>
+        <button class="gss-btn" id="gss-run-all-btn" style="margin-left:auto"><i class="pi pi-play"></i> Запустить всё</button>
+        <button class="gss-btn gss-btn-primary" id="gss-new-btn"><i class="pi pi-plus"></i> Новая конфигурация</button>
     </div>
 
     <div class="gss-help-box" id="gss-help" style="display:none">
@@ -198,6 +199,40 @@
         document.getElementById('gss-empty').style.display = hasCards ? 'none' : '';
     }
     updateEmpty();
+
+    document.getElementById('gss-run-all-btn').addEventListener('click', function() {
+        var runAllBtn = this;
+        var configs = Array.from(document.querySelectorAll('.gss-run-btn')).map(function(b) { return b.dataset.config; });
+        if (!configs.length) return;
+        runAllBtn.disabled = true;
+        var origHtml = runAllBtn.innerHTML;
+        runAllBtn.innerHTML = '<i class="pi pi-spin pi-spinner"></i> Выполняется...';
+        var chain = Promise.resolve();
+        configs.forEach(function(config) {
+            chain = chain.then(function() {
+                var box = document.getElementById('result-' + config);
+                var warn = document.getElementById('warn-' + config);
+                var runBtn = document.querySelector('.gss-run-btn[data-config="' + config + '"]');
+                var btnOrig = runBtn ? runBtn.innerHTML : '';
+                if (runBtn) { runBtn.disabled = true; runBtn.innerHTML = '<i class="pi pi-spin pi-spinner"></i> Выполняется...'; }
+                box.style.display = '';
+                box.querySelector('pre').textContent = 'Ожидание...';
+                if (warn) { warn.style.display = 'none'; warn.textContent = ''; }
+                return fetch('/' + db + '/gssync?JSON&config=' + encodeURIComponent(config))
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) {
+                        box.querySelector('pre').textContent = JSON.stringify(d, null, 2);
+                        if (warn && d && typeof d === 'object' && 'upload' in d && d.upload === null) {
+                            warn.textContent = 'Файл сформирован, но не загружен, потому что загрузка пока выключена. Включите загрузку и сохраните форму.';
+                            warn.style.display = '';
+                        }
+                    })
+                    .catch(function(err) { box.querySelector('pre').textContent = 'Ошибка: ' + err; })
+                    .finally(function() { if (runBtn) { runBtn.disabled = false; runBtn.innerHTML = btnOrig; } });
+            });
+        });
+        chain.finally(function() { runAllBtn.disabled = false; runAllBtn.innerHTML = origHtml; });
+    });
 
     function existingConfigNames() {
         var names = [];
