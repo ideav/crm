@@ -5975,8 +5975,16 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     					            trace(" not found ".$object[0]);
     					    }
     					}
-    					if(isset($existing))
+    					if(isset($existing)){
         					$new_id = $existing;
+        					// Composite-key uniqueness (the first column itself is not unique) — the existing
+        					// record was matched via UniqueKeyReqs without obj.val in the WHERE clause
+        					// (FindUniqueRecordDuplicate, $includeVal=false), so the first column in the DB may
+        					// differ from the incoming BKI row. Refresh it so re-import overwrites the first
+        					// column on update, not just the secondary requisites.
+        					if(count($keyReqs) && !$isUnique)
+        					    Update_Val($existing, $object[0]);
+    					}
     					else
 							$new_id = Insert($parent, (isset($cur_order) ? $cur_order++ : 1), $id, $object[0], "Plain import #$count");
     					#array_pop($object); 	# Cut off the empty item after the last semi-colon
