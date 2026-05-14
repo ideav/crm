@@ -83,7 +83,7 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
         + ':name:'
     , cellTpl     = '<td range=":from:-:to:" ready=":ready:" class="f-cell :classes:" align="right" title=":title:" data-src=":src:" data-item-id=":item-id:":extra:>:val:';
 
-let dashModelData = {}, dashPeriodData = {}, dashPeriods = {}, dashValues = {}, dashFormulas = {}, dashItems = {}, dashReports = {}, dashReportNames = {}, dashReportKeys = {}, dashReportSources = {}, dashVizReports = {}, dashPanelValues = {}, dashPanelFilters = {}, dashAjaxes = 0;
+let dashModelData = {}, dashPeriodData = {}, dashPeriods = {}, dashValues = {}, dashValueErrors = {}, dashFormulas = {}, dashItems = {}, dashReports = {}, dashReportNames = {}, dashReportKeys = {}, dashReportSources = {}, dashVizReports = {}, dashPanelValues = {}, dashPanelValueErrors = {}, dashPanelFilters = {}, dashAjaxes = 0;
 let dashValueItemIds = {}; // item name -> valueItemID from ЗначенияЗаПериод
 let dashMatrixValues = [], dashMatrixValuesRequested = false, dashRgSourceIds = {};
 
@@ -259,6 +259,31 @@ function dashNormalizeNumberText(v) {
         s = parts.join('');
     }
     return sign + s;
+}
+
+// Returns the source-value parse error (if any) for a given item/column pair,
+// preferring the panel-scoped bucket when a panelKey is supplied. Falls back
+// to the item-only key so the cell still highlights when colGroup info isn't
+// available on the error record.
+function dashLookupValueError(itemName, colName, panelKey) {
+    var itemKey = (itemName || '').toLowerCase()
+        , colKey = (colName || '').toLowerCase()
+        , scoped = panelKey ? dashPanelValueErrors[panelKey] : null
+        , scopedHit = scoped && (scoped[colKey ? itemKey + ':' + colKey : itemKey] || scoped[itemKey])
+        , globalHit = dashValueErrors[colKey ? itemKey + ':' + colKey : itemKey] || dashValueErrors[itemKey];
+    return scopedHit || globalHit || null;
+}
+
+// Marks the cell that was just appended to `row` with the .dash-err class and
+// a title that surfaces the parse error and the raw expression so the user
+// can see why the cell is empty — instead of the row silently disappearing.
+function dashMarkCellErrorIfAny(row, itemName, colName, panelKey) {
+    var info = dashLookupValueError(itemName, colName, panelKey);
+    if (!info) return;
+    var cell = row.lastElementChild;
+    if (!cell) return;
+    cell.classList.add('dash-err');
+    cell.setAttribute('title', info.error + ' | ' + info.raw);
 }
 
 function dashFormatNumberText(v) {
@@ -1672,6 +1697,7 @@ function dashDrawPeriods() {
                                             .replace(':extra:', cellExtra)
                                             .replace(':from:', fr)
                                             .replace(':to:', to));
+                                    dashMarkCellErrorIfAny(row, itemName, colName, panelId);
                                 });
                             });
                         } else {
@@ -1708,6 +1734,7 @@ function dashDrawPeriods() {
                                         .replace(':extra:', cellExtra)
                                         .replace(':from:', fr)
                                         .replace(':to:', to));
+                                dashMarkCellErrorIfAny(row, itemName, '', panelId);
                             });
                         }
                     }
@@ -2026,9 +2053,18 @@ function dashGetSrc(json) {
                     first: tagged[0]
                 });
             } catch (e) {
-                dashValues[(json[i].item || '').toLowerCase()] = 'error ' + e + ' in ' + json[i].value;
+                // Earlier rows for the same item may have parsed OK — don't
+                // clobber dashValues with a string. Track the failure
+                // separately so the affected cell can be highlighted.
+                var errItemKey = (json[i].item || '').toLowerCase();
+                var errColGroup = (json[i]['Колонка группы'] || json[i].RGcolumnsID || '').toLowerCase();
+                var errKey = errColGroup ? errItemKey + ':' + errColGroup : errItemKey;
+                dashValueErrors[errKey] = { error: String(e), raw: json[i].value };
+                if (!dashValueErrors[errItemKey]) dashValueErrors[errItemKey] = { error: String(e), raw: json[i].value };
                 dashTrace('source-value-parse-error', {
                     item: json[i].item,
+                    colGroup: errColGroup,
+                    key: errKey,
                     error: String(e),
                     raw: json[i].value
                 });
@@ -2047,6 +2083,7 @@ function dashGetSrc(json) {
 function dashGetPanelValues(panelKey, queryId, fr, to, panelFilter) {
     if (!panelKey || !queryId) return;
     dashPanelValues[panelKey] = {};
+    dashPanelValueErrors[panelKey] = {};
     var panelEl = document.getElementById(panelKey);
     if (panelEl) panelEl.classList.add('f-panel-readonly');
     var url = 'report/' + queryId + '?JSON_KV&FR_Date=' + fr + '&TO_Date=' + to
@@ -2060,19 +2097,27 @@ function dashGetPanelValuesDone(json, ctx) {
     var panelKey = ctx && ctx.panelKey;
     if (panelKey && Array.isArray(json)) {
         var bucket = dashPanelValues[panelKey] = {};
+        var errBucket = dashPanelValueErrors[panelKey] = {};
         json.forEach(function(row) {
             if (!row || row.value === undefined || row.value === null || row.value === '') return;
+            var itemKey = (row.item || '').toLowerCase();
+            var colGroup = (row.RGcolumnsID || '').toLowerCase();
+            var key = colGroup ? itemKey + ':' + colGroup : itemKey;
             try {
-                var itemKey = (row.item || '').toLowerCase();
-                var colGroup = (row.RGcolumnsID || '').toLowerCase();
-                var key = colGroup ? itemKey + ':' + colGroup : itemKey;
                 var srcLabel = row['Метка'] || '';
                 var parsed = JSON.parse('[' + row.value + ']');
                 var tagged = parsed.map(function(p) {
                     return Object.assign({}, p, { 'Метка': srcLabel });
                 });
                 bucket[key] = Array.isArray(bucket[key]) ? bucket[key].concat(tagged) : tagged;
-            } catch (e) {}
+            } catch (e) {
+                // Record the parse failure so the cell can be highlighted
+                // with the original expression in its title. Don't clobber
+                // bucket[key] — sibling rows for the same item may have
+                // parsed OK earlier.
+                errBucket[key] = { error: String(e), raw: row.value };
+                if (!errBucket[itemKey]) errBucket[itemKey] = { error: String(e), raw: row.value };
+            }
         });
     }
     dashAjaxes--;
@@ -5701,8 +5746,8 @@ document.addEventListener('click', function(e) {
 });
 
 function dashReset() {
-    dashModelData = {}; dashPeriodData = {}; dashPeriods = {}; dashValues = {};
-    dashFormulas = {}; dashItems = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashReportSources = {}; dashVizReports = {}; dashPanelValues = {}; dashPanelFilters = {}; dashAjaxes = 0; dashValueItemIds = {};
+    dashModelData = {}; dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashValueErrors = {};
+    dashFormulas = {}; dashItems = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashReportSources = {}; dashVizReports = {}; dashPanelValues = {}; dashPanelValueErrors = {}; dashPanelFilters = {}; dashAjaxes = 0; dashValueItemIds = {};
     dashPanelFilterModalCtx = null;
     dashMatrixValues = []; dashMatrixValuesRequested = false; dashRgSourceIds = {};
     var model = document.getElementById('dash-model');
@@ -5742,10 +5787,11 @@ window.dashApplyFilter = function(sheetEl) {
         });
         delete dashModelData[p.id];
         delete dashPanelValues[p.id];
+        delete dashPanelValueErrors[p.id];
         p.remove();
     });
     dashUpdateSheetSizeResetIcon(sheetEl);
-    dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashReportSources = {}; dashVizReports = {}; dashAjaxes = 0; dashValueItemIds = {}; dashRgSourceIds = {};
+    dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashValueErrors = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashReportSources = {}; dashVizReports = {}; dashAjaxes = 0; dashValueItemIds = {}; dashRgSourceIds = {};
 
     // Re-fetch model for this sheet only — skip get_record, use cached dashRecordId
     dashSetStatus('Загрузка данных...');
