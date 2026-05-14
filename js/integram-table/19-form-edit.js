@@ -1053,11 +1053,18 @@
 
                 // Close handler
                 const closeModal = () => {
-                    // Update subordinate record count in the parent cell (issue #1839)
-                    if (clickedCountCell) {
-                        const newCount = container.querySelectorAll('table tbody tr').length || 0;
+                    // Update subordinate record count in the parent cell (issue #1839),
+                    // but only when the modal has loaded the full record set. With
+                    // infinite scroll (issue #1640) the DOM only holds the pages the
+                    // user scrolled through, so counting `<tr>` would replace e.g.
+                    // (660) with (40) just because the user didn't scroll to the
+                    // bottom (issue #2663). When more pages remain, keep the link's
+                    // existing text intact rather than writing a wrong number.
+                    if (clickedCountCell
+                        && container._subordinateHasMore === false
+                        && Array.isArray(container._subordinateData)) {
                         const countLink = clickedCountCell.querySelector('.subordinate-count-link');
-                        if (countLink) countLink.textContent = `(${ newCount })`;
+                        if (countLink) countLink.textContent = `(${ container._subordinateData.length })`;
                     }
                     modal.remove();
                     overlay.remove();
