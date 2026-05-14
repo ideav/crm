@@ -12412,8 +12412,11 @@ class IntegramTable{
                 if (clickedRow) {
                     const firstCell = clickedRow.querySelector('td:first-child');
                     if (firstCell) {
-                        // Get the text content from the first cell (parent record value)
-                        const cellText = firstCell.textContent.trim();
+                        // Strip the subordinate row-number span so its digits don't leak
+                        // into the header title (issue #2642).
+                        const cellClone = firstCell.cloneNode(true);
+                        cellClone.querySelectorAll('.subordinate-row-number').forEach(n => n.remove());
+                        const cellText = cellClone.textContent.trim();
                         // Remove any leading index/ID prefix and icon markup
                         parentRecordValue = cellText.replace(/^\d+\s*/, '').replace(/<[^>]*>/g, '').trim();
                     }
