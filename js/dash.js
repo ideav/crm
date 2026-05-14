@@ -83,7 +83,7 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
         + ':name:'
     , cellTpl     = '<td range=":from:-:to:" ready=":ready:" class="f-cell :classes:" align="right" title=":title:" data-src=":src:" data-item-id=":item-id:":extra:>:val:';
 
-let dashModelData = {}, dashPeriodData = {}, dashPeriods = {}, dashValues = {}, dashFormulas = {}, dashItems = {}, dashReports = {}, dashReportNames = {}, dashReportKeys = {}, dashReportSources = {}, dashVizReports = {}, dashPanelFilters = {}, dashAjaxes = 0;
+let dashModelData = {}, dashPeriodData = {}, dashPeriods = {}, dashValues = {}, dashFormulas = {}, dashItems = {}, dashReports = {}, dashReportNames = {}, dashReportKeys = {}, dashReportSources = {}, dashVizReports = {}, dashPanelValues = {}, dashPanelFilters = {}, dashAjaxes = 0;
 let dashValueItemIds = {}; // item name -> valueItemID from ЗначенияЗаПериод
 let dashMatrixValues = [], dashMatrixValuesRequested = false, dashRgSourceIds = {};
 
@@ -1295,12 +1295,13 @@ function dashFetchMatrixValues() {
     newApi('GET', 'report/155564?JSON_KV', 'dashGetMatrixValues');
 }
 
-function dashGetVal(item, fr, to, dashLabel) {
+function dashGetVal(item, fr, to, dashLabel, panelKey) {
     var i, acc = 0, valids = false, key = item ? item.toLowerCase() : item;
-    if (!dashValues[key]) return;
+    var store = (panelKey && dashPanelValues[panelKey]) ? dashPanelValues[panelKey] : dashValues;
+    if (!store[key]) return;
     var hasLabelFilter = dashLabel !== undefined;
-    for (i in dashValues[key]) {
-        var entry = dashValues[key][i];
+    for (i in store[key]) {
+        var entry = store[key][i];
         if (hasLabelFilter && !dashMatrixLabelMatches(dashLabel, entry['Метка'])) continue;
         if (!fr || (entry.date >= fr && entry.date <= to)) {
             valids = true;
@@ -1310,12 +1311,13 @@ function dashGetVal(item, fr, to, dashLabel) {
     if (valids) return dashNormalizeVal(key, acc);
 }
 
-function dashGetColVal(item, col, dashLabel) {
+function dashGetColVal(item, col, dashLabel, panelKey) {
     var i, acc = 0, valids = false, key = item ? item.toLowerCase() : item, colLower = col ? col.toLowerCase() : col;
-    if (!dashValues[key]) return;
+    var store = (panelKey && dashPanelValues[panelKey]) ? dashPanelValues[panelKey] : dashValues;
+    if (!store[key]) return;
     var hasLabelFilter = dashLabel !== undefined;
-    for (i in dashValues[key]) {
-        var entry = dashValues[key][i];
+    for (i in store[key]) {
+        var entry = store[key][i];
         if (hasLabelFilter && !dashMatrixLabelMatches(dashLabel, entry['Метка'])) continue;
         if ((entry.col || '').toLowerCase() === colLower) {
             valids = true;
@@ -1325,16 +1327,17 @@ function dashGetColVal(item, col, dashLabel) {
     if (valids) return dashNormalizeVal(key, acc);
 }
 
-function dashResolveValueCell(rowId, groupName) {
+function dashResolveValueCell(rowId, groupName, panelKey) {
     var formula = dashFormulas[rowId] || ''
         , itemName = dashItems[rowId] ? dashItems[rowId].name : ''
         , dashLabel = dashItems[rowId] ? (dashItems[rowId].label || '') : ''
         , altName = formula.match(itemRegex)
         , valueName = altName ? altName[1] : itemName
         , groupedKey = groupName ? valueName + ':' + groupName : ''
-        , rowValue = dashValues[rowId]
-        , groupedValue = groupedKey ? dashGetVal(groupedKey, undefined, undefined, dashLabel) : undefined
-        , plainValue = dashGetVal(valueName, undefined, undefined, dashLabel)
+        , isPanelScoped = !!(panelKey && dashPanelValues[panelKey])
+        , rowValue = isPanelScoped ? undefined : dashValues[rowId]
+        , groupedValue = groupedKey ? dashGetVal(groupedKey, undefined, undefined, dashLabel, panelKey) : undefined
+        , plainValue = dashGetVal(valueName, undefined, undefined, dashLabel, panelKey)
         , value = rowValue || groupedValue || plainValue;
 
     dashTrace('value-cell-resolve', {
@@ -1620,17 +1623,17 @@ function dashDrawPeriods() {
                             panel.querySelectorAll('.f-item').forEach(function(row) {
                                 var itemName = row.getAttribute('item-name');
                                 var s = dashCellSrc(row.id, 'rg');
-                                var valueItemId = dashValueItemIds[(itemName || '').toLowerCase()] || '';
+                                var valueItemId = dashPanelValues[panelId] ? '' : (dashValueItemIds[(itemName || '').toLowerCase()] || '');
                                 var rgHeadVal = dashModelData[panelId].rgs[rg].head || '';
                                 var rowLabel = (dashItems[row.id] && dashItems[row.id].label) || '';
                                 rgCols.forEach(function(colName) {
-                                    v = dashGetVal(itemName + ':' + colName, fr, to, rowLabel);
+                                    v = dashGetVal(itemName + ':' + colName, fr, to, rowLabel, panelId);
                                     if (v === undefined && dashFormulas[row.id]) {
                                         if (dashFormulas[row.id] === '[]')
-                                            v = dashGetVal(itemName, fr, to, rowLabel);
+                                            v = dashGetVal(itemName, fr, to, rowLabel, panelId);
                                         else if (itemRegex.test(dashFormulas[row.id]))
-                                            v = dashGetVal(dashFormulas[row.id].match(itemRegex)[1] + ':' + colName, fr, to, rowLabel)
-                                             || dashGetVal(dashFormulas[row.id].match(itemRegex)[1], fr, to, rowLabel) || '0';
+                                            v = dashGetVal(dashFormulas[row.id].match(itemRegex)[1] + ':' + colName, fr, to, rowLabel, panelId)
+                                             || dashGetVal(dashFormulas[row.id].match(itemRegex)[1], fr, to, rowLabel, panelId) || '0';
                                     }
                                     var cellExtra = s.extra
                                         + (valueItemId ? ' data-value-item-id="' + valueItemId + '"' : '')
@@ -1657,15 +1660,15 @@ function dashDrawPeriods() {
                             panel.querySelectorAll('.f-item').forEach(function(row) {
                                 var s = dashCellSrc(row.id, 'rg');
                                 var itemName = row.getAttribute('item-name');
-                                var valueItemId = dashValueItemIds[(itemName || '').toLowerCase()] || '';
+                                var valueItemId = dashPanelValues[panelId] ? '' : (dashValueItemIds[(itemName || '').toLowerCase()] || '');
                                 var rgHeadVal = dashModelData[panelId].rgs[rg].head || '';
                                 var rowLabel = (dashItems[row.id] && dashItems[row.id].label) || '';
-                                v = dashGetVal(itemName, fr, to, rowLabel);
+                                v = dashGetVal(itemName, fr, to, rowLabel, panelId);
                                 if (v === undefined && dashFormulas[row.id]) {
                                     if (dashFormulas[row.id] === '[]')
-                                        v = dashGetVal(itemName, fr, to, rowLabel);
+                                        v = dashGetVal(itemName, fr, to, rowLabel, panelId);
                                     else if (itemRegex.test(dashFormulas[row.id]))
-                                        v = dashGetVal(dashFormulas[row.id].match(itemRegex)[1], fr, to, rowLabel) || '0';
+                                        v = dashGetVal(dashFormulas[row.id].match(itemRegex)[1], fr, to, rowLabel, panelId) || '0';
                                 }
                                 var periodLabel = p[i].r[0] || '';
                                 var cellExtra = s.extra
@@ -1695,12 +1698,12 @@ function dashDrawPeriods() {
                                .replace(':from:-:to:', '-'));
                     panel.querySelectorAll('.f-item').forEach(function(row) {
                         var s = dashCellSrc(row.id, 'value')
-                            , resolved = dashResolveValueCell(row.id, groupName);
+                            , resolved = dashResolveValueCell(row.id, groupName, panelId);
                         if (resolved.alias)
                             s = { src: 'value', extra: '' };
                         v = dashNormalizeVal(row.id, resolved.value);
                         var itemName = row.getAttribute('item-name');
-                        var valueItemId = dashValueItemIds[(itemName || '').toLowerCase()] || '';
+                        var valueItemId = dashPanelValues[panelId] ? '' : (dashValueItemIds[(itemName || '').toLowerCase()] || '');
                         var rgHeadVal = groupName;
                         var rowLabel = (dashItems[row.id] && dashItems[row.id].label) || '';
                         var cellExtra = s.extra
@@ -1798,7 +1801,7 @@ function dashDrawPeriods() {
                                             if (matrixRow && matrixRow.date)
                                                 extra += ' data-matrix-date="' + dashAttr(matrixRow.date) + '"';
                                         } else {
-                                            v = dashGetColVal(itemName, col, rowLabel);
+                                            v = dashGetColVal(itemName, col, rowLabel, panelId);
                                             if (v || dashFormulas[row.id] === '[]') ready = 1;
                                         }
                                         if (rowLabel) extra += ' data-dash-label="' + dashAttr(rowLabel) + '"';
@@ -2015,6 +2018,46 @@ function dashGetSrc(json) {
     dashDrawPeriods();
 }
 
+// Fetch per-panel values from `panelQuery` (JSON_KV) and store them in a
+// panel-scoped bucket. Used when a panel has both `panelQuery` and rows
+// (.f-item). Shape mirrors Дэшборд.ЗначенияЗаПериод rows but with
+// RGcolumnsID in place of «Колонка группы»; missing valueItemID is
+// intentional — these cells are rendered read-only.
+function dashGetPanelValues(panelKey, queryId, fr, to, panelFilter) {
+    if (!panelKey || !queryId) return;
+    dashPanelValues[panelKey] = {};
+    var panelEl = document.getElementById(panelKey);
+    if (panelEl) panelEl.classList.add('f-panel-readonly');
+    var url = 'report/' + queryId + '?JSON_KV&FR_Date=' + fr + '&TO_Date=' + to
+        , filter = dashNormalizePanelFilter(panelFilter);
+    if (filter) url += '&' + filter;
+    dashAjaxes++;
+    newApi('GET', url, 'dashGetPanelValuesDone', '', { panelKey: panelKey });
+}
+
+function dashGetPanelValuesDone(json, ctx) {
+    var panelKey = ctx && ctx.panelKey;
+    if (panelKey && Array.isArray(json)) {
+        var bucket = dashPanelValues[panelKey] = {};
+        json.forEach(function(row) {
+            if (!row || row.value === undefined || row.value === null || row.value === '') return;
+            try {
+                var itemKey = (row.item || '').toLowerCase();
+                var colGroup = (row.RGcolumnsID || '').toLowerCase();
+                var key = colGroup ? itemKey + ':' + colGroup : itemKey;
+                var srcLabel = row['Метка'] || '';
+                var parsed = JSON.parse('[' + row.value + ']');
+                var tagged = parsed.map(function(p) {
+                    return Object.assign({}, p, { 'Метка': srcLabel });
+                });
+                bucket[key] = Array.isArray(bucket[key]) ? bucket[key].concat(tagged) : tagged;
+            } catch (e) {}
+        });
+    }
+    dashAjaxes--;
+    dashDrawPeriods();
+}
+
 function dashGetRecord(json) {
     if (!json || json.error || !json.val) {
         dashSetStatus('Дэшборд не найден');
@@ -2178,6 +2221,16 @@ function dashGetModel(json) {
             }
         }
     }
+    // For panels that declare panelQuery AND have rows, fetch per-panel
+    // values via JSON_KV. They become the data source for those panels
+    // (cells rendered read-only, see f-panel-readonly).
+    Object.keys(dashModelData).forEach(function(panelKey) {
+        var data = dashModelData[panelKey];
+        if (!data || !data.vizReportId) return;
+        var panelEl = document.getElementById(panelKey);
+        if (!panelEl || !panelEl.querySelector('.f-item')) return;
+        dashGetPanelValues(panelKey, data.vizReportId, fr, to, data.panelFilter);
+    });
     dashUpdateAllSheetSizeResetIcons();
 
     // Activate tab: restore from URL hash or default to first tab (issue #1840)
@@ -5628,7 +5681,7 @@ document.addEventListener('click', function(e) {
 
 function dashReset() {
     dashModelData = {}; dashPeriodData = {}; dashPeriods = {}; dashValues = {};
-    dashFormulas = {}; dashItems = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashReportSources = {}; dashVizReports = {}; dashPanelFilters = {}; dashAjaxes = 0; dashValueItemIds = {};
+    dashFormulas = {}; dashItems = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashReportSources = {}; dashVizReports = {}; dashPanelValues = {}; dashPanelFilters = {}; dashAjaxes = 0; dashValueItemIds = {};
     dashPanelFilterModalCtx = null;
     dashMatrixValues = []; dashMatrixValuesRequested = false; dashRgSourceIds = {};
     var model = document.getElementById('dash-model');
@@ -5643,6 +5696,7 @@ window.dashGetPeriods = dashGetPeriods;
 window.dashGetMatrixValues = dashGetMatrixValues;
 window.dashGetRepDone             = dashGetRepDone;
 window.dashGetVizReportDone       = dashGetVizReportDone;
+window.dashGetPanelValuesDone     = dashGetPanelValuesDone;
 window.dashDebug                  = dashDebug;
 window.dashUpdateTableWrapOverflow = dashUpdateTableWrapOverflow;
 window.dashResetSheetSizeCookies  = dashResetSheetSizeCookies;
@@ -5666,6 +5720,7 @@ window.dashApplyFilter = function(sheetEl) {
             delete dashReportKeys[row.id];
         });
         delete dashModelData[p.id];
+        delete dashPanelValues[p.id];
         p.remove();
     });
     dashUpdateSheetSizeResetIcon(sheetEl);
@@ -6268,6 +6323,13 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
     if (!td) return;
     // Skip if inline input is already active
     if (td.querySelector('.dash-cell-input')) return;
+
+    // Panels driven by panelQuery render read-only values (no valueItemID
+    // and other edit fields are absent from the query response).
+    if (td.closest('.f-panel-readonly')) {
+        dashShowReadonlyTip(e);
+        return;
+    }
 
     var src = td.dataset.src || '';
 
