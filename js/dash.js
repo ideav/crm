@@ -6358,6 +6358,232 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
     }
 });
 
+// ─── Cell multi-selection (sum of selected cells) ────────────────────────────
+// Drag inside a table to make a rectangular selection. Ctrl/Cmd+click toggles a
+// single cell. Shift+click extends a rectangular selection from the anchor.
+// Plain click on a cell preserves existing behaviour (inline edit / formula
+// modal / readonly tooltip) and clears any previous selection. The floating
+// badge under the selection shows Σ / count / average over numeric cells.
+(function() {
+    var DRAG_PIXEL_THRESHOLD = 4;
+    var dashModelEl = document.getElementById('dash-model');
+    var badge = document.getElementById('dash-selection-sum');
+    if (!dashModelEl || !badge) return;
+
+    var sel = {
+        cells: new Set(),
+        anchor: null,
+        dragStart: null,
+        dragTbody: null,
+        dragOriginX: 0,
+        dragOriginY: 0,
+        dragArmed: false,
+        dragActive: false,
+        suppressNextClick: false
+    };
+
+    function cellRC(td) {
+        var tr = td && td.parentElement;
+        if (!tr || tr.tagName !== 'TR') return null;
+        var tbody = tr.parentElement;
+        if (!tbody) return null;
+        return {
+            row: Array.prototype.indexOf.call(tbody.children, tr),
+            col: Array.prototype.indexOf.call(tr.children, td),
+            tbody: tbody
+        };
+    }
+
+    function clearSelection() {
+        sel.cells.forEach(function(c) { c.classList.remove('dash-cell-selected'); });
+        sel.cells.clear();
+        sel.anchor = null;
+        updateBadge();
+    }
+
+    function addCell(td) {
+        if (!sel.cells.has(td)) {
+            sel.cells.add(td);
+            td.classList.add('dash-cell-selected');
+        }
+    }
+
+    function removeCell(td) {
+        if (sel.cells.has(td)) {
+            sel.cells.delete(td);
+            td.classList.remove('dash-cell-selected');
+        }
+    }
+
+    function rectFromCells(a, b) {
+        var ra = cellRC(a), rb = cellRC(b);
+        if (!ra || !rb || ra.tbody !== rb.tbody) return [];
+        var r1 = Math.min(ra.row, rb.row), r2 = Math.max(ra.row, rb.row);
+        var c1 = Math.min(ra.col, rb.col), c2 = Math.max(ra.col, rb.col);
+        var out = [];
+        for (var r = r1; r <= r2; r++) {
+            var tr = ra.tbody.children[r];
+            if (!tr) continue;
+            for (var c = c1; c <= c2; c++) {
+                var td = tr.children[c];
+                if (td && td.classList && td.classList.contains('f-cell')) out.push(td);
+            }
+        }
+        return out;
+    }
+
+    function replaceWith(cells) {
+        sel.cells.forEach(function(c) { c.classList.remove('dash-cell-selected'); });
+        sel.cells.clear();
+        cells.forEach(addCell);
+        updateBadge();
+    }
+
+    function formatAvg(n) {
+        var s = n.toFixed(2).replace(/\.?0+$/, '');
+        return dashFormatNumberText(s);
+    }
+
+    function updateBadge() {
+        if (sel.cells.size < 2) {
+            badge.classList.remove('visible');
+            return;
+        }
+        var sum = 0, n = 0, rect = null;
+        sel.cells.forEach(function(td) {
+            var v = dashGetFloat(dashCellText(td));
+            if (!isNaN(v)) { sum += v; n++; }
+            var r = td.getBoundingClientRect();
+            if (!rect) rect = { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+            else {
+                if (r.left < rect.left) rect.left = r.left;
+                if (r.right > rect.right) rect.right = r.right;
+                if (r.top < rect.top) rect.top = r.top;
+                if (r.bottom > rect.bottom) rect.bottom = r.bottom;
+            }
+        });
+        if (n === 0) {
+            badge.classList.remove('visible');
+            return;
+        }
+        var avg = sum / n;
+        var sep = '<span class="dash-sel-sep">·</span>';
+        badge.innerHTML =
+            'Σ ' + dashFormatNumberText(sum) + sep +
+            'N ' + n + sep +
+            '⌀ ' + formatAvg(avg);
+        var sy = window.pageYOffset || document.documentElement.scrollTop || 0;
+        var sx = window.pageXOffset || document.documentElement.scrollLeft || 0;
+        badge.style.top = (rect.bottom + sy + 6) + 'px';
+        badge.style.left = (rect.right + sx) + 'px';
+        badge.classList.add('visible');
+    }
+
+    dashModelEl.addEventListener('mousedown', function(e) {
+        if (e.button !== 0) return;
+        if (e.target.closest('input, textarea, select, .dash-cell-input, a, button')) return;
+        var td = e.target.closest('td.f-cell');
+        if (!td) {
+            if (sel.cells.size > 0) clearSelection();
+            return;
+        }
+        var rc = cellRC(td);
+        if (!rc) return;
+
+        if (e.shiftKey && sel.anchor) {
+            var anchorRC = cellRC(sel.anchor);
+            if (anchorRC && anchorRC.tbody === rc.tbody) {
+                replaceWith(rectFromCells(sel.anchor, td));
+            } else {
+                clearSelection();
+                sel.anchor = td;
+                addCell(td);
+                updateBadge();
+            }
+            sel.suppressNextClick = true;
+            e.preventDefault();
+            return;
+        }
+        if (e.ctrlKey || e.metaKey) {
+            if (sel.cells.has(td)) {
+                removeCell(td);
+                if (sel.anchor === td) sel.anchor = null;
+            } else {
+                if (!sel.anchor) sel.anchor = td;
+                addCell(td);
+            }
+            updateBadge();
+            sel.suppressNextClick = true;
+            e.preventDefault();
+            return;
+        }
+
+        // No modifier: arm drag without changing selection yet, so a plain click
+        // still falls through to the existing handler.
+        sel.dragStart = td;
+        sel.dragTbody = rc.tbody;
+        sel.dragOriginX = e.clientX;
+        sel.dragOriginY = e.clientY;
+        sel.dragArmed = true;
+        sel.dragActive = false;
+    });
+
+    document.addEventListener('mousemove', function(e) {
+        if (!sel.dragArmed) return;
+        if (!sel.dragActive) {
+            var dx = e.clientX - sel.dragOriginX;
+            var dy = e.clientY - sel.dragOriginY;
+            if (dx * dx + dy * dy < DRAG_PIXEL_THRESHOLD * DRAG_PIXEL_THRESHOLD) return;
+            sel.dragActive = true;
+            clearSelection();
+            sel.anchor = sel.dragStart;
+            dashModelEl.classList.add('dash-selecting');
+        }
+        var node = document.elementFromPoint(e.clientX, e.clientY);
+        var td = node && node.closest ? node.closest('td.f-cell') : null;
+        if (!td) return;
+        var rc = cellRC(td);
+        if (!rc || rc.tbody !== sel.dragTbody) return;
+        e.preventDefault();
+        replaceWith(rectFromCells(sel.dragStart, td));
+    });
+
+    document.addEventListener('mouseup', function() {
+        if (!sel.dragArmed) return;
+        var wasDrag = sel.dragActive;
+        sel.dragArmed = false;
+        sel.dragActive = false;
+        sel.dragStart = null;
+        sel.dragTbody = null;
+        dashModelEl.classList.remove('dash-selecting');
+        if (wasDrag) sel.suppressNextClick = true;
+    });
+
+    // Capture phase: suppress the existing bubble click handler when a
+    // modifier-select or drag-select just happened.
+    dashModelEl.addEventListener('click', function(e) {
+        if (sel.suppressNextClick) {
+            sel.suppressNextClick = false;
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            return;
+        }
+        if (sel.cells.size > 0) clearSelection();
+    }, true);
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && sel.cells.size > 0) clearSelection();
+    });
+
+    // Keep the badge anchored to the selection on scroll / resize.
+    window.addEventListener('scroll', function() {
+        if (sel.cells.size >= 2) updateBadge();
+    }, true);
+    window.addEventListener('resize', function() {
+        if (sel.cells.size >= 2) updateBadge();
+    });
+})();
+
 // Auto-load dashboard ID from URL path: dash/id
 (function() {
     var pathParts = window.location.pathname.split('/').filter(function(p) { return p !== ''; });
