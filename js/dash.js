@@ -1383,7 +1383,10 @@ function dashEvalFormula(el, f) {
         val = parseFloat(eval(f)); // eslint-disable-line no-eval
         if (isNaN(val)) return false;
     } catch (e) {
-        val = 'N/A';
+        // Missing operands turn the substituted formula into invalid JS
+        // (`+++` etc.) and eval throws — show an empty cell instead of N/A
+        // so dashboards read as "no data" rather than "broken" (issue #2660).
+        val = '';
         console.log(e + ': ' + f);
     }
     el.innerHTML = dashFormatNumberText(val);
@@ -1523,7 +1526,10 @@ function dashCalcRGFormulas() {
             try {
                 val = eval(expr); // eslint-disable-line no-eval
             } catch (e) {
-                val = 'N/A';
+                // Empty operands turn the expression into invalid JS — show an
+                // empty cell rather than N/A so missing data reads as "no data"
+                // instead of "broken" (issue #2660).
+                val = '';
                 console.log('RGformula eval error: ' + e + ' in: ' + expr);
             }
             var valStr = val !== null && val !== undefined ? String(val) : '';
