@@ -450,18 +450,31 @@
         });
     }
 
-    function getArchiveMonthKey(row) {
-        var rawValue = row && row.rawValues && row.rawValues.startDate;
-        var displayValue = row && row.values && row.values.startDate;
-        return formatMonthKey(parseDate(rawValue || displayValue));
+    var ARCHIVE_MONTH_FIELDS = ['startDate', 'deadline', 'exitDate'];
+
+    function getArchiveMonthKeys(row) {
+        if (!row) return [];
+        var rawValues = row.rawValues || {};
+        var displayValues = row.values || {};
+        var seen = {};
+        var keys = [];
+        ARCHIVE_MONTH_FIELDS.forEach(function(field) {
+            var key = formatMonthKey(parseDate(rawValues[field] || displayValues[field]));
+            if (key && !seen[key]) {
+                seen[key] = true;
+                keys.push(key);
+            }
+        });
+        return keys;
     }
 
     function getArchiveMonthOptions(rows) {
         var months = {};
 
         (rows || []).forEach(function(row) {
-            var key = getArchiveMonthKey(row);
-            if (key) months[key] = true;
+            getArchiveMonthKeys(row).forEach(function(key) {
+                months[key] = true;
+            });
         });
 
         return Object.keys(months).sort(function(a, b) {
@@ -479,7 +492,7 @@
         var selected = String(monthKey || '');
         if (!selected) return (rows || []).slice();
         return (rows || []).filter(function(row) {
-            return getArchiveMonthKey(row) === selected;
+            return getArchiveMonthKeys(row).indexOf(selected) !== -1;
         });
     }
 
