@@ -1641,10 +1641,13 @@ function dashDrawPeriods() {
                                         + (rowLabel ? ' data-dash-label="' + dashAttr(rowLabel) + '"' : '')
                                         + ' data-rg-col="' + colName.replace(/"/g, '&quot;') + '"'
                                         + dashCellFormatAttribute(row.id);
+                                    var hasValue = v !== undefined && v !== '';
+                                    var rowFormula = dashFormulas[row.id];
+                                    var cellReady = hasValue || rowFormula === '[]' || !rowFormula ? '1' : '0';
                                     row.insertAdjacentHTML('beforeend',
                                         cellTpl.replace(':val:', dashFormatNumberText(v || ''))
-                                            .replace(':ready:', '1')
-                                            .replace(':title:', dashFormatNumberText(v || ''))
+                                            .replace(':ready:', cellReady)
+                                            .replace(':title:', cellReady === '1' ? dashFormatNumberText(v || '') : '')
                                             .replace(':classes:', 'f-rg-cell')
                                             .replace(':src:', s.src)
                                             .replace(':item-id:', row.id)
