@@ -80,9 +80,12 @@
             dropdown.dataset.columnId = colId;
 
             // Build options HTML with checkboxes
-            const optionsHtml = cachedOptions.length > 0
-                ? cachedOptions.map(([id, text]) => {
-                    const isSelected = selectedIds.has(String(id));
+            const renderOptionsHtml = (options, selSet) => {
+                if (!options || options.length === 0) {
+                    return '<div class="filter-ref-empty">Ничего не найдено</div>';
+                }
+                return options.map(([id, text]) => {
+                    const isSelected = selSet.has(String(id));
                     const escapedText = String(text).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
                     return `
                         <label class="filter-ref-option" data-id="${id}">
@@ -90,7 +93,10 @@
                             <span class="filter-ref-option-text">${escapedText}</span>
                         </label>
                     `;
-                }).join('')
+                }).join('');
+            };
+            const optionsHtml = cachedOptions.length > 0
+                ? renderOptionsHtml(cachedOptions, selectedIds)
                 : '<div class="filter-ref-empty">Загрузка...</div>';
 
             dropdown.innerHTML = `
@@ -125,34 +131,72 @@
                 dropdown.style.left = `${window.innerWidth - dropdownRect.width - 10}px`;
             }
 
-            // Store reference to current dropdown
+            // Store reference to current dropdown. selectedIds is tracked here
+            // (not just in the DOM) because the option list is re-rendered on
+            // every server-side search (issue #2665) — checkbox state in the
+            // old DOM would be lost on each redraw.
             this.currentRefFilterDropdown = {
                 element: dropdown,
                 colId: colId,
                 triggerElement: triggerElement,
-                cachedOptions: cachedOptions
+                cachedOptions: cachedOptions,
+                selectedIds: new Set(selectedIds),
+                renderOptionsHtml: renderOptionsHtml,
+                searchSeq: 0
             };
 
             // Focus search input
             const searchInput = dropdown.querySelector('.filter-ref-search');
+            const optionsContainer = dropdown.querySelector('.filter-ref-options');
             searchInput.focus();
 
-            // Handle search input
+            // Handle search input — query the server with `q=<text>` instead of
+            // filtering locally. The initial cache is capped at LIMIT=50, so
+            // local filtering hid every record past that cap and prevented the
+            // user from selecting them (issue #2665). Mirrors the server-side
+            // search pattern already used in inline-edit reference dropdowns.
             let searchTimeout;
             searchInput.addEventListener('input', (e) => {
-                const searchText = e.target.value.trim().toLowerCase();
+                const searchText = e.target.value.trim();
                 clearTimeout(searchTimeout);
-                searchTimeout = setTimeout(() => {
-                    this.filterRefDropdownOptions(searchText);
-                }, 150);
+                searchTimeout = setTimeout(async () => {
+                    const state = this.currentRefFilterDropdown;
+                    if (!state || state.element !== dropdown) return;
+                    const mySeq = ++state.searchSeq;
+                    try {
+                        const options = await this.fetchReferenceOptions(colId, 0, searchText);
+                        // Drop responses that arrived after a newer query started or
+                        // after the dropdown was closed / replaced.
+                        if (!this.currentRefFilterDropdown
+                            || this.currentRefFilterDropdown !== state
+                            || mySeq !== state.searchSeq) return;
+                        state.cachedOptions = options;
+                        // Merge newly seen options into refOptionsCache so the
+                        // trigger label can resolve their text later.
+                        if (Array.isArray(options) && options.length > 0) {
+                            const existing = this.refOptionsCache[colId] || [];
+                            const known = new Set(existing.map(([id]) => String(id)));
+                            options.forEach(pair => {
+                                if (!known.has(String(pair[0]))) existing.push(pair);
+                            });
+                            this.refOptionsCache[colId] = existing;
+                        }
+                        optionsContainer.innerHTML = state.renderOptionsHtml(options, state.selectedIds);
+                    } catch (err) {
+                        console.error('Reference filter search failed:', err);
+                    }
+                }, 250);
             });
 
-            // Handle checkbox changes
-            const optionsContainer = dropdown.querySelector('.filter-ref-options');
+            // Handle checkbox changes — keep selectedIds in sync so it survives
+            // option-list re-renders on subsequent searches.
             optionsContainer.addEventListener('change', (e) => {
-                if (e.target.type === 'checkbox') {
-                    this.handleRefFilterSelection(colId);
-                }
+                if (e.target.type !== 'checkbox') return;
+                const state = this.currentRefFilterDropdown;
+                if (!state) return;
+                if (e.target.checked) state.selectedIds.add(e.target.value);
+                else state.selectedIds.delete(e.target.value);
+                this.handleRefFilterSelection(colId);
             });
 
             // Handle clear button
@@ -160,7 +204,9 @@
             clearBtn.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                // Uncheck all checkboxes
+                const state = this.currentRefFilterDropdown;
+                if (state) state.selectedIds.clear();
+                // Uncheck all checkboxes currently in the DOM
                 dropdown.querySelectorAll('.filter-ref-option input[type="checkbox"]').forEach(cb => {
                     cb.checked = false;
                 });
@@ -197,35 +243,18 @@
         }
 
         /**
-         * Filter options in the reference filter dropdown based on search text (issue #797).
-         * @param {string} searchText - Search text to filter by
-         */
-        filterRefDropdownOptions(searchText) {
-            if (!this.currentRefFilterDropdown) return;
-            const dropdown = this.currentRefFilterDropdown.element;
-            const options = dropdown.querySelectorAll('.filter-ref-option');
-
-            options.forEach(option => {
-                const text = option.querySelector('.filter-ref-option-text').textContent.toLowerCase();
-                const matches = !searchText || text.includes(searchText);
-                option.style.display = matches ? '' : 'none';
-            });
-        }
-
-        /**
          * Handle selection change in reference filter dropdown (issue #797).
          * Updates the filter state and reloads data.
          * @param {string} colId - Column ID
          */
         handleRefFilterSelection(colId) {
             if (!this.currentRefFilterDropdown) return;
-            const dropdown = this.currentRefFilterDropdown.element;
 
-            // Get selected IDs
-            const selectedIds = [];
-            dropdown.querySelectorAll('.filter-ref-option input[type="checkbox"]:checked').forEach(cb => {
-                selectedIds.push(cb.value);
-            });
+            // Read selected IDs from the tracked Set instead of the DOM —
+            // server-side search re-renders the option list (issue #2665), so
+            // a checkbox the user ticked earlier may no longer be in the DOM
+            // after they narrow the search. The Set is the source of truth.
+            const selectedIds = Array.from(this.currentRefFilterDropdown.selectedIds || []);
 
             // Update filter state
             if (!this.filters[colId]) {
