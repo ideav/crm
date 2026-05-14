@@ -6459,6 +6459,39 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         return dashFormatNumberText(s);
     }
 
+    function htmlEscape(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function pill(text) {
+        var safe = htmlEscape(text);
+        return '<span class="dash-sel-copy" role="button" tabindex="0" '
+            + 'title="Скопировать в буфер" data-copy="' + safe + '">' + safe + '</span>';
+    }
+
+    function copyToClipboard(text) {
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                return navigator.clipboard.writeText(text);
+            }
+        } catch (e) {}
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'absolute';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch (e) {}
+        document.body.removeChild(ta);
+    }
+
+    function flashCopied(el) {
+        el.classList.add('dash-sel-copied');
+        setTimeout(function() { el.classList.remove('dash-sel-copied'); }, 700);
+    }
+
     function updateBadge() {
         if (sel.cells.size < 2) {
             badge.classList.remove('visible');
@@ -6484,15 +6517,37 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         var avg = sum / n;
         var sep = '<span class="dash-sel-sep">·</span>';
         badge.innerHTML =
-            'Σ ' + dashFormatNumberText(sum) + sep +
-            'N ' + n + sep +
-            '⌀ ' + formatAvg(avg);
+            'Σ ' + pill(dashFormatNumberText(sum)) + sep +
+            'N ' + pill(String(n)) + sep +
+            '⌀ ' + pill(formatAvg(avg));
         var sy = window.pageYOffset || document.documentElement.scrollTop || 0;
         var sx = window.pageXOffset || document.documentElement.scrollLeft || 0;
         badge.style.top = (rect.bottom + sy + 6) + 'px';
         badge.style.left = (rect.right + sx) + 'px';
         badge.classList.add('visible');
     }
+
+    // Click-to-copy on the badge. The badge lives outside #dash-model, so
+    // these clicks don't reach the dashboard's mousedown/click handlers and
+    // the selection stays put.
+    badge.addEventListener('mousedown', function(e) { e.stopPropagation(); });
+    badge.addEventListener('click', function(e) {
+        var btn = e.target.closest('.dash-sel-copy');
+        if (!btn) return;
+        e.stopPropagation();
+        var text = btn.getAttribute('data-copy') || btn.textContent;
+        copyToClipboard(text);
+        flashCopied(btn);
+    });
+    badge.addEventListener('keydown', function(e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        var btn = e.target.closest && e.target.closest('.dash-sel-copy');
+        if (!btn) return;
+        e.preventDefault();
+        var text = btn.getAttribute('data-copy') || btn.textContent;
+        copyToClipboard(text);
+        flashCopied(btn);
+    });
 
     dashModelEl.addEventListener('mousedown', function(e) {
         if (e.button !== 0) return;
