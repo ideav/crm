@@ -1408,6 +1408,7 @@ function dashCalcCells() {
                 for (i in refs) {
                     // Try exact range match first; if not found and range="-", accept any range (issue #1877)
                     var rangeVal = el.getAttribute('range');
+                    var rgColVal = el.getAttribute('data-rg-col');
                     // Use getElementById to avoid invalid CSS selectors when IDs start with digits (issue #2074)
                     var refEl = document.getElementById(refs[i]);
                     var cells = refEl ? refEl.querySelectorAll('.f-rg-cell[range="' + rangeVal + '"],.f-col-cell[range="' + rangeVal + '"]') : [];
@@ -1417,10 +1418,21 @@ function dashCalcCells() {
                         cells = refEl ? refEl.querySelectorAll('.f-rg-cell,.f-col-cell') : [];
                         fallbackUsed = true;
                     }
+                    // Plan/Fact sub-columns share the same range="from-to", so the selector
+                    // above returns both; the non-global replace below would always pick the
+                    // first (План), leaking Plan values into Факт cells. Restrict to the
+                    // target cell's sub-column (issue #2652).
+                    if (rgColVal !== null && cells.length > 1) {
+                        var rgFilteredCells = Array.prototype.filter.call(cells, function(c) {
+                            return c.getAttribute('data-rg-col') === rgColVal;
+                        });
+                        if (rgFilteredCells.length > 0) cells = rgFilteredCells;
+                    }
                     dashTrace('formula-ref-lookup', {
                         itemId: itemId,
                         refId: refs[i],
                         range: rangeVal,
+                        rgCol: rgColVal,
                         matches: cells.length,
                         fallbackUsed: fallbackUsed,
                         formulaBeforeReplace: f
