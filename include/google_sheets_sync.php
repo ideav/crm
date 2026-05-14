@@ -955,10 +955,12 @@ function gss_escape_bki_list($values) {
 }
 
 function gss_escape_bki_value($value) {
+    // Only `:` and `;` are structural delimiters in BKI rows. `,` is a separator
+    // only inside multi-select list fields, which gss_build_bki_content never emits,
+    // so escaping it here added noisy backslashes to plain cell values (issue #2658).
     return strtr(gss_cell_to_string($value), [
         ':' => '\\:',
         ';' => '\\;',
-        ',' => '\\,',
     ]);
 }
 
