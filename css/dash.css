@@ -532,24 +532,39 @@ td:has(.dash-cell-input) {
     z-index: 9998;
     background: #2b6cb0;
     color: #fff;
-    font-size: 0.78rem;
-    line-height: 1.2;
-    padding: 0.3rem 0.7rem;
-    border-radius: 4px;
-    pointer-events: none;
+    font-size: 1rem;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.25;
+    padding: 0.55rem 1rem;
+    border-radius: 5px;
+    pointer-events: auto;
     white-space: nowrap;
     opacity: 0;
     transition: opacity 0.1s;
     transform: translateX(-100%);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.22);
     top: 0;
     left: 0;
 }
 #dash-selection-sum.visible { opacity: 1; }
 #dash-selection-sum .dash-sel-sep {
     display: inline-block;
-    margin: 0 0.45rem;
+    margin: 0 0.55rem;
     opacity: 0.55;
+}
+#dash-selection-sum .dash-sel-copy {
+    cursor: copy;
+    padding: 0.05rem 0.3rem;
+    margin: 0 -0.05rem;
+    border-radius: 3px;
+    transition: background-color 0.1s;
+}
+#dash-selection-sum .dash-sel-copy:hover {
+    background-color: rgba(255, 255, 255, 0.18);
+}
+#dash-selection-sum .dash-sel-copy.dash-sel-copied {
+    background-color: rgba(255, 255, 255, 0.4);
 }
 /* Panel filter modal */
 #dash-panel-filter-modal {
