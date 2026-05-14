@@ -6374,11 +6374,14 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
 });
 
 // ─── Cell multi-selection (sum of selected cells) ────────────────────────────
-// Drag inside a table to make a rectangular selection. Ctrl/Cmd+click toggles a
-// single cell. Shift+click extends a rectangular selection from the anchor.
-// Plain click on a cell preserves existing behaviour (inline edit / formula
-// modal / readonly tooltip) and clears any previous selection. The floating
-// badge under the selection shows Σ / count / average over numeric cells.
+// Drag inside a table to make a rectangular selection. Ctrl/Cmd+drag adds an
+// additional rectangle to the existing selection. Ctrl/Cmd+click toggles a
+// single cell. Shift+click extends from the anchor. Triple-click selects the
+// whole row. Plain click on a cell preserves existing behaviour (inline edit /
+// formula modal / readonly tooltip) and clears any previous selection. The
+// floating badge under the selection shows Σ / count / average over numeric
+// cells and supports click-to-copy plus Ctrl/Cmd+C TSV copy of everything
+// selected.
 (function() {
     var DRAG_PIXEL_THRESHOLD = 4;
     var dashModelEl = document.getElementById('dash-model');
@@ -6394,6 +6397,9 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         dragOriginY: 0,
         dragArmed: false,
         dragActive: false,
+        dragMode: null,           // 'replace' | 'additive'
+        dragBase: null,           // snapshot for additive merge
+        dragPendingToggle: false, // mouseup applies the Ctrl-click toggle if no drag happened
         suppressNextClick: false
     };
 
@@ -6509,6 +6515,33 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         }, 700);
     }
 
+    // If a stray first click on a triple-click sequence opened the inline
+    // editor, route the cell back through its own Esc handler so the original
+    // value is restored cleanly before we replace the selection.
+    function cancelInlineEdit() {
+        var input = dashModelEl.querySelector('.dash-cell-input');
+        if (!input) return;
+        try {
+            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        } catch (err) {
+            // KeyboardEvent ctor not available — just blur, the cell will
+            // commit but stay editable through its own logic.
+            input.blur();
+        }
+    }
+
+    function selectRowOf(td) {
+        var tr = td && td.closest && td.closest('tr');
+        if (!tr) return;
+        clearSelection();
+        sel.anchor = td;
+        for (var i = 0; i < tr.children.length; i++) {
+            var child = tr.children[i];
+            if (child.classList && child.classList.contains('f-cell')) addCell(child);
+        }
+        updateBadge();
+    }
+
     // Build a TSV blob from the current selection, walking the DOM in row
     // order. Each `<tr>` that has any selected cell becomes a line; selected
     // cells inside the row are joined with TAB in DOM (column) order. This
@@ -6609,8 +6642,24 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
 
     dashModelEl.addEventListener('mousedown', function(e) {
         if (e.button !== 0) return;
-        if (e.target.closest('input, textarea, select, .dash-cell-input, a, button')) return;
         var td = e.target.closest('td.f-cell');
+
+        // Multi-click handling runs even when the target is inside an inline
+        // edit input — that way triple-click still works after a stray first
+        // click opened the editor.
+        if (td && e.detail >= 2) {
+            e.preventDefault();
+            sel.suppressNextClick = true;
+            if (e.detail === 3) {
+                cancelInlineEdit();
+                selectRowOf(td);
+            }
+            return;
+        }
+
+        // Don't interfere with inputs (inline edit, formula modal textarea, …)
+        if (e.target.closest('input, textarea, select, .dash-cell-input, a, button')) return;
+
         if (!td) {
             if (sel.cells.size > 0) clearSelection();
             return;
@@ -6633,27 +6682,33 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
             return;
         }
         if (e.ctrlKey || e.metaKey) {
-            if (sel.cells.has(td)) {
-                removeCell(td);
-                if (sel.anchor === td) sel.anchor = null;
-            } else {
-                if (!sel.anchor) sel.anchor = td;
-                addCell(td);
-            }
-            updateBadge();
-            sel.suppressNextClick = true;
+            // Defer the toggle until mouseup so Ctrl+drag can grow an additive
+            // rectangle from this cell; a plain Ctrl+click without movement
+            // still toggles, applied in the mouseup handler below.
+            sel.dragStart = td;
+            sel.dragTbody = rc.tbody;
+            sel.dragOriginX = e.clientX;
+            sel.dragOriginY = e.clientY;
+            sel.dragArmed = true;
+            sel.dragActive = false;
+            sel.dragMode = 'additive';
+            sel.dragBase = new Set(sel.cells);
+            sel.dragPendingToggle = true;
             e.preventDefault();
             return;
         }
 
-        // No modifier: arm drag without changing selection yet, so a plain click
-        // still falls through to the existing handler.
+        // No modifier: arm a replace-drag without changing the selection yet,
+        // so a plain click still falls through to the existing handler.
         sel.dragStart = td;
         sel.dragTbody = rc.tbody;
         sel.dragOriginX = e.clientX;
         sel.dragOriginY = e.clientY;
         sel.dragArmed = true;
         sel.dragActive = false;
+        sel.dragMode = 'replace';
+        sel.dragBase = null;
+        sel.dragPendingToggle = false;
     });
 
     document.addEventListener('mousemove', function(e) {
@@ -6663,7 +6718,8 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
             var dy = e.clientY - sel.dragOriginY;
             if (dx * dx + dy * dy < DRAG_PIXEL_THRESHOLD * DRAG_PIXEL_THRESHOLD) return;
             sel.dragActive = true;
-            clearSelection();
+            sel.dragPendingToggle = false;
+            if (sel.dragMode === 'replace') clearSelection();
             sel.anchor = sel.dragStart;
             dashModelEl.classList.add('dash-selecting');
         }
@@ -6673,18 +6729,45 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         var rc = cellRC(td);
         if (!rc || rc.tbody !== sel.dragTbody) return;
         e.preventDefault();
-        replaceWith(rectFromCells(sel.dragStart, td));
+        var rect = rectFromCells(sel.dragStart, td);
+        if (sel.dragMode === 'additive') {
+            var merged = new Set(sel.dragBase);
+            rect.forEach(function(c) { merged.add(c); });
+            replaceWith(merged);
+        } else {
+            replaceWith(rect);
+        }
     });
 
     document.addEventListener('mouseup', function() {
         if (!sel.dragArmed) return;
         var wasDrag = sel.dragActive;
+        var pendingToggle = sel.dragPendingToggle;
+        var dragStart = sel.dragStart;
         sel.dragArmed = false;
         sel.dragActive = false;
+        sel.dragMode = null;
+        sel.dragBase = null;
+        sel.dragPendingToggle = false;
         sel.dragStart = null;
         sel.dragTbody = null;
         dashModelEl.classList.remove('dash-selecting');
-        if (wasDrag) sel.suppressNextClick = true;
+        if (wasDrag) {
+            sel.suppressNextClick = true;
+            return;
+        }
+        if (pendingToggle && dragStart) {
+            // Plain Ctrl/Cmd+click with no drag — apply the deferred toggle now.
+            if (sel.cells.has(dragStart)) {
+                removeCell(dragStart);
+                if (sel.anchor === dragStart) sel.anchor = null;
+            } else {
+                if (!sel.anchor) sel.anchor = dragStart;
+                addCell(dragStart);
+            }
+            updateBadge();
+            sel.suppressNextClick = true;
+        }
     });
 
     // Capture phase: suppress the existing bubble click handler when a
