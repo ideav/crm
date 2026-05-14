@@ -6464,10 +6464,18 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
             .replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
+    function stripSpaces(text) {
+        // Drop every whitespace char (regular space used as thousands
+        // separator, NBSP, narrow NBSP, tabs etc.) — keep digits, decimal
+        // comma/period, sign, percent.
+        return String(text).replace(/\s+/g, '');
+    }
+
     function pill(text) {
-        var safe = htmlEscape(text);
+        var display = htmlEscape(text);
+        var copy = htmlEscape(stripSpaces(text));
         return '<span class="dash-sel-copy" role="button" tabindex="0" '
-            + 'title="Скопировать в буфер" data-copy="' + safe + '">' + safe + '</span>';
+            + 'title="Скопировать в буфер" data-copy="' + copy + '">' + display + '</span>';
     }
 
     function copyToClipboard(text) {
@@ -6490,6 +6498,35 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
     function flashCopied(el) {
         el.classList.add('dash-sel-copied');
         setTimeout(function() { el.classList.remove('dash-sel-copied'); }, 700);
+    }
+
+    function flashSelection() {
+        var cells = [];
+        sel.cells.forEach(function(c) { cells.push(c); });
+        cells.forEach(function(c) { c.classList.add('dash-cell-copied'); });
+        setTimeout(function() {
+            cells.forEach(function(c) { c.classList.remove('dash-cell-copied'); });
+        }, 700);
+    }
+
+    // Build a TSV blob from the current selection, walking the DOM in row
+    // order. Each `<tr>` that has any selected cell becomes a line; selected
+    // cells inside the row are joined with TAB in DOM (column) order. This
+    // makes a rectangular range paste as a matching grid in Excel/Google
+    // Sheets, while disjoint Ctrl-selections still produce a sensible
+    // row-per-line layout.
+    function buildSelectionTsv() {
+        var trs = dashModelEl.querySelectorAll('tr');
+        var rows = [];
+        trs.forEach(function(tr) {
+            var rowCells = [];
+            for (var i = 0; i < tr.children.length; i++) {
+                var td = tr.children[i];
+                if (sel.cells.has(td)) rowCells.push(stripSpaces(dashCellText(td)));
+            }
+            if (rowCells.length > 0) rows.push(rowCells.join('\t'));
+        });
+        return rows.join('\n');
     }
 
     function updateBadge() {
@@ -6547,6 +6584,27 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         var text = btn.getAttribute('data-copy') || btn.textContent;
         copyToClipboard(text);
         flashCopied(btn);
+    });
+
+    // Ctrl+C / Cmd+C (and the OS «Copy» menu) over an active selection
+    // copies a TSV of every selected cell. We listen for the `copy` event so
+    // the user's data goes through `clipboardData.setData` directly — no
+    // permission prompt, no clipboard API quirks.
+    document.addEventListener('copy', function(e) {
+        if (sel.cells.size === 0) return;
+        var ae = document.activeElement;
+        if (ae && /^(INPUT|TEXTAREA)$/.test(ae.tagName)) return;
+        if (ae && ae.isContentEditable) return;
+        var text = buildSelectionTsv();
+        if (!text) return;
+        if (e.clipboardData) {
+            e.clipboardData.setData('text/plain', text);
+            e.preventDefault();
+        } else {
+            // Old IE / fallback
+            copyToClipboard(text);
+        }
+        flashSelection();
     });
 
     dashModelEl.addEventListener('mousedown', function(e) {
