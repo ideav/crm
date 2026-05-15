@@ -2279,6 +2279,14 @@ function dashGetModel(json) {
             , panelNotes = json[i].panelNotes === null || json[i].panelNotes === undefined ? '' : String(json[i].panelNotes)
             , panelFilter = json[i].panelFilter || ''
             , panelFilters = dashPanelLocalFilterState(panelFilter);
+        // The visible DOM row is keyed by the *first* non-duplicate itemID.
+        // If a later duplicate row introduces itemSrcName that the first
+        // occurrence didn't carry, fold it onto the visible row's metadata
+        // so dashRowLookupName still flips to the source-side name on
+        // render (issue #2687). Only fills an empty slot — never overwrites
+        // an existing srcName.
+        if (json[i].itemSrcName && dashItems[itemTargetId] && !dashItems[itemTargetId].srcName)
+            dashItems[itemTargetId].srcName = json[i].itemSrcName;
         // Add sheet tab
         if (!document.getElementById(json[i].sheetID)) {
             model.querySelector('.sheet-tabs').insertAdjacentHTML('beforeend',
