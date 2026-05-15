@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>gssync tabs preview (issue #2675)</title>
+<style>
+:root{
+  --text-primary:#222;--text-secondary:#666;--bg-primary:#fff;--bg-secondary:#f5f5f5;
+  --border-color:#ddd;--color-primary:#1283da;--color-danger:#dc3545;
+  --color-success:#28a745;
+  --color-warning-bg:#fff8e1;--color-warning-border:#f5c518;--color-warning-text:#8a6d00;
+  --card-bg:#fff;--input-bg:#fafafa;
+  font-family:system-ui,Arial,sans-serif;
+}
+body{padding:1rem;background:#fafafa;}
+
+.gss-wrap { padding: 1.5rem; max-width: 860px; }
+.gss-btn { padding: 0.3rem 0.75rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); cursor: pointer; font-size: 0.85rem; font-family: inherit; transition: background 0.15s; }
+.gss-btn-primary { background: var(--color-primary, #1283da); color: #fff; border-color: transparent; }
+.gss-form-box { border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-top: 1rem; background: var(--card-bg, var(--bg-primary)); }
+.gss-form-box h5 { margin: 0 0 1rem; color: var(--text-primary); font-size: 1rem; }
+.gss-field { margin-bottom: 0.75rem; }
+.gss-field label { display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.2rem; }
+.gss-field input[type=text], .gss-field input[type=password], .gss-field select, .gss-field textarea { width: 100%; box-sizing: border-box; padding: 0.45rem 0.6rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--input-bg, var(--bg-secondary)); color: var(--text-primary); font-size: 0.9rem; font-family: inherit; }
+.gss-field textarea { font-family: monospace; resize: vertical; }
+.gss-row { display: flex; gap: 1rem; }
+.gss-row .gss-field { flex: 1; }
+.gss-checkbox { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: var(--text-primary); cursor: pointer; margin-bottom: 0.5rem; }
+.gss-form-actions { display: flex; gap: 0.75rem; margin-top: 1.25rem; align-items: center; flex-wrap: wrap; }
+.gss-secret { position: relative; }
+.gss-secret input { padding-right: 4.2rem !important; }
+.gss-tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--border-color); margin-bottom: 1rem; }
+.gss-tab { background: none; border: none; padding: 0.5rem 1rem; cursor: pointer; color: var(--text-secondary); font-size: 0.9rem; font-family: inherit; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.gss-tab:hover { color: var(--text-primary); }
+.gss-tab.gss-tab-active { color: var(--color-primary, #1283da); border-bottom-color: var(--color-primary, #1283da); font-weight: 600; }
+.gss-tab-panel { display: none; }
+.gss-tab-panel.gss-tab-panel-active { display: block; }
+.gss-top-toggle { margin-bottom: 0.75rem; }
+</style>
+</head>
+<body>
+<div class="gss-wrap">
+  <p>
+    <button class="gss-btn" onclick="openNew()">Open as new (Подключение active)</button>
+    <button class="gss-btn" onclick="openEdit()">Open as edit with spreadsheet_id (Правила active)</button>
+  </p>
+  <div class="gss-form-box" id="gss-form">
+    <h5 id="gss-form-title">Новая конфигурация</h5>
+
+    <label class="gss-checkbox gss-top-toggle"><input type="checkbox" id="gss-enabled"> Загрузка включена</label>
+
+    <div class="gss-tabs" role="tablist">
+      <button type="button" class="gss-tab gss-tab-active" data-tab="connection" role="tab" aria-selected="true">Подключение</button>
+      <button type="button" class="gss-tab" data-tab="rules" role="tab" aria-selected="false">Правила</button>
+    </div>
+
+    <div class="gss-tab-panel gss-tab-panel-active" data-panel="connection" role="tabpanel">
+      <div class="gss-field">
+        <label>Имя конфигурации (латиница, цифры, дефис, точка) *</label>
+        <input type="text" id="gss-name" placeholder="my_config">
+      </div>
+      <div class="gss-field">
+        <label>Google Spreadsheet ID *</label>
+        <input type="text" id="gss-spreadsheet-id" placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms">
+      </div>
+      <div class="gss-field">
+        <label>Файл с credentials</label>
+        <input type="text" id="gss-credentials" placeholder="credentials.json">
+      </div>
+      <div class="gss-field">
+        <label>Таблица для загрузки *</label>
+        <select id="gss-table-id"><option value="">— выберите таблицу —</option></select>
+      </div>
+      <div class="gss-row">
+        <div class="gss-field"><label>Токен авторизации</label><div class="gss-secret"><input type="password" id="gss-token"></div></div>
+        <div class="gss-field"><label>Токен xsrf</label><div class="gss-secret"><input type="password" id="gss-xsrf"></div></div>
+      </div>
+      <div class="gss-row">
+        <div class="gss-field"><label>autoParent</label><input type="text" id="gss-auto-parent" value="449960"></div>
+        <div class="gss-field"><label>createParent</label><input type="text" id="gss-create-parent" value="1"></div>
+      </div>
+    </div>
+
+    <div class="gss-tab-panel" data-panel="rules" role="tabpanel">
+      <label class="gss-checkbox"><input type="checkbox" id="gss-save-empty"> Сохранять пустые значения</label>
+      <div class="gss-field">
+        <label>JSON-массив листов</label>
+        <textarea id="gss-sheets" rows="14"></textarea>
+      </div>
+    </div>
+
+    <div class="gss-form-actions">
+      <button class="gss-btn gss-btn-primary">Сохранить</button>
+      <button class="gss-btn">Отмена</button>
+    </div>
+  </div>
+</div>
+<script>
+function activateTab(name){
+  document.querySelectorAll('.gss-tab').forEach(function(t){
+    var a=t.dataset.tab===name;t.classList.toggle('gss-tab-active',a);t.setAttribute('aria-selected',a?'true':'false');
+  });
+  document.querySelectorAll('.gss-tab-panel').forEach(function(p){p.classList.toggle('gss-tab-panel-active',p.dataset.panel===name);});
+}
+document.querySelectorAll('.gss-tab').forEach(function(b){b.addEventListener('click',function(){activateTab(b.dataset.tab);});});
+function selectDefault(){
+  var sid=document.getElementById('gss-spreadsheet-id').value.trim();
+  activateTab(sid?'rules':'connection');
+}
+function openNew(){
+  document.getElementById('gss-spreadsheet-id').value='';
+  selectDefault();
+}
+function openEdit(){
+  document.getElementById('gss-spreadsheet-id').value='1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms';
+  selectDefault();
+}
+selectDefault();
+</script>
+</body>
+</html>
