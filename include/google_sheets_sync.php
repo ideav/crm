@@ -488,6 +488,15 @@ function gss_extract_sheet_records($sheetName, $values, $rowMatchers, $columnMat
     $maxColumns = gss_max_columns($matrix);
     $records = [];
 
+    // Precompute column-spec matches once per (column, columnSpec). The matcher
+    // in gss_find_matching_cell_entries iterates cells in index order and picks
+    // the lowest-index candidates first, so a match found against the full
+    // column is identical to one found against any prefix that contains all
+    // matched cells. Storing the highest entry index per match lets the main
+    // loop reproduce the original "column available up to rowIndex" semantics
+    // without re-running the matcher for every row × column.
+    $columnSpecMatches = gss_precompute_column_spec_matches($matrix, $maxColumns, $columnMatchers);
+
     foreach ($matrix as $rowIndex => $row) {
         gss_update_precondition_state($activePreconditions, $row, $levelPreconditions);
 
@@ -513,23 +522,27 @@ function gss_extract_sheet_records($sheetName, $values, $rowMatchers, $columnMat
         $rowSpecMatches = gss_apply_spec_prefixes($rowSpecMatches, $specPrefixes);
 
         for ($columnIndex = 0; $columnIndex < $maxColumns; $columnIndex++) {
+            $columnMatches = $columnSpecMatches[$columnIndex] ?? [];
+            if (empty($columnMatches)) {
+                continue;
+            }
+
             $matchedRows = [];
             $matchedColumns = [];
             $matchedRowEntries = [];
             $matchedColumnEntries = [];
             $hasColumnMatch = false;
-            $column = gss_column_values_between($matrix, $columnIndex, 0, $rowIndex);
 
             foreach ($rowSpecMatches as $rowSpecMatch) {
-                foreach ($columnMatchers as $columnSpec) {
-                    $columnMatch = gss_match_spec_with_entries($column, $columnSpec);
-                    if ($columnMatch['matched']) {
-                        $matchedRows = array_merge($matchedRows, $rowSpecMatch['values']);
-                        $matchedColumns = array_merge($matchedColumns, $columnMatch['values']);
-                        $matchedRowEntries = array_merge($matchedRowEntries, $rowSpecMatch['entries']);
-                        $matchedColumnEntries = array_merge($matchedColumnEntries, $columnMatch['entries']);
-                        $hasColumnMatch = true;
+                foreach ($columnMatches as $columnMatch) {
+                    if (!$columnMatch['matched'] || $columnMatch['max_index'] > $rowIndex) {
+                        continue;
                     }
+                    $matchedRows = array_merge($matchedRows, $rowSpecMatch['values']);
+                    $matchedColumns = array_merge($matchedColumns, $columnMatch['values']);
+                    $matchedRowEntries = array_merge($matchedRowEntries, $rowSpecMatch['entries']);
+                    $matchedColumnEntries = array_merge($matchedColumnEntries, $columnMatch['entries']);
+                    $hasColumnMatch = true;
                 }
             }
 
@@ -792,17 +805,35 @@ function gss_column_values($matrix, $columnIndex) {
     return $values;
 }
 
-function gss_column_values_between($matrix, $columnIndex, $startRow, $endRow) {
-    $values = [];
-    $startRow = max(0, (int)$startRow);
-    $endRow = min(count($matrix) - 1, (int)$endRow);
-
-    for ($rowIndex = $startRow; $rowIndex <= $endRow; $rowIndex++) {
-        $row = $matrix[$rowIndex];
-        $values[] = isset($row[$columnIndex]) ? $row[$columnIndex] : '';
+function gss_precompute_column_spec_matches($matrix, $maxColumns, $columnMatchers) {
+    $result = [];
+    for ($columnIndex = 0; $columnIndex < $maxColumns; $columnIndex++) {
+        $column = gss_column_values($matrix, $columnIndex);
+        $perSpec = [];
+        foreach ($columnMatchers as $columnSpec) {
+            $match = gss_match_spec_with_entries($column, $columnSpec);
+            $maxIndex = -1;
+            if ($match['matched']) {
+                foreach ($match['entries'] as $entry) {
+                    if (!isset($entry['index'])) {
+                        continue;
+                    }
+                    $entryIndex = (int)$entry['index'];
+                    if ($entryIndex > $maxIndex) {
+                        $maxIndex = $entryIndex;
+                    }
+                }
+            }
+            $perSpec[] = [
+                'matched' => $match['matched'],
+                'values' => $match['values'],
+                'entries' => $match['entries'],
+                'max_index' => $maxIndex,
+            ];
+        }
+        $result[$columnIndex] = $perSpec;
     }
-
-    return $values;
+    return $result;
 }
 
 function gss_match_specs($cells, $specs) {
