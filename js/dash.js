@@ -1352,6 +1352,50 @@ function dashGetColVal(item, col, dashLabel, panelKey) {
     if (valids) return dashNormalizeVal(key, acc);
 }
 
+// Build a comma-separated breakdown of contributing entries for a cell title.
+// Mirrors the iteration in dashGetVal / dashGetColVal so the title lists every
+// per-entry value that actually went into the displayed sum (issue #2677).
+function dashFormatDetailEntry(entry, n) {
+    var v = dashFormatNumberText(n), label = entry && entry['Метка'] ? String(entry['Метка']).trim() : '';
+    var prefix = entry && entry.date ? String(entry.date) : '';
+    if (label) prefix = prefix ? prefix + ' [' + label + ']' : '[' + label + ']';
+    return prefix ? prefix + ': ' + v : v;
+}
+
+function dashGetValDetails(item, fr, to, dashLabel, panelKey) {
+    var i, parts = [], key = item ? item.toLowerCase() : item;
+    var store = (panelKey && dashPanelValues[panelKey]) ? dashPanelValues[panelKey] : dashValues;
+    if (!store[key]) return '';
+    var hasLabelFilter = dashLabel !== undefined;
+    for (i in store[key]) {
+        var entry = store[key][i];
+        if (hasLabelFilter && !dashMatrixLabelMatches(dashLabel, entry['Метка'])) continue;
+        if (!fr || (entry.date >= fr && entry.date <= to)) {
+            var n = dashGetFloat(entry.val);
+            if (isNaN(n)) continue;
+            parts.push(dashFormatDetailEntry(entry, n));
+        }
+    }
+    return parts.join(', ');
+}
+
+function dashGetColValDetails(item, col, dashLabel, panelKey) {
+    var i, parts = [], key = item ? item.toLowerCase() : item, colLower = col ? col.toLowerCase() : col;
+    var store = (panelKey && dashPanelValues[panelKey]) ? dashPanelValues[panelKey] : dashValues;
+    if (!store[key]) return '';
+    var hasLabelFilter = dashLabel !== undefined;
+    for (i in store[key]) {
+        var entry = store[key][i];
+        if (hasLabelFilter && !dashMatrixLabelMatches(dashLabel, entry['Метка'])) continue;
+        if ((entry.col || '').toLowerCase() === colLower) {
+            var n = dashGetFloat(entry.val);
+            if (isNaN(n)) continue;
+            parts.push(dashFormatDetailEntry(entry, n));
+        }
+    }
+    return parts.join(', ');
+}
+
 function dashResolveValueCell(rowId, groupName, panelKey) {
     var formula = dashFormulas[rowId] || ''
         , itemName = dashItems[rowId] ? dashItems[rowId].name : ''
@@ -1670,13 +1714,25 @@ function dashDrawPeriods() {
                                 var rgHeadVal = dashModelData[panelId].rgs[rg].head || '';
                                 var rowLabel = (dashItems[row.id] && dashItems[row.id].label) || '';
                                 rgCols.forEach(function(colName) {
+                                    var vDetails = '';
                                     v = dashGetVal(itemName + ':' + colName, fr, to, rowLabel, panelId);
-                                    if (v === undefined && dashFormulas[row.id]) {
-                                        if (dashFormulas[row.id] === '[]')
+                                    if (v !== undefined)
+                                        vDetails = dashGetValDetails(itemName + ':' + colName, fr, to, rowLabel, panelId);
+                                    else if (dashFormulas[row.id]) {
+                                        if (dashFormulas[row.id] === '[]') {
                                             v = dashGetVal(itemName, fr, to, rowLabel, panelId);
-                                        else if (itemRegex.test(dashFormulas[row.id]))
-                                            v = dashGetVal(dashFormulas[row.id].match(itemRegex)[1] + ':' + colName, fr, to, rowLabel, panelId)
-                                             || dashGetVal(dashFormulas[row.id].match(itemRegex)[1], fr, to, rowLabel, panelId) || '0';
+                                            if (v !== undefined) vDetails = dashGetValDetails(itemName, fr, to, rowLabel, panelId);
+                                        } else if (itemRegex.test(dashFormulas[row.id])) {
+                                            var aliasItem = dashFormulas[row.id].match(itemRegex)[1];
+                                            v = dashGetVal(aliasItem + ':' + colName, fr, to, rowLabel, panelId);
+                                            if (v) {
+                                                vDetails = dashGetValDetails(aliasItem + ':' + colName, fr, to, rowLabel, panelId);
+                                            } else {
+                                                v = dashGetVal(aliasItem, fr, to, rowLabel, panelId);
+                                                if (v) vDetails = dashGetValDetails(aliasItem, fr, to, rowLabel, panelId);
+                                                else v = '0';
+                                            }
+                                        }
                                     }
                                     var cellExtra = s.extra
                                         + (valueItemId ? ' data-value-item-id="' + valueItemId + '"' : '')
@@ -1690,7 +1746,7 @@ function dashDrawPeriods() {
                                     row.insertAdjacentHTML('beforeend',
                                         cellTpl.replace(':val:', dashFormatNumberText(v || ''))
                                             .replace(':ready:', cellReady)
-                                            .replace(':title:', cellReady === '1' ? dashFormatNumberText(v || '') : '')
+                                            .replace(':title:', cellReady === '1' ? dashAttr(vDetails) : '')
                                             .replace(':classes:', 'f-rg-cell')
                                             .replace(':src:', s.src)
                                             .replace(':item-id:', row.id)
@@ -1710,12 +1766,20 @@ function dashDrawPeriods() {
                                 var valueItemId = dashPanelValues[panelId] ? '' : (dashValueItemIds[(itemName || '').toLowerCase()] || '');
                                 var rgHeadVal = dashModelData[panelId].rgs[rg].head || '';
                                 var rowLabel = (dashItems[row.id] && dashItems[row.id].label) || '';
+                                var vDetails = '';
                                 v = dashGetVal(itemName, fr, to, rowLabel, panelId);
-                                if (v === undefined && dashFormulas[row.id]) {
-                                    if (dashFormulas[row.id] === '[]')
+                                if (v !== undefined)
+                                    vDetails = dashGetValDetails(itemName, fr, to, rowLabel, panelId);
+                                else if (dashFormulas[row.id]) {
+                                    if (dashFormulas[row.id] === '[]') {
                                         v = dashGetVal(itemName, fr, to, rowLabel, panelId);
-                                    else if (itemRegex.test(dashFormulas[row.id]))
-                                        v = dashGetVal(dashFormulas[row.id].match(itemRegex)[1], fr, to, rowLabel, panelId) || '0';
+                                        if (v !== undefined) vDetails = dashGetValDetails(itemName, fr, to, rowLabel, panelId);
+                                    } else if (itemRegex.test(dashFormulas[row.id])) {
+                                        var aliasItem = dashFormulas[row.id].match(itemRegex)[1];
+                                        v = dashGetVal(aliasItem, fr, to, rowLabel, panelId);
+                                        if (v) vDetails = dashGetValDetails(aliasItem, fr, to, rowLabel, panelId);
+                                        else v = '0';
+                                    }
                                 }
                                 var periodLabel = p[i].r[0] || '';
                                 var cellExtra = s.extra
@@ -1727,7 +1791,7 @@ function dashDrawPeriods() {
                                 row.insertAdjacentHTML('beforeend',
                                     cellTpl.replace(':val:', dashFormatNumberText(v || ''))
                                         .replace(':ready:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? '1' : '0')
-                                        .replace(':title:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? dashFormatNumberText(v || '') : '')
+                                        .replace(':title:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? dashAttr(vDetails) : '')
                                         .replace(':classes:', 'f-rg-cell')
                                         .replace(':src:', s.src)
                                         .replace(':item-id:', row.id)
@@ -1831,7 +1895,7 @@ function dashDrawPeriods() {
                                     panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
                                         headTpl.replace(':head:', col).replace(':from:-:to:', i));
                                     panel.querySelectorAll('.f-item').forEach(function(row) {
-                                        var ready = 0, src = 'report', extra = '';
+                                        var ready = 0, src = 'report', extra = '', vDetails = '';
                                         var item = dashItems[row.id] || {};
                                         var itemName = item.name || '';
                                         var rowLabel = item.label || '';
@@ -1851,6 +1915,7 @@ function dashDrawPeriods() {
                                         } else {
                                             v = dashGetColVal(itemName, col, rowLabel, panelId);
                                             if (v || dashFormulas[row.id] === '[]') ready = 1;
+                                            if (v !== undefined) vDetails = dashGetColValDetails(itemName, col, rowLabel, panelId);
                                         }
                                         if (rowLabel) extra += ' data-dash-label="' + dashAttr(rowLabel) + '"';
                                         extra += ' data-rg-col="' + dashAttr(col) + '"';
@@ -1858,7 +1923,7 @@ function dashDrawPeriods() {
                                         row.insertAdjacentHTML('beforeend',
                                             cellTpl.replace(':val:', dashFormatNumberText(dashNormalizeVal(row.id, v || '')))
                                                 .replace(':ready:', ready)
-                                                .replace(':title:', '')
+                                                .replace(':title:', ready === 1 ? dashAttr(vDetails) : '')
                                                 .replace(':classes:', 'f-col-cell')
                                                 .replace(':src:', src)
                                                 .replace(':item-id:', row.id)
