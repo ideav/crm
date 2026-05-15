@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>gssync highlight preview</title>
+<style>
+:root{
+  --text-primary:#222;--text-secondary:#666;--bg-primary:#fff;--bg-secondary:#f5f5f5;
+  --border-color:#ddd;--color-primary:#1283da;--color-danger:#dc3545;
+  --color-warning-bg:#fff8e1;--color-warning-border:#f5c518;--color-warning-text:#8a6d00;
+  --card-bg:#fff;--input-bg:#fafafa;
+  font-family:system-ui,Arial,sans-serif;
+}
+body{padding:1rem;}
+
+.gss-wrap { padding: 1.5rem; max-width: 860px; }
+.gss-card { border: 1px solid var(--border-color); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.75rem; background: var(--card-bg, var(--bg-primary)); }
+.gss-card.gss-editing { background: var(--color-warning-bg, #fff8e1); border-color: var(--color-warning-border, #f5c518); }
+#gss-form-title.gss-editing { display: inline-block; background: var(--color-warning-bg, #fff8e1); border: 1px solid var(--color-warning-border, #f5c518); color: var(--color-warning-text, #8a6d00); padding: 0.15rem 0.5rem; border-radius: 4px; }
+.gss-card-name { font-weight: 600; flex: 1; color: var(--text-primary); }
+.gss-card-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
+.gss-btn { padding: 0.3rem 0.75rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); cursor: pointer; font-size: 0.85rem; font-family: inherit; transition: background 0.15s; }
+.gss-btn-primary { background: var(--color-primary, #1283da); color: #fff; border-color: transparent; }
+.gss-btn-danger { color: var(--color-danger, #dc3545); }
+.gss-form-box { border: 1px solid var(--border-color); border-radius: 8px; padding: 1.25rem; margin-top: 1rem; background: var(--card-bg, var(--bg-primary)); }
+.gss-form-box h5 { margin: 0 0 1rem; color: var(--text-primary); font-size: 1rem; }
+</style>
+</head>
+<body>
+<div class="gss-wrap">
+  <div class="gss-card">
+    <span class="gss-card-name">my_config1</span>
+    <div class="gss-card-actions">
+      <button class="gss-btn" onclick="edit('my_config1')">Изменить</button>
+    </div>
+  </div>
+  <div class="gss-card" id="card-my_config2">
+    <span class="gss-card-name">my_config2</span>
+    <div class="gss-card-actions">
+      <button class="gss-btn" onclick="edit('my_config2')">Изменить</button>
+    </div>
+  </div>
+  <div class="gss-card">
+    <span class="gss-card-name">my_config3</span>
+    <div class="gss-card-actions">
+      <button class="gss-btn" onclick="edit('my_config3')">Изменить</button>
+    </div>
+  </div>
+
+  <div class="gss-form-box">
+    <h5 id="gss-form-title">Редактирование: my_config2</h5>
+    <p>Form contents...</p>
+    <button class="gss-btn" onclick="cancel()">Отмена</button>
+  </div>
+</div>
+<script>
+function setEditingHighlight(config) {
+  document.querySelectorAll('.gss-card.gss-editing').forEach(function(c) { c.classList.remove('gss-editing'); });
+  var title = document.getElementById('gss-form-title');
+  if (config) {
+    var card = document.getElementById('card-' + config);
+    if (card) card.classList.add('gss-editing');
+    if (title) title.classList.add('gss-editing');
+  } else {
+    if (title) title.classList.remove('gss-editing');
+  }
+}
+function edit(c) {
+  document.getElementById('gss-form-title').textContent = 'Редактирование: ' + c;
+  // ensure all cards have id
+  document.querySelectorAll('.gss-card').forEach(function(card, i) {
+    if (!card.id) card.id = 'card-' + card.querySelector('.gss-card-name').textContent;
+  });
+  setEditingHighlight(c);
+}
+function cancel() { setEditingHighlight(null); document.getElementById('gss-form-title').textContent = 'Новая конфигурация'; }
+// preset: my_config2 is being edited
+edit('my_config2');
+</script>
+</body>
+</html>
