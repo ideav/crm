@@ -9,6 +9,8 @@
 .gss-help-box p { margin: 0.4rem 0; }
 .gss-help-box code { background: var(--bg-primary); padding: 0.1rem 0.3rem; border-radius: 3px; font-size: 0.82rem; }
 .gss-card { border: 1px solid var(--border-color); border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.75rem; background: var(--card-bg, var(--bg-primary)); }
+.gss-card.gss-editing { background: var(--color-warning-bg, #fff8e1); border-color: var(--color-warning-border, #f5c518); }
+#gss-form-title.gss-editing { display: inline-block; background: var(--color-warning-bg, #fff8e1); border: 1px solid var(--color-warning-border, #f5c518); color: var(--color-warning-text, #8a6d00); padding: 0.15rem 0.5rem; border-radius: 4px; }
 .gss-card-name { font-weight: 600; flex: 1; color: var(--text-primary); }
 .gss-card-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
 .gss-btn { padding: 0.3rem 0.75rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); cursor: pointer; font-size: 0.85rem; font-family: inherit; transition: background 0.15s; }
@@ -207,6 +209,20 @@
     }
     updateEmpty();
 
+    function setEditingHighlight(config) {
+        document.querySelectorAll('.gss-card.gss-editing').forEach(function(c) {
+            c.classList.remove('gss-editing');
+        });
+        var title = document.getElementById('gss-form-title');
+        if (config) {
+            var card = document.getElementById('card-' + config);
+            if (card) card.classList.add('gss-editing');
+            if (title) title.classList.add('gss-editing');
+        } else {
+            if (title) title.classList.remove('gss-editing');
+        }
+    }
+
     document.getElementById('gss-search').addEventListener('input', function() {
         var q = this.value.trim().toLowerCase();
         document.querySelectorAll('.gss-card').forEach(function(card) {
@@ -322,6 +338,7 @@
         clearForm();
         document.getElementById('gss-name').value = nextDefaultConfigName();
         loadTables();
+        setEditingHighlight(null);
         document.getElementById('gss-form').style.display = '';
         document.getElementById('gss-form').scrollIntoView({behavior:'smooth', block:'nearest'});
     });
@@ -329,6 +346,7 @@
     document.getElementById('gss-cancel-btn').addEventListener('click', function() {
         document.getElementById('gss-form').style.display = 'none';
         editingConfig = null;
+        setEditingHighlight(null);
     });
 
     document.addEventListener('click', function(e) {
@@ -340,6 +358,7 @@
         document.getElementById('gss-name').value = config;
         document.getElementById('gss-name').disabled = true;
         document.getElementById('gss-save-msg').textContent = '';
+        setEditingHighlight(config);
         Promise.all([
             loadTables(),
             fetch('/' + db + '/gssync?JSON&load=' + encodeURIComponent(config)).then(function(r) { return r.json(); })
@@ -433,6 +452,7 @@
                     if (card) card.remove();
                     if (result) result.remove();
                     if (warn) warn.remove();
+                    if (editingConfig === config) setEditingHighlight(null);
                     updateEmpty();
                 }
             })
