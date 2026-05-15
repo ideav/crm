@@ -2028,6 +2028,20 @@ function dashGetVizReport(reportId, fr, to, panelFilter) {
     return key;
 }
 
+// Parses a source-`value` string into an array of `{date, val, ...}` records.
+// Historically `value` came as a bare list of objects with no outer brackets —
+// `{"date":...},{"date":...}` — so the caller wrapped it in `[...]` before
+// JSON.parse. Newer backends may emit the same payload already wrapped:
+// `[{"date":...},{"date":...}]`. Wrapping that a second time produced a valid
+// JSON array of arrays — JSON.parse succeeded silently but the parsed records
+// were nested one level too deep, so per-record fields (date/val/Метка)
+// stopped being visible and the cells came up empty without any error.
+// Sniff the first non-whitespace char: if it's already `[`, parse as-is.
+function dashParseSrcValue(value) {
+    var raw = String(value == null ? '' : value).replace(/^\s+/, '');
+    return JSON.parse(raw.charAt(0) === '[' ? raw : '[' + raw + ']');
+}
+
 function dashGetSrc(json) {
     for (var i in json || []) {
         if (json[i].valueItemID) dashValueItemIds[(json[i].item || '').toLowerCase()] = json[i].valueItemID;
@@ -2037,7 +2051,7 @@ function dashGetSrc(json) {
                 var itemKey = (json[i].item || '').toLowerCase();
                 var key = colGroup ? itemKey + ':' + colGroup : itemKey;
                 var srcLabel = json[i]['Метка'] || '';
-                var parsed = JSON.parse('[' + json[i].value + ']');
+                var parsed = dashParseSrcValue(json[i].value);
                 var tagged = parsed.map(function(p) {
                     return Object.assign({}, p, { 'Метка': srcLabel });
                 });
@@ -2105,7 +2119,7 @@ function dashGetPanelValuesDone(json, ctx) {
             var key = colGroup ? itemKey + ':' + colGroup : itemKey;
             try {
                 var srcLabel = row['Метка'] || '';
-                var parsed = JSON.parse('[' + row.value + ']');
+                var parsed = dashParseSrcValue(row.value);
                 var tagged = parsed.map(function(p) {
                     return Object.assign({}, p, { 'Метка': srcLabel });
                 });
