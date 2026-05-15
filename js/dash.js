@@ -2177,7 +2177,13 @@ function dashGetPanelValuesDone(json, ctx) {
     if (panelKey && Array.isArray(json)) {
         var bucket = dashPanelValues[panelKey] = {};
         var errBucket = dashPanelValueErrors[panelKey] = {};
-        json.forEach(function(row) {
+        // Apply local panelFilter parts ("Field:Value") that weren't sent to
+        // the server in dashGetPanelValues. Without this, the panel would
+        // surface rows from every sheet even though panelFilter restricts
+        // it (issue #2679).
+        var modelFilters = (dashModelData[panelKey] && dashModelData[panelKey].panelFilters) || {};
+        var filteredRows = dashFilterReportRowsForPanel(json, modelFilters);
+        filteredRows.forEach(function(row) {
             if (!row || row.value === undefined || row.value === null || row.value === '') return;
             var itemKey = (row.item || '').toLowerCase();
             var colGroup = (row.RGcolumnsID || '').toLowerCase();
