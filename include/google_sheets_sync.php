@@ -477,15 +477,40 @@ function gss_extract_sheet_records($sheetName, $values, $rowMatchers, $columnMat
         throw new RuntimeException("Sheet '{$sheetName}' must define non-empty column matchers.");
     }
 
+    $parsedRowMatchers = [];
+    foreach (array_values($rowMatchers) as $matcher) {
+        $parsedRowMatchers[] = gss_parse_row_spec_preconditions($matcher);
+    }
+    $levelPreconditions = gss_collect_level_preconditions($parsedRowMatchers);
+    $activePreconditions = [];
+
     $matrix = gss_normalize_matrix($values);
     $maxColumns = gss_max_columns($matrix);
     $records = [];
 
     foreach ($matrix as $rowIndex => $row) {
-        $rowSpecMatches = gss_match_specs_with_entries($row, $rowMatchers);
+        gss_update_precondition_state($activePreconditions, $row, $levelPreconditions);
+
+        $applicableSpecs = [];
+        $specPrefixes = [];
+        foreach ($parsedRowMatchers as $idx => $parsed) {
+            if (!gss_preconditions_active($parsed['preconditions'], $activePreconditions)) {
+                continue;
+            }
+            $applicableSpecs[$idx] = $parsed['pattern'];
+            $specPrefixes[$idx] = $parsed['prefix'];
+        }
+
+        if (empty($applicableSpecs)) {
+            continue;
+        }
+
+        $rowSpecMatches = gss_match_specs_with_entries($row, $applicableSpecs);
         if (empty($rowSpecMatches)) {
             continue;
         }
+
+        $rowSpecMatches = gss_apply_spec_prefixes($rowSpecMatches, $specPrefixes);
 
         for ($columnIndex = 0; $columnIndex < $maxColumns; $columnIndex++) {
             $matchedRows = [];
@@ -534,6 +559,124 @@ function gss_extract_sheet_records($sheetName, $values, $rowMatchers, $columnMat
     }
 
     return $records;
+}
+
+function gss_parse_row_spec_preconditions($spec) {
+    if (!is_string($spec)) {
+        return ['preconditions' => [], 'pattern' => $spec, 'prefix' => ''];
+    }
+
+    $preconditions = [];
+    $prefix = '';
+    $remaining = $spec;
+    while (preg_match('/^\[([^\]]+)\]/u', $remaining, $matches) === 1) {
+        $preconditions[] = $matches[1];
+        $prefix .= $matches[0];
+        $remaining = substr($remaining, strlen($matches[0]));
+    }
+
+    if ($remaining === '' || empty($preconditions)) {
+        return ['preconditions' => [], 'pattern' => $spec, 'prefix' => ''];
+    }
+
+    return [
+        'preconditions' => $preconditions,
+        'pattern' => $remaining,
+        'prefix' => $prefix,
+    ];
+}
+
+function gss_collect_level_preconditions($parsedSpecs) {
+    $levels = [];
+    foreach ($parsedSpecs as $parsed) {
+        foreach ($parsed['preconditions'] as $position => $key) {
+            $level = $position + 1;
+            if (!isset($levels[$level])) {
+                $levels[$level] = [];
+            }
+            if (!in_array($key, $levels[$level], true)) {
+                $levels[$level][] = $key;
+            }
+        }
+    }
+    ksort($levels);
+    return $levels;
+}
+
+function gss_update_precondition_state(&$activeState, $row, $levelPreconditions) {
+    if (empty($levelPreconditions)) {
+        return;
+    }
+
+    foreach ($levelPreconditions as $level => $keys) {
+        $matchedKey = null;
+        foreach ($keys as $key) {
+            foreach ($row as $cell) {
+                if (gss_pattern_matches($key, $cell)) {
+                    $matchedKey = $key;
+                    break 2;
+                }
+            }
+        }
+
+        if ($matchedKey === null) {
+            continue;
+        }
+
+        if (($activeState[$level] ?? null) === $matchedKey) {
+            continue;
+        }
+
+        $activeState[$level] = $matchedKey;
+        foreach (array_keys($activeState) as $existingLevel) {
+            if ($existingLevel > $level) {
+                unset($activeState[$existingLevel]);
+            }
+        }
+    }
+}
+
+function gss_preconditions_active($preconditions, $activeState) {
+    foreach ($preconditions as $position => $key) {
+        $level = $position + 1;
+        if (($activeState[$level] ?? null) !== $key) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function gss_apply_spec_prefixes($rowSpecMatches, $specPrefixes) {
+    if (empty($specPrefixes)) {
+        return $rowSpecMatches;
+    }
+
+    foreach ($rowSpecMatches as &$match) {
+        $key = isset($match['key']) ? $match['key'] : '';
+        $prefix = isset($specPrefixes[$key]) ? (string)$specPrefixes[$key] : '';
+        if ($prefix === '') {
+            continue;
+        }
+
+        if (isset($match['values']) && is_array($match['values'])) {
+            foreach ($match['values'] as &$value) {
+                $value = $prefix . gss_cell_to_string($value);
+            }
+            unset($value);
+        }
+
+        if (isset($match['entries']) && is_array($match['entries'])) {
+            foreach ($match['entries'] as &$entry) {
+                if (isset($entry['value'])) {
+                    $entry['value'] = $prefix . gss_cell_to_string($entry['value']);
+                }
+            }
+            unset($entry);
+        }
+    }
+    unset($match);
+
+    return $rowSpecMatches;
 }
 
 function gss_normalize_matrix($values) {
