@@ -66,6 +66,7 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
         + '<h4>:name:</h4>'
         + (dashIsAdmin ? '<a class="f-panel-settings-icon" title="Настройки отображения"><i class="pi pi-chart-bar"></i></a>' : '')
         + '<a class="f-panel-filter-icon" title="Фильтр"><i class="pi pi-filter"></i></a>'
+        + '<a class="f-panel-copy-icon" title="Скопировать таблицу"><i class="pi pi-copy"></i></a>'
         + '</div>'
         + '<div class="f-panel-content">'
         + '<div class="f-table-wrap"><table class="table table-sm table-bordered w-auto"><thead><tr class="dash-head f-head"><th>:head:</thead><tbody></tbody></table></div>'
@@ -6540,15 +6541,38 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         suppressNextClick: false
     };
 
+    // Returns true for any cell the user is allowed to drag-select. Header
+    // cells (.f-head / .f-subhead th) and the row-label column (.f-first-cell)
+    // join the data cells (.f-cell) so a drag from the period header down or
+    // from the row name across covers everything, Excel-style (issue #2681).
+    function isSelectableCell(node) {
+        if (!node || !node.classList) return false;
+        if (node.classList.contains('f-cell')) return true;
+        if (node.classList.contains('f-first-cell')) return true;
+        if (node.tagName === 'TH' && node.closest('.f-panel table')) return true;
+        return false;
+    }
+
+    // Cells that contribute numbers to the Σ / N / ⌀ badge. Headers and the
+    // row-label column are part of the selection (for copy) but not the stats.
+    function isStatsCell(node) {
+        return !!(node && node.classList && node.classList.contains('f-cell'));
+    }
+
+    // Row index inside the cell's table (across thead + tbody), so a rectangle
+    // can span a period header at the top down to a data row at the bottom.
     function cellRC(td) {
         var tr = td && td.parentElement;
         if (!tr || tr.tagName !== 'TR') return null;
-        var tbody = tr.parentElement;
-        if (!tbody) return null;
+        var table = tr.closest('table');
+        if (!table) return null;
+        var allRows = table.querySelectorAll('tr');
+        var rowIdx = Array.prototype.indexOf.call(allRows, tr);
+        if (rowIdx < 0) return null;
         return {
-            row: Array.prototype.indexOf.call(tbody.children, tr),
+            row: rowIdx,
             col: Array.prototype.indexOf.call(tr.children, td),
-            tbody: tbody
+            tbody: table  // keep the field name for back-compat — it now scopes the rectangle to the whole table
         };
     }
 
@@ -6576,15 +6600,16 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
     function rectFromCells(a, b) {
         var ra = cellRC(a), rb = cellRC(b);
         if (!ra || !rb || ra.tbody !== rb.tbody) return [];
+        var rows = ra.tbody.querySelectorAll('tr');
         var r1 = Math.min(ra.row, rb.row), r2 = Math.max(ra.row, rb.row);
         var c1 = Math.min(ra.col, rb.col), c2 = Math.max(ra.col, rb.col);
         var out = [];
         for (var r = r1; r <= r2; r++) {
-            var tr = ra.tbody.children[r];
+            var tr = rows[r];
             if (!tr) continue;
             for (var c = c1; c <= c2; c++) {
-                var td = tr.children[c];
-                if (td && td.classList && td.classList.contains('f-cell')) out.push(td);
+                var cell = tr.children[c];
+                if (isSelectableCell(cell)) out.push(cell);
             }
         }
         return out;
@@ -6674,9 +6699,31 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         sel.anchor = td;
         for (var i = 0; i < tr.children.length; i++) {
             var child = tr.children[i];
-            if (child.classList && child.classList.contains('f-cell')) addCell(child);
+            if (isSelectableCell(child)) addCell(child);
         }
         updateBadge();
+    }
+
+    // Text for a single cell in a TSV payload. Strips thousands-separator
+    // spaces from numeric data cells so "1 234,56" pastes as a clean number;
+    // text cells (row labels, period headers) keep their internal spaces so
+    // "Total revenue" doesn't become "Totalrevenue" (issue #2681).
+    function tsvCellText(cell) {
+        if (!cell) return '';
+        if (isStatsCell(cell)) return stripSpaces(dashCellText(cell));
+        // The row-label cell hides .show-id (row id + edit link) via CSS,
+        // but textContent still picks it up. Use item-name as the canonical
+        // row label when available; otherwise fall back to textContent with
+        // any .show-id branch stripped.
+        if (cell.classList && cell.classList.contains('f-first-cell')) {
+            var tr = cell.closest('tr');
+            var attr = tr && tr.getAttribute && tr.getAttribute('item-name');
+            if (attr) return String(attr).trim();
+            var clone = cell.cloneNode(true);
+            clone.querySelectorAll('.show-id').forEach(function(el) { el.remove(); });
+            return (clone.textContent || '').trim();
+        }
+        return (cell.textContent != null ? String(cell.textContent) : '').trim();
     }
 
     // Build a TSV blob from the current selection, walking the DOM in row
@@ -6691,10 +6738,26 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         trs.forEach(function(tr) {
             var rowCells = [];
             for (var i = 0; i < tr.children.length; i++) {
-                var td = tr.children[i];
-                if (sel.cells.has(td)) rowCells.push(stripSpaces(dashCellText(td)));
+                var cell = tr.children[i];
+                if (sel.cells.has(cell)) rowCells.push(tsvCellText(cell));
             }
             if (rowCells.length > 0) rows.push(rowCells.join('\t'));
+        });
+        return rows.join('\n');
+    }
+
+    // Build a TSV blob for a single panel's table — every <tr> (thead + tbody)
+    // joined cell-by-cell. Powers the .f-panel-copy-icon click action; runs
+    // independently of any active selection (issue #2681).
+    function buildTableTsv(table) {
+        if (!table) return '';
+        var rows = [];
+        table.querySelectorAll('tr').forEach(function(tr) {
+            var rowCells = [];
+            for (var i = 0; i < tr.children.length; i++) {
+                rowCells.push(tsvCellText(tr.children[i]));
+            }
+            rows.push(rowCells.join('\t'));
         });
         return rows.join('\n');
     }
@@ -6706,8 +6769,10 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         }
         var sum = 0, n = 0, rect = null;
         sel.cells.forEach(function(td) {
-            var v = dashGetFloat(dashCellText(td));
-            if (!isNaN(v)) { sum += v; n++; }
+            if (isStatsCell(td)) {
+                var v = dashGetFloat(dashCellText(td));
+                if (!isNaN(v)) { sum += v; n++; }
+            }
             var r = td.getBoundingClientRect();
             if (!rect) rect = { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
             else {
@@ -6779,7 +6844,14 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
 
     dashModelEl.addEventListener('mousedown', function(e) {
         if (e.button !== 0) return;
-        var td = e.target.closest('td.f-cell');
+        // Hover-revealed panel header icons (copy / filter / settings) own
+        // their own click handlers and must leave any active selection
+        // alone — independent of selected cells per #2681.
+        if (e.target.closest('.f-panel-copy-icon, .f-panel-filter-icon, .f-panel-settings-icon')) return;
+        // Restrict the closest() search to a panel table — clicks outside
+        // .f-panel (sheet tabs, status bar, etc.) must still fall through.
+        var hit = e.target.closest('td.f-cell, td.f-first-cell, th');
+        var td = (hit && hit.closest('.f-panel table') && isSelectableCell(hit)) ? hit : null;
 
         // Multi-click handling runs even when the target is inside an inline
         // edit input — that way triple-click still works after a stray first
@@ -6861,7 +6933,8 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
             dashModelEl.classList.add('dash-selecting');
         }
         var node = document.elementFromPoint(e.clientX, e.clientY);
-        var td = node && node.closest ? node.closest('td.f-cell') : null;
+        var hit = node && node.closest ? node.closest('td.f-cell, td.f-first-cell, th') : null;
+        var td = (hit && hit.closest('.f-panel table') && isSelectableCell(hit)) ? hit : null;
         if (!td) return;
         var rc = cellRC(td);
         if (!rc || rc.tbody !== sel.dragTbody) return;
@@ -6916,8 +6989,28 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
             e.preventDefault();
             return;
         }
+        // Don't drop an active selection when the user clicks one of the
+        // hover-revealed panel header icons — they have their own handlers
+        // and the copy icon is explicitly selection-independent (#2681).
+        if (e.target.closest('.f-panel-copy-icon, .f-panel-filter-icon, .f-panel-settings-icon')) return;
         if (sel.cells.size > 0) clearSelection();
     }, true);
+
+    // Hover-revealed Copy icon in the panel header — TSV-copy of the entire
+    // panel table, independent of any selection (issue #2681).
+    dashModelEl.addEventListener('click', function(e) {
+        var icon = e.target.closest('.f-panel-copy-icon');
+        if (!icon) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var panel = icon.closest('.f-panel');
+        var table = panel && panel.querySelector('table');
+        if (!table) return;
+        var text = buildTableTsv(table);
+        if (!text) return;
+        copyToClipboard(text);
+        flashCopied(icon);
+    });
 
     document.addEventListener('keydown', function(e) {
         if (e.key === 'Escape' && sel.cells.size > 0) clearSelection();
