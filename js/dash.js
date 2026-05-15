@@ -66,6 +66,7 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
         + '<h4>:name:</h4>'
         + (dashIsAdmin ? '<a class="f-panel-settings-icon" title="Настройки отображения"><i class="pi pi-chart-bar"></i></a>' : '')
         + '<a class="f-panel-filter-icon" title="Фильтр"><i class="pi pi-filter"></i></a>'
+        + '<a class="f-panel-copy-icon" title="Скопировать таблицу"><i class="pi pi-copy"></i></a>'
         + '</div>'
         + '<div class="f-panel-content">'
         + '<div class="f-table-wrap"><table class="table table-sm table-bordered w-auto"><thead><tr class="dash-head f-head"><th>:head:</thead><tbody></tbody></table></div>'
@@ -6529,7 +6530,9 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
 // formula modal / readonly tooltip) and clears any previous selection. The
 // floating badge under the selection shows Σ / count / average over numeric
 // cells and supports click-to-copy plus Ctrl/Cmd+C TSV copy of everything
-// selected.
+// selected. Header cells (<th>) and the first-column item-name cells
+// (.f-first-cell) are selectable too and travel with the TSV when copying,
+// but never contribute to Σ / N / ⌀ (issue #2681).
 (function() {
     var DRAG_PIXEL_THRESHOLD = 4;
     var dashModelEl = document.getElementById('dash-model');
@@ -6540,7 +6543,7 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         cells: new Set(),
         anchor: null,
         dragStart: null,
-        dragTbody: null,
+        dragTable: null,
         dragOriginX: 0,
         dragOriginY: 0,
         dragArmed: false,
@@ -6551,15 +6554,35 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         suppressNextClick: false
     };
 
+    // A cell is selectable if it's a data cell, the first-column item-name
+    // cell, or a <th> inside a panel table. Report tables under
+    // .dash-report-table are excluded from selection.
+    function isSelectableCell(node) {
+        if (!node || !node.classList) return false;
+        if (node.tagName !== 'TD' && node.tagName !== 'TH') return false;
+        var table = node.closest && node.closest('table');
+        if (table && table.classList.contains('dash-report-table')) return false;
+        if (node.tagName === 'TH') return true;
+        return node.classList.contains('f-cell') || node.classList.contains('f-first-cell');
+    }
+
+    // Only .f-cell (data) cells, excluding the first-column item-name cells,
+    // count towards Σ / N / ⌀.
+    function isStatCell(node) {
+        return node && node.tagName === 'TD'
+            && node.classList.contains('f-cell')
+            && !node.classList.contains('f-first-cell');
+    }
+
     function cellRC(td) {
         var tr = td && td.parentElement;
         if (!tr || tr.tagName !== 'TR') return null;
-        var tbody = tr.parentElement;
-        if (!tbody) return null;
+        var table = tr.closest('table');
+        if (!table) return null;
         return {
-            row: Array.prototype.indexOf.call(tbody.children, tr),
-            col: Array.prototype.indexOf.call(tr.children, td),
-            tbody: tbody
+            row: Array.prototype.indexOf.call(table.rows, tr),
+            col: Array.prototype.indexOf.call(tr.cells, td),
+            table: table
         };
     }
 
@@ -6586,16 +6609,16 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
 
     function rectFromCells(a, b) {
         var ra = cellRC(a), rb = cellRC(b);
-        if (!ra || !rb || ra.tbody !== rb.tbody) return [];
+        if (!ra || !rb || ra.table !== rb.table) return [];
         var r1 = Math.min(ra.row, rb.row), r2 = Math.max(ra.row, rb.row);
         var c1 = Math.min(ra.col, rb.col), c2 = Math.max(ra.col, rb.col);
         var out = [];
         for (var r = r1; r <= r2; r++) {
-            var tr = ra.tbody.children[r];
+            var tr = ra.table.rows[r];
             if (!tr) continue;
             for (var c = c1; c <= c2; c++) {
-                var td = tr.children[c];
-                if (td && td.classList && td.classList.contains('f-cell')) out.push(td);
+                var cell = tr.cells[c];
+                if (isSelectableCell(cell)) out.push(cell);
             }
         }
         return out;
@@ -6683,11 +6706,32 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         if (!tr) return;
         clearSelection();
         sel.anchor = td;
-        for (var i = 0; i < tr.children.length; i++) {
-            var child = tr.children[i];
-            if (child.classList && child.classList.contains('f-cell')) addCell(child);
+        for (var i = 0; i < tr.cells.length; i++) {
+            var child = tr.cells[i];
+            if (isSelectableCell(child)) addCell(child);
         }
         updateBadge();
+    }
+
+    // Read the visible text for copying. For first-column cells the inline
+    // ID + edit link overlay (`.show-id`) is excluded so only the item name
+    // ends up in the TSV. Numeric data cells get their thousands separator
+    // spaces stripped; text in headers / first-column keeps its spaces.
+    function cellTextForCopy(td) {
+        if (!td) return '';
+        if (td.classList && td.classList.contains('f-first-cell')) {
+            var tr = td.closest('tr');
+            if (tr && tr.hasAttribute && tr.hasAttribute('item-name')) {
+                return tr.getAttribute('item-name') || '';
+            }
+            var clone = td.cloneNode(true);
+            var sid = clone.querySelector && clone.querySelector('.show-id');
+            if (sid) sid.parentNode.removeChild(sid);
+            return (clone.textContent || '').replace(/^\s+|\s+$/g, '');
+        }
+        var raw = dashCellText(td);
+        if (isStatCell(td)) return stripSpaces(raw);
+        return String(raw).replace(/^\s+|\s+$/g, '');
     }
 
     // Build a TSV blob from the current selection, walking the DOM in row
@@ -6701,11 +6745,26 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         var rows = [];
         trs.forEach(function(tr) {
             var rowCells = [];
-            for (var i = 0; i < tr.children.length; i++) {
-                var td = tr.children[i];
-                if (sel.cells.has(td)) rowCells.push(stripSpaces(dashCellText(td)));
+            for (var i = 0; i < tr.cells.length; i++) {
+                var td = tr.cells[i];
+                if (sel.cells.has(td)) rowCells.push(cellTextForCopy(td));
             }
             if (rowCells.length > 0) rows.push(rowCells.join('\t'));
+        });
+        return rows.join('\n');
+    }
+
+    // Full-table TSV: every row, every cell — used by the panel's "Copy
+    // table" icon (issue #2681).
+    function buildFullTableTsv(table) {
+        if (!table) return '';
+        var rows = [];
+        Array.prototype.forEach.call(table.rows, function(tr) {
+            var cells = [];
+            Array.prototype.forEach.call(tr.cells, function(cell) {
+                cells.push(cellTextForCopy(cell));
+            });
+            rows.push(cells.join('\t'));
         });
         return rows.join('\n');
     }
@@ -6717,8 +6776,10 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         }
         var sum = 0, n = 0, rect = null;
         sel.cells.forEach(function(td) {
-            var v = dashGetFloat(dashCellText(td));
-            if (!isNaN(v)) { sum += v; n++; }
+            if (isStatCell(td)) {
+                var v = dashGetFloat(dashCellText(td));
+                if (!isNaN(v)) { sum += v; n++; }
+            }
             var r = td.getBoundingClientRect();
             if (!rect) rect = { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
             else {
@@ -6788,9 +6849,15 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         flashSelection();
     });
 
+    function selectableFromEventTarget(target) {
+        if (!target || !target.closest) return null;
+        var node = target.closest('td, th');
+        return isSelectableCell(node) ? node : null;
+    }
+
     dashModelEl.addEventListener('mousedown', function(e) {
         if (e.button !== 0) return;
-        var td = e.target.closest('td.f-cell');
+        var td = selectableFromEventTarget(e.target);
 
         // Multi-click handling runs even when the target is inside an inline
         // edit input — that way triple-click still works after a stray first
@@ -6817,7 +6884,7 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
 
         if (e.shiftKey && sel.anchor) {
             var anchorRC = cellRC(sel.anchor);
-            if (anchorRC && anchorRC.tbody === rc.tbody) {
+            if (anchorRC && anchorRC.table === rc.table) {
                 replaceWith(rectFromCells(sel.anchor, td));
             } else {
                 clearSelection();
@@ -6834,7 +6901,7 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
             // rectangle from this cell; a plain Ctrl+click without movement
             // still toggles, applied in the mouseup handler below.
             sel.dragStart = td;
-            sel.dragTbody = rc.tbody;
+            sel.dragTable = rc.table;
             sel.dragOriginX = e.clientX;
             sel.dragOriginY = e.clientY;
             sel.dragArmed = true;
@@ -6849,7 +6916,7 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         // No modifier: arm a replace-drag without changing the selection yet,
         // so a plain click still falls through to the existing handler.
         sel.dragStart = td;
-        sel.dragTbody = rc.tbody;
+        sel.dragTable = rc.table;
         sel.dragOriginX = e.clientX;
         sel.dragOriginY = e.clientY;
         sel.dragArmed = true;
@@ -6872,10 +6939,10 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
             dashModelEl.classList.add('dash-selecting');
         }
         var node = document.elementFromPoint(e.clientX, e.clientY);
-        var td = node && node.closest ? node.closest('td.f-cell') : null;
+        var td = selectableFromEventTarget(node);
         if (!td) return;
         var rc = cellRC(td);
-        if (!rc || rc.tbody !== sel.dragTbody) return;
+        if (!rc || rc.table !== sel.dragTable) return;
         e.preventDefault();
         var rect = rectFromCells(sel.dragStart, td);
         if (sel.dragMode === 'additive') {
@@ -6898,7 +6965,7 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         sel.dragBase = null;
         sel.dragPendingToggle = false;
         sel.dragStart = null;
-        sel.dragTbody = null;
+        sel.dragTable = null;
         dashModelEl.classList.remove('dash-selecting');
         if (wasDrag) {
             sel.suppressNextClick = true;
@@ -6940,6 +7007,27 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
     }, true);
     window.addEventListener('resize', function() {
         if (sel.cells.size >= 2) updateBadge();
+    });
+
+    // ── "Copy entire table" icon on every panel (issue #2681) ──────────────
+    // Shown on panel hover (same UX as .f-panel-settings-icon). Copies the
+    // panel's table as TSV — headers, first column and data — so the whole
+    // grid pastes straight into Excel / Google Sheets independent of any
+    // active cell selection.
+    document.addEventListener('click', function(e) {
+        var icon = e.target.closest('.f-panel-copy-icon');
+        if (!icon) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var panel = icon.closest('.f-panel');
+        if (!panel) return;
+        var table = panel.querySelector('.f-table-wrap table');
+        if (!table) return;
+        var tsv = buildFullTableTsv(table);
+        if (!tsv) return;
+        copyToClipboard(tsv);
+        icon.classList.add('dash-panel-copy-flash');
+        setTimeout(function() { icon.classList.remove('dash-panel-copy-flash'); }, 700);
     });
 })();
 

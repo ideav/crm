@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Issue #2681 — dashboard copy table & first-column / header selection</title>
+    <link rel="stylesheet" href="https://unpkg.com/primeicons@7.0.0/primeicons.css">
+    <link rel="stylesheet" href="../css/dash.css">
+    <style>
+        body { font-family: sans-serif; margin: 1rem; }
+        .out { background: #f5f5f5; padding: 0.5rem; white-space: pre; font-family: monospace; font-size: 0.85rem; min-height: 4rem; }
+        h2 { font-size: 1rem; margin-top: 1.5rem; }
+        /* Force the copy icon visible at all times so we can click without hover */
+        #dash-model .f-panel-copy-icon,
+        #dash-model .f-panel-filter-icon {
+            display: inline-flex !important;
+        }
+    </style>
+</head>
+<body>
+    <h2>Test panel</h2>
+
+    <div id="dash-model" class="f-model m-2">
+        <div class="sheets">
+            <div class="f-sheet" style="display:flex">
+                <div id="panel1" class="f-panel pt-3" data-panel-id="123">
+                    <div class="f-panel-header">
+                        <h4>Тестовая панель</h4>
+                        <a class="f-panel-filter-icon" title="Фильтр"><i class="pi pi-filter"></i></a>
+                        <a class="f-panel-copy-icon" title="Скопировать таблицу"><i class="pi pi-copy"></i></a>
+                    </div>
+                    <div class="f-panel-content">
+                        <div class="f-table-wrap">
+                            <table class="table table-sm table-bordered w-auto">
+                                <thead>
+                                    <tr class="dash-head f-head">
+                                        <th>Показатель</th>
+                                        <th>Январь</th>
+                                        <th>Февраль</th>
+                                        <th>Март</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr class="dash-item f-item" id="row1" item-name="Выручка">
+                                        <td class="dash-first-cell f-first-cell">
+                                            <div class="show-id">
+                                                <span>1001</span>
+                                            </div>
+                                            Выручка
+                                        </td>
+                                        <td class="f-cell" data-src="value" align="right">1 200</td>
+                                        <td class="f-cell" data-src="value" align="right">1 350</td>
+                                        <td class="f-cell" data-src="value" align="right">1 540</td>
+                                    </tr>
+                                    <tr class="dash-item f-item" id="row2" item-name="Расходы">
+                                        <td class="dash-first-cell f-first-cell">
+                                            <div class="show-id">
+                                                <span>1002</span>
+                                            </div>
+                                            Расходы
+                                        </td>
+                                        <td class="f-cell" data-src="value" align="right">800</td>
+                                        <td class="f-cell" data-src="value" align="right">900</td>
+                                        <td class="f-cell" data-src="value" align="right">950</td>
+                                    </tr>
+                                    <tr class="dash-item f-item" id="row3" item-name="Прибыль">
+                                        <td class="dash-first-cell f-first-cell">
+                                            <div class="show-id">
+                                                <span>1003</span>
+                                            </div>
+                                            Прибыль
+                                        </td>
+                                        <td class="f-cell" data-src="value" align="right">400</td>
+                                        <td class="f-cell" data-src="value" align="right">450</td>
+                                        <td class="f-cell" data-src="value" align="right">590</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="dash-selection-sum" aria-live="polite"></div>
+
+    <h2>Captured clipboard</h2>
+    <div id="capture" class="out">(empty)</div>
+
+    <h2>Test actions</h2>
+    <button id="btn-copy-table">Copy full table (panel icon)</button>
+    <button id="btn-select-all-row1">Select Row1 (triple click sim)</button>
+    <button id="btn-select-rect">Select Header+First col+data (rect)</button>
+    <button id="btn-copy-selection">Copy selection (Ctrl+C sim)</button>
+
+    <script>
+        // Stub the helpers used by the selection module so it can run standalone
+        var dashTraceEnabled = false;
+        function dashTrace(){}
+        function dashNormalizeNumberText(v){
+            return String(v || '').replace(/\s+/g, '').replace(',', '.');
+        }
+        function dashGetFloat(v){ return parseFloat(dashNormalizeNumberText(v)); }
+        function dashFormatNumberText(v){
+            // very basic: insert spaces as thousands separator if numeric
+            var s = String(v || '');
+            var n = parseFloat(s.replace(/\s+/g, '').replace(',', '.'));
+            if (isNaN(n)) return s;
+            var sign = n < 0 ? '-' : '';
+            var abs = Math.abs(n);
+            var parts = abs.toString().split('.');
+            var whole = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+            return sign + whole + (parts[1] ? ',' + parts[1] : '');
+        }
+        function dashCellText(el){
+            return el && el.textContent !== undefined ? el.textContent : (el ? el.innerHTML : '');
+        }
+
+        // Intercept clipboard writes so we can verify them
+        var captureEl = document.getElementById('capture');
+        var origWrite = navigator.clipboard && navigator.clipboard.writeText;
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText = function(text){
+                captureEl.textContent = text;
+                window.lastClipboard = text;
+                if (origWrite) try { return origWrite.call(navigator.clipboard, text); } catch(e){}
+                return Promise.resolve();
+            };
+        }
+        document.addEventListener('copy', function(e){
+            // The dashboard's listener sets clipboardData via preventDefault.
+            // Read it back for capture.
+            setTimeout(function(){
+                if (e && e.clipboardData) {
+                    var t = e.clipboardData.getData('text/plain');
+                    if (t) { captureEl.textContent = t; window.lastClipboard = t; }
+                }
+            }, 0);
+        });
+
+        // Test buttons
+        document.getElementById('btn-copy-table').addEventListener('click', function(){
+            captureEl.textContent = '(running…)';
+            document.querySelector('#panel1 .f-panel-copy-icon').click();
+            setTimeout(function(){
+                if (captureEl.textContent === '(running…)') {
+                    captureEl.textContent = 'no clipboard write';
+                }
+            }, 100);
+        });
+
+        document.getElementById('btn-select-rect').addEventListener('click', function(){
+            // Programmatically simulate selecting from header (col 0) to last data cell
+            var head = document.querySelector('#panel1 thead .f-head th:nth-child(1)');
+            var last = document.querySelector('#panel1 tbody tr:nth-child(3) td:nth-child(4)');
+            head.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, clientX: head.getBoundingClientRect().left + 5, clientY: head.getBoundingClientRect().top + 5 }));
+            document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: last.getBoundingClientRect().right - 5, clientY: last.getBoundingClientRect().bottom - 5 }));
+            document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+        });
+
+        document.getElementById('btn-copy-selection').addEventListener('click', function(){
+            captureEl.textContent = '(running…)';
+            document.dispatchEvent(new ClipboardEvent('copy', { bubbles: true, cancelable: true, clipboardData: new DataTransfer() }));
+            setTimeout(function(){
+                if (captureEl.textContent === '(running…)' && window.lastClipboard) {
+                    captureEl.textContent = window.lastClipboard;
+                }
+            }, 50);
+        });
+    </script>
+    <!-- Inline copy of the selection + table-copy IIFE for standalone testing -->
+    <script>
+        (function() {
+            var DRAG_PIXEL_THRESHOLD = 4;
+            var dashModelEl = document.getElementById('dash-model');
+            var badge = document.getElementById('dash-selection-sum');
+            if (!dashModelEl || !badge) return;
+
+            var sel = {
+                cells: new Set(), anchor: null, dragStart: null, dragTable: null,
+                dragOriginX: 0, dragOriginY: 0, dragArmed: false, dragActive: false,
+                dragMode: null, dragBase: null, dragPendingToggle: false, suppressNextClick: false
+            };
+
+            function isSelectableCell(node) {
+                if (!node || !node.classList) return false;
+                if (node.tagName !== 'TD' && node.tagName !== 'TH') return false;
+                var table = node.closest && node.closest('table');
+                if (table && table.classList.contains('dash-report-table')) return false;
+                if (node.tagName === 'TH') return true;
+                return node.classList.contains('f-cell') || node.classList.contains('f-first-cell');
+            }
+            function isStatCell(node) {
+                return node && node.tagName === 'TD'
+                    && node.classList.contains('f-cell')
+                    && !node.classList.contains('f-first-cell');
+            }
+            function cellRC(td) {
+                var tr = td && td.parentElement;
+                if (!tr || tr.tagName !== 'TR') return null;
+                var table = tr.closest('table');
+                if (!table) return null;
+                return {
+                    row: Array.prototype.indexOf.call(table.rows, tr),
+                    col: Array.prototype.indexOf.call(tr.cells, td),
+                    table: table
+                };
+            }
+            function clearSelection() {
+                sel.cells.forEach(function(c) { c.classList.remove('dash-cell-selected'); });
+                sel.cells.clear(); sel.anchor = null;
+            }
+            function addCell(td) {
+                if (!sel.cells.has(td)) { sel.cells.add(td); td.classList.add('dash-cell-selected'); }
+            }
+            function rectFromCells(a, b) {
+                var ra = cellRC(a), rb = cellRC(b);
+                if (!ra || !rb || ra.table !== rb.table) return [];
+                var r1 = Math.min(ra.row, rb.row), r2 = Math.max(ra.row, rb.row);
+                var c1 = Math.min(ra.col, rb.col), c2 = Math.max(ra.col, rb.col);
+                var out = [];
+                for (var r = r1; r <= r2; r++) {
+                    var tr = ra.table.rows[r];
+                    if (!tr) continue;
+                    for (var c = c1; c <= c2; c++) {
+                        var cell = tr.cells[c];
+                        if (isSelectableCell(cell)) out.push(cell);
+                    }
+                }
+                return out;
+            }
+            function replaceWith(cells) {
+                sel.cells.forEach(function(c) { c.classList.remove('dash-cell-selected'); });
+                sel.cells.clear();
+                cells.forEach(addCell);
+            }
+            function stripSpaces(text) { return String(text).replace(/\s+/g, ''); }
+            function copyToClipboard(text) {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    return navigator.clipboard.writeText(text);
+                }
+            }
+            function cellTextForCopy(td) {
+                if (!td) return '';
+                if (td.classList && td.classList.contains('f-first-cell')) {
+                    var tr = td.closest('tr');
+                    if (tr && tr.hasAttribute && tr.hasAttribute('item-name')) {
+                        return tr.getAttribute('item-name') || '';
+                    }
+                    var clone = td.cloneNode(true);
+                    var sid = clone.querySelector && clone.querySelector('.show-id');
+                    if (sid) sid.parentNode.removeChild(sid);
+                    return (clone.textContent || '').replace(/^\s+|\s+$/g, '');
+                }
+                var raw = dashCellText(td);
+                if (isStatCell(td)) return stripSpaces(raw);
+                return String(raw).replace(/^\s+|\s+$/g, '');
+            }
+            function buildSelectionTsv() {
+                var trs = dashModelEl.querySelectorAll('tr');
+                var rows = [];
+                trs.forEach(function(tr) {
+                    var rowCells = [];
+                    for (var i = 0; i < tr.cells.length; i++) {
+                        var td = tr.cells[i];
+                        if (sel.cells.has(td)) rowCells.push(cellTextForCopy(td));
+                    }
+                    if (rowCells.length > 0) rows.push(rowCells.join('\t'));
+                });
+                return rows.join('\n');
+            }
+            function buildFullTableTsv(table) {
+                if (!table) return '';
+                var rows = [];
+                Array.prototype.forEach.call(table.rows, function(tr) {
+                    var cells = [];
+                    Array.prototype.forEach.call(tr.cells, function(cell) {
+                        cells.push(cellTextForCopy(cell));
+                    });
+                    rows.push(cells.join('\t'));
+                });
+                return rows.join('\n');
+            }
+            function selectableFromEventTarget(target) {
+                if (!target || !target.closest) return null;
+                var node = target.closest('td, th');
+                return isSelectableCell(node) ? node : null;
+            }
+
+            dashModelEl.addEventListener('mousedown', function(e) {
+                if (e.button !== 0) return;
+                var td = selectableFromEventTarget(e.target);
+                if (e.target.closest('input, textarea, select, .dash-cell-input, a, button')) return;
+                if (!td) { if (sel.cells.size > 0) clearSelection(); return; }
+                var rc = cellRC(td);
+                if (!rc) return;
+                sel.dragStart = td; sel.dragTable = rc.table;
+                sel.dragOriginX = e.clientX; sel.dragOriginY = e.clientY;
+                sel.dragArmed = true; sel.dragActive = false; sel.dragMode = 'replace';
+                sel.dragBase = null; sel.dragPendingToggle = false;
+            });
+            document.addEventListener('mousemove', function(e) {
+                if (!sel.dragArmed) return;
+                if (!sel.dragActive) {
+                    var dx = e.clientX - sel.dragOriginX, dy = e.clientY - sel.dragOriginY;
+                    if (dx * dx + dy * dy < DRAG_PIXEL_THRESHOLD * DRAG_PIXEL_THRESHOLD) return;
+                    sel.dragActive = true; if (sel.dragMode === 'replace') clearSelection();
+                    sel.anchor = sel.dragStart;
+                }
+                var node = document.elementFromPoint(e.clientX, e.clientY);
+                var td = selectableFromEventTarget(node);
+                if (!td) return;
+                var rc = cellRC(td);
+                if (!rc || rc.table !== sel.dragTable) return;
+                e.preventDefault();
+                replaceWith(rectFromCells(sel.dragStart, td));
+            });
+            document.addEventListener('mouseup', function() {
+                if (!sel.dragArmed) return;
+                sel.dragArmed = false; sel.dragActive = false;
+                sel.dragStart = null; sel.dragTable = null;
+            });
+            document.addEventListener('copy', function(e) {
+                if (sel.cells.size === 0) return;
+                var text = buildSelectionTsv();
+                if (!text) return;
+                if (e.clipboardData) { e.clipboardData.setData('text/plain', text); e.preventDefault(); }
+                else copyToClipboard(text);
+                window.lastClipboard = text;
+                document.getElementById('capture').textContent = text;
+            });
+            document.addEventListener('click', function(e) {
+                var icon = e.target.closest('.f-panel-copy-icon');
+                if (!icon) return;
+                e.preventDefault(); e.stopPropagation();
+                var panel = icon.closest('.f-panel');
+                if (!panel) return;
+                var table = panel.querySelector('.f-table-wrap table');
+                if (!table) return;
+                var tsv = buildFullTableTsv(table);
+                if (!tsv) return;
+                copyToClipboard(tsv);
+                document.getElementById('capture').textContent = tsv;
+                window.lastClipboard = tsv;
+            });
+        })();
+    </script>
+</body>
+</html>
