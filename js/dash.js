@@ -1398,8 +1398,9 @@ function dashGetColValDetails(item, col, dashLabel, panelKey) {
 
 function dashResolveValueCell(rowId, groupName, panelKey) {
     var formula = dashFormulas[rowId] || ''
-        , itemName = dashItems[rowId] ? dashItems[rowId].name : ''
-        , dashLabel = dashItems[rowId] ? (dashItems[rowId].label || '') : ''
+        , itemMeta = dashItems[rowId] || {}
+        , itemName = (itemMeta.srcName || itemMeta.name || '')
+        , dashLabel = itemMeta.label || ''
         , altName = formula.match(itemRegex)
         , valueName = altName ? altName[1] : itemName
         , groupedKey = groupName ? valueName + ':' + groupName : ''
@@ -1708,7 +1709,7 @@ function dashDrawPeriods() {
                             });
                             // Add cells: for each item row, one cell per column group
                             panel.querySelectorAll('.f-item').forEach(function(row) {
-                                var itemName = row.getAttribute('item-name');
+                                var itemName = dashRowLookupName(row);
                                 var s = dashCellSrc(row.id, 'rg');
                                 var valueItemId = dashPanelValues[panelId] ? '' : (dashValueItemIds[(itemName || '').toLowerCase()] || '');
                                 var rgHeadVal = dashModelData[panelId].rgs[rg].head || '';
@@ -1762,7 +1763,7 @@ function dashDrawPeriods() {
                                 headTpl.replace(':head:', p[i].r[0]).replace(':from:', fr).replace(':to:', to));
                             panel.querySelectorAll('.f-item').forEach(function(row) {
                                 var s = dashCellSrc(row.id, 'rg');
-                                var itemName = row.getAttribute('item-name');
+                                var itemName = dashRowLookupName(row);
                                 var valueItemId = dashPanelValues[panelId] ? '' : (dashValueItemIds[(itemName || '').toLowerCase()] || '');
                                 var rgHeadVal = dashModelData[panelId].rgs[rg].head || '';
                                 var rowLabel = (dashItems[row.id] && dashItems[row.id].label) || '';
@@ -1814,7 +1815,7 @@ function dashDrawPeriods() {
                         if (resolved.alias)
                             s = { src: 'value', extra: '' };
                         v = dashNormalizeVal(row.id, resolved.value);
-                        var itemName = row.getAttribute('item-name');
+                        var itemName = dashRowLookupName(row);
                         var valueItemId = dashPanelValues[panelId] ? '' : (dashValueItemIds[(itemName || '').toLowerCase()] || '');
                         var rgHeadVal = groupName;
                         var rowLabel = (dashItems[row.id] && dashItems[row.id].label) || '';
@@ -1897,7 +1898,7 @@ function dashDrawPeriods() {
                                     panel.querySelectorAll('.f-item').forEach(function(row) {
                                         var ready = 0, src = 'report', extra = '', vDetails = '';
                                         var item = dashItems[row.id] || {};
-                                        var itemName = item.name || '';
+                                        var itemName = item.srcName || item.name || '';
                                         var rowLabel = item.label || '';
                                         if (useMatrix) {
                                             var matrixRow = dashFindMatrixValue(itemName, col, rowLabel);
@@ -2236,7 +2237,7 @@ function dashGetModel(json) {
 
     for (i in json) {
         dashPeriods[json[i].period] = 1;
-        dashItems[json[i].itemID] = { name: json[i].item, format: json[i].format, mu: json[i].MU, label: json[i]['Метка'] || '' };
+        dashItems[json[i].itemID] = { name: json[i].item, format: json[i].format, mu: json[i].MU, label: json[i]['Метка'] || '', srcName: json[i].itemSrcName || '' };
         if (json[i].RGsourceID && !dashPeriods[json[i].RGsourceID]) {
             dashRgSourceIds[json[i].RGsourceID] = 1;
             dashPeriods[json[i].RGsourceID] = 1;
@@ -2470,6 +2471,16 @@ function dashPanelGetRows(panelEl) {
 
 function dashPanelGetRowName(row) {
     return row ? (row.getAttribute('item-name') || '') : '';
+}
+
+// Alternative row name used to look up data in the query (issue #2682).
+// When `itemSrcName` is filled on a Дэшборд row, the source data is keyed by
+// that name in ЗначенияЗаПериод / panelQuery — not by the visible row name.
+// Falls back to the visible `item-name` when itemSrcName is empty.
+function dashRowLookupName(row) {
+    if (!row) return '';
+    var meta = dashItems[row.id];
+    return (meta && meta.srcName) || row.getAttribute('item-name') || '';
 }
 
 function dashPanelGetRowKey(row) {
