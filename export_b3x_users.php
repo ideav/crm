@@ -26,6 +26,38 @@ $userFields = array_keys($userFieldsMap);
 $userHeaders = array_values($userFieldsMap);
 
 $usersCsvFile = $csvPath . 'users.csv';
+// Issue #2696: дополнительная выгрузка в .bki для Интеграма.
+$usersBkiFile = $csvPath . 'users.bki';
+
+// ========== ХЕЛПЕРЫ BKI (Issue #2696) ==========
+// function_exists guard: если export_b3x.php тоже объявил хелперы,
+// этот блок пропускается. Так PR независим от порядка мержа.
+if (!function_exists('bkiEscape')) {
+    function bkiEscape($value) {
+        $value = str_replace(["\r\n", "\r", "\n", "\t"], ' ', (string)$value);
+        return str_replace(';', '\\;', $value);
+    }
+    function formatBkiRow(array $values) {
+        return implode(';', array_map('bkiEscape', $values));
+    }
+    function initBkiFile($file) {
+        if (!file_exists($file) || filesize($file) == 0) {
+            file_put_contents($file, "DATA\n");
+        }
+    }
+    function appendBkiRow($file, array $values) {
+        file_put_contents($file, formatBkiRow($values) . "\n", FILE_APPEND);
+    }
+    function writeBkiFile($file, array $rows) {
+        $content = "DATA\n";
+        foreach ($rows as $values) {
+            $content .= formatBkiRow($values) . "\n";
+        }
+        $tmp = $file . '.tmp';
+        file_put_contents($tmp, $content);
+        rename($tmp, $file);
+    }
+}
 
 /**
  * Полный pull пользователей с пагинацией через start/next.
@@ -127,9 +159,17 @@ try {
 
     writeUsersCsv($usersCsvFile, $userHeaders, $userFields, $users);
 
+    // Issue #2696: параллельно — снимок в .bki для Интеграма (полная перезапись).
+    $bkiRows = [];
+    foreach ($users as $user) {
+        $bkiRows[] = prepareRowData($user, $userFields);
+    }
+    writeBkiFile($usersBkiFile, $bkiRows);
+
     echo "\n<span class='success'>[ГОТОВО] Выгружено {$count} пользователей</span>\n";
     echo "<hr>\n";
     echo "📁 <a href='" . basename($usersCsvFile) . "' download>Скачать users.csv</a>\n";
+    echo "<br>📁 <a href='" . basename($usersBkiFile) . "' download>Скачать users.bki</a>\n";
 
     // Issue #2689: паровозик. После завершения переходим к следующему скрипту
     // (если он существует и не передан ?nochain=1).
