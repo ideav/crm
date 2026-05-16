@@ -81,7 +81,51 @@ $dealHeaders = array_values($dealFieldsMap);
 // ========== ФАЙЛЫ ДЛЯ ЭКСПОРТА ==========
 $leadsCsvFile = $csvPath . 'leads_' . $TARGET_YEAR . '.csv';
 $dealsCsvFile = $csvPath . 'deals_' . $TARGET_YEAR . '.csv';
+// Issue #2696: дополнительная выгрузка в .bki для загрузки в Интеграм.
+$leadsBkiFile = $csvPath . 'leads_' . $TARGET_YEAR . '.bki';
+$dealsBkiFile = $csvPath . 'deals_' . $TARGET_YEAR . '.bki';
 $errorLogFile = $csvPath . 'export_error_counter_' . $TARGET_YEAR . '.json';
+
+// ========== ХЕЛПЕРЫ BKI ==========
+// Формат .bki: первая строка "DATA", далее по строке на запись;
+// поля разделены ";"; переносы/табы заменяются на пробел; ";" в значении
+// экранируется как "\;". Первое поле — ID (используется как PK в Интеграме).
+// function_exists guard на случай, если файл подключён через
+// EXPORT_B3X_SKIP_RUN из другого скрипта, который тоже объявляет хелперы.
+if (!function_exists('bkiEscape')) {
+    function bkiEscape($value) {
+        $value = str_replace(["\r\n", "\r", "\n", "\t"], ' ', (string)$value);
+        return str_replace(';', '\\;', $value);
+    }
+
+    function formatBkiRow(array $values) {
+        return implode(';', array_map('bkiEscape', $values));
+    }
+
+    function initBkiFile($file) {
+        if (!file_exists($file) || filesize($file) == 0) {
+            file_put_contents($file, "DATA\n");
+        }
+    }
+
+    function appendBkiRow($file, array $values) {
+        file_put_contents($file, formatBkiRow($values) . "\n", FILE_APPEND);
+    }
+
+    /**
+     * Атомарная полная перезапись .bki (для departments/users — каждый
+     * запуск свежий снимок).
+     */
+    function writeBkiFile($file, array $rows) {
+        $content = "DATA\n";
+        foreach ($rows as $values) {
+            $content .= formatBkiRow($values) . "\n";
+        }
+        $tmp = $file . '.tmp';
+        file_put_contents($tmp, $content);
+        rename($tmp, $file);
+    }
+}
 
 // ========== ЗАЩИТА ОТ БЕСКОНЕЧНЫХ ПЕРЕЗАГРУЗОК ==========
 function incrementErrorCounter($file) {
@@ -488,14 +532,18 @@ $isComplete = isExportComplete($state);
 // Очищаем файлы при первом запуске
 if ($lastLeadId == 0 && empty($state['leads_complete'])) {
     if (file_exists($leadsCsvFile)) unlink($leadsCsvFile);
+    if (file_exists($leadsBkiFile)) unlink($leadsBkiFile);
 }
 if ($lastDealId == 0 && empty($state['deals_complete'])) {
     if (file_exists($dealsCsvFile)) unlink($dealsCsvFile);
+    if (file_exists($dealsBkiFile)) unlink($dealsBkiFile);
 }
 
 // Инициализируем файлы с заголовками на русском
 initCsvFile($leadsCsvFile, $leadHeaders);
 initCsvFile($dealsCsvFile, $dealHeaders);
+initBkiFile($leadsBkiFile);
+initBkiFile($dealsBkiFile);
 
 echo "<!DOCTYPE html>
 <html>
@@ -585,6 +633,7 @@ try {
                 foreach ($leads as $lead) {
                     $leadRow = prepareRowData($lead, $leadFields);
                     appendCsvRow($leadsCsvFile, $leadRow);
+                    appendBkiRow($leadsBkiFile, $leadRow);
                     $processedLeads++;
 
                     if ($lead['ID'] > $maxLeadId) {
@@ -635,6 +684,7 @@ try {
                 foreach ($deals as $deal) {
                     $dealRow = prepareRowData($deal, $dealFields);
                     appendCsvRow($dealsCsvFile, $dealRow);
+                    appendBkiRow($dealsBkiFile, $dealRow);
                     $processedDeals++;
 
                     if ($deal['ID'] > $maxDealId) {
@@ -698,7 +748,9 @@ try {
                 } else {
                     echo "<span class='progress'>+{$cnt}</span>\n";
                     foreach ($leads as $lead) {
-                        appendCsvRow($leadsCsvFile, prepareRowData($lead, $leadFields));
+                        $row = prepareRowData($lead, $leadFields);
+                        appendCsvRow($leadsCsvFile, $row);
+                        appendBkiRow($leadsBkiFile, $row);
                         $procUpdLeads++;
                         if ((int)$lead['ID'] > $updLeadId) {
                             $updLeadId = (int)$lead['ID'];
@@ -737,7 +789,9 @@ try {
                 } else {
                     echo "<span class='progress'>+{$cnt}</span>\n";
                     foreach ($deals as $deal) {
-                        appendCsvRow($dealsCsvFile, prepareRowData($deal, $dealFields));
+                        $row = prepareRowData($deal, $dealFields);
+                        appendCsvRow($dealsCsvFile, $row);
+                        appendBkiRow($dealsBkiFile, $row);
                         $procUpdDeals++;
                         if ((int)$deal['ID'] > $updDealId) {
                             $updDealId = (int)$deal['ID'];
