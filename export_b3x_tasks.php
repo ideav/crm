@@ -37,6 +37,38 @@ $taskHeaders = array_values($taskFieldsMap);
 $tasksCsvFile = $csvPath . 'tasks_' . $TARGET_YEAR_TASKS . '.csv';
 $tasksStateFile = __DIR__ . '/export_tasks_state.json';
 $tasksErrorLogFile = $csvPath . 'export_tasks_error_counter_' . $TARGET_YEAR_TASKS . '.json';
+// Issue #2696: дополнительная выгрузка в .bki для Интеграма.
+$tasksBkiFile = $csvPath . 'tasks_' . $TARGET_YEAR_TASKS . '.bki';
+
+// ========== ХЕЛПЕРЫ BKI (Issue #2696) ==========
+// function_exists guard: если export_b3x.php тоже объявил хелперы,
+// этот блок пропускается. Так PR независим от порядка мержа.
+if (!function_exists('bkiEscape')) {
+    function bkiEscape($value) {
+        $value = str_replace(["\r\n", "\r", "\n", "\t"], ' ', (string)$value);
+        return str_replace(';', '\\;', $value);
+    }
+    function formatBkiRow(array $values) {
+        return implode(';', array_map('bkiEscape', $values));
+    }
+    function initBkiFile($file) {
+        if (!file_exists($file) || filesize($file) == 0) {
+            file_put_contents($file, "DATA\n");
+        }
+    }
+    function appendBkiRow($file, array $values) {
+        file_put_contents($file, formatBkiRow($values) . "\n", FILE_APPEND);
+    }
+    function writeBkiFile($file, array $rows) {
+        $content = "DATA\n";
+        foreach ($rows as $values) {
+            $content .= formatBkiRow($values) . "\n";
+        }
+        $tmp = $file . '.tmp';
+        file_put_contents($tmp, $content);
+        rename($tmp, $file);
+    }
+}
 
 /**
  * Один запрос tasks.task.list с фильтром по году создания и >ID.
@@ -140,9 +172,11 @@ $lastTaskId = $state['last_task_id'];
 
 if ($lastTaskId == 0 && empty($state['tasks_complete'])) {
     if (file_exists($tasksCsvFile)) unlink($tasksCsvFile);
+    if (file_exists($tasksBkiFile)) unlink($tasksBkiFile);
 }
 
 initCsvFile($tasksCsvFile, $taskHeaders);
+initBkiFile($tasksBkiFile);
 
 echo "<!DOCTYPE html>
 <html>
@@ -212,6 +246,7 @@ try {
             foreach ($tasks as $task) {
                 $row = prepareRowData($task, $taskFields);
                 appendCsvRow($tasksCsvFile, $row);
+                appendBkiRow($tasksBkiFile, $row);
                 $processedTasks++;
 
                 $taskId = (int)($task['id'] ?? 0);
