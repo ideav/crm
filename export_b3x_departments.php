@@ -107,6 +107,22 @@ try {
     echo "\n<span class='success'>[ГОТОВО] Выгружено {$count} департаментов</span>\n";
     echo "<hr>\n";
     echo "📁 <a href='" . basename($departmentsCsvFile) . "' download>Скачать departments.csv</a>\n";
+
+    // Issue #2689: паровозик. После завершения переходим к следующему скрипту
+    // (если он существует и не передан ?nochain=1).
+    $nextScript = 'export_b3x_users.php';
+    if (file_exists(__DIR__ . '/' . $nextScript) && empty($_GET['nochain'])) {
+        echo "<br><br><span class='info'>[ПАРОВОЗИК] Через 2 секунды → {$nextScript}</span>";
+        echo " <a href='#' id='b3x-stop-chain'>остановить</a>";
+        echo "</pre><script>
+var __b3xChain = setTimeout(function(){ location.href='{$nextScript}'; }, 2000);
+document.getElementById('b3x-stop-chain').onclick = function(e){
+    e.preventDefault();
+    clearTimeout(__b3xChain);
+    this.outerHTML = '<span class=\"info\">[цепочка остановлена]</span>';
+};
+</script>";
+    }
 } catch (Exception $e) {
     echo "\n<span class='error'>[ОШИБКА] " . htmlspecialchars($e->getMessage()) . "</span>\n";
 }
