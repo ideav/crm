@@ -570,6 +570,22 @@ try {
         echo "📁 <a href='" . basename($leadsCsvFile) . "' download>Скачать лидов ({$totalLeads})</a>\n";
         echo "<br>📁 <a href='" . basename($dealsCsvFile) . "' download>Скачать сделки ({$totalDeals})</a>\n";
         echo "<br><br>🗑️ <a href='?reset=1'>Сбросить и начать заново</a>\n";
+
+        // Issue #2689: паровозик. Если следующий скрипт существует — переходим
+        // к нему через 2 секунды. Прервать можно ссылкой "остановить".
+        $nextScript = 'export_b3x_departments.php';
+        if (file_exists(__DIR__ . '/' . $nextScript) && empty($_GET['nochain'])) {
+            echo "<br><br><span class='info'>[ПАРОВОЗИК] Через 2 секунды → {$nextScript}</span>";
+            echo " <a href='#' id='b3x-stop-chain'>остановить</a>";
+            echo "</pre><script>
+var __b3xChain = setTimeout(function(){ location.href='{$nextScript}'; }, 2000);
+document.getElementById('b3x-stop-chain').onclick = function(e){
+    e.preventDefault();
+    clearTimeout(__b3xChain);
+    this.outerHTML = '<span class=\"info\">[цепочка остановлена]</span>';
+};
+</script>";
+        }
     } else {
         echo "\n<span class='progress'>[ПЕРЕЗАГРУЗКА] Через 0,1 секунду...</span>\n";
         echo "</pre><script>setTimeout(function(){ location.reload(); }, 100);</script>";
