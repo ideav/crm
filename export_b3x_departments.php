@@ -19,6 +19,38 @@ $departmentFields = array_keys($departmentFieldsMap);
 $departmentHeaders = array_values($departmentFieldsMap);
 
 $departmentsCsvFile = $csvPath . 'departments.csv';
+// Issue #2696: дополнительная выгрузка в .bki для Интеграма.
+$departmentsBkiFile = $csvPath . 'departments.bki';
+
+// ========== ХЕЛПЕРЫ BKI (Issue #2696) ==========
+// function_exists guard: если export_b3x.php тоже объявил хелперы,
+// этот блок пропускается. Так PR независим от порядка мержа.
+if (!function_exists('bkiEscape')) {
+    function bkiEscape($value) {
+        $value = str_replace(["\r\n", "\r", "\n", "\t"], ' ', (string)$value);
+        return str_replace(';', '\\;', $value);
+    }
+    function formatBkiRow(array $values) {
+        return implode(';', array_map('bkiEscape', $values));
+    }
+    function initBkiFile($file) {
+        if (!file_exists($file) || filesize($file) == 0) {
+            file_put_contents($file, "DATA\n");
+        }
+    }
+    function appendBkiRow($file, array $values) {
+        file_put_contents($file, formatBkiRow($values) . "\n", FILE_APPEND);
+    }
+    function writeBkiFile($file, array $rows) {
+        $content = "DATA\n";
+        foreach ($rows as $values) {
+            $content .= formatBkiRow($values) . "\n";
+        }
+        $tmp = $file . '.tmp';
+        file_put_contents($tmp, $content);
+        rename($tmp, $file);
+    }
+}
 
 /**
  * Полный pull департаментов с пагинацией через start/next.
@@ -104,9 +136,17 @@ try {
 
     writeDepartmentsCsv($departmentsCsvFile, $departmentHeaders, $departmentFields, $departments);
 
+    // Issue #2696: параллельно — снимок в .bki для Интеграма (полная перезапись).
+    $bkiRows = [];
+    foreach ($departments as $dept) {
+        $bkiRows[] = prepareRowData($dept, $departmentFields);
+    }
+    writeBkiFile($departmentsBkiFile, $bkiRows);
+
     echo "\n<span class='success'>[ГОТОВО] Выгружено {$count} департаментов</span>\n";
     echo "<hr>\n";
     echo "📁 <a href='" . basename($departmentsCsvFile) . "' download>Скачать departments.csv</a>\n";
+    echo "<br>📁 <a href='" . basename($departmentsBkiFile) . "' download>Скачать departments.bki</a>\n";
 
     // Issue #2689: паровозик. После завершения переходим к следующему скрипту
     // (если он существует и не передан ?nochain=1).
