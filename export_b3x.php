@@ -18,6 +18,8 @@ $batchSize = defined('BATCH_SIZE') ? BATCH_SIZE : 50;
 // ========== НУЖНЫЕ ПОЛЯ И ИХ РУССКИЕ НАЗВАНИЯ ==========
 $leadFieldsMap = [
     'ID' => 'ID',
+    'DATE_CREATE' => 'Дата создания',
+    'DATE_MODIFY' => 'Дата изменения',
     'TITLE' => 'Название',
     'NAME' => 'Имя',
     'SECOND_NAME' => 'Отчество',
@@ -171,6 +173,59 @@ function getLeadsBatch($bitrix24_webhook, $year, $lastId = 0, $limit = 50, $sele
     ];
 }
 
+/**
+ * Issue #2689: тянем лиды, у которых DATE_MODIFY > $sinceTime, но ID
+ * НЕ выше $maxIdInclusive — чтобы не пересекаться с фазой "новые" по >ID.
+ * Пагинация внутри этой выборки — по >ID > $lastUpdateId, ASC.
+ */
+function getUpdatedLeadsBatch($bitrix24_webhook, $year, $sinceTime, $maxIdInclusive, $lastUpdateId = 0, $limit = 50, $selectFields = [], $apiCaller = null) {
+    $filter = [
+        '>=DATE_CREATE' => $year . '-01-01T00:00:00',
+        '<=DATE_CREATE' => $year . '-12-31T23:59:59',
+        '>DATE_MODIFY' => $sinceTime,
+        '<=ID' => $maxIdInclusive,
+    ];
+    if ($lastUpdateId > 0) {
+        $filter['>ID'] = $lastUpdateId;
+    }
+    $params = [
+        'order' => ['ID' => 'ASC'],
+        'filter' => $filter,
+        'select' => $selectFields,
+        'limit' => $limit,
+    ];
+    $apiCaller = $apiCaller ?: 'callBitrix';
+    $result = $apiCaller($bitrix24_webhook, 'crm.lead.list', $params);
+    return [
+        'leads' => $result['result'] ?? [],
+        'total' => $result['total'] ?? 0,
+    ];
+}
+
+function getUpdatedDealsBatch($bitrix24_webhook, $year, $sinceTime, $maxIdInclusive, $lastUpdateId = 0, $limit = 50, $selectFields = [], $apiCaller = null) {
+    $filter = [
+        '>=DATE_CREATE' => $year . '-01-01T00:00:00',
+        '<=DATE_CREATE' => $year . '-12-31T23:59:59',
+        '>DATE_MODIFY' => $sinceTime,
+        '<=ID' => $maxIdInclusive,
+    ];
+    if ($lastUpdateId > 0) {
+        $filter['>ID'] = $lastUpdateId;
+    }
+    $params = [
+        'order' => ['ID' => 'ASC'],
+        'filter' => $filter,
+        'select' => $selectFields,
+        'limit' => $limit,
+    ];
+    $apiCaller = $apiCaller ?: 'callBitrix';
+    $result = $apiCaller($bitrix24_webhook, 'crm.deal.list', $params);
+    return [
+        'deals' => $result['result'] ?? [],
+        'total' => $result['total'] ?? 0,
+    ];
+}
+
 function getDealsBatch($bitrix24_webhook, $year, $lastId = 0, $limit = 50, $selectFields = [], $apiCaller = null) {
     $yearStart = $year . '-01-01T00:00:00';
     $yearEnd = $year . '-12-31T23:59:59';
@@ -205,24 +260,44 @@ function isExportComplete($state) {
 }
 
 /**
+ * Issue #2689: фаза обновлений. На первом прогоне (last_export_time == null)
+ * её нет, считаем завершённой автоматически. На последующих — ждём оба
+ * updates-флага.
+ */
+function isUpdatesPhaseComplete($state) {
+    if (empty($state['last_export_time'])) {
+        return true;
+    }
+    return !empty($state['updates_leads_complete']) && !empty($state['updates_deals_complete']);
+}
+
+/**
  * Issue #2689: при повторном запуске после полной выгрузки снимаем
  * complete-флаги, чтобы догрузить новые лиды/сделки с ID > last_*_id.
- * Возвращает [новый_state, флаг_режим_догрузки].
+ * Если был хотя бы один полный прогон (last_export_time != null) —
+ * также сбрасываем флаги/курсоры фазы обновлений, чтобы заново пройти её.
  */
 function prepareResumeAfterComplete($state) {
-    $isResume = isExportComplete($state)
-        && ((int)($state['last_lead_id'] ?? 0) > 0 || (int)($state['last_deal_id'] ?? 0) > 0);
+    $allComplete = isExportComplete($state) && isUpdatesPhaseComplete($state);
+    $hasData = (int)($state['last_lead_id'] ?? 0) > 0 || (int)($state['last_deal_id'] ?? 0) > 0;
+    $isResume = $allComplete && $hasData;
     if ($isResume) {
         $state['leads_complete'] = false;
         $state['deals_complete'] = false;
         $state['is_complete'] = false;
+        if (!empty($state['last_export_time'])) {
+            $state['updates_leads_complete'] = false;
+            $state['updates_deals_complete'] = false;
+            $state['updates_lead_last_id'] = 0;
+            $state['updates_deal_last_id'] = 0;
+        }
     }
     return [$state, $isResume];
 }
 
 function getDefaultExportState() {
     return [
-        'state_version' => 2,
+        'state_version' => 3,
         'last_id' => 0,
         'last_lead_id' => 0,
         'last_deal_id' => 0,
@@ -230,7 +305,15 @@ function getDefaultExportState() {
         'deals_complete' => false,
         'is_complete' => false,
         'total_leads' => 0,
-        'total_deals' => 0
+        'total_deals' => 0,
+        // Issue #2689: фаза обновлений (DATE_MODIFY > last_export_time).
+        'last_export_time' => null,
+        'updates_lead_last_id' => 0,
+        'updates_deal_last_id' => 0,
+        'updates_leads_complete' => false,
+        'updates_deals_complete' => false,
+        'total_updated_leads' => 0,
+        'total_updated_deals' => 0,
     ];
 }
 
@@ -254,12 +337,23 @@ function normalizeExportState($state) {
     }
 
     $state = array_merge($default, $state);
-    $state['state_version'] = 2;
+    $state['state_version'] = 3;
     $state['last_lead_id'] = (int)$state['last_lead_id'];
     $state['last_deal_id'] = (int)$state['last_deal_id'];
     $state['total_leads'] = (int)$state['total_leads'];
     $state['total_deals'] = (int)$state['total_deals'];
     $state['last_id'] = $state['last_lead_id'];
+    $state['updates_lead_last_id'] = (int)$state['updates_lead_last_id'];
+    $state['updates_deal_last_id'] = (int)$state['updates_deal_last_id'];
+    $state['total_updated_leads'] = (int)$state['total_updated_leads'];
+    $state['total_updated_deals'] = (int)$state['total_updated_deals'];
+    $state['updates_leads_complete'] = (bool)$state['updates_leads_complete'];
+    $state['updates_deals_complete'] = (bool)$state['updates_deals_complete'];
+    if ($state['last_export_time'] !== null && $state['last_export_time'] !== '') {
+        $state['last_export_time'] = (string)$state['last_export_time'];
+    } else {
+        $state['last_export_time'] = null;
+    }
     $state['is_complete'] = isExportComplete($state);
 
     return $state;
@@ -431,10 +525,15 @@ echo "   Последний ID лида: {$lastLeadId}\n";
 echo "   Последний ID сделки: {$lastDealId}\n";
 echo "   Лиды завершены: " . (!empty($state['leads_complete']) ? 'Да' : 'Нет') . "\n";
 echo "   Сделки завершены: " . (!empty($state['deals_complete']) ? 'Да' : 'Нет') . "\n";
-echo "   Выгружено лидов: " . ($state['total_leads'] ?? 0) . "\n";
-echo "   Выгружено сделок: " . ($state['total_deals'] ?? 0) . "\n";
+echo "   Выгружено лидов (новых): " . ($state['total_leads'] ?? 0) . "\n";
+echo "   Выгружено сделок (новых): " . ($state['total_deals'] ?? 0) . "\n";
+echo "   Выгружено обновлённых лидов: " . ($state['total_updated_leads'] ?? 0) . "\n";
+echo "   Выгружено обновлённых сделок: " . ($state['total_updated_deals'] ?? 0) . "\n";
+if (!empty($state['last_export_time'])) {
+    echo "   Прошлый прогон: " . $state['last_export_time'] . "\n";
+}
 if ($isResumeAfterComplete) {
-    echo "   <span class='info'>[ДОГРУЗКА] Ищу новые записи с ID > last_lead_id / last_deal_id</span>\n";
+    echo "   <span class='info'>[ДОГРУЗКА] Сначала новые (ID > last_*_id), затем обновлённые (DATE_MODIFY > last_export_time)</span>\n";
 }
 echo "\n";
 
@@ -556,15 +655,125 @@ try {
         echo "      Пачка {$batchesProcessed}: +{$processedLeads} лидов, +{$processedDeals} сделок | лид ID: {$maxLeadId}, сделка ID: {$maxDealId}\n";
     }
 
+    // Issue #2689: фаза обновлений (DATE_MODIFY > last_export_time).
+    // Запускается только если фаза "новых" завершена и был хоть один полный
+    // прогон в прошлом (last_export_time != null → isUpdatesPhaseComplete = false).
+    if (!$shouldStop && isExportComplete($state) && !isUpdatesPhaseComplete($state)) {
+        $sinceTime = $state['last_export_time'];
+        $updLeadId = (int)$state['updates_lead_last_id'];
+        $updDealId = (int)$state['updates_deal_last_id'];
+        $leadMaxId = (int)$state['last_lead_id'];
+        $dealMaxId = (int)$state['last_deal_id'];
+
+        echo "\n<span class='info'>>>> ФАЗА ОБНОВЛЁННЫХ (DATE_MODIFY > {$sinceTime}) <<<</span>\n";
+
+        while (!isUpdatesPhaseComplete($state) && !$shouldStop) {
+            if (time() - $startTime >= $timeLimit) {
+                echo "\n<span class='info'>[ВРЕМЯ] Лимит ({$timeLimit} сек). Перезагрузка...</span>\n";
+                resetErrorCounter($errorLogFile);
+                $shouldStop = true;
+                break;
+            }
+
+            $procUpdLeads = 0;
+            $procUpdDeals = 0;
+
+            if (empty($state['updates_leads_complete'])) {
+                echo "   Обновлённые лиды (ID > {$updLeadId}, ≤ {$leadMaxId})... ";
+                try {
+                    $batch = getUpdatedLeadsBatch($bitrix24_webhook, $TARGET_YEAR, $sinceTime, $leadMaxId, $updLeadId, $batchSize, $leadFields);
+                    $leads = $batch['leads'];
+                    resetErrorCounter($errorLogFile);
+                } catch (Exception $e) {
+                    incrementErrorCounter($errorLogFile);
+                    checkErrorLimit($errorLogFile, 3);
+                    echo "<span class='error'>Ошибка: " . $e->getMessage() . "</span>\n";
+                    sleep(2);
+                    continue;
+                }
+                $cnt = count($leads);
+                if ($cnt == 0) {
+                    echo "<span class='info'>0 — обновлённые лиды завершены</span>\n";
+                    $state['updates_leads_complete'] = true;
+                } else {
+                    echo "<span class='progress'>+{$cnt}</span>\n";
+                    foreach ($leads as $lead) {
+                        appendCsvRow($leadsCsvFile, prepareRowData($lead, $leadFields));
+                        $procUpdLeads++;
+                        if ((int)$lead['ID'] > $updLeadId) {
+                            $updLeadId = (int)$lead['ID'];
+                        }
+                    }
+                }
+                $state['updates_lead_last_id'] = $updLeadId;
+                $state['total_updated_leads'] = ($state['total_updated_leads'] ?? 0) + $procUpdLeads;
+                saveExportState($stateFile, $state);
+            }
+
+            if (time() - $startTime >= $timeLimit) {
+                echo "\n<span class='info'>[ВРЕМЯ] Лимит ({$timeLimit} сек). Перезагрузка...</span>\n";
+                resetErrorCounter($errorLogFile);
+                $shouldStop = true;
+                break;
+            }
+
+            if (empty($state['updates_deals_complete'])) {
+                echo "   Обновлённые сделки (ID > {$updDealId}, ≤ {$dealMaxId})... ";
+                try {
+                    $batch = getUpdatedDealsBatch($bitrix24_webhook, $TARGET_YEAR, $sinceTime, $dealMaxId, $updDealId, $batchSize, $dealFields);
+                    $deals = $batch['deals'];
+                    resetErrorCounter($errorLogFile);
+                } catch (Exception $e) {
+                    incrementErrorCounter($errorLogFile);
+                    checkErrorLimit($errorLogFile, 3);
+                    echo "<span class='error'>Ошибка: " . $e->getMessage() . "</span>\n";
+                    sleep(2);
+                    continue;
+                }
+                $cnt = count($deals);
+                if ($cnt == 0) {
+                    echo "<span class='info'>0 — обновлённые сделки завершены</span>\n";
+                    $state['updates_deals_complete'] = true;
+                } else {
+                    echo "<span class='progress'>+{$cnt}</span>\n";
+                    foreach ($deals as $deal) {
+                        appendCsvRow($dealsCsvFile, prepareRowData($deal, $dealFields));
+                        $procUpdDeals++;
+                        if ((int)$deal['ID'] > $updDealId) {
+                            $updDealId = (int)$deal['ID'];
+                        }
+                    }
+                }
+                $state['updates_deal_last_id'] = $updDealId;
+                $state['total_updated_deals'] = ($state['total_updated_deals'] ?? 0) + $procUpdDeals;
+                saveExportState($stateFile, $state);
+            }
+
+            $batchesProcessed++;
+            echo "      Пачка {$batchesProcessed}: +{$procUpdLeads} обн. лидов, +{$procUpdDeals} обн. сделок\n";
+        }
+    }
+
+    // Issue #2689: оба прохода завершены — фиксируем момент окончания,
+    // от которого в следующий раз будем тянуть DATE_MODIFY.
+    if (isExportComplete($state) && isUpdatesPhaseComplete($state)) {
+        $state['last_export_time'] = date('c');
+        saveExportState($stateFile, $state);
+    }
+
     $totalLeads = $state['total_leads'] ?? 0;
     $totalDeals = $state['total_deals'] ?? 0;
+    $totalUpdLeads = $state['total_updated_leads'] ?? 0;
+    $totalUpdDeals = $state['total_updated_deals'] ?? 0;
 
     echo "\n<span class='info'>ИТОГИ СЕССИИ:</span>\n";
     echo "   Обработано пачек: {$batchesProcessed}\n";
-    echo "   Всего лидов: {$totalLeads}\n";
-    echo "   Всего сделок: {$totalDeals}\n";
+    echo "   Новых лидов: {$totalLeads}\n";
+    echo "   Новых сделок: {$totalDeals}\n";
+    echo "   Обновлённых лидов: {$totalUpdLeads}\n";
+    echo "   Обновлённых сделок: {$totalUpdDeals}\n";
 
-    if (isExportComplete($state)) {
+    if (isExportComplete($state) && isUpdatesPhaseComplete($state)) {
         echo "\n<span class='success'>[ГОТОВО] ВСЕ ДАННЫЕ ЗА {$TARGET_YEAR} ГОД ВЫГРУЖЕНЫ!</span>\n";
         echo "<hr>\n";
         echo "📁 <a href='" . basename($leadsCsvFile) . "' download>Скачать лидов ({$totalLeads})</a>\n";
