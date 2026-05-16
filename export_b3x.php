@@ -204,6 +204,22 @@ function isExportComplete($state) {
     return !empty($state['leads_complete']) && !empty($state['deals_complete']);
 }
 
+/**
+ * Issue #2689: при повторном запуске после полной выгрузки снимаем
+ * complete-флаги, чтобы догрузить новые лиды/сделки с ID > last_*_id.
+ * Возвращает [новый_state, флаг_режим_догрузки].
+ */
+function prepareResumeAfterComplete($state) {
+    $isResume = isExportComplete($state)
+        && ((int)($state['last_lead_id'] ?? 0) > 0 || (int)($state['last_deal_id'] ?? 0) > 0);
+    if ($isResume) {
+        $state['leads_complete'] = false;
+        $state['deals_complete'] = false;
+        $state['is_complete'] = false;
+    }
+    return [$state, $isResume];
+}
+
 function getDefaultExportState() {
     return [
         'state_version' => 2,
@@ -365,6 +381,12 @@ global $bitrix24_webhook;
 
 $startTime = time();
 $state = getExportState($stateFile);
+
+[$state, $isResumeAfterComplete] = prepareResumeAfterComplete($state);
+if ($isResumeAfterComplete) {
+    saveExportState($stateFile, $state);
+}
+
 $lastLeadId = $state['last_lead_id'];
 $lastDealId = $state['last_deal_id'];
 $isComplete = isExportComplete($state);
@@ -410,17 +432,11 @@ echo "   Последний ID сделки: {$lastDealId}\n";
 echo "   Лиды завершены: " . (!empty($state['leads_complete']) ? 'Да' : 'Нет') . "\n";
 echo "   Сделки завершены: " . (!empty($state['deals_complete']) ? 'Да' : 'Нет') . "\n";
 echo "   Выгружено лидов: " . ($state['total_leads'] ?? 0) . "\n";
-echo "   Выгружено сделок: " . ($state['total_deals'] ?? 0) . "\n\n";
-
-if ($isComplete) {
-    echo "<span class='success'>[ГОТОВО] ВСЕ ДАННЫЕ ЗА {$TARGET_YEAR} ГОД ВЫГРУЖЕНЫ!</span>\n";
-    echo "<hr>\n";
-    echo "📁 <a href='" . basename($leadsCsvFile) . "' download>Скачать лидов ({$state['total_leads']})</a>\n";
-    echo "<br>📁 <a href='" . basename($dealsCsvFile) . "' download>Скачать сделки ({$state['total_deals']})</a>\n";
-    echo "<br><br>🗑️ <a href='?reset=1'>Сбросить и начать заново</a>\n";
-    echo "</pre></body></html>";
-    exit(0);
+echo "   Выгружено сделок: " . ($state['total_deals'] ?? 0) . "\n";
+if ($isResumeAfterComplete) {
+    echo "   <span class='info'>[ДОГРУЗКА] Ищу новые записи с ID > last_lead_id / last_deal_id</span>\n";
 }
+echo "\n";
 
 $batchesProcessed = 0;
 $shouldStop = false;
@@ -554,6 +570,22 @@ try {
         echo "📁 <a href='" . basename($leadsCsvFile) . "' download>Скачать лидов ({$totalLeads})</a>\n";
         echo "<br>📁 <a href='" . basename($dealsCsvFile) . "' download>Скачать сделки ({$totalDeals})</a>\n";
         echo "<br><br>🗑️ <a href='?reset=1'>Сбросить и начать заново</a>\n";
+
+        // Issue #2689: паровозик. Если следующий скрипт существует — переходим
+        // к нему через 2 секунды. Прервать можно ссылкой "остановить".
+        $nextScript = 'export_b3x_departments.php';
+        if (file_exists(__DIR__ . '/' . $nextScript) && empty($_GET['nochain'])) {
+            echo "<br><br><span class='info'>[ПАРОВОЗИК] Через 2 секунды → {$nextScript}</span>";
+            echo " <a href='#' id='b3x-stop-chain'>остановить</a>";
+            echo "</pre><script>
+var __b3xChain = setTimeout(function(){ location.href='{$nextScript}'; }, 2000);
+document.getElementById('b3x-stop-chain').onclick = function(e){
+    e.preventDefault();
+    clearTimeout(__b3xChain);
+    this.outerHTML = '<span class=\"info\">[цепочка остановлена]</span>';
+};
+</script>";
+        }
     } else {
         echo "\n<span class='progress'>[ПЕРЕЗАГРУЗКА] Через 0,1 секунду...</span>\n";
         echo "</pre><script>setTimeout(function(){ location.reload(); }, 100);</script>";
