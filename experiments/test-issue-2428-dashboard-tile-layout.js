@@ -1,7 +1,7 @@
 'use strict';
 
-// Issue #2428: tile mode is the default dashboard layout, uses a 12-column
-// grid, removes tile-width dragging, and exposes panel height/column settings.
+// Issue #2428: tile mode uses a 12-column grid, removes tile-width dragging,
+// and exposes panel height/column settings.
 
 const assert = require('assert');
 const fs = require('fs');
@@ -86,6 +86,7 @@ function makeButton() {
 function makeSheet(id, button) {
     return {
         id,
+        dataset: {},
         style: makeStyle(),
         classList: makeClassList('f-sheet'),
         querySelector(selector) {
@@ -110,8 +111,8 @@ assert(sheetTpl.indexOf('dash-settings-icon') < sheetTpl.indexOf('dash-tile-mode
     'tile mode button is after dashboard settings');
 assert(sheetTpl.indexOf('dash-tile-mode-icon') < sheetTpl.indexOf('dash-reset-size-icon'),
     'tile mode button is before reset sizes');
-assert(sheetTpl.includes('aria-pressed="true"'), 'tile mode button starts pressed');
-assert(sheetTpl.includes('title="Выключить режим плитки"'), 'tile mode button starts with disable title');
+assert(sheetTpl.includes('aria-pressed="false"'), 'tile mode button starts unpressed');
+assert(sheetTpl.includes('title="Включить режим плитки"'), 'tile mode button starts with enable title');
 
 assert(/grid-template-columns:\s*repeat\(12,\s*minmax\(0,\s*1fr\)\)/.test(css),
     'tile mode uses a 12-column grid');
@@ -150,6 +151,10 @@ ${extractFunction('dashCookieNamePart')}
 ${extractFunction('dashSheetTileModeCookieName')}
 ${extractFunction('dashSheetTilePanelWidthCookieName')}
 ${extractFunction('dashRemoveSheetTilePanelWidth')}
+${extractFunction('dashSheetDefaultTileMode')}
+${extractFunction('dashSheetTileModeDefaultFromValue')}
+${extractFunction('dashSheetTileModeDefaultFromRow')}
+${extractFunction('dashSetSheetTileModeDefault')}
 ${extractFunction('dashReadSheetTileMode')}
 ${extractFunction('dashSetSheetTileModeButtonState')}
 ${extractFunction('dashApplySheetTilePanelMinWidth')}
@@ -184,7 +189,9 @@ const button = makeButton();
 const sheet = makeSheet('ds-main', button);
 const tileCookie = ctx.dashSheetTileModeCookieName(sheet);
 
-assert.strictEqual(ctx.dashReadSheetTileMode(sheet), true, 'missing tile cookie means tile mode is on');
+assert.strictEqual(ctx.dashReadSheetTileMode(sheet), false, 'missing tile cookie and sheet default means tile mode is off');
+ctx.dashSetSheetTileModeDefault(sheet, { 'Сетка': '1' });
+assert.strictEqual(ctx.dashReadSheetTileMode(sheet), true, 'non-empty Сетка enables tile mode by default');
 ctx.dashApplySheetTileMode(sheet, false, true);
 assert.strictEqual(doc.getCookie(tileCookie), '0', 'disabling tile mode stores an explicit off state');
 assert.strictEqual(ctx.dashReadSheetTileMode(sheet), false, 'explicit off cookie disables tile mode');
