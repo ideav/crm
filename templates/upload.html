@@ -80,6 +80,21 @@ input[type="checkbox"] {
     background-color: var(--color-danger, #dc3545);
     color: #fff;
 }
+.preview-toolbar {
+    display: none;
+    align-items: center;
+    gap: .5rem;
+    flex-wrap: wrap;
+}
+.preview-copy-status {
+    color: var(--text-secondary);
+}
+.preview-copy-status.success {
+    color: var(--color-success, #28a745);
+}
+.preview-copy-status.error {
+    color: var(--color-danger, #dc3545);
+}
 [data-theme="dark"] .upload-errors-bg {
     background-color: var(--color-error-bg, #7f1d1d);
     color: var(--color-error, #f87171);
@@ -206,6 +221,12 @@ input[type="checkbox"] {
         </div>
     </div>
     <div id="resume" class="mt-4"></div>
+    <div id="preview-actions" class="preview-toolbar mb-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="copy-preview-table" onclick="copyPreviewTable()" title="Скопировать таблицу предварительного просмотра для вставки в Excel">
+            <i class="pi pi-copy"></i> Скопировать таблицу
+        </button>
+        <span id="copy-preview-status" class="preview-copy-status small" aria-live="polite"></span>
+    </div>
     <div id="preview" style="/*overflow-x: auto*/" class="mt-3 mb-5"></div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.1/papaparse.min.js" integrity="sha512-EbdJQSugx0nVWrtyK3JdQQ/03mS3Q1UiAhRtErbwl1YL/+e2hZdlIcSURxxh7WXHTzn83sjlh2rysACoJGfb6g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -227,6 +248,98 @@ function showNotification(message, type) {
     var remove = function() { if (toast.parentNode) toast.remove(); };
     setTimeout(remove, 5000);
     toast.addEventListener('click', remove);
+}
+var previewCopyStatusTimer;
+function normalizePreviewClipboardText(text) {
+    return String(text == null ? '' : text).replace(/[\r\n\t]+/g, ' ').trim();
+}
+function previewCellClipboardText(cell) {
+    if(!cell)
+        return '';
+    var copyText = cell.getAttribute ? cell.getAttribute('data-copy-text') : null;
+    if(copyText !== null)
+        return normalizePreviewClipboardText(copyText);
+    return normalizePreviewClipboardText(cell.textContent || '');
+}
+function previewCellColSpan(cell) {
+    if(!cell)
+        return 1;
+    var raw = cell.getAttribute ? cell.getAttribute('colspan') : cell.colSpan;
+    var span = parseInt(raw, 10);
+    return span > 1 ? span : 1;
+}
+function buildPreviewTableTsv(table) {
+    if(!table && typeof document !== 'undefined')
+        table = document.querySelector('#preview table');
+    if(!table)
+        return '';
+    var rows = table.querySelectorAll('tr'), out = [], cells, row, i, j, k, span;
+    for(i=0;i<rows.length;i++){
+        cells = rows[i].querySelectorAll('th,td');
+        row = [];
+        for(j=0;j<cells.length;j++){
+            row.push(previewCellClipboardText(cells[j]));
+            span = previewCellColSpan(cells[j]);
+            for(k=1;k<span;k++)
+                row.push('');
+        }
+        out.push(row.join('\t'));
+    }
+    return out.join('\n');
+}
+function setPreviewCopyStatus(message, type) {
+    var status = document.getElementById('copy-preview-status');
+    if(!status)
+        return;
+    window.clearTimeout(previewCopyStatusTimer);
+    status.textContent = message || '';
+    status.className = 'preview-copy-status small' + (type ? ' ' + type : '');
+    if(message)
+        previewCopyStatusTimer = window.setTimeout(function(){
+            status.textContent = '';
+            status.className = 'preview-copy-status small';
+        }, 2500);
+}
+function fallbackCopyPreviewText(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch(e) {}
+    document.body.removeChild(ta);
+}
+function writePreviewClipboardText(text) {
+    if(navigator.clipboard && navigator.clipboard.writeText)
+        return navigator.clipboard.writeText(text).catch(function(){
+            fallbackCopyPreviewText(text);
+        });
+    fallbackCopyPreviewText(text);
+    return Promise.resolve();
+}
+function copyPreviewTable() {
+    var text = buildPreviewTableTsv();
+    var btn = document.getElementById('copy-preview-table');
+    if(text === ''){
+        setPreviewCopyStatus('Нет таблицы для копирования', 'error');
+        showNotification('Нет таблицы для копирования', 'error');
+        return false;
+    }
+    if(btn)
+        btn.disabled = true;
+    writePreviewClipboardText(text).then(function(){
+        setPreviewCopyStatus('Скопировано для Excel', 'success');
+        showNotification('Таблица скопирована в буфер обмена', 'success');
+        if(btn)
+            btn.disabled = false;
+    }, function(){
+        setPreviewCopyStatus('Не удалось скопировать', 'error');
+        showNotification('Не удалось скопировать таблицу', 'error');
+        if(btn)
+            btn.disabled = false;
+    });
+    return false;
 }
 var input,sourceMap=[],importMap={},chosenType,chosenTypeName,chosenSet,upType,uploadSets={},toImport=[],saveSet,formulas={},statArr={},origMap={}
     ,types={},bt={},revBt={},toCreate=[],newType,chunkSize=1000,autoParent
@@ -915,6 +1028,8 @@ function importParse(){
 var evalErrs={},evalExpr={};
 function importDoParse(input){
     $('#progress,#errors,#log').html('').hide();
+    $('#preview-actions').hide();
+    setPreviewCopyStatus('', '');
     var val,cellValue,i,j=0,jMap,reverseMap={}
         ,err=0,skippedInvalid=0,empties=0,sampleHeader='',sampleLine='',expr,l=0,line
         ,stats='<h5>'+'Статистика'+'</h5><table class="table table-sm table-bordered mt-2"><thead><tr><td></td>';
@@ -1034,9 +1149,11 @@ function importDoParse(input){
     $('#formula').hide();
 }
 function drawPage(n){
-    var cellValue,i,j=0,line,link,h='<table class="table table-sm table-bordered mt-1"><thead><tr>';
-    if(autoParent)
-        h+='<td>'+getParent(chosenType)+'</td>';
+    var cellValue,i,j=0,jMap,line,link,parentName,h='<table class="table table-sm table-bordered mt-1"><thead><tr>';
+    if(autoParent){
+        parentName = getParent(chosenType);
+        h+='<td data-copy-text="'+escape(parentName)+'">'+escape(parentName)+'</td>';
+    }
     for(i in sourceMap)
         if(sourceMap[i].skip===0){
             link='';
@@ -1045,7 +1162,7 @@ function drawPage(n){
                     link='<i class="pi pi-link" style="font-size: 0.8rem; color: var(--text-primary);" title="'+'Справочное значение'+'"></i>&nbsp;';
                 else if(sourceMap[i].link===2)
                     link='<i class="pi pi-list" style="font-size: 0.8rem; color: var(--text-primary);" title="'+'Выбор нескольких из справочника'+'"></i>&nbsp;';
-            h+='<td id="'+sourceMap[i].id+'">'+link+sourceMap[i].name
+            h+='<td id="'+sourceMap[i].id+'" data-copy-text="'+escape(sourceMap[i].name)+'">'+link+sourceMap[i].name
                 +(chosenType===undefined?'<br /><span style="font-size: 75%; color: var(--text-secondary)">'+bt[sourceMap[i].base]+'</span>':'')
                 +'</td>';
             if($('#chosen').html()==='')
@@ -1057,8 +1174,10 @@ function drawPage(n){
         if(!toImport[i])
             break;
         line='';
-        if(autoParent)
-            line+='<td>'+escape(serializeUploadCellValue(toImport[i][0]))+'</td>';
+        if(autoParent){
+            cellValue = serializeUploadCellValue(toImport[i][0]);
+            line+='<td data-copy-text="'+escape(cellValue)+'">'+escape(cellValue)+'</td>';
+        }
         for(j in sourceMap)
             if(sourceMap[j].skip===0){
                 if(chosenType===undefined)
@@ -1069,10 +1188,11 @@ function drawPage(n){
                         jMap=parseInt(jMap)+1;
                 }
                 if(evalErrs[i+'-'+jMap])
-                    line+='<td class="cell-error" title="'+evalErrs[i+'-'+jMap].title+'">'+evalErrs[i+'-'+jMap].err+'</td>';
-                else if((cellValue=serializeUploadCellValue(toImport[i][jMap]))!=='')
-                    line+='<td'+(evalExpr[i+'-'+jMap]?' title="'+evalExpr[i+'-'+jMap]+'" class="cell-success"':'')+'>'
+                    line+='<td class="cell-error" data-copy-text="'+escape(serializeUploadCellValue(evalErrs[i+'-'+jMap].err))+'" title="'+escape(evalErrs[i+'-'+jMap].title)+'">'+escape(serializeUploadCellValue(evalErrs[i+'-'+jMap].err))+'</td>';
+                else if((cellValue=serializeUploadCellValue(toImport[i][jMap]))!==''){
+                    line+='<td data-copy-text="'+escape(cellValue)+'"'+(evalExpr[i+'-'+jMap]?' title="'+escape(evalExpr[i+'-'+jMap])+'" class="cell-success"':'')+'>'
                             +escape(cellValue)+'</td>';
+                }
                 else
                     line+='<td class="cell-empty"></td>';
             }
@@ -1080,6 +1200,8 @@ function drawPage(n){
     }
     h+='</tbody></table>';
     $('#preview').html(h);
+    $('#preview-actions').css('display', $('#preview table').length ? 'flex' : 'none');
+    setPreviewCopyStatus('', '');
 }
 function procStats(j,val,type){
     if((type==='4'/*DATETIME*/&&!dateTimeMask.test(val)&&isNaN(Number(val)))
