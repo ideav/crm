@@ -80,13 +80,35 @@ input[type="checkbox"] {
     background-color: var(--color-danger, #dc3545);
     color: #fff;
 }
-.preview-toolbar {
-    display: none;
+.preview-copy-action {
+    display: inline-flex;
     align-items: center;
-    gap: .5rem;
-    flex-wrap: wrap;
+    gap: .35rem;
+    margin-left: .5rem;
+    vertical-align: middle;
+}
+.preview-copy-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: .15rem .25rem;
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    line-height: 1;
+}
+.preview-copy-icon:hover,
+.preview-copy-icon:focus {
+    color: var(--text-primary);
+}
+.preview-copy-icon:disabled {
+    opacity: .5;
+    cursor: default;
 }
 .preview-copy-status {
+    font-size: .75rem;
+    font-weight: 400;
     color: var(--text-secondary);
 }
 .preview-copy-status.success {
@@ -221,12 +243,6 @@ input[type="checkbox"] {
         </div>
     </div>
     <div id="resume" class="mt-4"></div>
-    <div id="preview-actions" class="preview-toolbar mb-2">
-        <button type="button" class="btn btn-outline-secondary btn-sm" id="copy-preview-table" onclick="copyPreviewTable()" title="Скопировать таблицу предварительного просмотра для вставки в Excel">
-            <i class="pi pi-copy"></i> Скопировать таблицу
-        </button>
-        <span id="copy-preview-status" class="preview-copy-status small" aria-live="polite"></span>
-    </div>
     <div id="preview" style="/*overflow-x: auto*/" class="mt-3 mb-5"></div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.1/papaparse.min.js" integrity="sha512-EbdJQSugx0nVWrtyK3JdQQ/03mS3Q1UiAhRtErbwl1YL/+e2hZdlIcSURxxh7WXHTzn83sjlh2rysACoJGfb6g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -287,6 +303,75 @@ function buildPreviewTableTsv(table) {
     }
     return out.join('\n');
 }
+function previewCopyActionHtml() {
+    return '<span id="preview-actions" class="preview-copy-action">'
+        + '<button type="button" class="preview-copy-icon" id="copy-preview-table" onclick="copyPreviewTable()" title="Скопировать все строки предварительного просмотра для вставки в Excel" aria-label="Скопировать таблицу">'
+        + '<i class="pi pi-copy" aria-hidden="true"></i></button>'
+        + '<span id="copy-preview-status" class="preview-copy-status small" aria-live="polite"></span>'
+        + '</span>';
+}
+function appendPreviewTsvText(row, text) {
+    row.push(normalizePreviewClipboardText(text));
+}
+function buildPreviewImportHeaderRow() {
+    var row = [], i, parentName;
+    if(typeof autoParent !== 'undefined' && autoParent){
+        parentName = typeof getParent === 'function' ? getParent(chosenType) : '';
+        appendPreviewTsvText(row, parentName);
+    }
+    if(typeof sourceMap === 'undefined' || !sourceMap)
+        return row;
+    for(i in sourceMap)
+        if(sourceMap[i] && sourceMap[i].skip===0)
+            appendPreviewTsvText(row, sourceMap[i].name);
+    return row;
+}
+function previewImportColumnIndex(sourceIndex) {
+    var jMap, parsed;
+    if(typeof chosenType === 'undefined' || chosenType===undefined)
+        return sourceIndex;
+    if(typeof sourceMap === 'undefined' || !sourceMap[sourceIndex])
+        return sourceIndex;
+    jMap = typeof origMap !== 'undefined' && origMap ? origMap[sourceMap[sourceIndex].id] : sourceIndex;
+    if(typeof autoParent !== 'undefined' && autoParent){
+        parsed = parseInt(jMap, 10);
+        return isNaN(parsed) ? jMap : parsed + 1;
+    }
+    return jMap;
+}
+function previewImportCellText(rowIndex, columnIndex) {
+    var errKey = rowIndex + '-' + columnIndex;
+    if(typeof evalErrs !== 'undefined' && evalErrs && evalErrs[errKey])
+        return serializeUploadCellValue(evalErrs[errKey].err);
+    if(typeof toImport === 'undefined' || !toImport || !toImport[rowIndex])
+        return '';
+    return serializeUploadCellValue(toImport[rowIndex][columnIndex]);
+}
+function buildPreviewImportTsv(fallbackTable) {
+    var header = buildPreviewImportHeaderRow(), out = [], row, i, j, jMap, hasRows = false;
+    if(header.length===0)
+        return buildPreviewTableTsv(fallbackTable);
+    out.push(header.join('\t'));
+    if(typeof toImport === 'undefined' || !toImport)
+        return fallbackTable ? buildPreviewTableTsv(fallbackTable) : out.join('\n');
+    for(i=1;i<toImport.length;i++){
+        if(toImport[i]===undefined)
+            continue;
+        hasRows = true;
+        row = [];
+        if(typeof autoParent !== 'undefined' && autoParent)
+            appendPreviewTsvText(row, toImport[i][0]);
+        for(j in sourceMap)
+            if(sourceMap[j] && sourceMap[j].skip===0){
+                jMap = previewImportColumnIndex(j);
+                appendPreviewTsvText(row, previewImportCellText(i, jMap));
+            }
+        out.push(row.join('\t'));
+    }
+    if(!hasRows && fallbackTable)
+        return buildPreviewTableTsv(fallbackTable);
+    return out.join('\n');
+}
 function setPreviewCopyStatus(message, type) {
     var status = document.getElementById('copy-preview-status');
     if(!status)
@@ -319,7 +404,8 @@ function writePreviewClipboardText(text) {
     return Promise.resolve();
 }
 function copyPreviewTable() {
-    var text = buildPreviewTableTsv();
+    var table = document.querySelector('#preview table');
+    var text = buildPreviewImportTsv(table);
     var btn = document.getElementById('copy-preview-table');
     if(text === ''){
         setPreviewCopyStatus('Нет таблицы для копирования', 'error');
@@ -329,8 +415,8 @@ function copyPreviewTable() {
     if(btn)
         btn.disabled = true;
     writePreviewClipboardText(text).then(function(){
-        setPreviewCopyStatus('Скопировано для Excel', 'success');
-        showNotification('Таблица скопирована в буфер обмена', 'success');
+        setPreviewCopyStatus('Скопировано', 'success');
+        showNotification('Таблица скопирована полностью', 'success');
         if(btn)
             btn.disabled = false;
     }, function(){
@@ -1137,7 +1223,8 @@ function importDoParse(input){
     $('#stats').html(stats);
     $('#resume').html('<h5>'+'Предварительный просмотр результатов импорта (всего строк'+': <b>'+l+'</b>'+(err>0?'<span style="color:var(--bs-warning,orange)">, '+'ошибок'+': '+err+'</span>':'')
                         +(empties>0?'<span style="color:var(--text-secondary)">, '+'пустых ячеек'+': '+empties+'</span>':'')
-                        +(skippedInvalid>0?'<span style="color:var(--bs-warning,orange)">, '+'пропущено пустых'+': '+skippedInvalid+'</span>':'')+')'+line+'</h5>');
+                        +(skippedInvalid>0?'<span style="color:var(--bs-warning,orange)">, '+'пропущено пустых'+': '+skippedInvalid+'</span>':'')+')'+line
+                        +(l>0?previewCopyActionHtml():'')+'</h5>');
     drawPage(1);
     if((l==0&&chosenType!==undefined)||sourceMap.length==0){
         $('#upload').hide();
@@ -1200,7 +1287,6 @@ function drawPage(n){
     }
     h+='</tbody></table>';
     $('#preview').html(h);
-    $('#preview-actions').css('display', $('#preview table').length ? 'flex' : 'none');
     setPreviewCopyStatus('', '');
 }
 function procStats(j,val,type){
