@@ -57,7 +57,7 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
         + '<button class="dash-apply-btn" onclick="dashApplyFilter(this.closest(\'.f-sheet\'))">Применить</button>'
         + '<input type="text" class="dash-search-input" placeholder="Поиск..." oninput="dashApplySearch(this.value,this.closest(\'.f-sheet\'))">'
         + (dashIsAdmin ? '<a class="dash-settings-icon" onclick="dashOpenSettings()" title="Настройки дэшборда"><i class="pi pi-cog"></i></a>' : '')
-        + '<button type="button" class="dash-tile-mode-icon" onclick="dashToggleSheetTileMode(this.closest(\'.f-sheet\'))" title="Выключить режим плитки" aria-label="Режим плитки" aria-pressed="true"><i class="pi pi-th-large"></i></button>'
+        + '<button type="button" class="dash-tile-mode-icon" onclick="dashToggleSheetTileMode(this.closest(\'.f-sheet\'))" title="Включить режим плитки" aria-label="Режим плитки" aria-pressed="false"><i class="pi pi-th-large"></i></button>'
         + '<button type="button" class="dash-reset-size-icon" onclick="dashResetSheetSizeCookies(this.closest(\'.f-sheet\'))" title="Сбросить размеры панелей" aria-label="Сбросить размеры панелей" aria-hidden="true" disabled><i class="pi pi-refresh"></i></button>'
         + '</div></div>'
     , panelTpl    = '<div id=":id:" f-period=":period:" class="f-panel pt-3" data-panel-id=":panelid:">'
@@ -2287,8 +2287,13 @@ function dashGetModel(json) {
             model.querySelector('.sheets').insertAdjacentHTML('beforeend',
                 sheetTpl.replace(/:id:/g, json[i].sheetID));
             var sheetEl = document.getElementById('ds' + json[i].sheetID);
+            dashSetSheetTileModeDefault(sheetEl, json[i]);
             dashInitFilterBar(sheetEl);
             dashSetSheetTileModeButtonState(sheetEl, dashReadSheetTileMode(sheetEl));
+        } else {
+            var existingSheetEl = document.getElementById('ds' + json[i].sheetID);
+            dashSetSheetTileModeDefault(existingSheetEl, json[i]);
+            dashSetSheetTileModeButtonState(existingSheetEl, dashReadSheetTileMode(existingSheetEl));
         }
         // Add panel to sheet (prefix 'fp' to avoid ID collision with item rows)
         if (!document.getElementById(panelKey)) {
@@ -3614,13 +3619,51 @@ function dashRemoveSheetTilePanelWidth(sheetEl) {
     dashCookieRemove(dashSheetTilePanelWidthCookieName(sheetEl));
 }
 
+function dashSheetDefaultTileMode(sheetEl) {
+    return !!(sheetEl && sheetEl.dataset && sheetEl.dataset.defaultTileMode === '1');
+}
+
+function dashSheetTileModeDefaultFromValue(value) {
+    var normalized;
+    if (value === null || value === undefined) return false;
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+    normalized = String(value).trim().toLowerCase();
+    if (!normalized) return false;
+    return ['0', 'false', 'no', 'off', 'нет'].indexOf(normalized) === -1;
+}
+
+function dashSheetTileModeDefaultFromRow(row) {
+    var names = ['Сетка', 'сетка', 'grid', 'Grid', 'GRID', 'sheetGrid', 'sheetGridMode', 'gridMode', 'tileMode', 'sheetTileMode']
+        , i, name;
+    if (!row) return null;
+    for (i = 0; i < names.length; i++) {
+        name = names[i];
+        if (Object.prototype.hasOwnProperty.call(row, name))
+            return dashSheetTileModeDefaultFromValue(row[name]);
+    }
+    return null;
+}
+
+function dashSetSheetTileModeDefault(sheetEl, row) {
+    var enabled = dashSheetTileModeDefaultFromRow(row);
+    if (!sheetEl || !sheetEl.dataset) return false;
+    if (enabled === null) {
+        if (!sheetEl.dataset.defaultTileMode)
+            sheetEl.dataset.defaultTileMode = '0';
+    } else {
+        sheetEl.dataset.defaultTileMode = enabled ? '1' : '0';
+    }
+    return dashSheetDefaultTileMode(sheetEl);
+}
+
 function dashReadSheetTileMode(sheetEl) {
     var raw;
     if (!sheetEl) return false;
     raw = dashCookieGet(dashSheetTileModeCookieName(sheetEl));
     if (raw === '0') return false;
     if (raw === '1') return true;
-    return true;
+    return dashSheetDefaultTileMode(sheetEl);
 }
 
 function dashSetSheetTileModeButtonState(sheetEl, enabled) {
