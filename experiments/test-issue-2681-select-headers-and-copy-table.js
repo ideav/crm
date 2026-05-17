@@ -5,6 +5,8 @@
 //   3. TSV copy of the whole table walks every row, joining cells with TAB
 //      and rows with newline; numeric cells get spaces stripped, text cells
 //      keep their internal spaces.
+//   4. Issue #2703: whole-table copy expands header colspan cells so grouped
+//      month headers stay aligned with the two subcolumns below them.
 
 let passed = 0, failed = 0;
 function assert(cond, msg) {
@@ -107,13 +109,29 @@ function tsvCellText(cell) {
     return (cell.textContent != null ? String(cell.textContent) : '').trim();
 }
 
+function tsvCellColSpan(cell) {
+    if (!cell) return 1;
+    var raw = typeof cell.colSpan === 'number'
+        ? cell.colSpan
+        : (cell.getAttribute && cell.getAttribute('colspan'));
+    var span = parseInt(raw, 10);
+    return span > 1 ? span : 1;
+}
+
+function appendTsvCell(rowCells, cell) {
+    rowCells.push(tsvCellText(cell));
+    for (var i = 1, span = tsvCellColSpan(cell); i < span; i++) {
+        rowCells.push('');
+    }
+}
+
 function buildTableTsv(table) {
     if (!table) return '';
     var rows = [];
     queryAllRows(table).forEach(function(tr) {
         var rowCells = [];
         for (var i = 0; i < tr.children.length; i++) {
-            rowCells.push(tsvCellText(tr.children[i]));
+            appendTsvCell(rowCells, tr.children[i]);
         }
         rows.push(rowCells.join('\t'));
     });
@@ -262,9 +280,32 @@ assert(lines[2] === 'Net profit\t300\t-50',
     'second data line: ' + JSON.stringify(lines[2]));
 
 // =========================================================================
-// Test 5: buildTableTsv on null / missing table is harmless.
+// Test 5: buildTableTsv keeps colspan headers aligned with body columns.
 // =========================================================================
-console.log('\nTest 5: buildTableTsv handles a missing table');
+console.log('\nTest 5: buildTableTsv expands header colspan cells');
+var colSpanFx = buildFixture();
+colSpanFx.headers[1]._attrs.colspan = '2';
+colSpanFx.headers[1].textContent = 'янв 26';
+colSpanFx.headers[2]._attrs.colspan = '2';
+colSpanFx.headers[2].textContent = 'фев 26';
+appendChild(colSpanFx.firstCells[0].closest('tr'), makeEl('td', { classes: ['f-cell'], text: '10' }));
+appendChild(colSpanFx.firstCells[0].closest('tr'), makeEl('td', { classes: ['f-cell'], text: '20' }));
+appendChild(colSpanFx.firstCells[1].closest('tr'), makeEl('td', { classes: ['f-cell'], text: '30' }));
+appendChild(colSpanFx.firstCells[1].closest('tr'), makeEl('td', { classes: ['f-cell'], text: '40' }));
+var colSpanTsv = buildTableTsv(colSpanFx.table);
+var colSpanLines = colSpanTsv.split('\n');
+assert(colSpanLines[0] === '\tянв 26\t\tфев 26\t',
+    'colspan header line includes blank covered cells: ' + JSON.stringify(colSpanLines[0]));
+assert(colSpanLines[0].split('\t').length === 5,
+    'colspan header line has 5 TSV columns: ' + JSON.stringify(colSpanLines[0]));
+assert(colSpanLines[1].split('\t').length === colSpanLines[0].split('\t').length,
+    'colspan header column count matches body row: '
+    + colSpanLines[0].split('\t').length + ' vs ' + colSpanLines[1].split('\t').length);
+
+// =========================================================================
+// Test 6: buildTableTsv on null / missing table is harmless.
+// =========================================================================
+console.log('\nTest 6: buildTableTsv handles a missing table');
 assert(buildTableTsv(null) === '', 'null table -> empty string');
 assert(buildTableTsv(undefined) === '', 'undefined table -> empty string');
 
