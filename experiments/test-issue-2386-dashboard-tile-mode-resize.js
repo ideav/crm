@@ -138,6 +138,10 @@ ${extractFunction('dashSheetTilePanelWidthCookieName')}
 ${extractFunction('dashReadSheetTilePanelWidth')}
 ${extractFunction('dashWriteSheetTilePanelWidth')}
 ${extractFunction('dashRemoveSheetTilePanelWidth')}
+${extractFunction('dashSheetDefaultTileMode')}
+${extractFunction('dashSheetTileModeDefaultFromValue')}
+${extractFunction('dashSheetTileModeDefaultFromRow')}
+${extractFunction('dashSetSheetTileModeDefault')}
 ${extractFunction('dashReadSheetTileMode')}
 ${extractFunction('dashSetSheetTileModeButtonState')}
 ${extractFunction('dashMeasureSheetTilePanelMinWidth')}

@@ -115,6 +115,10 @@ ${extractFunction('dashSheetTilePanelWidthCookieName')}
 ${extractFunction('dashReadSheetTilePanelWidth')}
 ${extractFunction('dashWriteSheetTilePanelWidth')}
 ${extractFunction('dashRemoveSheetTilePanelWidth')}
+${extractFunction('dashSheetDefaultTileMode')}
+${extractFunction('dashSheetTileModeDefaultFromValue')}
+${extractFunction('dashSheetTileModeDefaultFromRow')}
+${extractFunction('dashSetSheetTileModeDefault')}
 ${extractFunction('dashReadSheetTileMode')}
 ${extractFunction('dashSetSheetTileModeButtonState')}
 ${extractFunction('dashMeasureSheetTilePanelMinWidth')}
@@ -139,7 +143,7 @@ const button = makeButton();
 const sheet = makeSheet('ds-main', button);
 const cookieName = ctx.dashSheetTileModeCookieName(sheet);
 
-assert.strictEqual(ctx.dashReadSheetTileMode(sheet), true, 'tile mode is on when the cookie is absent');
+assert.strictEqual(ctx.dashReadSheetTileMode(sheet), false, 'tile mode is off when cookie and sheet default are absent');
 ctx.dashApplySheetTileMode(sheet, true, true);
 assert(sheet.classList.contains('dash-tile-mode'), 'applying tile mode adds the sheet class');
 assert(button.classList.contains('active'), 'button is highlighted when tile mode is active');
