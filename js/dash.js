@@ -6737,6 +6737,22 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
         return (cell.textContent != null ? String(cell.textContent) : '').trim();
     }
 
+    function tsvCellColSpan(cell) {
+        if (!cell) return 1;
+        var raw = typeof cell.colSpan === 'number'
+            ? cell.colSpan
+            : (cell.getAttribute && cell.getAttribute('colspan'));
+        var span = parseInt(raw, 10);
+        return span > 1 ? span : 1;
+    }
+
+    function appendTsvCell(rowCells, cell) {
+        rowCells.push(tsvCellText(cell));
+        for (var i = 1, span = tsvCellColSpan(cell); i < span; i++) {
+            rowCells.push('');
+        }
+    }
+
     // Build a TSV blob from the current selection, walking the DOM in row
     // order. Each `<tr>` that has any selected cell becomes a line; selected
     // cells inside the row are joined with TAB in DOM (column) order. This
@@ -6750,7 +6766,7 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
             var rowCells = [];
             for (var i = 0; i < tr.children.length; i++) {
                 var cell = tr.children[i];
-                if (sel.cells.has(cell)) rowCells.push(tsvCellText(cell));
+                if (sel.cells.has(cell)) appendTsvCell(rowCells, cell);
             }
             if (rowCells.length > 0) rows.push(rowCells.join('\t'));
         });
@@ -6758,15 +6774,17 @@ document.getElementById('dash-model').addEventListener('click', function(e) {
     }
 
     // Build a TSV blob for a single panel's table — every <tr> (thead + tbody)
-    // joined cell-by-cell. Powers the .f-panel-copy-icon click action; runs
-    // independently of any active selection (issue #2681).
+    // joined cell-by-cell. Colspans expand to empty TSV cells after the text
+    // cell so grouped period headers stay aligned with subcolumns (issue #2703).
+    // Powers the .f-panel-copy-icon click action; runs independently of any
+    // active selection (issue #2681).
     function buildTableTsv(table) {
         if (!table) return '';
         var rows = [];
         table.querySelectorAll('tr').forEach(function(tr) {
             var rowCells = [];
             for (var i = 0; i < tr.children.length; i++) {
-                rowCells.push(tsvCellText(tr.children[i]));
+                appendTsvCell(rowCells, tr.children[i]);
             }
             rows.push(rowCells.join('\t'));
         });
