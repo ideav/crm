@@ -485,6 +485,7 @@ define("SETTINGS_TYPE", 271);
 define("SETTINGS_VAL", 273);
 
 require_once __DIR__ . "/include/field_attrs.php";
+require_once __DIR__ . "/include/upload_security.php";
 # Default LIMIT parameter for queries with no filter
 define("DEFAULT_LIMIT", isset($_COOKIE["default_limit"])&&(int)$_COOKIE["default_limit"]>4&&(int)$_COOKIE["default_limit"]<1001?(int)$_COOKIE["default_limit"]:20);
 define("UPLOAD_DIR", "download/$z/");  # Uploaded files folder
@@ -817,8 +818,19 @@ function t9n($msg)
 # Check file extension
 function BlackList($ext)
 {
-	if(stripos(". php cgi pl fcgi fpl phtml shtml php2 php3 php4 php5 asp jsp ", " $ext "))
+	if(strpos((string)$ext, '.') !== false || strpos((string)$ext, '/') !== false || strpos((string)$ext, '\\') !== false)
+		$blocked = UploadFileNameSecurityError($ext) !== '';
+	else
+		$blocked = UploadFileBlockedExtension($ext);
+	if($blocked)
 		my_die(t9n("[RU]Недопустимый тип файла![EN]Wrong file extension!"));
+}
+function CheckUploadFileName($name)
+{
+	$name = SafeUploadFileName($name);
+	if($name === false)
+		my_die(t9n("[RU]Недопустимое имя файла![EN]Invalid file name!"));
+	return $name;
 }
 # Get a hashed string
 function GetSha($i)
@@ -835,6 +847,10 @@ function GetSubdir($id)
 function GetFilename($id)
 {
 	return substr("00$id", -3).substr(GetSha($id), 0, 8);
+}
+function GetStoredFilePath($id, $filename)
+{
+	return GetSubdir($id)."/".GetFilename($id).".".UploadFileStoredExtension($filename);
 }
 # Remove a directory on the server
 function RemoveDir($path)
@@ -1720,10 +1736,10 @@ function Format_Val_View($typ, $val, $id=0)
 			case "FILE":
 			    if(strpos($val,":")){
     			    $id = substr($val, 0, strpos($val,":"));
-                    $val = "<a target=\"_blank\" href=\"/".GetSubdir($id)."/".GetFilename($id).".".substr(strrchr($val,'.'),1)."\">".substr($val,strpos($val,":")+1)."</a>";
+                    $val = "<a target=\"_blank\" href=\"/".GetStoredFilePath($id, $val)."\">".substr($val,strpos($val,":")+1)."</a>";
 			    }
 			    else
-                    $val = "<a target=\"_blank\" href=\"/".GetSubdir($id)."/".GetFilename($id).".".substr(strrchr($val,'.'),1)."\">$val</a>";
+                    $val = "<a target=\"_blank\" href=\"/".GetStoredFilePath($id, $val)."\">$val</a>";
 				break;
 			case "SIGNED":
 				if($val == "")
@@ -1733,7 +1749,7 @@ function Format_Val_View($typ, $val, $id=0)
 				break;
 			case "PATH":
 			    $id = substr($val,0,strpos($val,":"));
-				$val = "/".GetSubdir($id)."/".GetFilename($id).".".substr(strrchr($val,'.'),1);
+				$val = "/".GetStoredFilePath($id, $val);
 				break;
 			case "GRANT":
 				if($val == 0) 
@@ -7180,10 +7196,10 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				check();
 				if(preg_match(FILE_MASK, $fname))
 				{
-                    BlackList(substr(strrchr($fname, '.'), 1)); # Check the file extension
-                    if(strpos($fname,".") === false)
-                        $fname .= ".html";
-                    if(is_file($path."/".$fname))
+					if(strpos($fname,".") === false)
+						$fname .= ".html";
+					$fname = CheckUploadFileName($fname);
+					if(is_file($path."/".$fname))
 						die(t9n("[RU]Такой файл ($fname) уже существует![EN]File ($fname) already exists!".BACK_LINK));
 					touch($path."/".$fname);
 					header("Location: /$z/dir_admin/?".$blocks[$block]["folder"][0]."=1&add_path=$add_path");
@@ -7200,13 +7216,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                 else
 				{
 					check();
-    			    trace("upload - file ".$value["name"]);
 					foreach($_FILES as $value){
-        			    trace("upload ".$value["name"]);
 						if(strlen($value["name"]) > 0)
 						{
-            			    trace("upload ".$value["name"]);
-							BlackList(substr(strrchr($value["name"], '.'), 1)); # Check the file extension
+							$value["name"] = CheckUploadFileName($value["name"]);
+							trace("upload ".$value["name"]);
 							if(file_exists($path."/".$value["name"]))
 								if(isset($_REQUEST["rewrite"]))
 									$warning = t9n("[RU] (перезаписан)[EN] (rewritten)");
@@ -7595,12 +7609,12 @@ function Populate_Reqs($i, $new_id)
 			{
 				$id = Insert($new_id, $ch["ord"], $ch["t"], $ch["val"], "Copy file");
 
-				$orig_path = GetSubdir($ch["id"])."/".GetFilename($ch["id"]).".".substr(strrchr($ch["val"],'.'),1);
+				$orig_path = GetStoredFilePath($ch["id"], $ch["val"]);
 				$new_dir = GetSubdir($id);
 				@mkdir($new_dir);
 
 				if(is_file($orig_path))
-					if(copy($orig_path, $new_dir."/".GetFilename($id).".".substr(strrchr($ch["val"],'.'),1)))
+					if(copy($orig_path, GetStoredFilePath($id, $ch["val"])))
 						continue;
 				$GLOBALS["warning"] .= t9n("[RU]Не удалось скопировать файл $orig_path в $new_dir"
 				                        ."[EN]Couldn't copy file $orig_path to $new_dir")."<br>";
@@ -9420,7 +9434,7 @@ if(Validate_Token())
         						if($val==""){
         							Delete($cur_id);
         							if($GLOBALS["REV_BT"][$row["t"]] === "FILE") // Remove the file from the server
-        							    @RemoveDir(GetSubdir($cur_id)."/".GetFilename($cur_id).".".substr(strrchr($cur_val,'.'),1));
+								@RemoveDir(GetStoredFilePath($cur_id, $cur_val));
         						}
         						else{
         							$val = Format_Val($row["t"], $val);
@@ -9444,7 +9458,7 @@ if(Validate_Token())
 
 					if(Check_Grant($obj, $t))
 					{
-						BlackList(substr(strrchr($value["name"], '.'), 1));
+						$value["name"] = CheckUploadFileName($value["name"]);
 						if(!file_exists(UPLOAD_DIR))
 							mkdir(UPLOAD_DIR);
 
@@ -9463,10 +9477,11 @@ if(Validate_Token())
 						$subdir = GetSubdir($req_id);
 						if(!file_exists($subdir))
 							@mkdir($subdir);
+						$targetPath = GetStoredFilePath($req_id, $value["name"]);
 						if(!move_uploaded_file($value['tmp_name']
-											, $subdir."/".GetFilename($req_id).".".substr(strrchr($value["name"],'.'),1)))
+											, $targetPath))
 							die (t9n("[RU]Не удалось заменить файл[EN]File updating failed"));
-						$arg .= $subdir."/".GetFilename($req_id).".".substr(strrchr($value["name"],'.'),1);
+						$arg .= $targetPath;
 					}
 				}
             if($t == 0)
@@ -9682,7 +9697,7 @@ if(Validate_Token())
 						elseif($t != $typ){
 							if($base_typ === "FILE"){ // Remove the file from the server
 								Delete($req_id);
-								@RemoveDir(GetSubdir($req_id)."/".GetFilename($req_id).".".substr(strrchr($value,'.'),1));
+								@RemoveDir(GetStoredFilePath($req_id, $value));
 							}
 							else
 								Exec_sql("DELETE FROM $z WHERE id=$req_id OR up=$req_id", "Delete Empty Obj");
@@ -9713,7 +9728,7 @@ if(Validate_Token())
 
 					if(Check_Grant($id, $t))
 					{
-						BlackList(substr(strrchr($value["name"], '.'), 1));
+						$value["name"] = CheckUploadFileName($value["name"]);
 						if(!file_exists(UPLOAD_DIR))
 							mkdir(UPLOAD_DIR);
 
@@ -9726,9 +9741,10 @@ if(Validate_Token())
 						$subdir = GetSubdir($req_id);
 						if(!file_exists($subdir))
 							@mkdir($subdir);
+						$targetPath = GetStoredFilePath($req_id, $value["name"]);
 						if(!move_uploaded_file($value['tmp_name']
-											, $subdir."/".GetFilename($req_id).".".substr(strrchr($value["name"],'.'),1)))
-							die (t9n("[RU]Не удалось загрузить файл[EN]File uploading failed")." ".$value['tmp_name']."->".$subdir."/".GetFilename($req_id).".".substr(strrchr($value["name"],'.'),1));
+											, $targetPath))
+							die (t9n("[RU]Не удалось загрузить файл[EN]File uploading failed")." ".$value['tmp_name']."->".$targetPath);
 					}
 				}
 #print_r($GLOBALS); die();
@@ -10069,7 +10085,7 @@ if(Validate_Token())
 						continue;
 					if(Check_Grant($i, $t))
 					{
-						BlackList(substr(strrchr($value["name"], '.'), 1));
+						$value["name"] = CheckUploadFileName($value["name"]);
 						$req_id = Insert($i, 1, $t, $value["name"], "Insert new Filename");
 						if(!file_exists(UPLOAD_DIR))
 							mkdir(UPLOAD_DIR);
@@ -10077,7 +10093,7 @@ if(Validate_Token())
 						if(!file_exists($subdir))
 							@mkdir($subdir);
 						if(!move_uploaded_file($value['tmp_name']
-											, $subdir."/".GetFilename($req_id).".".substr(strrchr($value["name"],'.'),1)))
+											, GetStoredFilePath($req_id, $value["name"])))
 							die (t9n("[RU]Не удалось загрузить файл[EN]File uploading failed"));
 					}
 				}
