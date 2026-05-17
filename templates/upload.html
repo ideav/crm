@@ -392,8 +392,65 @@ function postTypes(q,json){
 function putMsg(target,text,append){
     $('#'+target).html((append===undefined?'':$('#'+target).html())+text+'<br />').show();
 }
+function serializeUploadCellValue(v){
+    if(v===undefined||v===null)
+        return '';
+    if(typeof v==='object'){
+        try{
+            return JSON.stringify(v);
+        }
+        catch(e){
+            return String(v);
+        }
+    }
+    return v.toString();
+}
+function normalizeUploadJsonRecord(row){
+    var i,normalized;
+    if(Array.isArray(row)){
+        normalized=[];
+        for(i=0;i<row.length;i++)
+            normalized[i]=row[i]!==null&&typeof row[i]==='object'?serializeUploadCellValue(row[i]):row[i];
+        return normalized;
+    }
+    if(row!==null&&typeof row==='object'){
+        normalized={};
+        for(i in row)
+            if(Object.prototype.hasOwnProperty.call(row,i))
+                normalized[i]=row[i]!==null&&typeof row[i]==='object'?serializeUploadCellValue(row[i]):(row[i]===null?'':row[i]);
+        return normalized;
+    }
+    return row;
+}
+function normalizeUploadJsonRows(rows){
+    var i,normalized=[];
+    rows=Array.isArray(rows)?rows:[rows];
+    for(i=0;i<rows.length;i++)
+        normalized[i]=normalizeUploadJsonRecord(rows[i]);
+    return normalized;
+}
+function getUploadParseText(text){
+    var json;
+    try{
+        json=JSON.parse(text.replace(/^\uFEFF/,''));
+        if(json!==null&&typeof json==='object')
+            return Papa.unparse(normalizeUploadJsonRows(json));
+    }
+    catch(e){}
+    return text;
+}
+function parseUploadText(text,options){
+    var parseText=getUploadParseText(text),parseOptions=options,i;
+    if(parseText!==text){
+        parseOptions={};
+        for(i in options)
+            if(i!=='delimiter'&&i!=='linebreak')
+                parseOptions[i]=options[i];
+    }
+    Papa.parse(parseText,parseOptions);
+}
 function escapeSlashesNSemicolons(v){
-    return v.toString().replace(/\\/gm,'\\\\').replace(/;/gm,'\\;');
+    return serializeUploadCellValue(v).replace(/\\/gm,'\\\\').replace(/;/gm,'\\;');
 //    return v.replace(/\\/gm,'\\\\').replace(/;/gm,'\\;');
 //    return v.replace(/\\/gm,'\\\\').replace(/(?<!\\);/gm,'\\;');
 }
@@ -824,7 +881,7 @@ function chooseBase(i,v){
 }
 function importParse(){
     if($('#input').val().length>0)
-        Papa.parse($('#input').val(),{delimiter:$('#delim').val(),linebreak:$('#caret').val(),skipEmptyLines:true
+        parseUploadText($('#input').val(),{delimiter:$('#delim').val(),linebreak:$('#caret').val(),skipEmptyLines:true
             ,LocalChunkSize:1048024
             ,RemoteChunkSize:1048024
             ,chunk: (results, parser) =>{importDoParse(results);}
@@ -841,33 +898,24 @@ function importParse(){
     	    }
     	if(files.length <= 0)
     		return false;
-    	var fr = new FileReader();
-    	fr.onload = function(e){
-    	    if(files[0].name.substr(-5).toLowerCase()==='.json')
-                Papa.parse(Papa.unparse(e.target.result),{skipEmptyLines:true
+	    var fr = new FileReader();
+	    fr.onload = function(e){
+	        parseUploadText(e.target.result,{delimiter:$('#delim').val(),linebreak:$('#caret').val(),skipEmptyLines:true
                     ,LocalChunkSize:1048024
                     ,RemoteChunkSize:1048024
                     ,chunk: (results, parser) => {
                     	importDoParse(results);
                     }
                 });
-            else
-                Papa.parse(e.target.result,{delimiter:$('#delim').val(),linebreak:$('#caret').val(),skipEmptyLines:true
-                    ,LocalChunkSize:1048024
-                    ,RemoteChunkSize:1048024
-                    ,chunk: (results, parser) => {
-                    	importDoParse(results);
-                    }
-                });
-    	};
-    	fr.readAsText(files.item(0),$('#encoding').val());
-    }
+	    };
+	    fr.readAsText(files.item(0),$('#encoding').val());
+	    }
     $('#refresh').hide();
 }
 var evalErrs={},evalExpr={};
 function importDoParse(input){
     $('#progress,#errors,#log').html('').hide();
-    var val,i,j=0,jMap,reverseMap={}
+    var val,cellValue,i,j=0,jMap,reverseMap={}
         ,err=0,skippedInvalid=0,empties=0,sampleHeader='',sampleLine='',expr,l=0,line
         ,stats='<h5>'+'Статистика'+'</h5><table class="table table-sm table-bordered mt-2"><thead><tr><td></td>';
     if(chosenType===undefined){
@@ -875,9 +923,9 @@ function importDoParse(input){
         $('#chosen').html('');
     }
     for(i in input.data[0]){
-        sampleHeader+='<td style="font-size: .85em;">'+input.data[0][i].replace('<','&lt').replace('>','&gt')+'</td>';
+        sampleHeader+='<td style="font-size: .85em;">'+escape(serializeUploadCellValue(input.data[0][i]))+'</td>';
         if(input.data[1])
-            sampleLine+='<td style="font-size: .85em;">'+input.data[1][i]+'</td>';
+            sampleLine+='<td style="font-size: .85em;">'+escape(serializeUploadCellValue(input.data[1][i]))+'</td>';
     }
     $('#1st2').html('<tr>'+sampleHeader+'</tr><tr>'+sampleLine+'</tr>');
     $('#sample').show();
@@ -895,7 +943,7 @@ function importDoParse(input){
         if(!$('#header').prop('checked')||i!=0){
             l++;
             if(autoParent)
-                toImport[l]=Array(input.data[i][autoParent-1]);
+                toImport[l]=Array(serializeUploadCellValue(input.data[i][autoParent-1]));
             else
                 toImport[l]=[];
             for(j in sourceMap)
@@ -910,9 +958,11 @@ function importDoParse(input){
                         if(autoParent)
                             jMap=parseInt(jMap)+1;
                     }
+                    if(val!==undefined||$('#trim').prop('checked'))
+                        val=serializeUploadCellValue(val);
                     if($('#trim').prop('checked'))
                         if(val!==' ')
-                            val=(val||'').trim();
+                            val=val.trim();
                     if(j==='0'&&val===''){
                         skippedInvalid++;
                         l--;
@@ -926,9 +976,9 @@ function importDoParse(input){
                                 return '['+$2+']';
                             });
                         try{
-                            toImport[l][jMap]=eval(expr);
+                            toImport[l][jMap]=serializeUploadCellValue(eval(expr));
                             evalExpr[l+'-'+jMap]=expr;
-                            procStats(j,toImport[l][jMap].toString(),sourceMap[j].base);
+                            procStats(j,toImport[l][jMap],sourceMap[j].base);
                         }
                         catch(e){
                             evalErrs[l+'-'+jMap]={title:expr,err:e};
@@ -984,7 +1034,7 @@ function importDoParse(input){
     $('#formula').hide();
 }
 function drawPage(n){
-    var i,j=0,line,link,h='<table class="table table-sm table-bordered mt-1"><thead><tr>';
+    var cellValue,i,j=0,line,link,h='<table class="table table-sm table-bordered mt-1"><thead><tr>';
     if(autoParent)
         h+='<td>'+getParent(chosenType)+'</td>';
     for(i in sourceMap)
@@ -1008,7 +1058,7 @@ function drawPage(n){
             break;
         line='';
         if(autoParent)
-            line+='<td>'+toImport[i][0]+'</td>';
+            line+='<td>'+escape(serializeUploadCellValue(toImport[i][0]))+'</td>';
         for(j in sourceMap)
             if(sourceMap[j].skip===0){
                 if(chosenType===undefined)
@@ -1020,9 +1070,9 @@ function drawPage(n){
                 }
                 if(evalErrs[i+'-'+jMap])
                     line+='<td class="cell-error" title="'+evalErrs[i+'-'+jMap].title+'">'+evalErrs[i+'-'+jMap].err+'</td>';
-                else if(toImport[i][jMap])
+                else if((cellValue=serializeUploadCellValue(toImport[i][jMap]))!=='')
                     line+='<td'+(evalExpr[i+'-'+jMap]?' title="'+evalExpr[i+'-'+jMap]+'" class="cell-success"':'')+'>'
-                            +toImport[i][jMap].toString().replace('<','&lt').replace('>','&gt')+'</td>';
+                            +escape(cellValue)+'</td>';
                 else
                     line+='<td class="cell-empty"></td>';
             }
