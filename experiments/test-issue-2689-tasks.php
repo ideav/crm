@@ -6,7 +6,6 @@
  * ответа tasks.task.list (result.tasks, ключи в lowercase), resume-режим.
  */
 
-define('EXPORT_B3X_SKIP_RUN', true);
 define('EXPORT_B3X_TASKS_SKIP_RUN', true);
 require_once __DIR__ . '/../export_b3x_tasks.php';
 

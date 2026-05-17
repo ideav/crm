@@ -71,6 +71,30 @@ if (!function_exists('bkiEscape')) {
 }
 
 /**
+ * Bitrix возвращает статус задачи числовым кодом; в экспорт пишем имя.
+ */
+function getTaskStatusName($status) {
+    $status = trim((string)$status);
+    $taskStatuses = [
+        '1' => 'Новая',
+        '2' => 'Принята',
+        '3' => 'Выполняется',
+        '4' => 'Ждёт контроля',
+        '5' => 'Завершена',
+        '6' => 'Отложена',
+        '7' => 'Отклонена',
+    ];
+    return $taskStatuses[$status] ?? $status;
+}
+
+function prepareTaskRowData($task, $fields) {
+    if (array_key_exists('status', $task)) {
+        $task['status'] = getTaskStatusName($task['status']);
+    }
+    return prepareRowData($task, $fields);
+}
+
+/**
  * Один запрос tasks.task.list с фильтром по году создания и >ID.
  */
 function getTasksBatch($bitrix24_webhook, $year, $lastId = 0, $selectFields = [], $apiCaller = null) {
@@ -244,7 +268,7 @@ try {
             echo "<span class='progress'>получено {$tasksCount} задач</span>\n";
 
             foreach ($tasks as $task) {
-                $row = prepareRowData($task, $taskFields);
+                $row = prepareTaskRowData($task, $taskFields);
                 appendCsvRow($tasksCsvFile, $row);
                 appendBkiRow($tasksBkiFile, $row);
                 $processedTasks++;

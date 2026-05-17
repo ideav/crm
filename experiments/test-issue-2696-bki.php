@@ -39,7 +39,7 @@ bkiAssert(bkiEscape(null) === '', "null → empty string");
 // 5. formatBkiRow: склейка через ";".
 bkiAssert(formatBkiRow(['1', 'John', 'NEW']) === '1;John;NEW', "simple row");
 bkiAssert(formatBkiRow(['1', 'a;b', 'c']) === '1;a\\;b;c', "escape semicolon in value");
-bkiAssert(formatBkiRow(['1', "multi\nline", 'tab\there'])
+bkiAssert(formatBkiRow(['1', "multi\nline", "tab\there"])
     === '1;multi line;tab here', "newlines and tabs in row values");
 bkiAssert(formatBkiRow(['1', '', 'last']) === '1;;last', "empty middle field");
 
