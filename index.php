@@ -5984,6 +5984,16 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
         					// column on update, not just the secondary requisites.
         					if(count($keyReqs) && !$isUnique)
         					    Update_Val($existing, $object[0]);
+        					// Issue 2722: подмешиваем pending-записи Insert_batch для того же $existing —
+        					// чтобы следующая строка импорта для того же record'а видела ссылки, поставленные
+        					// предыдущей строкой, без принудительного flush'а батча.
+        					foreach(FindPendingBatchEntries($existing) as $pending){
+        					    if((int)$pending["t"] === 0) continue;
+        					    if(!isset($reqs[$pending["t"]])){
+        					        $reqs[$pending["t"]] = $pending["val"];
+        					        $ids[$pending["t"]] = $pending["sentinel_id"];
+        					    }
+        					}
     					}
     					else
 							$new_id = Insert($parent, (isset($cur_order) ? $cur_order++ : 1), $id, $object[0], "Plain import #$count");
@@ -6007,6 +6017,10 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
         								                    , "Get refs to delete");
                         				while($row = mysqli_fetch_array($data_set))
                 						    Delete($row["id"]);
+                        				// Issue 2722: ещё не сброшенные в БД ссылки этого поля тоже подчищаем.
+                        				foreach(FindPendingBatchEntries($new_id) as $pending)
+                        				    if((string)$pending["val"] === (string)$key)
+                        				        DeletePendingBatchEntry($pending["sentinel_id"]);
             						}
             						else{
         						        if(isset($GLOBALS["MULTI"][$key]))
@@ -6035,8 +6049,13 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                                 				    trace("    rid $rid => req $req ($req === $key)");
                     						        if($req == $key){
                                     				    trace("    req $req === key $key, rid $rid === refObjID $refObjID");
-                    						            if($refObjID !== $rid)
-                                							UpdateTyp($ids[$rid], $refObjID);
+                    						            if($refObjID !== $rid){
+                    						                // Issue 2722: $ids[$rid] может быть sentinel'ом pending-записи Insert_batch.
+                    						                if(IsPendingBatchSentinel($ids[$rid]))
+                    						                    UpdatePendingBatchEntryT($ids[$rid], $refObjID);
+                    						                else
+                                							    UpdateTyp($ids[$rid], $refObjID);
+                    						            }
                     						            continue 2;
                     						        }
                     						    }
@@ -7671,25 +7690,80 @@ function Salt($u, $val){
 	# $u = strtoupper($u);
 	return SALT."$z$val";
 }
-# Inserts new values in a batch
+# Inserts new values in a batch.
+# Issue 2722: каждый Insert_batch фиксируется ещё и в $GLOBALS["SQLbatch_entries"] — структурированный
+# индекс {up, ord, t, val}, по которому plain-import может видеть «то, что ещё не сброшено в БД»
+# через FindPendingBatchEntries вместо принудительного flush'а на каждой строке.
 function Insert_batch($up, $ord, $t, $val, $message){
 	global $connection, $z;
-	if(($up === "") && isset($GLOBALS["SQLbatch"])) // Close the batch
-	{
-    	exec_sql("INSERT INTO $z (up, ord, t, val) VALUES ".$GLOBALS["SQLbatch"], "Close batch: $message");
-    	unset($GLOBALS["SQLbatch"]);
-    	return;
+	if($up === ""){ // Close the batch
+		FlushInsertBatch($message);
+		return;
 	}
+	if(!isset($GLOBALS["SQLbatch_entries"]))
+		$GLOBALS["SQLbatch_entries"] = array();
+	$GLOBALS["SQLbatch_entries"][] = array("up" => $up, "ord" => $ord, "t" => $t, "val" => $val);
 	if(isset($GLOBALS["SQLbatch"]))
     	$GLOBALS["SQLbatch"] .= ",($up,$ord,$t,'".addslashes($val)."')";
     else
         $GLOBALS["SQLbatch"] = "($up,$ord,$t,'".addslashes($val)."')";
 #    trace("GLOBAL[SQLbatch] = ".$GLOBALS["SQLbatch"]);
 	if(strlen($GLOBALS["SQLbatch"]) > 31000)
-	{
-    	exec_sql("INSERT INTO $z (up, ord, t, val) VALUES ".$GLOBALS["SQLbatch"], "Flush batch: $message");
-    	unset($GLOBALS["SQLbatch"]);
+		FlushInsertBatch($message, "Flush batch");
+}
+# Сбросить накопленный batch в БД (если есть что сбрасывать). Возвращает TRUE если сброс произошёл.
+function FlushInsertBatch($message, $prefix="Close batch"){
+	global $z;
+	if(!isset($GLOBALS["SQLbatch"]) || $GLOBALS["SQLbatch"] === "")
+		return FALSE;
+	exec_sql("INSERT INTO $z (up, ord, t, val) VALUES ".$GLOBALS["SQLbatch"], "$prefix: $message");
+	unset($GLOBALS["SQLbatch"]);
+	unset($GLOBALS["SQLbatch_entries"]);
+	return TRUE;
+}
+# Пересобрать строку $GLOBALS["SQLbatch"] из текущих entries — после Update/Delete пендинг-записей.
+function RebuildSqlBatch(){
+	if(empty($GLOBALS["SQLbatch_entries"])){
+		unset($GLOBALS["SQLbatch"]);
+		unset($GLOBALS["SQLbatch_entries"]);
+		return;
 	}
+	$parts = array();
+	foreach($GLOBALS["SQLbatch_entries"] as $e)
+		$parts[] = "(".$e["up"].",".$e["ord"].",".$e["t"].",'".addslashes($e["val"])."')";
+	$GLOBALS["SQLbatch"] = implode(",", $parts);
+}
+# Pending-batch helpers. Sentinel id = -(idx+1) — negative чтобы не путать с DB-id (всегда положительными).
+function PendingBatchSentinelId($idx){ return -((int)$idx + 1); }
+function PendingBatchIdxFromSentinel($sentinelId){ return -((int)$sentinelId) - 1; }
+function FindPendingBatchEntries($up){
+	$out = array();
+	if(empty($GLOBALS["SQLbatch_entries"]))
+		return $out;
+	foreach($GLOBALS["SQLbatch_entries"] as $i => $e)
+		if((string)$e["up"] === (string)$up)
+			$out[] = array_merge($e, array("sentinel_id" => PendingBatchSentinelId($i)));
+	return $out;
+}
+function UpdatePendingBatchEntryT($sentinelId, $newT){
+	$idx = PendingBatchIdxFromSentinel($sentinelId);
+	if(!isset($GLOBALS["SQLbatch_entries"][$idx]))
+		return FALSE;
+	$GLOBALS["SQLbatch_entries"][$idx]["t"] = $newT;
+	RebuildSqlBatch();
+	return TRUE;
+}
+function DeletePendingBatchEntry($sentinelId){
+	$idx = PendingBatchIdxFromSentinel($sentinelId);
+	if(!isset($GLOBALS["SQLbatch_entries"][$idx]))
+		return FALSE;
+	unset($GLOBALS["SQLbatch_entries"][$idx]);
+	$GLOBALS["SQLbatch_entries"] = array_values($GLOBALS["SQLbatch_entries"]);
+	RebuildSqlBatch();
+	return TRUE;
+}
+function IsPendingBatchSentinel($id){
+	return is_int($id) ? ($id < 0) : (is_string($id) && strlen($id) > 1 && $id[0] === "-");
 }
 # Inserts a new value and returns the ID it got
 function Insert($up, $ord, $t, $val, $message)
