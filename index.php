@@ -4119,6 +4119,11 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 		    die(json_encode($json));
 	    }
 	    elseif(isset($_REQUEST["JSON_KV"])){
+	        # Expose query identity so callers can match panel queries to row formulas (issue 2718).
+	        # Name is rawurlencoded — header values are nominally ASCII; client must decodeURIComponent.
+	        header("X-Query-Id: ".$id);
+	        header("X-Query-Name: ".rawurlencode($GLOBALS["STORED_REPS"][$id]["header"]));
+	        header("Access-Control-Expose-Headers: X-Query-Id, X-Query-Name");
     	    $json = "[ ";
     	    if(count($blocks["_data_col"][$id]))
     	        reset($blocks["_data_col"][$id]);

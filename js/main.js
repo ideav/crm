@@ -11,6 +11,15 @@ function newApi(m,u,b,vars,index){ // Параметры: метод, адрес
             vars='_xsrf='+xsrf+'&'+vars; // добавляем токен xsrf, необходимый для POST-запроса
         }
     obj.onload=function(e){ // Когда запрос вернет результат - сработает эта функция
+        // Прокидываем заголовки ответа в ctx до abort() — чтобы колбэки могли читать X-Query-Id и т.п.
+        if(index && typeof index==='object'){
+            var rawHeaders=this.getAllResponseHeaders(), headers={};
+            if(rawHeaders) rawHeaders.trim().split(/[\r\n]+/).forEach(function(line){
+                var idx=line.indexOf(':');
+                if(idx>0) headers[line.slice(0,idx).toLowerCase()]=line.slice(idx+1).trim();
+            });
+            index.responseHeaders=headers;
+        }
         try{ // в this.responseText лежит ответ от сервера
             json=JSON.parse(this.responseText); // Пытаемся разобрать ответ как JSON
         }

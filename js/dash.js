@@ -84,7 +84,9 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
         + ':name:'
     , cellTpl     = '<td range=":from:-:to:" ready=":ready:" class="f-cell :classes:" align="right" title=":title:" data-src=":src:" data-item-id=":item-id:":extra:>:val:';
 
-let dashModelData = {}, dashPeriodData = {}, dashPeriods = {}, dashValues = {}, dashValueErrors = {}, dashFormulas = {}, dashItems = {}, dashReports = {}, dashReportNames = {}, dashReportKeys = {}, dashReportSources = {}, dashVizReports = {}, dashPanelValues = {}, dashPanelValueErrors = {}, dashPanelFilters = {}, dashAjaxes = 0;
+let dashModelData = {}, dashPeriodData = {}, dashPeriods = {}, dashValues = {}, dashValueErrors = {}, dashFormulas = {}, dashItems = {}, dashReports = {}, dashReportNames = {}, dashReportIds = {}, dashReportHeaders = {}, dashReportKeys = {}, dashReportSources = {}, dashVizReports = {}, dashPanelValues = {}, dashPanelValueErrors = {}, dashPanelFilters = {}, dashAjaxes = 0;
+// Issue 2718: алиасы запросов id↔name из X-Query-* заголовков; очередь row-fetch'ей, ждущих panel-fetch.
+let dashQueryNameById = {}, dashQueryIdByName = {}, dashPendingPanelRows = {};
 let dashValueItemIds = {}; // item name -> valueItemID from ЗначенияЗаПериод
 let dashMatrixValues = [], dashMatrixValuesRequested = false, dashRgSourceIds = {};
 
@@ -568,6 +570,46 @@ function dashResolvePanelVizReportId(row) {
         return match ? match[1] : value;
     }
     return '';
+}
+
+// Issue 2718: разобрать panelQuery как {id, name, raw}. Формы: "155564", "Имя", "155564:Имя".
+// Используется чтобы строки, чьи формулы ссылаются на тот же запрос (по id или по имени),
+// шарили данные panel-fetch'а вместо отдельного запроса.
+function dashPanelQueryParts(row) {
+    var keys = [
+        'panelReportID', 'panelReportId', 'panelQueryID', 'panelQueryId',
+        'panelReport', 'panelQuery',
+        'reportID', 'reportId', 'queryID', 'queryId', 'report', 'query',
+        'ЗапросID', 'ЗапросId', 'Запрос', 'ОтчетID', 'ОтчётID', 'Отчет', 'Отчёт'
+    ];
+    var i, key, value, m, parts = null;
+    if (!row) return null;
+    for (i = 0; i < keys.length; i++) {
+        key = keys[i];
+        if (!Object.prototype.hasOwnProperty.call(row, key)) continue;
+        value = row[key];
+        if (value === null || value === undefined) continue;
+        value = String(value).trim();
+        if (!value || value === '0') continue;
+        m = value.match(/^\s*(\d+)\s*(?::\s*(.+?)\s*)?$/);
+        parts = m ? { id: m[1], name: m[2] || '', raw: value } : { id: '', name: value, raw: value };
+        break;
+    }
+    if (!parts) return null;
+    if (parts.id && !parts.name && dashQueryNameById[parts.id])
+        parts.name = dashQueryNameById[parts.id];
+    if (parts.name && !parts.id && dashQueryIdByName[parts.name.toLowerCase()])
+        parts.id = dashQueryIdByName[parts.name.toLowerCase()];
+    return parts;
+}
+
+function dashRefMatchesPanelQuery(rowRef, parts) {
+    if (!parts || !rowRef) return false;
+    var s = String(rowRef).trim();
+    if (!s) return false;
+    if (parts.id && s === parts.id) return true;
+    if (parts.name && s.toLowerCase() === parts.name.toLowerCase()) return true;
+    return false;
 }
 
 function dashVizReportKey(reportId, panelFilter) {
@@ -2066,8 +2108,24 @@ function dashGetRepDone(json, ctx) {
     if (!json) return;
     var key = ctx && typeof ctx === 'object' ? ctx.key : ctx;
     dashReports[key] = json;
+    // Issue 2718: имя и id запроса приходят в X-Query-* заголовках, копим в алиас-индекс.
+    dashCaptureQueryHeaders(key, ctx && typeof ctx === 'object' ? ctx.responseHeaders : null);
     dashAjaxes--;
     dashDrawPeriods();
+}
+
+// Сохранить X-Query-Id / X-Query-Name (rawurlencoded) из заголовков ответа.
+function dashCaptureQueryHeaders(key, headers) {
+    if (!headers) return;
+    if (headers['x-query-id']) dashReportIds[key] = String(headers['x-query-id']);
+    if (headers['x-query-name']) {
+        try { dashReportHeaders[key] = decodeURIComponent(headers['x-query-name']); }
+        catch (e) { dashReportHeaders[key] = headers['x-query-name']; }
+    }
+    if (dashReportIds[key] && dashReportHeaders[key]) {
+        dashQueryNameById[dashReportIds[key]] = dashReportHeaders[key];
+        dashQueryIdByName[dashReportHeaders[key].toLowerCase()] = dashReportIds[key];
+    }
 }
 
 function dashGetRep(rep, fr, to, panelFilter) {
@@ -2176,6 +2234,12 @@ function dashGetPanelValues(panelKey, queryId, fr, to, panelFilter) {
 
 function dashGetPanelValuesDone(json, ctx) {
     var panelKey = ctx && ctx.panelKey;
+    // Issue 2718: данные panel-fetch'а кладём ещё и в dashReports[panelReportKey], чтобы
+    // row-формулы, чей запрос совпал с panelQuery, могли читать оттуда без отдельного запроса.
+    // Заодно фиксируем X-Query-Id/X-Query-Name в алиас-индексе.
+    var panelReportKey = panelKey && dashModelData[panelKey] && dashModelData[panelKey].panelReportKey;
+    if (panelReportKey && Array.isArray(json)) dashReports[panelReportKey] = json;
+    if (panelReportKey) dashCaptureQueryHeaders(panelReportKey, ctx && ctx.responseHeaders);
     if (panelKey && Array.isArray(json)) {
         var bucket = dashPanelValues[panelKey] = {};
         var errBucket = dashPanelValueErrors[panelKey] = {};
@@ -2207,8 +2271,44 @@ function dashGetPanelValuesDone(json, ctx) {
             }
         });
     }
+    // Issue 2718: row-fetch'и этой панели ждали в очереди — теперь данные есть и алиасы свежие.
+    if (panelKey) dashDrainPendingPanelRows(panelKey);
     dashAjaxes--;
     dashDrawPeriods();
+}
+
+// Issue 2718: после прихода panel-данных разобрать очередь row-fetch'ей.
+// Для каждой строки: совпала с panelQuery → переиспользуем panel-key, иначе fetch'аем свой.
+function dashDrainPendingPanelRows(panelKey) {
+    var queue = dashPendingPanelRows[panelKey];
+    if (!queue) return;
+    delete dashPendingPanelRows[panelKey];
+    var data = dashModelData[panelKey];
+    var panelParts = data && data.panelQueryParts;
+    var panelReportKey = data && data.panelReportKey;
+    // Дозаполняем parts через свежие алиасы из заголовков ответа.
+    if (panelParts) {
+        if (panelParts.id && !panelParts.name && dashQueryNameById[panelParts.id])
+            panelParts.name = dashQueryNameById[panelParts.id];
+        if (panelParts.name && !panelParts.id && dashQueryIdByName[panelParts.name.toLowerCase()])
+            panelParts.id = dashQueryIdByName[panelParts.name.toLowerCase()];
+    }
+    queue.forEach(function(entry) {
+        var fetchRef = entry.rowRef, reportKey;
+        if (panelReportKey && panelParts && dashRefMatchesPanelQuery(entry.rowRef, panelParts)) {
+            reportKey = panelReportKey;
+        } else {
+            // Нормализуем ref через алиас-индекс — если этот запрос уже встречался по другой форме.
+            var s = String(entry.rowRef).toLowerCase();
+            if (dashQueryIdByName[s] && dashQueryNameById[dashQueryIdByName[s]])
+                fetchRef = dashQueryNameById[dashQueryIdByName[s]];
+            reportKey = dashReportKey(fetchRef, entry.panelFilter);
+            if (!dashReports[reportKey]) dashGetRep(fetchRef, entry.fr, entry.to, entry.panelFilter);
+        }
+        if (!dashReportKeys[entry.itemTargetId]) dashReportKeys[entry.itemTargetId] = reportKey;
+        dashRememberReportSource(entry.itemTargetId, entry.formula, reportKey);
+        dashReportNames[reportKey] = fetchRef;
+    });
 }
 
 function dashGetRecord(json) {
@@ -2316,7 +2416,10 @@ function dashGetModel(json) {
                 panelFilter: panelFilter,
                 panelFilters: panelFilters,
                 vizReportId: vizReportId,
-                vizReportKey: vizReportId ? dashGetVizReport(vizReportId, fr, to, panelFilter) : ''
+                vizReportKey: vizReportId ? dashGetVizReport(vizReportId, fr, to, panelFilter) : '',
+                // Issue 2718: panelQuery в разобранной форме + ключ для шаринга panel-fetch с row-формулами.
+                panelQueryParts: dashPanelQueryParts(json[i]),
+                panelReportKey: vizReportId ? dashReportKey(vizReportId, panelFilter) : ''
             };
             dashApplyVizSize(document.getElementById(panelKey), 'table', {});
             dashPanelApplySettings(panelKey, panelSettings, false);
@@ -2369,13 +2472,26 @@ function dashGetModel(json) {
             if (!dashFormulas[itemTargetId] || (rep && dashFormulas[itemTargetId] === '[]'))
                 dashFormulas[itemTargetId] = json[i].formulas;
             if (rep) {
-                var reportKey = dashReportKey(rep[1], panelFilter);
-                if (!dashReportKeys[itemTargetId])
-                    dashReportKeys[itemTargetId] = reportKey;
-                dashRememberReportSource(itemTargetId, json[i].formulas, reportKey);
-                dashReportNames[reportKey] = rep[1];
-                if (!dashReports[reportKey])
-                    dashGetRep(rep[1], fr, to, panelFilter);
+                // Issue 2718: если у панели есть panelQuery — row-fetch встаёт в очередь и
+                // выполнится (или будет переиспользован panel-fetch) после dashGetPanelValuesDone.
+                // Если panelQuery нет — fire'им сразу как раньше.
+                var panelData2 = dashModelData[panelKey]
+                    , panelParts2 = panelData2 && panelData2.panelQueryParts;
+                if (panelParts2) {
+                    if (!dashPendingPanelRows[panelKey]) dashPendingPanelRows[panelKey] = [];
+                    dashPendingPanelRows[panelKey].push({
+                        itemTargetId: itemTargetId, formula: json[i].formulas, rowRef: rep[1],
+                        fr: fr, to: to, panelFilter: panelFilter
+                    });
+                } else {
+                    var reportKey = dashReportKey(rep[1], panelFilter);
+                    if (!dashReportKeys[itemTargetId])
+                        dashReportKeys[itemTargetId] = reportKey;
+                    dashRememberReportSource(itemTargetId, json[i].formulas, reportKey);
+                    dashReportNames[reportKey] = rep[1];
+                    if (!dashReports[reportKey])
+                        dashGetRep(rep[1], fr, to, panelFilter);
+                }
             }
         }
     }
@@ -5887,7 +6003,8 @@ document.addEventListener('click', function(e) {
 
 function dashReset() {
     dashModelData = {}; dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashValueErrors = {};
-    dashFormulas = {}; dashItems = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashReportSources = {}; dashVizReports = {}; dashPanelValues = {}; dashPanelValueErrors = {}; dashPanelFilters = {}; dashAjaxes = 0; dashValueItemIds = {};
+    dashFormulas = {}; dashItems = {}; dashReports = {}; dashReportNames = {}; dashReportIds = {}; dashReportHeaders = {}; dashReportKeys = {}; dashReportSources = {}; dashVizReports = {}; dashPanelValues = {}; dashPanelValueErrors = {}; dashPanelFilters = {}; dashAjaxes = 0; dashValueItemIds = {};
+    dashQueryNameById = {}; dashQueryIdByName = {}; dashPendingPanelRows = {};
     dashPanelFilterModalCtx = null;
     dashMatrixValues = []; dashMatrixValuesRequested = false; dashRgSourceIds = {};
     var model = document.getElementById('dash-model');
@@ -5931,7 +6048,7 @@ window.dashApplyFilter = function(sheetEl) {
         p.remove();
     });
     dashUpdateSheetSizeResetIcon(sheetEl);
-    dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashValueErrors = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashReportSources = {}; dashVizReports = {}; dashAjaxes = 0; dashValueItemIds = {}; dashRgSourceIds = {};
+    dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashValueErrors = {}; dashReports = {}; dashReportNames = {}; dashReportIds = {}; dashReportHeaders = {}; dashReportKeys = {}; dashReportSources = {}; dashVizReports = {}; dashAjaxes = 0; dashValueItemIds = {}; dashRgSourceIds = {};
 
     // Re-fetch model for this sheet only — skip get_record, use cached dashRecordId
     dashSetStatus('Загрузка данных...');
