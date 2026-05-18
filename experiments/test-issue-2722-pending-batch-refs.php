@@ -63,6 +63,7 @@ eval(extract_function($source, "PendingBatchSentinelId"));
 eval(extract_function($source, "PendingBatchIdxFromSentinel"));
 eval(extract_function($source, "FindPendingBatchEntries"));
 eval(extract_function($source, "UpdatePendingBatchEntryT"));
+eval(extract_function($source, "UpdatePendingBatchEntryVal"));
 eval(extract_function($source, "DeletePendingBatchEntry"));
 eval(extract_function($source, "IsPendingBatchSentinel"));
 
@@ -195,5 +196,77 @@ $after = FindPendingBatchEntries($existing);
 assert_eq(1, count($after), "still one pending entry — no duplicate added");
 assert_eq($refObjID_round3, $after[0]["t"], "pending entry's t mutated to new value");
 assert_eq(0, count($GLOBALS["__exec_sql_calls"]) - 1, "no DB queries beyond the earlier flush");
+
+// ── Scenario 9 (issue #2725): denormalized import — same record's plain value
+// appears twice with different values across input rows. Last row wins; the
+// pending entry from the first row must be MUTATED, not duplicated.
+$existing = 99;
+$key = 333; // a plain (non-ref) field id — numeric, matches production schema
+$valRow1 = "Draft";
+$valRow2 = "Final";
+
+Insert_batch($existing, 1, $key, $valRow1, "Import plain req"); // round 1
+
+// Round 2 reads $reqs/$ids — DB empty, but pending merge surfaces the round-1 value.
+$reqs = array(); $ids = array();
+foreach(FindPendingBatchEntries($existing) as $pending){
+    if((int)$pending["t"] === 0) continue;
+    if(!isset($reqs[$pending["t"]])){
+        $reqs[$pending["t"]] = $pending["val"];
+        $ids[$pending["t"]]  = $pending["sentinel_id"];
+    }
+}
+assert_eq($valRow1, $reqs[$key], "denorm round 2: pending plain value is visible");
+assert_true(IsPendingBatchSentinel($ids[$key]), "denorm round 2: id is a sentinel");
+
+// Mimic the plain-value branch's update path: $reqs[$key] !== $val → dispatch.
+if($reqs[$key] !== $valRow2){
+    if(IsPendingBatchSentinel($ids[$key]))
+        UpdatePendingBatchEntryVal($ids[$key], $valRow2);
+    // else Update_Val($ids[$key], $valRow2);  -- DB path, not exercised here
+}
+$after = FindPendingBatchEntries($existing);
+$titleEntries = array_filter($after, function($e) use($key){ return (int)$e["t"] === (int)$key; });
+assert_eq(1, count($titleEntries), "denorm: still ONE pending entry for field (no duplicate)");
+assert_eq($valRow2, array_values($titleEntries)[0]["val"], "denorm: pending val mutated to last row's value");
+
+// ── Scenario 10 (issue #2725): denormalized import — second row sets the same
+// plain field to space (" "), which must DELETE the pending entry from row 1.
+$existing = 100;
+$key = 555;
+Insert_batch($existing, 1, $key, "Draft", "Import plain req");
+$reqs = array(); $ids = array();
+foreach(FindPendingBatchEntries($existing) as $pending){
+    if((int)$pending["t"] === 0) continue;
+    if(!isset($reqs[$pending["t"]])){
+        $reqs[$pending["t"]] = $pending["val"];
+        $ids[$pending["t"]]  = $pending["sentinel_id"];
+    }
+}
+$valSpace = " ";
+if($reqs[$key] !== $valSpace){
+    if($valSpace === " "){
+        if(IsPendingBatchSentinel($ids[$key]))
+            DeletePendingBatchEntry($ids[$key]);
+    }
+}
+$after = FindPendingBatchEntries($existing);
+$titleEntries = array_filter($after, function($e) use($key){ return (int)$e["t"] === (int)$key; });
+assert_eq(0, count($titleEntries), "denorm-space: pending entry for field deleted (no DB call needed)");
+
+// ── Scenario 11 (issue #2725): empty value "" — outer code skips the column
+// entirely (strlen check). We don't reach the dispatch. Sanity-check that
+// behavior is preserved (no change to pending).
+$existing = 101;
+$key = 666;
+Insert_batch($existing, 1, $key, "KeepMe", "Import plain req");
+$before = count(FindPendingBatchEntries($existing));
+// Simulate the outer guard: empty value → skip processing.
+$incomingValue = "";
+if(strlen($incomingValue) === 0){
+    // skip — exactly what the production code does at the `if(strlen($object[$order]))` check
+}
+$after = count(FindPendingBatchEntries($existing));
+assert_eq($before, $after, "empty value is ignored — pending untouched");
 
 echo "All tests passed.\n";

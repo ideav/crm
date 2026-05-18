@@ -6068,14 +6068,31 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
             						}
     						    }
     						    elseif(isset($existing) && isset($reqs[$key])){
+    						        // Issue 2725: денормализованный импорт — одна и та же запись может встретиться
+    						        // несколько раз; последняя строка авторитетна. Если $ids[$key] — sentinel
+    						        // pending-записи Insert_batch (от предыдущей строки этого же импорта),
+    						        // правим / удаляем pending in-memory вместо SQL по отрицательному id.
     						         # Drop false BOOLEAN: -1 or FALSE
-    						        if($GLOBALS["base"][$key] === "11" /* BOOLEAN */ && (strtolower($object[$order]) === "false" || $object[$order] === "-1" || $object[$order] === " "))
-    						            Delete($ids[$key]);
-    						        elseif($reqs[$key] !== $val)
-    						            if($val === " ")
-        						            Delete($ids[$key]);
+    						        if($GLOBALS["base"][$key] === "11" /* BOOLEAN */ && (strtolower($object[$order]) === "false" || $object[$order] === "-1" || $object[$order] === " ")){
+    						            if(IsPendingBatchSentinel($ids[$key]))
+    						                DeletePendingBatchEntry($ids[$key]);
     						            else
-        						            Update_Val($ids[$key], $val);
+    						                Delete($ids[$key]);
+    						        }
+    						        elseif($reqs[$key] !== $val){
+    						            if($val === " "){
+    						                if(IsPendingBatchSentinel($ids[$key]))
+    						                    DeletePendingBatchEntry($ids[$key]);
+    						                else
+        						                Delete($ids[$key]);
+    						            }
+    						            else{
+    						                if(IsPendingBatchSentinel($ids[$key]))
+    						                    UpdatePendingBatchEntryVal($ids[$key], $val);
+    						                else
+        						                Update_Val($ids[$key], $val);
+    						            }
+    						        }
     						    }
     							else // Ordinary attribute of some base type
     							    # Skip false BOOLEAN: -1 or FALSE
@@ -7750,6 +7767,14 @@ function UpdatePendingBatchEntryT($sentinelId, $newT){
 	if(!isset($GLOBALS["SQLbatch_entries"][$idx]))
 		return FALSE;
 	$GLOBALS["SQLbatch_entries"][$idx]["t"] = $newT;
+	RebuildSqlBatch();
+	return TRUE;
+}
+function UpdatePendingBatchEntryVal($sentinelId, $newVal){
+	$idx = PendingBatchIdxFromSentinel($sentinelId);
+	if(!isset($GLOBALS["SQLbatch_entries"][$idx]))
+		return FALSE;
+	$GLOBALS["SQLbatch_entries"][$idx]["val"] = $newVal;
 	RebuildSqlBatch();
 	return TRUE;
 }
