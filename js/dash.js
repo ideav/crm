@@ -1,6 +1,6 @@
 (function(){
 
-const repRegex  = /^\[([A-Za-яЁё][A-Za-яЁё0-9 ]*)(\.[A-Za-яЁё][A-Za-яЁё0-9 ]*)(\.[A-Za-яЁё][A-Za-яЁё0-9 ]*)?\]$/
+const repRegex  = /^\[([^\].]+)(\.[^\].]+)(\.[^\].]+)?\]$/
     , itemRegex = /^\[([A-Za-яЁё][ A-Za-яЁё0-9\(\)-]*)\]$/
     , exprRegex = /(СУММА)\(\[(.*?)\]:\[(.*?)\]\)/g
     , itemIdRegex = /\[\d+\]/g;
@@ -84,7 +84,7 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
         + ':name:'
     , cellTpl     = '<td range=":from:-:to:" ready=":ready:" class="f-cell :classes:" align="right" title=":title:" data-src=":src:" data-item-id=":item-id:":extra:>:val:';
 
-let dashModelData = {}, dashPeriodData = {}, dashPeriods = {}, dashValues = {}, dashValueErrors = {}, dashFormulas = {}, dashItems = {}, dashReports = {}, dashReportNames = {}, dashReportKeys = {}, dashReportSources = {}, dashVizReports = {}, dashPanelValues = {}, dashPanelValueErrors = {}, dashPanelFilters = {}, dashAjaxes = 0;
+let dashModelData = {}, dashPeriodData = {}, dashPeriods = {}, dashValues = {}, dashValueErrors = {}, dashFormulas = {}, dashItems = {}, dashReports = {}, dashReportNames = {}, dashReportKeys = {}, dashReportSources = {}, dashVizReports = {}, dashPanelValues = {}, dashPanelValueErrors = {}, dashPanelFilters = {}, dashPanelReportFormulas = {}, dashAjaxes = 0;
 let dashValueItemIds = {}; // item name -> valueItemID from ЗначенияЗаПериод
 let dashMatrixValues = [], dashMatrixValuesRequested = false, dashRgSourceIds = {};
 
@@ -531,12 +531,36 @@ function dashMergePanelFilterState(target, incoming) {
     return target;
 }
 
+function dashReportRefId(ref) {
+    var match = String(ref || '').trim().match(/^(\d+)(?::|$)/);
+    return match ? match[1] : '';
+}
+
+function dashCleanReportRef(ref) {
+    ref = String(ref || '').trim();
+    return dashReportRefId(ref) || ref;
+}
+
+function dashNormalizeReportRef(ref) {
+    return dashCleanReportRef(ref).replace(/\s+/g, ' ').toLowerCase();
+}
+
+function dashReportRefIsNumeric(ref) {
+    return /^\d+$/.test(dashCleanReportRef(ref));
+}
+
+function dashSameReportRef(a, b) {
+    var left = dashNormalizeReportRef(a)
+        , right = dashNormalizeReportRef(b);
+    return !!left && !!right && left === right;
+}
+
 function dashReportKey(rep, panelFilter) {
-    return JSON.stringify([String(rep || ''), dashNormalizePanelFilter(panelFilter)]);
+    return JSON.stringify([dashCleanReportRef(rep), dashNormalizePanelFilter(panelFilter)]);
 }
 
 function dashReportUrl(rep, fr, to, panelFilter) {
-    var url = 'report/' + rep + '?JSON_KV&FR_Date=' + fr + '&TO_Date=' + to
+    var url = 'report/' + dashCleanReportRef(rep) + '?JSON_KV&FR_Date=' + fr + '&TO_Date=' + to
         , filter = dashNormalizePanelFilter(panelFilter);
     if (filter) url += '&' + filter;
     return url;
@@ -564,18 +588,17 @@ function dashResolvePanelVizReportId(row) {
         if (value === null || value === undefined) continue;
         value = String(value).trim();
         if (!value || value === '0') continue;
-        match = value.match(/^\s*(\d+)(?::|$)/);
-        return match ? match[1] : value;
+        return dashCleanReportRef(value);
     }
     return '';
 }
 
 function dashVizReportKey(reportId, panelFilter) {
-    return JSON.stringify(['viz', String(reportId || ''), dashNormalizePanelFilter(panelFilter)]);
+    return JSON.stringify(['viz', dashCleanReportRef(reportId), dashNormalizePanelFilter(panelFilter)]);
 }
 
 function dashVizReportUrl(reportId, fr, to, panelFilter) {
-    var url = 'report/' + reportId + '?JSON&FR_Date=' + fr + '&TO_Date=' + to
+    var url = 'report/' + dashCleanReportRef(reportId) + '?JSON&FR_Date=' + fr + '&TO_Date=' + to
         , filter = dashNormalizePanelFilter(panelFilter);
     if (filter) url += '&' + filter;
     return url;
@@ -1170,10 +1193,10 @@ function dashCollectReportVizData(report, vizConfig) {
 function dashParseReportFormula(formula) {
     var rep = (formula || '').match(repRegex);
     if (!rep) return null;
-    var field = rep[2].substr(1)
-        , group = rep[3] ? rep[3].substr(1) : '';
+    var field = rep[2].substr(1).trim()
+        , group = rep[3] ? rep[3].substr(1).trim() : '';
     return {
-        report: rep[1],
+        report: dashCleanReportRef(rep[1]),
         field: field,
         group: group,
         fullField: group ? field + '.' + group : field
@@ -2072,16 +2095,76 @@ function dashGetRepDone(json, ctx) {
 
 function dashGetRep(rep, fr, to, panelFilter) {
     var key = dashReportKey(rep, panelFilter);
-    dashReports[key] = {};
-    dashReportNames[key] = rep;
+    dashReports[key] = { loading: 'report' };
+    dashReportNames[key] = dashCleanReportRef(rep);
     dashAjaxes++;
     newApi('GET', dashReportUrl(rep, fr, to, panelFilter), 'dashGetRepDone', '', { key: key });
     return key;
 }
 
+function dashBindPanelReportFormulaRows(reportKey, reportRef, report) {
+    dashReports[reportKey] = report && Array.isArray(report.rows) ? report.rows : [];
+    dashReportNames[reportKey] = (report && report.header) || dashCleanReportRef(reportRef);
+}
+
+function dashQueuePanelReportFormula(panelReportKey, reportRef, reportKey, fr, to, panelFilter, directMatch) {
+    var queue = dashPanelReportFormulas[panelReportKey] || (dashPanelReportFormulas[panelReportKey] = [])
+        , i;
+    for (i = 0; i < queue.length; i++)
+        if (queue[i].reportKey === reportKey) return;
+    if (!Array.isArray(dashReports[reportKey]))
+        dashReports[reportKey] = { loading: 'panel-query' };
+    dashReportNames[reportKey] = dashCleanReportRef(reportRef);
+    queue.push({
+        reportRef: dashCleanReportRef(reportRef),
+        reportKey: reportKey,
+        fr: fr,
+        to: to,
+        panelFilter: panelFilter,
+        directMatch: !!directMatch
+    });
+}
+
+function dashFlushPanelReportFormulas(panelReportKey) {
+    var report = dashVizReports[panelReportKey]
+        , queue = dashPanelReportFormulas[panelReportKey] || [];
+    if (!queue.length) return;
+    delete dashPanelReportFormulas[panelReportKey];
+    queue.forEach(function(source) {
+        if (source.directMatch || dashSameReportRef(source.reportRef, report && report.header)) {
+            dashBindPanelReportFormulaRows(source.reportKey, source.reportRef, report);
+            return;
+        }
+        if (Array.isArray(dashReports[source.reportKey])) return;
+        if (dashReports[source.reportKey] && dashReports[source.reportKey].loading === 'report') return;
+        dashGetRep(source.reportRef, source.fr, source.to, source.panelFilter);
+    });
+}
+
+function dashUsePanelReportForFormula(panelKey, reportRef, reportKey, fr, to, panelFilter) {
+    var data = dashModelData[panelKey]
+        , report, directMatch, canMatchHeader;
+    if (!data || !data.vizReportId || !data.vizReportKey || !reportRef || !reportKey) return false;
+    if (Array.isArray(dashReports[reportKey])) return true;
+    directMatch = dashSameReportRef(reportRef, data.vizReportId);
+    canMatchHeader = !directMatch && dashReportRefIsNumeric(data.vizReportId) && !dashReportRefIsNumeric(reportRef);
+    if (!directMatch && !canMatchHeader) return false;
+    report = dashVizReports[data.vizReportKey];
+    if (report && !report.loading) {
+        if (directMatch || dashSameReportRef(reportRef, report.header)) {
+            dashBindPanelReportFormulaRows(reportKey, reportRef, report);
+            return true;
+        }
+        return false;
+    }
+    dashQueuePanelReportFormula(data.vizReportKey, reportRef, reportKey, fr, to, panelFilter, directMatch);
+    return true;
+}
+
 function dashGetVizReportDone(json, ctx) {
     var key = ctx && typeof ctx === 'object' ? ctx.key : ctx;
     dashVizReports[key] = dashNormalizeReportJson(json || {});
+    dashFlushPanelReportFormulas(key);
     dashAjaxes--;
     dashDrawPeriods();
 }
@@ -2365,17 +2448,18 @@ function dashGetModel(json) {
             dashValues[itemTargetId] = dashNormalizeVal(itemTargetId, json[i].value);
         // Formulas
         if (json[i].formulas.length > 0) {
+            var parsedFormulaReport = dashParseReportFormula(json[i].formulas);
             rep = json[i].formulas.match(repRegex);
             if (!dashFormulas[itemTargetId] || (rep && dashFormulas[itemTargetId] === '[]'))
                 dashFormulas[itemTargetId] = json[i].formulas;
-            if (rep) {
-                var reportKey = dashReportKey(rep[1], panelFilter);
+            if (parsedFormulaReport) {
+                var reportKey = dashReportKey(parsedFormulaReport.report, panelFilter);
                 if (!dashReportKeys[itemTargetId])
                     dashReportKeys[itemTargetId] = reportKey;
                 dashRememberReportSource(itemTargetId, json[i].formulas, reportKey);
-                dashReportNames[reportKey] = rep[1];
-                if (!dashReports[reportKey])
-                    dashGetRep(rep[1], fr, to, panelFilter);
+                dashReportNames[reportKey] = parsedFormulaReport.report;
+                if (!dashReports[reportKey] && !dashUsePanelReportForFormula(panelKey, parsedFormulaReport.report, reportKey, fr, to, panelFilter))
+                    dashGetRep(parsedFormulaReport.report, fr, to, panelFilter);
             }
         }
     }
@@ -5887,7 +5971,7 @@ document.addEventListener('click', function(e) {
 
 function dashReset() {
     dashModelData = {}; dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashValueErrors = {};
-    dashFormulas = {}; dashItems = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashReportSources = {}; dashVizReports = {}; dashPanelValues = {}; dashPanelValueErrors = {}; dashPanelFilters = {}; dashAjaxes = 0; dashValueItemIds = {};
+    dashFormulas = {}; dashItems = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashReportSources = {}; dashVizReports = {}; dashPanelValues = {}; dashPanelValueErrors = {}; dashPanelFilters = {}; dashPanelReportFormulas = {}; dashAjaxes = 0; dashValueItemIds = {};
     dashPanelFilterModalCtx = null;
     dashMatrixValues = []; dashMatrixValuesRequested = false; dashRgSourceIds = {};
     var model = document.getElementById('dash-model');
@@ -5931,7 +6015,7 @@ window.dashApplyFilter = function(sheetEl) {
         p.remove();
     });
     dashUpdateSheetSizeResetIcon(sheetEl);
-    dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashValueErrors = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashReportSources = {}; dashVizReports = {}; dashAjaxes = 0; dashValueItemIds = {}; dashRgSourceIds = {};
+    dashPeriodData = {}; dashPeriods = {}; dashValues = {}; dashValueErrors = {}; dashReports = {}; dashReportNames = {}; dashReportKeys = {}; dashReportSources = {}; dashVizReports = {}; dashPanelReportFormulas = {}; dashAjaxes = 0; dashValueItemIds = {}; dashRgSourceIds = {};
 
     // Re-fetch model for this sheet only — skip get_record, use cached dashRecordId
     dashSetStatus('Загрузка данных...');

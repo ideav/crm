@@ -46,6 +46,8 @@ function dashDrawPeriods() {}
 function dashFilterReportRowsForPanel(rows) { return rows || []; }
 
 ${extractFunctionMaybe('dashNormalizePanelFilter')}
+${extractFunctionMaybe('dashReportRefId')}
+${extractFunctionMaybe('dashCleanReportRef')}
 ${extractFunctionMaybe('dashReportKey')}
 ${extractFunctionMaybe('dashReportUrl')}
 ${extractFunction('dashNormalizeNumberText')}

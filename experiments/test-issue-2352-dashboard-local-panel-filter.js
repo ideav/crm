@@ -28,6 +28,8 @@ const urlCtx = {};
 vm.createContext(urlCtx);
 vm.runInContext(`
 ${extractFunction('dashNormalizePanelFilter')}
+${extractFunction('dashReportRefId')}
+${extractFunction('dashCleanReportRef')}
 ${extractFunction('dashReportKey')}
 ${extractFunction('dashReportUrl')}
 ${extractFunction('dashVizReportKey')}
@@ -142,6 +144,8 @@ ${extractFunction('dashPanelLocalFilterState')}
 ${extractFunction('dashMergePanelFilterState')}
 ${extractFunction('dashPanelFiltersFor')}
 ${extractFunction('dashNormalizePanelFilter')}
+${extractFunction('dashReportRefId')}
+${extractFunction('dashCleanReportRef')}
 ${extractFunction('dashReportKey')}
 ${extractFunction('dashParseReportFormula')}
 ${extractFunction('dashReportFieldName')}

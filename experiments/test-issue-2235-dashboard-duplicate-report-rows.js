@@ -74,6 +74,8 @@ ${extractFunction('dashFormatNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashNormalizeVal')}
 ${extractFunctionMaybe('dashNormalizePanelFilter')}
+${extractFunctionMaybe('dashReportRefId')}
+${extractFunctionMaybe('dashCleanReportRef')}
 ${extractFunctionMaybe('dashReportKey')}
 ${extractFunctionMaybe('dashParseReportFormula')}
 ${extractFunctionMaybe('dashReportFieldName')}

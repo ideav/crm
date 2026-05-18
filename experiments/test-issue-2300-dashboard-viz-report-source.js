@@ -33,8 +33,11 @@ function dashPanelTableCellPassesFilters() { return true; }
 
 ${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashGetFloat')}
+${extractFunction('dashChartMeasureValue')}
 ${extractFunction('dashAttr')}
 ${extractFunction('dashNormalizePanelFilter')}
+${extractFunction('dashReportRefId')}
+${extractFunction('dashCleanReportRef')}
 ${extractFunction('dashResolvePanelVizReportId')}
 ${extractFunction('dashVizReportKey')}
 ${extractFunction('dashVizReportUrl')}
