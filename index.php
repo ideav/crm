@@ -5812,6 +5812,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     					if(strlen($buffer)==0)
     						continue;
     					$object = UnHideDelimiters(explode(";", HideDelimiters($buffer)));	# Get fields array
+						FlushInsertBatch("Before plain import lookup");
                         if($object[0] == ""){
                             // issue #2522: if the Type has uniqueness defined by composite key reqs, an emptied
                             // first column means the source row was cleared — find the existing record by the
@@ -7726,13 +7727,21 @@ function Salt($u, $val){
 	# $u = strtoupper($u);
 	return SALT."$z$val";
 }
+# Flushes the pending insert batch so later SELECT/UPDATE/DELETE queries can see it
+function FlushInsertBatch($message, $prefix="Close batch"){
+	global $z;
+	if(!isset($GLOBALS["SQLbatch"]) || $GLOBALS["SQLbatch"] === "")
+		return FALSE;
+	exec_sql("INSERT INTO $z (up, ord, t, val) VALUES ".$GLOBALS["SQLbatch"], "$prefix: $message");
+	unset($GLOBALS["SQLbatch"]);
+	return TRUE;
+}
 # Inserts new values in a batch
 function Insert_batch($up, $ord, $t, $val, $message){
 	global $connection, $z;
-	if(($up === "") && isset($GLOBALS["SQLbatch"])) // Close the batch
+	if($up === "") // Close the batch
 	{
-    	exec_sql("INSERT INTO $z (up, ord, t, val) VALUES ".$GLOBALS["SQLbatch"], "Close batch: $message");
-    	unset($GLOBALS["SQLbatch"]);
+		FlushInsertBatch($message);
     	return;
 	}
 	if(isset($GLOBALS["SQLbatch"]))
@@ -7741,10 +7750,7 @@ function Insert_batch($up, $ord, $t, $val, $message){
         $GLOBALS["SQLbatch"] = "($up,$ord,$t,'".addslashes($val)."')";
 #    trace("GLOBAL[SQLbatch] = ".$GLOBALS["SQLbatch"]);
 	if(strlen($GLOBALS["SQLbatch"]) > 31000)
-	{
-    	exec_sql("INSERT INTO $z (up, ord, t, val) VALUES ".$GLOBALS["SQLbatch"], "Flush batch: $message");
-    	unset($GLOBALS["SQLbatch"]);
-	}
+		FlushInsertBatch($message, "Flush batch");
 }
 # Inserts a new value and returns the ID it got
 function Insert($up, $ord, $t, $val, $message)
