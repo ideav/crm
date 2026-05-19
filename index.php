@@ -8867,6 +8867,12 @@ function UniqueKeyValuesFromRequest($typ, $recordId, $request, $keyReqs=false){
 	}
 	return $values;
 }
+function UniqueKeyRequestHasSubmittedKeyReq($request, $keyReqs){
+	foreach($keyReqs as $reqId => $req)
+		if(array_key_exists("t$reqId", $request) || array_key_exists("NEW_$reqId", $request))
+			return true;
+	return false;
+}
 function FindUniqueRecordDuplicate($typ, $skipId, $up, $val, $keyValues, $includeVal=true){
 	global $z;
 	// When uniqueness is enforced solely by composite-key reqs (the first column is not marked unique),
@@ -9563,8 +9569,9 @@ if(Validate_Token())
 			Get_Current_Values($id, $typ);
 			$GLOBALS["REQS"][$typ] = $cur_val;
 			if(!$copy){
-				$hasKeyReqs = $unique ? false : (count(UniqueKeyReqs($typ)) > 0);
-				if($unique || $hasKeyReqs){
+				$keyReqs = $unique ? array() : UniqueKeyReqs($typ);
+				$hasSubmittedKeyReqs = $unique ? false : UniqueKeyRequestHasSubmittedKeyReq($_REQUEST, $keyReqs);
+				if($unique || $hasSubmittedKeyReqs){
 					$uniqueVal = $cur_val;
 					if(isset($_REQUEST["t$typ"]) && !(($typ == TOKEN || $typ == XSRF || $typ == PASSWORD) && $_REQUEST["t$typ"] === PASSWORDSTARS))
 						$uniqueVal = UniqueKeyNormalizeValue($typ, $_REQUEST["t$typ"]);
