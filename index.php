@@ -8751,14 +8751,37 @@ function UniqueKeyNormalizeValue($t, $value){
 		$value = BuiltIn($value);
 	return Format_Val($t, $value);
 }
-function UniqueKeyNormalizeRefs($req, $value){
+function UniqueKeyUnmaskRefValue($value){
+	return str_replace("\,", ",", UnMaskDelimiters((string)$value));
+}
+function UniqueKeySplitRefValues($req, $value, $allowNonMultiIdList=false){
+	if(is_array($value))
+		return $value;
+	$value = (string)$value;
+	if($req["multi"])
+		return UnHideDelimiters(explode(",", HideDelimiters($value)));
+	$value = UniqueKeyUnmaskRefValue($value);
+	if($allowNonMultiIdList && strpos($value, ",") !== false){
+		$parts = explode(",", $value);
+		$allNumeric = count($parts) > 1;
+		foreach($parts as $part)
+			if(!is_numeric(trim($part))){
+				$allNumeric = false;
+				break;
+			}
+		if($allNumeric)
+			return $parts;
+	}
+	return array($value);
+}
+function UniqueKeyNormalizeRefs($req, $value, $allowNonMultiIdList=false){
 	global $z;
-	$refs = is_array($value) ? $value : explode(",", (string)$value);
+	$refs = UniqueKeySplitRefValues($req, $value, $allowNonMultiIdList);
 	$ids = array();
 	$seen = array();
 	$hasMissingRef = false;
 	foreach($refs as $ref){
-		$ref = trim((string)$ref);
+		$ref = trim(UniqueKeyUnmaskRefValue($ref));
 		if($ref === "")
 			continue;
 		if(is_numeric($ref)){
@@ -8833,13 +8856,13 @@ function UniqueKeyValuesFromRequest($typ, $recordId, $request, $keyReqs=false){
 		$field = "t$reqId";
 		$newField = "NEW_$reqId";
 		if($req["ref_id"] && isset($request[$newField]) && trim((string)$request[$newField]) !== ""){
-			$values[$reqId] = UniqueKeyNormalizeRefs($req, $request[$newField]);
+			$values[$reqId] = UniqueKeyNormalizeRefs($req, $request[$newField], false);
 			continue;
 		}
 		if(!array_key_exists($field, $request))
 			continue;
 		$values[$reqId] = $req["ref_id"]
-			? UniqueKeyNormalizeRefs($req, $request[$field])
+			? UniqueKeyNormalizeRefs($req, $request[$field], true)
 			: array("kind" => "value", "value" => UniqueKeyNormalizeValue($req["t"], $request[$field]));
 	}
 	return $values;
