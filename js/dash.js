@@ -87,6 +87,13 @@ const sheetTabTpl = '<li class="nav-item"><a id=":id:" class="nav-link dash-shee
 let dashModelData = {}, dashPeriodData = {}, dashPeriods = {}, dashValues = {}, dashValueErrors = {}, dashFormulas = {}, dashItems = {}, dashReports = {}, dashReportNames = {}, dashReportIds = {}, dashReportHeaders = {}, dashReportKeys = {}, dashReportSources = {}, dashVizReports = {}, dashPanelValues = {}, dashPanelValueErrors = {}, dashPanelFilters = {}, dashAjaxes = 0;
 // Issue 2718: алиасы запросов id↔name из X-Query-* заголовков; очередь row-fetch'ей, ждущих panel-fetch.
 let dashQueryNameById = {}, dashQueryIdByName = {}, dashPendingPanelRows = {};
+// Issue 2727: индекс panelQuery по id и имени для кросс-панельного шаринга row-fetch'ей.
+// Заполняется pre-pass'ом до основного цикла, чтобы строка из панели B могла найти панель A
+// с подходящим panelQuery даже если A идёт в JSON позже. Server-filter хранится тут же —
+// сравнение dashModelData[candidate].panelFilter не сработало бы, пока главный цикл не дошёл до A.
+// hasItems нужен потому что dashGetPanelValues пропускает панель без .f-item, и данные в
+// dashReports[panelReportKey] не попадут — кросс-панельный шаринг для такой панели бесполезен.
+let dashPanelKeyByRef = {}, dashPanelServerFilterByKey = {}, dashPanelHasItemsByKey = {};
 let dashValueItemIds = {}; // item name -> valueItemID from ЗначенияЗаПериод
 let dashMatrixValues = [], dashMatrixValuesRequested = false, dashRgSourceIds = {};
 
@@ -610,6 +617,26 @@ function dashRefMatchesPanelQuery(rowRef, parts) {
     if (parts.id && s === parts.id) return true;
     if (parts.name && s.toLowerCase() === parts.name.toLowerCase()) return true;
     return false;
+}
+
+// Issue 2727: найти панель, чей panelQuery соответствует row-ref'у, для кросс-панельного шаринга.
+// Шаринг безопасен только если server-side panelFilter совпадает — иначе данные на сервере
+// отфильтрованы по-разному (FR_dept=1 vs FR_dept=2). Локальные ":"-фильтры применяются per-cell
+// в dashGetRepVals и шарингу не мешают.
+function dashFindPanelForRowRef(rowRef, rowPanelFilter, ownPanelKey) {
+    var s = String(rowRef || '').trim();
+    if (!s) return '';
+    var sLower = s.toLowerCase()
+        , rowServerFilter = dashNormalizePanelFilter(rowPanelFilter)
+        , candidate = dashPanelKeyByRef[s] || dashPanelKeyByRef[sLower];
+    if (!candidate || candidate === ownPanelKey) return '';
+    // Сравниваем по индексу, а не по dashModelData[candidate]: целевая панель может ещё
+    // не быть создана в основном цикле (если её строки идут в JSON позже текущей).
+    if (dashPanelServerFilterByKey[candidate] !== rowServerFilter) return '';
+    // dashGetPanelValues пропускает панели без .f-item — без её ответа данные в
+    // dashReports[panelReportKey] не появятся и очередь не разойдётся.
+    if (!dashPanelHasItemsByKey[candidate]) return '';
+    return candidate;
 }
 
 function dashVizReportKey(reportId, panelFilter) {
@@ -2371,6 +2398,23 @@ function dashGetModel(json) {
 
     var model = document.getElementById('dash-model');
 
+    // Issue 2727: pre-pass — индексируем panelQuery каждой панели по id и имени, чтобы
+    // row-формула в любой панели могла найти подходящий panel-fetch до начала основного
+    // цикла. Без этого матч сработал бы только для панелей, обработанных ранее в JSON.
+    var seenPanelsForRefIndex = {};
+    for (i in json) {
+        var indexPid = json[i].panelID;
+        var indexPanelKey = 'fp' + indexPid;
+        if (json[i].itemID) dashPanelHasItemsByKey[indexPanelKey] = true;
+        if (seenPanelsForRefIndex[indexPid]) continue;
+        seenPanelsForRefIndex[indexPid] = true;
+        var indexParts = dashPanelQueryParts(json[i]);
+        if (!indexParts) continue;
+        if (indexParts.id) dashPanelKeyByRef[indexParts.id] = indexPanelKey;
+        if (indexParts.name) dashPanelKeyByRef[indexParts.name.toLowerCase()] = indexPanelKey;
+        dashPanelServerFilterByKey[indexPanelKey] = dashNormalizePanelFilter(json[i].panelFilter || '');
+    }
+
     for (i in json) {
         var panelKey = 'fp' + json[i].panelID
             , previousItem = lastVisibleItemByPanel[panelKey]
@@ -2472,14 +2516,17 @@ function dashGetModel(json) {
             if (!dashFormulas[itemTargetId] || (rep && dashFormulas[itemTargetId] === '[]'))
                 dashFormulas[itemTargetId] = json[i].formulas;
             if (rep) {
-                // Issue 2718: если у панели есть panelQuery — row-fetch встаёт в очередь и
-                // выполнится (или будет переиспользован panel-fetch) после dashGetPanelValuesDone.
-                // Если panelQuery нет — fire'им сразу как раньше.
+                // Issue 2718/2727: row-fetch встаёт в очередь подходящей панели, если такая есть:
+                //   1) собственная панель имеет panelQuery → ждём её panel-fetch'а (issue 2718);
+                //   2) иначе — другая панель имеет panelQuery с тем же ref'ом и тем же
+                //      server-side panelFilter → шарим её panel-fetch (issue 2727).
+                // Иначе — fire'им свой dashGetRep как раньше.
                 var panelData2 = dashModelData[panelKey]
-                    , panelParts2 = panelData2 && panelData2.panelQueryParts;
-                if (panelParts2) {
-                    if (!dashPendingPanelRows[panelKey]) dashPendingPanelRows[panelKey] = [];
-                    dashPendingPanelRows[panelKey].push({
+                    , panelParts2 = panelData2 && panelData2.panelQueryParts
+                    , queueKey = panelParts2 ? panelKey : dashFindPanelForRowRef(rep[1], panelFilter, panelKey);
+                if (queueKey) {
+                    if (!dashPendingPanelRows[queueKey]) dashPendingPanelRows[queueKey] = [];
+                    dashPendingPanelRows[queueKey].push({
                         itemTargetId: itemTargetId, formula: json[i].formulas, rowRef: rep[1],
                         fr: fr, to: to, panelFilter: panelFilter
                     });
