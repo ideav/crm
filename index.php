@@ -2063,7 +2063,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 	    		my_die(t9n("[RU]У вас нет доступа к этому объекту ($val))![EN]You do not have this object granted ($val))")." ($t)");
 		$tables = $conds = $field_names = $joinedOn = $GLOBALS["CONDS"] = $GLOBALS["STORED_REPS"][$id][REP_JOIN] = array();
 		$s = "_";   # Delimiter for numeric table names: arr$par$s$rec -> arr777_555
-		$aggr_funcs = array("AVG", "COUNT", "MAX", "MIN", "SUM", "GROUP_CONCAT"); # Aggregative MySQL functions list
+		$aggr_funcs = array("AVG", "COUNT", "MAX", "MIN", "SUM", "GROUP_CONCAT", "JSON_ARRAYAGG"); # Aggregative MySQL functions list
 		$distinct = "";
 	    $fieldsAll = $displayVal = $fieldsName = $displayName = Array();
 	    $joined = Array();
@@ -2552,6 +2552,12 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
         								$displayVal[$key] = "GROUP_CONCAT(DISTINCT $fieldsOrig[$key])";
         								$GLOBALS["STORED_REPS"][$id]["aggrs2sort"][$key] = "GROUP_CONCAT(DISTINCT $field)";
     							    }
+    							    elseif($GLOBALS["STORED_REPS"][$id][REP_COL_FUNC][$key] === "JSON_ARRAYAGG")
+    							    {
+        								$field_names[$key] = "JSON_ARRAYAGG(DISTINCT $field) $name ";
+        								$displayVal[$key] = "JSON_ARRAYAGG(DISTINCT $fieldsOrig[$key])";
+        								$GLOBALS["STORED_REPS"][$id]["aggrs2sort"][$key] = "JSON_ARRAYAGG(DISTINCT $field)";
+    							    }
     							    elseif(($GLOBALS["REV_BT"][$typ] == "NUMBER") || ($GLOBALS["REV_BT"][$typ] == "DATETIME"))
     							    {
         								$field_names[$key] = $GLOBALS["STORED_REPS"][$id][REP_COL_FUNC][$key]."(CAST($field AS DOUBLE)) $name ";
@@ -2895,9 +2901,9 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     					if((!isset($GLOBALS["STORED_REPS"][$id]["aggrs"][$key])) # The field isn't aggregated
 							&& (!isset($GLOBALS["STORED_REPS"][$id][REP_COL_HIDE][$key]))  # and not hidden
 							&& !(($GLOBALS["STORED_REPS"][$id]["types"][$key]=="") # and not a calculatable with aggregation
-							    && (preg_match("/\b(sum|avg|count|min|max|group_concat)\b\(/i", $GLOBALS["STORED_REPS"][$id][REP_COL_FORMULA][$key])))
+							    && (preg_match("/\b(sum|avg|count|min|max|group_concat|json_arrayagg)\b\(/i", $GLOBALS["STORED_REPS"][$id][REP_COL_FORMULA][$key])))
 							&& !((substr($key,0,1) == "u") # and not an Update statement with aggregates enclosed
-							    && preg_match("/\b(sum|avg|count|min|max|group_concat)\b\(/i", $GLOBALS["STORED_REPS"][$id][REP_COL_SET][substr($key,1)])))
+							    && preg_match("/\b(sum|avg|count|min|max|group_concat|json_arrayagg)\b\(/i", $GLOBALS["STORED_REPS"][$id][REP_COL_SET][substr($key,1)])))
     					{
     					    #trace("($key) group by ".$fields[$key]." or ".$names[$key]." which is ".$GLOBALS["STORED_REPS"][$id][REP_COL_SET][substr($key,1)]);
     						if(isset($group))
@@ -3488,9 +3494,9 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
             		    if(isset($joinedClause[$k]))
             		    {
                 		    $sql .= "\r\n   ".$joinedClause[$k];
-                		    if(preg_match("/\b(sum|avg|count|min|max|group_concat)\b\(/i", implode(",",$joined[$k])))
+                		    if(preg_match("/\b(sum|avg|count|min|max|group_concat|json_arrayagg)\b\(/i", implode(",",$joined[$k])))
                                 foreach($joined[$k] as $gr)
-                                    if(!preg_match("/\b(sum|avg|count|min|max|group_concat)\b\(/i", $gr))
+                                    if(!preg_match("/\b(sum|avg|count|min|max|group_concat|json_arrayagg)\b\(/i", $gr))
                                     {
                 						$tmp = explode(" ", $gr);
                 						$gr = array_pop($tmp);
