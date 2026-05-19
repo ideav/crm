@@ -10,7 +10,7 @@ function newApi(m,u,b,vars,index){ // Параметры: метод, адрес
             obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
             vars='_xsrf='+xsrf+'&'+vars; // добавляем токен xsrf, необходимый для POST-запроса
         }
-    obj.onload=function(e){ // Когда запрос вернет результат - сработает эта функция
+    obj.onload=function(e){  // Когда запрос вернет результат - сработает эта функция
         // Прокидываем заголовки ответа в ctx до abort() — чтобы колбэки могли читать X-Query-Id и т.п.
         if(index && typeof index==='object'){
             var rawHeaders=this.getAllResponseHeaders(), headers={};
