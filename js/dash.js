@@ -1808,8 +1808,14 @@ function dashDrawPeriods() {
                                     // Issue 2740: panel driven by panelQuery and the row has no
                                     // formula → fall back to looking the value up by the row's
                                     // name alone (itemSrcName || item, with Метка filter). Covers
-                                    // panelQuery rows that don't carry RGcolumnsID, so the cell
-                                    // for every rg column still picks up the same item value.
+                                    // panelQuery RESPONSE rows that don't carry an `RGcolumnsID`
+                                    // field — those land in the bucket under the bare `itemKey`,
+                                    // so each rg-column cell of the dashboard row picks up the
+                                    // same per-item value. (Issue 2742: model rows that DO carry
+                                    // RGcolumnsID but receive their data via wide-form panelQuery
+                                    // columns shaped `<item>.<colName>` are handled earlier in
+                                    // dashGetPanelValuesDone — by the time we get here `v` is
+                                    // already set from the `itemKey:colKey` bucket entry.)
                                     if (v === undefined && !dashFormulas[row.id] && dashPanelValues[panelId]) {
                                         v = dashGetVal(itemName, fr, to, rowLabel, panelId);
                                         if (v !== undefined) vDetails = dashGetValDetails(itemName, fr, to, rowLabel, panelId);
@@ -2285,26 +2291,53 @@ function dashGetPanelValuesDone(json, ctx) {
         // it (issue #2679).
         var modelFilters = (dashModelData[panelKey] && dashModelData[panelKey].panelFilters) || {};
         var filteredRows = dashFilterReportRowsForPanel(json, modelFilters);
+        // Issue 2742: identify the period column (Месяц/Год/Неделя/…) on the
+        // panel so wide-form rows can use it as the entry date.
+        var panelEl2742 = document.getElementById(panelKey);
+        var periodField2742 = panelEl2742 ? panelEl2742.getAttribute('f-period') : '';
         filteredRows.forEach(function(row) {
-            if (!row || row.value === undefined || row.value === null || row.value === '') return;
-            var itemKey = (row.item || '').toLowerCase();
-            var colGroup = (row.RGcolumnsID || '').toLowerCase();
-            var key = colGroup ? itemKey + ':' + colGroup : itemKey;
-            try {
-                var srcLabel = row['Метка'] || '';
-                var parsed = dashParseSrcValue(row.value);
-                var tagged = parsed.map(function(p) {
-                    return Object.assign({}, p, { 'Метка': srcLabel });
-                });
-                bucket[key] = Array.isArray(bucket[key]) ? bucket[key].concat(tagged) : tagged;
-            } catch (e) {
-                // Record the parse failure so the cell can be highlighted
-                // with the original expression in its title. Don't clobber
-                // bucket[key] — sibling rows for the same item may have
-                // parsed OK earlier.
-                errBucket[key] = { error: String(e), raw: row.value };
-                if (!errBucket[itemKey]) errBucket[itemKey] = { error: String(e), raw: row.value };
+            if (!row) return;
+            var srcLabel = row['Метка'] || '';
+            // Long form: row carries `item`/`value`(+optional RGcolumnsID).
+            if (row.value !== undefined && row.value !== null && row.value !== '') {
+                var itemKey = (row.item || '').toLowerCase();
+                var colGroup = (row.RGcolumnsID || '').toLowerCase();
+                var key = colGroup ? itemKey + ':' + colGroup : itemKey;
+                try {
+                    var parsed = dashParseSrcValue(row.value);
+                    var tagged = parsed.map(function(p) {
+                        return Object.assign({}, p, { 'Метка': srcLabel });
+                    });
+                    bucket[key] = Array.isArray(bucket[key]) ? bucket[key].concat(tagged) : tagged;
+                } catch (e) {
+                    // Record the parse failure so the cell can be highlighted
+                    // with the original expression in its title. Don't clobber
+                    // bucket[key] — sibling rows for the same item may have
+                    // parsed OK earlier.
+                    errBucket[key] = { error: String(e), raw: row.value };
+                    if (!errBucket[itemKey]) errBucket[itemKey] = { error: String(e), raw: row.value };
+                }
             }
+            // Issue 2742: wide form — panelQuery returns one row per period
+            // with compound columns `<item>.<colName>`. Split each such
+            // column into its bucket entry under `<itemKey>:<colKey>` so
+            // dashDrawPeriods can pick it up via `dashGetVal(item:col)`.
+            var dateRaw2742 = (periodField2742 && row[periodField2742]) || '';
+            var dateYMD2742 = /^\d{8}$/.test(dateRaw2742)
+                ? dateRaw2742
+                : (/^\d{2}\.\d{2}\.\d{4}$/.test(dateRaw2742) ? dashDateYMD(dateRaw2742) : dateRaw2742);
+            Object.keys(row).forEach(function(colKey) {
+                var dotIdx = colKey.indexOf('.');
+                if (dotIdx <= 0) return;
+                var val = row[colKey];
+                if (val === undefined || val === null || val === '') return;
+                var wItem = colKey.substring(0, dotIdx).toLowerCase();
+                var wCol = colKey.substring(dotIdx + 1).toLowerCase();
+                if (!wItem || !wCol) return;
+                var wKey = wItem + ':' + wCol;
+                var entry = { date: dateYMD2742, val: String(val), 'Метка': srcLabel };
+                bucket[wKey] = Array.isArray(bucket[wKey]) ? bucket[wKey].concat([entry]) : [entry];
+            });
         });
     }
     // Issue 2718: row-fetch'и этой панели ждали в очереди — теперь данные есть и алиасы свежие.
