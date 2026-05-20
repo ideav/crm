@@ -78,17 +78,19 @@ $leadHeaders = array_values($leadFieldsMap);
 $dealFields = array_keys($dealFieldsMap);
 $dealHeaders = array_values($dealFieldsMap);
 
-// ========== СЛОВАРИ ДЛЯ СПРАВОЧНЫХ ПОЛЕЙ (#2736) ==========
-// STAGE_ID сделок и UF_CRM_1648027063964 лидов хранятся в Bitrix как
-// технические коды (например, "C16:NEW" или "4800"). Для CSV/BKI заменяем
-// их на человеческие имена из приложенного к задаче crm_status.json.
+// ========== СЛОВАРИ ДЛЯ СПРАВОЧНЫХ ПОЛЕЙ (#2736, #2738) ==========
+// STAGE_ID сделок, UF_CRM_1648027063964 и SOURCE_ID лидов хранятся в Bitrix
+// как технические коды (например, "C16:NEW", "4800", "WEBFORM"). Для CSV/BKI
+// заменяем их на человеческие имена из приложенного к задачам crm_status.json.
 $exportValueMapsFile = __DIR__ . '/export_b3x_value_maps.php';
 $exportValueMaps = file_exists($exportValueMapsFile) ? require $exportValueMapsFile : [];
 $dealStageMap = $exportValueMaps['deal_stage'] ?? [];
 $leadCategory1648027063964Map = $exportValueMaps['lead_category_1648027063964'] ?? [];
+$leadSourceMap = $exportValueMaps['lead_source'] ?? [];
 
 $leadValueMaps = [
     'UF_CRM_1648027063964' => $leadCategory1648027063964Map,
+    'SOURCE_ID' => $leadSourceMap,
 ];
 $dealValueMaps = [
     'STAGE_ID' => $dealStageMap,
