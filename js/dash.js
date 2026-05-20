@@ -1805,6 +1805,15 @@ function dashDrawPeriods() {
                                             }
                                         }
                                     }
+                                    // Issue 2740: panel driven by panelQuery and the row has no
+                                    // formula → fall back to looking the value up by the row's
+                                    // name alone (itemSrcName || item, with Метка filter). Covers
+                                    // panelQuery rows that don't carry RGcolumnsID, so the cell
+                                    // for every rg column still picks up the same item value.
+                                    if (v === undefined && !dashFormulas[row.id] && dashPanelValues[panelId]) {
+                                        v = dashGetVal(itemName, fr, to, rowLabel, panelId);
+                                        if (v !== undefined) vDetails = dashGetValDetails(itemName, fr, to, rowLabel, panelId);
+                                    }
                                     var cellExtra = s.extra
                                         + (valueItemId ? ' data-value-item-id="' + valueItemId + '"' : '')
                                         + (rgHeadVal ? ' data-rg-head="' + rgHeadVal.replace(/"/g, '&quot;') + '"' : '')
