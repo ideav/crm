@@ -304,9 +304,11 @@ class IntegramTable{
                 const metadata = await response.json();
                 this.globalMetadata = metadata;
                 // Re-render if data is already loaded, so column-add-btn visibility
-                // can be recalculated based on the metadata ids
+                // can be recalculated based on the metadata ids.
+                // Preserve scroll position since this resolves asynchronously and may
+                // fire after the user has scrolled the table (issue #2744).
                 if (this.columns.length > 0) {
-                    this.render();
+                    this.renderPreservingScroll(() => this.render());
                 }
             } catch (error) {
                 console.error('Error loading global metadata:', error);
@@ -341,9 +343,10 @@ class IntegramTable{
                         up: data.up,
                         type: data.type
                     };
-                    // Re-render if data is already loaded, so the title updates
+                    // Re-render if data is already loaded, so the title updates.
+                    // Preserve scroll position since this resolves asynchronously (issue #2744).
                     if (this.columns.length > 0) {
-                        this.render();
+                        this.renderPreservingScroll(() => this.render());
                     }
                 }
             } catch (error) {
@@ -572,6 +575,12 @@ class IntegramTable{
                 const appendScrollState = append ? this.captureScrollState() : null;
                 this.render();
                 this.restoreScrollState(appendScrollState);
+                // Re-apply the scroll state after the browser has settled the new layout,
+                // so late-firing layout shifts (ResizeObserver, font/image load, sticky-
+                // scrollbar sync) can't snap the table back to scrollLeft=0 (issue #2744).
+                if (appendScrollState && typeof window.requestAnimationFrame === 'function') {
+                    window.requestAnimationFrame(() => this.restoreScrollState(appendScrollState));
+                }
             } catch (error) {
                 console.error('Error loading data:', error);
                 if (!append && this.container) {
@@ -1706,11 +1715,15 @@ class IntegramTable{
                 this.loadRefFilterOptions();
             }
 
-            // Restore focus state after re-rendering
+            // Restore focus state after re-rendering.
+            // preventScroll: true keeps the browser from auto-scrolling the filter input
+            // into view, which would otherwise reset the table's horizontal scroll
+            // position when a filter input lives outside the visible scroll viewport
+            // (issue #2744).
             if (focusState) {
                 const newInput = this.container.querySelector(`.filter-input-with-icon[data-column-id="${focusState.columnId}"]`);
                 if (newInput) {
-                    newInput.focus();
+                    newInput.focus({ preventScroll: true });
                     // Restore cursor position (only for text inputs, not date pickers)
                     if (focusState.selectionStart !== null && focusState.selectionEnd !== null &&
                         newInput.type === 'text') {
@@ -6722,6 +6735,38 @@ class IntegramTable{
 
             scrollContainer.scrollTop = scrollState.scrollTop;
             scrollContainer.scrollLeft = scrollState.scrollLeft;
+
+            // After re-render the sticky scrollbar element is a fresh node at scrollLeft=0.
+            // Without this sync it stays at 0 while the table is at scrollState.scrollLeft;
+            // any later interaction with the sticky bar would then snap the table back to 0
+            // (issue #2744).
+            if (this.container && typeof document !== 'undefined'
+                && typeof document.getElementById === 'function') {
+                const stickyScrollbar = document.getElementById(
+                    `${this.container.id}-sticky-scrollbar`
+                );
+                if (stickyScrollbar) {
+                    this.isSyncingScroll = true;
+                    stickyScrollbar.scrollLeft = scrollState.scrollLeft;
+                    this.isSyncingScroll = false;
+                }
+            }
+        }
+
+        /**
+         * Capture the current scroll state, run the supplied render callback, then restore
+         * the scroll state both synchronously and on the next animation frame. The extra
+         * rAF-deferred restoration defeats late layout shifts (ResizeObserver callbacks,
+         * focus-triggered auto-scroll, sticky-scrollbar sync) that can otherwise reset
+         * .integram-table-container.scrollLeft after the synchronous restore (issue #2744).
+         */
+        renderPreservingScroll(renderFn) {
+            const state = this.captureScrollState();
+            renderFn();
+            this.restoreScrollState(state);
+            if (state && typeof window.requestAnimationFrame === 'function') {
+                window.requestAnimationFrame(() => this.restoreScrollState(state));
+            }
         }
 
         /**
