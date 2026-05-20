@@ -780,11 +780,26 @@
         /**
          * Delete a table via API (issue #1932).
          * Uses _d_del/{tableId}?JSON. On success returns {id, obj, next_act, args, warnings}.
+         *
+         * Issue #2746: if the table is referenced by another column (metadata
+         * exposes a "referenced" id), the server refuses to delete it. Fetch
+         * fresh metadata, delete each reference first via _d_del/{referenced},
+         * then delete the table itself. Surface the full server error on
+         * failure (no truncation, no generic "HTTP 400").
+         *
          * @returns {Promise<{success: boolean, error?: string}>}
          */
         async deleteTable(tableId) {
             const apiBase = this.getApiBase();
             try {
+                // Issue #2746: remove any reference columns pointing to this table
+                // before deleting the table itself. Bypass the cache so we see
+                // the current server-side state.
+                const refResult = await this.deleteTableReferences(tableId);
+                if (!refResult.success) {
+                    return refResult;
+                }
+
                 const params = new URLSearchParams();
                 if (typeof xsrf !== 'undefined') params.append('_xsrf', xsrf);
 
@@ -803,8 +818,106 @@
                     return { success: false, error: serverError || responseText || `HTTP ${resp.status}` };
                 }
                 if (result && result.id) return { success: true };
-                const err = (result && this.getServerError(result)) || 'Неизвестная ошибка';
+                // Issue #2746: surface the raw response body when the JSON shape
+                // is unexpected, so the user sees the whole server message
+                // rather than the generic "Неизвестная ошибка".
+                const err = (result && this.getServerError(result)) || responseText || 'Неизвестная ошибка';
                 return { success: false, error: err };
+            } catch (err) {
+                return { success: false, error: err.message };
+            }
+        }
+
+        /**
+         * Delete every column that references the given table (issue #2746).
+         * The server marks such tables in metadata with a "referenced" field
+         * holding the requisite id; deleting that requisite removes the link.
+         * Repeats until metadata reports no more references or the request
+         * fails. Returns the full server error on failure.
+         *
+         * @returns {Promise<{success: boolean, error?: string}>}
+         */
+        async deleteTableReferences(tableId) {
+            const apiBase = this.getApiBase();
+            const seen = new Set();
+            // Cap iterations to avoid a runaway loop if the server keeps
+            // returning the same referenced id (it would also be caught by
+            // `seen`, but the cap is a defensive backstop).
+            for (let i = 0; i < 32; i++) {
+                let metadata;
+                try {
+                    const resp = await fetch(`${apiBase}/metadata/${tableId}`);
+                    if (!resp.ok) {
+                        // Can't inspect references; let the table-delete call
+                        // surface whatever error the server returns.
+                        return { success: true };
+                    }
+                    const text = await resp.text();
+                    try { metadata = JSON.parse(text); } catch (_) { return { success: true }; }
+                } catch (_) {
+                    return { success: true };
+                }
+                if (Array.isArray(metadata)) metadata = metadata[0];
+                if (!metadata) return { success: true };
+                const referenced = metadata.referenced;
+                if (!referenced) return { success: true };
+
+                const refIds = Array.isArray(referenced) ? referenced : [referenced];
+                let removedAny = false;
+                for (const rawRefId of refIds) {
+                    const refId = String(rawRefId || '').trim();
+                    if (!refId || seen.has(refId)) continue;
+                    seen.add(refId);
+                    const delResult = await this.deleteReferenceRequisite(refId);
+                    if (!delResult.success) {
+                        return {
+                            success: false,
+                            error: `Не удалось удалить ссылку ${refId}: ${delResult.error}`,
+                        };
+                    }
+                    removedAny = true;
+                }
+                if (!removedAny) {
+                    // Nothing new to remove this iteration; either we already
+                    // processed every reference or the metadata still reports
+                    // ones we cannot resolve. Stop and let the table-delete
+                    // call surface the underlying error.
+                    return { success: true };
+                }
+            }
+            return { success: true };
+        }
+
+        /**
+         * Delete a reference requisite via _d_del/{id} (issue #2746).
+         * Returns the full server error on failure.
+         *
+         * @returns {Promise<{success: boolean, error?: string}>}
+         */
+        async deleteReferenceRequisite(refId) {
+            const apiBase = this.getApiBase();
+            try {
+                const params = new URLSearchParams();
+                if (typeof xsrf !== 'undefined') params.append('_xsrf', xsrf);
+
+                const resp = await fetch(`${apiBase}/_d_del/${refId}?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+                const responseText = await resp.text();
+                let result = null;
+                try { result = JSON.parse(responseText); } catch (_) { /* not JSON */ }
+                if (!resp.ok) {
+                    const serverError = result ? this.getServerError(result) : null;
+                    return { success: false, error: serverError || responseText || `HTTP ${resp.status}` };
+                }
+                const serverError = result ? this.getServerError(result) : null;
+                if (serverError) {
+                    return { success: false, error: serverError };
+                }
+                if (result && result.id) return { success: true };
+                return { success: false, error: responseText || 'Неизвестная ошибка' };
             } catch (err) {
                 return { success: false, error: err.message };
             }
