@@ -227,6 +227,296 @@
         }
 
         /**
+         * Show "delete by filter" confirmation popup (issue #2749).
+         * Mirrors the visibility/UX of the legacy templates/object.html flow:
+         * the button is gated by metadata.delete === "1" (see isTableDeletable),
+         * and the confirmation shows how many records match the current filter
+         * before any deletion is performed.
+         *
+         * @param {Event} event - Click event from the trigger button.
+         */
+        async showFilterDeleteConfirm(event) {
+            if (event) {
+                event.stopPropagation();
+            }
+
+            const btn = event && event.target
+                ? event.target.closest('.integram-table-settings-filter-delete')
+                : null;
+            if (!btn) return;
+
+            // Toggle behaviour: clicking the button again hides any existing popup.
+            const existing = this.container.querySelector('.filter-delete-confirm');
+            if (existing) {
+                existing.remove();
+                return;
+            }
+
+            // Show a "loading" popup while we count matching records.
+            const loadingHtml = `
+                <div class="filter-delete-confirm" style="display:inline-block; margin-left:8px;">
+                    <span>Подсчёт записей…</span>
+                </div>
+            `;
+            btn.insertAdjacentHTML('afterend', loadingHtml);
+            const loadingPopup = this.container.querySelector('.filter-delete-confirm');
+
+            let count;
+            try {
+                count = await this.fetchFilterMatchCount();
+            } catch (err) {
+                console.error('count-by-filter failed:', err);
+                loadingPopup.innerHTML = `<span style="color:#b00;">Ошибка подсчёта: ${ this.escapeHtml(err.message || String(err)) }</span>`;
+                setTimeout(() => loadingPopup.remove(), 4000);
+                return;
+            }
+
+            if (!Number.isFinite(count) || count <= 0) {
+                loadingPopup.innerHTML = '<span>Нет записей, удовлетворяющих фильтру</span>';
+                setTimeout(() => loadingPopup.remove(), 3000);
+                return;
+            }
+
+            loadingPopup.innerHTML = `
+                <span>Удалить ${ count } записей, удовлетворяющих фильтру?</span>
+                <button class="btn btn-sm btn-danger filter-delete-confirm-btn">Да, удалить</button>
+                <button class="btn btn-sm btn-outline-secondary filter-delete-cancel-btn">Отменить</button>
+            `;
+
+            loadingPopup.querySelector('.filter-delete-confirm-btn').addEventListener('click', () => {
+                loadingPopup.remove();
+                this.bulkDeleteByFilter();
+            });
+            loadingPopup.querySelector('.filter-delete-cancel-btn').addEventListener('click', () => {
+                loadingPopup.remove();
+            });
+        }
+
+        /**
+         * Count records matching the current filter (issue #2749).
+         * Reuses the existing _count=1 endpoint by reading from fetchTotalCount's
+         * data source, but isolated so we can await a fresh count even when
+         * this.totalRows is already cached.
+         *
+         * @returns {Promise<number>} number of records matching current filters
+         */
+        async fetchFilterMatchCount() {
+            if (!this.objectTableId) {
+                throw new Error('Доступно только для табличных источников');
+            }
+            const apiBase = this.getApiBase();
+            const params = new URLSearchParams({ _count: '1' });
+
+            const filters = this.filters || {};
+            Object.keys(filters).forEach(colId => {
+                const filter = filters[colId];
+                if (filter.value || filter.type === '%' || filter.type === '!%') {
+                    const column = this.columns.find(c => c.id === colId);
+                    if (column) {
+                        this.applyFilter(params, column, filter);
+                    }
+                }
+            });
+
+            if (this.options.parentId) {
+                params.set('F_U', this.options.parentId);
+            }
+
+            this.appendPageUrlParams(params);
+
+            const url = `${ apiBase }/object/${ this.objectTableId }/?JSON_OBJ&${ params }`;
+            const response = await fetch(url);
+            const result = await response.json();
+            return parseInt(result.count, 10);
+        }
+
+        /**
+         * Delete all records matching the current filter (issue #2749).
+         *
+         * Replaces the legacy POST {table_id}/_m_del_select flow (templates/object.html):
+         * instead of a single server-side request gated by an opaque form, this
+         * method fetches the current filter's matching record IDs from the
+         * JSON_OBJ endpoint and then calls the per-record _m_del/{id} endpoint
+         * for each one in parallel. The per-record endpoint is the same one
+         * used by row-level delete and by bulkDelete(), so server-side access
+         * checks and reference-integrity rules are honoured identically.
+         */
+        async bulkDeleteByFilter() {
+            if (!this.objectTableId) {
+                this.showToast('Удаление по фильтру доступно только для табличных источников', 'error');
+                return;
+            }
+
+            // Fetch all matching records (IDs + first-column value for error reports).
+            // We reuse loadDataFromTableForExport which honours the current filter,
+            // sorting, F_U parent, and page-URL params; rawData carries item.i (ID).
+            let records = [];
+            try {
+                const savedTableTypeId = this.options.tableTypeId;
+                if (!this.options.tableTypeId && this.objectTableId) {
+                    this.options.tableTypeId = this.objectTableId;
+                }
+                const json = await this.loadDataFromTableForExport(0, 1000000);
+                this.options.tableTypeId = savedTableTypeId;
+
+                const rawData = (json && json.rawData) || [];
+                records = rawData
+                    .filter(item => item && item.i)
+                    .map(item => ({
+                        id: item.i,
+                        value: (item.r && item.r[0]) || ''
+                    }));
+            } catch (err) {
+                console.error('filter-delete load failed:', err);
+                this.showToast(`Ошибка загрузки записей: ${ err.message }`, 'error');
+                return;
+            }
+
+            if (records.length === 0) {
+                this.showToast('Нет записей, удовлетворяющих фильтру', 'error');
+                return;
+            }
+
+            const apiBase = this.getApiBase();
+            const total = records.length;
+            let completed = 0;
+            const errors = [];
+            const warnings = [];
+
+            // Progress modal (same layout/IDs as bulkDelete so existing CSS applies).
+            const progressId = `filter-delete-progress-${ Date.now() }`;
+            const progressHtml = `
+                <div class="integram-modal-overlay" id="${ progressId }">
+                    <div class="integram-modal" style="max-width: 500px;">
+                        <div class="integram-modal-header">
+                            <h3>Удаление записей по фильтру</h3>
+                        </div>
+                        <div class="integram-modal-body">
+                            <div class="bulk-delete-progress-bar-container">
+                                <div class="bulk-delete-progress-bar" style="width: 0%"></div>
+                            </div>
+                            <div class="bulk-delete-progress-text">Удалено: 0 / ${ total }</div>
+                            <div class="bulk-delete-errors" style="display: none;"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', progressHtml);
+
+            const progressOverlay = document.getElementById(progressId);
+            const progressBar = progressOverlay.querySelector('.bulk-delete-progress-bar');
+            const progressText = progressOverlay.querySelector('.bulk-delete-progress-text');
+            const errorsDiv = progressOverlay.querySelector('.bulk-delete-errors');
+
+            const updateProgress = () => {
+                const pct = Math.round((completed / total) * 100);
+                progressBar.style.width = `${ pct }%`;
+                progressText.textContent = `Удалено: ${ completed } / ${ total }`;
+            };
+
+            const deletePromises = records.map(async (record) => {
+                try {
+                    const params = new URLSearchParams();
+                    if (typeof xsrf !== 'undefined') {
+                        params.append('_xsrf', xsrf);
+                    }
+
+                    const response = await fetch(`${ apiBase }/_m_del/${ record.id }?JSON`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: params.toString()
+                    });
+
+                    const text = await response.text();
+                    let result;
+                    try {
+                        result = JSON.parse(text);
+                    } catch (parseErr) {
+                        warnings.push(`#${ record.id } : ${ record.value } : ${ text }`);
+                    }
+
+                    if (result) {
+                        let serverError = null;
+                        if (Array.isArray(result)) {
+                            serverError = (result[0] && result[0].error) || null;
+                        } else {
+                            serverError = result.error || null;
+                        }
+                        if (serverError) {
+                            errors.push(`#${ record.id } : ${ record.value } : ${ serverError }`);
+                        }
+                    }
+                } catch (err) {
+                    errors.push(`#${ record.id } : ${ record.value } : ${ err.message }`);
+                } finally {
+                    completed++;
+                    updateProgress();
+                }
+            });
+
+            await Promise.all(deletePromises);
+
+            if (errors.length > 0 || warnings.length > 0) {
+                errorsDiv.style.display = 'block';
+                let html = '';
+
+                if (errors.length > 0) {
+                    html += `<div class="alert alert-danger" style="max-height: 200px; overflow-y: auto; font-size: 0.75rem; margin-top: 10px; background-color: #f8d7da; border: 2px solid #f5c6cb; border-radius: 4px; padding: 10px;">
+                        <strong>Ошибки (блокирующие):</strong><br>
+                        ${ errors.map(e => {
+                            const parts = e.split(' : ');
+                            if (parts.length >= 3) {
+                                const recordId = this.escapeHtml(parts[0]);
+                                const recordValue = this.escapeHtml(parts[1]);
+                                const errorMsg = parts.slice(2).join(' : ');
+                                const sanitizedMsg = this.sanitizeInlineMessageHtml(errorMsg);
+                                return `${recordId} : ${recordValue} : ${sanitizedMsg}`;
+                            }
+                            return this.escapeHtml(e);
+                        }).join('<br>') }
+                    </div>`;
+                }
+
+                if (warnings.length > 0) {
+                    html += `<div class="alert alert-warning" style="max-height: 200px; overflow-y: auto; font-size: 0.75rem; margin-top: 10px;">
+                        <strong>Предупреждения:</strong><br>
+                        ${ warnings.map(w => this.escapeHtml(w)).join('<br>') }
+                    </div>`;
+                }
+
+                errorsDiv.innerHTML = html;
+            }
+
+            if (errors.length > 0) {
+                progressText.textContent = `Удаление завершено с ошибками: ${ completed } / ${ total }`;
+            } else {
+                progressText.textContent = `Удаление завершено: ${ completed } / ${ total }`;
+            }
+
+            if (errors.length === 0 && warnings.length === 0) {
+                setTimeout(() => {
+                    progressOverlay.remove();
+                }, 1500);
+            } else {
+                const closeBtn = document.createElement('button');
+                closeBtn.className = 'btn btn-sm btn-primary';
+                closeBtn.style.marginTop = '10px';
+                closeBtn.textContent = 'Закрыть';
+                closeBtn.addEventListener('click', () => progressOverlay.remove());
+                progressOverlay.querySelector('.integram-modal-body').appendChild(closeBtn);
+            }
+
+            // Reload table data after delete finishes (mirrors bulkDelete()).
+            this.selectedRows.clear();
+            this.data = [];
+            this.rawObjectData = [];
+            this.loadedRecords = 0;
+            this.hasMore = true;
+            this.totalRows = null;
+            await this.loadData(false);
+        }
+
+        /**
          * Toggle export menu visibility.
          * Issue #1652: the menu is appended to document.body with position:fixed so it
          * escapes the overflow:hidden / overflow-y:hidden clipping of ancestor containers
