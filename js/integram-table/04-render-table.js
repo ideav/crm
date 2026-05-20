@@ -240,11 +240,15 @@
                 this.loadRefFilterOptions();
             }
 
-            // Restore focus state after re-rendering
+            // Restore focus state after re-rendering.
+            // preventScroll: true keeps the browser from auto-scrolling the filter input
+            // into view, which would otherwise reset the table's horizontal scroll
+            // position when a filter input lives outside the visible scroll viewport
+            // (issue #2744).
             if (focusState) {
                 const newInput = this.container.querySelector(`.filter-input-with-icon[data-column-id="${focusState.columnId}"]`);
                 if (newInput) {
-                    newInput.focus();
+                    newInput.focus({ preventScroll: true });
                     // Restore cursor position (only for text inputs, not date pickers)
                     if (focusState.selectionStart !== null && focusState.selectionEnd !== null &&
                         newInput.type === 'text') {
