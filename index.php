@@ -3996,6 +3996,10 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
                     || isset($GLOBALS["STORED_REPS"][$id]["rep_params"]["EXECUTE"]))){
 		if(!isset($GLOBALS["STORED_REPS"][$id]["rep_params"]["EXECUTE"]))
 		    check();
+		# Batch INSERTs of new records similarly to import: collect into Insert_batch,
+		# flush automatically by length and before any UPDATE/DELETE/INSERT-with-ID so
+		# subsequent ops see the just-inserted rows.
+		$ordCache = array();	# Next ord per "up:t" — Calc_Order can't see unflushed batched rows
 		foreach($blocks["_update"] as $key => $value){
     	    trace(" Execute ".count($value["id"]));
 			foreach($value["id"] as $i => $n){
@@ -4011,12 +4015,23 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 				    trace("A new record under ".$value["up"][$n]);
 					if(isset($new_id_needed[$value["up"][$n]])) # Fetch the new ID of our parent
 						$value["up"][$n] = $new_id_needed[$value["up"][$n]];
-					if(isset($new_id_needed[$key."_".$value["new_id"][$n]]))	# Save the new ID in case some Reqs need to know it
-						$new_id_needed[$key."_".$value["new_id"][$n]] = Insert($value["up"][$n]
-												, $value["ord"][$n] == 0 ? Calc_Order($value["up"][$n], $value["t"][$n]) : $value["ord"][$n]
-												, $value["t"][$n], $value["val"][$n], "INSERT new rec, get ID");
+					if($value["ord"][$n] == 0){
+						$ordKey = $value["up"][$n].":".$value["t"][$n];
+						if(!isset($ordCache[$ordKey]))
+							$ordCache[$ordKey] = Calc_Order($value["up"][$n], $value["t"][$n]);
+						$ordToUse = $ordCache[$ordKey]++;
+					}
 					else
-						Insert($value["up"][$n], $value["ord"][$n] == 0 ? Calc_Order($value["up"][$n], $value["t"][$n]) : $value["ord"][$n]
+						$ordToUse = $value["ord"][$n];
+					if(isset($new_id_needed[$key."_".$value["new_id"][$n]])){	# Save the new ID in case some Reqs need to know it
+						if(isset($GLOBALS["SQLbatch"]))	# Flush pending batch so mysqli_insert_id reflects this Insert only
+							Insert_batch("", "", "", "", "Flush before INSERT with ID");
+						$new_id_needed[$key."_".$value["new_id"][$n]] = Insert($value["up"][$n]
+												, $ordToUse
+												, $value["t"][$n], $value["val"][$n], "INSERT new rec, get ID");
+					}
+					else
+						Insert_batch($value["up"][$n], $ordToUse
 									, $value["t"][$n], $value["val"][$n], "INSERT new rec ($n)");
 				    trace("  ref ".$GLOBALS["STORED_REPS"][$id]["ref_typ"][$value["val"][$n]]);
     				if(isset($GLOBALS["STORED_REPS"][$id]["ref_typ"][$value["val"][$n]])){
@@ -4024,15 +4039,22 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
                         $blocks["_data_col"][$id][$names[$key]][$n] = $dsRefs[$value["t"][$n]];
     				}
 				}
-				elseif(substr($fields[$key],-4)===".ord")
+				elseif(substr($fields[$key],-4)===".ord"){
+					if(isset($GLOBALS["SQLbatch"]))	# Apply pending INSERTs so UPDATE sees them
+						Insert_batch("", "", "", "", "Flush before UPDATE Ord");
 					Exec_sql("UPDATE $z SET ord=".(int)$value["val"][$n]." WHERE id=$i", "UPDATE Ord");
+				}
 				elseif(isset($value["delete"][$n])){
                     $blocks["_data_col"][$id][$names[$key]][$n] = "";
+					if(isset($GLOBALS["SQLbatch"]))	# Apply pending INSERTs so DELETE sees them
+						Insert_batch("", "", "", "", "Flush before DELETE");
 					Delete($i);
 				}
 				elseif(!isset($value["val"][$n])){
 				    if(($blocks["_data_col"][$id][$names[$key]][$n] !== $dsRefs[$value["t"][$n]]) || isset($curLineOld[$key])){
                         $blocks["_data_col"][$id][$names[$key]][$n] = $dsRefs[$value["t"][$n]];
+						if(isset($GLOBALS["SQLbatch"]))	# Apply pending INSERTs so UPDATE sees them
+							Insert_batch("", "", "", "", "Flush before UPDATE Ref");
     					Exec_sql("UPDATE $z SET t=".$value["t"][$n]." WHERE id=$i", "UPDATE Ref");
 				    }
 				}
@@ -4041,12 +4063,16 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
                         $blocks["_data_col"][$id][$names[$key]][$n] = "<a target=\"$key\" href=\"/$z/edit_obj/$i\">".$value["val"][$n]."</a>";
                     else
                         $blocks["_data_col"][$id][$names[$key]][$n] = $value["val"][$n];
+					if(isset($GLOBALS["SQLbatch"]))	# Apply pending INSERTs so Update_Val sees them
+						Insert_batch("", "", "", "", "Flush before Update_Val");
                     Update_Val($i, Format_Val($GLOBALS["BT"][$GLOBALS["STORED_REPS"][$id]["base_out"][$key]], $value["val"][$n]));
 				}
 			    else
 			        trace(" value not changed: ".$dsRefs[$value["val"][$n]]);
     		}
 		}
+		if(isset($GLOBALS["SQLbatch"]))	# Apply remaining batched INSERTs
+			Insert_batch("", "", "", "", "Final flush Execute UPDATEs");
 		unset($blocks["_update"]);
 	}
 # Format the Totals values according to their type
