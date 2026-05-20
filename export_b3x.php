@@ -77,7 +77,23 @@ $leadFields = array_keys($leadFieldsMap);
 $leadHeaders = array_values($leadFieldsMap);
 $dealFields = array_keys($dealFieldsMap);
 $dealHeaders = array_values($dealFieldsMap);
-// ======================================================
+
+// ========== СЛОВАРИ ДЛЯ СПРАВОЧНЫХ ПОЛЕЙ (#2736) ==========
+// STAGE_ID сделок и UF_CRM_1648027063964 лидов хранятся в Bitrix как
+// технические коды (например, "C16:NEW" или "4800"). Для CSV/BKI заменяем
+// их на человеческие имена из приложенного к задаче crm_status.json.
+$exportValueMapsFile = __DIR__ . '/export_b3x_value_maps.php';
+$exportValueMaps = file_exists($exportValueMapsFile) ? require $exportValueMapsFile : [];
+$dealStageMap = $exportValueMaps['deal_stage'] ?? [];
+$leadCategory1648027063964Map = $exportValueMaps['lead_category_1648027063964'] ?? [];
+
+$leadValueMaps = [
+    'UF_CRM_1648027063964' => $leadCategory1648027063964Map,
+];
+$dealValueMaps = [
+    'STAGE_ID' => $dealStageMap,
+];
+// ===========================================================
 
 // ========== ФАЙЛЫ ДЛЯ ЭКСПОРТА ==========
 $leadsCsvFile = $csvPath . 'leads_' . $TARGET_YEAR . '.csv';
@@ -482,12 +498,42 @@ function formatFieldValue($value) {
 }
 
 /**
+ * Issue #2736: подстановка человеческого имени для значений справочных полей.
+ * Скаляры — простой lookup, массивы — поэлементно. Неизвестные ключи
+ * возвращаем как есть, чтобы не терять новые/нештатные значения.
+ */
+function applyValueMap($value, array $map) {
+    if (empty($map)) {
+        return $value;
+    }
+    if (is_array($value)) {
+        $mapped = [];
+        foreach ($value as $item) {
+            $key = is_scalar($item) ? (string)$item : null;
+            $mapped[] = ($key !== null && array_key_exists($key, $map)) ? $map[$key] : $item;
+        }
+        return $mapped;
+    }
+    if ($value === null || $value === '') {
+        return $value;
+    }
+    $key = is_scalar($value) ? (string)$value : null;
+    if ($key !== null && array_key_exists($key, $map)) {
+        return $map[$key];
+    }
+    return $value;
+}
+
+/**
  * Подготовка строки данных для CSV на основе списка полей
  */
-function prepareRowData($item, $fields) {
+function prepareRowData($item, $fields, array $valueMaps = []) {
     $row = [];
     foreach ($fields as $field) {
         $value = $item[$field] ?? '';
+        if (isset($valueMaps[$field])) {
+            $value = applyValueMap($value, $valueMaps[$field]);
+        }
         $row[] = formatFieldValue($value);
     }
     return $row;
@@ -632,7 +678,7 @@ try {
 
                 // Записываем лидов
                 foreach ($leads as $lead) {
-                    $leadRow = prepareRowData($lead, $leadFields);
+                    $leadRow = prepareRowData($lead, $leadFields, $leadValueMaps);
                     appendCsvRow($leadsCsvFile, $leadRow);
                     appendBkiRow($leadsBkiFile, $leadRow);
                     $processedLeads++;
@@ -683,7 +729,7 @@ try {
 
                 // Записываем все сделки независимо от привязки к лидам
                 foreach ($deals as $deal) {
-                    $dealRow = prepareRowData($deal, $dealFields);
+                    $dealRow = prepareRowData($deal, $dealFields, $dealValueMaps);
                     appendCsvRow($dealsCsvFile, $dealRow);
                     appendBkiRow($dealsBkiFile, $dealRow);
                     $processedDeals++;
@@ -749,7 +795,7 @@ try {
                 } else {
                     echo "<span class='progress'>+{$cnt}</span>\n";
                     foreach ($leads as $lead) {
-                        $row = prepareRowData($lead, $leadFields);
+                        $row = prepareRowData($lead, $leadFields, $leadValueMaps);
                         appendCsvRow($leadsCsvFile, $row);
                         appendBkiRow($leadsBkiFile, $row);
                         $procUpdLeads++;
@@ -790,7 +836,7 @@ try {
                 } else {
                     echo "<span class='progress'>+{$cnt}</span>\n";
                     foreach ($deals as $deal) {
-                        $row = prepareRowData($deal, $dealFields);
+                        $row = prepareRowData($deal, $dealFields, $dealValueMaps);
                         appendCsvRow($dealsCsvFile, $row);
                         appendBkiRow($dealsBkiFile, $row);
                         $procUpdDeals++;
