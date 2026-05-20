@@ -40,6 +40,38 @@
 
             scrollContainer.scrollTop = scrollState.scrollTop;
             scrollContainer.scrollLeft = scrollState.scrollLeft;
+
+            // After re-render the sticky scrollbar element is a fresh node at scrollLeft=0.
+            // Without this sync it stays at 0 while the table is at scrollState.scrollLeft;
+            // any later interaction with the sticky bar would then snap the table back to 0
+            // (issue #2744).
+            if (this.container && typeof document !== 'undefined'
+                && typeof document.getElementById === 'function') {
+                const stickyScrollbar = document.getElementById(
+                    `${this.container.id}-sticky-scrollbar`
+                );
+                if (stickyScrollbar) {
+                    this.isSyncingScroll = true;
+                    stickyScrollbar.scrollLeft = scrollState.scrollLeft;
+                    this.isSyncingScroll = false;
+                }
+            }
+        }
+
+        /**
+         * Capture the current scroll state, run the supplied render callback, then restore
+         * the scroll state both synchronously and on the next animation frame. The extra
+         * rAF-deferred restoration defeats late layout shifts (ResizeObserver callbacks,
+         * focus-triggered auto-scroll, sticky-scrollbar sync) that can otherwise reset
+         * .integram-table-container.scrollLeft after the synchronous restore (issue #2744).
+         */
+        renderPreservingScroll(renderFn) {
+            const state = this.captureScrollState();
+            renderFn();
+            this.restoreScrollState(state);
+            if (state && typeof window.requestAnimationFrame === 'function') {
+                window.requestAnimationFrame(() => this.restoreScrollState(state));
+            }
         }
 
         /**

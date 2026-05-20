@@ -287,9 +287,11 @@
                 const metadata = await response.json();
                 this.globalMetadata = metadata;
                 // Re-render if data is already loaded, so column-add-btn visibility
-                // can be recalculated based on the metadata ids
+                // can be recalculated based on the metadata ids.
+                // Preserve scroll position since this resolves asynchronously and may
+                // fire after the user has scrolled the table (issue #2744).
                 if (this.columns.length > 0) {
-                    this.render();
+                    this.renderPreservingScroll(() => this.render());
                 }
             } catch (error) {
                 console.error('Error loading global metadata:', error);
@@ -324,9 +326,10 @@
                         up: data.up,
                         type: data.type
                     };
-                    // Re-render if data is already loaded, so the title updates
+                    // Re-render if data is already loaded, so the title updates.
+                    // Preserve scroll position since this resolves asynchronously (issue #2744).
                     if (this.columns.length > 0) {
-                        this.render();
+                        this.renderPreservingScroll(() => this.render());
                     }
                 }
             } catch (error) {
@@ -555,6 +558,12 @@
                 const appendScrollState = append ? this.captureScrollState() : null;
                 this.render();
                 this.restoreScrollState(appendScrollState);
+                // Re-apply the scroll state after the browser has settled the new layout,
+                // so late-firing layout shifts (ResizeObserver, font/image load, sticky-
+                // scrollbar sync) can't snap the table back to scrollLeft=0 (issue #2744).
+                if (appendScrollState && typeof window.requestAnimationFrame === 'function') {
+                    window.requestAnimationFrame(() => this.restoreScrollState(appendScrollState));
+                }
             } catch (error) {
                 console.error('Error loading data:', error);
                 if (!append && this.container) {
