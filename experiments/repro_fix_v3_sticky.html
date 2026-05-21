@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Repro #2755 - FIX v3: sticky test</title>
+<style>
+  body { font-family:Verdana,Tahoma,sans-serif; font-size:13px; line-height:normal; padding:2px; }
+  table.table-bordered td { border:1px solid #ccc; padding:4px 8px; white-space:nowrap; }
+</style>
+</head>
+<body>
+<form>
+  <TABLE>
+    <TR>
+      <TD>Toolbar Left</TD>
+      <TD ALIGN="center"><h4>Wide Report</h4></TD>
+      <TD align="right">Toolbar Right</TD>
+    </TR>
+  </TABLE>
+  <div id="report_scroll" style="overflow-x:auto; -webkit-overflow-scrolling:touch; max-width:100%;">
+    <TABLE id="report_table" class="table-bordered">
+      <TR id="hdr" style="background-color:#ffeb3b; position:sticky; top:-1px;"></TR>
+    </TABLE>
+  </div>
+</form>
+<script>
+  var t = document.getElementById('report_table');
+  var thRow = t.rows[0];
+  for (var i = 0; i < 40; i++) {
+    var td = document.createElement('td');
+    td.innerHTML = '<b>HDR_' + i + '</b>';
+    thRow.appendChild(td);
+  }
+  for (var r = 0; r < 100; r++) {
+    var tr = t.insertRow();
+    for (var i = 0; i < 40; i++) {
+      var td = tr.insertCell();
+      td.textContent = 'r' + r + 'c' + i;
+    }
+  }
+</script>
+</body>
+</html>
