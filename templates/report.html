@@ -55,12 +55,14 @@
 			&nbsp;<a href="/{_global_.z}/report/{_global_.id}" title="<t9n>[RU]Очистить фильтр и перезапустить отчет[EN]Reset the filter and run the report</t9n>"><i class="pi pi-times-circle" style="font-size: 1.25rem;"></i></a>&nbsp;
 		</TD>
 	</TR>
-	<TR>
-	<TD colspan="3">
-		<!-- Issue #2753: горизонтальный скролл, когда таблица шире вьюпорта.
-		     overflow-y оставляем visible, чтобы не ломать position:sticky на шапке. -->
-		<div id="report_scroll" style="overflow-x:auto; overflow-y:visible; -webkit-overflow-scrolling:touch; max-width:100%;">
-		<TABLE id="report_table" class="table table-bordered">
+	</TABLE>
+	<!-- Issue #2755: scroll wrapper lives at FORM level (outside the toolbar
+	     layout TABLE) so the body content-area width — not the auto-sized
+	     outer TABLE — constrains it. JS below sets max-height so the wrapper
+	     becomes the scroll context for the sticky header (same pattern as
+	     .integram-table-container, issue #2083). -->
+	<div id="report_scroll" style="overflow:auto; -webkit-overflow-scrolling:touch; max-width:100%;">
+	<TABLE id="report_table" class="table table-bordered">
 			<TR style="background-color:var(--bg-secondary,#f9f9f9); position:sticky; top:-1px;" onclick="toggle_filter();">
 				<!-- Begin:&Uni_Report_Head -->
 				<TD ALIGN="CENTER" ><B>{VAL}</B></TD>
@@ -87,11 +89,8 @@
 				<!-- End:&Uni_Report_Column_Total -->
 			</TR>
 			<!-- End:&Uni_Report_Totals -->
-		</TABLE>
-		</div>
-	</TD>
-	</TR>
 	</TABLE>
+	</div>
 </FORM>
 <FORM method="POST" id="post" action="/{_global_.z}/"><input type="hidden" name="_xsrf" value="{_global_.xsrf}"></FORM>
 <script type="text/javascript">
@@ -152,6 +151,18 @@ function adjust(id) {
 }
 if(get_cookie("compact") == "compact")
 	byId('report_table').classList.add('table-condensed');
+// Issue #2755: size the scroll wrapper so it becomes the scroll context for the
+// sticky header row. Mirrors the updateContainerHeight() pattern used by
+// .integram-table-container (issue #2083).
+function updateReportScrollHeight() {
+	var wrapper = byId('report_scroll');
+	if (!wrapper) return;
+	var rect = wrapper.getBoundingClientRect();
+	var available = window.innerHeight - rect.top - 4;
+	wrapper.style.maxHeight = Math.max(200, available) + 'px';
+}
+window.addEventListener('resize', updateReportScrollHeight);
+updateReportScrollHeight();
 </script>
 <!--Elapsed-->
 <script src="/js/hints.js"></script>
