@@ -9887,6 +9887,98 @@ if(Validate_Token())
             $a = "object";
 			break;
 
+		case "_m_del_batch":
+			# Bulk delete a chunk of records of a single type in ONE request (issue #2749).
+			# Replaces the per-record _m_del/{id} loop bulkDeleteByFilter used to do.
+			# URL: /db/_m_del_batch/{type_id}?JSON  (POST)
+			# Body: ids=1,2,3,...  OR  ids[]=1&ids[]=2&...
+			# Returns: {"deleted":[1,2], "errors":{"3":"reason", ...}}
+			if($_SERVER["REQUEST_METHOD"] !== "POST")
+				my_die(t9n("[RU]Для массового удаления используйте POST[EN]Use POST for batch delete"), "405 Method Not Allowed");
+			if($id == 0)
+				my_die(t9n("[RU]Не указан тип записей (table id)[EN]Table id is required"));
+
+			# Parse ids — accept both ids=1,2,3 and ids[]=1&ids[]=2 conventions
+			$idsRaw = isset($_POST["ids"]) ? $_POST["ids"] : (isset($_REQUEST["ids"]) ? $_REQUEST["ids"] : "");
+			if(is_array($idsRaw))
+				$idsList = $idsRaw;
+			elseif(is_string($idsRaw) && $idsRaw !== "")
+				$idsList = explode(",", $idsRaw);
+			else
+				$idsList = array();
+			$ids = array();
+			$seen = array();
+			foreach($idsList as $rid){
+				$rid = (int)$rid;
+				if($rid > 0 && !isset($seen[$rid])){
+					$seen[$rid] = true;
+					$ids[] = $rid;
+				}
+			}
+			if(empty($ids))
+				my_die(t9n("[RU]Пустой список идентификаторов[EN]Empty list of ids"));
+			if(count($ids) > 10000)
+				my_die(t9n("[RU]Слишком большой батч (max 10000)[EN]Batch too large (max 10000)"));
+
+			# Permission check at type level — mirrors the legacy _m_del_select gate (index.php "case &uni_obj")
+			if(!isset($GLOBALS["GRANTS"]["DELETE"][1])
+				&& !isset($GLOBALS["GRANTS"]["DELETE"][$id])
+				&& ($GLOBALS["GLOBAL_VARS"]["user"] != "admin")
+				&& (Grant_1level($id) != "WRITE"))
+				my_die(t9n("[RU]У вас нет прав на массовое удаление объектов этого типа[EN]You do not have access to delete this type of object in bulk"), "403 Forbidden");
+
+			$idsCsv = implode(",", $ids);
+			$userIdNum = (int)$GLOBALS["GLOBAL_VARS"]["user_id"];
+
+			# One SELECT validates the entire batch: type match, has real parent (not metadata),
+			# has no incoming references. Mirrors per-record checks in case "_m_del" (above).
+			$data_set = Exec_sql(
+				"SELECT obj.id, obj.up, obj.ord, obj.t, obj.val, par.up pup, type.up tup, COUNT(r.id) ref_cnt"
+				." FROM $z obj"
+				." LEFT JOIN $z type ON type.id=obj.t"
+				." LEFT JOIN $z par ON par.id=obj.up"
+				." LEFT JOIN $z r ON r.t=obj.id"
+				." WHERE obj.id IN ($idsCsv) AND obj.t=$id AND obj.t!=obj.up"
+				." GROUP BY obj.id, obj.up, obj.ord, obj.t, obj.val, par.up, type.up"
+				, "Get batch info for _m_del_batch");
+
+			$deleted = array();
+			$errors = array();
+			$found = array();
+			while($row = mysqli_fetch_array($data_set)){
+				$rid = (int)$row["id"];
+				$found[$rid] = true;
+				if($row["pup"] == 0){
+					$errors[(string)$rid] = t9n("[RU]Нельзя удалить метаданные[EN]Can't delete metadata");
+					continue;
+				}
+				if($rid === $userIdNum){
+					$errors[(string)$rid] = t9n("[RU]Нельзя удалить себя как пользователя[EN]Can't delete yourself");
+					continue;
+				}
+				if($row["ref_cnt"] > 0){
+					$errors[(string)$rid] = t9n("[RU]Нельзя удалить объект, на который существуют ссылки (всего: [EN]Can't delete an object with incoming references (total: ").$row["ref_cnt"].")";
+					continue;
+				}
+				# Adjust peer order in arrays / multiselect refs (same as case "_m_del")
+				if($row["up"] > 1){
+					if($row["tup"] === "0")
+						Exec_sql("UPDATE $z SET ord=ord-1 WHERE up=".$row["up"]." AND t=".$row["t"]." AND ord>".$row["ord"], "Move peers");
+					elseif(is_numeric($row["val"]))
+						Exec_sql("UPDATE $z SET ord=ord-1 WHERE up=".$row["up"]." AND val='".$row["val"]."' AND ord>".$row["ord"], "Move peers");
+				}
+				BatchDelete($rid);
+				$deleted[] = $rid;
+			}
+			BatchDelete(""); // Flush batch (single grouped DELETE per the BatchDelete contract)
+
+			foreach($ids as $rid)
+				if(!isset($found[$rid]))
+					$errors[(string)$rid] = t9n("[RU]Не найден или другой тип[EN]Not found or wrong type");
+
+			api_dump(json_encode(array("deleted" => $deleted, "errors" => $errors), JSON_UNESCAPED_UNICODE), "del_batch.json");
+			break;
+
 		case "_m_new":
 			if($up == 0)
 				my_die(t9n("[RU]Недопустимые данные: up=0. Установите значение=1 для независимых объектов.[EN]Data is invalid: up=0. Set up=1 for independent objects."));

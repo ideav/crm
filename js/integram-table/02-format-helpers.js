@@ -56,6 +56,9 @@
             // Store table-level granted value for access control (issue #1508)
             this.tableGranted = metadata.granted !== undefined ? metadata.granted : null;
 
+            // Store bulk delete-by-filter flag from metadata (issue #2749)
+            this.tableDeletable = metadata.delete === '1' || metadata.delete === 1;
+
             // Convert metadata to columns format
             const columns = [];
 
@@ -166,6 +169,7 @@
                     });
                 }
                 this.tableGranted = refreshedMetadata.granted !== undefined ? refreshedMetadata.granted : null;
+                this.tableDeletable = refreshedMetadata.delete === '1' || refreshedMetadata.delete === 1;
             }
 
             // Transform object format data to row format
@@ -267,6 +271,9 @@
 
                 // Store table-level granted value for access control (issue #1508)
                 this.tableGranted = metadata.granted !== undefined ? metadata.granted : null;
+
+                // Store bulk delete-by-filter flag from metadata (issue #2749)
+                this.tableDeletable = metadata.delete === '1' || metadata.delete === 1;
 
                 // Convert metadata to columns format
                 const columns = [];
