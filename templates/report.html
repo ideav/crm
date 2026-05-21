@@ -57,6 +57,9 @@
 	</TR>
 	<TR>
 	<TD colspan="3">
+		<!-- Issue #2753: горизонтальный скролл, когда таблица шире вьюпорта.
+		     overflow-y оставляем visible, чтобы не ломать position:sticky на шапке. -->
+		<div id="report_scroll" style="overflow-x:auto; overflow-y:visible; -webkit-overflow-scrolling:touch; max-width:100%;">
 		<TABLE id="report_table" class="table table-bordered">
 			<TR style="background-color:var(--bg-secondary,#f9f9f9); position:sticky; top:-1px;" onclick="toggle_filter();">
 				<!-- Begin:&Uni_Report_Head -->
@@ -85,6 +88,7 @@
 			</TR>
 			<!-- End:&Uni_Report_Totals -->
 		</TABLE>
+		</div>
 	</TD>
 	</TR>
 	</TABLE>
