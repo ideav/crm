@@ -4011,18 +4011,35 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 				    trace("A new record under ".$value["up"][$n]);
 					if(isset($new_id_needed[$value["up"][$n]])) # Fetch the new ID of our parent
 						$value["up"][$n] = $new_id_needed[$value["up"][$n]];
-					if(isset($new_id_needed[$key."_".$value["new_id"][$n]]))	# Save the new ID in case some Reqs need to know it
-						$new_id_needed[$key."_".$value["new_id"][$n]] = Insert($value["up"][$n]
-												, $value["ord"][$n] == 0 ? Calc_Order($value["up"][$n], $value["t"][$n]) : $value["ord"][$n]
-												, $value["t"][$n], $value["val"][$n], "INSERT new rec, get ID");
-					else
-						Insert($value["up"][$n], $value["ord"][$n] == 0 ? Calc_Order($value["up"][$n], $value["t"][$n]) : $value["ord"][$n]
-									, $value["t"][$n], $value["val"][$n], "INSERT new rec ($n)");
-				    trace("  ref ".$GLOBALS["STORED_REPS"][$id]["ref_typ"][$value["val"][$n]]);
-    				if(isset($GLOBALS["STORED_REPS"][$id]["ref_typ"][$value["val"][$n]])){
-    				    trace("  new ref v=".$value["val"][$n]." t=".$value["t"][$n]." rv=".$dsRefs[$value["val"][$n]]." rt=".$dsRefs[$value["t"][$n]]);
-                        $blocks["_data_col"][$id][$names[$key]][$n] = $dsRefs[$value["t"][$n]];
-    				}
+					if(preg_match_all('/[а-яА-Яa-zA-Z0-9\s]+/u', $value["val"][$n], $items) === 0){
+						$items = [$value["val"][$n]];
+						$batch = false;
+					}
+					else{
+						$items = $items[0];
+						$cache = [];
+						$batch = true;
+					}
+					$ord = $value["ord"][$n] == 0 ? Calc_Order($value["up"][$n], $value["t"][$n]) : $value["ord"][$n];
+					foreach($items as $k => $v){
+						if(($k === 0) && isset($new_id_needed[$key."_".$value["new_id"][$n]]))	# Save the new ID in case some Reqs need to know it
+							$new_id_needed[$key."_".$value["new_id"][$n]] = Insert($value["up"][$n], $ord++, $value["t"][$n], $v, "INSERT new rec, get ID");
+						elseif($batch){
+							if(!isset($cache[$value["t"][$n].":$v"])){ // Do not create duplicates
+								Insert_batch($value["up"][$n], $ord++, $value["t"][$n], $v, "INSERT new rec ($n)");
+								$cache[$value["t"][$n].":$v"] = 1;
+							}
+						}
+						else
+							Insert($value["up"][$n], $ord++, $value["t"][$n], $v, "INSERT new rec ($n)");
+						trace("  ref ".$GLOBALS["STORED_REPS"][$id]["ref_typ"][$v]);
+						if(($k === 0) && isset($GLOBALS["STORED_REPS"][$id]["ref_typ"][$v])){
+							trace("  new ref v=".$value["val"][$n]." t=".$value["t"][$n]." rv=".$dsRefs[$value["val"][$n]]." rt=".$dsRefs[$value["t"][$n]]);
+							$blocks["_data_col"][$id][$names[$key]][$n] = $dsRefs[$value["t"][$n]];
+						}
+					}
+					if($batch)
+						Insert_batch("", "", "", "", "Flush INSERT new rec ($n)");
 				}
 				elseif(substr($fields[$key],-4)===".ord")
 					Exec_sql("UPDATE $z SET ord=".(int)$value["val"][$n]." WHERE id=$i", "UPDATE Ord");
@@ -7435,7 +7452,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			$rep_id = 0;	# Get Report ID to fetch the data
 			if(isset($GLOBALS["STORED_REPS"][$block]["_rep_id"]))
 				$rep_id = $GLOBALS["STORED_REPS"][$block]["_rep_id"];
-			elseif($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE val='".addslashes($block_name)."' AND t=".REPORT, "Get Report's ID")))
+			elseif((strpos($block_name, "\\") === FALSE) && ($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE val='".addslashes($block_name)."' AND t=".REPORT, "Get Report's ID"))))
 				$rep_id = $row[0]; # Save Report ID
 			elseif(is_numeric($block_name) && ($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE id='$block_name' AND t=".REPORT, "Check Report's ID"))))
 				$rep_id = $block_name; # Save the direct Report ID
