@@ -566,13 +566,67 @@
                 }
             } catch (error) {
                 console.error('Error loading data:', error);
-                if (!append && this.container) {
-                    this.container.innerHTML = `<div class="alert alert-danger">Ошибка загрузки данных: ${ error.message }</div>`;
-                }
+                this.handleLoadDataError(error, append);
             } finally {
                 this.isLoading = false;
                 // Check if table fits on screen and needs more data
                 this.checkAndLoadMore();
+            }
+        }
+
+        /**
+         * Surface a data-loading error without destroying the rendered table.
+         * Issue #2758: replacing container.innerHTML on a failed filter request
+         * removed the filter inputs, so users could not correct the bad input
+         * (e.g. an empty IN(,) list). When columns are already loaded we keep the
+         * existing layout (with an empty body) and show the error as a toast so
+         * the filter row remains editable.
+         */
+        handleLoadDataError(error, append) {
+            const message = (error && error.message) ? error.message : String(error);
+            if (!this.container) {
+                return;
+            }
+
+            if (this.columns.length > 0) {
+                try {
+                    this.render();
+                } catch (renderError) {
+                    console.error('Failed to re-render table after load error:', renderError);
+                }
+                this.showToast(`Ошибка загрузки данных: ${ message }`, 'error');
+                return;
+            }
+
+            if (!append) {
+                this.container.innerHTML = `<div class="alert alert-danger">Ошибка загрузки данных: ${ message }</div>`;
+            } else {
+                this.showToast(`Ошибка загрузки данных: ${ message }`, 'error');
+            }
+        }
+
+        /**
+         * Fetch a URL and parse the response as JSON.
+         * When the server returns a non-JSON payload (e.g. a plaintext error like
+         * "Couldn't extract ..."), surface that text so the user sees the actual
+         * server message instead of a cryptic "Unexpected token ..." parse error
+         * (issue #2758).
+         */
+        async fetchJson(url) {
+            const response = await fetch(url);
+            const text = await response.text();
+
+            try {
+                return text === '' ? null : JSON.parse(text);
+            } catch (parseError) {
+                const trimmed = (text || '').trim();
+                const preview = trimmed
+                    ? trimmed.slice(0, 300)
+                    : `HTTP ${ response.status } ${ response.statusText }`.trim();
+                const error = new Error(preview);
+                error.isNonJsonResponse = true;
+                error.status = response.status;
+                throw error;
             }
         }
 
@@ -612,8 +666,7 @@
             this.appendPageUrlParams(params);
 
             const separator = this.options.apiUrl.includes('?') ? '&' : '?';
-            const response = await fetch(`${ this.options.apiUrl }${ separator }${ params }`);
-            const json = await response.json();
+            const json = await this.fetchJson(`${ this.options.apiUrl }${ separator }${ params }`);
 
             // Check if this is object format (has id, type keys but not columns, data)
             if (this.isObjectFormat(json)) {
@@ -909,8 +962,7 @@
                 dataUrl += `&${ pageParams.toString() }`;
             }
 
-            const dataResponse = await fetch(dataUrl);
-            const data = await dataResponse.json();
+            const data = await this.fetchJson(dataUrl);
 
             // Detect metadata drift: rows whose `r` length differs from the
             // current column count mean another user changed the table schema
