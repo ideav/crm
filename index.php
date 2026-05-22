@@ -3551,7 +3551,12 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 #              	mywrite("$field");
     		    $sql = "";
     		    foreach($displayVal as $k => $v) # Any field alias should be taken at most once
-    		        if(mb_substr($fieldsAll[$k],-strlen($displayName[$k])-1) !== " ". $displayName[$k])
+    		        if(!$exe){ #This is a subquery - take only the first column
+						if($sql === "")
+							$sql = " " . $fieldsAll[$k];
+						continue;
+					}
+    		        elseif(mb_substr($fieldsAll[$k],-strlen($displayName[$k])-1) !== " ". $displayName[$k])
             		    $sql .= "," . $fieldsAll[$k] .($fieldsAll[$k] !== "" && isset($displayName[$k]) ? " as " : " "). $displayName[$k];
         		    else
             		    $sql .= "," . $fieldsAll[$k];
