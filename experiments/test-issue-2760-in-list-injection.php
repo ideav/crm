@@ -1,8 +1,10 @@
 <?php
 # Regression test for issue #2760.
-# Verifies that validateInList() (added in index.php) rejects SQL injection
-# attempts inside the value of an "IN(...)" filter while still accepting
-# legitimate numeric and properly quoted string lists.
+# Verifies that validateInList() (added in index.php) keeps SQL injection
+# attempts out of the IN() filter while still accepting legitimate numeric
+# and properly quoted string lists. After issue #2762, rejection is signalled
+# by a FALSE return (so the caller can fall through to a plain-text search)
+# instead of a fatal die_info() call.
 
 function assertTest($condition, $message){
     if(!$condition){
@@ -35,8 +37,8 @@ function extractFunctionSource($source, $name){
 }
 
 # Load the production validateInList() definition from index.php into this
-# script, stubbing out the few helpers it relies on (die_info / t9n) so we can
-# observe the rejection branch as an exception rather than process death.
+# script. The function no longer calls die_info()/t9n() (rejection is signalled
+# via FALSE), but the stubs are kept harmless for forward compatibility.
 $indexSource = file_get_contents(__DIR__."/../index.php");
 if($indexSource === false){
     fwrite(STDERR, "Cannot read index.php\n");
@@ -46,7 +48,6 @@ if($indexSource === false){
 class InListRejected extends Exception {}
 function die_info($msg){ throw new InListRejected($msg); }
 function t9n($msg){
-    # Strip [RU]…[EN]… markers so assertions can match a stable prefix.
     if(preg_match('/\[EN\](.*?)(\[[A-Z]{2}\]|$)/s', $msg, $m))
         return $m[1];
     return $m[0] ?? $msg;
@@ -73,29 +74,28 @@ assertTest(validateInList("'O''Brien'") === "'O\\'Brien'",
 assertTest(validateInList("'foo bar baz'") === "'foo bar baz'",
     "spaces inside a quoted string accepted");
 
-# --- Rejection cases (injection attempts) ---
-$rejected = function($input, $hint) {
-    try {
-        validateInList($input);
-    } catch(InListRejected $e) {
+# --- Rejection cases (injection attempts that must NOT produce an IN clause) ---
+$rejected = function($input, $hint){
+    $result = validateInList($input);
+    if($result === FALSE){
         fwrite(STDOUT, "OK:   rejected (".$hint."): ".$input."\n");
         return;
     }
-    fwrite(STDERR, "FAIL: accepted (".$hint."): ".$input."\n");
+    fwrite(STDERR, "FAIL: accepted (".$hint."): ".$input." -> ".$result."\n");
     exit(1);
 };
 
-# Bare unquoted text is not a valid IN() item.
-$rejected("foo", "unquoted identifier");
 # Statement terminator
 $rejected("1); DROP TABLE users; --", "stacked DROP TABLE");
-# UNION attack without the FROM/SELECT/TABLE words that the old checkInjection blocked
-$rejected("1) UNION SELECT 1", "UNION SELECT (already blocked previously)");
-# SLEEP-based time injection — was NOT blocked by the old checkInjection.
-$rejected("1) OR SLEEP(5", "time-based SLEEP injection");
-# BENCHMARK-based load injection — was NOT blocked by the old checkInjection.
-$rejected("1) OR BENCHMARK(1000000,MD5(1)", "BENCHMARK injection");
-# Comment markers
+# UNION attack via comment markers (--) — without the comment markers the new
+# bare-identifier path would treat it as a literal string search, which is also
+# safe, but the comment markers must still trigger fall-through.
+$rejected("1) UNION SELECT 1 -- ", "UNION SELECT with comment");
+# SLEEP-based time injection with a comment marker.
+$rejected("1) OR SLEEP(5) -- ", "time-based SLEEP injection with --");
+# BENCHMARK-based load injection with a comment marker.
+$rejected("1) OR BENCHMARK(1000000,MD5(1)) -- ", "BENCHMARK injection with --");
+# Comment markers on their own
 $rejected("1 -- comment", "double-dash SQL comment");
 $rejected("1 /* comment */", "C-style SQL comment");
 $rejected("1 # hash comment", "hash comment");
@@ -103,9 +103,13 @@ $rejected("1 # hash comment", "hash comment");
 $rejected("'unterminated", "unterminated single quote");
 # Embedded semicolon inside a string
 $rejected("'foo; bar'", "semicolon inside quoted string");
-# Empty / delimiter-only payloads (related to issue #2758 plaintext error).
+# Bare identifier containing a stray quote — caller should fall through rather
+# than guess at the user's intent.
+$rejected("a'b", "bare item with embedded single quote");
+# Empty / delimiter-only payloads now fall through (issue #2762).
 $rejected("", "empty list");
 $rejected(",", "comma-only list");
+$rejected(",,,", "many-commas-only list");
 $rejected("  ", "whitespace-only list");
 
-fwrite(STDOUT, "\nAll validateInList() checks passed.\n");
+fwrite(STDOUT, "\nAll validateInList() injection checks passed.\n");

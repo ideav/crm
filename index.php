@@ -869,13 +869,17 @@ function checkInjection($value){
 # rejects the FROM/SELECT/TABLE keywords) and pasted the user-supplied text
 # straight into the SQL. That left room for injection via SQL comments,
 # statement terminators, unbalanced quotes or other DML keywords (UNION,
-# UPDATE, DELETE, DROP, SLEEP, …). Re-parse the list, accept only numeric
-# tokens or properly single-quoted strings, and re-escape strings with
-# addslashes() before letting them back into the query.
+# UPDATE, DELETE, DROP, SLEEP, …). Re-parse the list, accept numeric tokens,
+# properly single-quoted strings, or bare identifiers (auto-wrapped in
+# quotes — issue #2762), drop empty items from leading/trailing/double commas
+# (issue #2762), and re-escape strings with addslashes() before letting them
+# back into the query. Returns FALSE when the list cannot be sanitized safely
+# so the caller can fall through and treat the original IN(...) literal as a
+# plain-text search instead of building an IN() clause.
 function validateInList($value){
 	$value = trim($value);
 	if($value === "")
-		die_info(t9n("[RU]Пустой список значений в IN()[EN]Empty IN() list"));
+		return FALSE;
 	$items = array();
 	$current = "";
 	$inQuote = FALSE;
@@ -899,11 +903,12 @@ function validateInList($value){
 			$current .= $ch;
 	}
 	if($inQuote)
-		die_info(t9n("[RU]Незакрытая кавычка в списке IN()[EN]Unclosed quote in IN() list"));
+		return FALSE;
 	if(trim($current) !== "")
 		$items[] = trim($current);
 	$sanitized = array();
 	foreach($items as $item){
+		# Drop empty items left by leading, trailing or double commas (issue #2762).
 		if($item === "")
 			continue;
 		if(is_numeric($item)){
@@ -919,15 +924,26 @@ function validateInList($value){
 				|| strpos($inner, "*/") !== FALSE
 				|| strpos($inner, "#") !== FALSE
 				|| strpos($inner, "\0") !== FALSE)
-				die_info(t9n("[RU]Недопустимые символы в списке IN()[EN]Forbidden characters in IN() list"));
+				return FALSE;
 			$inner_unescaped = str_replace("''", "'", $inner);
 			$sanitized[] = "'".addslashes($inner_unescaped)."'";
 			continue;
 		}
-		die_info(t9n("[RU]Недопустимый элемент в IN(): [EN]Invalid IN() item: ").htmlspecialchars($item));
+		# Bare identifier (issue #2762): auto-wrap in quotes when it is free of
+		# obvious injection markers, otherwise bail out so the caller falls back
+		# to a plain-text search instead of building an IN() clause.
+		if(strpos($item, ";") !== FALSE
+			|| strpos($item, "--") !== FALSE
+			|| strpos($item, "/*") !== FALSE
+			|| strpos($item, "*/") !== FALSE
+			|| strpos($item, "#") !== FALSE
+			|| strpos($item, "\0") !== FALSE
+			|| strpos($item, "'") !== FALSE)
+			return FALSE;
+		$sanitized[] = "'".addslashes($item)."'";
 	}
 	if(empty($sanitized))
-		die_info(t9n("[RU]Пустой список значений в IN()[EN]Empty IN() list"));
+		return FALSE;
 	return implode(",", $sanitized);
 }
 # Make WHERE and JOIN statements for reports
@@ -978,10 +994,10 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
 		$value = BuiltIn($value); # Check for a built-in phrases
 		if($value == "%")
 			$search_val = "IS ".($NOT_flag ? "" : "NOT")." NULL";
-		elseif((substr(trim(strtoupper($value)), 0, 3) == "IN(") && substr(trim($value), -1) == ")"){ # Multiple options - IN()
+		elseif((substr(trim(strtoupper($value)), 0, 3) == "IN(") && substr(trim($value), -1) == ")"
+		    && ($validatedInList = validateInList(substr(trim($value), 3, -1))) !== FALSE){ # Multiple options - IN()
             $in = true;
-            $value = substr(trim($value), 3, -1);
-            $value = validateInList($value);
+            $value = $validatedInList;
 			$search_val = "$NOT IN($value)";
         }
         elseif((substr(trim(strtoupper($value)), 0, 4) == "@IN(") && substr(trim($value), -1) == ")"){ # Multiple IDs - IN()
