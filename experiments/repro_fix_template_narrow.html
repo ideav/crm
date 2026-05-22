@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Repro #2755 — narrow-table case</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: Verdana, Tahoma, sans-serif; font-size:13px; padding:2px; overflow-x:hidden; min-height:100vh; }
+  table.table-bordered { border-collapse: collapse; }
+  table.table-bordered td { border:1px solid #ddd; padding:4px 8px; white-space:nowrap; }
+</style>
+</head>
+<body>
+<script>function byId(id){return document.getElementById(id);}</script>
+<FORM id="report">
+  <TABLE><TR><TD>Toolbar</TD></TR></TABLE>
+  <div id="report_scroll" style="overflow:auto; -webkit-overflow-scrolling:touch; max-width:100%;">
+  <TABLE id="report_table" class="table table-bordered">
+    <TR style="background:#f9f9f9; position:sticky; top:-1px;"></TR>
+  </TABLE>
+  </div>
+</FORM>
+<script>
+function updateReportScrollHeight() {
+  var wrapper = byId('report_scroll');
+  if (!wrapper) return;
+  var rect = wrapper.getBoundingClientRect();
+  var available = window.innerHeight - rect.top - 4;
+  wrapper.style.maxHeight = Math.max(200, available) + 'px';
+}
+window.addEventListener('resize', updateReportScrollHeight);
+updateReportScrollHeight();
+var t = byId('report_table');
+var hdr = t.rows[0];
+for (var i=0;i<3;i++){ var td=document.createElement('td'); td.innerHTML='<b>H'+i+'</b>'; hdr.appendChild(td); }
+for (var r=0;r<5;r++){ var tr=t.insertRow(); for (var i=0;i<3;i++){ tr.insertCell().textContent='r'+r+'c'+i; } }
+updateReportScrollHeight();
+</script>
+</body>
+</html>

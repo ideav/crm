@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Repro #2755 - BEFORE fix (current state from PR #2754)</title>
+<style>
+  body { font-family:Verdana,Tahoma,sans-serif; font-size:13px; line-height:normal; padding:2px; }
+  table.table-bordered td { border:1px solid #ccc; padding:4px 8px; white-space:nowrap; }
+</style>
+</head>
+<body>
+<form>
+  <TABLE>
+    <TR>
+      <TD>Toolbar Left</TD>
+      <TD ALIGN="center"><h4>Wide Report</h4></TD>
+      <TD align="right">Toolbar Right</TD>
+    </TR>
+    <TR>
+      <TD colspan="3">
+        <!-- current PR #2754 wrapper -->
+        <div id="report_scroll" style="overflow-x:auto; overflow-y:visible; -webkit-overflow-scrolling:touch; max-width:100%;">
+          <TABLE id="report_table" class="table-bordered">
+            <TR style="background-color:#f9f9f9; position:sticky; top:-1px;">
+              <script>
+                // generate 40 header columns via document.write later
+              </script>
+            </TR>
+          </TABLE>
+        </div>
+      </TD>
+    </TR>
+  </TABLE>
+</form>
+<script>
+  var t = document.getElementById('report_table');
+  // header row
+  var thRow = t.rows[0];
+  for (var i = 0; i < 40; i++) {
+    var td = document.createElement('td');
+    td.innerHTML = '<b>Col_' + i + '_with_some_long_text</b>';
+    thRow.appendChild(td);
+  }
+  // 30 data rows
+  for (var r = 0; r < 30; r++) {
+    var tr = t.insertRow();
+    for (var i = 0; i < 40; i++) {
+      var td = tr.insertCell();
+      td.textContent = 'r' + r + 'c' + i + '_value_x';
+    }
+  }
+</script>
+</body>
+</html>

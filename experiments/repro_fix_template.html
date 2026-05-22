@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Repro #2755 — verification against actual template structure</title>
+<!-- Inline replicas of the relevant pieces of css/styles.css -->
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: Verdana, Tahoma, sans-serif;
+    font-size: 13px;
+    line-height: normal;
+    padding: 2px;
+    overflow-x: hidden;
+    min-height: 100vh;
+    background-color: #fff;
+    color: #212529;
+  }
+  /* table.table-bordered approximation */
+  table.table-bordered { border-collapse: collapse; }
+  table.table-bordered td, table.table-bordered th {
+    border: 1px solid #ddd; padding: 4px 8px; white-space: nowrap;
+  }
+  /* table.table-condensed approximation */
+  table.table-condensed td, table.table-condensed th { padding: 2px 4px; }
+</style>
+</head>
+<body>
+<!-- byId shim -->
+<script>function byId(id){return document.getElementById(id);} function localize(){}</script>
+
+<FORM method="post" id="report" action="#">
+<input type="hidden" name="_xsrf" value="abc">
+<input type="submit" style="display:none">
+    <TABLE>
+	<TR>
+		<TD>&nbsp;<a href="#"><i style="font-size: 1.25rem;">[H]</i></a>&nbsp;
+		<a href="#" style="border: 1px solid; border-radius:5px; padding:3px;">.HTML</a>
+		<a href="#" style="border: 1px solid; border-radius:5px; padding:3px;">.XLS</a>
+		</td>
+		<TD ALIGN="center" style="padding-left:13px;padding-right:13px"><H4>Wide Test Report</H4></TD>
+		<TD align="right" style="padding-right:10px">
+			<a href="#" style="font-size: 1.25rem;">[c]</a>&nbsp;
+			&nbsp;<a href="#" style="font-size: 1.25rem;">[f]</a>
+			&nbsp;<a href="#" id="refresh" style="font-size: 1.25rem;">[r]</a>
+			&nbsp;<a href="#" style="font-size: 1.25rem;">[x]</a>&nbsp;
+		</TD>
+	</TR>
+	</TABLE>
+	<!-- Issue #2755: scroll wrapper at FORM level -->
+	<div id="report_scroll" style="overflow:auto; -webkit-overflow-scrolling:touch; max-width:100%;">
+	<TABLE id="report_table" class="table table-bordered">
+			<TR style="background-color:#f9f9f9; position:sticky; top:-1px;">
+				<!-- header injected by JS -->
+			</TR>
+	</TABLE>
+	</div>
+</FORM>
+
+<script type="text/javascript">
+localize();
+function set_cookie(){} function get_cookie(){return null;}
+
+// === Mirror of the fix added in templates/report.html ===
+function updateReportScrollHeight() {
+	var wrapper = byId('report_scroll');
+	if (!wrapper) return;
+	var rect = wrapper.getBoundingClientRect();
+	var available = window.innerHeight - rect.top - 4;
+	wrapper.style.maxHeight = Math.max(200, available) + 'px';
+}
+window.addEventListener('resize', updateReportScrollHeight);
+updateReportScrollHeight();
+
+// === Populate a wide table ===
+var t = byId('report_table');
+var thRow = t.rows[0];
+var COLS = 40;
+var ROWS = 100;
+for (var i = 0; i < COLS; i++) {
+  var td = document.createElement('td');
+  td.innerHTML = '<b>HDR_' + i + '_long_label</b>';
+  thRow.appendChild(td);
+}
+for (var r = 0; r < ROWS; r++) {
+  var tr = t.insertRow();
+  for (var i = 0; i < COLS; i++) {
+    var td = tr.insertCell();
+    td.textContent = 'r' + r + 'c' + i;
+  }
+}
+// Re-run after we have content
+updateReportScrollHeight();
+</script>
+</body>
+</html>
