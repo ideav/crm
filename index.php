@@ -4042,18 +4042,31 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     				    # issue #2767: $row["u$key"] may arrive as a free-text list of words for a
     				    # multi-ref field. Resolve each word to a ref id, creating missing ones,
     				    # and stash the full set in tList for execution to fan out across rows.
+    				    # issue #2769: do not Insert new ref values during the preparation/preview
+    				    # pass — reserve negative placeholder ids and defer the Insert until the
+    				    # confirmed UPDATE phase below.
     				    if(!isset($dsRefs[$row["u$key"]]) && !is_numeric($row["u$key"]) && strlen((string)$row["u$key"]))
     				        if(preg_match_all('/[а-яА-Яa-zA-Z0-9\s]+/u', (string)$row["u$key"], $refItems)){
-    				            $refIds = $refSeen = array();
+    				            $refIds = $refSeen = $refPending = $refPendingByVal = array();
     				            foreach($refItems[0] as $refItem){
     				                $refItem = trim($refItem);
     				                if($refItem === "")
     				                    continue;
     				                $refItemEsc = addslashes($refItem);
-    				                if($refRow = mysqli_fetch_array(Exec_sql("SELECT id, val FROM $z WHERE t=$refOrig AND up>0 AND val='$refItemEsc' LIMIT 1", "Seek Ref by val")))
+    				                if($refRow = mysqli_fetch_array(Exec_sql("SELECT id, val FROM $z WHERE t=$refOrig AND up>0 AND val='$refItemEsc' LIMIT 1", "Seek Ref by val"))){
     				                    $refResolvedId = (int)$refRow["id"];
-    				                else
-    				                    $refResolvedId = Insert(1, 1, $refOrig, $refItem, "Insert new Ref by val");
+    				                }
+    				                elseif(isset($refPendingByVal[$refItem])){
+    				                    $refResolvedId = $refPendingByVal[$refItem];
+    				                }
+    				                else{
+    				                    if(!isset($GLOBALS["_pendingRefSeq"]))
+    				                        $GLOBALS["_pendingRefSeq"] = 0;
+    				                    $GLOBALS["_pendingRefSeq"]++;
+    				                    $refResolvedId = -$GLOBALS["_pendingRefSeq"];
+    				                    $refPending[$refResolvedId] = array("val" => $refItem, "refOrig" => $refOrig);
+    				                    $refPendingByVal[$refItem] = $refResolvedId;
+    				                }
     				                if(!isset($refSeen[$refResolvedId])){
     				                    $refIds[] = $refResolvedId;
     				                    $refSeen[$refResolvedId] = true;
@@ -4064,6 +4077,8 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     				                $row["u$key"] = $refIds[0];
     				                if(count($refIds) > 1)
     				                    $blocks["_update"][$key]["tList"][$rec] = $refIds;
+    				                if(count($refPending))
+    				                    $blocks["_update"][$key]["tListPending"][$rec] = $refPending;
     				            }
     				        }
     				    if(!isset($dsRefs[$row["u$key"]]))
@@ -4073,15 +4088,15 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     						if($new)
     							$blocks["_update"][$key]["val"][$rec] = $typ;
     						# We'll show the pre-Update advice: what's added/changed during this UPDATE
-    						$preview = $row["u$key"]." ".$dsRefs[$row["u$key"]];
+    						$preview = ($row["u$key"] > 0 ? "#".$row["u$key"]." " : "(новое) ").$dsRefs[$row["u$key"]];
     						if(isset($blocks["_update"][$key]["tList"][$rec])){
     						    $previewParts = array();
     						    foreach($blocks["_update"][$key]["tList"][$rec] as $rid)
-    						        $previewParts[] = "#$rid ".(isset($dsRefs[$rid]) ? $dsRefs[$rid] : "");
+    						        $previewParts[] = ($rid > 0 ? "#$rid " : "(новое) ").(isset($dsRefs[$rid]) ? $dsRefs[$rid] : "");
     						    $preview = implode(", ", $previewParts);
     						}
-    						$blocks["_data_col"][$id]["update"][$rec] .= $GLOBALS["STORED_REPS"][$id]["head"][$key].($new ? ": #"
-    						        : ": ".$blocks["_data_col"][$id][$names[$key]][$rec]." => #").$preview."<br>";
+    						$blocks["_data_col"][$id]["update"][$rec] .= $GLOBALS["STORED_REPS"][$id]["head"][$key].($new ? ": "
+    						        : ": ".$blocks["_data_col"][$id][$names[$key]][$rec]." => ").$preview."<br>";
     					}
 					}
 					else{
@@ -4169,6 +4184,24 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 					Delete($i);
 				}
 				elseif(!isset($value["val"][$n])){
+				    # issue #2769: materialize any pending Refs that were deferred during preparation
+				    if(isset($value["tListPending"][$n])){
+				        foreach($value["tListPending"][$n] as $placeholder => $pending){
+				            $newId = Insert(1, 1, $pending["refOrig"], $pending["val"], "Insert new Ref by val (deferred, issue 2769)");
+				            $newId = (int)$newId;
+				            $placeholder = (int)$placeholder;
+				            if(isset($dsRefs[$placeholder])){
+				                $dsRefs[$newId] = $dsRefs[$placeholder];
+				                unset($dsRefs[$placeholder]);
+				            }
+				            if(isset($value["t"][$n]) && (int)$value["t"][$n] === $placeholder)
+				                $value["t"][$n] = $newId;
+				            if(isset($value["tList"][$n]))
+				                foreach($value["tList"][$n] as $tk => $tv)
+				                    if((int)$tv === $placeholder)
+				                        $value["tList"][$n][$tk] = $newId;
+				        }
+				    }
 				    if(($blocks["_data_col"][$id][$names[$key]][$n] !== $dsRefs[$value["t"][$n]]) || isset($curLineOld[$key]) || isset($value["tList"][$n])){
                         $blocks["_data_col"][$id][$names[$key]][$n] = $dsRefs[$value["t"][$n]];
     					Exec_sql("UPDATE $z SET t=".$value["t"][$n]." WHERE id=$i", "UPDATE Ref");
