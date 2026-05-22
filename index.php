@@ -4039,15 +4039,9 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     				        if(is_numeric($row["u$key"]))
                             	if($dsRef = mysqli_fetch_array(Exec_sql("SELECT val FROM $z WHERE t=$refOrig AND up>0 AND id=".$row["u$key"], "Seek Ref by ID")))
                             	    $dsRefs[$row["u$key"]] = $dsRef["val"];
-    				    # issue #2767: $row["u$key"] may arrive as a free-text list of words for a
+    				    # may arrive as a free-text list of words for a
     				    # multi-ref field. Resolve each word to a ref id, creating missing ones,
     				    # and stash the full set in tList for execution to fan out across rows.
-    				    # issue #2769: do not Insert new ref values during the preparation/preview
-    				    # pass — reserve negative placeholder ids and defer the Insert until the
-    				    # confirmed UPDATE phase below.
-    				    # issue #2772: share placeholders ACROSS records being processed in this
-    				    # same Compile_Report pass, so an unknown word like "черный" appearing in
-    				    # N edited rows still produces ONE pending entry → ONE Insert.
     				    if(!isset($dsRefs[$row["u$key"]]) && !is_numeric($row["u$key"]) && strlen((string)$row["u$key"]))
     				        if(preg_match_all('/[а-яА-Яa-zA-Z0-9\s]+/u', (string)$row["u$key"], $refItems)){
     				            $refIds = $refSeen = $refPending = array();
@@ -4137,7 +4131,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 		    check();
 		foreach($blocks["_update"] as $key => $value){
     	    trace(" Execute ".count($value["id"]));
-			# issue #2772: materialize every pending Ref for this column ONCE before the per-record
+			# materialize every pending Ref for this column ONCE before the per-record
 			# loop, then remap all placeholder ids in t/tList. This guarantees a single Insert per
 			# distinct unknown value across rows (closes the "(новое) черный inserted twice"
 			# question) AND ensures the elseif(!isset($value["val"][$n])) UPDATE branch never
@@ -4155,7 +4149,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 							$pendingIdMap[$placeholder] = $insertedByValKey[$valKey];
 						}
 						else{
-							$newId = (int)Insert(1, 1, $pending["refOrig"], $pending["val"], "Insert new Ref by val (deferred, issue 2769/2772)");
+							$newId = (int)Insert_batch(1, 1, $pending["refOrig"], $pending["val"], "Insert new Ref by val (deferred)");
 							$insertedByValKey[$valKey] = $newId;
 							$pendingIdMap[$placeholder] = $newId;
 						}
@@ -4176,6 +4170,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 									$value["tList"][$rec][$tk] = $pendingIdMap[(int)$tv];
 				}
 				unset($value["tListPending"]);
+				Insert_batch("", "", "", "", "Flush INSERT new rec ($n)");
 			}
 			unset($value["_pendingByVal"]);
 			foreach($value["id"] as $i => $n){
@@ -4230,7 +4225,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 						}
 					}
 					if($batch)
-						Insert_batch("", "", "", "", "Flush INSERT new rec ($n)");
+						Insert_batch("", "", "", "", "Flush Insert new Ref by val");
 				}
 				elseif(substr($fields[$key],-4)===".ord")
 					Exec_sql("UPDATE $z SET ord=".(int)$value["val"][$n]." WHERE id=$i", "UPDATE Ord");
