@@ -566,6 +566,14 @@
                 }
             } catch (error) {
                 console.error('Error loading data:', error);
+                // Stop auto-loading after a failed request (issue #2763).
+                // handleLoadDataError() re-renders the table to keep the filter
+                // row editable (issue #2758); the fresh wrapper has belowFold ≈ 0,
+                // so checkAndLoadMore() (and the scroll listener) would otherwise
+                // re-issue the same failing request in a loop. The filter UI and
+                // refreshData reset hasMore = true when the user edits the filter
+                // or clicks refresh, so the table is still recoverable.
+                this.hasMore = false;
                 this.handleLoadDataError(error, append);
             } finally {
                 this.isLoading = false;
