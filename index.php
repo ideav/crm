@@ -4045,9 +4045,12 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     				    # issue #2769: do not Insert new ref values during the preparation/preview
     				    # pass — reserve negative placeholder ids and defer the Insert until the
     				    # confirmed UPDATE phase below.
+    				    # issue #2772: share placeholders ACROSS records being processed in this
+    				    # same Compile_Report pass, so an unknown word like "черный" appearing in
+    				    # N edited rows still produces ONE pending entry → ONE Insert.
     				    if(!isset($dsRefs[$row["u$key"]]) && !is_numeric($row["u$key"]) && strlen((string)$row["u$key"]))
     				        if(preg_match_all('/[а-яА-Яa-zA-Z0-9\s]+/u', (string)$row["u$key"], $refItems)){
-    				            $refIds = $refSeen = $refPending = $refPendingByVal = array();
+    				            $refIds = $refSeen = $refPending = array();
     				            foreach($refItems[0] as $refItem){
     				                $refItem = trim($refItem);
     				                if($refItem === "")
@@ -4056,16 +4059,16 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     				                if($refRow = mysqli_fetch_array(Exec_sql("SELECT id, val FROM $z WHERE t=$refOrig AND up>0 AND val='$refItemEsc' LIMIT 1", "Seek Ref by val"))){
     				                    $refResolvedId = (int)$refRow["id"];
     				                }
-    				                elseif(isset($refPendingByVal[$refItem])){
-    				                    $refResolvedId = $refPendingByVal[$refItem];
+    				                elseif(isset($blocks["_update"][$key]["_pendingByVal"][$refOrig][$refItem])){
+    				                    $refResolvedId = $blocks["_update"][$key]["_pendingByVal"][$refOrig][$refItem];
     				                }
     				                else{
     				                    if(!isset($GLOBALS["_pendingRefSeq"]))
     				                        $GLOBALS["_pendingRefSeq"] = 0;
     				                    $GLOBALS["_pendingRefSeq"]++;
     				                    $refResolvedId = -$GLOBALS["_pendingRefSeq"];
+    				                    $blocks["_update"][$key]["_pendingByVal"][$refOrig][$refItem] = $refResolvedId;
     				                    $refPending[$refResolvedId] = array("val" => $refItem, "refOrig" => $refOrig);
-    				                    $refPendingByVal[$refItem] = $refResolvedId;
     				                }
     				                if(!isset($refSeen[$refResolvedId])){
     				                    $refIds[] = $refResolvedId;
@@ -4134,6 +4137,47 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 		    check();
 		foreach($blocks["_update"] as $key => $value){
     	    trace(" Execute ".count($value["id"]));
+			# issue #2772: materialize every pending Ref for this column ONCE before the per-record
+			# loop, then remap all placeholder ids in t/tList. This guarantees a single Insert per
+			# distinct unknown value across rows (closes the "(новое) черный inserted twice"
+			# question) AND ensures the elseif(!isset($value["val"][$n])) UPDATE branch never
+			# writes a negative placeholder id to $z.t for existing records.
+			if(isset($value["tListPending"])){
+				$pendingIdMap = array();
+				$insertedByValKey = array();
+				foreach($value["tListPending"] as $pendingRec => $pendingEntries){
+					foreach($pendingEntries as $placeholder => $pending){
+						$placeholder = (int)$placeholder;
+						if(isset($pendingIdMap[$placeholder]))
+							continue;
+						$valKey = $pending["refOrig"]."\0".$pending["val"];
+						if(isset($insertedByValKey[$valKey])){
+							$pendingIdMap[$placeholder] = $insertedByValKey[$valKey];
+						}
+						else{
+							$newId = (int)Insert(1, 1, $pending["refOrig"], $pending["val"], "Insert new Ref by val (deferred, issue 2769/2772)");
+							$insertedByValKey[$valKey] = $newId;
+							$pendingIdMap[$placeholder] = $newId;
+						}
+						$mappedId = $pendingIdMap[$placeholder];
+						if(isset($dsRefs[$placeholder]) && !isset($dsRefs[$mappedId]))
+							$dsRefs[$mappedId] = $dsRefs[$placeholder];
+					}
+				}
+				if(!empty($pendingIdMap)){
+					if(isset($value["t"]))
+						foreach($value["t"] as $rec => $tv)
+							if(isset($pendingIdMap[(int)$tv]))
+								$value["t"][$rec] = $pendingIdMap[(int)$tv];
+					if(isset($value["tList"]))
+						foreach($value["tList"] as $rec => $tlist)
+							foreach($tlist as $tk => $tv)
+								if(isset($pendingIdMap[(int)$tv]))
+									$value["tList"][$rec][$tk] = $pendingIdMap[(int)$tv];
+				}
+				unset($value["tListPending"]);
+			}
+			unset($value["_pendingByVal"]);
 			foreach($value["id"] as $i => $n){
         	    trace(" i=$i n=$n key=$key ord[n]=".(isset($value["ord"][$n]) ? $value["ord"][$n] : ""));
                 trace("_  The old value for ".$names[$key]." is ".$blocks["_data_col"][$id][$names[$key]][$n]);
@@ -4155,24 +4199,6 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 						$items = $items[0];
 						$cache = [];
 						$batch = true;
-						# issue #2769: materialize any pending Refs that were deferred during preparation
-						if(isset($value["tListPending"][$n])){
-							foreach($value["tListPending"][$n] as $placeholder => $pending){
-								$newId = Insert(1, 1, $pending["refOrig"], $pending["val"], "Insert new Ref by val (deferred, issue 2769)");
-								$newId = (int)$newId;
-								$placeholder = (int)$placeholder;
-								if(isset($dsRefs[$placeholder])){
-									$dsRefs[$newId] = $dsRefs[$placeholder];
-									unset($dsRefs[$placeholder]);
-								}
-								if(isset($value["t"][$n]) && (int)$value["t"][$n] === $placeholder)
-									$value["t"][$n] = $newId;
-								if(isset($value["tList"][$n]))
-									foreach($value["tList"][$n] as $tk => $tv)
-										if((int)$tv === $placeholder)
-											$value["tList"][$n][$tk] = $newId;
-							}
-						}
 					}
 					$ord = $value["ord"][$n] == 0 ? Calc_Order($value["up"][$n], $value["t"][$n]) : $value["ord"][$n];
 					foreach($items as $k => $v){
