@@ -4049,20 +4049,29 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     				                $refItem = trim($refItem);
     				                if($refItem === "")
     				                    continue;
-    				                $refItemEsc = addslashes($refItem);
-    				                if($refRow = mysqli_fetch_array(Exec_sql("SELECT id, val FROM $z WHERE t=$refOrig AND up>0 AND val='$refItemEsc' LIMIT 1", "Seek Ref by val"))){
-    				                    $refResolvedId = (int)$refRow["id"];
+    				                # Cache "Seek Ref by val" hits column-wide so the same word
+    				                # mentioned across many records (or repeated inside one record)
+    				                # triggers at most one SELECT per prepare pass (issue #2776).
+    				                if(isset($blocks["_update"][$key]["_resolvedByVal"][$refOrig][$refItem])){
+    				                    $refResolvedId = $blocks["_update"][$key]["_resolvedByVal"][$refOrig][$refItem];
     				                }
     				                elseif(isset($blocks["_update"][$key]["_pendingByVal"][$refOrig][$refItem])){
     				                    $refResolvedId = $blocks["_update"][$key]["_pendingByVal"][$refOrig][$refItem];
     				                }
     				                else{
-    				                    if(!isset($GLOBALS["_pendingRefSeq"]))
-    				                        $GLOBALS["_pendingRefSeq"] = 0;
-    				                    $GLOBALS["_pendingRefSeq"]++;
-    				                    $refResolvedId = -$GLOBALS["_pendingRefSeq"];
-    				                    $blocks["_update"][$key]["_pendingByVal"][$refOrig][$refItem] = $refResolvedId;
-    				                    $refPending[$refResolvedId] = array("val" => $refItem, "refOrig" => $refOrig);
+    				                    $refItemEsc = addslashes($refItem);
+    				                    if($refRow = mysqli_fetch_array(Exec_sql("SELECT id, val FROM $z WHERE t=$refOrig AND up>0 AND val='$refItemEsc' LIMIT 1", "Seek Ref by val"))){
+    				                        $refResolvedId = (int)$refRow["id"];
+    				                        $blocks["_update"][$key]["_resolvedByVal"][$refOrig][$refItem] = $refResolvedId;
+    				                    }
+    				                    else{
+    				                        if(!isset($GLOBALS["_pendingRefSeq"]))
+    				                            $GLOBALS["_pendingRefSeq"] = 0;
+    				                        $GLOBALS["_pendingRefSeq"]++;
+    				                        $refResolvedId = -$GLOBALS["_pendingRefSeq"];
+    				                        $blocks["_update"][$key]["_pendingByVal"][$refOrig][$refItem] = $refResolvedId;
+    				                        $refPending[$refResolvedId] = array("val" => $refItem, "refOrig" => $refOrig);
+    				                    }
     				                }
     				                if(!isset($refSeen[$refResolvedId])){
     				                    $refIds[] = $refResolvedId;
@@ -4173,6 +4182,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 				Insert_batch("", "", "", "", "Flush INSERT new rec ($n)");
 			}
 			unset($value["_pendingByVal"]);
+			unset($value["_resolvedByVal"]);
 			foreach($value["id"] as $i => $n){
         	    trace(" i=$i n=$n key=$key ord[n]=".(isset($value["ord"][$n]) ? $value["ord"][$n] : ""));
                 trace("_  The old value for ".$names[$key]." is ".$blocks["_data_col"][$id][$names[$key]][$n]);
