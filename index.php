@@ -4155,6 +4155,24 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 						$items = $items[0];
 						$cache = [];
 						$batch = true;
+						# issue #2769: materialize any pending Refs that were deferred during preparation
+						if(isset($value["tListPending"][$n])){
+							foreach($value["tListPending"][$n] as $placeholder => $pending){
+								$newId = Insert(1, 1, $pending["refOrig"], $pending["val"], "Insert new Ref by val (deferred, issue 2769)");
+								$newId = (int)$newId;
+								$placeholder = (int)$placeholder;
+								if(isset($dsRefs[$placeholder])){
+									$dsRefs[$newId] = $dsRefs[$placeholder];
+									unset($dsRefs[$placeholder]);
+								}
+								if(isset($value["t"][$n]) && (int)$value["t"][$n] === $placeholder)
+									$value["t"][$n] = $newId;
+								if(isset($value["tList"][$n]))
+									foreach($value["tList"][$n] as $tk => $tv)
+										if((int)$tv === $placeholder)
+											$value["tList"][$n][$tk] = $newId;
+							}
+						}
 					}
 					$ord = $value["ord"][$n] == 0 ? Calc_Order($value["up"][$n], $value["t"][$n]) : $value["ord"][$n];
 					foreach($items as $k => $v){
@@ -4173,6 +4191,17 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 							trace("  new ref v=".$value["val"][$n]." t=".$value["t"][$n]." rv=".$dsRefs[$value["val"][$n]]." rt=".$dsRefs[$value["t"][$n]]);
 							$blocks["_data_col"][$id][$names[$key]][$n] = $dsRefs[$value["t"][$n]];
 						}
+    					# issue #2767: fan out the rest of the resolved multi-ref ids as sibling rows
+    					if(isset($value["tList"][$n]) && count($value["tList"][$n]) > 1){
+							trace("tList in place");
+							$displayParts = array($dsRefs[$value["t"][$n]]);
+							$extraOrd = Calc_Order($value["up"][$n], $value["val"][$n]);
+							foreach(array_slice($value["tList"][$n], 1) as $extraT){
+								Insert($value["up"][$n], $extraOrd++, $extraT, $value["val"][$n], "INSERT extra Ref for multi (issue 2767)");
+								if(isset($dsRefs[$extraT]))
+									$displayParts[] = $dsRefs[$extraT];
+							}
+						}
 					}
 					if($batch)
 						Insert_batch("", "", "", "", "Flush INSERT new rec ($n)");
@@ -4184,41 +4213,9 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 					Delete($i);
 				}
 				elseif(!isset($value["val"][$n])){
-				    # issue #2769: materialize any pending Refs that were deferred during preparation
-				    if(isset($value["tListPending"][$n])){
-				        foreach($value["tListPending"][$n] as $placeholder => $pending){
-				            $newId = Insert(1, 1, $pending["refOrig"], $pending["val"], "Insert new Ref by val (deferred, issue 2769)");
-				            $newId = (int)$newId;
-				            $placeholder = (int)$placeholder;
-				            if(isset($dsRefs[$placeholder])){
-				                $dsRefs[$newId] = $dsRefs[$placeholder];
-				                unset($dsRefs[$placeholder]);
-				            }
-				            if(isset($value["t"][$n]) && (int)$value["t"][$n] === $placeholder)
-				                $value["t"][$n] = $newId;
-				            if(isset($value["tList"][$n]))
-				                foreach($value["tList"][$n] as $tk => $tv)
-				                    if((int)$tv === $placeholder)
-				                        $value["tList"][$n][$tk] = $newId;
-				        }
-				    }
 				    if(($blocks["_data_col"][$id][$names[$key]][$n] !== $dsRefs[$value["t"][$n]]) || isset($curLineOld[$key]) || isset($value["tList"][$n])){
                         $blocks["_data_col"][$id][$names[$key]][$n] = $dsRefs[$value["t"][$n]];
     					Exec_sql("UPDATE $z SET t=".$value["t"][$n]." WHERE id=$i", "UPDATE Ref");
-    					# issue #2767: fan out the rest of the resolved multi-ref ids as sibling rows
-    					if(isset($value["tList"][$n]) && count($value["tList"][$n]) > 1)
-    					    if($refRow = mysqli_fetch_array(Exec_sql("SELECT up, val FROM $z WHERE id=$i", "Get Ref row for multi"))){
-    					        $upRef = (int)$refRow["up"];
-    					        $valRef = (int)$refRow["val"];
-    					        $displayParts = array($dsRefs[$value["t"][$n]]);
-    					        foreach(array_slice($value["tList"][$n], 1) as $extraT){
-    					            $extraOrd = Calc_Order($upRef, $valRef);
-    					            Insert($upRef, $extraOrd, $extraT, $valRef, "INSERT extra Ref for multi (issue 2767)");
-    					            if(isset($dsRefs[$extraT]))
-    					                $displayParts[] = $dsRefs[$extraT];
-    					        }
-    					        $blocks["_data_col"][$id][$names[$key]][$n] = implode(", ", $displayParts);
-    					    }
 				    }
 				}
 				elseif(($blocks["_data_col"][$id][$names[$key]][$n] !== $value["val"][$n]) || isset($curLineOld[$key])){
