@@ -864,6 +864,72 @@ function checkInjection($value){
 		        "[EN]No SQL clause allowed in search fields. Found: ").$match[0]);
     return $value;
 }
+# Validate and sanitize the comma-separated value list extracted from "IN(...)"
+# filters. The previous implementation just ran checkInjection() (which only
+# rejects the FROM/SELECT/TABLE keywords) and pasted the user-supplied text
+# straight into the SQL. That left room for injection via SQL comments,
+# statement terminators, unbalanced quotes or other DML keywords (UNION,
+# UPDATE, DELETE, DROP, SLEEP, …). Re-parse the list, accept only numeric
+# tokens or properly single-quoted strings, and re-escape strings with
+# addslashes() before letting them back into the query.
+function validateInList($value){
+	$value = trim($value);
+	if($value === "")
+		die_info(t9n("[RU]Пустой список значений в IN()[EN]Empty IN() list"));
+	$items = array();
+	$current = "";
+	$inQuote = FALSE;
+	$len = strlen($value);
+	for($i = 0; $i < $len; $i++){
+		$ch = $value[$i];
+		if($ch === "'"){
+			if($inQuote && $i + 1 < $len && $value[$i + 1] === "'"){ # SQL '' escape
+				$current .= "''";
+				$i++;
+				continue;
+			}
+			$inQuote = !$inQuote;
+			$current .= $ch;
+		}
+		elseif($ch === "," && !$inQuote){
+			$items[] = trim($current);
+			$current = "";
+		}
+		else
+			$current .= $ch;
+	}
+	if($inQuote)
+		die_info(t9n("[RU]Незакрытая кавычка в списке IN()[EN]Unclosed quote in IN() list"));
+	if(trim($current) !== "")
+		$items[] = trim($current);
+	$sanitized = array();
+	foreach($items as $item){
+		if($item === "")
+			continue;
+		if(is_numeric($item)){
+			$sanitized[] = $item;
+			continue;
+		}
+		$qLen = strlen($item);
+		if($qLen >= 2 && $item[0] === "'" && $item[$qLen - 1] === "'"){
+			$inner = substr($item, 1, -1);
+			if(strpos($inner, ";") !== FALSE
+				|| strpos($inner, "--") !== FALSE
+				|| strpos($inner, "/*") !== FALSE
+				|| strpos($inner, "*/") !== FALSE
+				|| strpos($inner, "#") !== FALSE
+				|| strpos($inner, "\0") !== FALSE)
+				die_info(t9n("[RU]Недопустимые символы в списке IN()[EN]Forbidden characters in IN() list"));
+			$inner_unescaped = str_replace("''", "'", $inner);
+			$sanitized[] = "'".addslashes($inner_unescaped)."'";
+			continue;
+		}
+		die_info(t9n("[RU]Недопустимый элемент в IN(): [EN]Invalid IN() item: ").htmlspecialchars($item));
+	}
+	if(empty($sanitized))
+		die_info(t9n("[RU]Пустой список значений в IN()[EN]Empty IN() list"));
+	return implode(",", $sanitized);
+}
 # Make WHERE and JOIN statements for reports
 function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
 {
@@ -915,7 +981,7 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
 		elseif((substr(trim(strtoupper($value)), 0, 3) == "IN(") && substr(trim($value), -1) == ")"){ # Multiple options - IN()
             $in = true;
             $value = substr(trim($value), 3, -1);
-            checkInjection($value);
+            $value = validateInList($value);
 			$search_val = "$NOT IN($value)";
         }
         elseif((substr(trim(strtoupper($value)), 0, 4) == "@IN(") && substr(trim($value), -1) == ")"){ # Multiple IDs - IN()
