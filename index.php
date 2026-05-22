@@ -4039,6 +4039,33 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     				        if(is_numeric($row["u$key"]))
                             	if($dsRef = mysqli_fetch_array(Exec_sql("SELECT val FROM $z WHERE t=$refOrig AND up>0 AND id=".$row["u$key"], "Seek Ref by ID")))
                             	    $dsRefs[$row["u$key"]] = $dsRef["val"];
+    				    # issue #2767: $row["u$key"] may arrive as a free-text list of words for a
+    				    # multi-ref field. Resolve each word to a ref id, creating missing ones,
+    				    # and stash the full set in tList for execution to fan out across rows.
+    				    if(!isset($dsRefs[$row["u$key"]]) && !is_numeric($row["u$key"]) && strlen((string)$row["u$key"]))
+    				        if(preg_match_all('/[а-яА-Яa-zA-Z0-9\s]+/u', (string)$row["u$key"], $refItems)){
+    				            $refIds = $refSeen = array();
+    				            foreach($refItems[0] as $refItem){
+    				                $refItem = trim($refItem);
+    				                if($refItem === "")
+    				                    continue;
+    				                $refItemEsc = addslashes($refItem);
+    				                if($refRow = mysqli_fetch_array(Exec_sql("SELECT id, val FROM $z WHERE t=$refOrig AND up>0 AND val='$refItemEsc' LIMIT 1", "Seek Ref by val")))
+    				                    $refResolvedId = (int)$refRow["id"];
+    				                else
+    				                    $refResolvedId = Insert(1, 1, $refOrig, $refItem, "Insert new Ref by val");
+    				                if(!isset($refSeen[$refResolvedId])){
+    				                    $refIds[] = $refResolvedId;
+    				                    $refSeen[$refResolvedId] = true;
+    				                    $dsRefs[$refResolvedId] = $refItem;
+    				                }
+    				            }
+    				            if(count($refIds)){
+    				                $row["u$key"] = $refIds[0];
+    				                if(count($refIds) > 1)
+    				                    $blocks["_update"][$key]["tList"][$rec] = $refIds;
+    				            }
+    				        }
     				    if(!isset($dsRefs[$row["u$key"]]))
     						$blocks["_data_col"][$id]["update"][$rec] .= $GLOBALS["STORED_REPS"][$id]["head"][$key].": <s>#".$row["u$key"]."</s> (invalid)<br>";
     					else{
@@ -4046,8 +4073,15 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     						if($new)
     							$blocks["_update"][$key]["val"][$rec] = $typ;
     						# We'll show the pre-Update advice: what's added/changed during this UPDATE
+    						$preview = $row["u$key"]." ".$dsRefs[$row["u$key"]];
+    						if(isset($blocks["_update"][$key]["tList"][$rec])){
+    						    $previewParts = array();
+    						    foreach($blocks["_update"][$key]["tList"][$rec] as $rid)
+    						        $previewParts[] = "#$rid ".(isset($dsRefs[$rid]) ? $dsRefs[$rid] : "");
+    						    $preview = implode(", ", $previewParts);
+    						}
     						$blocks["_data_col"][$id]["update"][$rec] .= $GLOBALS["STORED_REPS"][$id]["head"][$key].($new ? ": #"
-    						        : ": ".$blocks["_data_col"][$id][$names[$key]][$rec]." => #").$row["u$key"]." ".$dsRefs[$row["u$key"]]."<br>";
+    						        : ": ".$blocks["_data_col"][$id][$names[$key]][$rec]." => #").$preview."<br>";
     					}
 					}
 					else{
@@ -4135,9 +4169,23 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 					Delete($i);
 				}
 				elseif(!isset($value["val"][$n])){
-				    if(($blocks["_data_col"][$id][$names[$key]][$n] !== $dsRefs[$value["t"][$n]]) || isset($curLineOld[$key])){
+				    if(($blocks["_data_col"][$id][$names[$key]][$n] !== $dsRefs[$value["t"][$n]]) || isset($curLineOld[$key]) || isset($value["tList"][$n])){
                         $blocks["_data_col"][$id][$names[$key]][$n] = $dsRefs[$value["t"][$n]];
     					Exec_sql("UPDATE $z SET t=".$value["t"][$n]." WHERE id=$i", "UPDATE Ref");
+    					# issue #2767: fan out the rest of the resolved multi-ref ids as sibling rows
+    					if(isset($value["tList"][$n]) && count($value["tList"][$n]) > 1)
+    					    if($refRow = mysqli_fetch_array(Exec_sql("SELECT up, val FROM $z WHERE id=$i", "Get Ref row for multi"))){
+    					        $upRef = (int)$refRow["up"];
+    					        $valRef = (int)$refRow["val"];
+    					        $displayParts = array($dsRefs[$value["t"][$n]]);
+    					        foreach(array_slice($value["tList"][$n], 1) as $extraT){
+    					            $extraOrd = Calc_Order($upRef, $valRef);
+    					            Insert($upRef, $extraOrd, $extraT, $valRef, "INSERT extra Ref for multi (issue 2767)");
+    					            if(isset($dsRefs[$extraT]))
+    					                $displayParts[] = $dsRefs[$extraT];
+    					        }
+    					        $blocks["_data_col"][$id][$names[$key]][$n] = implode(", ", $displayParts);
+    					    }
 				    }
 				}
 				elseif(($blocks["_data_col"][$id][$names[$key]][$n] !== $value["val"][$n]) || isset($curLineOld[$key])){
