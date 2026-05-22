@@ -4206,7 +4206,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 							}
 						}
 						else
-							Insert($value["up"][$n], $ord++, $value["t"][$n], $v, "INSERT new rec ($n)");
+							Insert_batch($value["up"][$n], $ord++, $value["t"][$n], $v, "INSERT new rec ($n)");
 						trace("  ref ".$GLOBALS["STORED_REPS"][$id]["ref_typ"][$v]);
 						if(($k === 0) && isset($GLOBALS["STORED_REPS"][$id]["ref_typ"][$v])){
 							trace("  new ref v=".$value["val"][$n]." t=".$value["t"][$n]." rv=".$dsRefs[$value["val"][$n]]." rt=".$dsRefs[$value["t"][$n]]);
@@ -4218,7 +4218,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 							$displayParts = array($dsRefs[$value["t"][$n]]);
 							$extraOrd = Calc_Order($value["up"][$n], $value["val"][$n]);
 							foreach(array_slice($value["tList"][$n], 1) as $extraT){
-								Insert($value["up"][$n], $extraOrd++, $extraT, $value["val"][$n], "INSERT extra Ref for multi (issue 2767)");
+								Insert_batch($value["up"][$n], $extraOrd++, $extraT, $value["val"][$n], "INSERT extra Ref for multi");
 								if(isset($dsRefs[$extraT]))
 									$displayParts[] = $dsRefs[$extraT];
 							}
