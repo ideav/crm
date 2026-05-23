@@ -309,6 +309,7 @@
         }
 
         async fetchTotalCount() {
+            this.beginRequest();
             try {
                 let countUrl;
 
@@ -370,6 +371,8 @@
                 this.render();  // Re-render to update the counter
             } catch (error) {
                 console.error('Error fetching total count:', error);
+            } finally {
+                this.endRequest();
             }
         }
 

@@ -50,6 +50,7 @@ class IntegramTable{
             this.totalRows = null;  // null means unknown, user can click to fetch
             this.hasMore = true;  // Whether there are more records to load
             this.isLoading = false;  // Prevent multiple simultaneous loads
+            this.pendingRequests = 0;  // In-flight server requests; drives the toolbar AJAX spinner
             this.filters = {};
             this.columnOrder = [];
             this.visibleColumns = [];
@@ -454,6 +455,7 @@ class IntegramTable{
             }
 
             this.isLoading = true;
+            this.beginRequest();
 
             try {
                 let json;
@@ -594,8 +596,33 @@ class IntegramTable{
                 this.handleLoadDataError(error, append);
             } finally {
                 this.isLoading = false;
+                this.endRequest();
                 // Check if table fits on screen and needs more data
                 this.checkAndLoadMore();
+            }
+        }
+
+        beginRequest() {
+            this.pendingRequests = (this.pendingRequests || 0) + 1;
+            this.updateAjaxSpinner();
+        }
+
+        endRequest() {
+            // Clamp at 0 so a stray endRequest() can't drive the counter negative.
+            this.pendingRequests = Math.max(0, (this.pendingRequests || 0) - 1);
+            this.updateAjaxSpinner();
+        }
+
+        // Mutates only the spinner DOM in place so concurrent requests don't trigger a full re-render.
+        updateAjaxSpinner() {
+            if (!this.container) return;
+            const spinner = this.container.querySelector('.integram-table-ajax-spinner');
+            if (!spinner) return;
+            const pending = this.pendingRequests || 0;
+            spinner.classList.toggle('active', pending > 0);
+            const counter = spinner.querySelector('.integram-table-ajax-spinner-counter');
+            if (counter) {
+                counter.textContent = pending > 1 ? `(${ pending })` : '';
             }
         }
 
@@ -1355,6 +1382,7 @@ class IntegramTable{
         }
 
         async fetchTotalCount() {
+            this.beginRequest();
             try {
                 let countUrl;
 
@@ -1416,6 +1444,8 @@ class IntegramTable{
                 this.render();  // Re-render to update the counter
             } catch (error) {
                 console.error('Error fetching total count:', error);
+            } finally {
+                this.endRequest();
             }
         }
 
@@ -1563,6 +1593,10 @@ class IntegramTable{
                     <div class="integram-table-header">
                         ${ this.renderTitleHtml() }
                         <div class="integram-table-controls">
+                            <div class="integram-table-ajax-spinner${ (this.pendingRequests || 0) > 0 ? ' active' : '' }" title="Ожидание ответа от сервера">
+                                <i class="pi pi-spin pi-spinner"></i>
+                                <span class="integram-table-ajax-spinner-counter">${ (this.pendingRequests || 0) > 1 ? `(${ this.pendingRequests })` : '' }</span>
+                            </div>
                             <div class="integram-table-settings integram-table-settings-refresh" onclick="window.${ instanceName }.refreshData()" title="Обновить">
                                 <i class="pi pi-refresh"></i>
                             </div>

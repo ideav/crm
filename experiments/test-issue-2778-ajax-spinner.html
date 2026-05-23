@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Issue #2778 — AJAX spinner test</title>
+    <link rel="stylesheet" href="../assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="../css/integram-table.css">
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f0f2f5; }
+        .test-block { background: white; padding: 12px; margin-bottom: 20px;
+                      border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        h1 { font-size: 1.2rem; }
+        .controls-mock {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            border: 1px dashed #bbb;
+            padding: 8px;
+            border-radius: 4px;
+            margin-top: 8px;
+        }
+        button { margin: 4px; }
+        .note { font-size: 0.9rem; color: #666; margin-top: 6px; }
+    </style>
+</head>
+<body>
+<h1>Issue #2778 — AJAX spinner in .integram-table-controls</h1>
+
+<div class="test-block">
+    <h2>Scenario 1: idle (no spinner visible)</h2>
+    <div class="controls-mock integram-table-controls" id="ctrl-1">
+        <div class="integram-table-ajax-spinner">
+            <i class="pi pi-spin pi-spinner"></i>
+            <span class="integram-table-ajax-spinner-counter"></span>
+        </div>
+        <div class="integram-table-settings integram-table-settings-refresh"><i class="pi pi-refresh"></i></div>
+        <div class="integram-table-settings"><i class="pi pi-filter"></i></div>
+        <div class="integram-table-settings"><i class="pi pi-cog"></i></div>
+    </div>
+    <p class="note">Spinner is hidden by CSS because the .active class is absent.</p>
+</div>
+
+<div class="test-block">
+    <h2>Scenario 2: 1 pending request (spinner only, no counter)</h2>
+    <div class="controls-mock integram-table-controls">
+        <div class="integram-table-ajax-spinner active">
+            <i class="pi pi-spin pi-spinner"></i>
+            <span class="integram-table-ajax-spinner-counter"></span>
+        </div>
+        <div class="integram-table-settings integram-table-settings-refresh"><i class="pi pi-refresh"></i></div>
+        <div class="integram-table-settings"><i class="pi pi-filter"></i></div>
+        <div class="integram-table-settings"><i class="pi pi-cog"></i></div>
+    </div>
+</div>
+
+<div class="test-block">
+    <h2>Scenario 3: 3 pending requests (spinner + counter "(3)")</h2>
+    <div class="controls-mock integram-table-controls">
+        <div class="integram-table-ajax-spinner active">
+            <i class="pi pi-spin pi-spinner"></i>
+            <span class="integram-table-ajax-spinner-counter">(3)</span>
+        </div>
+        <div class="integram-table-settings integram-table-settings-refresh"><i class="pi pi-refresh"></i></div>
+        <div class="integram-table-settings"><i class="pi pi-filter"></i></div>
+        <div class="integram-table-settings"><i class="pi pi-cog"></i></div>
+    </div>
+</div>
+
+<div class="test-block">
+    <h2>Scenario 4: live counter (mocked beginRequest/endRequest)</h2>
+    <div class="controls-mock integram-table-controls" id="ctrl-live">
+        <div class="integram-table-ajax-spinner">
+            <i class="pi pi-spin pi-spinner"></i>
+            <span class="integram-table-ajax-spinner-counter"></span>
+        </div>
+        <div class="integram-table-settings integram-table-settings-refresh"><i class="pi pi-refresh"></i></div>
+        <div class="integram-table-settings"><i class="pi pi-filter"></i></div>
+        <div class="integram-table-settings"><i class="pi pi-cog"></i></div>
+    </div>
+    <button id="add-req">+ Begin request</button>
+    <button id="del-req">− End request</button>
+    <button id="burst">Start 5 requests of 1.5s each</button>
+    <span id="status" style="margin-left:12px;color:#444"></span>
+</div>
+
+<script>
+    // Tiny inline reimplementation of the same updateAjaxSpinner() logic in
+    // js/integram-table/01-core.js so we can drive the DOM without booting
+    // the whole IntegramTable class.
+    const live = document.getElementById('ctrl-live');
+    let pending = 0;
+    function update() {
+        const spinner = live.querySelector('.integram-table-ajax-spinner');
+        const counter = spinner.querySelector('.integram-table-ajax-spinner-counter');
+        spinner.classList.toggle('active', pending > 0);
+        counter.textContent = pending > 1 ? `(${ pending })` : '';
+        document.getElementById('status').textContent = `pendingRequests = ${ pending }`;
+    }
+    function begin() { pending++; update(); }
+    function end() { pending = Math.max(0, pending - 1); update(); }
+
+    document.getElementById('add-req').onclick = begin;
+    document.getElementById('del-req').onclick = end;
+    document.getElementById('burst').onclick = () => {
+        for (let i = 0; i < 5; i++) {
+            begin();
+            setTimeout(end, 1500);
+        }
+    };
+    update();
+</script>
+</body>
+</html>

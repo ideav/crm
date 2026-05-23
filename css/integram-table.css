@@ -161,6 +161,27 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     flex-shrink: 0;
     white-space: nowrap;
 }
+
+.integram-table-ajax-spinner {
+    display: none;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    color: var(--md-primary, #1976d2);
+    flex-shrink: 0;
+    font-size: 1rem;
+    white-space: nowrap;
+    user-select: none;
+}
+
+.integram-table-ajax-spinner.active {
+    display: inline-flex;
+}
+
+.integram-table-ajax-spinner-counter {
+    font-size: 0.875rem;
+    font-weight: 500;
+}
 .integram-table-settings-refresh{
     border: none !important;
 }

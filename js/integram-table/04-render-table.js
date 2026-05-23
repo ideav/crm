@@ -28,6 +28,10 @@
                     <div class="integram-table-header">
                         ${ this.renderTitleHtml() }
                         <div class="integram-table-controls">
+                            <div class="integram-table-ajax-spinner${ (this.pendingRequests || 0) > 0 ? ' active' : '' }" title="Ожидание ответа от сервера">
+                                <i class="pi pi-spin pi-spinner"></i>
+                                <span class="integram-table-ajax-spinner-counter">${ (this.pendingRequests || 0) > 1 ? `(${ this.pendingRequests })` : '' }</span>
+                            </div>
                             <div class="integram-table-settings integram-table-settings-refresh" onclick="window.${ instanceName }.refreshData()" title="Обновить">
                                 <i class="pi pi-refresh"></i>
                             </div>
