@@ -809,12 +809,14 @@ function myApi(m,u,b,vars,index){ // Параметры: метод, адрес,
                             if(getReq(id,58)!=='') // Alias - select input
                                 control=control.replace('value="'+getReq(id,58)+'"','value="'+getReq(id,58)+'" selected');
                             else if(ctl[k]==102){ // Range input for Filter
-                                control=control.replace('id="t102_'+id+'" value=""','id="t102_'+id+'" value="'+getReq(id,102)+'"')
-                                                .replace('id="t103_'+id+'" value=""','id="t103_'+id+'" value="'+getReq(id,103)+'"');
+                                var v102=getReq(id,102),v103=getReq(id,103);
+                                control=control.replace('id="t102_'+id+'" value=""',function(){return 'id="t102_'+id+'" value="'+v102+'"';})
+                                                .replace('id="t103_'+id+'" value=""',function(){return 'id="t103_'+id+'" value="'+v103+'"';});
                             }
                             else if(ctl[k]==105){ // Range input for HAVING
-                                control=control.replace('id="t105_'+id+'" value=""','id="t105_'+id+'" value="'+getReq(id,105)+'"')
-                                                .replace('id="t106_'+id+'" value=""','id="t106_'+id+'" value="'+getReq(id,106)+'"');
+                                var v105=getReq(id,105),v106=getReq(id,106);
+                                control=control.replace('id="t105_'+id+'" value=""',function(){return 'id="t105_'+id+'" value="'+v105+'"';})
+                                                .replace('id="t106_'+id+'" value=""',function(){return 'id="t106_'+id+'" value="'+v106+'"';});
                             }
                             else if(ctl[k]==109){ // Order
                                 dir=getReq(id,ctl[k]);
@@ -839,8 +841,12 @@ function myApi(m,u,b,vars,index){ // Параметры: метод, адрес,
                                             +'" onclick="showLoading(this);setOrder('+id+',0,\'\')" class="pi pi-times-circle icon8 text-danger"></i>';
                                 }
                             }
-                            else
-                                control=control.replace('value=""','value="'+getReq(id,ctl[k]).replace(/"/g,'\"')+'" title="'+getReq(id,ctl[k]).replace(/"/g,'\"')+'"');
+                            else{
+                                // Use a function as the replacement so that $-sequences ($', $&, $`, $n) in the
+                                // user value are not interpreted by String.prototype.replace (fixes #2791).
+                                var v=getReq(id,ctl[k]);
+                                control=control.replace('value=""',function(){return 'value="'+v+'" title="'+v+'"';});
+                            }
                             c[k]+=control+'</td>';
                         }
                     }
