@@ -7910,8 +7910,14 @@ function Insert_batch($up, $ord, $t, $val, $message){
 	{
     	exec_sql("INSERT INTO $z (up, ord, t, val) VALUES ".$GLOBALS["SQLbatch"], "Close batch: $message");
     	unset($GLOBALS["SQLbatch"]);
+    	unset($GLOBALS["SQLbatchSeen"]);
     	return;
 	}
+	// Skip exact duplicates within the same batch (closes #2785)
+	$dedupKey = $up."\0".$ord."\0".$t."\0".$val;
+	if(isset($GLOBALS["SQLbatchSeen"][$dedupKey]))
+		return;
+	$GLOBALS["SQLbatchSeen"][$dedupKey] = true;
 	if(isset($GLOBALS["SQLbatch"]))
     	$GLOBALS["SQLbatch"] .= ",($up,$ord,$t,'".addslashes($val)."')";
     else
@@ -7921,6 +7927,7 @@ function Insert_batch($up, $ord, $t, $val, $message){
 	{
     	exec_sql("INSERT INTO $z (up, ord, t, val) VALUES ".$GLOBALS["SQLbatch"], "Flush batch: $message");
     	unset($GLOBALS["SQLbatch"]);
+    	unset($GLOBALS["SQLbatchSeen"]);
 	}
 }
 # Inserts a new value and returns the ID it got
