@@ -1370,15 +1370,64 @@ class IntegramTable{
                 this.columns = columns;
             }
 
+            // Issue #2783: dedupe rows that share the same id. A filter LEFT
+            // JOIN on a non-MULTI/ARRAY column on the server can return the
+            // same vals.id more than once, which used to produce one entry
+            // with only the main value and one entry with reqs duplicated.
+            // Server-side fix lives in index.php; this client guard keeps a
+            // mid-rollout server from breaking column alignment by keeping
+            // the entry with the most cells per id.
+            const dedupedArray = this.dedupeJsonDataArrayById(dataArray);
+
             // Transform JSON_OBJ array to row format
             // LIMIT is already applied server-side via the fetch URL in loadDataFromReport
-            const rows = dataArray.map(item => item.r || []);
+            const rows = dedupedArray.map(item => item.r || []);
 
             return {
                 columns: this.columns,
                 rows: rows,
-                rawData: dataArray  // Preserve raw data with 'i' keys
+                rawData: dedupedArray  // Preserve raw data with 'i' keys
             };
+        }
+
+        /**
+         * Dedupe JSON_OBJ array entries by their `i` field, keeping the entry
+         * with the most cells in `r` when duplicates exist (issue #2783).
+         * Returns the input untouched when no duplicates are present.
+         */
+        dedupeJsonDataArrayById(dataArray) {
+            if (!Array.isArray(dataArray) || dataArray.length < 2) {
+                return dataArray;
+            }
+            const seenIndexById = new Map();
+            const keep = new Set();
+            let hasDuplicates = false;
+            for (let i = 0; i < dataArray.length; i++) {
+                const item = dataArray[i];
+                if (!item || item.i === undefined) {
+                    // Malformed entries can't be deduped by id — keep them as-is.
+                    keep.add(i);
+                    continue;
+                }
+                const prevIndex = seenIndexById.get(item.i);
+                if (prevIndex === undefined) {
+                    seenIndexById.set(item.i, i);
+                    keep.add(i);
+                    continue;
+                }
+                hasDuplicates = true;
+                const prevLen = Array.isArray(dataArray[prevIndex].r) ? dataArray[prevIndex].r.length : 0;
+                const curLen = Array.isArray(item.r) ? item.r.length : 0;
+                if (curLen > prevLen) {
+                    keep.delete(prevIndex);
+                    seenIndexById.set(item.i, i);
+                    keep.add(i);
+                }
+            }
+            if (!hasDuplicates) {
+                return dataArray;
+            }
+            return dataArray.filter((_, idx) => keep.has(idx));
         }
 
         async fetchTotalCount() {

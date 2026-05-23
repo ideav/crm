@@ -6812,6 +6812,21 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			$i = 0; # Row count for Array elements
 			while($row = mysqli_fetch_array($data_set))
 			{
+				# Issue #2783: a filter LEFT JOIN on a non-MULTI/ARRAY column can
+				# produce duplicate rows for the same vals.id. Construct_WHERE only
+				# sets $GLOBALS["distinct"] for MULTI/ARRAY types, so the SELECT
+				# above may legitimately return the same id multiple times. Without
+				# dedup, JSON_OBJ creates one newapi[] entry per duplicate and the
+				# newapicnt[$id] -> latest-index map gets overwritten, routing every
+				# &uni_object_view_reqs append into the latest entry — earlier
+				# entries lose their reqs, the latest collects them once per
+				# duplicate. JSON_DATA suffers the same per-id req doubling because
+				# &uni_object_view_reqs fires once per blocks[$block]["id"][] entry.
+				# Skip duplicates before they reach the blocks/newapi pipeline.
+				if(isset($_REQUEST["JSON_OBJ"]) && isset($GLOBALS["GLOBAL_VARS"]["newapicnt"][$row["id"]]))
+					continue;
+				if(isset($_REQUEST["JSON_DATA"]) && isset($GLOBALS["GLOBAL_VARS"]["newapi"][$row["id"]]))
+					continue;
     			if(isset($GLOBALS["dataExport"])){
     				$GLOBALS["dataExport"][] = Export_reqs($id, $row["id"], $row["val"]);
     				#$str = Export_reqs($id, $row["id"], $row["val"]);
