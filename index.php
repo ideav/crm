@@ -4049,27 +4049,32 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     				                $refItem = trim($refItem);
     				                if($refItem === "")
     				                    continue;
+    				                # Case-fold the PHP cache key so "LaserJet", "laserJet", "Laserjet"
+    				                # and "laserjet" share a single placeholder within one prepare pass
+    				                # (issue #2780). The original casing is still stored on first sight
+    				                # via $refPending[...]["val"] / $dsRefs[$refResolvedId].
+    				                $refItemKey = function_exists('mb_strtolower') ? mb_strtolower($refItem, 'UTF-8') : strtolower($refItem);
     				                # Cache "Seek Ref by val" hits column-wide so the same word
     				                # mentioned across many records (or repeated inside one record)
     				                # triggers at most one SELECT per prepare pass (issue #2776).
-    				                if(isset($blocks["_update"][$key]["_resolvedByVal"][$refOrig][$refItem])){
-    				                    $refResolvedId = $blocks["_update"][$key]["_resolvedByVal"][$refOrig][$refItem];
+    				                if(isset($blocks["_update"][$key]["_resolvedByVal"][$refOrig][$refItemKey])){
+    				                    $refResolvedId = $blocks["_update"][$key]["_resolvedByVal"][$refOrig][$refItemKey];
     				                }
-    				                elseif(isset($blocks["_update"][$key]["_pendingByVal"][$refOrig][$refItem])){
-    				                    $refResolvedId = $blocks["_update"][$key]["_pendingByVal"][$refOrig][$refItem];
+    				                elseif(isset($blocks["_update"][$key]["_pendingByVal"][$refOrig][$refItemKey])){
+    				                    $refResolvedId = $blocks["_update"][$key]["_pendingByVal"][$refOrig][$refItemKey];
     				                }
     				                else{
     				                    $refItemEsc = addslashes($refItem);
     				                    if($refRow = mysqli_fetch_array(Exec_sql("SELECT id, val FROM $z WHERE t=$refOrig AND up>0 AND val='$refItemEsc' LIMIT 1", "Seek Ref by val"))){
     				                        $refResolvedId = (int)$refRow["id"];
-    				                        $blocks["_update"][$key]["_resolvedByVal"][$refOrig][$refItem] = $refResolvedId;
+    				                        $blocks["_update"][$key]["_resolvedByVal"][$refOrig][$refItemKey] = $refResolvedId;
     				                    }
     				                    else{
     				                        if(!isset($GLOBALS["_pendingRefSeq"]))
     				                            $GLOBALS["_pendingRefSeq"] = 0;
     				                        $GLOBALS["_pendingRefSeq"]++;
     				                        $refResolvedId = -$GLOBALS["_pendingRefSeq"];
-    				                        $blocks["_update"][$key]["_pendingByVal"][$refOrig][$refItem] = $refResolvedId;
+    				                        $blocks["_update"][$key]["_pendingByVal"][$refOrig][$refItemKey] = $refResolvedId;
     				                        $refPending[$refResolvedId] = array("val" => $refItem, "refOrig" => $refOrig);
     				                    }
     				                }
@@ -4153,7 +4158,10 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 						$placeholder = (int)$placeholder;
 						if(isset($pendingIdMap[$placeholder]))
 							continue;
-						$valKey = $pending["refOrig"]."\0".$pending["val"];
+						# Case-fold so any stray case variants (defensive — prepare already
+						# dedups via _pendingByVal) still collapse to one Insert (issue #2780).
+						$pendingValKey = function_exists('mb_strtolower') ? mb_strtolower($pending["val"], 'UTF-8') : strtolower($pending["val"]);
+						$valKey = $pending["refOrig"]."\0".$pendingValKey;
 						if(isset($insertedByValKey[$valKey])){
 							$pendingIdMap[$placeholder] = $insertedByValKey[$valKey];
 						}
