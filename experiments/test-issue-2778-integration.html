@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Issue #2778 — IntegramTable AJAX spinner integration</title>
+    <link rel="stylesheet" href="../assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="../css/integram-table.css">
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f0f2f5; }
+        #table-container { background: white; border-radius: 6px; padding: 0;
+                           box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        h1 { font-size: 1.2rem; }
+        #status { background: #fff; padding: 10px; border-radius: 6px;
+                  margin-top: 12px; font-family: monospace; }
+        button { margin: 4px; padding: 6px 10px; }
+    </style>
+</head>
+<body>
+<h1>Issue #2778 — real IntegramTable instance with mocked fetch</h1>
+<div>
+    <button id="trigger-load">Trigger loadData() (1.2s delay)</button>
+    <button id="trigger-count">Trigger fetchTotalCount() (1.2s delay)</button>
+    <button id="trigger-both">Trigger both concurrently</button>
+</div>
+<div id="status">Awaiting actions…</div>
+<div id="table-container"></div>
+
+<script>
+    // ---- mock fetch BEFORE loading the script ----
+    const originalFetch = window.fetch;
+    let fetchDelay = 1200;
+    let fetchCount = 0;
+    window.fetch = (url, opts) => {
+        fetchCount++;
+        const log = document.getElementById('status');
+        log.textContent = `[fetchCount=${ fetchCount }] in-flight: ${ url }`;
+        return new Promise(resolve => {
+            setTimeout(() => {
+                // Reply differently for different endpoints.
+                if (/RECORD_COUNT=1|_count=1/.test(url)) {
+                    resolve(new Response(JSON.stringify({ count: 42 }), {
+                        status: 200,
+                        headers: { 'Content-Type': 'application/json' }
+                    }));
+                    return;
+                }
+                if (/\/metadata$/.test(url)) {
+                    resolve(new Response('[]', {
+                        status: 200,
+                        headers: { 'Content-Type': 'application/json' }
+                    }));
+                    return;
+                }
+                // Default: report-style payload.
+                const payload = {
+                    columns: [
+                        { id: 'c1', name: 'Колонка 1', type: 'CHARS', format: 'CHARS', orig: 'c1' },
+                        { id: 'c2', name: 'Колонка 2', type: 'CHARS', format: 'CHARS', orig: 'c2' }
+                    ],
+                    data: [
+                        ['a', 'b'],
+                        ['c', 'd']
+                    ]
+                };
+                resolve(new Response(JSON.stringify(payload), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' }
+                }));
+            }, fetchDelay);
+        });
+    };
+</script>
+<script src="../js/integram-table.js"></script>
+<script>
+    window.table = new IntegramTable('table-container', {
+        apiUrl: '/test/report/1',
+        instanceName: 'table',
+        title: 'Тестовая таблица'
+    });
+
+    document.getElementById('trigger-load').onclick = () => {
+        window.table.refreshData ? window.table.refreshData() : window.table.loadData(false);
+    };
+    document.getElementById('trigger-count').onclick = () => {
+        window.table.fetchTotalCount();
+    };
+    document.getElementById('trigger-both').onclick = () => {
+        window.table.loadData(false);
+        window.table.fetchTotalCount();
+        window.table.fetchTotalCount();
+    };
+</script>
+</body>
+</html>

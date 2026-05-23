@@ -33,6 +33,7 @@
             this.totalRows = null;  // null means unknown, user can click to fetch
             this.hasMore = true;  // Whether there are more records to load
             this.isLoading = false;  // Prevent multiple simultaneous loads
+            this.pendingRequests = 0;  // In-flight server requests; drives the toolbar AJAX spinner
             this.filters = {};
             this.columnOrder = [];
             this.visibleColumns = [];
@@ -437,6 +438,7 @@
             }
 
             this.isLoading = true;
+            this.beginRequest();
 
             try {
                 let json;
@@ -577,8 +579,33 @@
                 this.handleLoadDataError(error, append);
             } finally {
                 this.isLoading = false;
+                this.endRequest();
                 // Check if table fits on screen and needs more data
                 this.checkAndLoadMore();
+            }
+        }
+
+        beginRequest() {
+            this.pendingRequests = (this.pendingRequests || 0) + 1;
+            this.updateAjaxSpinner();
+        }
+
+        endRequest() {
+            // Clamp at 0 so a stray endRequest() can't drive the counter negative.
+            this.pendingRequests = Math.max(0, (this.pendingRequests || 0) - 1);
+            this.updateAjaxSpinner();
+        }
+
+        // Mutates only the spinner DOM in place so concurrent requests don't trigger a full re-render.
+        updateAjaxSpinner() {
+            if (!this.container) return;
+            const spinner = this.container.querySelector('.integram-table-ajax-spinner');
+            if (!spinner) return;
+            const pending = this.pendingRequests || 0;
+            spinner.classList.toggle('active', pending > 0);
+            const counter = spinner.querySelector('.integram-table-ajax-spinner-counter');
+            if (counter) {
+                counter.textContent = pending > 1 ? `(${ pending })` : '';
             }
         }
 
