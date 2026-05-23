@@ -4187,7 +4187,6 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 									$value["tList"][$rec][$tk] = $pendingIdMap[(int)$tv];
 				}
 				unset($value["tListPending"]);
-				Insert_batch("", "", "", "", "Flush INSERT new rec ($n)");
 			}
 			unset($value["_pendingByVal"]);
 			unset($value["_resolvedByVal"]);
