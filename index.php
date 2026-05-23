@@ -4166,7 +4166,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 							$pendingIdMap[$placeholder] = $insertedByValKey[$valKey];
 						}
 						else{
-							$newId = (int)Insert_batch(1, 1, $pending["refOrig"], $pending["val"], "Insert new Ref by val (deferred)");
+							$newId = Insert(1, 1, $pending["refOrig"], $pending["val"], "Insert new Ref by val");
 							$insertedByValKey[$valKey] = $newId;
 							$pendingIdMap[$placeholder] = $newId;
 						}
