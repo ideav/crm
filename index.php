@@ -4039,7 +4039,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     				        if(is_numeric($row["u$key"]))
                             	if($dsRef = mysqli_fetch_array(Exec_sql("SELECT val FROM $z WHERE t=$refOrig AND up>0 AND id=".$row["u$key"], "Seek Ref by ID")))
                             	    $dsRefs[$row["u$key"]] = $dsRef["val"];
-    				    # may arrive as a free-text list of words for a
+    				    # $row["u$key"] may arrive as a free-text list of words for a
     				    # multi-ref field. Resolve each word to a ref id, creating missing ones,
     				    # and stash the full set in tList for execution to fan out across rows.
     				    if(!isset($dsRefs[$row["u$key"]]) && !is_numeric($row["u$key"]) && strlen((string)$row["u$key"]))
