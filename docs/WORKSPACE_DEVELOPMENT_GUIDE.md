@@ -233,9 +233,10 @@
   (`templates/query.html:1-8`, `templates/table.html:1-8`)
 - **Программно**: `new IntegramTable('container-id', { apiUrl, dataSource, tableTypeId,
   parentId, recordId, pageSize, cookiePrefix, title, instanceName, onCellClick,
-  onDataLoad })` (`templates/calendar.html:1328`).
+  onDataLoad, debug })` (`templates/calendar.html:1328`).
 - `parentId` берётся из опции или из URL (`parentId` / `F_U` / `up`); `recordId` —
-  фильтр по записи (`issue #563`).
+  фильтр по записи, берётся из опции или из GET-параметра `F_I` (`issue #563`).
+- `debug: false` — включить трассировку в консоль (`js/integram-table/01-core.js:22`).
 
 ### 7.2. Правило сборки бандла
 
