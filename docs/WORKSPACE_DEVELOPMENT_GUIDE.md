@@ -156,18 +156,22 @@
 
 - **Каждый POST-запрос обязан содержать токен `_xsrf`.** GET-запросы токен не требуют.
 - Токен берётся из шаблонной переменной: `var xsrf = '{_global_.xsrf}'`
-  (`templates/main.html:128`).
+  (`templates/main.html:131`).
 - В рабочих местах используется хелпер `intApi(method, url, branch, vars, index)`,
-  который **сам подставляет токен** (`templates/upload.html:820-832`):
+  который **сам подставляет токен** (`templates/upload.html:821-832`):
   - если `vars` — объект `FormData`: `vars.append('_xsrf', xsrf)`;
   - если `vars` — строка: `vars = '_xsrf=' + xsrf + '&' + vars` и заголовок
     `Content-Type: application/x-www-form-urlencoded`.
 - Для обычной HTML-формы добавляйте скрытое поле:
   `<input type="hidden" name="_xsrf" value="{_global_.xsrf}">`
   (`templates/edit_obj.html:77`).
-- Аналогичные хелперы (`myApi`, `newApi`) есть в `templates/sql.html`,
-  `templates/form.html`, `templates/quiz.html`, `templates/object.html` — они инжектят
-  токен тем же способом. Не дублируйте логику XSRF вручную, если хелпер уже есть.
+- Аналогичные хелперы используют ту же логику инжекта токена:
+  - `newApi` (с поддержкой `FormData`) — глобальный хелпер в `js/main.js:2-13`;
+  - `myApi` (только строка) — локальный хелпер в `templates/sql.html:691` и
+    `templates/form.html:217`;
+  - `intApi` (с поддержкой `FormData`) — локальный хелпер в
+    `templates/quiz.html:952` и `templates/object.html:1526`.
+- Не дублируйте логику XSRF вручную, если хелпер уже есть.
 
 ---
 
