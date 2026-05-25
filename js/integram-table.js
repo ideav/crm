@@ -48,6 +48,7 @@ class IntegramTable{
             this.data = [];
             this.loadedRecords = 0;  // Changed from currentPage to loadedRecords
             this.totalRows = null;  // null means unknown, user can click to fetch
+            this.isFetchingTotalCount = false;  // True while re-requesting the total count (issue #2795)
             this.hasMore = true;  // Whether there are more records to load
             this.isLoading = false;  // Prevent multiple simultaneous loads
             this.pendingRequests = 0;  // In-flight server requests; drives the toolbar AJAX spinner
@@ -1382,7 +1383,12 @@ class IntegramTable{
         }
 
         async fetchTotalCount() {
+            // Avoid stacking requests if the user clicks the count repeatedly (issue #2795).
+            if (this.isFetchingTotalCount) return;
             this.beginRequest();
+            // Show a small non-clickable spinner in place of the number while we recount (issue #2795).
+            this.isFetchingTotalCount = true;
+            this.updateScrollCounterTotal();
             try {
                 let countUrl;
 
@@ -1441,11 +1447,14 @@ class IntegramTable{
                 const response = await fetch(countUrl);
                 const result = await response.json();
                 this.totalRows = parseInt(result.count, 10);
-                this.render();  // Re-render to update the counter
             } catch (error) {
                 console.error('Error fetching total count:', error);
             } finally {
+                // Clear the spinner and show the (re)counted number — or restore the
+                // previous value on error — in place, without a full re-render (issue #2795).
+                this.isFetchingTotalCount = false;
                 this.endRequest();
+                this.updateScrollCounterTotal();
             }
         }
 
@@ -2967,11 +2976,40 @@ class IntegramTable{
             return allCols.map((col, idx) => this.renderFilterCell(col, idx)).join('');
         }
 
+        /**
+         * Render the "total records" part of the scroll counter (issue #2795).
+         * Wrapped in a stable .scroll-counter-total span so it can be swapped in
+         * place (see updateScrollCounterTotal) without re-rendering the table.
+         * - While the count is being re-requested: a small non-clickable spinner.
+         * - When the total is unknown: a clickable "?" that fetches the count.
+         * - When the total is known: the number itself, clickable to re-request it.
+         */
+        renderTotalCountDisplay() {
+            const instanceName = this.options.instanceName;
+            if (this.isFetchingTotalCount) {
+                return `<span class="total-count-loading" title="Подсчёт..."><i class="pi pi-spin pi-spinner"></i></span>`;
+            }
+            if (this.totalRows === null) {
+                return `<span class="total-count-unknown" onclick="window.${ instanceName }.fetchTotalCount()" title="Нажмите, чтобы узнать общее количество">?</span>`;
+            }
+            return `<span class="total-count-known" onclick="window.${ instanceName }.fetchTotalCount()" title="Нажмите, чтобы пересчитать общее количество">${ this.totalRows }</span>`;
+        }
+
+        /**
+         * Swap only the total-count portion of the scroll counter in place so
+         * re-requesting the count shows a spinner without re-rendering the whole
+         * table (issue #2795).
+         */
+        updateScrollCounterTotal() {
+            if (!this.container) return;
+            const total = this.container.querySelector('.scroll-counter .scroll-counter-total');
+            if (!total) return;
+            total.innerHTML = this.renderTotalCountDisplay();
+        }
+
         renderScrollCounter() {
             const instanceName = this.options.instanceName;
-            const totalDisplay = this.totalRows === null
-                ? `<span class="total-count-unknown" onclick="window.${ instanceName }.fetchTotalCount()" title="Нажмите, чтобы узнать общее количество">?</span>`
-                : this.totalRows;
+            const totalDisplay = this.renderTotalCountDisplay();
 
             // Show add row button only for object-source tables with write access (issue #807, #1508)
             const isObjectSource = this.objectTableId || this.getDataSourceType() === 'table';
@@ -2987,7 +3025,7 @@ class IntegramTable{
             return `
                 <div class="scroll-counter">
                     ${ addRowBtnHtml }${ pasteDataBtnHtml }
-                    Показано ${ this.loadedRecords } из ${ totalDisplay }
+                    Показано ${ this.loadedRecords } из <span class="scroll-counter-total">${ totalDisplay }</span>
                 </div>
             `;
         }

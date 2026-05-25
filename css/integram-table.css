@@ -880,6 +880,31 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     text-decoration: underline;
 }
 
+/* Clicking the known total re-requests the count (issue #2795) */
+.total-count-known {
+    cursor: pointer;
+    text-decoration: none;
+    transition: var(--md-transition);
+}
+
+.total-count-known:hover {
+    color: var(--md-primary);
+    text-decoration: underline;
+}
+
+/* Small non-clickable spinner shown in place of the number while recounting (issue #2795) */
+.total-count-loading {
+    display: inline-flex;
+    align-items: center;
+    color: var(--md-primary);
+    cursor: default;
+    user-select: none;
+}
+
+.total-count-loading .pi-spinner {
+    font-size: 0.75rem;
+}
+
 /* Old pagination controls - kept for backwards compatibility */
 .pagination-controls {
     display: flex;
