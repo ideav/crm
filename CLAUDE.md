@@ -8,6 +8,18 @@
 
 ---
 
+## Разработка рабочих мест — ВАЖНО
+
+Перед созданием или изменением рабочего места (workspace `templates/*.html`,
+встраиваемого в `templates/main.html`) свериться с правилами в
+[`docs/WORKSPACE_DEVELOPMENT_GUIDE.md`](docs/WORKSPACE_DEVELOPMENT_GUIDE.md):
+шаблонизатор `{_global_.*}`, версионирование ресурсов, вызовы API `_m_*`, токен XSRF,
+чтение данных из таблиц и отчётов, компонент IntegramTable, модальные окна
+(не `alert`/`confirm`/`prompt`), подсказки `js/hints.js`. Каждое правило снабжено
+ссылкой на закрытый тикет `issue #NNN` и/или место в коде `file:line`.
+
+---
+
 Issue to solve: https://github.com/ideav/crm/issues/78
 Your prepared branch: issue-78-4001031cf921
 Your prepared working directory: /tmp/gh-issue-solver-1769973978122
