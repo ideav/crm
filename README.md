@@ -71,9 +71,10 @@ IntegramTable component, modals, and user hints. Each rule cites its source clos
 issue (`issue #NNN`) and/or code location (`file:line`).
 
 - **Never use** `alert()`, `confirm()`, or `prompt()`. Use the modal methods instead:
-  - `showDeleteConfirmModal(message)` — for delete confirmations
+  - `showDeleteConfirmModal()` — for delete confirmations (in `IntegramTable`, no parameter — fixed message text)
   - `showErrorModal(message)` — for errors (in `MainAppController`)
-  - `showWarningModal(message)` — for warnings (in `IntegTable`)
+  - `showWarningModal(message)` — for warnings during save (in `IntegramTable`)
+  - `showWarningsModal(message)` — for informational warnings after save, non-blocking (in `IntegramTable`)
 - Template variables must not have spaces: `{_global_.version}`, not `{ _global_.version }`
 - Styles go in `.css` files, scripts in `.js` files — no inline styles or scripts in templates
 - Asset URLs must include version for cache busting: `href="/css/file.css?{_global_.version}"`

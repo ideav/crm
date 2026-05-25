@@ -250,10 +250,16 @@
 ## 8. Модальные окна и запрет `alert`/`confirm`/`prompt`
 
 - **Никогда не используйте** `alert()`, `confirm()`, `prompt()`. Вместо них —
-  модальные методы (`README.md:41,67-69`):
-  - `showDeleteConfirmModal(message)` — подтверждение удаления;
-  - `showErrorModal(message)` — ошибки (в `MainAppController`);
-  - `showWarningModal(message)` — предупреждения (в `IntegramTable`).
+  модальные методы (`README.md:41,73-76`):
+  - `showDeleteConfirmModal()` — подтверждение удаления (в `IntegramTable`, без
+    параметра — текст фиксированный; `js/integram-table/21-form-field-settings.js:893`);
+  - `showErrorModal(message)` — ошибки (в `MainAppController`;
+    `js/main-app.js:1607`);
+  - `showWarningModal(message, objId = null)` — предупреждения во время сохранения
+    (в `IntegramTable`; `js/integram-table/22-utils.js:430`);
+  - `showWarningsModal(message)` — информационные предупреждения **после** сохранения,
+    не блокирует операцию (в `IntegramTable`; `js/integram-table/22-utils.js:491`;
+    `issue #610`).
 
 ---
 
