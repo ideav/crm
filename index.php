@@ -3709,7 +3709,9 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 	$rownum = 1;
 															 
 	$GLOBALS["STORED_REPS"][$id]["last_res_empty"] = 1;
-	$GLOBALS["STORED_REPS"][$id]["rownum"] = mysqli_num_rows($data_set);
+	# Exec_sql() with $fatal=FALSE returns the MySQL error text (a string) on failure;
+	# guard mysqli_num_rows() so we don't crash here and lose the error - it is shown below
+	$GLOBALS["STORED_REPS"][$id]["rownum"] = gettype($data_set)==="string" ? 1 : mysqli_num_rows($data_set);
 	foreach($GLOBALS["STORED_REPS"][$id]["names"] as $key => $value)
 	    if(substr($value,0,1) == "'")
 	    {
