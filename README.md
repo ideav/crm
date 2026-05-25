@@ -63,6 +63,13 @@ See [ASSETS_DEPLOYMENT.md](ASSETS_DEPLOYMENT.md) for details on asset structure 
 
 ## Development Rules
 
+Before building or changing a workspace (`templates/*.html` embedded into
+`templates/main.html`), follow the rules in
+[docs/WORKSPACE_DEVELOPMENT_GUIDE.md](docs/WORKSPACE_DEVELOPMENT_GUIDE.md) — the
+templating engine, `_m_*` API calls + XSRF, reading data from tables/reports, the
+IntegramTable component, modals, and user hints. Each rule cites its source closed
+issue (`issue #NNN`) and/or code location (`file:line`).
+
 - **Never use** `alert()`, `confirm()`, or `prompt()`. Use the modal methods instead:
   - `showDeleteConfirmModal(message)` — for delete confirmations
   - `showErrorModal(message)` — for errors (in `MainAppController`)
@@ -73,6 +80,7 @@ See [ASSETS_DEPLOYMENT.md](ASSETS_DEPLOYMENT.md) for details on asset structure 
 
 ## Related Documentation
 
+- [docs/WORKSPACE_DEVELOPMENT_GUIDE.md](docs/WORKSPACE_DEVELOPMENT_GUIDE.md) — Rules for building workspaces (templating, `_m_*` API + XSRF, tables/reports, IntegramTable, modals, hints)
 - [TABLE_COMPONENT_README.md](TABLE_COMPONENT_README.md) — IntegramTable component reference
 - [ASSETS_DEPLOYMENT.md](ASSETS_DEPLOYMENT.md) — Asset deployment guide
 - [CRM_OVERVIEW_SCENARIO.md](CRM_OVERVIEW_SCENARIO.md) — CRM walkthrough for new users
