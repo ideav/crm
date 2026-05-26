@@ -31,6 +31,7 @@
             this.data = [];
             this.loadedRecords = 0;  // Changed from currentPage to loadedRecords
             this.totalRows = null;  // null means unknown, user can click to fetch
+            this.isFetchingTotalCount = false;  // True while re-requesting the total count (issue #2795)
             this.hasMore = true;  // Whether there are more records to load
             this.isLoading = false;  // Prevent multiple simultaneous loads
             this.pendingRequests = 0;  // In-flight server requests; drives the toolbar AJAX spinner

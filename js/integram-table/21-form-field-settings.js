@@ -333,6 +333,7 @@
             }
 
             const apiBase = this.getApiBase();
+            const deferredPasswordFields = isCreate ? this.collectCreatePasswordFields(modal, typeId) : [];
 
             try {
                 // Step 1: Prepare form data for save
@@ -368,7 +369,8 @@
 
                     // Add main value as t{typeId}
                     if (isCreate) {
-                        if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
+                        if (!this.isDeferredPasswordField('main', deferredPasswordFields) &&
+                            mainValue !== '' && mainValue !== null && mainValue !== undefined) {
                             requestBody.append(`t${ typeId }`, mainValue);
                         }
                     } else {
@@ -378,6 +380,7 @@
                     // Add all form fields
                     for (const [key, value] of formData.entries()) {
                         if (key === 'main') continue;
+                        if (isCreate && this.isDeferredPasswordField(key, deferredPasswordFields)) continue;
 
                         // Check if this is a file field
                         const fieldMatch = key.match(/^t(\d+)$/);
@@ -433,6 +436,7 @@
                     // Add all form fields (skip 'main' since it's handled separately as t{typeId})
                     for (const [key, value] of formData.entries()) {
                         if (key === 'main') continue;
+                        if (isCreate && this.isDeferredPasswordField(key, deferredPasswordFields)) continue;
 
                         // Skip file fields that haven't changed
                         const fieldMatch = key.match(/^t(\d+)$/);
@@ -461,7 +465,8 @@
                     }
 
                     if (isCreate) {
-                        if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
+                        if (!this.isDeferredPasswordField('main', deferredPasswordFields) &&
+                            mainValue !== '' && mainValue !== null && mainValue !== undefined) {
                             params.append(`t${ typeId }`, mainValue);
                         }
                     } else {
@@ -508,8 +513,14 @@
                 // Check for warning - show modal and stay in edit mode
                 // Pass result.obj to show a link to the existing/found record if available
                 if (result.warning) {
-                    this.showWarningModal(result.warning, result.id || null);
+                    this.showWarningModal(result.warning, this.getSavedRecordId(result));
                     return;
+                }
+
+                const savedId = isCreate ? this.getSavedRecordId(result) : recordId;
+
+                if (isCreate && deferredPasswordFields.length > 0) {
+                    await this.saveDeferredPasswordFields(apiBase, savedId, deferredPasswordFields);
                 }
 
                 // Check for warnings (plural) - show modal but continue with save (issue #610)
@@ -532,7 +543,6 @@
                 this.clearAllReferenceOptionCaches();
 
                 // Dispatch event for external listeners
-                const savedId = isCreate ? (result.id || result.i || null) : recordId;
                 document.dispatchEvent(new CustomEvent('integram-record-saved', {
                     detail: { isCreate, recordId: savedId, typeId, result }
                 }));
@@ -567,7 +577,7 @@
                     // Handle special refresh for column header create
                     if (isCreate && columnId) {
                         // Extract created record ID from response
-                        const createdId = result.id || result.i;
+                        const createdId = this.getSavedRecordId(result);
 
                         if (createdId) {
                             await this.refreshWithNewRecord(columnId, createdId);
@@ -767,7 +777,7 @@
                 const serverError = this.getServerError(result);
                 if (serverError) throw new Error(serverError);
 
-                const newId = result.id || result.i || null;
+                const newId = this.getSavedRecordId(result);
                 if (!newId) throw new Error('Сервер не вернул ID новой записи');
 
                 // Close the current modal

@@ -65,8 +65,8 @@
 
 - Синтаксис подстановки: `{_global_.ИМЯ}`. **Пробелы внутри фигурных скобок
   недопустимы** — пишите `{_global_.version}`, а не `{ _global_.version }`
-  (`README.md:70`).
-- Доступные глобальные переменные (объявлены в `templates/main.html:127-136`):
+  (`README.md:77`).
+- Доступные глобальные переменные (объявлены в `templates/main.html:130-139`):
 
   | Переменная | Значение |
   |------------|----------|
@@ -77,7 +77,7 @@
   | `{_global_.token}` | токен сессии |
   | `{_global_.xsrf}` | XSRF-токен для POST-запросов (см. раздел 4) |
   | `{_global_.id}` | ID текущего объекта/ресурса |
-  | `{_global_.grants}` | base64-JSON прав доступа: `JSON.parse(atob('{_global_.grants}'))` (`templates/main.html:135`) |
+  | `{_global_.grants}` | base64-JSON прав доступа: `JSON.parse(atob('{_global_.grants}'))` (`templates/main.html:138`) |
   | `{_global_.version}` | версия приложения для cache-busting (см. раздел 2) |
 
 - Кроме `_global_`, шаблонизатор понимает префиксы `{_request_.X}` (значение из
@@ -89,10 +89,10 @@
 ### 1.2. Блоки и встраивание рабочего места
 
 - Повторяемые и условные секции размечаются парами комментариев
-  `<!-- Begin: ИМЯ -->` … `<!-- End: ИМЯ -->` (`templates/main.html:189,195,382,384`).
+  `<!-- Begin: ИМЯ -->` … `<!-- End: ИМЯ -->` (`templates/main.html:192,198,385,387`).
 - Условный блок проверяет инлайн-комментарий вида `<!--{_global_.z}-->`: если
-  переменная не разрешается, блок пропускается (`templates/main.html:189`).
-- Маркер `<!-- File: a -->` (`templates/main.html:376`) динамически подключает шаблон
+  переменная не разрешается, блок пропускается (`templates/main.html:192`).
+- Маркер `<!-- File: a -->` (`templates/main.html:379`) динамически подключает шаблон
   рабочего места по имени `{_global_.action}.html` (например `dict.html`,
   `forms.html`). Если файла нет — подставляется `info.html`. Так рабочее место и
   встраивается в `main.html`.
@@ -104,11 +104,16 @@
 ## 2. Подключение CSS/JS и версионирование ресурсов
 
 - **Стили — только в `.css`, скрипты — только в `.js`.** Инлайн-стили и инлайн-скрипты
-  в шаблонах не используются (`README.md:71`). Исключение — короткая логика
-  инициализации (например, вызов `initHints`, см. раздел 9).
-- **URL ресурсов обязаны содержать версию** для сброса кэша:
+  в шаблонах не используются (`README.md:78`). Исключение — короткая логика
+  инициализации (например, вызов `initHints`, см. раздел 9);
+  пример применения исключения — блоки `<style>` и `<script>` для логики подсказок
+  в `templates/table.html:15-260`.
+- **URL ресурсов рекомендуется снабжать версией** для сброса кэша:
   `href="/css/file.css?{_global_.version}"`, `src="/js/file.js?{_global_.version}"`
-  (`templates/dash.html:9-10`; `README.md:72`).
+  (`templates/dash.html:1,73`; `README.md:79`).
+  Правило применяется в новых шаблонах (`dash.html`, `migr.html`); часть
+  старых шаблонов (`table.html`, `query.html`, `info.html` и др.) версию не указывает —
+  это техдолг, а не допустимое исключение.
 - Порядок подключения для рабочего места с таблицей: сначала CSS компонента, затем
   его JS, затем `hints.js` (`templates/table.html:10-13`).
 
@@ -127,8 +132,9 @@
 | `_m_del/{objectId}` | удалить объект (каскадно с подчинёнными) |
 | `_m_del_select` | массовое удаление выбранных записей (`templates/object.html:545`) |
 | `_m_ord/{objectId}` | установить позицию в порядке сортировки (`issue #1617`) |
-| `_m_up/{objectId}` / `_m_down/{objectId}` | сдвинуть запись вверх/вниз (`templates/forms.html:2479`) |
+| `_m_up/{objectId}` | сдвинуть запись вверх среди равных (`templates/forms.html:2479`) |
 | `_m_move/{objectId}` | сменить родителя (параметр `up={newParentId}`) |
+| `_m_id/{objectId}` | переименовать ID объекта (параметр `new_id`; административная команда) |
 
 - **`_m_save` — только для первой колонки**, для всех прочих реквизитов используйте
   `_m_set` (`issue #775`; `js/integram-table.js:5633`).
@@ -139,7 +145,8 @@
   - `t{reqId}={value}` — значение реквизита по его ID; можно несколько:
     `&t271=...&t273=...` (`templates/upload.html:959-961`);
   - `full=1` — **обязателен** при записи длинных/HTML-полей, иначе значение
-    обрезается до 127 символов (источник истины — комментарии в
+    обрезается до 127 символов (`index.php:49` — константа `VAL_LIM=127`,
+    `index.php:6821,7215` — проверка обрезки; комментарии в
     `mcp-server/index.js:2122`).
 - Пример (создание + установка реквизитов из `templates/upload.html:959-961`):
 
@@ -156,18 +163,22 @@
 
 - **Каждый POST-запрос обязан содержать токен `_xsrf`.** GET-запросы токен не требуют.
 - Токен берётся из шаблонной переменной: `var xsrf = '{_global_.xsrf}'`
-  (`templates/main.html:128`).
+  (`templates/main.html:131`).
 - В рабочих местах используется хелпер `intApi(method, url, branch, vars, index)`,
-  который **сам подставляет токен** (`templates/upload.html:820-832`):
+  который **сам подставляет токен** (`templates/upload.html:821-832`):
   - если `vars` — объект `FormData`: `vars.append('_xsrf', xsrf)`;
   - если `vars` — строка: `vars = '_xsrf=' + xsrf + '&' + vars` и заголовок
     `Content-Type: application/x-www-form-urlencoded`.
 - Для обычной HTML-формы добавляйте скрытое поле:
   `<input type="hidden" name="_xsrf" value="{_global_.xsrf}">`
   (`templates/edit_obj.html:77`).
-- Аналогичные хелперы (`myApi`, `newApi`) есть в `templates/sql.html`,
-  `templates/form.html`, `templates/quiz.html`, `templates/object.html` — они инжектят
-  токен тем же способом. Не дублируйте логику XSRF вручную, если хелпер уже есть.
+- Аналогичные хелперы используют ту же логику инжекта токена:
+  - `newApi` (с поддержкой `FormData`) — глобальный хелпер в `js/main.js:2-13`;
+  - `myApi` (только строка) — локальный хелпер в `templates/sql.html:691` и
+    `templates/form.html:217`;
+  - `intApi` (с поддержкой `FormData`) — локальный хелпер в
+    `templates/quiz.html:952` и `templates/object.html:1526`.
+- Не дублируйте логику XSRF вручную, если хелпер уже есть.
 
 ---
 
@@ -233,9 +244,10 @@
   (`templates/query.html:1-8`, `templates/table.html:1-8`)
 - **Программно**: `new IntegramTable('container-id', { apiUrl, dataSource, tableTypeId,
   parentId, recordId, pageSize, cookiePrefix, title, instanceName, onCellClick,
-  onDataLoad })` (`templates/calendar.html:1328`).
+  onDataLoad, debug })` (`templates/calendar.html:1328`).
 - `parentId` берётся из опции или из URL (`parentId` / `F_U` / `up`); `recordId` —
-  фильтр по записи (`issue #563`).
+  фильтр по записи, берётся из опции или из GET-параметра `F_I` (`issue #563`).
+- `debug: false` — включить трассировку в консоль (`js/integram-table/01-core.js:22`).
 
 ### 7.2. Правило сборки бандла
 
@@ -250,10 +262,16 @@
 ## 8. Модальные окна и запрет `alert`/`confirm`/`prompt`
 
 - **Никогда не используйте** `alert()`, `confirm()`, `prompt()`. Вместо них —
-  модальные методы (`README.md:41,67-69`):
-  - `showDeleteConfirmModal(message)` — подтверждение удаления;
-  - `showErrorModal(message)` — ошибки (в `MainAppController`);
-  - `showWarningModal(message)` — предупреждения (в `IntegramTable`).
+  модальные методы (`README.md:41,73-76`):
+  - `showDeleteConfirmModal()` — подтверждение удаления (в `IntegramTable`, без
+    параметра — текст фиксированный; `js/integram-table/21-form-field-settings.js:893`);
+  - `showErrorModal(message)` — ошибки (в `MainAppController`;
+    `js/main-app.js:1607`);
+  - `showWarningModal(message, objId = null)` — предупреждения во время сохранения
+    (в `IntegramTable`; `js/integram-table/22-utils.js:430`);
+  - `showWarningsModal(message)` — информационные предупреждения **после** сохранения,
+    не блокирует операцию (в `IntegramTable`; `js/integram-table/22-utils.js:491`;
+    `issue #610`).
 
 ---
 

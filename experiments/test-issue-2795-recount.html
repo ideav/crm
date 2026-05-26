@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Issue #2795 — recount total on click</title>
+    <link rel="stylesheet" href="../assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="../css/integram-table.css">
+    <style>
+        /* Minimal Material-ish variables so the page is readable standalone */
+        :root {
+            --md-primary: #1976d2;
+            --md-primary-dark: #115293;
+            --md-surface: #fff;
+            --md-text-secondary: #555;
+            --md-elevation-2: 0 1px 4px rgba(0,0,0,0.2);
+            --md-transition: all 0.15s ease;
+        }
+        body { font-family: sans-serif; padding: 24px; background: #f0f2f5; }
+        h1 { font-size: 1.2rem; }
+        /* The real .scroll-counter is position:fixed; pin it inline for the test container */
+        #tbl { position: relative; height: 80px; }
+        #tbl .scroll-counter { position: static; display: inline-block; }
+        #results { margin-top: 20px; font-family: monospace; white-space: pre-wrap; }
+        .pass { color: #1b7f2b; }
+        .fail { color: #c62828; font-weight: bold; }
+        button { margin: 4px 4px 12px 0; }
+    </style>
+    <script src="../js/integram-table.js"></script>
+</head>
+<body>
+<h1>Issue #2795 — click the record count to re-request it; show a small non-clickable spinner while counting</h1>
+
+<div id="tbl"></div>
+
+<div>
+    <button id="btn-render">Re-render counter</button>
+    <button id="btn-resolve">Resolve pending fetch</button>
+    <span id="state"></span>
+</div>
+
+<div id="results">Running automated checks…</div>
+
+<script>
+    // Build a minimal IntegramTable instance WITHOUT booting init() (which would
+    // hit the network). We exercise the real renderTotalCountDisplay /
+    // updateScrollCounterTotal / fetchTotalCount methods on the real prototype.
+    const t = Object.create(IntegramTable.prototype);
+    t.container = document.getElementById('tbl');
+    t.options = { instanceName: 'table', apiUrl: 'https://example.com/db/report/123' };
+    t.loadedRecords = 20;
+    t.totalRows = null;            // unknown initially -> shows clickable "?"
+    t.isFetchingTotalCount = false;
+    t.filters = {};
+    t.columns = [];
+    t.objectTableId = null;        // report source -> no add/paste buttons
+    window.table = t;
+
+    // Controllable mock fetch so we can observe the in-flight spinner state.
+    let resolvePending = null;
+    let nextCount = 142;
+    window.fetch = (url) => {
+        window.__lastUrl = String(url);
+        return new Promise((resolve) => {
+            resolvePending = () => resolve({ json: async () => ({ count: nextCount }) });
+            document.getElementById('state').textContent = 'fetch in flight → ' + window.__lastUrl;
+        });
+    };
+
+    function renderCounter() { t.container.innerHTML = t.renderScrollCounter(); }
+    renderCounter();
+
+    document.getElementById('btn-render').onclick = renderCounter;
+    document.getElementById('btn-resolve').onclick = () => { if (resolvePending) { resolvePending(); resolvePending = null; } };
+
+    // ---- Automated assertions -------------------------------------------------
+    const out = [];
+    let failures = 0;
+    function check(name, cond) {
+        out.push((cond ? '✓ PASS' : '✗ FAIL') + ' — ' + name);
+        if (!cond) failures++;
+    }
+    function q(sel) { return t.container.querySelector(sel); }
+
+    async function runTests() {
+        // 1) Initially the unknown total is a clickable "?"
+        renderCounter();
+        const unknown = q('.total-count-unknown');
+        check('unknown total renders clickable "?"', !!unknown && unknown.textContent.trim() === '?');
+        check('"?" has an onclick handler', !!unknown && /fetchTotalCount/.test(unknown.getAttribute('onclick') || ''));
+        check('no spinner before any request', !q('.total-count-loading'));
+
+        // 2) Clicking fetches: while in flight, the number is replaced by a
+        //    small NON-clickable spinner.
+        nextCount = 142;
+        const p1 = t.fetchTotalCount();         // synchronous part runs, then awaits mocked fetch
+        check('spinner shown while counting', !!q('.total-count-loading .pi-spinner'));
+        check('spinner is non-clickable (no onclick)', q('.total-count-loading') && !q('.total-count-loading').getAttribute('onclick'));
+        check('number/“?” hidden while counting', !q('.total-count-unknown') && !q('.total-count-known'));
+        check('isFetchingTotalCount flag is true', t.isFetchingTotalCount === true);
+
+        resolvePending();
+        await p1;
+
+        // 3) After the response the recounted number shows and is clickable.
+        const known = q('.total-count-known');
+        check('total replaced with counted number 142', !!known && known.textContent.trim() === '142');
+        check('counted number is clickable (re-request)', !!known && /fetchTotalCount/.test(known.getAttribute('onclick') || ''));
+        check('spinner cleared after response', !q('.total-count-loading'));
+        check('flag reset after response', t.isFetchingTotalCount === false);
+
+        // 4) Clicking the known number re-requests the count again.
+        nextCount = 257;
+        const p2 = t.fetchTotalCount();
+        check('clicking the number recounts → spinner again', !!q('.total-count-loading .pi-spinner'));
+        resolvePending();
+        await p2;
+        check('total updates to the re-requested value 257', q('.total-count-known') && q('.total-count-known').textContent.trim() === '257');
+
+        // 5) Re-entrancy guard: a second click while a request is in flight is ignored.
+        nextCount = 999;
+        const a = t.fetchTotalCount();          // starts a request
+        const before = window.__lastUrl;
+        window.__lastUrl = null;
+        const b = t.fetchTotalCount();          // should be a no-op (guard)
+        check('second concurrent recount is ignored', window.__lastUrl === null);
+        resolvePending();
+        await a; await b;
+
+        const res = document.getElementById('results');
+        res.innerHTML = out.map(l => '<div class="' + (l.startsWith('✓') ? 'pass' : 'fail') + '">' + l + '</div>').join('');
+        res.innerHTML += '<div style="margin-top:8px"><b>' + (failures === 0 ? 'ALL TESTS PASSED' : failures + ' TEST(S) FAILED') + '</b></div>';
+        window.__testFailures = failures;
+        window.__testDone = true;
+
+        // Leave the counter in the known/clickable state for manual inspection.
+        renderCounter();
+    }
+
+    runTests();
+</script>
+</body>
+</html>
