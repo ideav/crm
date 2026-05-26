@@ -149,6 +149,10 @@
     background: var(--hover-bg, rgba(37, 99, 235, 0.06));
 }
 
+.xcom-match-table tr.xcom-match-row-selected td {
+    background: var(--selected-bg, rgba(37, 99, 235, 0.14));
+}
+
 .xcom-match-action-col {
     width: 8.75rem;
 }
