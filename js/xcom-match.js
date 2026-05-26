@@ -161,9 +161,9 @@
         });
 
         if (selectedRow) {
-            if (selectedRow.id) params.set('sku_id', selectedRow.id);
+            // if (selectedRow.id) params.set('sku_id', selectedRow.id);
             if (selectedRow.values && selectedRow.values.length) {
-                params.set('sku_value', trimValue(selectedRow.values[0]));
+                params.set('FR_SKU', trimValue(selectedRow.values[0]));
             }
         }
 
