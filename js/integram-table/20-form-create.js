@@ -384,6 +384,14 @@
                 }
             };
 
+            const getInvitationUsername = () => {
+                const savedUsername = modal.dataset.firstColumnValue || '';
+                if (savedUsername) return savedUsername;
+
+                const mainInput = modal.querySelector('#field-main');
+                return mainInput ? mainInput.value.trim() : '';
+            };
+
             resetBtns.forEach(btn => {
                 btn.addEventListener('click', () => {
                     const fieldId = btn.dataset.fieldId;
@@ -403,11 +411,10 @@
                     const fieldId = btn.dataset.fieldId;
                     const pwdInput = modal.querySelector(`#field-${ fieldId }`);
                     if (!pwdInput) return;
-                    // Copy login link (username from first column of the table, issue #1479)
-                    // Do not allow copying invitation before the record is saved (issue #1591)
-                    const username = modal.dataset.firstColumnValue || '';
+                    // Existing forms use the saved first column; create forms use the typed main value.
+                    const username = getInvitationUsername();
                     if (!username) {
-                        this.showCopyNotification('Сохраните запись перед копированием приглашения', true, 5000);
+                        this.showCopyNotification('Введите имя пользователя перед копированием приглашения', true, 5000);
                         return;
                     }
                     const pwd = generatePassword();
