@@ -165,6 +165,12 @@
             if (selectedRow.values && selectedRow.values.length) {
                 params.set('FR_SKU', trimValue(selectedRow.values[0]));
             }
+            fields.forEach(function(field, fieldIndex) {
+                var parsed = parseRefValue(selectedRow.values[fieldIndex]);
+                if (!parsed.refId) return;
+                var key = normalizeReportFilterKey(field.name || field.id);
+                if (key) params.set('FR_' + key + 'ID', parsed.refId);
+            });
         }
 
         return '/' + encodePathSegment(dbName) + '/report/' + encodePathSegment(report) + '?' + params.toString();
