@@ -1920,6 +1920,13 @@
                 const editingCellRef = this.currentEditingCell;
                 setTimeout(() => {
                     const outsideClickHandler = (e) => {
+                        // Don't cancel if clicking inside the nested reference creation modal.
+                        // The modal Save click must keep currentEditingCell alive until _m_new finishes.
+                        const refModal = e.target.closest('[data-is-reference-create="true"]');
+                        const refOverlay = e.target.closest('.edit-form-overlay');
+                        if (refModal || refOverlay) {
+                            return;
+                        }
                         // Issue #1384: dropdown is detached from cell (appended to body), so check it separately
                         const fixedDropdown = this.currentEditingCell && this.currentEditingCell.fixedDropdown;
                         if (fixedDropdown && fixedDropdown.contains(e.target)) {
