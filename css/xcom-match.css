@@ -1,0 +1,268 @@
+.xcom-match {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    min-height: calc(100vh - 90px);
+    padding: 1rem;
+    color: var(--text-primary, #1f2937);
+}
+
+.xcom-match-search-panel,
+.xcom-match-pane {
+    background: var(--card-bg, #ffffff);
+    border: 1px solid var(--border-color, #d9e0ea);
+    border-radius: 8px;
+}
+
+.xcom-match-search-panel {
+    padding: 1rem;
+}
+
+.xcom-match-search-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.xcom-match-search-head,
+.xcom-match-pane-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.xcom-match-search-head h1,
+.xcom-match-pane-head h2 {
+    margin: 0;
+    font-size: 1rem;
+    line-height: 1.25;
+    font-weight: 650;
+}
+
+.xcom-match-search-head p,
+.xcom-match-summary {
+    margin: 0.25rem 0 0;
+    color: var(--text-secondary, #64748b);
+    font-size: 0.85rem;
+}
+
+.xcom-match-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.xcom-match-fields {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.xcom-match-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.xcom-match-field label {
+    color: var(--text-secondary, #475569);
+    font-size: 0.8rem;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+
+.xcom-match-field input {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid var(--border-color, #cfd8e3);
+    border-radius: 6px;
+    background: var(--input-bg, #ffffff);
+    color: var(--text-primary, #1f2937);
+    min-height: 2.35rem;
+    padding: 0.45rem 0.6rem;
+    font: inherit;
+}
+
+.xcom-match-field input:focus {
+    outline: none;
+    border-color: var(--button-primary, #2563eb);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.14);
+}
+
+.xcom-match-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1rem;
+    flex: 1;
+    min-height: 0;
+}
+
+.xcom-match-pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 360px;
+}
+
+.xcom-match-pane-head {
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid var(--border-color, #d9e0ea);
+}
+
+.xcom-match-table-wrap {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+}
+
+.xcom-match-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: auto;
+    font-size: 0.88rem;
+}
+
+.xcom-match-table th,
+.xcom-match-table td {
+    border-bottom: 1px solid var(--border-color, #e5ebf2);
+    padding: 0.55rem 0.65rem;
+    text-align: left;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+.xcom-match-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--bg-secondary, #f6f8fb);
+    color: var(--text-secondary, #475569);
+    font-weight: 650;
+}
+
+.xcom-match-table tr:hover td {
+    background: var(--hover-bg, rgba(37, 99, 235, 0.06));
+}
+
+.xcom-match-table tr.xcom-match-row-selected td {
+    background: var(--selected-bg, rgba(37, 99, 235, 0.14));
+}
+
+.xcom-match-action-col {
+    width: 8.75rem;
+}
+
+.xcom-match-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    min-height: 2.25rem;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 0.42rem 0.75rem;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.xcom-match-btn:disabled {
+    opacity: 0.55;
+    cursor: wait;
+}
+
+.xcom-match-btn-primary {
+    background: var(--button-primary, #2563eb);
+    border-color: var(--button-primary, #2563eb);
+    color: #ffffff;
+}
+
+.xcom-match-btn-primary:hover:not(:disabled) {
+    background: #1d4ed8;
+}
+
+.xcom-match-btn-secondary {
+    background: var(--bg-secondary, #f6f8fb);
+    border-color: var(--border-color, #cfd8e3);
+    color: var(--text-primary, #1f2937);
+}
+
+.xcom-match-btn-secondary:hover:not(:disabled) {
+    border-color: var(--button-primary, #2563eb);
+}
+
+.xcom-match-btn-select {
+    width: 100%;
+}
+
+.xcom-match-empty,
+.xcom-match-error,
+.xcom-match-loading {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    min-height: 7rem;
+    padding: 1rem;
+    color: var(--text-secondary, #64748b);
+}
+
+.xcom-match-error {
+    color: var(--danger, #b91c1c);
+}
+
+.xcom-match-spinner {
+    width: 1rem;
+    height: 1rem;
+    border-radius: 999px;
+    border: 2px solid rgba(37, 99, 235, 0.2);
+    border-top-color: var(--button-primary, #2563eb);
+    animation: xcom-match-spin 0.8s linear infinite;
+    flex: 0 0 auto;
+}
+
+@keyframes xcom-match-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (max-width: 1100px) {
+    .xcom-match-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .xcom-match-pane {
+        min-height: 320px;
+    }
+}
+
+@media (max-width: 760px) {
+    .xcom-match {
+        padding: 0.75rem;
+    }
+
+    .xcom-match-search-head,
+    .xcom-match-pane-head {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .xcom-match-actions,
+    .xcom-match-actions .xcom-match-btn {
+        width: 100%;
+    }
+
+    .xcom-match-fields {
+        grid-template-columns: 1fr;
+    }
+
+    .xcom-match-table {
+        min-width: 680px;
+    }
+}
