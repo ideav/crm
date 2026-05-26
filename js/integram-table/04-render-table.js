@@ -82,6 +82,11 @@
                                 Удалить (${ this.selectedRows.size })
                             </button>
                             ` : '' }
+                            ${ this.tableDeleteGranted && this.getDataSourceType() === 'table' && this.hasActiveFilters() ? `
+                            <button class="btn btn-sm btn-outline-danger integram-delete-by-filter-btn" onclick="window.${ instanceName }.showDeleteByFilterConfirm(event)" title="Удалить все записи, соответствующие текущему фильтру">
+                                Удалить по фильтру
+                            </button>
+                            ` : '' }
                             <div class="integram-table-settings" onclick="window.${ instanceName }.copyConfigUrl()" title="Скопировать ссылку с текущими фильтрами и группами">
                                 <i class="pi pi-copy"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">ссылка</span>' : '' }

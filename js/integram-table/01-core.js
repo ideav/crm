@@ -41,6 +41,7 @@
             this.filtersEnabled = false;
             this.objectTableId = null;  // Table ID when data is in object/JSON_OBJ format (for _count=1 queries)
             this.tableGranted = null;  // 'WRITE' = full access, other value = read-only (issue #1508)
+            this.tableDeleteGranted = false;  // true when metadata.delete === '1' (issue #2749)
             this.rawObjectData = [];  // Raw data array with {i, u, o, r} for object format (preserves record IDs)
             this.styleColumns = {};  // Map of column IDs to their style column values
             this.idColumns = new Set();  // Set of hidden ID column IDs
@@ -218,6 +219,26 @@
             const id = parseInt(typeId, 10);
             // Base types are IDs 2-17 (primitives like string, number, date, etc.)
             return !isNaN(id) && id >= 2 && id <= 17;
+        }
+
+        /**
+         * Build URLSearchParams with currently active column filters (issue #2749).
+         * Shared between loadDataFromTable and deleteByFilter.
+         * @returns {URLSearchParams}
+         */
+        buildCurrentFilterParams() {
+            const filters = this.filters || {};
+            const params = new URLSearchParams();
+            Object.keys(filters).forEach(colId => {
+                const filter = filters[colId];
+                if (filter.value || filter.type === '%' || filter.type === '!%') {
+                    const column = this.columns.find(c => c.id === colId);
+                    if (column) {
+                        this.applyFilter(params, column, filter);
+                    }
+                }
+            });
+            return params;
         }
 
         /**
@@ -946,6 +967,9 @@
                 // Store table-level granted value for access control (issue #1508)
                 this.tableGranted = metadata.granted !== undefined ? metadata.granted : null;
 
+                // Store delete grant from metadata (issue #2749)
+                this.tableDeleteGranted = metadata.delete === '1' || metadata.delete === 1;
+
                 // Convert metadata to columns format
                 const columns = [];
 
@@ -989,18 +1013,7 @@
             }
 
             // Apply filters if any (issue #508)
-            const filters = this.filters || {};
-            const filterParams = new URLSearchParams();
-
-            Object.keys(filters).forEach(colId => {
-                const filter = filters[colId];
-                if (filter.value || filter.type === '%' || filter.type === '!%') {
-                    const column = this.columns.find(c => c.id === colId);
-                    if (column) {
-                        this.applyFilter(filterParams, column, filter);
-                    }
-                }
-            });
+            const filterParams = this.buildCurrentFilterParams();
 
             // Add filter parameters to URL
             if (filterParams.toString()) {
@@ -1034,6 +1047,7 @@
                 }
                 this.tableExportAllowed = refreshedMetadata.export === '1' || refreshedMetadata.export === 1;
                 this.tableGranted = refreshedMetadata.granted !== undefined ? refreshedMetadata.granted : null;
+                this.tableDeleteGranted = refreshedMetadata.delete === '1' || refreshedMetadata.delete === 1;
 
                 const refreshedColumns = [];
                 const mainColGranted = this.isTableWritable() ? 1 : 0;

@@ -58,6 +58,7 @@ class IntegramTable{
             this.filtersEnabled = false;
             this.objectTableId = null;  // Table ID when data is in object/JSON_OBJ format (for _count=1 queries)
             this.tableGranted = null;  // 'WRITE' = full access, other value = read-only (issue #1508)
+            this.tableDeleteGranted = false;  // true when metadata.delete === '1' (issue #2749)
             this.rawObjectData = [];  // Raw data array with {i, u, o, r} for object format (preserves record IDs)
             this.styleColumns = {};  // Map of column IDs to their style column values
             this.idColumns = new Set();  // Set of hidden ID column IDs
@@ -235,6 +236,26 @@ class IntegramTable{
             const id = parseInt(typeId, 10);
             // Base types are IDs 2-17 (primitives like string, number, date, etc.)
             return !isNaN(id) && id >= 2 && id <= 17;
+        }
+
+        /**
+         * Build URLSearchParams with currently active column filters (issue #2749).
+         * Shared between loadDataFromTable and deleteByFilter.
+         * @returns {URLSearchParams}
+         */
+        buildCurrentFilterParams() {
+            const filters = this.filters || {};
+            const params = new URLSearchParams();
+            Object.keys(filters).forEach(colId => {
+                const filter = filters[colId];
+                if (filter.value || filter.type === '%' || filter.type === '!%') {
+                    const column = this.columns.find(c => c.id === colId);
+                    if (column) {
+                        this.applyFilter(params, column, filter);
+                    }
+                }
+            });
+            return params;
         }
 
         /**
@@ -963,6 +984,9 @@ class IntegramTable{
                 // Store table-level granted value for access control (issue #1508)
                 this.tableGranted = metadata.granted !== undefined ? metadata.granted : null;
 
+                // Store delete grant from metadata (issue #2749)
+                this.tableDeleteGranted = metadata.delete === '1' || metadata.delete === 1;
+
                 // Convert metadata to columns format
                 const columns = [];
 
@@ -1006,18 +1030,7 @@ class IntegramTable{
             }
 
             // Apply filters if any (issue #508)
-            const filters = this.filters || {};
-            const filterParams = new URLSearchParams();
-
-            Object.keys(filters).forEach(colId => {
-                const filter = filters[colId];
-                if (filter.value || filter.type === '%' || filter.type === '!%') {
-                    const column = this.columns.find(c => c.id === colId);
-                    if (column) {
-                        this.applyFilter(filterParams, column, filter);
-                    }
-                }
-            });
+            const filterParams = this.buildCurrentFilterParams();
 
             // Add filter parameters to URL
             if (filterParams.toString()) {
@@ -1051,6 +1064,7 @@ class IntegramTable{
                 }
                 this.tableExportAllowed = refreshedMetadata.export === '1' || refreshedMetadata.export === 1;
                 this.tableGranted = refreshedMetadata.granted !== undefined ? refreshedMetadata.granted : null;
+                this.tableDeleteGranted = refreshedMetadata.delete === '1' || refreshedMetadata.delete === 1;
 
                 const refreshedColumns = [];
                 const mainColGranted = this.isTableWritable() ? 1 : 0;
@@ -1675,6 +1689,11 @@ class IntegramTable{
                             ${ this.checkboxMode && this.selectedRows.size > 0 && this.isTableWritable() ? `
                             <button class="btn btn-sm btn-danger integram-bulk-delete-btn" id="${ instanceName }-bulk-delete-btn" onclick="window.${ instanceName }.showBulkDeleteConfirm(event)">
                                 Удалить (${ this.selectedRows.size })
+                            </button>
+                            ` : '' }
+                            ${ this.tableDeleteGranted && this.getDataSourceType() === 'table' && this.hasActiveFilters() ? `
+                            <button class="btn btn-sm btn-outline-danger integram-delete-by-filter-btn" onclick="window.${ instanceName }.showDeleteByFilterConfirm(event)" title="Удалить все записи, соответствующие текущему фильтру">
+                                Удалить по фильтру
                             </button>
                             ` : '' }
                             <div class="integram-table-settings" onclick="window.${ instanceName }.copyConfigUrl()" title="Скопировать ссылку с текущими фильтрами и группами">
@@ -18180,6 +18199,193 @@ class IntegramTable{
                 console.error('Copy to buffer error:', error);
                 this.showToast(`Ошибка копирования: ${ error.message }`, 'error');
             }
+        }
+
+        /**
+         * Show confirmation popup for "Delete by filter" (issue #2749).
+         * Button is only shown when tableDeleteGranted && hasActiveFilters() — no extra guard needed.
+         */
+        showDeleteByFilterConfirm(event) {
+            if (event) event.stopPropagation();
+
+            const btn = event && event.target.closest('.integram-delete-by-filter-btn');
+            if (!btn) return;
+
+            const existing = this.container.querySelector('.delete-by-filter-confirm');
+            if (existing) {
+                existing.remove();
+                btn.style.display = '';
+                return;
+            }
+
+            btn.style.display = 'none';
+
+            const confirmHtml = `
+                <div class="delete-by-filter-confirm" style="display:inline-flex;align-items:center;gap:6px;">
+                    <span style="font-size:0.85rem;">Удалить все записи по фильтру?</span>
+                    <button class="btn btn-sm btn-danger dbf-confirm-btn">Да, удалить</button>
+                    <button class="btn btn-sm btn-outline-secondary dbf-cancel-btn">Отмена</button>
+                </div>
+            `;
+            btn.insertAdjacentHTML('afterend', confirmHtml);
+
+            const popup = this.container.querySelector('.delete-by-filter-confirm');
+            popup.querySelector('.dbf-confirm-btn').addEventListener('click', () => {
+                popup.remove();
+                btn.style.display = '';
+                this.deleteByFilter();
+            });
+            popup.querySelector('.dbf-cancel-btn').addEventListener('click', () => {
+                popup.remove();
+                btn.style.display = '';
+            });
+        }
+
+        /**
+         * Delete all records matching the current filter (issue #2749).
+         * Fetches the full filtered ID list then deletes each via _m_del/{id}?JSON,
+         * showing the same progress modal as bulkDelete().
+         * Requires tableDeleteGranted === true (enforced by button visibility).
+         */
+        async deleteByFilter() {
+            const apiBase = this.getApiBase();
+            const typeId = this.options.tableTypeId;
+
+            if (!typeId) {
+                this.showToast('Ошибка: не определён тип таблицы', 'error');
+                return;
+            }
+
+            // Build filter query string (same params as loadDataFromTable)
+            const filterParams = this.buildCurrentFilterParams();
+            if (this.options.parentId) {
+                filterParams.append('F_U', this.options.parentId);
+            }
+            const pageParams = this.getPageUrlParams();
+
+            let fetchUrl = `${ apiBase }/object/${ typeId }/?JSON_OBJ&LIMIT=0,999999`;
+            if (filterParams.toString()) fetchUrl += `&${ filterParams.toString() }`;
+            if (pageParams.toString()) fetchUrl += `&${ pageParams.toString() }`;
+
+            // Fetch matching record IDs
+            let records;
+            try {
+                const data = await this.fetchJson(fetchUrl);
+                if (!Array.isArray(data)) {
+                    this.showToast('Ошибка получения записей для удаления', 'error');
+                    return;
+                }
+                records = data
+                    .filter(item => item && item.i)
+                    .map(item => ({ id: item.i, value: (item.r && item.r[0]) || '' }));
+            } catch (err) {
+                this.showToast(`Ошибка: ${ err.message }`, 'error');
+                return;
+            }
+
+            if (records.length === 0) {
+                this.showToast('Нет записей, соответствующих фильтру', 'warning');
+                return;
+            }
+
+            // Progress modal (same pattern as bulkDelete)
+            const total = records.length;
+            let completed = 0;
+            const errors = [];
+            const warnings = [];
+
+            const progressId = `dbf-progress-${ Date.now() }`;
+            document.body.insertAdjacentHTML('beforeend', `
+                <div class="integram-modal-overlay" id="${ progressId }">
+                    <div class="integram-modal" style="max-width:500px;">
+                        <div class="integram-modal-header"><h3>Удаление по фильтру</h3></div>
+                        <div class="integram-modal-body">
+                            <div class="bulk-delete-progress-bar-container">
+                                <div class="bulk-delete-progress-bar" style="width:0%"></div>
+                            </div>
+                            <div class="bulk-delete-progress-text">Удалено: 0 / ${ total }</div>
+                            <div class="bulk-delete-errors" style="display:none;"></div>
+                        </div>
+                    </div>
+                </div>
+            `);
+
+            const overlay = document.getElementById(progressId);
+            const bar = overlay.querySelector('.bulk-delete-progress-bar');
+            const text = overlay.querySelector('.bulk-delete-progress-text');
+            const errorsDiv = overlay.querySelector('.bulk-delete-errors');
+
+            const updateProgress = () => {
+                bar.style.width = `${ Math.round((completed / total) * 100) }%`;
+                text.textContent = `Удалено: ${ completed } / ${ total }`;
+            };
+
+            await Promise.all(records.map(async (record) => {
+                try {
+                    const params = new URLSearchParams();
+                    if (typeof xsrf !== 'undefined') params.append('_xsrf', xsrf);
+                    const resp = await fetch(`${ apiBase }/_m_del/${ record.id }?JSON`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: params.toString()
+                    });
+                    const raw = await resp.text();
+                    let result;
+                    try { result = JSON.parse(raw); } catch (_) {
+                        warnings.push(`#${ record.id } : ${ record.value } : ${ raw }`);
+                    }
+                    if (result) {
+                        const serverError = Array.isArray(result)
+                            ? (result[0] && result[0].error) || null
+                            : result.error || null;
+                        if (serverError) errors.push(`#${ record.id } : ${ record.value } : ${ serverError }`);
+                    }
+                } catch (err) {
+                    errors.push(`#${ record.id } : ${ record.value } : ${ err.message }`);
+                } finally {
+                    completed++;
+                    updateProgress();
+                }
+            }));
+
+            if (errors.length > 0 || warnings.length > 0) {
+                errorsDiv.style.display = 'block';
+                let html = '';
+                if (errors.length > 0) {
+                    html += `<div class="alert alert-danger" style="max-height:200px;overflow-y:auto;font-size:0.75rem;margin-top:10px;">
+                        <strong>Ошибки:</strong><br>${ errors.map(e => this.escapeHtml(e)).join('<br>') }
+                    </div>`;
+                }
+                if (warnings.length > 0) {
+                    html += `<div class="alert alert-warning" style="max-height:200px;overflow-y:auto;font-size:0.75rem;margin-top:10px;">
+                        <strong>Предупреждения:</strong><br>${ warnings.map(w => this.escapeHtml(w)).join('<br>') }
+                    </div>`;
+                }
+                errorsDiv.innerHTML = html;
+            }
+
+            text.textContent = errors.length > 0
+                ? `Удаление завершено с ошибками: ${ completed } / ${ total }`
+                : `Удаление завершено: ${ completed } / ${ total }`;
+
+            if (errors.length === 0 && warnings.length === 0) {
+                setTimeout(() => overlay.remove(), 1500);
+            } else {
+                const closeBtn = document.createElement('button');
+                closeBtn.className = 'btn btn-sm btn-primary';
+                closeBtn.style.marginTop = '10px';
+                closeBtn.textContent = 'Закрыть';
+                closeBtn.addEventListener('click', () => overlay.remove());
+                overlay.querySelector('.integram-modal-body').appendChild(closeBtn);
+            }
+
+            // Reload data after deletion
+            this.data = [];
+            this.rawObjectData = [];
+            this.loadedRecords = 0;
+            this.hasMore = true;
+            this.totalRows = null;
+            await this.loadData(false);
         }
     }
 
