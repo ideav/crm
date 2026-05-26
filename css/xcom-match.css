@@ -153,6 +153,14 @@
     background: var(--selected-bg, rgba(37, 99, 235, 0.14));
 }
 
+.xcom-match-table tr.xcom-match-row-tmm td {
+    background: rgba(134, 239, 172, 0.2);
+}
+
+.xcom-match-table tr.xcom-match-row-tmm.xcom-match-row-selected td {
+    background: rgba(134, 239, 172, 0.38);
+}
+
 .xcom-match-action-col {
     width: 8.75rem;
 }
