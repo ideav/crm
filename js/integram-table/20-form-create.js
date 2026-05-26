@@ -404,10 +404,10 @@
                     const pwdInput = modal.querySelector(`#field-${ fieldId }`);
                     if (!pwdInput) return;
                     // Copy login link (username from first column of the table, issue #1479)
-                    // Do not allow copying invitation before the record is saved (issue #1591)
-                    const username = modal.dataset.firstColumnValue || '';
+                    // In create mode, use the current main field value instead of requiring a saved record.
+                    const username = this.getPasswordInvitationUsername(modal);
                     if (!username) {
-                        this.showCopyNotification('Сохраните запись перед копированием приглашения', true, 5000);
+                        this.showCopyNotification('Укажите имя пользователя перед копированием приглашения', true, 5000);
                         return;
                     }
                     const pwd = generatePassword();
@@ -421,6 +421,115 @@
                     this.showCopyNotification('Пароль сгенерирован и скопирован в буфер. Обязательно сохраните эту форму!', false, 7000);
                 });
             });
+        }
+
+        getPasswordInvitationUsername(modal) {
+            const savedUsername = (modal && modal.dataset && modal.dataset.firstColumnValue) || '';
+            if (savedUsername) return savedUsername;
+
+            const mainInput = modal && modal.querySelector ? modal.querySelector('#field-main') : null;
+            if (!mainInput) return '';
+
+            if (mainInput.type === 'checkbox') {
+                return mainInput.checked ? '1' : '';
+            }
+
+            return (mainInput.value || '').trim();
+        }
+
+        collectCreatePasswordFields(modal, typeId) {
+            if (!modal || !modal.querySelectorAll) return [];
+
+            const fields = [];
+            modal.querySelectorAll('input[type="password"][name]').forEach(input => {
+                if (!input || input.disabled) return;
+
+                const rawName = input.getAttribute ? input.getAttribute('name') : input.name;
+                if (!rawName) return;
+
+                const value = input.value;
+                if (value === '' || value === null || value === undefined) return;
+
+                const saveKey = rawName === 'main' ? `t${ typeId }` : rawName;
+                if (!/^t\d+$/.test(saveKey)) return;
+
+                fields.push({
+                    formKey: rawName,
+                    saveKey,
+                    value
+                });
+            });
+
+            return fields;
+        }
+
+        isDeferredPasswordField(formKey, deferredPasswordFields) {
+            if (!Array.isArray(deferredPasswordFields)) return false;
+            return deferredPasswordFields.some(field => field.formKey === formKey);
+        }
+
+        getSavedRecordId(result) {
+            if (!result) return null;
+
+            const candidates = [result.obj, result.id, result.i];
+            for (const candidate of candidates) {
+                if (candidate === null || candidate === undefined || candidate === '') continue;
+
+                if (typeof candidate === 'object') {
+                    const nested = candidate.id ?? candidate.i ?? candidate.obj;
+                    if (nested !== null && nested !== undefined && nested !== '') {
+                        return nested;
+                    }
+                    continue;
+                }
+
+                return candidate;
+            }
+
+            return null;
+        }
+
+        async saveDeferredPasswordFields(apiBase, recordId, passwordFields) {
+            if (!passwordFields || passwordFields.length === 0) return null;
+            if (!recordId) {
+                throw new Error('Сервер не вернул ID созданной записи для сохранения пароля');
+            }
+
+            const params = new URLSearchParams();
+            if (typeof xsrf !== 'undefined') {
+                params.append('_xsrf', xsrf);
+            }
+
+            passwordFields.forEach(field => {
+                params.append(field.saveKey, field.value);
+            });
+
+            const response = await fetch(`${ apiBase }/_m_save/${ recordId }?JSON`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: params.toString()
+            });
+
+            const text = await response.text();
+            let result;
+            try {
+                result = JSON.parse(text);
+            } catch (e) {
+                if (text.includes('error') || !response.ok) {
+                    throw new Error(text);
+                }
+                result = { success: true };
+            }
+
+            const serverError = this.getServerError(result);
+            if (serverError) {
+                throw new Error(serverError);
+            }
+            if (!response.ok) {
+                throw new Error(`Ошибка сохранения пароля: ${ response.statusText }`);
+            }
+
+            return result;
         }
 
         attachDatePickerHandlers(modal) {

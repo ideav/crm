@@ -48,6 +48,7 @@ class IntegramTable{
             this.data = [];
             this.loadedRecords = 0;  // Changed from currentPage to loadedRecords
             this.totalRows = null;  // null means unknown, user can click to fetch
+            this.isFetchingTotalCount = false;  // True while re-requesting the total count (issue #2795)
             this.hasMore = true;  // Whether there are more records to load
             this.isLoading = false;  // Prevent multiple simultaneous loads
             this.pendingRequests = 0;  // In-flight server requests; drives the toolbar AJAX spinner
@@ -1382,7 +1383,12 @@ class IntegramTable{
         }
 
         async fetchTotalCount() {
+            // Avoid stacking requests if the user clicks the count repeatedly (issue #2795).
+            if (this.isFetchingTotalCount) return;
             this.beginRequest();
+            // Show a small non-clickable spinner in place of the number while we recount (issue #2795).
+            this.isFetchingTotalCount = true;
+            this.updateScrollCounterTotal();
             try {
                 let countUrl;
 
@@ -1441,11 +1447,14 @@ class IntegramTable{
                 const response = await fetch(countUrl);
                 const result = await response.json();
                 this.totalRows = parseInt(result.count, 10);
-                this.render();  // Re-render to update the counter
             } catch (error) {
                 console.error('Error fetching total count:', error);
             } finally {
+                // Clear the spinner and show the (re)counted number — or restore the
+                // previous value on error — in place, without a full re-render (issue #2795).
+                this.isFetchingTotalCount = false;
                 this.endRequest();
+                this.updateScrollCounterTotal();
             }
         }
 
@@ -2967,11 +2976,40 @@ class IntegramTable{
             return allCols.map((col, idx) => this.renderFilterCell(col, idx)).join('');
         }
 
+        /**
+         * Render the "total records" part of the scroll counter (issue #2795).
+         * Wrapped in a stable .scroll-counter-total span so it can be swapped in
+         * place (see updateScrollCounterTotal) without re-rendering the table.
+         * - While the count is being re-requested: a small non-clickable spinner.
+         * - When the total is unknown: a clickable "?" that fetches the count.
+         * - When the total is known: the number itself, clickable to re-request it.
+         */
+        renderTotalCountDisplay() {
+            const instanceName = this.options.instanceName;
+            if (this.isFetchingTotalCount) {
+                return `<span class="total-count-loading" title="Подсчёт..."><i class="pi pi-spin pi-spinner"></i></span>`;
+            }
+            if (this.totalRows === null) {
+                return `<span class="total-count-unknown" onclick="window.${ instanceName }.fetchTotalCount()" title="Нажмите, чтобы узнать общее количество">?</span>`;
+            }
+            return `<span class="total-count-known" onclick="window.${ instanceName }.fetchTotalCount()" title="Нажмите, чтобы пересчитать общее количество">${ this.totalRows }</span>`;
+        }
+
+        /**
+         * Swap only the total-count portion of the scroll counter in place so
+         * re-requesting the count shows a spinner without re-rendering the whole
+         * table (issue #2795).
+         */
+        updateScrollCounterTotal() {
+            if (!this.container) return;
+            const total = this.container.querySelector('.scroll-counter .scroll-counter-total');
+            if (!total) return;
+            total.innerHTML = this.renderTotalCountDisplay();
+        }
+
         renderScrollCounter() {
             const instanceName = this.options.instanceName;
-            const totalDisplay = this.totalRows === null
-                ? `<span class="total-count-unknown" onclick="window.${ instanceName }.fetchTotalCount()" title="Нажмите, чтобы узнать общее количество">?</span>`
-                : this.totalRows;
+            const totalDisplay = this.renderTotalCountDisplay();
 
             // Show add row button only for object-source tables with write access (issue #807, #1508)
             const isObjectSource = this.objectTableId || this.getDataSourceType() === 'table';
@@ -2987,7 +3025,7 @@ class IntegramTable{
             return `
                 <div class="scroll-counter">
                     ${ addRowBtnHtml }${ pasteDataBtnHtml }
-                    Показано ${ this.loadedRecords } из ${ totalDisplay }
+                    Показано ${ this.loadedRecords } из <span class="scroll-counter-total">${ totalDisplay }</span>
                 </div>
             `;
         }
@@ -5461,10 +5499,10 @@ class IntegramTable{
                 const editingCellRef = this.currentEditingCell;
                 setTimeout(() => {
                     const outsideClickHandler = (e) => {
-                        // Issue #2821: Don't cancel when clicking inside the reference creation
-                        // modal. The modal is appended to <body>, so clicks in it are "outside"
-                        // the cell and would otherwise null currentEditingCell before
-                        // saveRecordForReference adds the new value to the selection.
+                        // Don't cancel if clicking inside the nested reference creation modal
+                        // (issues #2829, #2821). The modal is appended to <body>, so its clicks
+                        // are "outside" the cell; the Save click must keep currentEditingCell
+                        // alive until _m_new finishes and the new value is appended to the row.
                         const refModal = e.target.closest('[data-is-reference-create="true"]');
                         const refOverlay = e.target.closest('.edit-form-overlay');
                         if (refModal || refOverlay) {
@@ -14135,10 +14173,10 @@ class IntegramTable{
                     const pwdInput = modal.querySelector(`#field-${ fieldId }`);
                     if (!pwdInput) return;
                     // Copy login link (username from first column of the table, issue #1479)
-                    // Do not allow copying invitation before the record is saved (issue #1591)
-                    const username = modal.dataset.firstColumnValue || '';
+                    // In create mode, use the current main field value instead of requiring a saved record.
+                    const username = this.getPasswordInvitationUsername(modal);
                     if (!username) {
-                        this.showCopyNotification('Сохраните запись перед копированием приглашения', true, 5000);
+                        this.showCopyNotification('Укажите имя пользователя перед копированием приглашения', true, 5000);
                         return;
                     }
                     const pwd = generatePassword();
@@ -14152,6 +14190,115 @@ class IntegramTable{
                     this.showCopyNotification('Пароль сгенерирован и скопирован в буфер. Обязательно сохраните эту форму!', false, 7000);
                 });
             });
+        }
+
+        getPasswordInvitationUsername(modal) {
+            const savedUsername = (modal && modal.dataset && modal.dataset.firstColumnValue) || '';
+            if (savedUsername) return savedUsername;
+
+            const mainInput = modal && modal.querySelector ? modal.querySelector('#field-main') : null;
+            if (!mainInput) return '';
+
+            if (mainInput.type === 'checkbox') {
+                return mainInput.checked ? '1' : '';
+            }
+
+            return (mainInput.value || '').trim();
+        }
+
+        collectCreatePasswordFields(modal, typeId) {
+            if (!modal || !modal.querySelectorAll) return [];
+
+            const fields = [];
+            modal.querySelectorAll('input[type="password"][name]').forEach(input => {
+                if (!input || input.disabled) return;
+
+                const rawName = input.getAttribute ? input.getAttribute('name') : input.name;
+                if (!rawName) return;
+
+                const value = input.value;
+                if (value === '' || value === null || value === undefined) return;
+
+                const saveKey = rawName === 'main' ? `t${ typeId }` : rawName;
+                if (!/^t\d+$/.test(saveKey)) return;
+
+                fields.push({
+                    formKey: rawName,
+                    saveKey,
+                    value
+                });
+            });
+
+            return fields;
+        }
+
+        isDeferredPasswordField(formKey, deferredPasswordFields) {
+            if (!Array.isArray(deferredPasswordFields)) return false;
+            return deferredPasswordFields.some(field => field.formKey === formKey);
+        }
+
+        getSavedRecordId(result) {
+            if (!result) return null;
+
+            const candidates = [result.obj, result.id, result.i];
+            for (const candidate of candidates) {
+                if (candidate === null || candidate === undefined || candidate === '') continue;
+
+                if (typeof candidate === 'object') {
+                    const nested = candidate.id ?? candidate.i ?? candidate.obj;
+                    if (nested !== null && nested !== undefined && nested !== '') {
+                        return nested;
+                    }
+                    continue;
+                }
+
+                return candidate;
+            }
+
+            return null;
+        }
+
+        async saveDeferredPasswordFields(apiBase, recordId, passwordFields) {
+            if (!passwordFields || passwordFields.length === 0) return null;
+            if (!recordId) {
+                throw new Error('Сервер не вернул ID созданной записи для сохранения пароля');
+            }
+
+            const params = new URLSearchParams();
+            if (typeof xsrf !== 'undefined') {
+                params.append('_xsrf', xsrf);
+            }
+
+            passwordFields.forEach(field => {
+                params.append(field.saveKey, field.value);
+            });
+
+            const response = await fetch(`${ apiBase }/_m_save/${ recordId }?JSON`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: params.toString()
+            });
+
+            const text = await response.text();
+            let result;
+            try {
+                result = JSON.parse(text);
+            } catch (e) {
+                if (text.includes('error') || !response.ok) {
+                    throw new Error(text);
+                }
+                result = { success: true };
+            }
+
+            const serverError = this.getServerError(result);
+            if (serverError) {
+                throw new Error(serverError);
+            }
+            if (!response.ok) {
+                throw new Error(`Ошибка сохранения пароля: ${ response.statusText }`);
+            }
+
+            return result;
         }
 
         attachDatePickerHandlers(modal) {
@@ -15833,6 +15980,7 @@ class IntegramTable{
             }
 
             const apiBase = this.getApiBase();
+            const deferredPasswordFields = isCreate ? this.collectCreatePasswordFields(modal, typeId) : [];
 
             try {
                 // Step 1: Prepare form data for save
@@ -15868,7 +16016,8 @@ class IntegramTable{
 
                     // Add main value as t{typeId}
                     if (isCreate) {
-                        if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
+                        if (!this.isDeferredPasswordField('main', deferredPasswordFields) &&
+                            mainValue !== '' && mainValue !== null && mainValue !== undefined) {
                             requestBody.append(`t${ typeId }`, mainValue);
                         }
                     } else {
@@ -15878,6 +16027,7 @@ class IntegramTable{
                     // Add all form fields
                     for (const [key, value] of formData.entries()) {
                         if (key === 'main') continue;
+                        if (isCreate && this.isDeferredPasswordField(key, deferredPasswordFields)) continue;
 
                         // Check if this is a file field
                         const fieldMatch = key.match(/^t(\d+)$/);
@@ -15933,6 +16083,7 @@ class IntegramTable{
                     // Add all form fields (skip 'main' since it's handled separately as t{typeId})
                     for (const [key, value] of formData.entries()) {
                         if (key === 'main') continue;
+                        if (isCreate && this.isDeferredPasswordField(key, deferredPasswordFields)) continue;
 
                         // Skip file fields that haven't changed
                         const fieldMatch = key.match(/^t(\d+)$/);
@@ -15961,7 +16112,8 @@ class IntegramTable{
                     }
 
                     if (isCreate) {
-                        if (mainValue !== '' && mainValue !== null && mainValue !== undefined) {
+                        if (!this.isDeferredPasswordField('main', deferredPasswordFields) &&
+                            mainValue !== '' && mainValue !== null && mainValue !== undefined) {
                             params.append(`t${ typeId }`, mainValue);
                         }
                     } else {
@@ -16008,8 +16160,14 @@ class IntegramTable{
                 // Check for warning - show modal and stay in edit mode
                 // Pass result.obj to show a link to the existing/found record if available
                 if (result.warning) {
-                    this.showWarningModal(result.warning, result.id || null);
+                    this.showWarningModal(result.warning, this.getSavedRecordId(result));
                     return;
+                }
+
+                const savedId = isCreate ? this.getSavedRecordId(result) : recordId;
+
+                if (isCreate && deferredPasswordFields.length > 0) {
+                    await this.saveDeferredPasswordFields(apiBase, savedId, deferredPasswordFields);
                 }
 
                 // Check for warnings (plural) - show modal but continue with save (issue #610)
@@ -16032,7 +16190,6 @@ class IntegramTable{
                 this.clearAllReferenceOptionCaches();
 
                 // Dispatch event for external listeners
-                const savedId = isCreate ? (result.id || result.i || null) : recordId;
                 document.dispatchEvent(new CustomEvent('integram-record-saved', {
                     detail: { isCreate, recordId: savedId, typeId, result }
                 }));
@@ -16067,7 +16224,7 @@ class IntegramTable{
                     // Handle special refresh for column header create
                     if (isCreate && columnId) {
                         // Extract created record ID from response
-                        const createdId = result.id || result.i;
+                        const createdId = this.getSavedRecordId(result);
 
                         if (createdId) {
                             await this.refreshWithNewRecord(columnId, createdId);
@@ -16267,7 +16424,7 @@ class IntegramTable{
                 const serverError = this.getServerError(result);
                 if (serverError) throw new Error(serverError);
 
-                const newId = result.id || result.i || null;
+                const newId = this.getSavedRecordId(result);
                 if (!newId) throw new Error('Сервер не вернул ID новой записи');
 
                 // Close the current modal

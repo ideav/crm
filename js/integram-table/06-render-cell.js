@@ -877,11 +877,40 @@
             return allCols.map((col, idx) => this.renderFilterCell(col, idx)).join('');
         }
 
+        /**
+         * Render the "total records" part of the scroll counter (issue #2795).
+         * Wrapped in a stable .scroll-counter-total span so it can be swapped in
+         * place (see updateScrollCounterTotal) without re-rendering the table.
+         * - While the count is being re-requested: a small non-clickable spinner.
+         * - When the total is unknown: a clickable "?" that fetches the count.
+         * - When the total is known: the number itself, clickable to re-request it.
+         */
+        renderTotalCountDisplay() {
+            const instanceName = this.options.instanceName;
+            if (this.isFetchingTotalCount) {
+                return `<span class="total-count-loading" title="Подсчёт..."><i class="pi pi-spin pi-spinner"></i></span>`;
+            }
+            if (this.totalRows === null) {
+                return `<span class="total-count-unknown" onclick="window.${ instanceName }.fetchTotalCount()" title="Нажмите, чтобы узнать общее количество">?</span>`;
+            }
+            return `<span class="total-count-known" onclick="window.${ instanceName }.fetchTotalCount()" title="Нажмите, чтобы пересчитать общее количество">${ this.totalRows }</span>`;
+        }
+
+        /**
+         * Swap only the total-count portion of the scroll counter in place so
+         * re-requesting the count shows a spinner without re-rendering the whole
+         * table (issue #2795).
+         */
+        updateScrollCounterTotal() {
+            if (!this.container) return;
+            const total = this.container.querySelector('.scroll-counter .scroll-counter-total');
+            if (!total) return;
+            total.innerHTML = this.renderTotalCountDisplay();
+        }
+
         renderScrollCounter() {
             const instanceName = this.options.instanceName;
-            const totalDisplay = this.totalRows === null
-                ? `<span class="total-count-unknown" onclick="window.${ instanceName }.fetchTotalCount()" title="Нажмите, чтобы узнать общее количество">?</span>`
-                : this.totalRows;
+            const totalDisplay = this.renderTotalCountDisplay();
 
             // Show add row button only for object-source tables with write access (issue #807, #1508)
             const isObjectSource = this.objectTableId || this.getDataSourceType() === 'table';
@@ -897,7 +926,7 @@
             return `
                 <div class="scroll-counter">
                     ${ addRowBtnHtml }${ pasteDataBtnHtml }
-                    Показано ${ this.loadedRecords } из ${ totalDisplay }
+                    Показано ${ this.loadedRecords } из <span class="scroll-counter-total">${ totalDisplay }</span>
                 </div>
             `;
         }

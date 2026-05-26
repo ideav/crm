@@ -1920,10 +1920,10 @@
                 const editingCellRef = this.currentEditingCell;
                 setTimeout(() => {
                     const outsideClickHandler = (e) => {
-                        // Issue #2821: Don't cancel when clicking inside the reference creation
-                        // modal. The modal is appended to <body>, so clicks in it are "outside"
-                        // the cell and would otherwise null currentEditingCell before
-                        // saveRecordForReference adds the new value to the selection.
+                        // Don't cancel if clicking inside the nested reference creation modal
+                        // (issues #2829, #2821). The modal is appended to <body>, so its clicks
+                        // are "outside" the cell; the Save click must keep currentEditingCell
+                        // alive until _m_new finishes and the new value is appended to the row.
                         const refModal = e.target.closest('[data-is-reference-create="true"]');
                         const refOverlay = e.target.closest('.edit-form-overlay');
                         if (refModal || refOverlay) {
