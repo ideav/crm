@@ -385,13 +385,20 @@
             return;
         }
 
+        var tmmIndex = -1;
+        report.columns.forEach(function(col, i) {
+            if (col.name === 'ТММ') tmmIndex = i;
+        });
+
         var headers = report.columns.map(function(column) {
             return '<th>' + escapeHtml(column.name) + '</th>';
         }).join('');
         var body = report.rows.map(function(row) {
-            return '<tr>' + report.columns.map(function(column, index) {
-                return '<td>' + escapeHtml(row[index]) + '</td>';
-            }).join('') + '</tr>';
+            var isTmm = tmmIndex >= 0 && trimValue(row[tmmIndex]) === '1';
+            return '<tr' + (isTmm ? ' class="xcom-match-row-tmm"' : '') + '>' +
+                report.columns.map(function(column, index) {
+                    return '<td>' + escapeHtml(row[index]) + '</td>';
+                }).join('') + '</tr>';
         }).join('');
 
         container.innerHTML = '<table class="xcom-match-table">' +
