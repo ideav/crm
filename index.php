@@ -1012,6 +1012,12 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
 			$inID = true;
     		$EQ = "";
         }
+        elseif(strtoupper(substr(trim($value), 0, 7)) === "REGEXP:"){ # Regular expression filter (issue #2790)
+            $pattern = addslashes(substr(trim($value), 7));
+            $search_val = ($NOT_flag ? "NOT " : "") . "REGEXP '$pattern'";
+            $EQ = "";
+            $NOT = "";
+        }
         else{ # If we have a [substitute], don't add '' and slash the existing ''
 			if(preg_match("/\[([^\[\]]+)\]/", $value))
 			    $v = strpos($value, "'") !== FALSE ? checkInjection($value) : $value;

@@ -106,7 +106,8 @@
                     { symbol: '%', name: 'не пустое', format: 'FR_{ T }=%' },
                     { symbol: '!%', name: 'пустое', format: 'FR_{ T }=!%' },
                     { symbol: '(,)', name: 'в списке', format: 'FR_{ T }=IN({ X })' },
-                    { symbol: '$', name: 'заканчивается', format: 'FR_{ T }=%{ X }' }
+                    { symbol: '$', name: 'заканчивается', format: 'FR_{ T }=%{ X }' },
+                    { symbol: '/', name: 'regexp', format: 'FR_{ T }=REGEXP:{ X }' }
                 ],
                 'NUMBER': [
                     { symbol: '^', name: 'начинается с...', format: 'FR_{ T }={ X }%' },

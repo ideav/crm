@@ -123,7 +123,8 @@ class IntegramTable{
                     { symbol: '%', name: 'не пустое', format: 'FR_{ T }=%' },
                     { symbol: '!%', name: 'пустое', format: 'FR_{ T }=!%' },
                     { symbol: '(,)', name: 'в списке', format: 'FR_{ T }=IN({ X })' },
-                    { symbol: '$', name: 'заканчивается', format: 'FR_{ T }=%{ X }' }
+                    { symbol: '$', name: 'заканчивается', format: 'FR_{ T }=%{ X }' },
+                    { symbol: '/', name: 'regexp', format: 'FR_{ T }=REGEXP:{ X }' }
                 ],
                 'NUMBER': [
                     { symbol: '^', name: 'начинается с...', format: 'FR_{ T }={ X }%' },
@@ -10279,6 +10280,11 @@ class IntegramTable{
             // Note: > and < are less common as URL values may use different encoding
             // The format uses FR_{T}>{X} but the value itself doesn't include >
             // After parsing in applyFilter, it becomes just the value
+
+            // Check for REGEXP filter: REGEXP:pattern (issue #2790)
+            if (rawValue.toUpperCase().startsWith('REGEXP:')) {
+                return { type: '/', value: rawValue.substring(7) };
+            }
 
             // Check for "contains" filter: %value%
             if (rawValue.startsWith('%') && rawValue.endsWith('%') && rawValue.length > 2) {
