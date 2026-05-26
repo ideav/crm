@@ -5461,6 +5461,15 @@ class IntegramTable{
                 const editingCellRef = this.currentEditingCell;
                 setTimeout(() => {
                     const outsideClickHandler = (e) => {
+                        // Issue #2821: Don't cancel when clicking inside the reference creation
+                        // modal. The modal is appended to <body>, so clicks in it are "outside"
+                        // the cell and would otherwise null currentEditingCell before
+                        // saveRecordForReference adds the new value to the selection.
+                        const refModal = e.target.closest('[data-is-reference-create="true"]');
+                        const refOverlay = e.target.closest('.edit-form-overlay');
+                        if (refModal || refOverlay) {
+                            return;
+                        }
                         // Issue #1384: dropdown is detached from cell (appended to body), so check it separately
                         const fixedDropdown = this.currentEditingCell && this.currentEditingCell.fixedDropdown;
                         if (fixedDropdown && fixedDropdown.contains(e.target)) {
