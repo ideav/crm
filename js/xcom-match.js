@@ -179,6 +179,13 @@
             .replace(/'/g, '&#039;');
     }
 
+    function parseRefValue(raw) {
+        var str = String(raw == null ? '' : raw);
+        var m = str.match(/^(\d+):(.*)$/);
+        if (m) return { refId: m[1], label: m[2] };
+        return { refId: null, label: str };
+    }
+
     function normalizeRows(json) {
         if (!Array.isArray(json)) return [];
 
@@ -344,7 +351,9 @@
 
         var body = state.rows.map(function(row, index) {
             var cells = state.searchFields.map(function(field, fieldIndex) {
-                return '<td>' + escapeHtml(row.values[fieldIndex]) + '</td>';
+                var parsed = parseRefValue(row.values[fieldIndex]);
+                var td = '<td' + (parsed.refId ? ' data-ref-id="' + parsed.refId + '"' : '') + '>';
+                return td + escapeHtml(parsed.label) + '</td>';
             }).join('');
 
             return '<tr data-row-index="' + index + '">' + cells +
