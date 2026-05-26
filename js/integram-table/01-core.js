@@ -430,15 +430,36 @@
         }
 
         async loadData(append = false) {
-            // Block concurrent loads; block appending when there are no more records.
-            // Allow non-append (refresh) calls unconditionally so the refresh button works (issue #1516).
-            // Block scroll-triggered appends while a new row is pending creation (issue #2059):
-            // re-rendering would destroy the unsaved row and lose the editor focus.
-            if (this.isLoading || (append && !this.hasMore) || (append && this.pendingNewRow)) {
+            // Block appending when there are no more records, and block scroll-triggered
+            // appends while a new row is pending creation (issue #2059): re-rendering
+            // would destroy the unsaved row and lose the editor focus.
+            if ((append && !this.hasMore) || (append && this.pendingNewRow)) {
                 return;
             }
 
+            // Dedupe concurrent loads. When a load is already running, return its
+            // in-flight promise instead of a no-op so callers that `await this.loadData(...)`
+            // wait for columns/data to be rebuilt. Returning early used to leave
+            // this.columns = [], which produced an empty "Настройки колонок таблицы" form
+            // after deleting and immediately re-creating a column: closeColumnSettings()
+            // fires an un-awaited refresh and the following `await this.loadData(...)`
+            // short-circuited before the columns were rebuilt (issue #2824).
+            // Non-append (refresh) calls are still allowed even when hasMore is false so the
+            // refresh button keeps working (issue #1516).
+            if (this.isLoading) {
+                return this._loadDataPromise || undefined;
+            }
+
             this.isLoading = true;
+            this._loadDataPromise = this._runLoadData(append);
+            try {
+                return await this._loadDataPromise;
+            } finally {
+                this._loadDataPromise = null;
+            }
+        }
+
+        async _runLoadData(append = false) {
             this.beginRequest();
 
             try {
