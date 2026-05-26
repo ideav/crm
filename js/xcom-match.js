@@ -1,7 +1,7 @@
 (function(window, document) {
     'use strict';
 
-    var DEFAULT_SKU_TABLE = 'RFP';
+    var DEFAULT_SKU_TABLE = '2032189';
     var DEFAULT_MATCH_REPORT = 'Сопоставление';
     var DEFAULT_LIMIT = 20;
 
