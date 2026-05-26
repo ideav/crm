@@ -309,7 +309,12 @@
         }
 
         async fetchTotalCount() {
+            // Avoid stacking requests if the user clicks the count repeatedly (issue #2795).
+            if (this.isFetchingTotalCount) return;
             this.beginRequest();
+            // Show a small non-clickable spinner in place of the number while we recount (issue #2795).
+            this.isFetchingTotalCount = true;
+            this.updateScrollCounterTotal();
             try {
                 let countUrl;
 
@@ -368,11 +373,14 @@
                 const response = await fetch(countUrl);
                 const result = await response.json();
                 this.totalRows = parseInt(result.count, 10);
-                this.render();  // Re-render to update the counter
             } catch (error) {
                 console.error('Error fetching total count:', error);
             } finally {
+                // Clear the spinner and show the (re)counted number — or restore the
+                // previous value on error — in place, without a full re-render (issue #2795).
+                this.isFetchingTotalCount = false;
                 this.endRequest();
+                this.updateScrollCounterTotal();
             }
         }
 
