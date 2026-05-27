@@ -1691,7 +1691,7 @@ class IntegramTable{
                                 Удалить (${ this.selectedRows.size })
                             </button>
                             ` : '' }
-                            ${ this.tableDeleteGranted && this.getDataSourceType() === 'table' && this.hasActiveFilters() ? `
+                            ${ this.tableDeleteGranted && this.getDataSourceType() === 'table' ? `
                             <button class="btn btn-sm btn-outline-danger integram-delete-by-filter-btn" onclick="window.${ instanceName }.showDeleteByFilterConfirm(event)" title="Удалить все записи, соответствующие текущему фильтру">
                                 Удалить по фильтру
                             </button>
