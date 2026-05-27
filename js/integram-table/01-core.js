@@ -41,6 +41,7 @@
             this.filtersEnabled = false;
             this.objectTableId = null;  // Table ID when data is in object/JSON_OBJ format (for _count=1 queries)
             this.tableGranted = null;  // 'WRITE' = full access, other value = read-only (issue #1508)
+            this.tableDeletable = false;  // True when metadata.delete === "1" — enables "Delete by filter" (issue #2749)
             this.rawObjectData = [];  // Raw data array with {i, u, o, r} for object format (preserves record IDs)
             this.styleColumns = {};  // Map of column IDs to their style column values
             this.idColumns = new Set();  // Set of hidden ID column IDs
@@ -206,6 +207,15 @@
          */
         isStructureWritable() {
             return window.grants && window.grants['1'] === 'WRITE';
+        }
+
+        /**
+         * Check whether bulk "Delete by filter" is allowed (issue #2749).
+         * Mirrors the legacy templates/object.html gate: visible only when
+         * metadata.delete === "1".
+         */
+        isTableDeletable() {
+            return this.tableDeletable === true;
         }
 
         /**
@@ -946,6 +956,9 @@
                 // Store table-level granted value for access control (issue #1508)
                 this.tableGranted = metadata.granted !== undefined ? metadata.granted : null;
 
+                // Store bulk delete-by-filter flag from metadata (issue #2749)
+                this.tableDeletable = metadata.delete === '1' || metadata.delete === 1;
+
                 // Convert metadata to columns format
                 const columns = [];
 
@@ -1034,6 +1047,7 @@
                 }
                 this.tableExportAllowed = refreshedMetadata.export === '1' || refreshedMetadata.export === 1;
                 this.tableGranted = refreshedMetadata.granted !== undefined ? refreshedMetadata.granted : null;
+                this.tableDeletable = refreshedMetadata.delete === '1' || refreshedMetadata.delete === 1;
 
                 const refreshedColumns = [];
                 const mainColGranted = this.isTableWritable() ? 1 : 0;
