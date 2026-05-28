@@ -163,7 +163,7 @@
         if (selectedRow) {
             // if (selectedRow.id) params.set('sku_id', selectedRow.id);
             if (selectedRow.values && selectedRow.values.length) {
-                params.set('FR_SKU', trimValue(selectedRow.values[0]));
+                params.set('FR_RFP', trimValue(selectedRow.values[0]));
             }
             fields.forEach(function(field, fieldIndex) {
                 var parsed = parseRefValue(selectedRow.values[fieldIndex]);
