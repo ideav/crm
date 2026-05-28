@@ -25,7 +25,7 @@ https://your-server.com/update.php?config=update.conf
 ### Configuration File Format
 
 ```conf
-# Repository settings
+[repository crm]
 repository: https://github.com/ideav/crm/
 branch: main
 
@@ -33,6 +33,12 @@ branch: main
 css/* : /var/www/site/css/
 js/* : /var/www/site/js/
 templates/main.html : /var/www/site/templates/
+
+[repository assets]
+repository: https://github.com/owner/assets/
+branch: main
+
+download/assets/js/* : /var/www/site/download/assets/js/
 ```
 
 ### Configuration Options
@@ -42,6 +48,11 @@ templates/main.html : /var/www/site/templates/
 | `repository` | GitHub repository URL | `https://github.com/owner/repo/` |
 | `branch` | Branch to sync from | `main` |
 | `source : target` | File mapping (source path : target directory) | `css/* : /var/www/css/` |
+
+To copy from more than one repository in a single run, split the config into
+`[repository name]` sections. Each section has its own `repository`, `branch`,
+`token`, `ignore_cache`, and mappings. Existing single-repository configs
+without section headers continue to work.
 
 ### Wildcard Patterns
 
