@@ -219,31 +219,86 @@ function downloadParallel($tasks, $info, $branch, $token, $concurrency) {
 
 // ------------------------ Config / Manifest ------------------------
 
+function defaultConfigRepository() {
+    return ['repository' => '', 'branch' => 'main', 'token' => '', 'ignore_cache' => false, 'mappings' => []];
+}
+
+function normalizeConfigRepositories($repositories) {
+    $out = [];
+    foreach ($repositories as $idx => $repoConfig) {
+        $name = isset($repoConfig['name']) && $repoConfig['name'] !== '' ? $repoConfig['name'] : "repo" . ($idx + 1);
+        $repoConfig['name'] = $name;
+        $out[] = $repoConfig;
+    }
+    return $out;
+}
+
 function parseConfig($path) {
     if (!file_exists($path)) return false;
     $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
     if ($lines === false) return false;
 
-    $cfg = ['repository' => '', 'branch' => 'main', 'token' => '', 'ignore_cache' => false, 'mappings' => []];
+    $cfg = defaultConfigRepository();
+    $repositories = [];
+    $current = $cfg;
+    $currentHasContent = false;
+    $hasSections = false;
+    $repoCounter = 0;
+
+    $flushCurrent = function () use (&$repositories, &$current, &$currentHasContent, &$repoCounter) {
+        if (!$currentHasContent) return;
+        $repoCounter++;
+        if (!isset($current['name']) || $current['name'] === '') {
+            $info = parseRepo($current['repository']);
+            $current['name'] = $info ? $info['owner'] . '/' . $info['repo'] : "repo{$repoCounter}";
+        }
+        $repositories[] = $current;
+    };
+
     foreach ($lines as $line) {
         $line = trim($line);
         if ($line === '' || $line[0] === '#') continue;
 
-        if (preg_match('/^repository\s*:\s*(.+)$/i', $line, $m)) {
-            $cfg['repository'] = trim($m[1]);
+        if (preg_match('/^\[repository\s+(.+)\]$/i', $line, $m) || preg_match('/^\[repo\s+(.+)\]$/i', $line, $m)) {
+            $hasSections = true;
+            $flushCurrent();
+            $current = defaultConfigRepository();
+            $current['name'] = trim($m[1]);
+            $currentHasContent = true;
+        } elseif (preg_match('/^repository\s*:\s*(.+)$/i', $line, $m)) {
+            if ($currentHasContent && $current['repository'] !== '') {
+                $flushCurrent();
+                $current = defaultConfigRepository();
+            }
+            $current['repository'] = trim($m[1]);
+            $currentHasContent = true;
         } elseif (preg_match('/^branch\s*:\s*(.+)$/i', $line, $m)) {
-            $cfg['branch'] = trim($m[1]);
+            $current['branch'] = trim($m[1]);
+            $currentHasContent = true;
         } elseif (preg_match('/^token\s*:\s*(.+)$/i', $line, $m)) {
-            $cfg['token'] = trim($m[1]);
+            $current['token'] = trim($m[1]);
+            $currentHasContent = true;
         } elseif (preg_match('/^ignore_cache\s*:\s*(.+)$/i', $line, $m)) {
             $v = strtolower(trim($m[1]));
-            $cfg['ignore_cache'] = ($v === '1' || $v === 'true' || $v === 'yes');
+            $current['ignore_cache'] = ($v === '1' || $v === 'true' || $v === 'yes');
+            $currentHasContent = true;
         } elseif (strpos($line, ':') !== false) {
             $parts = explode(':', $line, 2);
             $src = trim($parts[0]);
             $tgt = trim($parts[1]);
-            if ($src !== '' && $tgt !== '') $cfg['mappings'][] = ['source' => $src, 'target' => $tgt];
+            if ($src !== '' && $tgt !== '') {
+                $current['mappings'][] = ['source' => $src, 'target' => $tgt];
+                $currentHasContent = true;
+            }
         }
+    }
+    $flushCurrent();
+
+    if ($hasSections && !empty($repositories)) {
+        $cfg = $repositories[0];
+        $cfg['repositories'] = normalizeConfigRepositories($repositories);
+    } elseif (!empty($repositories)) {
+        $cfg = $repositories[0];
     }
     return $cfg;
 }
@@ -435,6 +490,27 @@ function syncWithCache($config, $configName) {
     return $results;
 }
 
+function syncConfig($config, $configName) {
+    if (empty($config['repositories']) || !is_array($config['repositories'])) {
+        return syncWithCache($config, $configName);
+    }
+
+    $combined = ['fast_path' => true, 'success' => [], 'skipped' => [], 'errors' => [], 'cleaned' => 0, 'repositories' => []];
+    foreach ($config['repositories'] as $repoConfig) {
+        $repoName = isset($repoConfig['name']) ? $repoConfig['name'] : $repoConfig['repository'];
+        $result = syncWithCache($repoConfig, $configName . ':' . $repoName);
+        $combined['repositories'][$repoName] = $result;
+        $combined['fast_path'] = $combined['fast_path'] && !empty($result['fast_path']);
+        foreach (['success', 'skipped', 'errors'] as $key) {
+            foreach ($result[$key] as $msg) {
+                $combined[$key][] = "[{$repoName}] {$msg}";
+            }
+        }
+        if (!empty($result['cleaned'])) $combined['cleaned'] += $result['cleaned'];
+    }
+    return $combined;
+}
+
 // ------------------------ Output ------------------------
 
 function outputResults($results, $config, $configName, $elapsedMs) {
@@ -456,8 +532,8 @@ function outputResults($results, $config, $configName, $elapsedMs) {
     echo "<!DOCTYPE html><html lang='ru'><head><meta charset='UTF-8'><title>GitHub Sync Results</title>{$css}</head><body><div class='container'>";
     echo "<h1>GitHub Sync Results</h1>";
     echo "<div class='meta'>config: " . htmlspecialchars($configName)
-        . " &middot; branch: " . htmlspecialchars($config['branch'])
-        . " &middot; commit: " . htmlspecialchars(isset($results['commit']) ? substr($results['commit'], 0, 7) : '?')
+        . " &middot; branch: " . htmlspecialchars(isset($config['branch']) ? $config['branch'] : 'multiple')
+        . " &middot; commit: " . htmlspecialchars(isset($results['commit']) ? substr($results['commit'], 0, 7) : (isset($results['repositories']) ? 'multiple' : '?'))
         . " &middot; elapsed: {$elapsedMs} ms</div>";
 
     if (!empty($results['fast_path'])) {
@@ -485,34 +561,36 @@ function outputResults($results, $config, $configName, $elapsedMs) {
 
 // ------------------------ Main ------------------------
 
-$configFile = isset($_GET['config']) ? basename($_GET['config']) : '';
-if ($configFile === '') {
-    echo "<h1>Error</h1><p>Usage: update.php?config=your-config.conf [&cleanup_legacy_sha=1]</p>";
-    exit(1);
+if (!defined('UPDATE_PHP_NO_MAIN')) {
+    $configFile = isset($_GET['config']) ? basename($_GET['config']) : '';
+    if ($configFile === '') {
+        echo "<h1>Error</h1><p>Usage: update.php?config=your-config.conf [&cleanup_legacy_sha=1]</p>";
+        exit(1);
+    }
+
+    $configPath = __DIR__ . '/' . $configFile;
+    $config = parseConfig($configPath);
+    if ($config === false) {
+        echo "<h1>Error</h1><p>Could not read config file: " . htmlspecialchars($configFile) . "</p>";
+        exit(1);
+    }
+
+    $lockPath = __DIR__ . '/' . LOCK_NAME;
+    $lockFp = @fopen($lockPath, 'c');
+    if ($lockFp && !flock($lockFp, LOCK_EX | LOCK_NB)) {
+        fclose($lockFp);
+        echo "<h1>Busy</h1><p>Another sync is already running. Try again in a moment.</p>";
+        exit(1);
+    }
+
+    $start = microtime(true);
+    $results = syncConfig($config, $configFile);
+    $elapsedMs = (int) round((microtime(true) - $start) * 1000);
+
+    if ($lockFp) {
+        flock($lockFp, LOCK_UN);
+        fclose($lockFp);
+    }
+
+    outputResults($results, $config, $configFile, $elapsedMs);
 }
-
-$configPath = __DIR__ . '/' . $configFile;
-$config = parseConfig($configPath);
-if ($config === false) {
-    echo "<h1>Error</h1><p>Could not read config file: " . htmlspecialchars($configFile) . "</p>";
-    exit(1);
-}
-
-$lockPath = __DIR__ . '/' . LOCK_NAME;
-$lockFp = @fopen($lockPath, 'c');
-if ($lockFp && !flock($lockFp, LOCK_EX | LOCK_NB)) {
-    fclose($lockFp);
-    echo "<h1>Busy</h1><p>Another sync is already running. Try again in a moment.</p>";
-    exit(1);
-}
-
-$start = microtime(true);
-$results = syncWithCache($config, $configFile);
-$elapsedMs = (int) round((microtime(true) - $start) * 1000);
-
-if ($lockFp) {
-    flock($lockFp, LOCK_UN);
-    fclose($lockFp);
-}
-
-outputResults($results, $config, $configFile, $elapsedMs);
