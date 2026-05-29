@@ -1,0 +1,179 @@
+/* Рабочее место atex «Калькулятор типов резки» (ideav/crm#2912).
+   Стили скоупятся под #atex-cut-calc / .atex-cc, чтобы не пересекаться
+   с остальными рабочими местами в main.html. */
+
+.atex-cc {
+    --cc-border: #d9dee5;
+    --cc-bg: #ffffff;
+    --cc-muted: #6b7280;
+    --cc-accent: #2563eb;
+    --cc-accent-d: #1d4ed8;
+    --cc-warn: #b91c1c;
+    --cc-ok: #15803d;
+    color: #1f2933;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+.atex-cc *,
+.atex-cc *::before,
+.atex-cc *::after { box-sizing: border-box; }
+
+.atex-cc.is-busy { opacity: .65; pointer-events: none; }
+
+.atex-cc-loading,
+.atex-cc-fatal {
+    padding: 24px;
+    color: var(--cc-muted);
+}
+.atex-cc-fatal { color: var(--cc-warn); }
+
+.atex-cc-layout {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 16px;
+    padding: 16px;
+    align-items: start;
+}
+@media (max-width: 720px) {
+    .atex-cc-layout { grid-template-columns: 1fr; }
+}
+
+/* Боковой список типов резки */
+.atex-cc-sidebar {
+    border: 1px solid var(--cc-border);
+    border-radius: 8px;
+    background: var(--cc-bg);
+    overflow: hidden;
+}
+.atex-cc-sidebar-head {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--cc-border);
+    background: #f8fafc;
+}
+.atex-cc-sidebar-head h2 { margin: 0; font-size: 15px; }
+.atex-cc-list { display: flex; flex-direction: column; max-height: 70vh; overflow: auto; }
+.atex-cc-list-item {
+    text-align: left;
+    padding: 10px 14px;
+    border: none;
+    border-bottom: 1px solid #eef1f5;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+}
+.atex-cc-list-item:hover { background: #f1f5f9; }
+.atex-cc-list-item.is-active { background: #e0ecff; font-weight: 600; }
+.atex-cc-empty { padding: 14px; color: var(--cc-muted); }
+
+/* Форма */
+.atex-cc-form {
+    border: 1px solid var(--cc-border);
+    border-radius: 8px;
+    background: var(--cc-bg);
+    padding: 18px 20px;
+}
+.atex-cc-form-title { margin: 0 0 16px; font-size: 18px; }
+
+.atex-cc-field { margin-bottom: 14px; }
+.atex-cc-label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 600;
+    color: #374151;
+}
+.atex-cc-input {
+    width: 100%;
+    padding: 7px 10px;
+    border: 1px solid var(--cc-border);
+    border-radius: 6px;
+    font: inherit;
+    background: #fff;
+}
+.atex-cc-input:focus {
+    outline: none;
+    border-color: var(--cc-accent);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, .15);
+}
+.atex-cc-textarea { resize: vertical; min-height: 60px; }
+
+/* Полосы */
+.atex-cc-strips { border: 1px solid var(--cc-border); border-radius: 6px; padding: 10px; }
+.atex-cc-strips-head,
+.atex-cc-strip-row {
+    display: grid;
+    grid-template-columns: 40px 1fr 1fr 1.2fr 36px;
+    gap: 8px;
+    align-items: center;
+}
+.atex-cc-strips-head {
+    margin-bottom: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--cc-muted);
+    text-transform: uppercase;
+    letter-spacing: .03em;
+}
+.atex-cc-strip-row { margin-bottom: 8px; }
+.atex-cc-strip-num { text-align: center; color: var(--cc-muted); }
+
+.atex-cc-btn {
+    border: 1px solid var(--cc-border);
+    border-radius: 6px;
+    background: #fff;
+    padding: 7px 14px;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+}
+.atex-cc-btn:hover { background: #f1f5f9; }
+.atex-cc-btn-add { margin-top: 4px; color: var(--cc-accent); border-color: #bfdbfe; }
+.atex-cc-btn-del {
+    padding: 4px 0;
+    line-height: 1;
+    font-size: 18px;
+    color: var(--cc-warn);
+    border-color: #fecaca;
+}
+.atex-cc-btn-primary { background: var(--cc-accent); border-color: var(--cc-accent); color: #fff; }
+.atex-cc-btn-primary:hover { background: var(--cc-accent-d); }
+.atex-cc-btn-secondary { background: #f8fafc; }
+
+/* Итоги */
+.atex-cc-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin: 18px 0;
+    padding: 14px;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1px solid var(--cc-border);
+}
+.atex-cc-metric { display: flex; flex-direction: column; gap: 2px; min-width: 110px; }
+.atex-cc-metric-label { font-size: 12px; color: var(--cc-muted); text-transform: uppercase; letter-spacing: .03em; }
+.atex-cc-metric-value { font-size: 22px; font-weight: 700; }
+.atex-cc-metric.is-warn .atex-cc-metric-value { color: var(--cc-warn); }
+.atex-cc-metric.is-ok .atex-cc-metric-value { color: var(--cc-ok); }
+
+.atex-cc-actions { display: flex; gap: 10px; margin-top: 8px; }
+
+/* Тосты-уведомления (без alert/confirm/prompt) */
+.atex-cc-toast {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 9999;
+    max-width: 360px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    color: #fff;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .18);
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity .25s, transform .25s;
+}
+.atex-cc-toast.is-visible { opacity: 1; transform: translateY(0); }
+.atex-cc-toast-success { background: #15803d; }
+.atex-cc-toast-error { background: #b91c1c; }
+.atex-cc-toast-info { background: #334155; }

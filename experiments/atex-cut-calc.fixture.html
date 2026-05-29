@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<!-- Браузерный стенд для рабочего места «Калькулятор типов резки» (#2912).
+     Мокает fetch: metadata?JSON, object/{id} и команды _m_*.
+     Открывать локально, использует те же js/css, что и продакшн-шаблон. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>atex · Калькулятор типов резки — стенд</title>
+<link rel="stylesheet" href="../css/atex-cut-calc.css">
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#eef1f5}</style>
+</head>
+<body>
+<div id="atex-cut-calc" class="atex-cc" data-db="atex" data-xsrf="test-token">
+    <div class="atex-cc-loading">Загрузка…</div>
+</div>
+
+<script>
+// ── Мок схемы atex (имена как в docs/atex_metadata.json; id произвольные) ──
+var META = [
+    { id: 100, val: 'Вид сырья', reqs: [{ id: 1001, val: 'Марка' }] },
+    { id: 104, val: 'Тип резки', reqs: [
+        { id: 1025, val: 'Вид сырья' },
+        { id: 1027, val: 'Ширина входа, мм' },
+        { id: 1029, val: 'Допуск, мм' },
+        { id: 1031, val: 'Итого ножей' },
+        { id: 1033, val: 'Остаток, мм' },
+        { id: 1035, val: 'Примечания' },
+        { id: 1037, val: 'Полоса' }
+    ]},
+    { id: 105, val: 'Полоса', reqs: [
+        { id: 1038, val: 'Ширина, мм' },
+        { id: 1040, val: 'Количество' },
+        { id: 1042, val: 'Назначение' }
+    ]}
+];
+
+// Хранилище-заглушка
+var DB = {
+    materials: [
+        { i: 201, r: ['Сталь 0.5мм'] },
+        { i: 202, r: ['Алюминий 1.0мм'] }
+    ],
+    cutTypes: [
+        { i: 301, r: ['25×35 + 55', '201:Сталь 0.5мм', '910', '15', '23', '185', ''] }
+    ],
+    strips: {
+        301: [
+            { i: 401, r: ['1', '25', '10', 'Заказ'] },
+            { i: 402, r: ['2', '35', '12', 'Заказ'] },
+            { i: 403, r: ['3', '55', '1', 'Склад'] }
+        ]
+    },
+    nextId: 500
+};
+
+var realFetch = window.fetch;
+window.fetch = function(url, opts) {
+    var u = String(url);
+    function json(data) {
+        return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }
+    // metadata
+    if (/\/metadata\?JSON/.test(u)) return json(META);
+    // object/{id}
+    var mObj = u.match(/\/object\/(\d+)\//);
+    if (mObj) {
+        var tid = mObj[1];
+        if (tid === '100') return json(DB.materials);
+        if (tid === '104') {
+            var fi = u.match(/F_I=(\d+)/);
+            if (fi) return json(DB.cutTypes.filter(function(c){return String(c.i)===fi[1];}));
+            return json(DB.cutTypes);
+        }
+        if (tid === '105') {
+            var fu = u.match(/F_U=(\d+)/);
+            var key = fu ? fu[1] : null;
+            return json((key && DB.strips[key]) || []);
+        }
+    }
+    // _m_* commands
+    if (/\/_m_new\//.test(u)) {
+        var id = DB.nextId++;
+        console.log('[mock] _m_new', u, opts && opts.body);
+        return json({ obj: id, i: id });
+    }
+    if (/\/_m_set\//.test(u) || /\/_m_save\//.test(u) || /\/_m_del\//.test(u)) {
+        console.log('[mock]', u, opts && opts.body);
+        return json({ ok: 1 });
+    }
+    return realFetch(url, opts);
+};
+</script>
+<script src="../js/atex-cut-calc.js"></script>
+</body>
+</html>
