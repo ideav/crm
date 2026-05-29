@@ -1,0 +1,867 @@
+/*
+ * Рабочее место atex «Приём и ведение заказов» (роль Менеджер).
+ *
+ * Часть #2903 — «Подключи рабочие места по API». На первом этапе рабочее место
+ * обращается к таблицам напрямую командами `_m_*` (см. docs/atex_workplaces.md §3.1
+ * и docs/WORKSPACE_DEVELOPMENT_GUIDE.md §3). Перевод чтений на защищённый слой
+ * `report/` — следующий этап и в объём этого тикета не входит.
+ *
+ * Таблицы (id берутся из data-атрибутов, реквизиты резолвятся из metadata по имени,
+ * чтобы не хардкодить t{reqId} — id зависят от сборки базы):
+ *   107 «Заказ»            — up=1
+ *   108 «Позиция заказа»   — up={orderId} (подчинённая Заказу)
+ *   103 «Клиент», 100 «Вид сырья», 104 «Тип резки» — ссылки.
+ */
+(function(window, document) {
+    'use strict';
+
+    var DEFAULT_ORDER_TABLE = '107';
+    var DEFAULT_POSITION_TABLE = '108';
+    var REF_OPTIONS_LIMIT = 500;
+    var LIST_LIMIT = 5000;
+
+    // Статусы — свободный текст (тип 3), поэтому фиксируем разумные наборы.
+    // Их можно переопределить data-атрибутами data-order-statuses / data-position-statuses.
+    var DEFAULT_ORDER_STATUSES = ['Новый', 'Согласован', 'В производстве', 'Выполнен', 'Отменён'];
+    var DEFAULT_POSITION_STATUSES = ['Новая', 'В работе', 'Готова', 'Отгружена'];
+
+    // Карта полей таблицы «Заказ»: ключ → возможные имена реквизита в metadata.
+    var ORDER_FIELDS = [
+        { key: 'client', label: 'Клиент', names: ['Клиент'], ref: true },
+        { key: 'manager', label: 'Менеджер', names: ['Менеджер', 'Пользователь'], ref: true },
+        { key: 'created', label: 'Дата создания', names: ['Дата создания'] },
+        { key: 'approved', label: 'Дата согласования', names: ['Дата согласования'] },
+        { key: 'status', label: 'Статус', names: ['Статус'], status: true },
+        { key: 'lead', label: 'Лидер', names: ['Лидер'] },
+        { key: 'notes', label: 'Примечания', names: ['Примечания'] }
+    ];
+
+    // Карта полей подчинённой таблицы «Позиция заказа».
+    var POSITION_FIELDS = [
+        { key: 'qty', label: 'Кол-во', names: ['Кол-во', 'Количество'] },
+        { key: 'raw', label: 'Вид сырья', names: ['Вид сырья'], ref: true },
+        { key: 'cutType', label: 'Тип резки', names: ['Тип резки'], ref: true },
+        { key: 'width', label: 'Ширина, мм', names: ['Ширина, мм', 'Ширина'] },
+        { key: 'length', label: 'Длина, м', names: ['Длина, м', 'Длина'] },
+        { key: 'sleeve', label: 'Диаметр втулки', names: ['Диаметр втулки'] },
+        { key: 'status', label: 'Статус', names: ['Статус'], status: true }
+    ];
+
+    var state = {
+        root: null,
+        db: '',
+        orderTable: DEFAULT_ORDER_TABLE,
+        positionTable: DEFAULT_POSITION_TABLE,
+        orderStatuses: DEFAULT_ORDER_STATUSES,
+        positionStatuses: DEFAULT_POSITION_STATUSES,
+        orderMeta: null,
+        positionMeta: null,
+        orderColumns: [],
+        positionColumns: [],
+        orders: [],
+        positionsByOrder: {},
+        expanded: {},
+        statusFilter: '',
+        refOptions: {},
+        creating: false
+    };
+
+    // ------------------------------------------------------------------
+    // Чистые утилиты (выносятся в AtexOrdersTesting для модульных тестов).
+    // ------------------------------------------------------------------
+
+    function trimValue(value) {
+        return String(value == null ? '' : value).trim();
+    }
+
+    function escapeHtml(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function normalizeFieldName(value) {
+        return String(value || '')
+            .toLowerCase()
+            .replace(/ё/g, 'е')
+            .replace(/[\s_\-\/,.]+/g, '')
+            .replace(/[^\wа-я0-9]/g, '');
+    }
+
+    function mapTypeToFormat(typeId) {
+        var map = {
+            '3': 'SHORT', '4': 'DATETIME', '6': 'PWD', '9': 'DATE',
+            '12': 'MEMO', '13': 'NUMBER', '14': 'SIGNED'
+        };
+        return map[String(typeId)] || 'SHORT';
+    }
+
+    // Разбор ссылочного значения "id:Отображение" → {id, label}.
+    function parseRef(value) {
+        var text = String(value == null ? '' : value);
+        var idx = text.indexOf(':');
+        if (idx <= 0) return { id: text, label: text };
+        return { id: text.slice(0, idx), label: text.slice(idx + 1) };
+    }
+
+    // Источники реквизитов из metadata: первая колонка (main) + reqs по порядку.
+    function buildFieldSources(metadata) {
+        var sources = [];
+        if (!metadata) return sources;
+
+        sources.push({
+            id: String(metadata.id),
+            index: 0,
+            name: metadata.val || '',
+            format: mapTypeToFormat(metadata.type || '3'),
+            ref_id: metadata.ref_id || null,
+            kind: 'main'
+        });
+
+        (metadata.reqs || []).forEach(function(req, idx) {
+            sources.push({
+                id: String(req.id),
+                index: idx + 1,
+                name: req.val || '',
+                format: req.ref || req.ref_id ? 'REF' : mapTypeToFormat(req.type || '3'),
+                ref_id: req.ref_id || (req.ref ? req.id : null),
+                arr_id: req.arr_id || null,
+                kind: 'req'
+            });
+        });
+
+        return sources;
+    }
+
+    function findSource(def, sources) {
+        var wanted = (def.names || []).map(normalizeFieldName);
+        for (var i = 0; i < sources.length; i++) {
+            if (wanted.indexOf(normalizeFieldName(sources[i].name)) !== -1) {
+                return sources[i];
+            }
+        }
+        return null;
+    }
+
+    // Привязка карты полей к metadata → массив колонок с источником.
+    function buildColumns(fieldDefs, metadata) {
+        var sources = buildFieldSources(metadata);
+        return fieldDefs.map(function(def) {
+            var source = findSource(def, sources);
+            return {
+                key: def.key,
+                label: def.label,
+                ref: !!def.ref,
+                status: !!def.status,
+                source: source,
+                reqId: source ? source.id : null
+            };
+        });
+    }
+
+    function getColumn(columns, key) {
+        for (var i = 0; i < columns.length; i++) {
+            if (columns[i].key === key) return columns[i];
+        }
+        return null;
+    }
+
+    // Нормализация компактного формата JSON_DATA ([{i,u,o,r}]) в записи.
+    function normalizeObjects(json, columns) {
+        if (!Array.isArray(json)) return [];
+        return json.map(function(item) {
+            var raw = item && Array.isArray(item.r) ? item.r : [];
+            var rec = {
+                id: item && item.i != null ? String(item.i) : '',
+                up: item && item.u != null ? String(item.u) : '',
+                ord: item && item.o != null ? item.o : 0,
+                values: {},
+                refs: {}
+            };
+            (columns || []).forEach(function(column) {
+                if (!column.source) return;
+                var cell = raw[column.source.index];
+                cell = cell == null ? '' : String(cell);
+                if (column.ref || (column.source && column.source.ref_id)) {
+                    var parsed = parseRef(cell);
+                    rec.values[column.key] = parsed.label;
+                    rec.refs[column.key] = parsed.id;
+                } else {
+                    rec.values[column.key] = cell;
+                }
+            });
+            return rec;
+        });
+    }
+
+    // ID новой записи из ответа _m_new: { "obj": 649 }.
+    function extractNewObjectId(response) {
+        if (!response || typeof response !== 'object') return null;
+        if (response.obj != null) return String(response.obj);
+        if (response.id != null) return String(response.id);
+        return null;
+    }
+
+    // --- Построители запросов (чистые: db/реквизиты передаются явно) ---
+
+    function buildListUrl(db, tableId, parentId, statusReqId, statusValue) {
+        var params = ['JSON_DATA', 'LIMIT=' + LIST_LIMIT];
+        if (parentId != null && parentId !== '') {
+            params.push('F_U=' + encodeURIComponent(parentId));
+        }
+        if (statusReqId && trimValue(statusValue)) {
+            params.push('F_' + statusReqId + '=' + encodeURIComponent(trimValue(statusValue)));
+        }
+        return '/' + encodeURIComponent(db) + '/object/' + encodeURIComponent(tableId) + '/?' + params.join('&');
+    }
+
+    function buildRefOptionsUrl(db, refReqId) {
+        return '/' + encodeURIComponent(db) + '/_ref_reqs/' + encodeURIComponent(refReqId) +
+            '?JSON&LIMIT=' + REF_OPTIONS_LIMIT;
+    }
+
+    // Тело POST: {t{reqId}: value, ...} + _xsrf → application/x-www-form-urlencoded.
+    function buildFormBody(fields, xsrf) {
+        var params = [];
+        if (xsrf) params.push('_xsrf=' + encodeURIComponent(xsrf));
+        Object.keys(fields || {}).forEach(function(reqId) {
+            var value = fields[reqId];
+            if (value == null) return;
+            params.push('t' + reqId + '=' + encodeURIComponent(value));
+        });
+        return params.join('&');
+    }
+
+    // Запрос на создание заказа: POST _m_new/{orderTable}?JSON&up=1 + реквизиты.
+    function buildCreateOrderRequest(opts) {
+        var fields = {};
+        var cols = opts.columns || [];
+        function put(key, value) {
+            if (value == null || value === '') return;
+            var col = getColumn(cols, key);
+            if (col && col.reqId) fields[col.reqId] = value;
+        }
+        put('client', opts.clientId);
+        put('manager', opts.managerId);
+        put('created', opts.created);
+        put('status', opts.status);
+        put('notes', opts.notes);
+
+        var url = '/' + encodeURIComponent(opts.db) + '/_m_new/' +
+            encodeURIComponent(opts.tableId) + '?JSON&up=1';
+        return { url: url, body: buildFormBody(fields, opts.xsrf) };
+    }
+
+    // Запрос на создание позиции: POST _m_new/{positionTable}?JSON&up={orderId} + реквизиты.
+    function buildCreatePositionRequest(opts) {
+        var fields = {};
+        var cols = opts.columns || [];
+        function put(key, value) {
+            if (value == null || value === '') return;
+            var col = getColumn(cols, key);
+            if (col && col.reqId) fields[col.reqId] = value;
+        }
+        put('qty', opts.qty);
+        put('raw', opts.rawId);
+        put('cutType', opts.cutTypeId);
+        put('width', opts.width);
+        put('length', opts.length);
+        put('sleeve', opts.sleeve);
+        put('status', opts.status);
+
+        var url = '/' + encodeURIComponent(opts.db) + '/_m_new/' +
+            encodeURIComponent(opts.tableId) + '?JSON&up=' + encodeURIComponent(opts.orderId);
+        return { url: url, body: buildFormBody(fields, opts.xsrf) };
+    }
+
+    // Запрос смены статуса: статус — не первая колонка → _m_set.
+    function buildSetStatusRequest(opts) {
+        var fields = {};
+        fields[opts.statusReqId] = opts.statusValue;
+        var url = '/' + encodeURIComponent(opts.db) + '/_m_set/' +
+            encodeURIComponent(opts.objId) + '?JSON';
+        return { url: url, body: buildFormBody(fields, opts.xsrf) };
+    }
+
+    // ------------------------------------------------------------------
+    // Сетевой слой
+    // ------------------------------------------------------------------
+
+    function getApiBase() {
+        var dbName = state.db || window.db || '';
+        if (!dbName && window.location && window.location.pathname) {
+            dbName = window.location.pathname.split('/').filter(Boolean)[0] || '';
+        }
+        return dbName;
+    }
+
+    function getXsrf() {
+        return typeof window.xsrf !== 'undefined' && window.xsrf
+            ? window.xsrf
+            : (typeof xsrf !== 'undefined' ? xsrf : '');
+    }
+
+    function fetchJson(url, options) {
+        return fetch(url, options || { credentials: 'same-origin' }).then(function(response) {
+            return response.text().then(function(text) {
+                var data = null;
+                if (text) {
+                    try {
+                        data = JSON.parse(text);
+                    } catch (err) {
+                        throw new Error('Сервер вернул ответ не в формате JSON');
+                    }
+                }
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status);
+                }
+                if (data && typeof data === 'object' && (data.error || data.err)) {
+                    throw new Error(String(data.error || data.err));
+                }
+                return data;
+            });
+        });
+    }
+
+    function postForm(url, body) {
+        return fetchJson(url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body
+        });
+    }
+
+    function loadMetadata(tableId) {
+        return fetchJson('/' + encodeURIComponent(getApiBase()) + '/metadata/' +
+            encodeURIComponent(tableId) + '?JSON').then(function(payload) {
+            return Array.isArray(payload) ? payload[0] : payload;
+        });
+    }
+
+    function loadRefOptions(reqId) {
+        if (!reqId) return Promise.resolve([]);
+        if (state.refOptions[reqId]) return Promise.resolve(state.refOptions[reqId]);
+        return fetchJson(buildRefOptionsUrl(getApiBase(), reqId)).then(function(data) {
+            var entries = [];
+            if (Array.isArray(data)) {
+                data.forEach(function(item) {
+                    if (Array.isArray(item)) {
+                        entries.push({ id: String(item[0]), text: String(item[1] == null ? item[0] : item[1]) });
+                    } else if (item && typeof item === 'object') {
+                        var id = item.id != null ? item.id : item.i;
+                        var text = item.text != null ? item.text : (item.val != null ? item.val : id);
+                        if (id != null) entries.push({ id: String(id), text: String(text) });
+                    }
+                });
+            } else if (data && typeof data === 'object') {
+                Object.keys(data).forEach(function(id) {
+                    entries.push({ id: String(id), text: String(data[id]) });
+                });
+            }
+            state.refOptions[reqId] = entries;
+            return entries;
+        });
+    }
+
+    // ------------------------------------------------------------------
+    // Рендеринг
+    // ------------------------------------------------------------------
+
+    function setMessage(text, kind) {
+        var el = document.getElementById('atex-orders-message');
+        if (!el) return;
+        if (!text) {
+            el.textContent = '';
+            el.className = 'atex-orders-message';
+            el.hidden = true;
+            return;
+        }
+        el.textContent = text;
+        el.className = 'atex-orders-message atex-orders-message--' + (kind || 'info');
+        el.hidden = false;
+    }
+
+    function statusSelectHtml(statuses, current, dataAttrs) {
+        var options = ['<option value="">—</option>'].concat((statuses || []).map(function(status) {
+            var selected = trimValue(status) === trimValue(current) ? ' selected' : '';
+            return '<option value="' + escapeHtml(status) + '"' + selected + '>' + escapeHtml(status) + '</option>';
+        }));
+        if (current && (statuses || []).map(trimValue).indexOf(trimValue(current)) === -1) {
+            options.push('<option value="' + escapeHtml(current) + '" selected>' + escapeHtml(current) + '</option>');
+        }
+        return '<select class="atex-orders-status"' + (dataAttrs || '') + '>' + options.join('') + '</select>';
+    }
+
+    function refSelectHtml(id, options, current, placeholder) {
+        var opts = ['<option value="">' + escapeHtml(placeholder || '—') + '</option>'].concat((options || []).map(function(opt) {
+            var selected = String(opt.id) === String(current) ? ' selected' : '';
+            return '<option value="' + escapeHtml(opt.id) + '"' + selected + '>' + escapeHtml(opt.text) + '</option>';
+        }));
+        return '<select id="' + escapeHtml(id) + '" class="atex-orders-input">' + opts.join('') + '</select>';
+    }
+
+    function renderFilter() {
+        var sel = document.getElementById('atex-orders-filter');
+        if (!sel) return;
+        sel.innerHTML = ['<option value="">Все статусы</option>'].concat(state.orderStatuses.map(function(status) {
+            var selected = status === state.statusFilter ? ' selected' : '';
+            return '<option value="' + escapeHtml(status) + '"' + selected + '>' + escapeHtml(status) + '</option>';
+        })).join('');
+    }
+
+    function filteredOrders() {
+        if (!state.statusFilter) return state.orders;
+        return state.orders.filter(function(order) {
+            return trimValue(order.values.status) === trimValue(state.statusFilter);
+        });
+    }
+
+    function renderPositions(order) {
+        var positions = state.positionsByOrder[order.id] || [];
+        var head = '<thead><tr>' +
+            '<th>Кол-во</th><th>Вид сырья</th><th>Тип резки</th>' +
+            '<th>Ширина, мм</th><th>Длина, м</th><th>Ø втулки</th><th>Статус</th>' +
+            '</tr></thead>';
+        var body;
+        if (!positions.length) {
+            body = '<tbody><tr><td colspan="7" class="atex-orders-empty">Позиций пока нет.</td></tr></tbody>';
+        } else {
+            body = '<tbody>' + positions.map(function(pos) {
+                return '<tr data-position-id="' + escapeHtml(pos.id) + '">' +
+                    '<td>' + escapeHtml(pos.values.qty || '') + '</td>' +
+                    '<td>' + escapeHtml(pos.values.raw || '') + '</td>' +
+                    '<td>' + escapeHtml(pos.values.cutType || '') + '</td>' +
+                    '<td>' + escapeHtml(pos.values.width || '') + '</td>' +
+                    '<td>' + escapeHtml(pos.values.length || '') + '</td>' +
+                    '<td>' + escapeHtml(pos.values.sleeve || '') + '</td>' +
+                    '<td>' + statusSelectHtml(state.positionStatuses, pos.values.status,
+                        ' data-position-status="' + escapeHtml(pos.id) + '"') + '</td>' +
+                    '</tr>';
+            }).join('') + '</tbody>';
+        }
+
+        return '<div class="atex-orders-positions">' +
+            '<table class="atex-orders-subtable">' + head + body + '</table>' +
+            '<button type="button" class="atex-orders-btn atex-orders-btn-secondary" ' +
+            'data-add-position="' + escapeHtml(order.id) + '">' +
+            '<i class="pi pi-plus"></i><span>Добавить позицию</span></button>' +
+            renderPositionForm(order) +
+            '</div>';
+    }
+
+    function renderPositionForm(order) {
+        var rawCol = getColumn(state.positionColumns, 'raw');
+        var cutCol = getColumn(state.positionColumns, 'cutType');
+        var rawOptions = rawCol && rawCol.reqId ? state.refOptions[rawCol.reqId] : null;
+        var cutOptions = cutCol && cutCol.reqId ? state.refOptions[cutCol.reqId] : null;
+        return '<form class="atex-orders-position-form" data-position-form="' + escapeHtml(order.id) + '" hidden>' +
+            '<div class="atex-orders-fields">' +
+            '<label>Кол-во<input class="atex-orders-input" type="number" min="0" data-field="qty"></label>' +
+            '<label>Вид сырья' + refSelectHtml('atex-pos-raw-' + order.id, rawOptions, '', 'Выберите вид сырья') + '</label>' +
+            '<label>Тип резки' + refSelectHtml('atex-pos-cut-' + order.id, cutOptions, '', 'Выберите тип резки') + '</label>' +
+            '<label>Ширина, мм<input class="atex-orders-input" type="number" min="0" data-field="width"></label>' +
+            '<label>Длина, м<input class="atex-orders-input" type="number" min="0" step="any" data-field="length"></label>' +
+            '<label>Ø втулки<input class="atex-orders-input" type="number" min="0" data-field="sleeve"></label>' +
+            '</div>' +
+            '<div class="atex-orders-form-actions">' +
+            '<button type="submit" class="atex-orders-btn atex-orders-btn-primary"><i class="pi pi-check"></i><span>Сохранить позицию</span></button>' +
+            '<button type="button" class="atex-orders-btn atex-orders-btn-secondary" data-cancel-position="' + escapeHtml(order.id) + '">Отмена</button>' +
+            '</div></form>';
+    }
+
+    function renderOrders() {
+        var container = document.getElementById('atex-orders-list');
+        if (!container) return;
+
+        var orders = filteredOrders();
+        if (!orders.length) {
+            container.innerHTML = '<div class="atex-orders-empty">' +
+                (state.orders.length ? 'Нет заказов с выбранным статусом.' : 'Заказов пока нет. Создайте первый.') +
+                '</div>';
+            return;
+        }
+
+        var rows = orders.map(function(order) {
+            var positions = state.positionsByOrder[order.id] || [];
+            var isOpen = !!state.expanded[order.id];
+            var main = '<tr class="atex-orders-row" data-order-id="' + escapeHtml(order.id) + '">' +
+                '<td class="atex-orders-toggle-cell"><button type="button" class="atex-orders-toggle" data-toggle="' + escapeHtml(order.id) + '" title="Позиции">' +
+                '<i class="pi ' + (isOpen ? 'pi-chevron-down' : 'pi-chevron-right') + '"></i></button></td>' +
+                '<td>' + escapeHtml(order.id) + '</td>' +
+                '<td>' + escapeHtml(order.values.client || '') + '</td>' +
+                '<td>' + escapeHtml(order.values.manager || '') + '</td>' +
+                '<td>' + escapeHtml(order.values.created || '') + '</td>' +
+                '<td>' + statusSelectHtml(state.orderStatuses, order.values.status,
+                    ' data-order-status="' + escapeHtml(order.id) + '"') + '</td>' +
+                '<td class="atex-orders-count">' + positions.length + '</td>' +
+                '</tr>';
+            var detail = isOpen
+                ? '<tr class="atex-orders-detail-row"><td colspan="7">' + renderPositions(order) + '</td></tr>'
+                : '';
+            return main + detail;
+        }).join('');
+
+        container.innerHTML = '<table class="atex-orders-table">' +
+            '<thead><tr><th></th><th>№</th><th>Клиент</th><th>Менеджер</th><th>Дата создания</th><th>Статус</th><th>Позиций</th></tr></thead>' +
+            '<tbody>' + rows + '</tbody></table>';
+    }
+
+    function renderCreateForm() {
+        var clientCol = getColumn(state.orderColumns, 'client');
+        var clientOptions = clientCol && clientCol.reqId ? state.refOptions[clientCol.reqId] : null;
+        var panel = document.getElementById('atex-order-create-form');
+        if (!panel) return;
+        panel.innerHTML =
+            '<div class="atex-orders-fields">' +
+            '<label>Клиент' + refSelectHtml('atex-order-client', clientOptions, '', 'Выберите клиента') + '</label>' +
+            '<label>Статус' + statusSelectHtml(state.orderStatuses, state.orderStatuses[0], ' id="atex-order-status"') + '</label>' +
+            '<label class="atex-orders-field-wide">Примечания<textarea class="atex-orders-input" id="atex-order-notes" rows="2"></textarea></label>' +
+            '</div>' +
+            '<div class="atex-orders-form-actions">' +
+            '<button type="submit" class="atex-orders-btn atex-orders-btn-primary"><i class="pi pi-check"></i><span>Создать заказ</span></button>' +
+            '<button type="button" class="atex-orders-btn atex-orders-btn-secondary" id="atex-order-cancel">Отмена</button>' +
+            '</div>';
+    }
+
+    // ------------------------------------------------------------------
+    // Действия
+    // ------------------------------------------------------------------
+
+    function todayIso() {
+        var now = new Date();
+        return now.getFullYear() + '-' +
+            String(now.getMonth() + 1).padStart(2, '0') + '-' +
+            String(now.getDate()).padStart(2, '0');
+    }
+
+    function loadOrders() {
+        var statusCol = getColumn(state.orderColumns, 'status');
+        var url = buildListUrl(getApiBase(), state.orderTable, null,
+            null, ''); // фильтр по статусу делаем на клиенте (быстрее и переживает опечатки)
+        return fetchJson(url).then(function(json) {
+            state.orders = normalizeObjects(json, state.orderColumns).sort(function(a, b) {
+                return Number(b.id) - Number(a.id);
+            });
+            renderOrders();
+            return statusCol;
+        });
+    }
+
+    function loadPositions(orderId) {
+        var url = buildListUrl(getApiBase(), state.positionTable, orderId, null, '');
+        return fetchJson(url).then(function(json) {
+            state.positionsByOrder[orderId] = normalizeObjects(json, state.positionColumns);
+            renderOrders();
+        });
+    }
+
+    function createOrder() {
+        if (state.creating) return;
+        var clientSel = document.getElementById('atex-order-client');
+        var statusSel = document.getElementById('atex-order-status');
+        var notesEl = document.getElementById('atex-order-notes');
+
+        var req = buildCreateOrderRequest({
+            db: getApiBase(),
+            tableId: state.orderTable,
+            columns: state.orderColumns,
+            clientId: clientSel ? clientSel.value : '',
+            managerId: typeof window.uid !== 'undefined' ? window.uid : (typeof uid !== 'undefined' ? uid : ''),
+            created: todayIso(),
+            status: statusSel ? statusSel.value : '',
+            notes: notesEl ? notesEl.value : '',
+            xsrf: getXsrf()
+        });
+
+        state.creating = true;
+        setMessage('Создание заказа…', 'info');
+        postForm(req.url, req.body).then(function(response) {
+            var newId = extractNewObjectId(response);
+            setMessage(newId ? 'Заказ №' + newId + ' создан.' : 'Заказ создан.', 'success');
+            closeCreateForm();
+            return loadOrders().then(function() {
+                if (newId) {
+                    state.expanded[newId] = true;
+                    return loadPositions(newId);
+                }
+            });
+        }).catch(function(error) {
+            setMessage('Не удалось создать заказ: ' + (error.message || error), 'error');
+        }).finally(function() {
+            state.creating = false;
+        });
+    }
+
+    function createPosition(orderId, form) {
+        var rawSel = form.querySelector('#atex-pos-raw-' + cssEscape(orderId));
+        var cutSel = form.querySelector('#atex-pos-cut-' + cssEscape(orderId));
+        function fieldVal(name) {
+            var el = form.querySelector('[data-field="' + name + '"]');
+            return el ? el.value : '';
+        }
+
+        var req = buildCreatePositionRequest({
+            db: getApiBase(),
+            tableId: state.positionTable,
+            columns: state.positionColumns,
+            orderId: orderId,
+            qty: fieldVal('qty'),
+            rawId: rawSel ? rawSel.value : '',
+            cutTypeId: cutSel ? cutSel.value : '',
+            width: fieldVal('width'),
+            length: fieldVal('length'),
+            sleeve: fieldVal('sleeve'),
+            status: state.positionStatuses[0],
+            xsrf: getXsrf()
+        });
+
+        setMessage('Добавление позиции…', 'info');
+        postForm(req.url, req.body).then(function() {
+            setMessage('Позиция добавлена.', 'success');
+            return loadPositions(orderId);
+        }).catch(function(error) {
+            setMessage('Не удалось добавить позицию: ' + (error.message || error), 'error');
+        });
+    }
+
+    function changeStatus(objId, statusReqId, statusValue, onDone) {
+        if (!statusReqId) {
+            setMessage('Не найден реквизит «Статус» в метаданных.', 'error');
+            return;
+        }
+        var req = buildSetStatusRequest({
+            db: getApiBase(),
+            objId: objId,
+            statusReqId: statusReqId,
+            statusValue: statusValue,
+            xsrf: getXsrf()
+        });
+        setMessage('Сохранение статуса…', 'info');
+        postForm(req.url, req.body).then(function() {
+            setMessage('Статус обновлён.', 'success');
+            if (onDone) onDone();
+        }).catch(function(error) {
+            setMessage('Не удалось обновить статус: ' + (error.message || error), 'error');
+        });
+    }
+
+    function cssEscape(value) {
+        return String(value).replace(/[^\w-]/g, '\\$&');
+    }
+
+    function openCreateForm() {
+        var panel = document.getElementById('atex-order-create');
+        if (panel) panel.hidden = false;
+        renderCreateForm();
+        var client = document.getElementById('atex-order-client');
+        if (client) client.focus();
+    }
+
+    function closeCreateForm() {
+        var panel = document.getElementById('atex-order-create');
+        if (panel) panel.hidden = true;
+    }
+
+    // ------------------------------------------------------------------
+    // События
+    // ------------------------------------------------------------------
+
+    function attachEvents() {
+        var createBtn = document.getElementById('atex-orders-create');
+        if (createBtn) {
+            createBtn.addEventListener('click', openCreateForm);
+        }
+
+        var filter = document.getElementById('atex-orders-filter');
+        if (filter) {
+            filter.addEventListener('change', function() {
+                state.statusFilter = filter.value || '';
+                renderOrders();
+            });
+        }
+
+        var refresh = document.getElementById('atex-orders-refresh');
+        if (refresh) {
+            refresh.addEventListener('click', function() {
+                state.positionsByOrder = {};
+                loadOrders();
+            });
+        }
+
+        var createForm = document.getElementById('atex-order-create-form');
+        if (createForm) {
+            createForm.addEventListener('submit', function(event) {
+                event.preventDefault();
+                createOrder();
+            });
+            createForm.addEventListener('click', function(event) {
+                if (event.target.closest('#atex-order-cancel')) {
+                    closeCreateForm();
+                }
+            });
+        }
+
+        var list = document.getElementById('atex-orders-list');
+        if (list) {
+            list.addEventListener('click', function(event) {
+                var toggle = event.target.closest('[data-toggle]');
+                if (toggle) {
+                    var orderId = toggle.getAttribute('data-toggle');
+                    state.expanded[orderId] = !state.expanded[orderId];
+                    if (state.expanded[orderId] && !state.positionsByOrder[orderId]) {
+                        loadPositions(orderId);
+                    } else {
+                        renderOrders();
+                    }
+                    return;
+                }
+
+                var addPos = event.target.closest('[data-add-position]');
+                if (addPos) {
+                    var addId = addPos.getAttribute('data-add-position');
+                    var form = list.querySelector('[data-position-form="' + cssEscape(addId) + '"]');
+                    if (form) form.hidden = false;
+                    return;
+                }
+
+                var cancelPos = event.target.closest('[data-cancel-position]');
+                if (cancelPos) {
+                    var cancelId = cancelPos.getAttribute('data-cancel-position');
+                    var cform = list.querySelector('[data-position-form="' + cssEscape(cancelId) + '"]');
+                    if (cform) cform.hidden = true;
+                    return;
+                }
+            });
+
+            list.addEventListener('submit', function(event) {
+                var form = event.target.closest('[data-position-form]');
+                if (!form) return;
+                event.preventDefault();
+                createPosition(form.getAttribute('data-position-form'), form);
+            });
+
+            list.addEventListener('change', function(event) {
+                var orderStatus = event.target.closest('[data-order-status]');
+                if (orderStatus) {
+                    var statusCol = getColumn(state.orderColumns, 'status');
+                    var orderId = orderStatus.getAttribute('data-order-status');
+                    var order = findOrder(orderId);
+                    changeStatus(orderId, statusCol && statusCol.reqId, orderStatus.value, function() {
+                        if (order) order.values.status = orderStatus.value;
+                    });
+                    return;
+                }
+                var posStatus = event.target.closest('[data-position-status]');
+                if (posStatus) {
+                    var posCol = getColumn(state.positionColumns, 'status');
+                    var posId = posStatus.getAttribute('data-position-status');
+                    changeStatus(posId, posCol && posCol.reqId, posStatus.value, function() {
+                        updatePositionStatus(posId, posStatus.value);
+                    });
+                }
+            });
+        }
+    }
+
+    function findOrder(orderId) {
+        for (var i = 0; i < state.orders.length; i++) {
+            if (state.orders[i].id === String(orderId)) return state.orders[i];
+        }
+        return null;
+    }
+
+    function updatePositionStatus(posId, value) {
+        Object.keys(state.positionsByOrder).forEach(function(orderId) {
+            state.positionsByOrder[orderId].forEach(function(pos) {
+                if (pos.id === String(posId)) pos.values.status = value;
+            });
+        });
+    }
+
+    // ------------------------------------------------------------------
+    // Инициализация
+    // ------------------------------------------------------------------
+
+    function parseStatusesAttr(value, fallback) {
+        var text = trimValue(value);
+        if (!text) return fallback;
+        var list = text.split(',').map(trimValue).filter(Boolean);
+        return list.length ? list : fallback;
+    }
+
+    function init() {
+        state.root = document.getElementById('atex-orders-app');
+        if (!state.root) return;
+
+        state.db = state.root.getAttribute('data-db') || window.db || '';
+        state.orderTable = state.root.getAttribute('data-order-table') || DEFAULT_ORDER_TABLE;
+        state.positionTable = state.root.getAttribute('data-position-table') || DEFAULT_POSITION_TABLE;
+        state.orderStatuses = parseStatusesAttr(state.root.getAttribute('data-order-statuses'), DEFAULT_ORDER_STATUSES);
+        state.positionStatuses = parseStatusesAttr(state.root.getAttribute('data-position-statuses'), DEFAULT_POSITION_STATUSES);
+
+        attachEvents();
+        renderFilter();
+        setMessage('Загрузка данных…', 'info');
+
+        Promise.all([loadMetadata(state.orderTable), loadMetadata(state.positionTable)])
+            .then(function(metas) {
+                state.orderMeta = metas[0] || {};
+                state.positionMeta = metas[1] || {};
+                state.orderColumns = buildColumns(ORDER_FIELDS, state.orderMeta);
+                state.positionColumns = buildColumns(POSITION_FIELDS, state.positionMeta);
+
+                // Предзагрузка справочников для форм.
+                var clientCol = getColumn(state.orderColumns, 'client');
+                var rawCol = getColumn(state.positionColumns, 'raw');
+                var cutCol = getColumn(state.positionColumns, 'cutType');
+                return Promise.all([
+                    clientCol && clientCol.reqId ? loadRefOptions(clientCol.reqId) : Promise.resolve([]),
+                    rawCol && rawCol.reqId ? loadRefOptions(rawCol.reqId) : Promise.resolve([]),
+                    cutCol && cutCol.reqId ? loadRefOptions(cutCol.reqId) : Promise.resolve([])
+                ]);
+            })
+            .then(function() {
+                setMessage('');
+                return loadOrders();
+            })
+            .catch(function(error) {
+                setMessage('Ошибка загрузки: ' + (error.message || error), 'error');
+            });
+    }
+
+    // Публичный API для отладки/тестов.
+    window.AtexOrders = {
+        init: init,
+        reload: loadOrders
+    };
+
+    // Чистые функции — для модульных тестов (без DOM/сети).
+    window.AtexOrdersTesting = {
+        normalizeFieldName: normalizeFieldName,
+        parseRef: parseRef,
+        buildFieldSources: buildFieldSources,
+        buildColumns: buildColumns,
+        normalizeObjects: normalizeObjects,
+        extractNewObjectId: extractNewObjectId,
+        buildListUrl: buildListUrl,
+        buildRefOptionsUrl: buildRefOptionsUrl,
+        buildFormBody: buildFormBody,
+        buildCreateOrderRequest: buildCreateOrderRequest,
+        buildCreatePositionRequest: buildCreatePositionRequest,
+        buildSetStatusRequest: buildSetStatusRequest,
+        ORDER_FIELDS: ORDER_FIELDS,
+        POSITION_FIELDS: POSITION_FIELDS,
+        DEFAULT_ORDER_STATUSES: DEFAULT_ORDER_STATUSES,
+        DEFAULT_POSITION_STATUSES: DEFAULT_POSITION_STATUSES
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})(window, document);
