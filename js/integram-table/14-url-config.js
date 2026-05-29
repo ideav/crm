@@ -442,6 +442,11 @@
             // The format uses FR_{T}>{X} but the value itself doesn't include >
             // After parsing in applyFilter, it becomes just the value
 
+            // Check for REGEXP filter: REGEXP:pattern (issue #2790)
+            if (rawValue.toUpperCase().startsWith('REGEXP:')) {
+                return { type: '/', value: rawValue.substring(7) };
+            }
+
             // Check for "contains" filter: %value%
             if (rawValue.startsWith('%') && rawValue.endsWith('%') && rawValue.length > 2) {
                 return { type: '~', value: rawValue.slice(1, -1) };
