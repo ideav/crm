@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>atex orders harness</title>
+<style>
+  body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 16px; background: #eef2f7; }
+  /* минимальные стенды для иконок pi, чтобы не тянуть primeicons */
+  .pi { font-style: normal; }
+  .pi-plus::before { content: "＋"; }
+  .pi-refresh::before { content: "⟳"; }
+  .pi-check::before { content: "✓"; }
+  .pi-chevron-right::before { content: "▸"; }
+  .pi-chevron-down::before { content: "▾"; }
+  #host { height: 640px; background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 8px 24px rgba(15,23,42,.08); }
+</style>
+</head>
+<body>
+<div id="host"></div>
+<script>
+// --- Мок API Интеграма ---
+var META = {
+  '107': { id: '107', val: 'Заказ', type: '3', reqs: [
+    { id: 1052, val: 'Клиент', type: '3', ref: '103', ref_id: '1053' },
+    { id: 1054, val: 'Пользователь', type: '3', ref: '18', ref_id: '1055' },
+    { id: 1056, val: 'Дата создания', type: '9' },
+    { id: 1058, val: 'Дата согласования', type: '9' },
+    { id: 1060, val: 'Статус', type: '3' },
+    { id: 1062, val: 'Лидер', type: '3' },
+    { id: 1064, val: 'Примечания', type: '12' }
+  ]},
+  '108': { id: '108', val: 'Позиция заказа', type: '3', reqs: [
+    { id: 1067, val: 'Кол-во', type: '13' },
+    { id: 1069, val: 'Вид сырья', type: '3', ref: '100', ref_id: '1070' },
+    { id: 1071, val: 'Тип резки', type: '3', ref: '104', ref_id: '1072' },
+    { id: 1073, val: 'Ширина, мм', type: '13' },
+    { id: 1075, val: 'Длина, м', type: '14' },
+    { id: 1077, val: 'Диаметр втулки', type: '13' },
+    { id: 1079, val: 'Статус', type: '3' }
+  ]}
+};
+var ORDERS = [
+  { i: 651, u: 1, o: 2, r: ['Заказ 651', '305:ООО «Ромашка»', '42:victor_g', '2026-05-28', '', 'Согласован', '', ''] },
+  { i: 650, u: 1, o: 1, r: ['Заказ 650', '306:АО «Лютик»', '42:victor_g', '2026-05-27', '', 'В производстве', '', ''] }
+];
+var POSITIONS = {
+  '651': [
+    { i: 700, u: 651, o: 1, r: ['Поз 700', '120', '200:Бумага мелованная', '7:Прямая', '500', '1000', '76', 'В работе'] },
+    { i: 701, u: 651, o: 2, r: ['Поз 701', '40', '201:Картон', '8:Косая', '320', '500', '76', 'Новая'] }
+  ]
+};
+var REFS = {
+  '1052': { '305': 'ООО «Ромашка»', '306': 'АО «Лютик»', '307': 'ИП Иванов' },
+  '1069': { '200': 'Бумага мелованная', '201': 'Картон', '202': 'Плёнка ПВХ' },
+  '1071': { '7': 'Прямая', '8': 'Косая' }
+};
+
+window.db = 'atex';
+window.xsrf = 'TESTTOKEN';
+window.uid = '42';
+
+window.fetch = function(url) {
+  var u = String(url);
+  function json(data) {
+    return Promise.resolve({ ok: true, status: 200, text: function() { return Promise.resolve(JSON.stringify(data)); } });
+  }
+  var m = u.match(/\/metadata\/(\d+)/);
+  if (m) return json(META[m[1]]);
+  m = u.match(/\/_ref_reqs\/(\d+)/);
+  if (m) return json(REFS[m[1]] || {});
+  if (/\/object\/108\//.test(u)) {
+    var pm = u.match(/F_U=(\d+)/);
+    return json(pm ? (POSITIONS[pm[1]] || []) : []);
+  }
+  if (/\/object\/107\//.test(u)) return json(ORDERS);
+  return json({});
+};
+
+// корень рабочего места
+var host = document.getElementById('host');
+host.innerHTML = [
+  '<div id="atex-orders-app" class="atex-orders" data-db="atex" data-order-table="107" data-position-table="108">',
+  '<div class="atex-orders-toolbar">',
+  '<button id="atex-orders-create" class="atex-orders-btn atex-orders-btn-primary" type="button"><i class="pi pi-plus"></i><span>Создать заказ</span></button>',
+  '<label class="atex-orders-filter-wrap"><span>Статус:</span><select id="atex-orders-filter" class="atex-orders-input"><option value="">Все статусы</option></select></label>',
+  '<button id="atex-orders-refresh" class="atex-orders-btn atex-orders-btn-secondary" type="button"><i class="pi pi-refresh"></i><span>Обновить</span></button>',
+  '</div>',
+  '<div id="atex-orders-message" class="atex-orders-message" hidden></div>',
+  '<section id="atex-order-create" class="atex-orders-create" hidden><h2 class="atex-orders-create-title">Новый заказ</h2><form id="atex-order-create-form" class="atex-orders-create-form"></form></section>',
+  '<div id="atex-orders-list" class="atex-orders-list"><div class="atex-orders-empty">Загрузка…</div></div>',
+  '</div>'
+].join('');
+</script>
+<link rel="stylesheet" href="../download/atex/css/orders.css">
+<script src="../download/atex/js/orders.js"></script>
+<script>
+// раскрыть первый заказ для наглядности после загрузки
+setTimeout(function(){
+  var t = document.querySelector('[data-toggle="651"]');
+  if (t) t.click();
+}, 400);
+</script>
+</body>
+</html>
