@@ -2,3 +2,6 @@
 /include/credentials.json
 /google_sheets_sync.bki
 /logs/google_sheets_sync.bki
+
+# Local research artifacts for issue #2895
+experiments/
