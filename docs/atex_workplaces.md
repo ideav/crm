@@ -136,6 +136,14 @@ API-операции и критерии приёмки.
   `object/{Производственная резка}/?JSON_KV` (фильтр по слиттеру/статусу).
 - **Приёмка:** резка создаётся с автонумером; обеспечение связывает позицию
   заказа и резку (M:N через подчинённую таблицу).
+- **Реализация:** шаблон `templates/atex/production-planning.html` (URL
+  `/atex/production-planning`), логика `js/atex-production-planning.js`, стили
+  `css/atex-production-planning.css`. Id таблиц и реквизитов резолвятся из
+  `metadata?JSON` по имени, поэтому код переживает пересборку базы: резка —
+  `_m_new/{Производственная резка}?up=1` без главного значения (Номер считает
+  `unique`), обеспечение — `_m_new/{Обеспечение}?up={позицияId}` со ссылкой
+  `t{refРезка}`. Тесты ядра: `experiments/atex-production-planning.test.js`;
+  браузерный стенд с моком fetch: `experiments/atex-production-planning.fixture.html`.
 
 ### 3.4 Приёмка сырья (Кладовщик)
 
