@@ -1,0 +1,220 @@
+.atex-orders {
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+    background: var(--bg-primary, #f8fafc);
+    color: var(--text-primary, #111827);
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.atex-orders * {
+    box-sizing: border-box;
+}
+
+.atex-orders-toolbar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.atex-orders-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 7px;
+    padding: 6px 12px;
+    font: inherit;
+    cursor: pointer;
+    border: 1px solid transparent;
+}
+
+.atex-orders-btn-primary {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #ffffff;
+}
+
+.atex-orders-btn-primary:hover {
+    background: #1d4ed8;
+    border-color: #1d4ed8;
+}
+
+.atex-orders-btn-secondary {
+    background: var(--input-bg, #fff);
+    border-color: var(--input-border, #cbd5e1);
+    color: var(--text-primary, #111827);
+}
+
+.atex-orders-btn-secondary:hover {
+    background: #f1f5f9;
+}
+
+.atex-orders-filter-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-secondary, #64748b);
+}
+
+.atex-orders-input {
+    border: 1px solid var(--input-border, #cbd5e1);
+    border-radius: 7px;
+    background: var(--input-bg, #fff);
+    color: var(--text-primary, #111827);
+    padding: 5px 10px;
+    font: inherit;
+}
+
+.atex-orders-input:focus {
+    outline: 2px solid rgba(37, 99, 235, 0.18);
+    border-color: #2563eb;
+}
+
+.atex-orders-message {
+    flex: 0 0 auto;
+    border-radius: 7px;
+    padding: 8px 12px;
+    font-size: 0.92rem;
+}
+
+.atex-orders-message--info {
+    background: #eff6ff;
+    color: #1e40af;
+}
+
+.atex-orders-message--success {
+    background: #ecfdf5;
+    color: #047857;
+}
+
+.atex-orders-message--error {
+    background: #fef2f2;
+    color: #b91c1c;
+}
+
+.atex-orders-create {
+    flex: 0 0 auto;
+    border: 1px solid var(--input-border, #cbd5e1);
+    border-radius: 10px;
+    background: var(--input-bg, #fff);
+    padding: 14px 16px;
+}
+
+.atex-orders-create-title {
+    margin: 0 0 12px;
+    font-size: 1.05rem;
+}
+
+.atex-orders-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px 14px;
+}
+
+.atex-orders-fields label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.88rem;
+    color: var(--text-secondary, #64748b);
+}
+
+.atex-orders-field-wide {
+    grid-column: 1 / -1;
+}
+
+.atex-orders-form-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.atex-orders-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+}
+
+.atex-orders-table,
+.atex-orders-subtable {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--input-bg, #fff);
+    font-size: 0.9rem;
+}
+
+.atex-orders-table th,
+.atex-orders-table td,
+.atex-orders-subtable th,
+.atex-orders-subtable td {
+    border: 1px solid var(--input-border, #e2e8f0);
+    padding: 6px 8px;
+    text-align: left;
+    vertical-align: middle;
+}
+
+.atex-orders-table thead th,
+.atex-orders-subtable thead th {
+    background: #f1f5f9;
+    color: var(--text-secondary, #475569);
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+}
+
+.atex-orders-row:hover {
+    background: #f8fafc;
+}
+
+.atex-orders-toggle-cell {
+    width: 34px;
+    text-align: center;
+}
+
+.atex-orders-toggle {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: var(--text-secondary, #64748b);
+    padding: 2px 4px;
+}
+
+.atex-orders-count {
+    text-align: center;
+}
+
+.atex-orders-status {
+    border: 1px solid var(--input-border, #cbd5e1);
+    border-radius: 6px;
+    background: var(--input-bg, #fff);
+    color: var(--text-primary, #111827);
+    padding: 3px 6px;
+    font: inherit;
+    max-width: 180px;
+}
+
+.atex-orders-detail-row > td {
+    background: #f8fafc;
+    padding: 0;
+}
+
+.atex-orders-positions {
+    padding: 12px 16px;
+}
+
+.atex-orders-position-form {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--input-border, #cbd5e1);
+}
+
+.atex-orders-empty {
+    padding: 18px;
+    text-align: center;
+    color: var(--text-secondary, #64748b);
+}
