@@ -1030,6 +1030,7 @@ Fields: t{colId}=579  # где 579 — ID записи в целевой таб�
 - [MCP.md](https://github.com/ideav/crm/blob/main/docs/MCP.md) — описание API (неполное)
 - [Roadmap.md](https://github.com/ideav/crm/blob/main/docs/Roadmap.md) — roadmap с примерами API-вызовов
 - [create_perelidoz.ps1](https://github.com/ideav/crm/blob/main/docs/create_perelidoz.ps1) — эталонный скрипт создания таблиц и данных
+- [create_db_from_scratch.ps1](https://github.com/ideav/crm/blob/main/docs/create_db_from_scratch.ps1) — наполнение базы «с нуля» по файлу метаданных ([metadata_all.json](https://github.com/ideav/crm/blob/main/docs/metadata_all.json)); идемпотентный, для PowerShell Windows 10
 - [Issue #632](https://github.com/ideav/crm/issues/632) — создание/удаление пунктов меню (_m_new/151, t153, t391)
 - [Issue #597](https://github.com/ideav/crm/issues/597) — паттерн t{id} для первой колонки системных таблиц
 
