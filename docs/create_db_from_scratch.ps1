@@ -8,6 +8,13 @@
 # свободные связи и атрибуты колонок (обязательность, мультивыбор, значение
 # по умолчанию, псевдоним).
 #
+# Исходные данные по умолчанию — atex_metadata.json: схема проекta atex
+# (производство термопринтерных рулонов, 15 таблиц + системная Пользователь)
+# по дизайн-спеке
+# https://github.com/ideav/atex/blob/main/docs/superpowers/specs/2026-05-26-atex-schema-setup-design.md
+# Прежний metadata_all.json был выгрузкой сторонней базы (системные таблицы
+# Интеграм) — неверные исходные данные, см. issue #2901.
+#
 # «Нуль» — чистая база. Часть таблиц уже может существовать (неполная) — это
 # не ломает работу, скрипт идемпотентен и дозаполняет недостающее:
 #   * _d_new дедуплицирует типы по паре (имя, базовый тип);
@@ -34,8 +41,8 @@ param(
     [string]$Login = "api",
     [string]$Password = "",
     [string]$BaseUrl = "https://ideav.ru",
-    [string]$DbName = "perelidoz",
-    [string]$MetadataPath = (Join-Path $PSScriptRoot "metadata_all.json"),
+    [string]$DbName = "atex",
+    [string]$MetadataPath = (Join-Path $PSScriptRoot "atex_metadata.json"),
     [string]$LogPath = "create_db_from_scratch_log.txt",
     # Применять числовые значения по умолчанию на ссылочных колонках. По
     # умолчанию выключено: такие значения — это id записей исходной базы
