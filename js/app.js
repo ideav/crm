@@ -121,6 +121,23 @@ async function validateToken(host, dbName) {
     }
 }
 
+// Issue #2906: a returning visitor who already holds a valid auth token should not
+// be bothered with the captcha. Every idb_* cookie is checked for validity one by
+// one (GET xsrf); a valid response keeps the cookie, a failed one deletes it (see
+// validateToken). Returns true if at least one non-guest token is valid.
+async function hasValidAuthToken(host) {
+    const dbNames = CookieUtil.getAllIdb();
+    let anyValid = false;
+    for (const db of dbNames) {
+        const data = await validateToken(host, db);
+        // Guest sessions are not real authentications and must not bypass the captcha.
+        if (data && data.user && data.user !== 'guest') {
+            anyValid = true;
+        }
+    }
+    return anyValid;
+}
+
 // ============================================================
 // Notification utility
 // ============================================================
@@ -490,6 +507,9 @@ class App {
         this.apiConfig = new ApiConfig();
         this.auth = new AuthManager(this.apiConfig);
         this.yandexAuth = new YandexAuthManager(this.apiConfig);
+        // Issue #2906: set to true when a valid auth token is found, so the captcha
+        // is hidden and its client-side check is skipped for returning users.
+        this._captchaBypass = false;
         window._app = this;
     }
 
@@ -612,7 +632,7 @@ class App {
                     }
                 }
                 const captchaToken = getCaptchaToken('login-captcha-container');
-                if (captchaToken === null) {
+                if (!this._captchaBypass && captchaToken === null) {
                     showToast('Пожалуйста, пройдите проверку капчи', 'error');
                     loginInProgress = false;
                     return;
@@ -917,7 +937,7 @@ class App {
                 }
 
                 const captchaToken = getCaptchaToken('register-captcha-container');
-                if (captchaToken === null) {
+                if (!this._captchaBypass && captchaToken === null) {
                     showToast('Пожалуйста, пройдите проверку капчи', 'error');
                     return;
                 }
@@ -953,6 +973,12 @@ class App {
 
         // Check auth state from cookies
         this.auth.init();
+
+        // Issue #2906: validate existing token cookies. If any is valid, the visitor
+        // is a returning, authenticated user — hide the captcha and skip its check.
+        // Done before any auth panel is shown below so the captcha never flashes.
+        this._captchaBypass = await hasValidAuthToken(this.apiConfig.host);
+        if (this._captchaBypass) this._hideCaptchaWidgets();
 
         // Handle redirect reasons from the backend: show login form and a visible message
         const urlParams = new URLSearchParams(window.location.search);
@@ -1064,6 +1090,8 @@ class App {
     }
 
     _initCaptchaWidgets() {
+        // Issue #2906: skip rendering the captcha entirely for returning users with a valid token.
+        if (this._captchaBypass) return;
         if (!window.smartCaptcha) return;
         ['login-captcha-container', 'register-captcha-container'].forEach(id => {
             const el = document.getElementById(id);
@@ -1073,6 +1101,14 @@ class App {
             const robustness = el.dataset.robustness || 'strict';
             const widgetId = window.smartCaptcha.render(el, { sitekey, robustness });
             el.dataset.widgetId = widgetId;
+        });
+    }
+
+    // Issue #2906: hide the captcha containers when a valid token bypasses the captcha.
+    _hideCaptchaWidgets() {
+        ['login-captcha-container', 'register-captcha-container'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
         });
     }
 

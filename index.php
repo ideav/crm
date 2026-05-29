@@ -193,7 +193,7 @@ if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Registe
     	if(!strlen($_POST["agree"]))
     		$msg .= t9n("[RU]Пожалуйста, поставьте отметку, что ознакомились с&nbsp;Лицензионным соглашением"
     		    ."[EN]Please confirm that you have read the&nbsp;<a href=\"offer.html\">papers to protect you")."<br/><br/>\n";
-        if(!verifyCaptcha(isset($_POST["smart-token"]) ? $_POST["smart-token"] : ""))
+        if(!hasValidTokenCookie() && !verifyCaptcha(isset($_POST["smart-token"]) ? $_POST["smart-token"] : ""))
             $msg .= t9n("[RU]Пожалуйста, пройдите проверку капчи.[EN]Please complete the captcha verification.")."<br/><br/>\n";
         # Stage one: Inform of the errors, if any, and let him try again
         if(strlen($msg))
@@ -545,6 +545,28 @@ function verifyCaptcha($token) {
     if ($result === false) return false;
     $data = json_decode($result, true);
     return isset($data['status']) && $data['status'] === 'ok';
+}
+
+# Issue #2906: a returning visitor who already holds a valid auth token (an idb_*
+# cookie) is not a bot, so the captcha may be skipped for them. This mirrors the
+# start.html logic: every idb_* cookie is checked against its DB one by one and the
+# first valid, non-guest token bypasses the captcha. Guest tokens never count.
+function hasValidTokenCookie(){
+    global $connection;
+    if(empty($_COOKIE) || !is_array($_COOKIE)) return false;
+    foreach($_COOKIE as $name => $value){
+        if(strpos($name, "idb_") !== 0) continue;
+        $db = substr($name, 4);
+        if(!checkDbName(USER_DB_MASK, $db)) continue;
+        if($value === "" || $value === "gtuoeksetn") continue; # Empty or guest token
+        $tok = addslashes($value);
+        # Query the DB directly (not Exec_sql) so a missing table is ignored here
+        # rather than triggering a dBNotExists redirect.
+        $res = @mysqli_query($connection, "SELECT 1 FROM $db tok, $db u"
+            ." WHERE u.t=".USER." AND u.val!='guest' AND tok.up=u.id AND tok.val='$tok' AND tok.t=".TOKEN." LIMIT 1");
+        if($res && mysqli_fetch_array($res)) return true;
+    }
+    return false;
 }
 
 function mail2DB($email, $uid){
@@ -9297,7 +9319,7 @@ switch($a)  # Check actions, which don't require authentication
 			$GLOBALS["tzone"] = round(((int)$_POST["tzone"] - time() - date("Z"))/1800)*1800; # Round the time zone shift to 30 min
 			setcookie("tzone", $GLOBALS["tzone"], time() + COOKIES_EXPIRE, "/"); # 30 days
 		}
-		if(isset($_POST["smart-token"]) && !verifyCaptcha($_POST["smart-token"])){
+		if(isset($_POST["smart-token"]) && !hasValidTokenCookie() && !verifyCaptcha($_POST["smart-token"])){
 			$captchaMsg = t9n("[RU]Проверка капчи не пройдена. Пожалуйста, попробуйте снова.[EN]Captcha verification failed. Please try again.");
 			if(isApi()){
 				header("HTTP/1.0 403 Forbidden");
