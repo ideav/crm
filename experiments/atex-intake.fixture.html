@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<!-- Браузерный стенд для рабочего места «Приёмка сырья» (#2914).
+     Мокает fetch: metadata?JSON, object/{id} и команды _m_*.
+     Открывать локально, использует те же js/css, что и продакшн-шаблон. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>atex · Приёмка сырья — стенд</title>
+<link rel="stylesheet" href="../css/atex-intake.css">
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#eef1f5}</style>
+</head>
+<body>
+<div id="atex-intake" class="atex-in" data-db="atex" data-xsrf="test-token">
+    <div class="atex-in-loading">Загрузка…</div>
+</div>
+
+<script>
+// ── Мок схемы atex (имена как в docs/atex_metadata.json; id произвольные) ──
+var META = [
+    { id: 100, val: 'Вид сырья', reqs: [
+        { id: 1001, val: 'Полное название' },
+        { id: 1003, val: 'Ширина, мм' }
+    ]},
+    { id: 106, val: 'Партия сырья', reqs: [
+        { id: 1044, val: 'Вид сырья' },
+        { id: 1046, val: 'Дата прихода' },
+        { id: 1048, val: 'Получено, м²' },
+        { id: 1050, val: 'Остаток, м²' }
+    ]}
+];
+
+// Хранилище-заглушка
+var DB = {
+    materials: [
+        { i: 201, r: ['Бумага термо 80 г/м²'] },
+        { i: 202, r: ['Плёнка PP 50 мкм'] }
+    ],
+    // r = [главное значение, Вид сырья(ref), Дата прихода, Получено, Остаток]
+    batches: [
+        { i: 301, r: ['Бумага термо 80 г/м² от 2026-05-10', '201:Бумага термо 80 г/м²', '2026-05-10', '5000', '3200'] },
+        { i: 302, r: ['Плёнка PP 50 мкм от 2026-05-22', '202:Плёнка PP 50 мкм', '2026-05-22', '2400', '2400'] }
+    ],
+    nextId: 500
+};
+
+var realFetch = window.fetch;
+window.fetch = function(url, opts) {
+    var u = String(url);
+    function json(data) {
+        return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }
+    if (/\/metadata\?JSON/.test(u)) return json(META);
+    var mObj = u.match(/\/object\/(\d+)\//);
+    if (mObj) {
+        var tid = mObj[1];
+        if (tid === '100') return json(DB.materials);
+        if (tid === '106') return json(DB.batches);
+    }
+    if (/\/_m_new\//.test(u)) {
+        var id = DB.nextId++;
+        console.log('[mock] _m_new', u, opts && opts.body);
+        // Простейшая регистрация новой партии для отображения в списке.
+        var p = new URLSearchParams((opts && opts.body) || '');
+        var matRef = p.get('t1044');
+        var mat = (DB.materials.filter(function(m){return String(m.i)===String(matRef);})[0] || {}).r;
+        DB.batches.push({ i: id, r: [
+            p.get('t106') || ('#' + id),
+            matRef + ':' + (mat ? mat[0] : ''),
+            p.get('t1046') || '',
+            p.get('t1048') || '',
+            p.get('t1050') || ''
+        ]});
+        return json({ obj: id, i: id });
+    }
+    if (/\/_m_set\//.test(u) || /\/_m_save\//.test(u) || /\/_m_del\//.test(u)) {
+        console.log('[mock]', u, opts && opts.body);
+        return json({ ok: 1 });
+    }
+    return realFetch(url, opts);
+};
+</script>
+<script src="../js/atex-intake.js"></script>
+</body>
+</html>
