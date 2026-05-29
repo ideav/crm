@@ -29,11 +29,20 @@ function load_state($file) {
 function save_state($file, $state) {
     file_put_contents($file, json_encode($state));
 }
-function seed_state($file) {
+function seed_state($file, $withSystem = false) {
     // Base-type rows are self-referential (id == t), up=0.
     $rows = [];
     foreach (BASE_TYPES as $code => $name) {
         $rows[] = ['id' => $code, 'up' => 0, 't' => $code, 'val' => $name, 'ord' => 0];
+    }
+    // System tables (42 Роль, 18 Пользователь, 151 Меню) pre-exist in a real
+    // Integram base at fixed ids. Seeded only on demand (reset?system=1) so the
+    // structure-only #2901 test keeps its clean base. A system table is a
+    // SHORT (t=3) top-level row whose id is the fixed platform id.
+    if ($withSystem) {
+        $rows[] = ['id' => 42,  'up' => 0, 't' => 3, 'val' => 'Роль',         'ord' => 0];
+        $rows[] = ['id' => 18,  'up' => 0, 't' => 3, 'val' => 'Пользователь', 'ord' => 0];
+        $rows[] = ['id' => 151, 'up' => 0, 't' => 3, 'val' => 'Меню',         'ord' => 0];
     }
     $state = ['rows' => $rows, 'next_id' => 1000];
     save_state($file, $state);
@@ -97,7 +106,7 @@ $unique = isset($req['unique']) ? (int)$req['unique'] : 0;
 switch ($cmd) {
 
 case 'reset':
-    seed_state($STATE_FILE);
+    seed_state($STATE_FILE, isset($req['system']));
     send_json(['ok' => 1]);
 
 case 'auth':
@@ -173,6 +182,49 @@ case '_d_attrs':
     $r['val'] = $attr;
     save_state($STATE_FILE, $state);
     send_json(['obj' => (string)$r['up']]);
+
+case '_m_new':
+    // Create a record in a table. $arg = table id. Record rows carry t=tableId,
+    // up=parent (1 for root). The first column (the record's name/_value) is
+    // passed as t{tableId}; every other t{colId} field is stored verbatim in
+    // `data`. Unlike _d_new, _m_new does NOT deduplicate records.
+    $tableId = (int)$arg;
+    $tableRow = &row_by_id($state, $tableId);
+    if (!$tableRow || (int)$tableRow['up'] !== 0) die_err("Table $tableId not found");
+    $up = isset($req['up']) ? (int)$req['up'] : 1;
+    $nameKey = 't' . $tableId;
+    $recVal = isset($req[$nameKey]) ? trim($req[$nameKey]) : '';
+    $data = [];
+    foreach ($req as $k => $v) {
+        if ($k === $nameKey || $k === 'up' || $k === 'token' || $k === '_xsrf' || $k === 'JSON' || $k === 'full') continue;
+        if (strlen($k) > 1 && $k[0] === 't' && ctype_digit(substr($k, 1))) {
+            $data[substr($k, 1)] = $v;
+        }
+    }
+    $id = $state['next_id']++;
+    $state['rows'][] = ['id' => $id, 'up' => $up, 't' => $tableId, 'val' => $recVal,
+                        'ord' => next_ord($state, $up), 'data' => $data];
+    save_state($STATE_FILE, $state);
+    send_json(['obj' => (string)$id]);
+
+case 'object':
+    // List records of a table (GET object/{tableId}?JSON=1). Faithful to the
+    // real shape (docs/MCP.md §6): {object:[{id,up,val,base}], reqs:{recId:{colId:{value}}}}.
+    $tableId = (int)$arg;
+    $tableRow = &row_by_id($state, $tableId);
+    $base = $tableRow ? (int)$tableRow['t'] : 3;
+    $objects = []; $reqs = [];
+    foreach ($state['rows'] as $r) {
+        if ((int)$r['t'] !== $tableId || (int)$r['up'] === 0) continue;
+        if (isset($req['F_U']) && (int)$r['up'] !== (int)$req['F_U']) continue;
+        $objects[] = ['id' => (int)$r['id'], 'up' => (int)$r['up'], 'val' => $r['val'], 'base' => $base];
+        $rq = [];
+        if (!empty($r['data'])) {
+            foreach ($r['data'] as $colId => $value) { $rq[(string)$colId] = ['value' => $value]; }
+        }
+        $reqs[(string)$r['id']] = $rq;
+    }
+    send_json(['object' => $objects, 'reqs' => $reqs]);
 
 case 'metadata':
     send_json(reconstruct_metadata($state));
