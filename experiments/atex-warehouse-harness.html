@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>atex warehouse harness</title>
+<style>
+  body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 16px; background: #eef2f7; }
+  /* минимальные стенды для иконок pi, чтобы не тянуть primeicons */
+  .pi { font-style: normal; }
+  .pi-plus::before { content: "＋"; }
+  .pi-refresh::before { content: "⟳"; }
+  .pi-check::before { content: "✓"; }
+  #host { min-height: 720px; background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 8px 24px rgba(15,23,42,.08); }
+</style>
+</head>
+<body>
+<div id="host"></div>
+<script>
+// --- Мок API Интеграма для рабочего места «Склад готовой продукции» ---
+var META = {
+  '113': { id: '113', val: 'Партия ГП', type: '4', reqs: [
+    { id: 1126, val: 'Производственная резка', type: '13', ref: '110', ref_id: '1127' },
+    { id: 1128, val: 'Ширина, мм', type: '13' },
+    { id: 1130, val: 'Кол-во рулонов', type: '13' },
+    { id: 1132, val: 'Метраж, м', type: '14' },
+    { id: 1134, val: 'Адрес хранения', type: '3' },
+    { id: 1136, val: 'Статус', type: '3' }
+  ]},
+  '109': { id: '109', val: 'Обеспечение', type: '13', reqs: [
+    { id: 1082, val: 'Метраж, м', type: '14' },
+    { id: 1084, val: 'Производственная резка', type: '13', ref: '110', ref_id: '1085' },
+    { id: 1086, val: 'Партия ГП', type: '4', ref: '113', ref_id: '1087' },
+    { id: 1088, val: 'Статус', type: '3' }
+  ]},
+  '110': { id: '110', val: 'Производственная резка', type: '13', reqs: [
+    { id: 1090, val: 'Слиттер', type: '3', ref: '101', ref_id: '1091' },
+    { id: 1092, val: 'Тип резки', type: '3', ref: '104', ref_id: '1093' },
+    { id: 1094, val: 'Партия сырья', type: '3', ref: '106', ref_id: '1095' },
+    { id: 1096, val: 'Дата план', type: '9' },
+    { id: 1098, val: 'Статус', type: '3' }
+  ]}
+};
+var BATCHES = [
+  { i: 902, u: 1, o: 2, r: ['2026-05-18 09:00', '210:Резка №210', '500', '3', '900', 'A-13', 'Есть'] },
+  { i: 901, u: 1, o: 1, r: ['2026-05-20 10:00', '210:Резка №210', '500', '4', '1200', 'A-12', 'Есть'] },
+  { i: 903, u: 1, o: 3, r: ['2026-05-15 09:00', '210:Резка №210', '500', '2', '600', 'A-14', 'Отгружен'] },
+  { i: 904, u: 1, o: 4, r: ['2026-05-22 09:00', '211:Резка №211', '400', '5', '1500', 'B-01', 'Зарезервирован'] }
+];
+var PROVISIONS = [
+  { i: 720, u: 660, o: 1, r: ['Обеспечение 720', '1200', '210:Резка №210', '', 'Ожидает'] },
+  { i: 721, u: 661, o: 1, r: ['Обеспечение 721', '600', '211:Резка №211', '904:Партия 904', 'Зарезервировано'] }
+];
+var CUTTINGS = [
+  { i: 210, u: 1, o: 1, r: ['210', '1:Слиттер-1', '2:Прямая', '5:Партия А', '2026-05-01', 'Завершён'] },
+  { i: 211, u: 1, o: 2, r: ['211', '1:Слиттер-1', '3:Косая', '6:Партия Б', '2026-05-02', 'Завершён'] },
+  { i: 212, u: 1, o: 3, r: ['212', '2:Слиттер-2', '2:Прямая', '7:Партия В', '2026-05-03', 'В работе'] }
+];
+
+window.db = 'atex';
+window.xsrf = 'TESTTOKEN';
+
+window.fetch = function(url) {
+  var u = String(url);
+  function json(data) {
+    return Promise.resolve({ ok: true, status: 200, text: function() { return Promise.resolve(JSON.stringify(data)); } });
+  }
+  var m = u.match(/\/metadata\/(\d+)/);
+  if (m) return json(META[m[1]]);
+  if (/\/object\/113\//.test(u)) return json(BATCHES);
+  if (/\/object\/109\//.test(u)) return json(PROVISIONS);
+  if (/\/object\/110\//.test(u)) return json(CUTTINGS);
+  return json({});
+};
+
+// корень рабочего места
+var host = document.getElementById('host');
+host.innerHTML = [
+  '<div id="atex-warehouse-app" class="atex-wh" data-db="atex" data-batch-table="113" data-provision-table="109" data-cutting-table="110">',
+  '<div class="atex-wh-toolbar">',
+  '<button id="atex-wh-create-btn" class="atex-wh-btn atex-wh-btn-primary" type="button"><i class="pi pi-plus"></i><span>Оприходовать партию</span></button>',
+  '<label class="atex-wh-filter-wrap"><span>Статус партии:</span><select id="atex-wh-filter" class="atex-wh-input"><option value="">Все статусы</option></select></label>',
+  '<button id="atex-wh-refresh" class="atex-wh-btn atex-wh-btn-secondary" type="button"><i class="pi pi-refresh"></i><span>Обновить</span></button>',
+  '</div>',
+  '<div id="atex-wh-message" class="atex-wh-message" hidden></div>',
+  '<section id="atex-wh-create" class="atex-wh-create" hidden><h2 class="atex-wh-panel-title">Оприходование партии ГП</h2><form id="atex-wh-create-form" class="atex-wh-create-form"></form></section>',
+  '<section class="atex-wh-panel"><h2 class="atex-wh-panel-title">Партии готовой продукции</h2><div id="atex-wh-batches" class="atex-wh-list"><div class="atex-wh-empty">Загрузка…</div></div></section>',
+  '<section class="atex-wh-panel"><h2 class="atex-wh-panel-title">FIFO-списание в обеспечение позиций</h2><div id="atex-wh-provisions" class="atex-wh-list"><div class="atex-wh-empty">Загрузка…</div></div></section>',
+  '</div>'
+].join('');
+</script>
+<link rel="stylesheet" href="../download/atex/css/warehouse.css">
+<script src="../download/atex/js/warehouse.js"></script>
+<script>
+// открыть форму оприходования для наглядности после загрузки
+setTimeout(function(){
+  var b = document.getElementById('atex-wh-create-btn');
+  if (b) b.click();
+}, 400);
+</script>
+</body>
+</html>

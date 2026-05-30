@@ -1,0 +1,48 @@
+<!-- Рабочее место atex «Склад готовой продукции» (роль Кладовщик). -->
+<!-- Решение ideav/crm#2918 (часть #2903). См. docs/atex_workplaces.md §3.8 -->
+<!-- и docs/WORKSPACE_DEVELOPMENT_GUIDE.md. URL: /atex/warehouse -->
+<link rel="stylesheet" href="/css/integram-table.css?0{_global_.version}">
+<link rel="stylesheet" href="/download/{_global_.z}/css/warehouse.css?0{_global_.version}">
+<script src="/download/{_global_.z}/js/warehouse.js?0{_global_.version}" defer></script>
+
+<div id="atex-warehouse-app" class="atex-wh"
+     data-db="{_global_.z}"
+     data-batch-table="113"
+     data-provision-table="109"
+     data-cutting-table="110">
+    <div class="atex-wh-toolbar">
+        <button id="atex-wh-create-btn" class="atex-wh-btn atex-wh-btn-primary" type="button" title="Оприходовать партию ГП">
+            <i class="pi pi-plus"></i><span>Оприходовать партию</span>
+        </button>
+        <label class="atex-wh-filter-wrap">
+            <span>Статус партии:</span>
+            <select id="atex-wh-filter" class="atex-wh-input" aria-label="Фильтр по статусу">
+                <option value="">Все статусы</option>
+            </select>
+        </label>
+        <button id="atex-wh-refresh" class="atex-wh-btn atex-wh-btn-secondary" type="button" title="Обновить данные">
+            <i class="pi pi-refresh"></i><span>Обновить</span>
+        </button>
+    </div>
+
+    <div id="atex-wh-message" class="atex-wh-message" hidden></div>
+
+    <section id="atex-wh-create" class="atex-wh-create" hidden>
+        <h2 class="atex-wh-panel-title">Оприходование партии ГП</h2>
+        <form id="atex-wh-create-form" class="atex-wh-create-form"></form>
+    </section>
+
+    <section class="atex-wh-panel">
+        <h2 class="atex-wh-panel-title">Партии готовой продукции</h2>
+        <div id="atex-wh-batches" class="atex-wh-list">
+            <div class="atex-wh-empty">Загрузка данных…</div>
+        </div>
+    </section>
+
+    <section class="atex-wh-panel">
+        <h2 class="atex-wh-panel-title">FIFO-списание в обеспечение позиций</h2>
+        <div id="atex-wh-provisions" class="atex-wh-list">
+            <div class="atex-wh-empty">Загрузка данных…</div>
+        </div>
+    </section>
+</div>
