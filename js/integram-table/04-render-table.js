@@ -85,7 +85,7 @@
                             ${ this.isTableDeletable() && this.isTableWritable() ? `
                             <div class="integram-table-settings integram-table-settings-filter-delete" onclick="window.${ instanceName }.showFilterDeleteConfirm(event)" title="Удалить записи, удовлетворяющие заданному фильтру">
                                 <i class="pi pi-trash"></i>
-                                ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">удалить по фильтру</span>' : '' }
+                                ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">Удалить</span>' : '' }
                             </div>
                             ` : '' }
                             <div class="integram-table-settings" onclick="window.${ instanceName }.copyConfigUrl()" title="Скопировать ссылку с текущими фильтрами и группами">
