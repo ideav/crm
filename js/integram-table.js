@@ -7627,7 +7627,9 @@ class IntegramTable{
                         const isMulti = parsedAttrs.multi;
                         const isRequired = parsedAttrs.required;
                         const isKey = parsedAttrs.key;
-                        const alias = parsedAttrs.alias;
+                        // First column carries the table alias on col.alias (issue #2967),
+                        // other columns carry their alias inside attrs.
+                        const alias = parsedAttrs.alias || (isFirst ? col.alias : '');
                         const originalName = col.val || col.name;
                         const displayName = alias
                             ? `${ this.escapeHtml(alias) } <span class="col-original-name">(${this.escapeHtml(originalName)})</span>`
@@ -7887,6 +7889,9 @@ class IntegramTable{
 
             // Build the alias display value (either alias or original name)
             const currentAlias = parsedAttrs.alias || '';
+            // Table alias for the first column (issue #2967): the displayed table
+            // name, stored separately from the raw first-column name.
+            const currentTableAlias = isFirstColumn ? (col.alias || '') : '';
             // Original (base) column name for renaming (issue #1018)
             const currentName = col.val || col.name;
 
@@ -7913,6 +7918,10 @@ class IntegramTable{
                             ${ availableTypes.map(t => `<option value="${t.id}" ${ String(col.type) === String(t.id) ? 'selected' : '' }>${t.name}</option>`).join('') }
                         </select>` : `<span class="col-edit-value">Ссылочный тип (справочник)</span>` }
                     </div>
+                    ${ isFirstColumn ? `<div class="col-edit-row">
+                        <label class="col-edit-label">Псевдоним таблицы:</label>
+                        <input type="text" id="col-edit-table-alias-${instanceName}" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(currentTableAlias) }" placeholder="Отображаемое имя таблицы" autocomplete="off">
+                    </div>` : '' }
                     ${ isFirstColumn ? `<div class="col-edit-row">
                         <label class="col-edit-label col-edit-check-label">
                             <input type="checkbox" id="col-edit-unique-${instanceName}" ${ isUnique ? 'checked' : '' }>
@@ -8030,6 +8039,23 @@ class IntegramTable{
                         }
                         col.name = newName;
                         col.val = newName;
+                    }
+
+                    // 0b. Table alias for the first column (issue #2967): the
+                    // displayed table name, stored separately from the raw name.
+                    if (isFirstColumn) {
+                        const tableAliasInput = colEditModal.querySelector(`#col-edit-table-alias-${instanceName}`);
+                        const newTableAlias = tableAliasInput ? tableAliasInput.value.trim() : '';
+                        if (newTableAlias !== currentTableAlias) {
+                            const tableId = this.objectTableId || this.options.tableTypeId;
+                            const result = await this.setTableAlias(tableId, newTableAlias);
+                            if (!result.success) {
+                                showStatus('Ошибка установки псевдонима таблицы: ' + result.error, true);
+                                saveBtn.disabled = false;
+                                return;
+                            }
+                            col.alias = newTableAlias;
+                        }
                     }
 
                     // 1. Change base type (non-ref, non-free-link only)
@@ -8269,6 +8295,31 @@ class IntegramTable{
                 if (typeof xsrf !== 'undefined') params.append('_xsrf', xsrf);
 
                 const resp = await fetch(`${apiBase}/_d_alias/${colId}?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+                if (!resp.ok) return { success: false, error: `HTTP ${resp.status}` };
+                return { success: true };
+            } catch (err) {
+                return { success: false, error: err.message };
+            }
+        }
+
+        /**
+         * Set (or clear) the table alias via API (issue #2967).
+         * Uses _t_alias/{tableId}?JSON. The alias is the displayed table name,
+         * stored in the first column's attrs via a self-descriptor requisite.
+         * Pass an empty alias to clear it.
+         */
+        async setTableAlias(tableId, alias) {
+            const apiBase = this.getApiBase();
+            try {
+                const params = new URLSearchParams();
+                params.append('val', alias);
+                if (typeof xsrf !== 'undefined') params.append('_xsrf', xsrf);
+
+                const resp = await fetch(`${apiBase}/_t_alias/${tableId}?JSON`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: params.toString()
