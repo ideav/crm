@@ -102,3 +102,13 @@ Issue просил составить список точек влияния в 
   `terms` со строкой-самоописанием (4 сценария, 16 проверок).
 - `experiments/test-issue-2967-table-alias.js` — методы `IntegramTable`:
   `tableDisplayName`, `parseObjectFormat`, `setTableAlias` (19 проверок).
+
+## Визуальная проверка
+
+Стенд `experiments/table-alias-screenshot.html` строит две таблицы реальным
+методом `IntegramTable.parseObjectFormat()` из собранного бандла — различие
+только в наличии `alias`. Слева («ДО») заголовок и первая колонка показывают
+«сырое» имя термина `Клиент`; справа («ПОСЛЕ») — псевдоним `Клиенты`, при этом
+`val` первой колонки остаётся `Клиент`.
+
+![Псевдоним таблицы: до и после](screenshots/issue-2967-table-alias-before-after.png)
