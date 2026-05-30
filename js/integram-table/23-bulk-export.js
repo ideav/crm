@@ -274,8 +274,12 @@
                 return;
             }
 
+            const recordWord = count % 100 >= 11 && count % 100 <= 14 ? 'записей'
+                : count % 10 === 1 ? 'запись'
+                : count % 10 >= 2 && count % 10 <= 4 ? 'записи'
+                : 'записей';
             popup.innerHTML = `
-                <span>Удалить ${ count } записей, удовлетворяющих фильтру?</span>
+                <span>Удалить ${ count } ${ recordWord }, удовлетворяющих фильтру?</span>
                 <button class="btn btn-sm btn-danger filter-delete-confirm-btn">Да, удалить</button>
                 <button class="btn btn-sm btn-outline-secondary filter-delete-cancel-btn">Отменить</button>
             `;

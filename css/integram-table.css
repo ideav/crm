@@ -3509,6 +3509,26 @@ tr.row-selected {
     font-size: 0.75rem !important;
 }
 
+.filter-delete-confirm {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 8px;
+    padding: 4px 8px;
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 4px;
+    font-size: 0.8125rem;
+}
+
+.filter-delete-confirm-btn {
+    font-size: 0.75rem !important;
+}
+
+.filter-delete-cancel-btn {
+    font-size: 0.75rem !important;
+}
+
 /* Bulk delete progress */
 .bulk-delete-progress-bar-container {
     width: 100%;
@@ -4123,6 +4143,12 @@ tr.row-selected {
 
 /* Bulk delete warning confirmation */
 [data-theme="dark"] .bulk-delete-confirm {
+    background: rgba(245, 158, 11, 0.15);
+    border-color: rgba(245, 158, 11, 0.5);
+    color: var(--text-primary, #e9ecef);
+}
+
+[data-theme="dark"] .filter-delete-confirm {
     background: rgba(245, 158, 11, 0.15);
     border-color: rgba(245, 158, 11, 0.5);
     color: var(--text-primary, #e9ecef);
