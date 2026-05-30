@@ -122,20 +122,26 @@ async function validateToken(host, dbName) {
 }
 
 // Issue #2906: a returning visitor who already holds a valid auth token should not
-// be bothered with the captcha. Every idb_* cookie is checked for validity one by
-// one (GET xsrf); a valid response keeps the cookie, a failed one deletes it (see
+// be bothered with the captcha. idb_* cookies are checked for validity one by one
+// (GET xsrf); a valid response keeps the cookie, a failed one deletes it (see
 // validateToken). Returns true if at least one non-guest token is valid.
+//
+// Issue #2930: don't keep iterating over ALL tokens once the answer is known. We
+// only need to confirm that *some* valid non-guest token exists to bypass the
+// captcha, so we short-circuit as soon as the first valid token is found instead
+// of issuing a network request for every remaining cookie on every page load.
+// (Stale cookies for the not-yet-checked dbs are cleaned up lazily when those dbs
+// are actually validated.)
 async function hasValidAuthToken(host) {
     const dbNames = CookieUtil.getAllIdb();
-    let anyValid = false;
     for (const db of dbNames) {
         const data = await validateToken(host, db);
         // Guest sessions are not real authentications and must not bypass the captcha.
         if (data && data.user && data.user !== 'guest') {
-            anyValid = true;
+            return true;
         }
     }
-    return anyValid;
+    return false;
 }
 
 // ============================================================
