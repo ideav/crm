@@ -1,0 +1,164 @@
+/* Рабочее место atex «Приёмка сырья» (ideav/crm#2914).
+   Стили скоупятся под #atex-intake / .atex-in, чтобы не пересекаться
+   с остальными рабочими местами в main.html. */
+
+.atex-in {
+    --in-border: #d9dee5;
+    --in-bg: #ffffff;
+    --in-muted: #6b7280;
+    --in-accent: #2563eb;
+    --in-accent-d: #1d4ed8;
+    --in-warn: #b91c1c;
+    --in-ok: #15803d;
+    color: #1f2933;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+.atex-in *,
+.atex-in *::before,
+.atex-in *::after { box-sizing: border-box; }
+
+.atex-in.is-busy { opacity: .65; pointer-events: none; }
+
+.atex-in-loading,
+.atex-in-fatal {
+    padding: 24px;
+    color: var(--in-muted);
+}
+.atex-in-fatal { color: var(--in-warn); }
+
+.atex-in-layout {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    gap: 16px;
+    padding: 16px;
+    align-items: start;
+}
+@media (max-width: 820px) {
+    .atex-in-layout { grid-template-columns: 1fr; }
+}
+
+/* Список партий (FIFO) */
+.atex-in-sidebar {
+    border: 1px solid var(--in-border);
+    border-radius: 8px;
+    background: var(--in-bg);
+    overflow: hidden;
+}
+.atex-in-sidebar-head {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--in-border);
+    background: #f8fafc;
+}
+.atex-in-sidebar-head h2 { margin: 0; font-size: 15px; }
+
+.atex-in-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--in-border);
+    background: #fbfcfe;
+}
+.atex-in-metric { display: flex; flex-direction: column; gap: 2px; min-width: 90px; }
+.atex-in-metric-label { font-size: 11px; color: var(--in-muted); text-transform: uppercase; letter-spacing: .03em; }
+.atex-in-metric-value { font-size: 20px; font-weight: 700; }
+
+.atex-in-list { display: flex; flex-direction: column; max-height: 70vh; overflow: auto; }
+.atex-in-row {
+    display: grid;
+    grid-template-columns: 32px 1.4fr 1fr .9fr .9fr;
+    gap: 8px;
+    align-items: center;
+    padding: 9px 12px;
+}
+.atex-in-row-head {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--in-muted);
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    border-bottom: 1px solid var(--in-border);
+    background: #f8fafc;
+}
+.atex-in-row-item {
+    text-align: left;
+    border: none;
+    border-bottom: 1px solid #eef1f5;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    width: 100%;
+}
+.atex-in-row-item:hover { background: #f1f5f9; }
+.atex-in-row-item.is-active { background: #e0ecff; font-weight: 600; }
+.atex-in-num { text-align: center; color: var(--in-muted); }
+.atex-in-amount { text-align: right; font-variant-numeric: tabular-nums; }
+.atex-in-empty { padding: 14px; color: var(--in-muted); }
+
+/* Форма оприходования */
+.atex-in-form {
+    border: 1px solid var(--in-border);
+    border-radius: 8px;
+    background: var(--in-bg);
+    padding: 18px 20px;
+}
+.atex-in-form-title { margin: 0 0 16px; font-size: 18px; }
+
+.atex-in-field { margin-bottom: 14px; }
+.atex-in-label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 600;
+    color: #374151;
+}
+.atex-in-hint { margin-top: 4px; font-size: 12px; color: var(--in-muted); }
+.atex-in-input {
+    width: 100%;
+    padding: 7px 10px;
+    border: 1px solid var(--in-border);
+    border-radius: 6px;
+    font: inherit;
+    background: #fff;
+}
+.atex-in-input:focus {
+    outline: none;
+    border-color: var(--in-accent);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, .15);
+}
+
+.atex-in-btn {
+    border: 1px solid var(--in-border);
+    border-radius: 6px;
+    background: #fff;
+    padding: 8px 16px;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+}
+.atex-in-btn:hover { background: #f1f5f9; }
+.atex-in-btn-primary { background: var(--in-accent); border-color: var(--in-accent); color: #fff; }
+.atex-in-btn-primary:hover { background: var(--in-accent-d); }
+.atex-in-btn-secondary { background: #f8fafc; }
+.atex-in-actions { display: flex; gap: 10px; margin-top: 18px; }
+
+/* Тосты-уведомления (без alert/confirm/prompt) */
+.atex-in-toast {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 9999;
+    max-width: 360px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    color: #fff;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .18);
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity .25s, transform .25s;
+}
+.atex-in-toast.is-visible { opacity: 1; transform: translateY(0); }
+.atex-in-toast-success { background: #15803d; }
+.atex-in-toast-error { background: #b91c1c; }
+.atex-in-toast-info { background: #334155; }
