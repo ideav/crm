@@ -140,7 +140,7 @@ curl -c cookies.txt -X POST 'https://ideav.ru/{db}/auth?JSON=1' \
 | 17 | PATH | Путь (служебное) |
 
 > Полный список доступных в конкретной БД — `GET /{db}/basics`
-> {"3":"SHORT","8":"CHARS","9":"DATE","13":"NUMBER","14":"SIGNED","11":"BOOLEAN","12":"MEMO","4":"DATETIME","10":"FILE","2":"HTML","7":"BUTTON","6":"PWD","5":"GRANT","15":"CALCULATABLE","16":"REPORT_COLUMN","17":"PATH"}
+> Пример ответа: `{"3":"SHORT","8":"CHARS","9":"DATE","13":"NUMBER","14":"SIGNED","11":"BOOLEAN","12":"MEMO","4":"DATETIME","10":"FILE","2":"HTML","7":"BUTTON","6":"PWD","5":"GRANT","15":"CALCULATABLE","16":"REPORT_COLUMN","17":"PATH"}`
 
 ### 2.3 Документирование схемы
 
