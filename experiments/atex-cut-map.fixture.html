@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<!-- Браузерный стенд для рабочего места «Карта раскроя» (#2917).
+     Мокает fetch: metadata?JSON и object/{id} (резки, тип резки, полосы).
+     Открывать локально, использует те же js/css, что и продакшн-шаблон. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>atex · Карта раскроя — стенд</title>
+<link rel="stylesheet" href="../css/atex-cut-map.css">
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#eef1f5}</style>
+</head>
+<body>
+<div id="atex-cut-map" class="atex-cm" data-db="atex" data-xsrf="test-token">
+    <div class="atex-cm-loading">Загрузка…</div>
+</div>
+
+<script>
+// ── Мок схемы atex (имена как в docs/atex_metadata.json; id произвольные) ──
+var META = [
+    { id: 110, val: 'Производственная резка', reqs: [
+        { id: 1090, val: 'Слиттер' },
+        { id: 1092, val: 'Тип резки' },
+        { id: 1094, val: 'Партия сырья' },
+        { id: 1096, val: 'Дата план' },
+        { id: 1098, val: 'Статус' }
+    ]},
+    { id: 104, val: 'Тип резки', reqs: [
+        { id: 1025, val: 'Вид сырья' },
+        { id: 1027, val: 'Ширина входа, мм' },
+        { id: 1029, val: 'Допуск, мм' },
+        { id: 1031, val: 'Итого ножей' },
+        { id: 1033, val: 'Остаток, мм' },
+        { id: 1035, val: 'Примечания' },
+        { id: 1037, val: 'Полоса' }
+    ]},
+    { id: 105, val: 'Полоса', reqs: [
+        { id: 1038, val: 'Ширина, мм' },
+        { id: 1040, val: 'Количество' },
+        { id: 1042, val: 'Назначение' }
+    ]}
+];
+
+// Хранилище-заглушка
+var DB = {
+    // Производственные резки: [Номер, Слиттер, Тип резки, Партия сырья, Дата план, Статус]
+    cuts: [
+        { i: 501, r: ['РЗ-001', '301:Слиттер №1', '401:25×35 + 55', '', '2026-05-29', '11:В работе'] },
+        { i: 502, r: ['РЗ-002', '302:Слиттер №2', '402:Перекрой (overflow)', '', '2026-05-30', '10:Ожидает'] }
+    ],
+    // Типы резки: [Название, Вид сырья, Ширина входа, Допуск, Итого ножей, Остаток, Примечания, Полоса]
+    cutTypes: {
+        401: { i: 401, r: ['25×35 + 55', '201:Сталь 0.5мм', '910', '15', '23', '185', '', ''] },
+        402: { i: 402, r: ['Перекрой (overflow)', '202:Алюминий 1.0мм', '900', '15', '13', '-80', '', ''] }
+    },
+    // Полосы по типу резки: [№, Ширина, Количество, Назначение]
+    strips: {
+        401: [
+            { i: 601, r: ['1', '25', '10', 'Заказ'] },
+            { i: 602, r: ['2', '35', '12', 'Заказ'] },
+            { i: 603, r: ['3', '55', '1', 'Склад'] }
+        ],
+        402: [
+            { i: 604, r: ['1', '100', '5', 'Заказ'] },
+            { i: 605, r: ['2', '60', '8', 'Отходы'] }
+        ]
+    }
+};
+
+var realFetch = window.fetch;
+window.fetch = function(url, opts) {
+    var u = String(url);
+    function json(data) {
+        return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }
+    if (/\/metadata\?JSON/.test(u)) return json(META);
+    var mObj = u.match(/\/object\/(\d+)\//);
+    if (mObj) {
+        var tid = mObj[1];
+        var fi = u.match(/F_I=(\d+)/);
+        var fu = u.match(/F_U=(\d+)/);
+        if (tid === '110') {
+            if (fi) return json(DB.cuts.filter(function(c){return String(c.i)===fi[1];}));
+            return json(DB.cuts);
+        }
+        if (tid === '104') {
+            if (fi && DB.cutTypes[fi[1]]) return json([DB.cutTypes[fi[1]]]);
+            return json([]);
+        }
+        if (tid === '105') {
+            var key = fu ? fu[1] : null;
+            return json((key && DB.strips[key]) || []);
+        }
+    }
+    return realFetch(url, opts);
+};
+</script>
+<script src="../js/atex-cut-map.js"></script>
+</body>
+</html>

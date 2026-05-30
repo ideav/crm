@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<!-- Браузерный стенд для рабочего места «Пульт втулкореза» (#2916).
+     Мокает fetch: metadata?JSON, object/{id} и команды _m_*.
+     Открывать локально, использует те же js/css, что и продакшн-шаблон. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>atex · Пульт втулкореза — стенд</title>
+<link rel="stylesheet" href="../css/atex-sleeve-cutter.css">
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#eef1f5}</style>
+</head>
+<body>
+<div id="atex-sleeve-cutter" class="atex-sc" data-db="atex" data-xsrf="test-token">
+    <div class="atex-sc-loading">Загрузка…</div>
+</div>
+
+<script>
+// ── Мок схемы atex (имена как в docs/atex_metadata.json; id произвольные) ──
+var META = [
+    { id: 102, val: 'Втулкорез', reqs: [
+        { id: 1013, val: 'Диаметр, мм' },
+        { id: 1015, val: 'Статус' }
+    ]},
+    { id: 110, val: 'Производственная резка', reqs: [
+        { id: 1090, val: 'Слиттер' },
+        { id: 1092, val: 'Тип резки' },
+        { id: 1098, val: 'Статус' },
+        { id: 1111, val: 'Задание на втулки' }
+    ]},
+    { id: 112, val: 'Задание на втулки', reqs: [
+        { id: 1116, val: 'Кол-во план' },
+        { id: 1118, val: 'Втулкорез' },
+        { id: 1120, val: 'Диаметр, мм' },
+        { id: 1122, val: 'Кол-во факт' },
+        { id: 1124, val: 'Статус' }
+    ]}
+];
+
+// Хранилище-заглушка. r = [главное значение, ...reqs по порядку метаданных].
+var DB = {
+    cutters: [
+        { i: 201, r: ['ВР-01'] },
+        { i: 202, r: ['ВР-02'] }
+    ],
+    cuts: [
+        { i: 301, r: ['Резка №301 (25×35)', '1:Слиттер-1', '11:25×35', 'В работе', ''] },
+        { i: 302, r: ['Резка №302 (55мм)', '1:Слиттер-1', '12:55мм', 'Ожидает', ''] }
+    ],
+    tasks: {
+        301: [
+            { i: 401, r: ['Задание 1', '100', '201:ВР-01', '76', '100', 'Готово'] },
+            { i: 402, r: ['Задание 2', '120', '202:ВР-02', '76', '45', 'В работе'] },
+            { i: 403, r: ['Задание 3', '60', '', '40', '0', 'Ожидает'] }
+        ],
+        302: []
+    },
+    nextId: 500
+};
+
+var realFetch = window.fetch;
+window.fetch = function(url, opts) {
+    var u = String(url);
+    function json(data) {
+        return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }
+    if (/\/metadata\?JSON/.test(u)) return json(META);
+    var mObj = u.match(/\/object\/(\d+)\//);
+    if (mObj) {
+        var tid = mObj[1];
+        if (tid === '102') return json(DB.cutters);
+        if (tid === '110') return json(DB.cuts);
+        if (tid === '112') {
+            var fu = u.match(/F_U=(\d+)/);
+            var key = fu ? fu[1] : null;
+            return json((key && DB.tasks[key]) || []);
+        }
+    }
+    if (/\/_m_new\//.test(u)) {
+        var id = DB.nextId++;
+        console.log('[mock] _m_new', u, opts && opts.body);
+        return json({ obj: id, i: id });
+    }
+    if (/\/_m_set\//.test(u) || /\/_m_save\//.test(u) || /\/_m_del\//.test(u)) {
+        console.log('[mock]', u, opts && opts.body);
+        return json({ ok: 1 });
+    }
+    return realFetch(url, opts);
+};
+</script>
+<script src="../js/atex-sleeve-cutter.js"></script>
+</body>
+</html>

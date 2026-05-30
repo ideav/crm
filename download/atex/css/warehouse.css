@@ -1,0 +1,189 @@
+.atex-wh {
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+    background: var(--bg-primary, #f8fafc);
+    color: var(--text-primary, #111827);
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: auto;
+}
+
+.atex-wh * {
+    box-sizing: border-box;
+}
+
+.atex-wh-toolbar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.atex-wh-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 7px;
+    padding: 6px 12px;
+    font: inherit;
+    cursor: pointer;
+    border: 1px solid transparent;
+}
+
+.atex-wh-btn-primary {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #ffffff;
+}
+
+.atex-wh-btn-primary:hover {
+    background: #1d4ed8;
+    border-color: #1d4ed8;
+}
+
+.atex-wh-btn-secondary {
+    background: var(--input-bg, #fff);
+    border-color: var(--input-border, #cbd5e1);
+    color: var(--text-primary, #111827);
+}
+
+.atex-wh-btn-secondary:hover {
+    background: #f1f5f9;
+}
+
+.atex-wh-filter-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-secondary, #64748b);
+}
+
+.atex-wh-input {
+    border: 1px solid var(--input-border, #cbd5e1);
+    border-radius: 7px;
+    background: var(--input-bg, #fff);
+    color: var(--text-primary, #111827);
+    padding: 5px 10px;
+    font: inherit;
+}
+
+.atex-wh-input:focus {
+    outline: 2px solid rgba(37, 99, 235, 0.18);
+    border-color: #2563eb;
+}
+
+.atex-wh-message {
+    flex: 0 0 auto;
+    border-radius: 7px;
+    padding: 8px 12px;
+    font-size: 0.92rem;
+}
+
+.atex-wh-message--info {
+    background: #eff6ff;
+    color: #1e40af;
+}
+
+.atex-wh-message--success {
+    background: #ecfdf5;
+    color: #047857;
+}
+
+.atex-wh-message--error {
+    background: #fef2f2;
+    color: #b91c1c;
+}
+
+.atex-wh-create,
+.atex-wh-panel {
+    flex: 0 0 auto;
+    border: 1px solid var(--input-border, #cbd5e1);
+    border-radius: 10px;
+    background: var(--input-bg, #fff);
+    padding: 14px 16px;
+}
+
+.atex-wh-panel-title {
+    margin: 0 0 12px;
+    font-size: 1.05rem;
+}
+
+.atex-wh-fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px 14px;
+}
+
+.atex-wh-fields label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.88rem;
+    color: var(--text-secondary, #64748b);
+}
+
+.atex-wh-form-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.atex-wh-list {
+    overflow: auto;
+}
+
+.atex-wh-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--input-bg, #fff);
+    font-size: 0.9rem;
+}
+
+.atex-wh-table th,
+.atex-wh-table td {
+    border: 1px solid var(--input-border, #e2e8f0);
+    padding: 6px 8px;
+    text-align: left;
+    vertical-align: middle;
+}
+
+.atex-wh-table thead th {
+    background: #f1f5f9;
+    color: var(--text-secondary, #475569);
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+}
+
+.atex-wh-row:hover {
+    background: #f8fafc;
+}
+
+.atex-wh-status {
+    border: 1px solid var(--input-border, #cbd5e1);
+    border-radius: 6px;
+    background: var(--input-bg, #fff);
+    color: var(--text-primary, #111827);
+    padding: 3px 6px;
+    font: inherit;
+    max-width: 180px;
+}
+
+.atex-wh-batch-pick {
+    max-width: 260px;
+}
+
+.atex-wh-muted {
+    color: var(--text-secondary, #94a3b8);
+    font-style: italic;
+}
+
+.atex-wh-empty {
+    padding: 18px;
+    text-align: center;
+    color: var(--text-secondary, #64748b);
+}

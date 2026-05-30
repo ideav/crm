@@ -1,0 +1,212 @@
+.atex-portal {
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+    background: var(--bg-primary, #f8fafc);
+    color: var(--text-primary, #111827);
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.atex-portal * {
+    box-sizing: border-box;
+}
+
+.atex-portal-toolbar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.atex-portal-title {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-right: auto;
+}
+
+.atex-portal-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 7px;
+    padding: 6px 12px;
+    font: inherit;
+    cursor: pointer;
+    border: 1px solid transparent;
+}
+
+.atex-portal-btn-secondary {
+    background: var(--input-bg, #fff);
+    border-color: var(--input-border, #cbd5e1);
+    color: var(--text-primary, #111827);
+}
+
+.atex-portal-btn-secondary:hover {
+    background: #f1f5f9;
+}
+
+.atex-portal-filter-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-secondary, #64748b);
+}
+
+.atex-portal-input {
+    border: 1px solid var(--input-border, #cbd5e1);
+    border-radius: 7px;
+    background: var(--input-bg, #fff);
+    color: var(--text-primary, #111827);
+    padding: 5px 10px;
+    font: inherit;
+}
+
+.atex-portal-input:focus {
+    outline: 2px solid rgba(37, 99, 235, 0.18);
+    border-color: #2563eb;
+}
+
+.atex-portal-message {
+    flex: 0 0 auto;
+    border-radius: 7px;
+    padding: 8px 12px;
+    font-size: 0.92rem;
+}
+
+.atex-portal-message--info {
+    background: #eff6ff;
+    color: #1e40af;
+}
+
+.atex-portal-message--success {
+    background: #ecfdf5;
+    color: #047857;
+}
+
+.atex-portal-message--error {
+    background: #fef2f2;
+    color: #b91c1c;
+}
+
+.atex-portal-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+}
+
+.atex-portal-table,
+.atex-portal-subtable {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--input-bg, #fff);
+    font-size: 0.9rem;
+}
+
+.atex-portal-table th,
+.atex-portal-table td,
+.atex-portal-subtable th,
+.atex-portal-subtable td {
+    border: 1px solid var(--input-border, #e2e8f0);
+    padding: 6px 8px;
+    text-align: left;
+    vertical-align: middle;
+}
+
+.atex-portal-table thead th,
+.atex-portal-subtable thead th {
+    background: #f1f5f9;
+    color: var(--text-secondary, #475569);
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+}
+
+.atex-portal-row:hover {
+    background: #f8fafc;
+}
+
+.atex-portal-toggle-cell {
+    width: 34px;
+    text-align: center;
+}
+
+.atex-portal-toggle {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: var(--text-secondary, #64748b);
+    padding: 2px 4px;
+}
+
+.atex-portal-count {
+    text-align: center;
+}
+
+.atex-portal-detail-row > td {
+    background: #f8fafc;
+    padding: 0;
+}
+
+.atex-portal-positions {
+    padding: 12px 16px;
+}
+
+.atex-portal-empty {
+    padding: 18px;
+    text-align: center;
+    color: var(--text-secondary, #64748b);
+}
+
+/* Статус — компактная «таблетка» (только чтение). */
+.atex-portal-badge {
+    display: inline-block;
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    background: #f1f5f9;
+    color: #334155;
+    white-space: nowrap;
+}
+
+.atex-portal-badge--none {
+    color: #94a3b8;
+}
+
+.atex-portal-badge--новый,
+.atex-portal-badge--новая {
+    background: #eff6ff;
+    color: #1e40af;
+}
+
+.atex-portal-badge--согласован {
+    background: #fef9c3;
+    color: #854d0e;
+}
+
+.atex-portal-badge--впроизводстве,
+.atex-portal-badge--вработе {
+    background: #ede9fe;
+    color: #5b21b6;
+}
+
+.atex-portal-badge--выполнен,
+.atex-portal-badge--готова {
+    background: #ecfdf5;
+    color: #047857;
+}
+
+.atex-portal-badge--отгружена {
+    background: #e0f2fe;
+    color: #0369a1;
+}
+
+.atex-portal-badge--отменён {
+    background: #fef2f2;
+    color: #b91c1c;
+}

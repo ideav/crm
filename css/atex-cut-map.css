@@ -1,0 +1,247 @@
+/* Рабочее место atex «Карта раскроя» (ideav/crm#2917).
+   Стили скоупятся под #atex-cut-map / .atex-cm, чтобы не пересекаться
+   с остальными рабочими местами в main.html. */
+
+.atex-cm {
+    --cm-border: #d9dee5;
+    --cm-bg: #ffffff;
+    --cm-muted: #6b7280;
+    --cm-accent: #2563eb;
+    --cm-warn: #b91c1c;
+    --cm-ok: #15803d;
+    /* Цвета сегментов по назначению полосы */
+    --cm-order: #2563eb;
+    --cm-stock: #0d9488;
+    --cm-waste: #b45309;
+    --cm-other: #6b7280;
+    --cm-remainder: #cbd5e1;
+    color: #1f2933;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+.atex-cm *,
+.atex-cm *::before,
+.atex-cm *::after { box-sizing: border-box; }
+
+.atex-cm.is-busy { opacity: .65; pointer-events: none; }
+
+.atex-cm-loading,
+.atex-cm-fatal,
+.atex-cm-placeholder {
+    padding: 24px;
+    color: var(--cm-muted);
+}
+.atex-cm-fatal { color: var(--cm-warn); }
+
+.atex-cm-layout {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    gap: 16px;
+    padding: 16px;
+    align-items: start;
+}
+@media (max-width: 720px) {
+    .atex-cm-layout { grid-template-columns: 1fr; }
+}
+
+/* Боковой список резок */
+.atex-cm-sidebar {
+    border: 1px solid var(--cm-border);
+    border-radius: 8px;
+    background: var(--cm-bg);
+    overflow: hidden;
+}
+.atex-cm-sidebar-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--cm-border);
+    background: #f8fafc;
+}
+.atex-cm-sidebar-head h2 { margin: 0; font-size: 15px; }
+.atex-cm-list { display: flex; flex-direction: column; max-height: 72vh; overflow: auto; }
+.atex-cm-list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    text-align: left;
+    padding: 10px 14px;
+    border: none;
+    border-bottom: 1px solid #eef1f5;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+}
+.atex-cm-list-item:hover { background: #f1f5f9; }
+.atex-cm-list-item.is-active { background: #e0ecff; font-weight: 600; }
+.atex-cm-list-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.atex-cm-list-status {
+    flex: none;
+    font-size: 11px;
+    color: var(--cm-muted);
+    background: #eef2f7;
+    border-radius: 999px;
+    padding: 2px 8px;
+}
+.atex-cm-empty { padding: 14px; color: var(--cm-muted); }
+
+/* Правая область */
+.atex-cm-view {
+    border: 1px solid var(--cm-border);
+    border-radius: 8px;
+    background: var(--cm-bg);
+    padding: 18px 20px;
+    min-height: 200px;
+}
+
+/* Шапка резки */
+.atex-cm-header { margin-bottom: 18px; }
+.atex-cm-header-title { margin: 0 0 12px; font-size: 18px; }
+.atex-cm-header-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 10px 16px;
+}
+.atex-cm-header-cell { display: flex; flex-direction: column; gap: 2px; }
+.atex-cm-header-label { font-size: 12px; color: var(--cm-muted); text-transform: uppercase; letter-spacing: .03em; }
+.atex-cm-header-value { font-weight: 600; }
+
+/* Карта-полоса */
+.atex-cm-bar-wrap { margin: 8px 0 20px; }
+.atex-cm-bar-caption {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--cm-muted);
+    margin-bottom: 6px;
+}
+.atex-cm-bar-caption-used { font-weight: 600; }
+.atex-cm-bar {
+    display: flex;
+    width: 100%;
+    height: 64px;
+    border: 1px solid var(--cm-border);
+    border-radius: 8px;
+    overflow: hidden;
+    background:
+        repeating-linear-gradient(45deg, #f1f5f9, #f1f5f9 6px, #e2e8f0 6px, #e2e8f0 12px);
+}
+.atex-cm-bar.is-overflow { box-shadow: 0 0 0 2px rgba(185, 28, 28, .35); }
+.atex-cm-seg {
+    height: 100%;
+    border-right: 1px solid rgba(255, 255, 255, .65);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    min-width: 1px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+}
+.atex-cm-seg-label {
+    white-space: nowrap;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, .25);
+    pointer-events: none;
+}
+.atex-cm-seg-order { background: var(--cm-order); }
+.atex-cm-seg-stock { background: var(--cm-stock); }
+.atex-cm-seg-waste { background: var(--cm-waste); }
+.atex-cm-seg-other { background: var(--cm-other); }
+.atex-cm-seg-remainder {
+    background: var(--cm-remainder);
+    color: #475569;
+    border-right: none;
+}
+.atex-cm-warn {
+    margin-top: 8px;
+    color: var(--cm-warn);
+    font-weight: 600;
+}
+
+/* Легенда полос */
+.atex-cm-legend {
+    border: 1px solid var(--cm-border);
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 18px;
+}
+.atex-cm-legend-head,
+.atex-cm-legend-row {
+    display: grid;
+    grid-template-columns: 64px 1fr 1fr 1.4fr 1fr;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 12px;
+}
+.atex-cm-legend-head {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--cm-muted);
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    background: #f8fafc;
+    border-bottom: 1px solid var(--cm-border);
+}
+.atex-cm-legend-row { border-bottom: 1px solid #eef1f5; }
+.atex-cm-legend-row:last-child { border-bottom: none; }
+.atex-cm-legend-num { display: flex; align-items: center; gap: 8px; }
+.atex-cm-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    flex: none;
+    display: inline-block;
+}
+
+/* Сводка */
+.atex-cm-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    padding: 14px;
+    border-radius: 8px;
+    background: #f8fafc;
+    border: 1px solid var(--cm-border);
+}
+.atex-cm-metric { display: flex; flex-direction: column; gap: 2px; min-width: 120px; }
+.atex-cm-metric-label { font-size: 12px; color: var(--cm-muted); text-transform: uppercase; letter-spacing: .03em; }
+.atex-cm-metric-value { font-size: 22px; font-weight: 700; }
+.atex-cm-metric.is-warn .atex-cm-metric-value { color: var(--cm-warn); }
+.atex-cm-metric.is-ok .atex-cm-metric-value { color: var(--cm-ok); }
+
+.atex-cm-btn {
+    border: 1px solid var(--cm-border);
+    border-radius: 6px;
+    background: #fff;
+    padding: 4px 10px;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    line-height: 1.2;
+}
+.atex-cm-btn:hover { background: #f1f5f9; }
+.atex-cm-btn-secondary { background: #f8fafc; }
+
+/* Тосты-уведомления (без alert/confirm/prompt) */
+.atex-cm-toast {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 9999;
+    max-width: 360px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    color: #fff;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .18);
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity .25s, transform .25s;
+}
+.atex-cm-toast.is-visible { opacity: 1; transform: translateY(0); }
+.atex-cm-toast-success { background: #15803d; }
+.atex-cm-toast-error { background: #b91c1c; }
+.atex-cm-toast-info { background: #334155; }

@@ -1,0 +1,174 @@
+/* Рабочее место atex «Планирование производства» (ideav/crm#2913).
+   Стили скоупятся под #atex-production-planning / .atex-pp, чтобы не
+   пересекаться с остальными рабочими местами в main.html. */
+
+.atex-pp {
+    --pp-border: #d9dee5;
+    --pp-bg: #ffffff;
+    --pp-muted: #6b7280;
+    --pp-accent: #2563eb;
+    --pp-accent-d: #1d4ed8;
+    --pp-warn: #b91c1c;
+    --pp-ok: #15803d;
+    color: #1f2933;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+.atex-pp *,
+.atex-pp *::before,
+.atex-pp *::after { box-sizing: border-box; }
+
+.atex-pp.is-busy { opacity: .65; pointer-events: none; }
+
+.atex-pp-loading,
+.atex-pp-fatal { padding: 24px; color: var(--pp-muted); }
+.atex-pp-fatal { color: var(--pp-warn); }
+
+.atex-pp-layout {
+    display: grid;
+    grid-template-columns: 300px 1fr 320px;
+    gap: 16px;
+    padding: 16px;
+    align-items: start;
+}
+@media (max-width: 1080px) {
+    .atex-pp-layout { grid-template-columns: 1fr; }
+}
+
+.atex-pp-panel {
+    border: 1px solid var(--pp-border);
+    border-radius: 8px;
+    background: var(--pp-bg);
+    padding: 18px 20px;
+}
+.atex-pp-form-title { margin: 0 0 6px; font-size: 17px; }
+.atex-pp-hint { margin: 0 0 14px; color: var(--pp-muted); font-size: 13px; }
+
+.atex-pp-field { margin-bottom: 14px; }
+.atex-pp-label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 600;
+    color: #374151;
+}
+.atex-pp-input {
+    width: 100%;
+    padding: 7px 10px;
+    border: 1px solid var(--pp-border);
+    border-radius: 6px;
+    font: inherit;
+    background: #fff;
+}
+.atex-pp-input:focus {
+    outline: none;
+    border-color: var(--pp-accent);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, .15);
+}
+.atex-pp-textarea { resize: vertical; min-height: 48px; }
+
+.atex-pp-btn {
+    border: 1px solid var(--pp-border);
+    border-radius: 6px;
+    background: #fff;
+    padding: 8px 16px;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+}
+.atex-pp-btn:hover { background: #f1f5f9; }
+.atex-pp-btn-primary { background: var(--pp-accent); border-color: var(--pp-accent); color: #fff; }
+.atex-pp-btn-primary:hover { background: var(--pp-accent-d); }
+.atex-pp-actions { display: flex; gap: 10px; margin-top: 8px; }
+
+/* Очередь резок по слиттерам */
+.atex-pp-filters {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.atex-pp-filters .atex-pp-field { margin-bottom: 0; }
+
+.atex-pp-queue-group { margin-bottom: 16px; }
+.atex-pp-queue-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 6px 10px;
+    background: #f1f5f9;
+    border-radius: 6px;
+    margin-bottom: 8px;
+}
+.atex-pp-queue-slitter { font-weight: 700; }
+.atex-pp-queue-count { color: var(--pp-muted); font-size: 12px; }
+
+.atex-pp-cut {
+    display: grid;
+    grid-template-columns: 70px 1.4fr 1fr 100px 110px 110px;
+    gap: 10px;
+    align-items: center;
+    width: 100%;
+    text-align: left;
+    padding: 9px 10px;
+    margin-bottom: 6px;
+    border: 1px solid var(--pp-border);
+    border-radius: 6px;
+    background: #fff;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+}
+.atex-pp-cut:hover { background: #f8fafc; }
+.atex-pp-cut.is-active { border-color: var(--pp-accent); box-shadow: 0 0 0 2px rgba(37, 99, 235, .15); }
+.atex-pp-cut-num { font-weight: 700; }
+.atex-pp-cut-type { font-weight: 600; }
+.atex-pp-cut-batch,
+.atex-pp-cut-date { color: var(--pp-muted); }
+.atex-pp-cut-status {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #eef2ff;
+    color: #3730a3;
+    text-align: center;
+    justify-self: start;
+}
+.atex-pp-cut-supplies { font-size: 12px; color: var(--pp-muted); text-align: right; }
+
+@media (max-width: 720px) {
+    .atex-pp-cut { grid-template-columns: 1fr 1fr; }
+    .atex-pp-filters { grid-template-columns: 1fr; }
+}
+
+/* Привязка обеспечения */
+.atex-pp-linked { margin-top: 18px; border-top: 1px solid var(--pp-border); padding-top: 14px; }
+.atex-pp-linked-title { margin: 0 0 8px; font-size: 14px; }
+.atex-pp-linked-item {
+    padding: 7px 10px;
+    border: 1px solid #eef1f5;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    background: #f8fafc;
+}
+
+.atex-pp-empty { padding: 14px; color: var(--pp-muted); }
+
+/* Тосты-уведомления (без alert/confirm/prompt) */
+.atex-pp-toast {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 9999;
+    max-width: 360px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    color: #fff;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, .18);
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity .25s, transform .25s;
+}
+.atex-pp-toast.is-visible { opacity: 1; transform: translateY(0); }
+.atex-pp-toast-success { background: #15803d; }
+.atex-pp-toast-error { background: #b91c1c; }
+.atex-pp-toast-info { background: #334155; }
