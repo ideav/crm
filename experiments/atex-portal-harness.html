@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>atex client portal harness</title>
+<style>
+  body { font-family: system-ui, Arial, sans-serif; margin: 0; padding: 16px; background: #eef2f7; }
+  /* минимальные стенды для иконок pi, чтобы не тянуть primeicons */
+  .pi { font-style: normal; }
+  .pi-refresh::before { content: "⟳"; }
+  .pi-chevron-right::before { content: "▸"; }
+  .pi-chevron-down::before { content: "▾"; }
+  #host { height: 560px; background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 8px 24px rgba(15,23,42,.08); }
+</style>
+</head>
+<body>
+<div id="host"></div>
+<script>
+// --- Мок API Интеграма (логин client → клиент 305) ---
+var META = {
+  '107': { id: '107', val: 'Заказ', type: '3', reqs: [
+    { id: 1052, val: 'Клиент', type: '3', ref: '103', ref_id: '1053' },
+    { id: 1054, val: 'Пользователь', type: '3', ref: '18', ref_id: '1055' },
+    { id: 1056, val: 'Дата создания', type: '9' },
+    { id: 1058, val: 'Дата согласования', type: '9' },
+    { id: 1060, val: 'Статус', type: '3' },
+    { id: 1062, val: 'Лидер', type: '3' },
+    { id: 1064, val: 'Примечания', type: '12' }
+  ]},
+  '108': { id: '108', val: 'Позиция заказа', type: '13', reqs: [
+    { id: 1067, val: 'Кол-во', type: '13' },
+    { id: 1069, val: 'Вид сырья', type: '3', ref: '100', ref_id: '1070' },
+    { id: 1071, val: 'Тип резки', type: '3', ref: '104', ref_id: '1072' },
+    { id: 1073, val: 'Ширина, мм', type: '13' },
+    { id: 1075, val: 'Длина, м', type: '14' },
+    { id: 1077, val: 'Диаметр втулки', type: '13' },
+    { id: 1079, val: 'Статус', type: '3' }
+  ]},
+  '103': { id: '103', val: 'Клиент', type: '3', reqs: [
+    { id: 1017, val: 'Логин', type: '3' },
+    { id: 1019, val: 'Пароль', type: '6' },
+    { id: 1021, val: 'Email', type: '3' },
+    { id: 1023, val: 'Телефон', type: '3' }
+  ]}
+};
+var CLIENTS = [
+  { i: 305, u: 1, o: 1, r: ['ООО «Ромашка»', 'client', '', 'romashka@example.com', '+7 900 000-00-01'] },
+  { i: 306, u: 1, o: 2, r: ['АО «Лютик»', 'lutik', '', 'lutik@example.com', '+7 900 000-00-02'] }
+];
+// Заказы разных клиентов — портал должен показать только заказы 305.
+var ORDERS = [
+  { i: 651, u: 1, o: 3, r: ['Заказ 651', '305:ООО «Ромашка»', '42:manager', '2026-05-28', '', 'Согласован', '', ''] },
+  { i: 650, u: 1, o: 2, r: ['Заказ 650', '306:АО «Лютик»', '42:manager', '2026-05-27', '', 'В производстве', '', ''] },
+  { i: 649, u: 1, o: 1, r: ['Заказ 649', '305:ООО «Ромашка»', '42:manager', '2026-05-26', '', 'Новый', '', ''] }
+];
+var POSITIONS = {
+  '651': [
+    { i: 700, u: 651, o: 1, r: ['Поз 700', '120', '200:Бумага мелованная', '7:Прямая', '500', '1000', '76', 'В работе'] },
+    { i: 701, u: 651, o: 2, r: ['Поз 701', '40', '201:Картон', '8:Косая', '320', '500', '76', 'Готова'] }
+  ]
+};
+
+window.db = 'atex';
+window.user = 'client';
+
+window.fetch = function(url) {
+  var u = String(url);
+  function json(data) {
+    return Promise.resolve({ ok: true, status: 200, text: function() { return Promise.resolve(JSON.stringify(data)); } });
+  }
+  var m = u.match(/\/metadata\/(\d+)/);
+  if (m) return json(META[m[1]]);
+  if (/\/object\/108\//.test(u)) {
+    var pm = u.match(/F_U=(\d+)/);
+    return json(pm ? (POSITIONS[pm[1]] || []) : []);
+  }
+  if (/\/object\/107\//.test(u)) return json(ORDERS);
+  if (/\/object\/103\//.test(u)) return json(CLIENTS);
+  return json({});
+};
+
+var host = document.getElementById('host');
+host.innerHTML = [
+  '<div id="atex-portal-app" class="atex-portal" data-db="atex" data-order-table="107" data-position-table="108" data-client-table="103" data-user="client">',
+  '<div class="atex-portal-toolbar">',
+  '<h1 class="atex-portal-title">Мои заказы</h1>',
+  '<label class="atex-portal-filter-wrap"><span>Статус:</span><select id="atex-portal-filter" class="atex-portal-input"><option value="">Все статусы</option></select></label>',
+  '<button id="atex-portal-refresh" class="atex-portal-btn atex-portal-btn-secondary" type="button"><i class="pi pi-refresh"></i><span>Обновить</span></button>',
+  '</div>',
+  '<div id="atex-portal-message" class="atex-portal-message" hidden></div>',
+  '<div id="atex-portal-list" class="atex-portal-list"><div class="atex-portal-empty">Загрузка…</div></div>',
+  '</div>'
+].join('');
+</script>
+<link rel="stylesheet" href="../download/atex/css/portal.css">
+<script src="../download/atex/js/portal.js"></script>
+<script>
+// раскрыть первый заказ для наглядности после загрузки
+setTimeout(function(){
+  var t = document.querySelector('[data-toggle="651"]');
+  if (t) t.click();
+}, 400);
+</script>
+</body>
+</html>

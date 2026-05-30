@@ -1,0 +1,34 @@
+<!-- Рабочее место atex «Клиентский портал» (роль Клиент). -->
+<!-- Решение ideav/crm#2920 (часть #2903). См. docs/atex_workplaces.md §3.10 -->
+<!-- и docs/WORKSPACE_DEVELOPMENT_GUIDE.md. URL: /atex/portal -->
+<!-- Только чтение: клиент видит исключительно свои заказы и их статусы. -->
+<link rel="stylesheet" href="/css/integram-table.css?0{_global_.version}">
+<link rel="stylesheet" href="/download/{_global_.z}/css/portal.css?0{_global_.version}">
+<script src="/download/{_global_.z}/js/portal.js?0{_global_.version}" defer></script>
+
+<div id="atex-portal-app" class="atex-portal"
+     data-db="{_global_.z}"
+     data-order-table="107"
+     data-position-table="108"
+     data-client-table="103"
+     data-user="{_global_.user}"
+     data-user-id="{_global_.user_id}">
+    <div class="atex-portal-toolbar">
+        <h1 class="atex-portal-title">Мои заказы</h1>
+        <label class="atex-portal-filter-wrap">
+            <span>Статус:</span>
+            <select id="atex-portal-filter" class="atex-portal-input" aria-label="Фильтр по статусу">
+                <option value="">Все статусы</option>
+            </select>
+        </label>
+        <button id="atex-portal-refresh" class="atex-portal-btn atex-portal-btn-secondary" type="button" title="Обновить список">
+            <i class="pi pi-refresh"></i><span>Обновить</span>
+        </button>
+    </div>
+
+    <div id="atex-portal-message" class="atex-portal-message" hidden></div>
+
+    <div id="atex-portal-list" class="atex-portal-list">
+        <div class="atex-portal-empty">Загрузка данных…</div>
+    </div>
+</div>
