@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<!-- Браузерный стенд рабочего места «Планирование производства» (#2913).
+     Мокает fetch: metadata?JSON, object/{id} и команды _m_*.
+     Открывать локально, использует те же js/css, что и продакшн-шаблон. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>atex · Планирование производства — стенд</title>
+<link rel="stylesheet" href="../css/atex-production-planning.css">
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#eef1f5}</style>
+</head>
+<body>
+<div id="atex-production-planning" class="atex-pp" data-db="atex" data-xsrf="test-token">
+    <div class="atex-pp-loading">Загрузка…</div>
+</div>
+
+<script>
+// ── Мок схемы atex (имена как в docs/atex_metadata.json; id из неё же) ──
+var META = [
+    { id: 101, val: 'Слиттер', reqs: [{ id: 1009, val: 'Статус' }, { id: 1011, val: 'Примечания' }] },
+    { id: 104, val: 'Тип резки', reqs: [
+        { id: 1025, val: 'Вид сырья' }, { id: 1027, val: 'Ширина входа, мм' }
+    ] },
+    { id: 106, val: 'Партия сырья', reqs: [
+        { id: 1044, val: 'Вид сырья' }, { id: 1046, val: 'Дата прихода' }, { id: 1050, val: 'Остаток, м²' }
+    ] },
+    { id: 108, val: 'Позиция заказа', reqs: [
+        { id: 1067, val: 'Кол-во' }, { id: 1069, val: 'Вид сырья' }, { id: 1071, val: 'Тип резки' },
+        { id: 1073, val: 'Ширина, мм' }, { id: 1079, val: 'Статус' }, { id: 1081, val: 'Обеспечение' }
+    ] },
+    { id: 109, val: 'Обеспечение', reqs: [
+        { id: 1082, val: 'Метраж, м' }, { id: 1084, val: 'Производственная резка' },
+        { id: 1086, val: 'Партия ГП' }, { id: 1088, val: 'Статус' }
+    ] },
+    { id: 110, val: 'Производственная резка', reqs: [
+        { id: 1090, val: 'Слиттер' }, { id: 1092, val: 'Тип резки' }, { id: 1094, val: 'Партия сырья' },
+        { id: 1096, val: 'Дата план' }, { id: 1098, val: 'Статус' }, { id: 1108, val: 'Примечания' }
+    ] }
+];
+
+// Хранилище-заглушка (значения-ссылки в формате id:Подпись).
+var DB = {
+    101: [ { i: 201, r: ['Слиттер №1', 'Свободен', ''] }, { i: 202, r: ['Слиттер №2', 'Свободен', ''] } ],
+    104: [ { i: 301, r: ['25×35 + 55', '401:Сталь 0.5мм', '910'] }, { i: 302, r: ['40×20', '401:Сталь 0.5мм', '800'] } ],
+    106: [ { i: 501, r: ['Партия A-2026', '401:Сталь 0.5мм', '2026-05-20', '1200'] },
+           { i: 502, r: ['Партия B-2026', '402:Алюминий 1.0мм', '2026-05-22', '800'] } ],
+    108: [ { i: 701, u: 600, r: ['1', '100', '401:Сталь 0.5мм', '301:25×35 + 55', '120', 'Новая', ''] },
+           { i: 702, u: 600, r: ['2', '50', '402:Алюминий 1.0мм', '302:40×20', '90', 'Новая', ''] } ],
+    109: [ { i: 801, u: 701, r: ['1', '1200', '901:7', '', 'Зарезервировано'] } ],
+    110: [
+        { i: 901, r: ['7', '201:Слиттер №1', '301:25×35 + 55', '501:Партия A-2026', '2026-06-01', 'В очереди', ''] },
+        { i: 902, r: ['8', '201:Слиттер №1', '302:40×20', '501:Партия A-2026', '2026-06-02', 'В работе', ''] },
+        { i: 903, r: ['9', '202:Слиттер №2', '301:25×35 + 55', '502:Партия B-2026', '2026-06-03', 'Запланирована', ''] }
+    ],
+    nextId: 1000
+};
+
+var realFetch = window.fetch;
+window.fetch = function(url, opts) {
+    var u = String(url);
+    function json(data) {
+        return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }
+    if (/\/metadata\?JSON/.test(u)) return json(META);
+    var mObj = u.match(/\/object\/(\d+)\//);
+    if (mObj) {
+        var tid = mObj[1];
+        var rows = DB[tid] || [];
+        var fu = u.match(/F_U=(\d+)/);
+        if (fu) rows = rows.filter(function(r) { return String(r.u) === fu[1]; });
+        return json(rows);
+    }
+    if (/\/_m_new\//.test(u)) {
+        var id = DB.nextId++;
+        console.log('[mock] _m_new', u, opts && opts.body);
+        return json({ obj: id, i: id });
+    }
+    if (/\/_m_set\//.test(u) || /\/_m_save\//.test(u) || /\/_m_del\//.test(u)) {
+        console.log('[mock]', u, opts && opts.body);
+        return json({ ok: 1 });
+    }
+    return realFetch(url, opts);
+};
+</script>
+<script src="../js/atex-production-planning.js"></script>
+</body>
+</html>
