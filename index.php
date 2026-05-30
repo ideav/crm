@@ -9290,7 +9290,7 @@ $GLOBALS["GLOBAL_VARS"]["id"] = $id;
 
 #Exec_sql("Set transaction isolation level read uncommitted", "No lock");
 Exec_sql("SET SESSION optimizer_search_depth = 9", "Search depth");
-Exec_sql("SET SESSION sort_buffer_size = 33554432", "Search depth");
+Exec_sql("SET SESSION sort_buffer_size = 33554432", "Sort_buffer_size");
 
 switch($a)  # Check actions, which don't require authentication
 {
@@ -10241,6 +10241,8 @@ if(Validate_Token())
 				my_die(t9n("[RU]Недопустимые данные: up=0. Установите значение=1 для независимых объектов.[EN]Data is invalid: up=0. Set up=1 for independent objects."));
 			if($id == 0)
 				my_die(t9n("[RU]Недопустимый id=0.[EN]Invalid id=0."));
+			if($id === "")
+				my_die(t9n("[RU]Недопустимый пустой id[EN]Invalid empty id"));
 		    # Check if the Type exists and has reqs
 			$data_set = Exec_sql("SELECT obj.t, obj.ord, req.id, req.t reqt, req.val, def.t base"
 			                        ." FROM $z obj LEFT JOIN $z req ON req.up=$id LEFT JOIN $z def ON def.id=req.t"
