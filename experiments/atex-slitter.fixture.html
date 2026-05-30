@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<!-- Браузерный стенд для рабочего места «Пульт слиттера» (#2915).
+     Мокает fetch: metadata?JSON, object/{id} и команды _m_*.
+     Открывать локально, использует те же js/css, что и продакшн-шаблон. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>atex · Пульт слиттера — стенд</title>
+<link rel="stylesheet" href="../css/atex-slitter.css">
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#eef1f5}</style>
+</head>
+<body>
+<div id="atex-slitter" class="atex-sl" data-db="atex" data-xsrf="test-token" data-user="operator" data-user-id="701">
+    <div class="atex-sl-loading">Загрузка…</div>
+</div>
+
+<script>
+// ── Мок схемы atex (имена как в docs/atex_metadata.json; id произвольные) ──
+var META = [
+    { id: 106, val: 'Партия сырья', reqs: [
+        { id: 1044, val: 'Вид сырья' },
+        { id: 1046, val: 'Дата прихода' },
+        { id: 1048, val: 'Получено, м²' },
+        { id: 1050, val: 'Остаток, м²' }
+    ]},
+    { id: 110, val: 'Производственная резка', reqs: [
+        { id: 1090, val: 'Слиттер' },
+        { id: 1092, val: 'Тип резки' },
+        { id: 1094, val: 'Партия сырья' },
+        { id: 1096, val: 'Дата план' },
+        { id: 1098, val: 'Статус' },
+        { id: 1100, val: 'Счётчик нач.' },
+        { id: 1102, val: 'Счётчик кон.' },
+        { id: 1104, val: 'Погонаж факт, м' },
+        { id: 1106, val: 'Брак, м²' },
+        { id: 1108, val: 'Примечания' }
+    ]},
+    { id: 111, val: 'Расход сырья', reqs: [
+        { id: 1112, val: 'Израсходовано, м²' },
+        { id: 1114, val: 'Партия сырья' }
+    ]},
+    { id: 114, val: 'Событие смены', reqs: [
+        { id: 1138, val: 'Тип события' },
+        { id: 1140, val: 'Производственная резка' },
+        { id: 1142, val: 'Пользователь' },
+        { id: 1144, val: 'Значение' },
+        { id: 1146, val: 'Примечания' }
+    ]}
+];
+
+// Хранилище-заглушка. r = [главное значение, ...reqs по порядку метаданных].
+var DB = {
+    batches: [
+        { i: 601, r: ['Партия А-100 (БОПП)', '5:БОПП', '2026-05-10', '5000', '1200'] },
+        { i: 602, r: ['Партия Б-205 (ПЭТ)', '6:ПЭТ', '2026-05-18', '8000', '8000'] }
+    ],
+    cuts: [
+        { i: 301, r: ['1', '1:Слиттер-1', '11:25×35 БОПП', '601:Партия А-100', '2026-05-30', 'В работе', '1000', '1850', '850', '12', 'Идёт резка'] },
+        { i: 302, r: ['2', '2:Слиттер-2', '12:55мм ПЭТ', '602:Партия Б-205', '2026-05-31', 'Ожидает', '', '', '', '', ''] },
+        { i: 303, r: ['3', '1:Слиттер-1', '11:25×35 БОПП', '601:Партия А-100', '2026-05-29', 'Завершён', '500', '2200', '1700', '8', ''] }
+    ],
+    consumptions: {
+        301: [ { i: 401, r: ['Расход 1', '300', '601:Партия А-100'] } ],
+        302: [],
+        303: []
+    },
+    events: [
+        { i: 501, r: ['2026-05-30 08:00:00', 'Начало смены', '301:1', '701:operator', '', 'Смена А'] },
+        { i: 502, r: ['2026-05-30 08:15:00', 'Запуск резки', '301:1', '701:operator', '1000', ''] }
+    ],
+    nextId: 900
+};
+
+function field(metaId, row, reqId) {
+    var meta = META.filter(function(m){ return String(m.id) === String(metaId); })[0];
+    var order = [String(meta.id)].concat(meta.reqs.map(function(r){ return String(r.id); }));
+    return order.indexOf(String(reqId));
+}
+
+var realFetch = window.fetch;
+window.fetch = function(url, opts) {
+    var u = String(url);
+    function json(data) {
+        return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }
+    if (/\/metadata\?JSON/.test(u)) return json(META);
+    var mObj = u.match(/\/object\/(\d+)\//);
+    if (mObj) {
+        var tid = mObj[1];
+        var fi = u.match(/F_I=(\d+)/);
+        var fu = u.match(/F_U=(\d+)/);
+        if (tid === '106') return json(DB.batches);
+        if (tid === '110') {
+            if (fi) return json(DB.cuts.filter(function(c){ return String(c.i) === fi[1]; }));
+            return json(DB.cuts);
+        }
+        if (tid === '111') return json((fu && DB.consumptions[fu[1]]) || []);
+        if (tid === '114') return json(DB.events);
+    }
+    if (/\/_m_new\//.test(u)) {
+        var id = DB.nextId++;
+        console.log('[mock] _m_new', u, opts && opts.body);
+        return json({ obj: id, i: id });
+    }
+    if (/\/_m_set\//.test(u) || /\/_m_save\//.test(u) || /\/_m_del\//.test(u)) {
+        console.log('[mock]', u, opts && opts.body);
+        return json({ ok: 1 });
+    }
+    return realFetch(url, opts);
+};
+</script>
+<script src="../js/atex-slitter.js"></script>
+</body>
+</html>
