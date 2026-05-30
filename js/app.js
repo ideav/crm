@@ -515,7 +515,10 @@ class App {
         this.yandexAuth = new YandexAuthManager(this.apiConfig);
         // Issue #2906: set to true when a valid auth token is found, so the captcha
         // is hidden and its client-side check is skipped for returning users.
+        // Issue #2947: the token check is performed lazily (see _ensureCaptchaBypass),
+        // so this flag stays false until the captcha decision is actually reached.
         this._captchaBypass = false;
+        this._captchaBypassChecked = false;
         window._app = this;
     }
 
@@ -638,6 +641,8 @@ class App {
                     }
                 }
                 const captchaToken = getCaptchaToken('login-captcha-container');
+                // Issue #2947: resolve the captcha bypass lazily, right before the check.
+                await this._ensureCaptchaBypass();
                 if (!this._captchaBypass && captchaToken === null) {
                     showToast('Пожалуйста, пройдите проверку капчи', 'error');
                     loginInProgress = false;
@@ -943,6 +948,8 @@ class App {
                 }
 
                 const captchaToken = getCaptchaToken('register-captcha-container');
+                // Issue #2947: resolve the captcha bypass lazily, right before the check.
+                await this._ensureCaptchaBypass();
                 if (!this._captchaBypass && captchaToken === null) {
                     showToast('Пожалуйста, пройдите проверку капчи', 'error');
                     return;
@@ -980,11 +987,11 @@ class App {
         // Check auth state from cookies
         this.auth.init();
 
-        // Issue #2906: validate existing token cookies. If any is valid, the visitor
-        // is a returning, authenticated user — hide the captcha and skip its check.
-        // Done before any auth panel is shown below so the captcha never flashes.
-        this._captchaBypass = await hasValidAuthToken(this.apiConfig.host);
-        if (this._captchaBypass) this._hideCaptchaWidgets();
+        // Issue #2906/#2947: the validity of existing token cookies decides whether
+        // the captcha can be bypassed. This check is no longer performed eagerly here:
+        // querying tokens on every init wastes requests for users who are already
+        // authorized in a workspace and will never see the captcha. It now runs
+        // lazily, right before the captcha decision, via _ensureCaptchaBypass().
 
         // Handle redirect reasons from the backend: show login form and a visible message
         const urlParams = new URLSearchParams(window.location.search);
@@ -1095,8 +1102,22 @@ class App {
         this._initCaptchaWidgets();
     }
 
-    _initCaptchaWidgets() {
-        // Issue #2906: skip rendering the captcha entirely for returning users with a valid token.
+    // Issue #2947: query the token cookies lazily — only right before the captcha
+    // decision (when the auth panel/captcha is about to be shown for a non-logged-in
+    // user), never eagerly on every init. The result is memoized so repeated
+    // decisions (render, login submit, register submit) reuse the same check.
+    async _ensureCaptchaBypass() {
+        if (this._captchaBypassChecked) return this._captchaBypass;
+        this._captchaBypassChecked = true;
+        this._captchaBypass = await hasValidAuthToken(this.apiConfig.host);
+        if (this._captchaBypass) this._hideCaptchaWidgets();
+        return this._captchaBypass;
+    }
+
+    async _initCaptchaWidgets() {
+        // Issue #2906/#2947: query tokens here, right before deciding whether to
+        // render the captcha, and skip rendering entirely for returning users.
+        await this._ensureCaptchaBypass();
         if (this._captchaBypass) return;
         if (!window.smartCaptcha) return;
         ['login-captcha-container', 'register-captcha-container'].forEach(id => {
