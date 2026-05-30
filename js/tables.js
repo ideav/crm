@@ -262,7 +262,10 @@ class TablesController {
         card.className = 'table-card';
         card.href = '/' + db + '/table/' + table.id;
         card.dataset.tableId = table.id;
-        card.dataset.tableName = table.name.toLowerCase();
+        // Display the alias when set, falling back to the table name (issue #2967).
+        // Search still matches both so a table remains findable by its real name.
+        const displayName = (table.alias && table.alias.trim()) ? table.alias : table.name;
+        card.dataset.tableName = ((table.name || '') + ' ' + (table.alias || '')).toLowerCase();
         card.draggable = true;
 
         const icon = document.createElement('i');
@@ -270,7 +273,7 @@ class TablesController {
 
         const name = document.createElement('span');
         name.className = 'table-card-name';
-        name.textContent = table.name;
+        name.textContent = displayName;
 
         card.appendChild(icon);
         card.appendChild(name);

@@ -10,6 +10,18 @@
                    !json.hasOwnProperty('data');
         }
 
+        /**
+         * Resolve the displayed name of a table / its first column (issue #2967).
+         * A table may carry an `alias` (stored in the first column's attrs) that
+         * overrides the raw term value used as both the table title and the first
+         * column header. Falls back to the term value/name.
+         */
+        tableDisplayName(metadata) {
+            if (!metadata) return '';
+            if (metadata.alias) return metadata.alias;
+            return metadata.val || metadata.value || metadata.name || '';
+        }
+
         buildColumnFromMetadataReq(req) {
             const attrs = this.parseAttrs(req.attrs);
             const isReference = req.hasOwnProperty('ref_id');
@@ -48,9 +60,11 @@
          * }
          */
         async parseObjectFormat(metadata, append = false) {
-            // Auto-set table title from metadata if not explicitly provided
-            if (!this.options.title && (metadata.val || metadata.value)) {
-                this.options.title = metadata.val || metadata.value;
+            // Auto-set table title from metadata if not explicitly provided.
+            // Prefer the table alias when present (issue #2967).
+            if (!this.options.title) {
+                const title = this.tableDisplayName(metadata);
+                if (title) this.options.title = title;
             }
 
             // Store table-level granted value for access control (issue #1508)
@@ -70,7 +84,9 @@
                 id: String(metadata.id),
                 type: metadata.type || 'SHORT',
                 format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
-                name: metadata.val || 'Значение',
+                name: this.tableDisplayName(metadata) || 'Значение', // alias overrides term value (issue #2967)
+                val: metadata.val, // Original first-column name for alias display (issue #2967)
+                alias: metadata.alias || '', // Table alias, if any (issue #2967)
                 granted: mainColGranted,
                 ref: 0,
                 orig: metadata.id, // Store the original table id
@@ -156,7 +172,9 @@
                     id: String(refreshedMetadata.id),
                     type: refreshedMetadata.type || 'SHORT',
                     format: this.mapTypeIdToFormat(refreshedMetadata.type || 'SHORT'),
-                    name: refreshedMetadata.val || 'Значение',
+                    name: this.tableDisplayName(refreshedMetadata) || 'Значение', // alias overrides term value (issue #2967)
+                    val: refreshedMetadata.val,
+                    alias: refreshedMetadata.alias || '',
                     granted: mainColGranted,
                     ref: 0,
                     orig: refreshedMetadata.id,
@@ -264,9 +282,11 @@
                 // Use fetchMetadata() to leverage globalMetadata cache and avoid redundant requests (issue #783)
                 const metadata = await this.fetchMetadata(typeId);
 
-                // Auto-set table title from metadata if not explicitly provided
-                if (!this.options.title && (metadata.val || metadata.value)) {
-                    this.options.title = metadata.val || metadata.value;
+                // Auto-set table title from metadata if not explicitly provided.
+                // Prefer the table alias when present (issue #2967).
+                if (!this.options.title) {
+                    const title = this.tableDisplayName(metadata);
+                    if (title) this.options.title = title;
                 }
 
                 // Store table-level granted value for access control (issue #1508)
@@ -286,7 +306,9 @@
                     id: String(metadata.id),
                     type: metadata.type || 'SHORT',
                     format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
-                    name: metadata.val || metadata.name || 'Значение',
+                    name: this.tableDisplayName(metadata) || 'Значение', // alias overrides term value (issue #2967)
+                    val: metadata.val, // Original first-column name for alias display (issue #2967)
+                    alias: metadata.alias || '', // Table alias, if any (issue #2967)
                     granted: mainColGranted,
                     ref: 0,
                     orig: metadata.id,
