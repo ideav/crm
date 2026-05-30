@@ -9918,7 +9918,7 @@ if(Validate_Token())
 								if((int)$ref > 0){
 									if($row = mysqli_fetch_array(Exec_sql("SELECT t, val FROM $z WHERE id=".((int)$ref)." AND (t=".$GLOBALS["REF_typs"][$t]." OR ".$GLOBALS["REF_typs"][$t]."=1)", "Check Ref's Type"))){
 										if($GLOBALS["REF_typs"][$t] === "1") # Link to any table
-											$GLOBALS["REF_typs"][$t] = $row["t"];
+											$GLOBALS["REF_typs"][$t] = $row["t"];
 										Check_Val_granted($GLOBALS["REF_typs"][$t], $row["val"], (int)$ref);
 										if(isset($search[$t]))
 											unset($search[$t]); # Clean the search criteria to leave the form
