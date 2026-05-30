@@ -61,6 +61,9 @@ curl https://ideav.ru/update.php?config=update.conf
 
 See [ASSETS_DEPLOYMENT.md](ASSETS_DEPLOYMENT.md) for details on asset structure and deployment.
 
+For a local client-side Docker install with a master password and HTTPS certificate,
+see [docs/LOCAL_DOCKER_INSTALL.md](docs/LOCAL_DOCKER_INSTALL.md).
+
 ## Development Rules
 
 Before building or changing a workspace (`templates/*.html` embedded into

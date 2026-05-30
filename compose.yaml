@@ -1,0 +1,50 @@
+name: integram-local
+
+services:
+  db:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      MARIADB_DATABASE: ${INTEGRAM_DB_NAME:-ideav}
+      MARIADB_USER: ${INTEGRAM_DB_USER:-ideav}
+      MARIADB_PASSWORD: ${INTEGRAM_DB_PASSWORD:-ideav-local-password}
+      MARIADB_ROOT_PASSWORD: ${INTEGRAM_DB_ROOT_PASSWORD:-ideav-local-root-password}
+    volumes:
+      - integram-db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -u$${MARIADB_USER} -p$${MARIADB_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      INTEGRAM_DB_HOST: db
+      INTEGRAM_DB_PORT: 3306
+      INTEGRAM_DB_NAME: ${INTEGRAM_DB_NAME:-ideav}
+      INTEGRAM_DB_USER: ${INTEGRAM_DB_USER:-ideav}
+      INTEGRAM_DB_PASSWORD: ${INTEGRAM_DB_PASSWORD:-ideav-local-password}
+      INTEGRAM_MASTER_PASSWORD: ${INTEGRAM_MASTER_PASSWORD:?Set INTEGRAM_MASTER_PASSWORD in .env.local}
+      INTEGRAM_ADMIN_EMAIL: ${INTEGRAM_ADMIN_EMAIL:-admin@example.local}
+      INTEGRAM_SALT: ${INTEGRAM_SALT:-integram-local-salt}
+      INTEGRAM_SMTP_DEBUG: ${INTEGRAM_SMTP_DEBUG:-false}
+      INTEGRAM_SMARTCAPTCHA_SERVER_KEY: ${INTEGRAM_SMARTCAPTCHA_SERVER_KEY:-ysc2_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX}
+    ports:
+      - "${INTEGRAM_HTTP_PORT:-8080}:80"
+      - "${INTEGRAM_HTTPS_PORT:-8443}:443"
+    volumes:
+      - integram-download:/var/www/html/download
+      - integram-templates:/var/www/html/templates/custom
+      - integram-logs:/var/www/html/logs
+      - ./docker/certs:/etc/integram/certs
+
+volumes:
+  integram-db:
+  integram-download:
+  integram-templates:
+  integram-logs:

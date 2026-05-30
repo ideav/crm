@@ -1,0 +1,12 @@
+.git
+.github
+.env
+.env.local
+ci-logs/
+docker/certs/
+experiments/
+logs/
+mcp-server/node_modules/
+node_modules/
+*.log
+*.tmp
