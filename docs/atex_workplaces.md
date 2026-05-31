@@ -14,6 +14,8 @@
 (#3002).
 **Сценарий ввода данных по ролям для Atex:** [`docs/atex_role_input_walkthrough_3027.md`](atex_role_input_walkthrough_3027.md)
 (#3027).
+**Инструкция для человека-тестировщика Atex:** [`docs/atex_human_tester_instruction_3029.md`](atex_human_tester_instruction_3029.md)
+(#3029).
 **Минимальный сквозной пример для первого прохода:** [`docs/integram-minimal-full-cycle-project.md`](integram-minimal-full-cycle-project.md)
 (#2986).
 
