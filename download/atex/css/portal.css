@@ -67,8 +67,8 @@
 }
 
 .atex-portal-input:focus {
-    outline: 2px solid rgba(37, 99, 235, 0.18);
-    border-color: #2563eb;
+    outline: 2px solid rgba(19, 65, 116, 0.18);
+    border-color: var(--atex-navy, #134174);
 }
 
 .atex-portal-message {

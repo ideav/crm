@@ -6,8 +6,8 @@
     --cc-border: #d9dee5;
     --cc-bg: #ffffff;
     --cc-muted: #6b7280;
-    --cc-accent: #2563eb;
-    --cc-accent-d: #1d4ed8;
+    --cc-accent: var(--atex-navy, #134174);
+    --cc-accent-d: var(--atex-navy-d, #0e3158);
     --cc-warn: #b91c1c;
     --cc-ok: #15803d;
     color: #1f2933;
@@ -93,7 +93,7 @@
 .atex-cc-input:focus {
     outline: none;
     border-color: var(--cc-accent);
-    box-shadow: 0 0 0 2px rgba(37, 99, 235, .15);
+    box-shadow: 0 0 0 2px rgba(19, 65, 116, .15);
 }
 .atex-cc-textarea { resize: vertical; min-height: 60px; }
 
