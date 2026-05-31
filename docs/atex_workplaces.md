@@ -10,6 +10,8 @@
 [`docs/atex_workplaces_consolidation.md`](atex_workplaces_consolidation.md) (#2970).
 **Полный сценарий проверки рабочих мест:** [`docs/atex_full_cycle_test_scenario.md`](atex_full_cycle_test_scenario.md)
 (#2978).
+**Live-проверка по ролям для Atex:** [`docs/atex_live_full_cycle_ateh_2026-05-31.md`](atex_live_full_cycle_ateh_2026-05-31.md)
+(#3002).
 **Минимальный сквозной пример для первого прохода:** [`docs/integram-minimal-full-cycle-project.md`](integram-minimal-full-cycle-project.md)
 (#2986).
 

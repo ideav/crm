@@ -7,7 +7,7 @@
 // На этом этапе рабочее место обращается к данным напрямую командами `_m_*`
 // (#2903): создание — `_m_new/{Тип резки}`, полосы — `_m_new/{Полоса}` с
 // `up={cutTypeId}`, правки — `_m_set`, удаление полос — `_m_del`. ID таблиц и
-// реквизитов не хардкодятся: они берутся по именам из `GET /{db}/metadata?JSON`
+// реквизитов не хардкодятся: они берутся по именам из `GET /{db}/metadata?JSON=1`
 // (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6). Перевод чтений на защищённый
 // слой `report/` — следующий этап и в объём этой задачи не входит.
 //
@@ -196,7 +196,7 @@
 
     AtexCutCalc.prototype.loadMetadata = function() {
         var self = this;
-        return this.getJson('metadata?JSON').then(function(all) {
+        return this.getJson('metadata?JSON=1').then(function(all) {
             var list = Array.isArray(all) ? all : [all];
             function byName(name) {
                 return list.filter(function(t) {

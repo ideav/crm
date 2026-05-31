@@ -2,7 +2,7 @@
  * Regression test for issue #3003.
  *
  * Atex workplace templates must not hardcode table object ids or the `atex`
- * database name. Workplaces resolve object ids from /metadata?JSON by table
+ * database name. Workplaces resolve object ids from /metadata?JSON=1 by table
  * names, while scripts use window.db (or the template data-db fallback).
  */
 const fs = require('fs');
