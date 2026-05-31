@@ -26,12 +26,14 @@ function includes(text, message) {
     '#3002',
     'https://ideav.ru/ateh/',
     '31.05.2026',
-    'metadata?JSON=1',
+    'metadata',
     '?_count=&JSON=1',
     'АТХ-3002-2026-05-31'
 ].forEach(function(text) {
     includes(text);
 });
+
+assert(!doc.includes('metadata?JSON=1'), 'metadata route is documented without redundant JSON=1');
 
 [
     '1936',

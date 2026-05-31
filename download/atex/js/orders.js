@@ -362,7 +362,7 @@
     }
 
     function loadAllMetadata() {
-        return fetchJson('/' + encodeURIComponent(getApiBase()) + '/metadata?JSON=1').then(function(payload) {
+        return fetchJson('/' + encodeURIComponent(getApiBase()) + '/metadata').then(function(payload) {
             return Array.isArray(payload) ? payload : [];
         });
     }

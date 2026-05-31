@@ -9,7 +9,7 @@
 // (#2903): чтение заданий — `object/{Задание на втулки}/?F_U={резкаId}`,
 // правки — `_m_set/{заданиеId}`, новые задания — `_m_new/{Задание на втулки}`
 // с `up={резкаId}`. ID таблиц и реквизитов не хардкодятся: они берутся по именам
-// из `GET /{db}/metadata?JSON=1` (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6).
+// из `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6).
 // Перевод чтений на защищённый слой `report/` — следующий этап и в объём этой
 // задачи не входит.
 //
@@ -214,7 +214,7 @@
 
     AtexSleeveCutter.prototype.loadMetadata = function() {
         var self = this;
-        return this.getJson('metadata?JSON=1').then(function(all) {
+        return this.getJson('metadata').then(function(all) {
             var list = Array.isArray(all) ? all : [all];
             function byName(name) {
                 return list.filter(function(t) {

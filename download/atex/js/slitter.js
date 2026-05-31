@@ -12,7 +12,7 @@
 // `_m_new/{Расход сырья}` с `up={резкаId}` (и `_m_set` остатка партии); событие —
 // `_m_new/{Событие смены}`; список «мои резки» — `object/{Производственная резка}/`
 // с фильтром по слиттеру/статусу. ID таблиц и реквизитов не хардкодятся: они
-// берутся по именам из `GET /{db}/metadata?JSON=1` (WORKSPACE_DEVELOPMENT_GUIDE.md,
+// берутся по именам из `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md,
 // разделы 3 и 6). Перевод чтений на защищённый слой `report/` — следующий этап и
 // в объём этой задачи не входит.
 //
@@ -278,7 +278,7 @@
 
     AtexSlitter.prototype.loadMetadata = function() {
         var self = this;
-        return this.getJson('metadata?JSON=1').then(function(all) {
+        return this.getJson('metadata').then(function(all) {
             var list = Array.isArray(all) ? all : [all];
             function byName(name) {
                 return list.filter(function(t) {
