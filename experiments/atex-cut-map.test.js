@@ -9,7 +9,7 @@
 //
 // Run with: node experiments/atex-cut-map.test.js
 
-var layout = require('../js/atex-cut-map.js').layout;
+var layout = require('../download/atex/js/cut-map.js').layout;
 
 var passed = 0;
 function assertEqual(actual, expected, name) {

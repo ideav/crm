@@ -6,8 +6,8 @@
     --pp-border: #d9dee5;
     --pp-bg: #ffffff;
     --pp-muted: #6b7280;
-    --pp-accent: #2563eb;
-    --pp-accent-d: #1d4ed8;
+    --pp-accent: var(--atex-navy, #134174);
+    --pp-accent-d: var(--atex-navy-d, #0e3158);
     --pp-warn: #b91c1c;
     --pp-ok: #15803d;
     color: #1f2933;
@@ -62,7 +62,7 @@
 .atex-pp-input:focus {
     outline: none;
     border-color: var(--pp-accent);
-    box-shadow: 0 0 0 2px rgba(37, 99, 235, .15);
+    box-shadow: 0 0 0 2px rgba(19, 65, 116, .15);
 }
 .atex-pp-textarea { resize: vertical; min-height: 48px; }
 
@@ -119,7 +119,7 @@
     color: inherit;
 }
 .atex-pp-cut:hover { background: #f8fafc; }
-.atex-pp-cut.is-active { border-color: var(--pp-accent); box-shadow: 0 0 0 2px rgba(37, 99, 235, .15); }
+.atex-pp-cut.is-active { border-color: var(--pp-accent); box-shadow: 0 0 0 2px rgba(19, 65, 116, .15); }
 .atex-pp-cut-num { font-weight: 700; }
 .atex-pp-cut-type { font-weight: 600; }
 .atex-pp-cut-batch,

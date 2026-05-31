@@ -6,8 +6,8 @@
     --in-border: #d9dee5;
     --in-bg: #ffffff;
     --in-muted: #6b7280;
-    --in-accent: #2563eb;
-    --in-accent-d: #1d4ed8;
+    --in-accent: var(--atex-navy, #134174);
+    --in-accent-d: var(--atex-navy-d, #0e3158);
     --in-warn: #b91c1c;
     --in-ok: #15803d;
     color: #1f2933;
@@ -125,7 +125,7 @@
 .atex-in-input:focus {
     outline: none;
     border-color: var(--in-accent);
-    box-shadow: 0 0 0 2px rgba(37, 99, 235, .15);
+    box-shadow: 0 0 0 2px rgba(19, 65, 116, .15);
 }
 
 .atex-in-btn {

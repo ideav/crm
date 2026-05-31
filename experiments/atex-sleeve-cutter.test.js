@@ -5,7 +5,7 @@
 //
 // Run with: node experiments/atex-sleeve-cutter.test.js
 
-var core = require('../js/atex-sleeve-cutter.js').core;
+var core = require('../download/atex/js/sleeve-cutter.js').core;
 
 var passed = 0;
 function assertEqual(actual, expected, name) {

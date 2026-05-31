@@ -5,7 +5,7 @@
 //
 // Run with: node experiments/atex-intake.test.js
 
-var calc = require('../js/atex-intake.js').calc;
+var calc = require('../download/atex/js/intake.js').calc;
 
 var passed = 0;
 function assertEqual(actual, expected, name) {
