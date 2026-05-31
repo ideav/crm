@@ -2,8 +2,10 @@
    Подключается из templates/main.html по пути /download/<база>/css/brand.css.
    Назначение: ЗАМЕНИТЬ верхнее меню и лого Интеграма фирменным стилем клиента,
    а НЕ вкладывать бренд-шапку в рабочие места.
-   Палитра, шрифт и логотип берутся из atex-brand.css / atex-logo.svg. */
-@import url("/download/atex/css/atex-brand.css");
+   Палитра, шрифт и логотип берутся из atex-brand.css / atex-logo.svg.
+   Внутренние пути — относительные (файл лежит в download/<база>/css/), чтобы
+   стиль работал в любой базе независимо от её имени. */
+@import url("atex-brand.css");
 
 /* Верхнее меню (navbar) — фирменный тёмно-синий фон АТЕХ. */
 .navbar {
@@ -14,7 +16,7 @@
 
 /* Лого Интеграма заменяется логотипом АТЕХ (широкий логотип «АТЕХ»). */
 .navbar-brand .logo {
-    content: url("/download/atex/img/atex-logo.svg");
+    content: url("../img/atex-logo.svg");
     width: auto;
     height: 28px;
     border-radius: 0;
