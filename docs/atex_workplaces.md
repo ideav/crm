@@ -139,8 +139,8 @@ API-операции и критерии приёмки.
 - **Приёмка:** резка создаётся с автонумером; обеспечение связывает позицию
   заказа и резку (M:N через подчинённую таблицу).
 - **Реализация:** шаблон `templates/atex/production-planning.html` (URL
-  `/atex/production-planning`), логика `js/atex-production-planning.js`, стили
-  `css/atex-production-planning.css`. Id таблиц и реквизитов резолвятся из
+  `/atex/production-planning`), логика `download/atex/js/production-planning.js`, стили
+  `download/atex/css/production-planning.css`. Id таблиц и реквизитов резолвятся из
   `metadata?JSON` по имени, поэтому код переживает пересборку базы: резка —
   `_m_new/{Производственная резка}?up=1` без главного значения (Номер считает
   `unique`), обеспечение — `_m_new/{Обеспечение}?up={позицияId}` со ссылкой
@@ -157,8 +157,8 @@ API-операции и критерии приёмки.
 - **Приёмка:** партия создаётся со ссылкой на вид сырья; «Остаток, м²»
   инициализируется значением «Получено, м²».
 - **Реализация:** шаблон `templates/atex/intake.html`, логика
-  `js/atex-intake.js` (чистое ядро `calc` + DOM-контроллер), стили
-  `css/atex-intake.css`. URL рабочего места — `/atex/intake`. Реквизиты
+  `download/atex/js/intake.js` (чистое ядро `calc` + DOM-контроллер), стили
+  `download/atex/css/intake.css`. URL рабочего места — `/atex/intake`. Реквизиты
   резолвятся из `metadata?JSON` по имени, поэтому код переживает пересборку
   базы. При оприходовании «Остаток, м²» по умолчанию равен «Получено, м²»
   (`calc.initialRemainder`); список партий отсортирован по дате прихода
@@ -179,7 +179,7 @@ API-операции и критерии приёмки.
 - **Приёмка:** оператор переводит резку по статусам; расход сырья уменьшает
   остаток партии; события смены пишутся с датой/временем.
 - **Реализация:** шаблон `templates/atex/slitter.html`, логика
-  `js/atex-slitter.js`, стили `css/atex-slitter.css` (URL `/atex/slitter`). Id
+  `download/atex/js/slitter.js`, стили `download/atex/css/slitter.css` (URL `/atex/slitter`). Id
   таблиц и реквизитов резолвятся из `metadata?JSON` по имени, поэтому код
   переживает пересборку базы. Списание расхода (`_m_new/{Расход сырья}`)
   сопровождается уменьшением «Остаток, м²» партии через `_m_set/{партияId}` на
@@ -202,7 +202,7 @@ API-операции и критерии приёмки.
 - **Приёмка:** задание привязано к резке; статус и кол-во факт сохраняются;
   выбор втулкореза работает.
 - **Реализация:** шаблон `templates/atex/sleeve-cutter.html`, логика
-  `js/atex-sleeve-cutter.js`, стили `css/atex-sleeve-cutter.css` (URL
+  `download/atex/js/sleeve-cutter.js`, стили `download/atex/css/sleeve-cutter.css` (URL
   `/atex/sleeve-cutter`). Id таблиц и реквизитов резолвятся из `metadata?JSON`
   по имени, поэтому код переживает пересборку базы. Чистое ядро (цепочка статусов
   Ожидает → В работе → Готово и сводка план/факт) покрыто тестом
@@ -220,7 +220,7 @@ API-операции и критерии приёмки.
 - **Приёмка:** карта отрисовывает все полосы выбранной резки с корректными
   ширинами и остатком.
 - **Реализация:** шаблон `templates/atex/cut-map.html` (URL `/atex/cut-map`),
-  логика `js/atex-cut-map.js`, стили `css/atex-cut-map.css`. Чистое ядро
+  логика `download/atex/js/cut-map.js`, стили `download/atex/css/cut-map.css`. Чистое ядро
   раскладки (`layout.computeLayout` — сегменты-ножи, занятая ширина, остаток,
   флаг overflow) вынесено для модульных тестов. Чтение: список резок
   `object/{Производственная резка}/?JSON_OBJ`, выбранная резка по `F_I`, по
@@ -264,7 +264,7 @@ API-операции и критерии приёмки.
   защищённый слой данных.
 - **Приёмка:** дашборд показывает корректные счётчики/списки по живым данным.
 - **Реализация:** шаблон `templates/atex/dashboards.html` (URL `/atex/dashboards`),
-  логика `js/atex-dashboards.js`, стили `css/atex-dashboards.css`. Чистое ядро
+  логика `download/atex/js/dashboards.js`, стили `download/atex/css/dashboards.css`. Чистое ядро
   агрегации вынесено в `agg` (заказы по статусам, загрузка слиттеров, выпуск ГП,
   остатки сырья) и покрыто тестом `experiments/atex-dashboards.test.js`; браузерный
   стенд — `experiments/atex-dashboards.fixture.html`. ID таблиц и реквизитов
