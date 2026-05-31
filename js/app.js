@@ -519,11 +519,31 @@ class App {
         // so this flag stays false until the captcha decision is actually reached.
         this._captchaBypass = false;
         this._captchaBypassChecked = false;
+        this._postLoginUri = '';
+        this._postLoginDb = '';
         window._app = this;
     }
 
     navigateToDb() {
         this.auth.navigateToDb();
+    }
+
+    _getDbFromUri(uri) {
+        if (!uri || typeof uri !== 'string') return '';
+        try {
+            const url = new URL(uri, window.location.origin);
+            if (url.origin !== window.location.origin) return '';
+            const firstSegment = url.pathname.split('/').filter(Boolean)[0] || '';
+            return firstSegment ? decodeURIComponent(firstSegment) : '';
+        } catch (e) {
+            return '';
+        }
+    }
+
+    _getPostLoginUriForDb(selectedDb) {
+        if (!this._postLoginUri) return '';
+        if (!selectedDb || this._postLoginDb !== selectedDb) return '';
+        return this._postLoginUri;
     }
 
     async init() {
@@ -651,8 +671,9 @@ class App {
                 const result = await this.auth.login(email, password, selectedDb, captchaToken);
                 if (result.success) {
                     CookieUtil.set('last_db', selectedDb, 365);
-                    if (this._postLoginUri) {
-                        window.location.href = window.location.origin + this._postLoginUri;
+                    const postLoginUri = this._getPostLoginUriForDb(selectedDb);
+                    if (postLoginUri) {
+                        window.location.href = window.location.origin + postLoginUri;
                     } else {
                         window.location.href = window.location.origin + '/' + selectedDb;
                     }
@@ -1018,6 +1039,7 @@ class App {
             // Store uri for post-login redirect, but never redirect back to OAuth callbacks
             if (uriParam && !uriParam.toLowerCase().includes('auth.asp')) {
                 this._postLoginUri = uriParam;
+                this._postLoginDb = this._getDbFromUri(uriParam) || dbParam || '';
             }
 
             this.showAuthPanel(dbParam || undefined);
