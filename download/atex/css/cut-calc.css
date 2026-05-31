@@ -3,17 +3,29 @@
    с остальными рабочими местами в main.html. */
 
 .atex-cc {
-    --cc-border: #d9dee5;
-    --cc-bg: #ffffff;
-    --cc-muted: #6b7280;
+    --cc-border: var(--input-border, #d9dee5);
+    --cc-border-soft: var(--border-color, #eef1f5);
+    --cc-bg: var(--input-bg, #ffffff);
+    --cc-surface: var(--bg-secondary, #f8fafc);
+    --cc-muted: var(--text-secondary, #6b7280);
     --cc-accent: var(--atex-navy, #134174);
     --cc-accent-d: var(--atex-navy-d, #0e3158);
-    --cc-warn: #b91c1c;
-    --cc-ok: #15803d;
-    color: #1f2933;
+    --cc-active-bg: #e0ecff;
+    --cc-add-border: #bfdbfe;
+    --cc-danger-border: #fecaca;
+    --cc-warn: var(--color-error, #b91c1c);
+    --cc-ok: var(--color-success, #15803d);
+    color: var(--text-primary, #1f2933);
     font-size: 14px;
     box-sizing: border-box;
 }
+
+[data-theme="dark"] .atex-cc {
+    --cc-active-bg: rgba(96, 165, 250, 0.16);
+    --cc-add-border: rgba(96, 165, 250, 0.45);
+    --cc-danger-border: rgba(248, 113, 113, 0.45);
+}
+
 .atex-cc *,
 .atex-cc *::before,
 .atex-cc *::after { box-sizing: border-box; }
@@ -48,7 +60,7 @@
 .atex-cc-sidebar-head {
     padding: 12px 14px;
     border-bottom: 1px solid var(--cc-border);
-    background: #f8fafc;
+    background: var(--cc-surface);
 }
 .atex-cc-sidebar-head h2 { margin: 0; font-size: 15px; }
 .atex-cc-list { display: flex; flex-direction: column; max-height: 70vh; overflow: auto; }
@@ -56,14 +68,14 @@
     text-align: left;
     padding: 10px 14px;
     border: none;
-    border-bottom: 1px solid #eef1f5;
+    border-bottom: 1px solid var(--cc-border-soft);
     background: transparent;
     cursor: pointer;
     font: inherit;
     color: inherit;
 }
-.atex-cc-list-item:hover { background: #f1f5f9; }
-.atex-cc-list-item.is-active { background: #e0ecff; font-weight: 600; }
+.atex-cc-list-item:hover { background: var(--cc-surface); }
+.atex-cc-list-item.is-active { background: var(--cc-active-bg); font-weight: 600; }
 .atex-cc-empty { padding: 14px; color: var(--cc-muted); }
 
 /* Форма */
@@ -80,7 +92,7 @@
     display: block;
     margin-bottom: 5px;
     font-weight: 600;
-    color: #374151;
+    color: var(--text-primary, #374151);
 }
 .atex-cc-input {
     width: 100%;
@@ -88,7 +100,8 @@
     border: 1px solid var(--cc-border);
     border-radius: 6px;
     font: inherit;
-    background: #fff;
+    background: var(--cc-bg);
+    color: var(--text-primary, #1f2933);
 }
 .atex-cc-input:focus {
     outline: none;
@@ -120,24 +133,24 @@
 .atex-cc-btn {
     border: 1px solid var(--cc-border);
     border-radius: 6px;
-    background: #fff;
+    background: var(--cc-bg);
     padding: 7px 14px;
     cursor: pointer;
     font: inherit;
     color: inherit;
 }
-.atex-cc-btn:hover { background: #f1f5f9; }
-.atex-cc-btn-add { margin-top: 4px; color: var(--cc-accent); border-color: #bfdbfe; }
+.atex-cc-btn:hover { background: var(--cc-surface); }
+.atex-cc-btn-add { margin-top: 4px; color: var(--cc-accent); border-color: var(--cc-add-border); }
 .atex-cc-btn-del {
     padding: 4px 0;
     line-height: 1;
     font-size: 18px;
     color: var(--cc-warn);
-    border-color: #fecaca;
+    border-color: var(--cc-danger-border);
 }
 .atex-cc-btn-primary { background: var(--cc-accent); border-color: var(--cc-accent); color: #fff; }
 .atex-cc-btn-primary:hover { background: var(--cc-accent-d); }
-.atex-cc-btn-secondary { background: #f8fafc; }
+.atex-cc-btn-secondary { background: var(--cc-surface); }
 
 /* Итоги */
 .atex-cc-summary {
@@ -147,7 +160,7 @@
     margin: 18px 0;
     padding: 14px;
     border-radius: 8px;
-    background: #f8fafc;
+    background: var(--cc-surface);
     border: 1px solid var(--cc-border);
 }
 .atex-cc-metric { display: flex; flex-direction: column; gap: 2px; min-width: 110px; }

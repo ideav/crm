@@ -1,4 +1,12 @@
 .atex-portal {
+    --atex-portal-info-bg: #eff6ff;
+    --atex-portal-info-text: #1e40af;
+    --atex-portal-warning-bg: #fef9c3;
+    --atex-portal-warning-text: #854d0e;
+    --atex-portal-progress-bg: #ede9fe;
+    --atex-portal-progress-text: #5b21b6;
+    --atex-portal-shipped-bg: #e0f2fe;
+    --atex-portal-shipped-text: #0369a1;
     height: 100%;
     min-height: 0;
     padding: 0;
@@ -8,6 +16,17 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+}
+
+[data-theme="dark"] .atex-portal {
+    --atex-portal-info-bg: rgba(96, 165, 250, 0.16);
+    --atex-portal-info-text: #93c5fd;
+    --atex-portal-warning-bg: rgba(251, 191, 36, 0.16);
+    --atex-portal-warning-text: #fbbf24;
+    --atex-portal-progress-bg: rgba(167, 139, 250, 0.18);
+    --atex-portal-progress-text: #c4b5fd;
+    --atex-portal-shipped-bg: rgba(56, 189, 248, 0.16);
+    --atex-portal-shipped-text: #7dd3fc;
 }
 
 .atex-portal * {
@@ -47,7 +66,7 @@
 }
 
 .atex-portal-btn-secondary:hover {
-    background: #f1f5f9;
+    background: var(--bg-secondary, #f1f5f9);
 }
 
 .atex-portal-filter-wrap {
@@ -79,18 +98,18 @@
 }
 
 .atex-portal-message--info {
-    background: #eff6ff;
-    color: #1e40af;
+    background: var(--atex-portal-info-bg);
+    color: var(--atex-portal-info-text);
 }
 
 .atex-portal-message--success {
-    background: #ecfdf5;
-    color: #047857;
+    background: var(--color-success-bg, #ecfdf5);
+    color: var(--color-success, #047857);
 }
 
 .atex-portal-message--error {
-    background: #fef2f2;
-    color: #b91c1c;
+    background: var(--color-error-bg, #fef2f2);
+    color: var(--color-error, #b91c1c);
 }
 
 .atex-portal-list {
@@ -119,7 +138,7 @@
 
 .atex-portal-table thead th,
 .atex-portal-subtable thead th {
-    background: #f1f5f9;
+    background: var(--bg-secondary, #f1f5f9);
     color: var(--text-secondary, #475569);
     font-weight: 600;
     position: sticky;
@@ -127,7 +146,7 @@
 }
 
 .atex-portal-row:hover {
-    background: #f8fafc;
+    background: var(--bg-secondary, #f8fafc);
 }
 
 .atex-portal-toggle-cell {
@@ -148,7 +167,7 @@
 }
 
 .atex-portal-detail-row > td {
-    background: #f8fafc;
+    background: var(--bg-primary, #f8fafc);
     padding: 0;
 }
 
@@ -169,44 +188,44 @@
     padding: 2px 10px;
     font-size: 0.82rem;
     line-height: 1.5;
-    background: #f1f5f9;
-    color: #334155;
+    background: var(--bg-secondary, #f1f5f9);
+    color: var(--text-secondary, #334155);
     white-space: nowrap;
 }
 
 .atex-portal-badge--none {
-    color: #94a3b8;
+    color: var(--text-secondary, #94a3b8);
 }
 
 .atex-portal-badge--новый,
 .atex-portal-badge--новая {
-    background: #eff6ff;
-    color: #1e40af;
+    background: var(--atex-portal-info-bg);
+    color: var(--atex-portal-info-text);
 }
 
 .atex-portal-badge--согласован {
-    background: #fef9c3;
-    color: #854d0e;
+    background: var(--atex-portal-warning-bg);
+    color: var(--atex-portal-warning-text);
 }
 
 .atex-portal-badge--впроизводстве,
 .atex-portal-badge--вработе {
-    background: #ede9fe;
-    color: #5b21b6;
+    background: var(--atex-portal-progress-bg);
+    color: var(--atex-portal-progress-text);
 }
 
 .atex-portal-badge--выполнен,
 .atex-portal-badge--готова {
-    background: #ecfdf5;
-    color: #047857;
+    background: var(--color-success-bg, #ecfdf5);
+    color: var(--color-success, #047857);
 }
 
 .atex-portal-badge--отгружена {
-    background: #e0f2fe;
-    color: #0369a1;
+    background: var(--atex-portal-shipped-bg);
+    color: var(--atex-portal-shipped-text);
 }
 
 .atex-portal-badge--отменён {
-    background: #fef2f2;
-    color: #b91c1c;
+    background: var(--color-error-bg, #fef2f2);
+    color: var(--color-error, #b91c1c);
 }
