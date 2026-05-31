@@ -3,8 +3,8 @@
 # ============================================
 
 param(
-    [string]$Token = $env:INTEGRAM_TOKEN,
-    [string]$XsrfToken = $env:INTEGRAM_XSRF,
+    [string]$Token,
+    [string]$XsrfToken,
     [string]$BaseUrl = "https://ideav.ru",
     [string]$DbName = "perelidoz",
     [string]$LogPath = "api_log.txt",
@@ -12,6 +12,33 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+function Get-IntegramEnvironmentValue {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    foreach ($target in @(
+        [System.EnvironmentVariableTarget]::Process,
+        [System.EnvironmentVariableTarget]::User,
+        [System.EnvironmentVariableTarget]::Machine
+    )) {
+        try {
+            $value = [Environment]::GetEnvironmentVariable($Name, $target)
+        } catch {
+            continue
+        }
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            return $value
+        }
+    }
+    return ""
+}
+
+if ([string]::IsNullOrWhiteSpace($Token)) {
+    $Token = Get-IntegramEnvironmentValue -Name "INTEGRAM_TOKEN"
+}
+if ([string]::IsNullOrWhiteSpace($XsrfToken)) {
+    $XsrfToken = Get-IntegramEnvironmentValue -Name "INTEGRAM_XSRF"
+}
 
 function Write-Log {
     param([string]$Message)
@@ -115,7 +142,7 @@ function Initialize-TokenSession {
     Write-Log "1. Token connection..."
 
     if ([string]::IsNullOrWhiteSpace($Token)) {
-        throw "Pass -Token or set INTEGRAM_TOKEN. POST /auth with login/password is not used by this script."
+        throw "Pass -Token or set INTEGRAM_TOKEN in the Process/User/Machine scope. POST /auth with login/password is not used by this script."
     }
 
     $script:AuthToken = $Token
