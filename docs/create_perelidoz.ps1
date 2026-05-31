@@ -3,8 +3,8 @@
 # ============================================
 
 param(
-    [string]$Login = "api",
-    [string]$Password = "",
+    [string]$Token = $env:INTEGRAM_TOKEN,
+    [string]$XsrfToken = $env:INTEGRAM_XSRF,
     [string]$BaseUrl = "https://ideav.ru",
     [string]$DbName = "perelidoz",
     [string]$LogPath = "api_log.txt",
@@ -51,7 +51,9 @@ function Invoke-ApiRequest {
 
     Write-Log "Request: $Method $url"
     if ($body.Count -gt 0) {
-        $bodyString = ($body.GetEnumerator() | Sort-Object Name | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "; "
+        $bodyString = ($body.GetEnumerator() |
+            Where-Object { $_.Key -ne "token" -and $_.Key -ne "_xsrf" } |
+            Sort-Object Name | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "; "
         Write-Log "Body: $bodyString"
     }
 
@@ -73,6 +75,56 @@ function Invoke-ApiRequest {
         }
         throw
     }
+}
+
+function Get-XsrfByToken {
+    param([Parameter(Mandatory = $true)][string]$TokenValue)
+
+    $url = "$BaseUrl/$DbName/xsrf"
+    if ($url -notmatch "\?") {
+        $url = "$url`?JSON=1"
+    } elseif ($url -notmatch "(^|[?&])JSON=") {
+        $url = "$url&JSON=1"
+    }
+
+    Write-Log "Request: GET $url"
+    Write-Log "Cookie: idb_$DbName=***"
+    try {
+        return Invoke-RestMethod -Uri $url -Method Get -Headers @{ Cookie = "idb_$DbName=$TokenValue" }
+    } catch {
+        Write-Log "ERROR: $($_.Exception.Message)"
+        if ($_.Exception.Response) {
+            $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+            $reader.BaseStream.Position = 0
+            $reader.DiscardBufferedData()
+            Write-Log "Response Body: $($reader.ReadToEnd())"
+        }
+        throw
+    }
+}
+
+function Initialize-TokenSession {
+    Write-Log "1. Token connection..."
+
+    if ([string]::IsNullOrWhiteSpace($Token)) {
+        throw "Pass -Token or set INTEGRAM_TOKEN. POST /auth with login/password is not used by this script."
+    }
+
+    $script:AuthToken = $Token
+    if (-not [string]::IsNullOrWhiteSpace($XsrfToken)) {
+        $script:XsrfToken = $XsrfToken
+        Write-Log "   OK XSRF token supplied"
+        return
+    }
+
+    $xsrfResponse = Get-XsrfByToken -TokenValue $Token
+    if (-not $xsrfResponse -or -not $xsrfResponse._xsrf) {
+        throw "Failed to get _xsrf by token from $BaseUrl/$DbName/xsrf"
+    }
+    $script:XsrfToken = $xsrfResponse._xsrf
+    if ($xsrfResponse.token) { $script:AuthToken = $xsrfResponse.token }
+    Write-Log "   OK Token connection successful"
+    Write-Log "   User ID: $($xsrfResponse.id)"
 }
 
 function New-IntegramType {
@@ -171,17 +223,7 @@ Write-Log "Base URL: $BaseUrl"
 Write-Log "========================================"
 
 Write-Log ""
-Write-Log "1. Authorization..."
-
-$authResponse = Invoke-ApiRequest -Endpoint "auth" -FormData @{ login = $Login; pwd = $Password } -AuthToken $null -XsrfToken $null
-if (-not $authResponse -or -not $authResponse.token -or -not $authResponse._xsrf) {
-    throw "Authorization failed"
-}
-
-$script:XsrfToken = $authResponse._xsrf
-$script:AuthToken = $authResponse.token
-Write-Log "   OK Authorization successful"
-Write-Log "   User ID: $($authResponse.id)"
+Initialize-TokenSession
 
 $tableDefinitions = [ordered]@{
     Project = @{

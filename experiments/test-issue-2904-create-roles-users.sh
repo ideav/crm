@@ -34,14 +34,14 @@ curl -s "http://127.0.0.1:$PORT/$DB/reset?system=1" >/dev/null
 echo "== Building atex schema (create_db_from_scratch.ps1) =="
 "$PWSH" -NoProfile -File "$ROOT/docs/create_db_from_scratch.ps1" \
     -BaseUrl "http://127.0.0.1:$PORT" -DbName "$DB" \
-    -Login tester -Password secret \
+    -Token mock-token \
     -MetadataPath "$META" \
     -LogPath "$HERE/roles_users_e2e_schema.log" >/dev/null
 
 echo "== Creating roles and users (create_roles_users.ps1) =="
 "$PWSH" -NoProfile -File "$ROOT/docs/create_roles_users.ps1" \
     -BaseUrl "http://127.0.0.1:$PORT" -DbName "$DB" \
-    -Login tester -Password secret \
+    -Token mock-token \
     -DataPath "$DATA" \
     -LogPath "$HERE/roles_users_e2e_run1.log"
 
@@ -59,7 +59,7 @@ echo
 echo "== Second run (idempotency check) =="
 "$PWSH" -NoProfile -File "$ROOT/docs/create_roles_users.ps1" \
     -BaseUrl "http://127.0.0.1:$PORT" -DbName "$DB" \
-    -Login tester -Password secret \
+    -Token mock-token \
     -DataPath "$DATA" \
     -LogPath "$HERE/roles_users_e2e_run2.log" >/dev/null
 curl -s "http://127.0.0.1:$PORT/$DB/object/42" > "$HERE/roles_42_run2.json"

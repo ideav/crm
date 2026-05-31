@@ -39,7 +39,7 @@ curl -s "http://127.0.0.1:$PORT/$DB/reset?system=1" >/dev/null
 echo "== Creating roles and users =="
 "$PWSH" -NoProfile -File "$ROOT/docs/create_roles_users.ps1" \
     -BaseUrl "http://127.0.0.1:$PORT" -DbName "$DB" \
-    -Login tester -Password secret \
+    -Token mock-token \
     -DataPath "$ROLES_DATA" \
     -LogPath "$HERE/atex_menu_roles_users.log" >/dev/null
 
@@ -57,7 +57,7 @@ curl -s -X POST "http://127.0.0.1:$PORT/$DB/_m_new/151?JSON=1" \
 echo "== Creating atex menu =="
 "$PWSH" -NoProfile -File "$ROOT/docs/create_atex_menu.ps1" \
     -BaseUrl "http://127.0.0.1:$PORT" -DbName "$DB" \
-    -Login tester -Password secret \
+    -Token mock-token \
     -DataPath "$MENU_DATA" \
     -LogPath "$HERE/atex_menu_run1.log"
 
@@ -75,7 +75,7 @@ echo
 echo "== Second run (idempotency check) =="
 "$PWSH" -NoProfile -File "$ROOT/docs/create_atex_menu.ps1" \
     -BaseUrl "http://127.0.0.1:$PORT" -DbName "$DB" \
-    -Login tester -Password secret \
+    -Token mock-token \
     -DataPath "$MENU_DATA" \
     -LogPath "$HERE/atex_menu_run2.log" >/dev/null
 curl -s "http://127.0.0.1:$PORT/$DB/object/151" > "$HERE/menus_151_2992_run2.json"
