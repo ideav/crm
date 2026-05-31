@@ -30,8 +30,8 @@ assert(template.includes('/download/{_global_.z}/js/orders.js?0{_global_.version
 assert(!/<script\b(?![^>]*\bsrc=)/i.test(template), 'template does not contain inline scripts');
 assert(!/<style\b/i.test(template), 'template does not contain inline styles');
 assert(template.includes('id="atex-orders-app"'), 'template contains the app root');
-assert(template.includes('data-order-table="107"'), 'template wires the order table id');
-assert(template.includes('data-position-table="108"'), 'template wires the position table id');
+assert(!template.includes('data-order-table="107"'), 'template does not hardcode the order table id');
+assert(!template.includes('data-position-table="108"'), 'template does not hardcode the position table id');
 
 const updateConf = fs.readFileSync(updateConfPath, 'utf8');
 assert(updateConf.includes('templates/atex/* : /var/www/www-root/data/www/ideav.ru/templates/custom/atex/'), 'update.conf deploys atex templates');
@@ -64,14 +64,14 @@ vm.runInNewContext(source, sandbox, { filename: scriptPath });
 const helpers = sandbox.window.AtexOrdersTesting;
 assert(helpers, 'AtexOrdersTesting helper API is exposed');
 
-// --- Метаданные из docs/atex_metadata.json (таблицы 107 и 108) ---
+// --- Метаданные из docs/atex_metadata.json (таблицы резолвятся по имени) ---
 const metadata = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'atex_metadata.json'), 'utf8'));
-function tableById(id) {
-    return metadata.filter(function(t) { return String(t.id) === String(id); })[0];
-}
-const orderMeta = tableById('107');
-const positionMeta = tableById('108');
+const resolvedTables = helpers.resolveTableMetadata(metadata, helpers.TABLE, {});
+const orderMeta = resolvedTables.order;
+const positionMeta = resolvedTables.position;
 assert(orderMeta && positionMeta, 'metadata for tables 107/108 found');
+assert.strictEqual(orderMeta.id, '107', 'order table id resolved from metadata');
+assert.strictEqual(positionMeta.id, '108', 'position table id resolved from metadata');
 
 // --- Привязка полей к реквизитам по имени ---
 const orderColumns = helpers.buildColumns(helpers.ORDER_FIELDS, orderMeta);

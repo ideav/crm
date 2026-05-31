@@ -204,7 +204,7 @@
 
     function AtexDashboards(root) {
         this.root = root;
-        this.db = root.getAttribute('data-db') || (location.pathname.split('/').filter(Boolean)[0] || '');
+        this.db = window.db || root.getAttribute('data-db') || '';
         this.meta = { order: null, cut: null, gp: null, rawBatch: null };
         this.busy = false;
     }

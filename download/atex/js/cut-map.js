@@ -196,7 +196,7 @@
 
     function AtexCutMap(root) {
         this.root = root;
-        this.db = root.getAttribute('data-db') || (location.pathname.split('/').filter(Boolean)[0] || '');
+        this.db = window.db || root.getAttribute('data-db') || '';
         this.meta = { cut: null, cutType: null, strip: null };
         this.cuts = [];          // список производственных резок [{ id, name, statusLabel, cutTypeRef }]
         this.current = null;     // выбранная резка с раскладкой

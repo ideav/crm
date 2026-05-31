@@ -225,7 +225,7 @@
 
     function AtexSlitter(root) {
         this.root = root;
-        this.db = root.getAttribute('data-db') || (location.pathname.split('/').filter(Boolean)[0] || '');
+        this.db = window.db || root.getAttribute('data-db') || '';
         this.userId = root.getAttribute('data-user-id') || '';
         this.meta = { cut: null, consumption: null, event: null, batch: null };
         this.batches = [];        // справочник партий сырья [{ id, label, date, remainder }]

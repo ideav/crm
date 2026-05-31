@@ -207,7 +207,7 @@
 
     function AtexProductionPlanning(root) {
         this.root = root;
-        this.db = root.getAttribute('data-db') || (location.pathname.split('/').filter(Boolean)[0] || '');
+        this.db = window.db || root.getAttribute('data-db') || '';
         this.meta = { cut: null, supply: null, position: null, slitter: null, cutType: null, materialBatch: null };
         this.slitters = [];        // справочник [{ id, label }]
         this.cutTypes = [];        // справочник [{ id, label }]

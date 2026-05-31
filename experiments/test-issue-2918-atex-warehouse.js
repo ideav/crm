@@ -35,9 +35,9 @@ assert(template.includes('/download/{_global_.z}/js/warehouse.js?0{_global_.vers
 assert(!/<script\b(?![^>]*\bsrc=)/i.test(template), 'template does not contain inline scripts');
 assert(!/<style\b/i.test(template), 'template does not contain inline styles');
 assert(template.includes('id="atex-warehouse-app"'), 'template contains the app root');
-assert(template.includes('data-batch-table="113"'), 'template wires the GP batch table id');
-assert(template.includes('data-provision-table="109"'), 'template wires the provision table id');
-assert(template.includes('data-cutting-table="110"'), 'template wires the cutting table id');
+assert(!template.includes('data-batch-table="113"'), 'template does not hardcode the GP batch table id');
+assert(!template.includes('data-provision-table="109"'), 'template does not hardcode the provision table id');
+assert(!template.includes('data-cutting-table="110"'), 'template does not hardcode the cutting table id');
 
 const updateConf = fs.readFileSync(updateConfPath, 'utf8');
 assert(updateConf.includes('templates/atex/* : /var/www/www-root/data/www/ideav.ru/templates/custom/atex/'), 'update.conf deploys atex templates');
@@ -71,15 +71,16 @@ vm.runInNewContext(source, sandbox, { filename: scriptPath });
 const helpers = sandbox.window.AtexWarehouseTesting;
 assert(helpers, 'AtexWarehouseTesting helper API is exposed');
 
-// --- Метаданные из docs/atex_metadata.json (таблицы 113/109/110) ---
+// --- Метаданные из docs/atex_metadata.json (таблицы резолвятся по имени) ---
 const metadata = JSON.parse(fs.readFileSync(path.join(root, 'docs', 'atex_metadata.json'), 'utf8'));
-function tableById(id) {
-    return metadata.filter(function(t) { return String(t.id) === String(id); })[0];
-}
-const batchMeta = tableById('113');
-const provisionMeta = tableById('109');
-const cuttingMeta = tableById('110');
+const resolvedTables = helpers.resolveTableMetadata(metadata, helpers.TABLE, {});
+const batchMeta = resolvedTables.batch;
+const provisionMeta = resolvedTables.provision;
+const cuttingMeta = resolvedTables.cutting;
 assert(batchMeta && provisionMeta && cuttingMeta, 'metadata for tables 113/109/110 found');
+assert.strictEqual(batchMeta.id, '113', 'GP batch table id resolved from metadata');
+assert.strictEqual(provisionMeta.id, '109', 'provision table id resolved from metadata');
+assert.strictEqual(cuttingMeta.id, '110', 'cutting table id resolved from metadata');
 
 const batchColumns = helpers.buildColumns(helpers.BATCH_FIELDS, batchMeta);
 const provisionColumns = helpers.buildColumns(helpers.PROVISION_FIELDS, provisionMeta);
