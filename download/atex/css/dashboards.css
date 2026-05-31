@@ -60,6 +60,7 @@
     background: var(--db-bg);
     padding: 16px 18px;
 }
+.atex-db-card-wide { grid-column: 1 / -1; }
 .atex-db-card-head {
     display: flex;
     align-items: baseline;
@@ -131,3 +132,107 @@
 }
 
 .atex-db-empty { padding: 10px 0; color: var(--db-muted); }
+
+/* Путь продукции */
+.atex-db-flow-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 14px;
+}
+.atex-db-flow-row {
+    border: 1px solid #e6eaf0;
+    border-radius: 8px;
+    padding: 12px;
+    background: #fbfcfe;
+}
+.atex-db-flow-row-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+.atex-db-flow-order {
+    font-weight: 700;
+    color: #1f2933;
+}
+.atex-db-flow-product {
+    margin-top: 2px;
+    color: var(--db-muted);
+    font-size: 12px;
+    line-height: 1.35;
+}
+.atex-db-flow-progress {
+    min-width: 48px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 4px 8px;
+    text-align: center;
+    font-weight: 700;
+    color: var(--db-accent);
+    background: #fff;
+    font-variant-numeric: tabular-nums;
+}
+.atex-db-flow-stages {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(130px, 1fr));
+    gap: 8px;
+}
+.atex-db-flow-stage {
+    min-height: 78px;
+    border: 1px solid #d9dee5;
+    border-radius: 8px;
+    padding: 9px 10px;
+    background: #fff;
+    overflow: hidden;
+}
+.atex-db-flow-stage-label {
+    display: block;
+    font-size: 11px;
+    text-transform: uppercase;
+    color: var(--db-muted);
+}
+.atex-db-flow-stage-status {
+    display: block;
+    margin-top: 4px;
+    font-weight: 700;
+    line-height: 1.25;
+}
+.atex-db-flow-stage-detail {
+    display: block;
+    margin-top: 4px;
+    color: var(--db-muted);
+    font-size: 12px;
+    line-height: 1.3;
+}
+.atex-db-flow-stage-done {
+    border-color: #86b88b;
+    background: #f2fbf4;
+}
+.atex-db-flow-stage-done .atex-db-flow-stage-status { color: #166534; }
+.atex-db-flow-stage-active {
+    border-color: #8da9c4;
+    background: #f5f9fc;
+}
+.atex-db-flow-stage-active .atex-db-flow-stage-status { color: var(--db-accent); }
+.atex-db-flow-stage-pending {
+    border-color: #e2e8f0;
+    background: #f8fafc;
+    color: #64748b;
+}
+.atex-db-flow-more {
+    margin-top: 10px;
+    color: var(--db-muted);
+    font-size: 12px;
+}
+
+@media (max-width: 860px) {
+    .atex-db-flow-stages { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+    .atex-db-grid { grid-template-columns: minmax(0, 1fr); }
+    .atex-db-flow-row-head { flex-direction: column; }
+    .atex-db-flow-stages { grid-template-columns: minmax(0, 1fr); }
+}
