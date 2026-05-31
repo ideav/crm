@@ -27,21 +27,44 @@
             z-index: 0;
             opacity: var(--brand-bg-opacity, 0.3);
         }
+        /* Brand background contrast tokens are separate from light/dark theme tokens. */
+        body.brand-bg-on {
+            --brand-bg-text-primary: #000000;
+            --brand-bg-text-secondary: #000000;
+        }
+
+        [data-theme="dark"] body.brand-bg-on {
+            --brand-bg-text-primary: #ffffff;
+            --brand-bg-text-secondary: #ffffff;
+        }
+
         /* Make navbar and sidebar transparent when brand-bg is on */
         body.brand-bg-on .navbar,
         body.brand-bg-on .app-sidebar {
             background-color: transparent !important;
             backdrop-filter: blur(0px);
+            color: var(--brand-bg-text-primary);
         }
-        /* High-contrast text when brand-bg is on — light theme */
-        body.brand-bg-on {
-            --text-primary: #000000;
-            --text-secondary: #000000;
+
+        body.brand-bg-on .navbar-brand,
+        body.brand-bg-on .navbar-workspace,
+        body.brand-bg-on .navbar .ai-chat-toggle,
+        body.brand-bg-on .navbar .account-info,
+        body.brand-bg-on .navbar .account-email,
+        body.brand-bg-on .navbar .user-menu-arrow,
+        body.brand-bg-on .navbar .mobile-sidebar-toggle,
+        body.brand-bg-on .app-sidebar .sidebar-toggle,
+        body.brand-bg-on .app-sidebar .menu-search-icon,
+        body.brand-bg-on .app-sidebar .menu-search-clear,
+        body.brand-bg-on .app-sidebar .menu-arrow,
+        body.brand-bg-on .app-sidebar .sidebar-settings {
+            color: var(--brand-bg-text-secondary);
         }
-        /* High-contrast text when brand-bg is on — dark theme */
-        [data-theme="dark"] body.brand-bg-on {
-            --text-primary: #ffffff;
-            --text-secondary: #ffffff;
+
+        body.brand-bg-on .app-sidebar .app-menu-item,
+        body.brand-bg-on .app-sidebar .app-menu-item:hover,
+        body.brand-bg-on .app-sidebar .app-menu-item.active {
+            color: var(--brand-bg-text-primary);
         }
     </style>
     <script>
