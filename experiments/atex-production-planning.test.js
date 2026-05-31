@@ -10,7 +10,7 @@
 //
 // Run with: node experiments/atex-production-planning.test.js
 
-var planning = require('../js/atex-production-planning.js').planning;
+var planning = require('../download/atex/js/production-planning.js').planning;
 
 var passed = 0;
 function assertEqual(actual, expected, name) {

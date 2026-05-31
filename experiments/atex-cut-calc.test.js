@@ -5,7 +5,7 @@
 //
 // Run with: node experiments/atex-cut-calc.test.js
 
-var calc = require('../js/atex-cut-calc.js').calc;
+var calc = require('../download/atex/js/cut-calc.js').calc;
 
 var passed = 0;
 function assertEqual(actual, expected, name) {
