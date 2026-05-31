@@ -1,7 +1,8 @@
 // Рабочее место atex «Дашборды и отчёты» (роль Руководитель).
 //
-// Сводки только для чтения по живым данным: заказы по статусам, загрузка
-// слиттеров, выпуск готовой продукции (ГП), остатки сырья. Решение задачи
+// Сводки только для чтения по живым данным: путь продукции по этапам, заказы по
+// статусам, загрузка слиттеров, выпуск готовой продукции (ГП), остатки сырья.
+// Решение задачи
 // ideav/crm#2919 (часть #2903). Правила разработки рабочих мест —
 // docs/WORKSPACE_DEVELOPMENT_GUIDE.md, раздел про дашборды — atex_workplaces.md §3.9.
 //
@@ -40,13 +41,34 @@
     // рабочее место находит конкретные числовые id в метаданных текущей сборки.
     var TABLE = {
         order: 'Заказ',
+        position: 'Позиция заказа',
+        provision: 'Обеспечение',
         cut: 'Производственная резка',
         gp: 'Партия ГП',
         rawBatch: 'Партия сырья'
     };
     var ORDER_REQ = { status: 'Статус', created: 'Дата создания' };
+    var POSITION_REQ = {
+        qty: 'Кол-во',
+        cutType: 'Тип резки',
+        width: 'Ширина, мм',
+        length: 'Длина, м',
+        status: 'Статус'
+    };
+    var PROVISION_REQ = {
+        footage: 'Метраж, м',
+        cut: 'Производственная резка',
+        gp: 'Партия ГП',
+        status: 'Статус'
+    };
     var CUT_REQ = { slitter: 'Слиттер', status: 'Статус', footage: 'Погонаж факт, м' };
-    var GP_REQ = { status: 'Статус', rolls: 'Кол-во рулонов', footage: 'Метраж, м' };
+    var GP_REQ = {
+        cut: 'Производственная резка',
+        status: 'Статус',
+        rolls: 'Кол-во рулонов',
+        footage: 'Метраж, м',
+        address: 'Адрес хранения'
+    };
     var RAW_REQ = { material: 'Вид сырья', received: 'Получено, м²', remainder: 'Остаток, м²' };
 
     // Метка для записей без значения в группирующем поле.
@@ -147,6 +169,137 @@
         };
     }
 
+    function normalizeStatus(value) {
+        return String(value == null ? '' : value)
+            .trim()
+            .toLowerCase()
+            .replace(/ё/g, 'е');
+    }
+
+    function statusIn(status, list) {
+        var wanted = normalizeStatus(status);
+        return (list || []).map(normalizeStatus).indexOf(wanted) !== -1;
+    }
+
+    function stageState(status, doneStatuses) {
+        var text = String(status == null ? '' : status).trim();
+        if (!text) return 'pending';
+        return statusIn(text, doneStatuses) ? 'done' : 'active';
+    }
+
+    function stage(key, labelText, status, doneStatuses, detail) {
+        var text = String(status == null ? '' : status).trim();
+        return {
+            key: key,
+            label: labelText,
+            status: text || 'нет данных',
+            state: stageState(text, doneStatuses),
+            detail: String(detail == null ? '' : detail).trim()
+        };
+    }
+
+    function first(list) {
+        return list && list.length ? list[0] : null;
+    }
+
+    function byParent(list, parentKey) {
+        var map = {};
+        (list || []).forEach(function(item) {
+            var key = String(item && item[parentKey] != null ? item[parentKey] : '');
+            if (!key) return;
+            if (!map[key]) map[key] = [];
+            map[key].push(item);
+        });
+        return map;
+    }
+
+    function byId(list) {
+        var map = {};
+        (list || []).forEach(function(item) {
+            if (item && item.id != null) map[String(item.id)] = item;
+        });
+        return map;
+    }
+
+    function productionFlow(data) {
+        var orders = data && data.orders || [];
+        var positionsByOrder = byParent(data && data.positions, 'orderId');
+        var provisionsByPosition = byParent(data && data.provisions, 'positionId');
+        var cutsById = byId(data && data.cuts);
+        var gpById = byId(data && data.gpBatches);
+        var gpByCut = byParent(data && data.gpBatches, 'cutId');
+        var rows = [];
+
+        function makeRow(order, position, provision) {
+            var cut = provision && provision.cutId ? cutsById[String(provision.cutId)] : null;
+            var gp = provision && provision.gpId ? gpById[String(provision.gpId)] : null;
+            if (!gp && cut) gp = first(gpByCut[String(cut.id)]);
+
+            var positionLabel = position
+                ? [
+                    position.cutType || ('позиция #' + position.id),
+                    position.width ? position.width + ' мм' : '',
+                    position.length ? position.length + ' м' : ''
+                ].filter(Boolean).join(' · ')
+                : 'позиция не создана';
+
+            var stages = [
+                stage('order', 'Заказ', order.status, ['Выполнен'], order.number || ('#' + order.id)),
+                stage('position', 'Позиция', position && position.status,
+                    ['Отгружена'], positionLabel),
+                stage('provision', 'Обеспечение', provision && provision.status,
+                    ['Выполнено'], provision && provision.footage ? provision.footage + ' м' : ''),
+                stage('cut', 'Резка', cut && cut.status,
+                    ['Завершён', 'Завершен', 'Готово', 'Готова'],
+                    cut ? [cut.number ? '№ ' + cut.number : '', cut.slitter || '', cut.footage ? cut.footage + ' м' : ''].filter(Boolean).join(' · ') : ''),
+                stage('gp', 'ГП / отгрузка', gp && gp.status,
+                    ['Отгружен', 'Отгружено'],
+                    gp ? [gp.rolls ? gp.rolls + ' рул.' : '', gp.footage ? gp.footage + ' м' : '', gp.address || ''].filter(Boolean).join(' · ') : '')
+            ];
+            var done = stages.filter(function(s) { return s.state === 'done'; }).length;
+            var active = stages.filter(function(s) { return s.state === 'active'; }).length;
+            var percent = Math.round((done + active * 0.5) / stages.length * 100);
+
+            return {
+                orderId: String(order.id),
+                positionId: position ? String(position.id) : '',
+                provisionId: provision ? String(provision.id) : '',
+                cutId: cut ? String(cut.id) : '',
+                gpId: gp ? String(gp.id) : '',
+                product: position ? positionLabel : (order.number || ('Заказ #' + order.id)),
+                order: order.number || ('Заказ #' + order.id),
+                stages: stages,
+                completeStages: done,
+                activeStages: active,
+                progress: percent,
+                done: done === stages.length
+            };
+        }
+
+        orders.forEach(function(order) {
+            var positions = positionsByOrder[String(order.id)] || [null];
+            positions.forEach(function(position) {
+                var provisions = position ? (provisionsByPosition[String(position.id)] || [null]) : [null];
+                provisions.forEach(function(provision) {
+                    rows.push(makeRow(order, position, provision));
+                });
+            });
+        });
+
+        rows.sort(function(a, b) {
+            if (a.done !== b.done) return a.done ? 1 : -1;
+            if (b.activeStages !== a.activeStages) return b.activeStages - a.activeStages;
+            return Number(b.orderId) - Number(a.orderId);
+        });
+
+        return {
+            total: rows.length,
+            done: rows.filter(function(row) { return row.done; }).length,
+            active: rows.filter(function(row) { return !row.done; }).length,
+            rows: rows
+        };
+    }
+
     var agg = {
         toNumber: toNumber,
         round3: round3,
@@ -156,6 +309,8 @@
         slitterLoad: slitterLoad,
         gpOutput: gpOutput,
         materialStock: materialStock,
+        productionFlow: productionFlow,
+        stageState: stageState,
         UNSET: UNSET
     };
 
@@ -187,10 +342,20 @@
         return found ? String(found.id) : null;
     }
 
-    // Разбор значения-ссылки из JSON_OBJ: «id:Подпись» → подпись (или сырьё).
-    function refLabel(raw) {
+    // Разбор значения-ссылки из JSON_OBJ: «id:Подпись» → id + подпись.
+    function refParts(raw) {
         var m = String(raw == null ? '' : raw).match(/^(\d+):([\s\S]*)$/);
-        return m ? m[2] : String(raw == null ? '' : raw);
+        return m
+            ? { id: m[1], label: m[2] }
+            : { id: '', label: String(raw == null ? '' : raw) };
+    }
+
+    function refLabel(raw) {
+        return refParts(raw).label;
+    }
+
+    function refId(raw) {
+        return refParts(raw).id;
     }
 
     // Форматирование чисел для показа: целые без дробной части, иначе до 2 знаков,
@@ -205,7 +370,7 @@
     function AtexDashboards(root) {
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
-        this.meta = { order: null, cut: null, gp: null, rawBatch: null };
+        this.meta = {};
         this.busy = false;
     }
 
@@ -270,10 +435,9 @@
                     return String(t.val).trim().toLowerCase() === name.trim().toLowerCase();
                 })[0] || null;
             }
-            self.meta.order = byName(TABLE.order);
-            self.meta.cut = byName(TABLE.cut);
-            self.meta.gp = byName(TABLE.gp);
-            self.meta.rawBatch = byName(TABLE.rawBatch);
+            Object.keys(TABLE).forEach(function(key) {
+                self.meta[key] = byName(TABLE[key]);
+            });
             var missing = Object.keys(TABLE).filter(function(k) { return !self.meta[k]; })
                 .map(function(k) { return TABLE[k]; });
             if (missing.length) throw new Error('В метаданных не найдены таблицы: ' + missing.join(', '));
@@ -282,7 +446,7 @@
 
     // ── Сбор сводок ──
 
-    // Возвращает Promise<{ counts, orders, slitters, gp, materials }>.
+    // Возвращает Promise<{ counts, orders, slitters, gp, materials, flow }>.
     AtexDashboards.prototype.collect = function() {
         var self = this;
         var m = this.meta;
@@ -294,40 +458,120 @@
             return { order: c[0], cut: c[1], gp: c[2], rawBatch: c[3] };
         });
 
-        var ordersP = this.loadAll(m.order.id).then(function(rows) {
-            var col = columnReader(m.order);
-            var status = col(ORDER_REQ.status);
-            return ordersByStatus(rows.map(function(rec) {
-                return { status: status(rec) };
-            }));
-        });
+        return Promise.all([
+            countsP,
+            this.loadAll(m.order.id),
+            this.loadAll(m.position.id),
+            this.loadAll(m.provision.id),
+            this.loadAll(m.cut.id),
+            this.loadAll(m.gp.id),
+            this.loadAll(m.rawBatch.id)
+        ]).then(function(res) {
+            var counts = res[0];
+            var orderRows = res[1], positionRows = res[2], provisionRows = res[3];
+            var cutRows = res[4], gpRows = res[5], rawRows = res[6];
 
-        var slittersP = this.loadAll(m.cut.id).then(function(rows) {
-            var col = columnReader(m.cut);
-            var slitter = col(CUT_REQ.slitter), status = col(CUT_REQ.status), footage = col(CUT_REQ.footage);
-            return slitterLoad(rows.map(function(rec) {
-                return { slitter: refLabel(slitter(rec)), status: status(rec), footage: footage(rec) };
-            }));
-        });
+            var orderCol = columnReader(m.order);
+            var orderStatus = orderCol(ORDER_REQ.status);
+            var orders = orderRows.map(function(rec) {
+                return {
+                    id: String(rec.i),
+                    number: (rec.r && rec.r[0]) || ('#' + rec.i),
+                    status: orderStatus(rec)
+                };
+            });
 
-        var gpP = this.loadAll(m.gp.id).then(function(rows) {
-            var col = columnReader(m.gp);
-            var status = col(GP_REQ.status), rolls = col(GP_REQ.rolls), footage = col(GP_REQ.footage);
-            return gpOutput(rows.map(function(rec) {
-                return { status: status(rec), rolls: rolls(rec), footage: footage(rec) };
-            }));
-        });
+            var positionCol = columnReader(m.position);
+            var positionStatus = positionCol(POSITION_REQ.status);
+            var positionCutType = positionCol(POSITION_REQ.cutType);
+            var positionWidth = positionCol(POSITION_REQ.width);
+            var positionLength = positionCol(POSITION_REQ.length);
+            var positionQty = positionCol(POSITION_REQ.qty);
+            var positions = positionRows.map(function(rec) {
+                return {
+                    id: String(rec.i),
+                    orderId: rec.u != null ? String(rec.u) : '',
+                    cutType: refLabel(positionCutType(rec)),
+                    width: positionWidth(rec),
+                    length: positionLength(rec),
+                    qty: positionQty(rec),
+                    status: positionStatus(rec)
+                };
+            });
 
-        var materialsP = this.loadAll(m.rawBatch.id).then(function(rows) {
-            var col = columnReader(m.rawBatch);
-            var material = col(RAW_REQ.material), received = col(RAW_REQ.received), remainder = col(RAW_REQ.remainder);
-            return materialStock(rows.map(function(rec) {
-                return { material: refLabel(material(rec)), received: received(rec), remainder: remainder(rec) };
-            }));
-        });
+            var provisionCol = columnReader(m.provision);
+            var provisionStatus = provisionCol(PROVISION_REQ.status);
+            var provisionCut = provisionCol(PROVISION_REQ.cut);
+            var provisionGp = provisionCol(PROVISION_REQ.gp);
+            var provisionFootage = provisionCol(PROVISION_REQ.footage);
+            var provisions = provisionRows.map(function(rec) {
+                return {
+                    id: String(rec.i),
+                    positionId: rec.u != null ? String(rec.u) : '',
+                    cutId: refId(provisionCut(rec)),
+                    gpId: refId(provisionGp(rec)),
+                    footage: provisionFootage(rec),
+                    status: provisionStatus(rec)
+                };
+            });
 
-        return Promise.all([countsP, ordersP, slittersP, gpP, materialsP]).then(function(res) {
-            return { counts: res[0], orders: res[1], slitters: res[2], gp: res[3], materials: res[4] };
+            var cutCol = columnReader(m.cut);
+            var cutSlitter = cutCol(CUT_REQ.slitter);
+            var cutStatus = cutCol(CUT_REQ.status);
+            var cutFootage = cutCol(CUT_REQ.footage);
+            var cuts = cutRows.map(function(rec) {
+                return {
+                    id: String(rec.i),
+                    number: (rec.r && rec.r[0]) || ('#' + rec.i),
+                    slitter: refLabel(cutSlitter(rec)),
+                    status: cutStatus(rec),
+                    footage: cutFootage(rec)
+                };
+            });
+
+            var gpCol = columnReader(m.gp);
+            var gpCut = gpCol(GP_REQ.cut);
+            var gpStatus = gpCol(GP_REQ.status);
+            var gpRolls = gpCol(GP_REQ.rolls);
+            var gpFootage = gpCol(GP_REQ.footage);
+            var gpAddress = gpCol(GP_REQ.address);
+            var gpBatches = gpRows.map(function(rec) {
+                return {
+                    id: String(rec.i),
+                    cutId: refId(gpCut(rec)),
+                    status: gpStatus(rec),
+                    rolls: gpRolls(rec),
+                    footage: gpFootage(rec),
+                    address: gpAddress(rec)
+                };
+            });
+
+            var rawCol = columnReader(m.rawBatch);
+            var rawMaterial = rawCol(RAW_REQ.material);
+            var rawReceived = rawCol(RAW_REQ.received);
+            var rawRemainder = rawCol(RAW_REQ.remainder);
+            var rawBatches = rawRows.map(function(rec) {
+                return {
+                    material: refLabel(rawMaterial(rec)),
+                    received: rawReceived(rec),
+                    remainder: rawRemainder(rec)
+                };
+            });
+
+            return {
+                counts: counts,
+                orders: ordersByStatus(orders),
+                slitters: slitterLoad(cuts),
+                gp: gpOutput(gpBatches),
+                materials: materialStock(rawBatches),
+                flow: productionFlow({
+                    orders: orders,
+                    positions: positions,
+                    provisions: provisions,
+                    cuts: cuts,
+                    gpBatches: gpBatches
+                })
+            };
         });
     };
 
@@ -336,18 +580,19 @@
     AtexDashboards.prototype.render = function(data) {
         var grid = this.gridEl;
         grid.innerHTML = '';
+        grid.appendChild(this.cardProductionFlow(data.flow));
         grid.appendChild(this.cardOrders(data.counts.order, data.orders));
         grid.appendChild(this.cardSlitters(data.counts.cut, data.slitters));
         grid.appendChild(this.cardGp(data.counts.gp, data.gp));
         grid.appendChild(this.cardMaterials(data.counts.rawBatch, data.materials));
     };
 
-    function card(title, count, body) {
+    function card(title, count, body, className) {
         var head = el('div', { class: 'atex-db-card-head' }, [
             el('h2', { class: 'atex-db-card-title', text: title }),
             el('span', { class: 'atex-db-card-count', text: fmt(count) })
         ]);
-        return el('section', { class: 'atex-db-card' }, [head, body]);
+        return el('section', { class: 'atex-db-card' + (className ? ' ' + className : '') }, [head, body]);
     }
 
     // Горизонтальная гистограмма по строкам [{ key, count, ... }].
@@ -378,6 +623,54 @@
             ]);
         }));
     }
+
+    AtexDashboards.prototype.cardProductionFlow = function(data) {
+        var rows = data && data.rows || [];
+        var body = el('div', {}, [
+            metrics([
+                { label: 'позиций в пути', value: data ? data.total : 0 },
+                { label: 'активных', value: data ? data.active : 0 },
+                { label: 'завершено', value: data ? data.done : 0 }
+            ])
+        ]);
+
+        if (!rows.length) {
+            body.appendChild(el('div', { class: 'atex-db-empty', text: 'Нет данных по позициям заказа' }));
+            return card('Путь продукции', 0, body, 'atex-db-card-wide');
+        }
+
+        var list = el('div', { class: 'atex-db-flow-list' });
+        rows.slice(0, 8).forEach(function(row) {
+            var stages = el('div', { class: 'atex-db-flow-stages' });
+            row.stages.forEach(function(st) {
+                stages.appendChild(el('div', {
+                    class: 'atex-db-flow-stage atex-db-flow-stage-' + st.state,
+                    title: st.detail || st.status
+                }, [
+                    el('span', { class: 'atex-db-flow-stage-label', text: st.label }),
+                    el('span', { class: 'atex-db-flow-stage-status', text: st.status }),
+                    st.detail ? el('span', { class: 'atex-db-flow-stage-detail', text: st.detail }) : null
+                ]));
+            });
+
+            list.appendChild(el('article', { class: 'atex-db-flow-row' }, [
+                el('div', { class: 'atex-db-flow-row-head' }, [
+                    el('div', {}, [
+                        el('div', { class: 'atex-db-flow-order', text: row.order }),
+                        el('div', { class: 'atex-db-flow-product', text: row.product })
+                    ]),
+                    el('span', { class: 'atex-db-flow-progress', text: row.progress + '%' })
+                ]),
+                stages
+            ]));
+        });
+        body.appendChild(list);
+        if (rows.length > 8) {
+            body.appendChild(el('div', { class: 'atex-db-flow-more', text: 'Показаны 8 из ' + rows.length }));
+        }
+
+        return card('Путь продукции', data.total, body, 'atex-db-card-wide');
+    };
 
     AtexDashboards.prototype.cardOrders = function(count, data) {
         return card('Заказы по статусам', count, el('div', {}, [
