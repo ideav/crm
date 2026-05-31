@@ -33,13 +33,16 @@
 #   .\create_db_from_scratch.ps1 -BaseUrl https://ideav.ru -DbName myapp `
 #       -Token "***"
 #
+# Токен можно передать параметром -Token или переменной INTEGRAM_TOKEN
+# в scope Process/User/Machine.
+#
 # Предварительный прогон без обращения к серверу (показывает план вызовов):
 #   .\create_db_from_scratch.ps1 -DryRun
 # ============================================================================
 
 param(
-    [string]$Token = $env:INTEGRAM_TOKEN,
-    [string]$XsrfToken = $env:INTEGRAM_XSRF,
+    [string]$Token,
+    [string]$XsrfToken,
     [string]$BaseUrl = "https://ideav.ru",
     [string]$DbName = "atex",
     [string]$MetadataPath = (Join-Path $PSScriptRoot "atex_metadata.json"),
@@ -54,6 +57,33 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+function Get-IntegramEnvironmentValue {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    foreach ($target in @(
+        [System.EnvironmentVariableTarget]::Process,
+        [System.EnvironmentVariableTarget]::User,
+        [System.EnvironmentVariableTarget]::Machine
+    )) {
+        try {
+            $value = [Environment]::GetEnvironmentVariable($Name, $target)
+        } catch {
+            continue
+        }
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            return $value
+        }
+    }
+    return ""
+}
+
+if ([string]::IsNullOrWhiteSpace($Token)) {
+    $Token = Get-IntegramEnvironmentValue -Name "INTEGRAM_TOKEN"
+}
+if ([string]::IsNullOrWhiteSpace($XsrfToken)) {
+    $XsrfToken = Get-IntegramEnvironmentValue -Name "INTEGRAM_XSRF"
+}
 
 # Базовые типы Интеграм (см. docs/integram-app-workflow.md, раздел 2.2).
 # Используются только для подписи в логах.
@@ -198,7 +228,7 @@ function Initialize-TokenSession {
     }
 
     if ([string]::IsNullOrWhiteSpace($Token)) {
-        throw "Передайте -Token или задайте INTEGRAM_TOKEN. POST /auth с логином и паролем в этом сценарии не используется."
+        throw "Передайте -Token или задайте INTEGRAM_TOKEN в scope Process/User/Machine. POST /auth с логином и паролем в этом сценарии не используется."
     }
 
     $script:AuthToken = $Token
