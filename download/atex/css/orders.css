@@ -1,4 +1,6 @@
 .atex-orders {
+    --atex-orders-info-bg: #eff6ff;
+    --atex-orders-info-text: #1e40af;
     height: 100%;
     min-height: 0;
     padding: 0;
@@ -8,6 +10,11 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+}
+
+[data-theme="dark"] .atex-orders {
+    --atex-orders-info-bg: rgba(96, 165, 250, 0.16);
+    --atex-orders-info-text: #93c5fd;
 }
 
 .atex-orders * {
@@ -51,7 +58,7 @@
 }
 
 .atex-orders-btn-secondary:hover {
-    background: #f1f5f9;
+    background: var(--bg-secondary, #f1f5f9);
 }
 
 .atex-orders-filter-wrap {
@@ -83,18 +90,18 @@
 }
 
 .atex-orders-message--info {
-    background: #eff6ff;
-    color: #1e40af;
+    background: var(--atex-orders-info-bg);
+    color: var(--atex-orders-info-text);
 }
 
 .atex-orders-message--success {
-    background: #ecfdf5;
-    color: #047857;
+    background: var(--color-success-bg, #ecfdf5);
+    color: var(--color-success, #047857);
 }
 
 .atex-orders-message--error {
-    background: #fef2f2;
-    color: #b91c1c;
+    background: var(--color-error-bg, #fef2f2);
+    color: var(--color-error, #b91c1c);
 }
 
 .atex-orders-create {
@@ -160,7 +167,7 @@
 
 .atex-orders-table thead th,
 .atex-orders-subtable thead th {
-    background: #f1f5f9;
+    background: var(--bg-secondary, #f1f5f9);
     color: var(--text-secondary, #475569);
     font-weight: 600;
     position: sticky;
@@ -168,7 +175,7 @@
 }
 
 .atex-orders-row:hover {
-    background: #f8fafc;
+    background: var(--bg-secondary, #f8fafc);
 }
 
 .atex-orders-toggle-cell {
@@ -199,7 +206,7 @@
 }
 
 .atex-orders-detail-row > td {
-    background: #f8fafc;
+    background: var(--bg-primary, #f8fafc);
     padding: 0;
 }
 
