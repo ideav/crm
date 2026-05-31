@@ -1,0 +1,237 @@
+<!doctype html>
+<html data-theme="dark" lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Issue 3043 Atex Theme Harness</title>
+    <link rel="stylesheet" href="../css/styles.css">
+    <link rel="stylesheet" href="../download/atex/css/atex-brand.css">
+    <link rel="stylesheet" href="../download/atex/css/cut-calc.css">
+    <link rel="stylesheet" href="../download/atex/css/cut-map.css">
+    <link rel="stylesheet" href="../download/atex/css/dashboards.css">
+    <link rel="stylesheet" href="../download/atex/css/intake.css">
+    <link rel="stylesheet" href="../download/atex/css/production-planning.css">
+    <link rel="stylesheet" href="../download/atex/css/sleeve-cutter.css">
+    <link rel="stylesheet" href="../download/atex/css/slitter.css">
+    <link rel="stylesheet" href="../download/atex/css/portal.css">
+    <link rel="stylesheet" href="../download/atex/css/warehouse.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 24px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: var(--atex-font, system-ui, sans-serif);
+        }
+
+        .matrix {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(420px, 1fr));
+            gap: 18px;
+            align-items: start;
+        }
+
+        .sample {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            background: var(--bg-primary);
+        }
+
+        .sample-title {
+            margin: 0;
+            padding: 10px 12px;
+            font-size: 14px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        .sample-body { padding: 12px; }
+
+        .atex-cc-layout,
+        .atex-cm-layout,
+        .atex-in-layout,
+        .atex-sc-layout,
+        .atex-sl-layout {
+            padding: 0;
+            grid-template-columns: 170px 1fr;
+            gap: 10px;
+        }
+
+        .atex-pp-layout { grid-template-columns: 1fr; }
+        .atex-db-grid { grid-template-columns: 1fr; padding: 0; }
+        .atex-db-flow-stages { grid-template-columns: repeat(3, 1fr); }
+        .atex-portal-table, .atex-wh-table { min-width: 0; }
+    </style>
+</head>
+<body>
+<div class="matrix">
+    <section class="sample">
+        <h2 class="sample-title">Калькулятор резки</h2>
+        <div class="sample-body atex-cc atex-brand">
+            <div class="atex-cc-layout">
+                <aside class="atex-cc-sidebar">
+                    <div class="atex-cc-sidebar-head"><h2>Типы</h2></div>
+                    <button class="atex-cc-list-item is-active">57x10</button>
+                    <button class="atex-cc-list-item">40x8</button>
+                </aside>
+                <form class="atex-cc-form">
+                    <h3 class="atex-cc-form-title">Параметры</h3>
+                    <label class="atex-cc-label">Ширина</label>
+                    <input class="atex-cc-input" value="910">
+                    <div class="atex-cc-summary">
+                        <div class="atex-cc-metric">
+                            <span class="atex-cc-metric-label">Остаток</span>
+                            <span class="atex-cc-metric-value">185</span>
+                        </div>
+                    </div>
+                    <button class="atex-cc-btn atex-cc-btn-secondary" type="button">Сброс</button>
+                </form>
+            </div>
+        </div>
+    </section>
+
+    <section class="sample">
+        <h2 class="sample-title">Карта раскроя</h2>
+        <div class="sample-body atex-cm atex-brand">
+            <div class="atex-cm-layout">
+                <aside class="atex-cm-sidebar">
+                    <div class="atex-cm-sidebar-head">
+                        <h2>Резки</h2>
+                        <span class="atex-cm-list-status">В работе</span>
+                    </div>
+                    <button class="atex-cm-list-item is-active"><span>Резка 12</span></button>
+                </aside>
+                <main class="atex-cm-view">
+                    <div class="atex-cm-bar">
+                        <span class="atex-cm-seg atex-cm-seg-order" style="width:48%">Заказ</span>
+                        <span class="atex-cm-seg atex-cm-seg-remainder" style="width:20%">Остаток</span>
+                    </div>
+                    <div class="atex-cm-summary">
+                        <div class="atex-cm-metric">
+                            <span class="atex-cm-metric-label">Ножей</span>
+                            <span class="atex-cm-metric-value">18</span>
+                        </div>
+                    </div>
+                </main>
+            </div>
+        </div>
+    </section>
+
+    <section class="sample">
+        <h2 class="sample-title">Дашборды</h2>
+        <div class="sample-body atex-db atex-brand">
+            <div class="atex-db-grid">
+                <article class="atex-db-card">
+                    <div class="atex-db-card-head">
+                        <h3 class="atex-db-card-title">Путь продукции</h3>
+                        <span class="atex-db-card-count">8</span>
+                    </div>
+                    <div class="atex-db-bar-row">
+                        <span class="atex-db-bar-key">В работе</span>
+                        <span class="atex-db-bar-track"><span class="atex-db-bar-fill" style="width:62%"></span></span>
+                        <span class="atex-db-bar-val">62%</span>
+                    </div>
+                    <div class="atex-db-flow-row">
+                        <div class="atex-db-flow-row-head">
+                            <strong class="atex-db-flow-order">АТХ-3043</strong>
+                            <span class="atex-db-flow-progress">60%</span>
+                        </div>
+                        <div class="atex-db-flow-stages">
+                            <span class="atex-db-flow-stage atex-db-flow-stage-done"><span class="atex-db-flow-stage-label">Заказ</span><span class="atex-db-flow-stage-status">Готов</span></span>
+                            <span class="atex-db-flow-stage atex-db-flow-stage-active"><span class="atex-db-flow-stage-label">Резка</span><span class="atex-db-flow-stage-status">В работе</span></span>
+                            <span class="atex-db-flow-stage atex-db-flow-stage-pending"><span class="atex-db-flow-stage-label">ГП</span><span class="atex-db-flow-stage-status">Ожидает</span></span>
+                        </div>
+                    </div>
+                </article>
+            </div>
+        </div>
+    </section>
+
+    <section class="sample">
+        <h2 class="sample-title">Приёмка</h2>
+        <div class="sample-body atex-in atex-brand">
+            <div class="atex-in-layout">
+                <aside class="atex-in-sidebar">
+                    <div class="atex-in-sidebar-head"><h2>Партии</h2></div>
+                    <div class="atex-in-summary"><span class="atex-in-metric"><span class="atex-in-metric-label">Остаток</span><b class="atex-in-metric-value">4500</b></span></div>
+                    <button class="atex-in-row atex-in-row-item is-active"><span>1</span><span>Сырьё</span><span>500</span><span>450</span><span>A1</span></button>
+                </aside>
+                <form class="atex-in-form">
+                    <h3 class="atex-in-form-title">Оприходование</h3>
+                    <label class="atex-in-label">Метраж</label>
+                    <input class="atex-in-input" value="5000">
+                    <button class="atex-in-btn atex-in-btn-secondary" type="button">Очистить</button>
+                </form>
+            </div>
+        </div>
+    </section>
+
+    <section class="sample">
+        <h2 class="sample-title">Планирование</h2>
+        <div class="sample-body atex-pp atex-brand">
+            <section class="atex-pp-panel">
+                <div class="atex-pp-queue-head"><strong class="atex-pp-queue-slitter">Слиттер 1</strong><span class="atex-pp-queue-count">3 резки</span></div>
+                <button class="atex-pp-cut"><span class="atex-pp-cut-num">12</span><span class="atex-pp-cut-type">57x10</span><span class="atex-pp-cut-status">Запланирован</span></button>
+                <div class="atex-pp-linked-item">Обеспечение 1200 м</div>
+                <label class="atex-pp-label">Комментарий</label>
+                <input class="atex-pp-input" value="Смена 2">
+            </section>
+        </div>
+    </section>
+
+    <section class="sample">
+        <h2 class="sample-title">Пульты</h2>
+        <div class="sample-body">
+            <div class="atex-sc atex-brand">
+                <div class="atex-sc-layout">
+                    <aside class="atex-sc-sidebar">
+                        <div class="atex-sc-sidebar-head"><h2>Втулкорез</h2></div>
+                        <button class="atex-sc-cut-item is-active"><span>Задание 9</span><span class="atex-sc-badge atex-sc-badge-wip">В работе</span></button>
+                    </aside>
+                    <main class="atex-sc-main">
+                        <div class="atex-sc-summary"><span class="atex-sc-metric"><span class="atex-sc-metric-label">План</span><b class="atex-sc-metric-value">120</b></span></div>
+                        <article class="atex-sc-card is-done"><span class="atex-sc-badge atex-sc-badge-done">Готово</span></article>
+                    </main>
+                </div>
+            </div>
+            <div class="atex-sl atex-brand" style="margin-top:12px">
+                <section class="atex-sl-section">
+                    <span class="atex-sl-badge atex-sl-badge-setup">Наладка</span>
+                    <span class="atex-sl-badge atex-sl-badge-run">В работе</span>
+                    <div class="atex-sl-row">
+                        <label class="atex-sl-field"><span class="atex-sl-label">Расход</span><input class="atex-sl-input" value="250"></label>
+                        <button class="atex-sl-btn atex-sl-btn-advance" type="button">Далее</button>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </section>
+
+    <section class="sample">
+        <h2 class="sample-title">Портал клиента</h2>
+        <div class="sample-body atex-portal atex-brand">
+            <div class="atex-portal-message atex-portal-message--info">Заказы обновлены</div>
+            <table class="atex-portal-table">
+                <thead><tr><th>Заказ</th><th>Статус</th></tr></thead>
+                <tbody>
+                    <tr class="atex-portal-row"><td>АТХ-42</td><td><span class="atex-portal-badge atex-portal-badge--впроизводстве">В производстве</span></td></tr>
+                    <tr class="atex-portal-detail-row"><td colspan="2"><div class="atex-portal-positions">Позиции заказа</div></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="sample">
+        <h2 class="sample-title">Склад ГП</h2>
+        <div class="sample-body atex-wh atex-brand">
+            <div class="atex-wh-message atex-wh-message--success">Партия оприходована</div>
+            <table class="atex-wh-table">
+                <thead><tr><th>Партия</th><th>Статус</th></tr></thead>
+                <tbody><tr class="atex-wh-row"><td>ГП-12</td><td><select class="atex-wh-status"><option>Есть</option></select></td></tr></tbody>
+            </table>
+        </div>
+    </section>
+</div>
+</body>
+</html>
