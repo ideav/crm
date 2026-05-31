@@ -29,7 +29,7 @@ curl -s "http://127.0.0.1:$PORT/$DB/reset" >/dev/null
 echo "== Running create_db_from_scratch.ps1 with atex_metadata.json =="
 "$PWSH" -NoProfile -File "$ROOT/docs/create_db_from_scratch.ps1" \
     -BaseUrl "http://127.0.0.1:$PORT" -DbName "$DB" \
-    -Login tester -Password secret \
+    -Token mock-token \
     -MetadataPath "$META" \
     -LogPath "$HERE/atex_e2e_run1.log"
 
@@ -44,7 +44,7 @@ echo
 echo "== Second run (idempotency check) =="
 "$PWSH" -NoProfile -File "$ROOT/docs/create_db_from_scratch.ps1" \
     -BaseUrl "http://127.0.0.1:$PORT" -DbName "$DB" \
-    -Login tester -Password secret \
+    -Token mock-token \
     -MetadataPath "$META" \
     -LogPath "$HERE/atex_e2e_run2.log" >/dev/null
 curl -s "http://127.0.0.1:$PORT/$DB/metadata" > "$HERE/reconstructed_atex_metadata_run2.json"

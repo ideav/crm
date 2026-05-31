@@ -112,6 +112,10 @@ case 'reset':
 case 'auth':
     send_json(['token' => 'mock-token', '_xsrf' => 'mock-xsrf', 'id' => 1, 'user' => $req['login'] ?? '']);
 
+case 'xsrf':
+    $token = $_COOKIE['idb_' . ($segments[0] ?? '')] ?? ($req['token'] ?? 'mock-token');
+    send_json(['token' => $token, '_xsrf' => 'mock-xsrf', 'id' => 1, 'user' => 'tester', 'role' => 'admin', 'msg' => '']);
+
 case '_d_new':
     if ($val === '') die_err('Empty type');
     if (!isset(BASE_TYPES[$t]) && $t !== 0) die_err("Invalid base type: $t");
