@@ -538,8 +538,8 @@ class MainAppController {
         settingsBtn.style.display = 'none';
 
         // Check menu edit rights on the frontend:
-        // A) user is the database owner (db === user), OR
-        // B) the user's role metadata has WRITE access to the Menu type ('Меню' or 'Menu')
+        // A) user is the database owner or platform admin, OR
+        // B) the user's role has WRITE access to the Menu table.
         const canEditMenu = await this.checkMenuEditRights();
         if (!canEditMenu) {
             return;
@@ -553,15 +553,30 @@ class MainAppController {
     }
 
     async checkMenuEditRights() {
-        // Case A: user is the database owner
-        if (typeof db !== 'undefined' && typeof user !== 'undefined' && db === user) {
+        // Case A: user is the database owner or platform admin
+        if (typeof user !== 'undefined' && (
+            (typeof db !== 'undefined' && db === user) ||
+            user === 'admin'
+        )) {
             return true;
         }
 
-        // Case B: check metadata - find the Role type and see if 'Меню' req has granted: 'WRITE'
+        // Case B: use already available grants when the Menu table grant is present
+        const currentGrants = this.getCurrentGrants();
+        if (currentGrants && this.isWriteGrant(currentGrants['151'])) {
+            return true;
+        }
+
+        // Case C: check metadata for WRITE on the Menu table, then keep the
+        // older Role.Menu requisite check for compatibility with existing bases.
         try {
             const metadata = await this.loadGlobalMetadata();
             if (!metadata) return false;
+
+            const menuType = metadata.find(item => this.isMenuMetadataEntry(item));
+            if (menuType && this.isWriteGrant(menuType.granted)) {
+                return true;
+            }
 
             // Find the Role type entry (val = 'Роль' or 'Role')
             const roleType = metadata.find(item =>
@@ -571,12 +586,33 @@ class MainAppController {
 
             // Check if the 'Меню' (or 'Menu') requisite has granted: 'WRITE'
             return roleType.reqs.some(req =>
-                (req.val === 'Меню' || req.val === 'Menu') && req.granted === 'WRITE'
+                (req.val === 'Меню' || req.val === 'Menu') && this.isWriteGrant(req.granted)
             );
         } catch (e) {
             console.error('Error checking menu edit rights:', e);
             return false;
         }
+    }
+
+    getCurrentGrants() {
+        if (typeof grants !== 'undefined' && grants) {
+            return grants;
+        }
+        if (typeof window !== 'undefined' && window.grants) {
+            return window.grants;
+        }
+        return null;
+    }
+
+    isWriteGrant(value) {
+        return value === 'WRITE' || value === 1 || value === '1' || value === true;
+    }
+
+    isMenuMetadataEntry(item) {
+        if (!item) return false;
+        if (String(item.id) === '151') return true;
+        return (item.val === 'Меню' || item.val === 'Menu') &&
+            (item.up === undefined || String(item.up) === '0');
     }
 
     async showRoleSelector() {
