@@ -8,6 +8,8 @@
 «Подключи рабочие места по API — создай отдельные тикеты на каждое».
 **Какая версия рабочих мест актуальная и как их объединить:**
 [`docs/atex_workplaces_consolidation.md`](atex_workplaces_consolidation.md) (#2970).
+**Полный сценарий проверки рабочих мест:** [`docs/atex_full_cycle_test_scenario.md`](atex_full_cycle_test_scenario.md)
+(#2978).
 
 ---
 

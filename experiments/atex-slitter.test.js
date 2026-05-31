@@ -6,7 +6,7 @@
 //
 // Run with: node experiments/atex-slitter.test.js
 
-var core = require('../js/atex-slitter.js').core;
+var core = require('../download/atex/js/slitter.js').core;
 
 var passed = 0;
 function assertEqual(actual, expected, name) {
