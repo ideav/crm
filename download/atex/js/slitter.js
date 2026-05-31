@@ -229,6 +229,7 @@
         this.userId = root.getAttribute('data-user-id') || '';
         this.meta = { cut: null, consumption: null, event: null, batch: null };
         this.batches = [];        // справочник партий сырья [{ id, label, date, remainder }]
+        this.refOptions = {};     // кеш опций searchable reference inputs по reqId
         this.cuts = [];           // производственные резки [{ id, label, status, slitter, cutType }]
         this.currentCutId = null; // выбранная резка
         this.currentCut = null;   // полная запись выбранной резки
@@ -250,6 +251,38 @@
                 catch (e) { throw new Error('Некорректный JSON: ' + text.slice(0, 200)); }
             });
         });
+    };
+
+    AtexSlitter.prototype.loadRefOptions = function(reqId, query, limit) {
+        return this.getJson(window.AtexRefSearch.buildRefOptionsPath(reqId, query, limit));
+    };
+
+    AtexSlitter.prototype.refSelect = function(opts) {
+        var self = this;
+        var helper = (typeof window !== 'undefined' && window.AtexRefSearch) || null;
+        if (helper && typeof helper.createSelect === 'function') {
+            return helper.createSelect({
+                classPrefix: 'atex-sl',
+                inputClass: 'atex-sl-input',
+                options: opts.options || [],
+                value: opts.value,
+                placeholder: opts.placeholder,
+                reqId: opts.reqId,
+                cache: this.refOptions,
+                loadOptions: function(reqId, query, limit) { return self.loadRefOptions(reqId, query, limit); },
+                onChange: opts.onChange
+            });
+        }
+
+        var nativeSelect = el('select', { class: 'atex-sl-input' });
+        nativeSelect.appendChild(el('option', { value: '', text: opts.placeholder || '— не выбрано —' }));
+        (opts.options || []).forEach(function(item) {
+            var o = el('option', { value: item.id, text: item.label });
+            if (String(opts.value) === String(item.id)) o.selected = true;
+            nativeSelect.appendChild(o);
+        });
+        nativeSelect.addEventListener('change', function() { opts.onChange(nativeSelect.value); });
+        return nativeSelect;
     };
 
     // POST команды `_m_*`. Токен XSRF подставляется обязательно (раздел 4 гайда).
@@ -612,15 +645,17 @@
         var self = this;
         var card = el('div', { class: 'atex-sl-row' });
 
-        var sel = el('select', { class: 'atex-sl-input' });
-        sel.appendChild(el('option', { value: '', text: '— партия сырья —' }));
-        core.sortFifo(this.batches).forEach(function(b) {
-            var o = el('option', { value: b.id, text: b.label + ' — остаток ' + core.round3(b.remainder) + ' м²' });
-            if (String(row.batchId) === String(b.id)) o.selected = true;
-            sel.appendChild(o);
+        var batchOptions = core.sortFifo(this.batches).map(function(b) {
+            return { id: b.id, label: b.label + ' — остаток ' + core.round3(b.remainder) + ' м²' };
         });
-        sel.addEventListener('change', function() { row.batchId = sel.value || null; });
-        card.appendChild(field('Партия сырья', sel));
+        var batchRef = this.refSelect({
+            options: batchOptions,
+            value: row.batchId,
+            placeholder: '— партия сырья —',
+            reqId: reqIdByName(this.meta.consumption, CONS_REQ.batch),
+            onChange: function(value) { row.batchId = value || null; }
+        });
+        card.appendChild(field('Партия сырья', batchRef));
 
         var amount = numInput(row.amount, '0');
         amount.addEventListener('input', function() { row.amount = amount.value; });

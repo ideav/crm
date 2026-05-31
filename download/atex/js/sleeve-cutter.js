@@ -167,6 +167,7 @@
         this.db = window.db || root.getAttribute('data-db') || '';
         this.meta = { cut: null, task: null, cutter: null };
         this.cutters = [];        // справочник втулкорезов [{ id, label }]
+        this.refOptions = {};     // кеш опций searchable reference inputs по reqId
         this.cuts = [];           // производственные резки [{ id, label, status }]
         this.currentCutId = null; // выбранная резка
         this.currentCut = null;   // { id, label, status }
@@ -186,6 +187,38 @@
                 catch (e) { throw new Error('Некорректный JSON: ' + text.slice(0, 200)); }
             });
         });
+    };
+
+    AtexSleeveCutter.prototype.loadRefOptions = function(reqId, query, limit) {
+        return this.getJson(window.AtexRefSearch.buildRefOptionsPath(reqId, query, limit));
+    };
+
+    AtexSleeveCutter.prototype.refSelect = function(opts) {
+        var self = this;
+        var helper = (typeof window !== 'undefined' && window.AtexRefSearch) || null;
+        if (helper && typeof helper.createSelect === 'function') {
+            return helper.createSelect({
+                classPrefix: 'atex-sc',
+                inputClass: 'atex-sc-input',
+                options: opts.options || [],
+                value: opts.value,
+                placeholder: opts.placeholder,
+                reqId: opts.reqId,
+                cache: this.refOptions,
+                loadOptions: function(reqId, query, limit) { return self.loadRefOptions(reqId, query, limit); },
+                onChange: opts.onChange
+            });
+        }
+
+        var nativeSelect = el('select', { class: 'atex-sc-input' });
+        nativeSelect.appendChild(el('option', { value: '', text: opts.placeholder || '— не выбрано —' }));
+        (opts.options || []).forEach(function(item) {
+            var o = el('option', { value: item.id, text: item.label });
+            if (String(opts.value) === String(item.id)) o.selected = true;
+            nativeSelect.appendChild(o);
+        });
+        nativeSelect.addEventListener('change', function() { opts.onChange(nativeSelect.value); });
+        return nativeSelect;
     };
 
     // POST команды `_m_*`. Токен XSRF подставляется обязательно (раздел 4 гайда).
@@ -377,15 +410,14 @@
         var grid = el('div', { class: 'atex-sc-card-grid' });
 
         // Втулкорез (ссылка).
-        var sel = el('select', { class: 'atex-sc-input' });
-        sel.appendChild(el('option', { value: '', text: '— втулкорез —' }));
-        this.cutters.forEach(function(m) {
-            var o = el('option', { value: m.id, text: m.label });
-            if (String(task.cutterId) === String(m.id)) o.selected = true;
-            sel.appendChild(o);
+        var cutterRef = this.refSelect({
+            options: this.cutters,
+            value: task.cutterId,
+            placeholder: '— втулкорез —',
+            reqId: reqIdByName(this.meta.task, TASK_REQ.cutter),
+            onChange: function(value) { task.cutterId = value || null; }
         });
-        sel.addEventListener('change', function() { task.cutterId = sel.value || null; });
-        grid.appendChild(this.cardField('Втулкорез', sel));
+        grid.appendChild(this.cardField('Втулкорез', cutterRef));
 
         // Диаметр.
         var diam = numInput(task.diameter, '76');

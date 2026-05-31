@@ -83,6 +83,7 @@
         provisions: [],
         cuttings: [],
         cuttingById: {},
+        refOptions: {},
         statusFilter: '',
         creating: false
     };
@@ -448,6 +449,26 @@
         return '<select class="atex-wh-status"' + (dataAttrs || '') + '>' + options.join('') + '</select>';
     }
 
+    function refSearchHelper() {
+        return (typeof window !== 'undefined' && window.AtexRefSearch) || null;
+    }
+
+    function loadRefOptions(reqId, query, limit) {
+        var helper = refSearchHelper();
+        if (!helper) return Promise.resolve([]);
+        return fetchJson(helper.buildRefOptionsUrl(getApiBase(), reqId, query, limit));
+    }
+
+    function attachRefSearchEvents() {
+        var helper = refSearchHelper();
+        if (!helper || !state.root) return;
+        helper.attach(state.root, {
+            cache: state.refOptions,
+            db: getApiBase,
+            loadOptions: loadRefOptions
+        });
+    }
+
     function cuttingLabel(cutting) {
         if (!cutting) return '';
         var parts = ['Резка №' + (cutting.main || cutting.id)];
@@ -457,10 +478,28 @@
     }
 
     function cuttingOptionsHtml(selectId) {
+        var helper = refSearchHelper();
+        var refOptions = completedCuttings(state.cuttings).map(function(cutting) {
+            return { id: cutting.id, label: cuttingLabel(cutting) };
+        });
+        if (helper && typeof helper.selectHtml === 'function') {
+            return helper.selectHtml({
+                id: selectId,
+                classPrefix: 'atex-wh',
+                inputClass: 'atex-wh-input',
+                options: refOptions,
+                placeholder: 'Выберите резку',
+                cacheKey: 'completed-cuttings',
+                cache: state.refOptions,
+                replaceCache: true,
+                hiddenAttrs: { id: selectId }
+            });
+        }
+
         var options = ['<option value="">Выберите резку</option>'];
-        completedCuttings(state.cuttings).forEach(function(cutting) {
+        refOptions.forEach(function(cutting) {
             options.push('<option value="' + escapeHtml(cutting.id) + '">' +
-                escapeHtml(cuttingLabel(cutting)) + '</option>');
+                escapeHtml(cutting.label) + '</option>');
         });
         return '<select id="' + escapeHtml(selectId) + '" class="atex-wh-input">' + options.join('') + '</select>';
     }
@@ -514,19 +553,47 @@
     }
 
     function batchOptionsHtml(provision) {
+        var helper = refSearchHelper();
         var fifo = pickFifoBatch(state.batches, provision.refs.cutting, AVAILABLE_BATCH_STATUS);
         var assigned = trimValue(provision.refs.batch);
-        var options = ['<option value="">— партия —</option>'];
+        var selectedValue = assigned || (fifo ? fifo.id : '');
+        var refOptions = [];
         state.batches.forEach(function(batch) {
             var available = trimValue(batch.values.status) === trimValue(AVAILABLE_BATCH_STATUS);
             var sameCut = !provision.refs.cutting ||
                 trimValue(batch.refs.cutting) === trimValue(provision.refs.cutting);
             var isAssigned = trimValue(batch.id) === assigned;
             if (!isAssigned && (!available || !sameCut)) return;
-            var selected = (assigned ? isAssigned : (fifo && batch.id === fifo.id)) ? ' selected' : '';
+            refOptions.push({
+                id: batch.id,
+                label: 'Партия №' + batch.id + ' · ' + (batch.values.arrived || '') +
+                    ' · ' + (batch.values.length || '') + ' м'
+            });
+        });
+        if (helper && typeof helper.selectHtml === 'function') {
+            return helper.selectHtml({
+                id: 'atex-wh-batch-pick-' + provision.id,
+                classPrefix: 'atex-wh',
+                inputClass: 'atex-wh-input',
+                options: refOptions,
+                value: selectedValue,
+                placeholder: '— партия —',
+                cacheKey: 'batch-pick-' + provision.id,
+                cache: state.refOptions,
+                replaceCache: true,
+                hiddenAttrs: {
+                    id: 'atex-wh-batch-pick-' + provision.id,
+                    class: 'atex-wh-batch-pick',
+                    dataset: { batchPick: provision.id }
+                }
+            });
+        }
+
+        var options = ['<option value="">— партия —</option>'];
+        refOptions.forEach(function(batch) {
+            var selected = trimValue(batch.id) === trimValue(selectedValue) ? ' selected' : '';
             options.push('<option value="' + escapeHtml(batch.id) + '"' + selected + '>' +
-                escapeHtml('Партия №' + batch.id + ' · ' + (batch.values.arrived || '') +
-                    ' · ' + (batch.values.length || '') + ' м') + '</option>');
+                escapeHtml(batch.label) + '</option>');
         });
         return '<select class="atex-wh-input atex-wh-batch-pick" data-batch-pick="' +
             escapeHtml(provision.id) + '">' + options.join('') + '</select>';
@@ -747,7 +814,7 @@
         var panel = document.getElementById('atex-wh-create');
         if (panel) panel.hidden = false;
         renderCreateForm();
-        var cutting = document.getElementById('atex-wh-cutting');
+        var cutting = document.getElementById('atex-wh-cutting-search') || document.getElementById('atex-wh-cutting');
         if (cutting) cutting.focus();
     }
 
@@ -761,6 +828,8 @@
     // ------------------------------------------------------------------
 
     function attachEvents() {
+        attachRefSearchEvents();
+
         var createBtn = document.getElementById('atex-wh-create-btn');
         if (createBtn) {
             createBtn.addEventListener('click', openCreateForm);

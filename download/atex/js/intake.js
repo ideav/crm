@@ -169,6 +169,7 @@
         this.meta = { batch: null, material: null };
         this.materials = [];   // [{ id, label }]
         this.batches = [];     // загруженные партии [{ id, name, materialId, materialLabel, arrivedAt, received, remainder }]
+        this.refOptions = {};  // кеш опций searchable reference inputs по reqId
         this.current = null;   // редактируемая/новая партия
         this.remainderTouched = false; // пользователь вручную правил «Остаток»?
         this.busy = false;
@@ -186,6 +187,39 @@
                 catch (e) { throw new Error('Некорректный JSON: ' + text.slice(0, 200)); }
             });
         });
+    };
+
+    AtexIntake.prototype.loadRefOptions = function(reqId, query, limit) {
+        return this.getJson(window.AtexRefSearch.buildRefOptionsPath(reqId, query, limit));
+    };
+
+    AtexIntake.prototype.refSelect = function(opts) {
+        var self = this;
+        var helper = (typeof window !== 'undefined' && window.AtexRefSearch) || null;
+        if (helper && typeof helper.createSelect === 'function') {
+            return helper.createSelect({
+                classPrefix: 'atex-in',
+                inputClass: 'atex-in-input',
+                id: opts.id,
+                options: opts.options || [],
+                value: opts.value,
+                placeholder: opts.placeholder,
+                reqId: opts.reqId,
+                cache: this.refOptions,
+                loadOptions: function(reqId, query, limit) { return self.loadRefOptions(reqId, query, limit); },
+                onChange: opts.onChange
+            });
+        }
+
+        var sel = el('select', { class: 'atex-in-input', id: opts.id });
+        sel.appendChild(el('option', { value: '', text: opts.placeholder || '— не выбрано —' }));
+        (opts.options || []).forEach(function(item) {
+            var o = el('option', { value: item.id, text: item.label });
+            if (String(opts.value) === String(item.id)) o.selected = true;
+            sel.appendChild(o);
+        });
+        sel.addEventListener('change', function() { opts.onChange(sel.value); });
+        return sel;
     };
 
     // POST команды `_m_*`. Токен XSRF подставляется обязательно (раздел 4 гайда).
@@ -363,15 +397,15 @@
         form.appendChild(el('h2', { class: 'atex-in-form-title', text: c.id ? ('Партия: ' + (c.name || '#' + c.id)) : 'Оприходовать партию сырья' }));
 
         // Вид сырья (ссылка)
-        var sel = el('select', { class: 'atex-in-input', id: 'atex-in-material' });
-        sel.appendChild(el('option', { value: '', text: '— не выбрано —' }));
-        this.materials.forEach(function(m) {
-            var o = el('option', { value: m.id, text: m.label });
-            if (String(c.materialId) === String(m.id)) o.selected = true;
-            sel.appendChild(o);
+        var materialRef = this.refSelect({
+            id: 'atex-in-material',
+            options: this.materials,
+            value: c.materialId,
+            placeholder: '— не выбрано —',
+            reqId: reqIdByName(this.meta.batch, BATCH_REQ.material),
+            onChange: function(value) { c.materialId = value || null; }
         });
-        sel.addEventListener('change', function() { c.materialId = sel.value || null; });
-        form.appendChild(field('Вид сырья', sel));
+        form.appendChild(field('Вид сырья', materialRef));
 
         // Дата прихода
         var dateInput = el('input', { class: 'atex-in-input', type: 'date' });

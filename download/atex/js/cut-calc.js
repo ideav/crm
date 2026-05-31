@@ -150,6 +150,7 @@
         this.meta = { cutType: null, strip: null, material: null };
         this.materials = [];      // [{ id, label }]
         this.cutTypes = [];       // список существующих типов резки [{ id, name }]
+        this.refOptions = {};     // кеш опций searchable reference inputs по reqId
         this.current = null;      // редактируемый тип резки: { id|null, name, ... }
         this.strips = [];         // строки полос формы: { id|null, width, qty, purpose }
         this.busy = false;
@@ -167,6 +168,39 @@
                 catch (e) { throw new Error('Некорректный JSON: ' + text.slice(0, 200)); }
             });
         });
+    };
+
+    AtexCutCalc.prototype.loadRefOptions = function(reqId, query, limit) {
+        return this.getJson(window.AtexRefSearch.buildRefOptionsPath(reqId, query, limit));
+    };
+
+    AtexCutCalc.prototype.refSelect = function(opts) {
+        var self = this;
+        var helper = (typeof window !== 'undefined' && window.AtexRefSearch) || null;
+        if (helper && typeof helper.createSelect === 'function') {
+            return helper.createSelect({
+                classPrefix: 'atex-cc',
+                inputClass: 'atex-cc-input',
+                id: opts.id,
+                options: opts.options || [],
+                value: opts.value,
+                placeholder: opts.placeholder,
+                reqId: opts.reqId,
+                cache: this.refOptions,
+                loadOptions: function(reqId, query, limit) { return self.loadRefOptions(reqId, query, limit); },
+                onChange: opts.onChange
+            });
+        }
+
+        var sel = el('select', { class: 'atex-cc-input', id: opts.id });
+        sel.appendChild(el('option', { value: '', text: opts.placeholder || '— не выбрано —' }));
+        (opts.options || []).forEach(function(item) {
+            var o = el('option', { value: item.id, text: item.label });
+            if (String(opts.value) === String(item.id)) o.selected = true;
+            sel.appendChild(o);
+        });
+        sel.addEventListener('change', function() { opts.onChange(sel.value); });
+        return sel;
     };
 
     // POST команды `_m_*`. Токен XSRF подставляется обязательно (раздел 4 гайда).
@@ -328,15 +362,15 @@
         form.appendChild(field('Название', this.input('name', c.name, 'text', 'например, 25мм×35 + 55мм×1')));
 
         // Вид сырья (ссылка)
-        var sel = el('select', { class: 'atex-cc-input', id: 'atex-cc-material' });
-        sel.appendChild(el('option', { value: '', text: '— не выбрано —' }));
-        this.materials.forEach(function(m) {
-            var o = el('option', { value: m.id, text: m.label });
-            if (String(c.materialId) === String(m.id)) o.selected = true;
-            sel.appendChild(o);
+        var materialRef = this.refSelect({
+            id: 'atex-cc-material',
+            options: this.materials,
+            value: c.materialId,
+            placeholder: '— не выбрано —',
+            reqId: reqIdByName(this.meta.cutType, CUT_REQ.material),
+            onChange: function(value) { c.materialId = value || null; }
         });
-        sel.addEventListener('change', function() { c.materialId = sel.value || null; });
-        form.appendChild(field('Вид сырья', sel));
+        form.appendChild(field('Вид сырья', materialRef));
 
         // Ширина входа / Допуск
         var widthInput = this.input('inputWidth', c.inputWidth, 'number', '910');
