@@ -207,6 +207,29 @@ case '_m_new':
     save_state($STATE_FILE, $state);
     send_json(['obj' => (string)$id]);
 
+case '_m_set':
+    // Update an existing record. $arg = record id. The first-column key
+    // t{tableId} updates the row's val; other t{colId} values update `data`.
+    $id = (int)$arg;
+    $record = &row_by_id($state, $id);
+    if (!$record || (int)$record['up'] === 0) die_err("Record $id not found");
+    $tableId = (int)$record['t'];
+    $nameKey = 't' . $tableId;
+    if (isset($req[$nameKey])) {
+        $record['val'] = trim($req[$nameKey]);
+    }
+    if (!isset($record['data']) || !is_array($record['data'])) {
+        $record['data'] = [];
+    }
+    foreach ($req as $k => $v) {
+        if ($k === $nameKey || $k === 'token' || $k === '_xsrf' || $k === 'JSON' || $k === 'full') continue;
+        if (strlen($k) > 1 && $k[0] === 't' && ctype_digit(substr($k, 1))) {
+            $record['data'][substr($k, 1)] = $v;
+        }
+    }
+    save_state($STATE_FILE, $state);
+    send_json(['obj' => (string)$id]);
+
 case 'object':
     // List records of a table (GET object/{tableId}?JSON=1). Faithful to the
     // real shape (docs/MCP.md §6): {object:[{id,up,val,base}], reqs:{recId:{colId:{value}}}}.
