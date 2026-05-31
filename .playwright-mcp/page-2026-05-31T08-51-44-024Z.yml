@@ -1,0 +1,55 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e3]: "ДО (ideav/crm#2975): две шапки — лого Интеграма сверху и вложенная бренд-полоса АТЕХ"
+    - navigation [ref=e4]:
+      - link "Logo atex" [ref=e5] [cursor=pointer]:
+        - /url: "#"
+        - img "Logo" [ref=e6]
+        - generic [ref=e7]: atex
+      - generic [ref=e8]: Карта раскроя
+      - generic [ref=e9]:
+        - generic [ref=e10]: ☀
+        - generic [ref=e11]: О
+        - generic [ref=e12]: operator / Оператор
+    - generic [ref=e13]:
+      - complementary [ref=e14]:
+        - generic [ref=e15]: Таблицы
+        - generic [ref=e16]: Загрузка
+        - generic [ref=e17]: Пользователи
+        - generic [ref=e18]: Запросы
+        - generic [ref=e19]: Формы
+      - main [ref=e20]:
+        - generic [ref=e21]:
+          - img "АТЕХ" [ref=e22]
+          - generic [ref=e23]: Карта раскроя
+        - generic [ref=e24]:
+          - heading "Карта раскроя" [level=3] [ref=e25]
+          - generic [ref=e26]:
+            - text: Партия №128 — бумага 1020 мм
+            - text: "Остаток: 4500 м"
+            - button "Сохранить" [ref=e27]
+  - generic [ref=e28]:
+    - generic [ref=e29]: "ПОСЛЕ (ideav/crm#2982): бренд в верхнем меню; вложенной шапки нет"
+    - navigation [ref=e30]:
+      - link "АТЕХ" [ref=e31] [cursor=pointer]:
+        - /url: "#"
+        - img "АТЕХ" [ref=e32]
+      - generic [ref=e33]: Карта раскроя
+      - generic [ref=e34]:
+        - generic [ref=e35]: ☀
+        - generic [ref=e36]: О
+        - generic [ref=e37]: operator / Оператор
+    - generic [ref=e38]:
+      - complementary [ref=e39]:
+        - generic [ref=e40]: Таблицы
+        - generic [ref=e41]: Загрузка
+        - generic [ref=e42]: Пользователи
+        - generic [ref=e43]: Запросы
+        - generic [ref=e44]: Формы
+      - main [ref=e45]:
+        - generic [ref=e46]:
+          - heading "Карта раскроя" [level=3] [ref=e47]
+          - generic [ref=e48]:
+            - text: Партия №128 — бумага 1020 мм
+            - text: "Остаток: 4500 м"
+            - button "Сохранить" [ref=e49]
