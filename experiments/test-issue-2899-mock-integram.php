@@ -234,6 +234,21 @@ case '_m_set':
     save_state($STATE_FILE, $state);
     send_json(['obj' => (string)$id]);
 
+case '_m_del':
+    // Delete an existing data record. The menu cleanup test only deletes leaf
+    // records, but remove direct children as well to match the API shape.
+    $id = (int)$arg;
+    $record = &row_by_id($state, $id);
+    if (!$record || (int)$record['up'] === 0) die_err("Record $id not found");
+    $filtered = [];
+    foreach ($state['rows'] as $r) {
+        if ((int)$r['id'] === $id || (int)$r['up'] === $id) continue;
+        $filtered[] = $r;
+    }
+    $state['rows'] = $filtered;
+    save_state($STATE_FILE, $state);
+    send_json(['obj' => (string)$id]);
+
 case 'object':
     // List records of a table (GET object/{tableId}?JSON=1). Faithful to the
     // real shape (docs/MCP.md §6): {object:[{id,up,val,base}], reqs:{recId:{colId:{value}}}}.
