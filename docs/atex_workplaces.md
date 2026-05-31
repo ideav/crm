@@ -12,6 +12,8 @@
 (#2978).
 **Live-проверка по ролям для Atex:** [`docs/atex_live_full_cycle_ateh_2026-05-31.md`](atex_live_full_cycle_ateh_2026-05-31.md)
 (#3002).
+**Сценарий ввода данных по ролям для Atex:** [`docs/atex_role_input_walkthrough_3027.md`](atex_role_input_walkthrough_3027.md)
+(#3027).
 **Минимальный сквозной пример для первого прохода:** [`docs/integram-minimal-full-cycle-project.md`](integram-minimal-full-cycle-project.md)
 (#2986).
 
