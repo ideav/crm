@@ -6,11 +6,11 @@
 // docs/WORKSPACE_DEVELOPMENT_GUIDE.md, раздел про дашборды — atex_workplaces.md §3.9.
 //
 // На этом этапе рабочее место читает данные напрямую из таблиц (#2903):
-//   • счётчики    — `GET /{db}/object/{typeId}/?_count=` (+ фильтры F_{reqId});
+//   • счётчики    — `GET /{db}/object/{typeId}/?_count=&JSON=1` (+ фильтры F_{reqId});
 //   • списки/срезы — `GET /{db}/object/{typeId}/?JSON_OBJ&LIMIT={offset},{count}`
 //     постранично (WORKSPACE_DEVELOPMENT_GUIDE.md, раздел 6).
 // Запись отсутствует — дашборд только читает. ID таблиц и реквизитов не
-// хардкодятся: они резолвятся по именам из `GET /{db}/metadata?JSON`, поэтому
+// хардкодятся: они резолвятся по именам из `GET /{db}/metadata?JSON=1`, поэтому
 // код переживает пересборку базы. Перевод чтений на защищённый слой `report/` —
 // следующий этап и в объём этой задачи не входит (atex_workplaces.md §3.9).
 //
@@ -223,9 +223,9 @@
         });
     };
 
-    // Счётчик записей таблицы: `?_count=` → { count: N } (index.php:6832).
+    // Счётчик записей таблицы: `?_count=&JSON=1` → { count: N } (index.php:6832).
     AtexDashboards.prototype.count = function(typeId) {
-        return this.getJson('object/' + typeId + '/?_count=').then(function(res) {
+        return this.getJson('object/' + typeId + '/?_count=&JSON=1').then(function(res) {
             return res && typeof res.count !== 'undefined' ? Number(res.count) : 0;
         });
     };
@@ -263,7 +263,7 @@
 
     AtexDashboards.prototype.loadMetadata = function() {
         var self = this;
-        return this.getJson('metadata?JSON').then(function(all) {
+        return this.getJson('metadata?JSON=1').then(function(all) {
             var list = Array.isArray(all) ? all : [all];
             function byName(name) {
                 return list.filter(function(t) {

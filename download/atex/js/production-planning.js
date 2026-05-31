@@ -10,7 +10,7 @@
 // у таблицы `unique=1` — сервер сам считает автонумер), обеспечение —
 // `_m_new/{Обеспечение}` с `up={позицияId}` и ссылкой `t{Производственная резка}`,
 // правки — `_m_set`. ID таблиц и реквизитов не хардкодятся: они берутся по именам
-// из `GET /{db}/metadata?JSON` (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6).
+// из `GET /{db}/metadata?JSON=1` (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6).
 // Перевод чтений на защищённый слой `report/` — следующий этап и в объём этой
 // задачи не входит.
 //
@@ -264,7 +264,7 @@
 
     AtexProductionPlanning.prototype.loadMetadata = function() {
         var self = this;
-        return this.getJson('metadata?JSON').then(function(all) {
+        return this.getJson('metadata?JSON=1').then(function(all) {
             var list = Array.isArray(all) ? all : [all];
             function byName(name) {
                 return list.filter(function(t) {
