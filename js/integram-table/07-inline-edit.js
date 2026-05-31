@@ -492,7 +492,7 @@
                         } else {
                             this.selectedRows.clear();
                         }
-                        this.render();
+                        this.renderPreservingScroll(() => this.render());
                     });
                 }
 
@@ -505,7 +505,7 @@
                         } else {
                             this.selectedRows.delete(rowIndex);
                         }
-                        this.render();
+                        this.renderPreservingScroll(() => this.render());
                     });
                 });
             }
