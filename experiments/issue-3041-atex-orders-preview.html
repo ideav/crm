@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>Issue 3041 Atex Orders Search Preview</title>
+    <link rel="stylesheet" href="../download/atex/css/atex-brand.css">
+    <link rel="stylesheet" href="../download/atex/css/orders.css">
+    <style>
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+        }
+
+        body {
+            padding: 16px;
+            background: #f8fafc;
+        }
+    </style>
+</head>
+<body>
+<div id="atex-orders-app" class="atex-orders atex-brand" data-db="atex">
+    <div class="atex-orders-toolbar">
+        <button id="atex-orders-create" class="atex-orders-btn atex-orders-btn-primary" type="button" title="Создать заказ">
+            <i class="pi pi-plus"></i><span>Создать заказ</span>
+        </button>
+        <label class="atex-orders-filter-wrap">
+            <span>Статус:</span>
+            <select id="atex-orders-filter" class="atex-orders-input" aria-label="Фильтр по статусу">
+                <option value="">Все статусы</option>
+            </select>
+        </label>
+        <button id="atex-orders-refresh" class="atex-orders-btn atex-orders-btn-secondary" type="button" title="Обновить список">
+            <i class="pi pi-refresh"></i><span>Обновить</span>
+        </button>
+    </div>
+
+    <div id="atex-orders-message" class="atex-orders-message" hidden></div>
+
+    <section id="atex-order-create" class="atex-orders-create" hidden>
+        <h2 class="atex-orders-create-title">Новый заказ</h2>
+        <form id="atex-order-create-form" class="atex-orders-create-form"></form>
+    </section>
+
+    <div id="atex-orders-list" class="atex-orders-list">
+        <div class="atex-orders-empty">Загрузка данных...</div>
+    </div>
+</div>
+
+<script>
+window.db = 'atex';
+window.uid = '42';
+window.xsrf = 'TOK';
+
+const metadata = [
+    {
+        id: '107',
+        up: '0',
+        type: '3',
+        val: 'Заказ',
+        reqs: [
+            { id: '1052', val: 'Клиент', ref: '101', ref_id: '1052' },
+            { id: '1054', val: 'Пользователь', ref: '18', ref_id: '1054' },
+            { id: '1056', val: 'Дата создания', type: '9' },
+            { id: '1058', val: 'Дата согласования', type: '9' },
+            { id: '1060', val: 'Статус', type: '3' },
+            { id: '1062', val: 'Лидер', type: '3' },
+            { id: '1064', val: 'Примечания', type: '12' }
+        ]
+    },
+    {
+        id: '108',
+        up: '107',
+        type: '3',
+        val: 'Позиция заказа',
+        reqs: [
+            { id: '1067', val: 'Кол-во', type: '13' },
+            { id: '1069', val: 'Вид сырья', ref: '100', ref_id: '1069' },
+            { id: '1071', val: 'Тип резки', ref: '104', ref_id: '1071' },
+            { id: '1073', val: 'Ширина, мм', type: '13' },
+            { id: '1075', val: 'Длина, м', type: '13' },
+            { id: '1077', val: 'Диаметр втулки', type: '13' },
+            { id: '1079', val: 'Статус', type: '3' }
+        ]
+    }
+];
+
+const orders = [
+    { i: 8182, u: 1, o: 1, r: ['8182', '305:АО Интеграм', '42:manager', '31.05.2026', '', 'Новый', '', ''] },
+    { i: 1966, u: 1, o: 2, r: ['1966', '306:ООО Ромашка-Термолента #3002', '42:manager', '30.05.2026', '', 'Выполнен', '', ''] },
+    { i: 1532, u: 1, o: 3, r: ['1532', '307:Лидер Этикетка37', '42:manager', '29.05.2026', '', 'Выполнен', '', ''] },
+    { i: 1519, u: 1, o: 4, r: ['1519', '308:Рустрейд', '42:manager', '28.05.2026', '', 'Выполнен', '', ''] },
+    { i: 1492, u: 1, o: 5, r: ['1492', '307:Лидер Этикетка37', '42:manager', '27.05.2026', '', 'К выполнению', '', ''] },
+    { i: 1472, u: 1, o: 6, r: ['1472', '307:Лидер Этикетка37', '42:manager', '26.05.2026', '', 'К выполнению', '', ''] },
+    { i: 1452, u: 1, o: 7, r: ['1452', '309:Атут', '42:manager', '25.05.2026', '', 'К выполнению', '', ''] }
+];
+
+const refData = {
+    '1052': {
+        '305': 'АО Интеграм',
+        '306': 'ООО Ромашка-Термолента #3002',
+        '307': 'Лидер Этикетка37',
+        '308': 'Рустрейд',
+        '309': 'Атут'
+    },
+    '1069': {
+        '200': 'Термобумага 57',
+        '201': 'Этикетка белая',
+        '202': 'Плёнка прозрачная'
+    },
+    '1071': {
+        '1': '25мм×35 / MWR118',
+        '2': '110мм×8 / MW308',
+        '3': '40мм×22 / MWR200',
+        '4': '59мм×15 / MWR200',
+        '5': '30мм×29 / MW308',
+        '6': '55мм×16 / MW308',
+        '7': '80мм×11 / MW308',
+        '8': '99мм×9 / MWR400L',
+        '9': '33мм×30 / MWR500L',
+        '10': '64мм×12+110мм×1 / MW308',
+        '11': 'MR120 - 30мм x 29',
+        '12': 'MR131 - 35мм x 25',
+        '13': 'MR132 - 110мм x 8',
+        '14': 'MR132 - 25мм x 35',
+        '15': 'MR132 - 30мм x 29'
+    }
+};
+
+function jsonResponse(data) {
+    return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: function() {
+            return Promise.resolve(JSON.stringify(data));
+        }
+    });
+}
+
+window.fetch = function(url) {
+    const text = String(url);
+    if (text.indexOf('/atex/metadata') !== -1) return jsonResponse(metadata);
+    if (text.indexOf('/atex/object/107/') !== -1) return jsonResponse(orders);
+    if (text.indexOf('/atex/object/108/') !== -1) return jsonResponse([]);
+
+    const match = text.match(/_ref_reqs\/(\d+)/);
+    if (!match) return jsonResponse({});
+
+    const data = refData[match[1]] || {};
+    const queryMatch = text.match(/[?&]q=([^&]+)/);
+    if (!queryMatch) return jsonResponse(data);
+
+    const query = decodeURIComponent(queryMatch[1]).toLowerCase();
+    const filtered = {};
+    Object.keys(data).forEach(function(id) {
+        const label = String(data[id]).toLowerCase();
+        if (label.indexOf(query) !== -1 || String(id).indexOf(query) !== -1) {
+            filtered[id] = data[id];
+        }
+    });
+    return jsonResponse(filtered);
+};
+</script>
+<script src="../download/atex/js/orders.js"></script>
+</body>
+</html>
