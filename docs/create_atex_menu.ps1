@@ -15,9 +15,18 @@
 # меню по паре (parent up, name), создаёт отсутствующие пункты и обновляет href /
 # icon / params у уже существующих. Повторный прогон не создаёт дубли.
 #
+# Очистка: с ключом -PruneMissingTemplates скрипт сначала сохраняет JSON-бэкап
+# текущего меню целевых ролей, затем удаляет лишние пункты этих ролей, если их
+# href ведёт на рабочее место без файла шаблона. Это убирает остатки старых
+# ролевых экранов вроде manager-workplace.
+#
 # Запуск (PowerShell 5.1+ / PowerShell 7, Windows 11):
 #   .\create_atex_menu.ps1 -BaseUrl https://ideav.ru -DbName atex `
 #       -Token "***"
+#
+# Очистка устаревших пунктов меню без файлов-шаблонов:
+#   .\create_atex_menu.ps1 -BaseUrl https://ideav.ru -DbName ateh `
+#       -Token "***" -PruneMissingTemplates
 #
 # Токен можно передать параметром -Token или переменной INTEGRAM_TOKEN
 # в scope Process/User/Machine.
@@ -38,6 +47,10 @@ param(
     [string]$MenuHrefField = "153",
     [string]$MenuIconField = "391",
     [string]$MenuParamsField = "158",
+    [string]$TemplateRootPath = (Join-Path (Split-Path -Parent $PSScriptRoot) "templates"),
+    [string]$TemplateNamespace = "atex",
+    [string]$BackupPath,
+    [switch]$PruneMissingTemplates,
     [switch]$DryRun
 )
 
@@ -93,6 +106,134 @@ function Normalize-Key {
     param([string]$Value)
     if ($null -eq $Value) { return "" }
     return $Value.Trim().ToLowerInvariant()
+}
+
+function Get-MenuActionFromHref {
+    param([string]$Href)
+
+    if ($null -eq $Href) { return "" }
+    $value = $Href.Trim()
+    if ([string]::IsNullOrWhiteSpace($value)) { return "" }
+
+    $lower = $value.ToLowerInvariant()
+    foreach ($prefix in @("http://", "https://", "mailto:", "tel:", "javascript:", "#")) {
+        if ($lower.StartsWith($prefix)) {
+            return $null
+        }
+    }
+
+    $value = ($value -split "[?#]", 2)[0].Trim("/")
+    if ([string]::IsNullOrWhiteSpace($value)) { return "" }
+
+    $parts = @($value -split "/" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($parts.Count -eq 0) { return "" }
+    if ($parts.Count -gt 1 -and (Normalize-Key ([string]$parts[0])) -eq (Normalize-Key $DbName)) {
+        $parts = @($parts | Select-Object -Skip 1)
+    }
+    if ($parts.Count -eq 0) { return "" }
+
+    $action = [string]$parts[0]
+    if ($action.EndsWith(".html", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $action = $action.Substring(0, $action.Length - 5)
+    }
+    return $action
+}
+
+function Add-TemplateCandidate {
+    param(
+        [System.Collections.ArrayList]$Candidates,
+        [Parameter(Mandatory = $true)][string]$Candidate
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($Candidate) -and -not $Candidates.Contains($Candidate)) {
+        [void]$Candidates.Add($Candidate)
+    }
+}
+
+function Get-TemplateCandidates {
+    param([Parameter(Mandatory = $true)][string]$Action)
+
+    $candidates = New-Object System.Collections.ArrayList
+    if ([string]::IsNullOrWhiteSpace($TemplateRootPath)) { return @() }
+
+    $file = "$Action.html"
+    Add-TemplateCandidate -Candidates $candidates -Candidate (Join-Path (Join-Path (Join-Path $TemplateRootPath "custom") $DbName) $file)
+    if (-not [string]::IsNullOrWhiteSpace($TemplateNamespace)) {
+        Add-TemplateCandidate -Candidates $candidates -Candidate (Join-Path (Join-Path (Join-Path $TemplateRootPath "custom") $TemplateNamespace) $file)
+    }
+    Add-TemplateCandidate -Candidates $candidates -Candidate (Join-Path (Join-Path $TemplateRootPath $DbName) $file)
+    if (-not [string]::IsNullOrWhiteSpace($TemplateNamespace)) {
+        Add-TemplateCandidate -Candidates $candidates -Candidate (Join-Path (Join-Path $TemplateRootPath $TemplateNamespace) $file)
+    }
+    Add-TemplateCandidate -Candidates $candidates -Candidate (Join-Path $TemplateRootPath $file)
+
+    return @($candidates)
+}
+
+function Resolve-MenuTemplate {
+    param([string]$Href)
+
+    $action = Get-MenuActionFromHref -Href $Href
+    if ($null -eq $action) {
+        return [pscustomobject]@{
+            isTemplateRoute = $false
+            action          = ""
+            exists          = $true
+            path            = ""
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($action)) {
+        return [pscustomobject]@{
+            isTemplateRoute = $false
+            action          = ""
+            exists          = $true
+            path            = ""
+        }
+    }
+
+    foreach ($candidate in @(Get-TemplateCandidates -Action $action)) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            $resolved = Resolve-Path -LiteralPath $candidate
+            return [pscustomobject]@{
+                isTemplateRoute = $true
+                action          = $action
+                exists          = $true
+                path            = [string]$resolved.Path
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        isTemplateRoute = $true
+        action          = $action
+        exists          = $false
+        path            = ""
+    }
+}
+
+function Assert-ConfiguredMenuTemplatesExist {
+    $missing = @()
+    foreach ($roleBlock in @($script:MenuData.roles)) {
+        $roleName = [string]$roleBlock.role
+        foreach ($menu in @($roleBlock.menus)) {
+            $href = ""
+            if ($menu.PSObject.Properties["href"]) { $href = [string]$menu.href }
+            $template = Resolve-MenuTemplate -Href $href
+            if ($template.isTemplateRoute -and -not $template.exists) {
+                $missing += "роль '$roleName', пункт '$($menu.name)', href '$href' -> $($template.action).html"
+            }
+        }
+    }
+    if ($missing.Count -gt 0) {
+        throw "В $DataPath есть пункты меню без файлов-шаблонов:`n - $($missing -join "`n - ")"
+    }
+}
+
+function Get-DefaultBackupPath {
+    $logDir = Split-Path -Parent $LogPath
+    if ([string]::IsNullOrWhiteSpace($logDir)) { $logDir = "." }
+    $timestamp = (Get-Date).ToUniversalTime().ToString("yyyyMMdd-HHmmss")
+    return (Join-Path $logDir "atex_menu_backup_${DbName}_$timestamp.json")
 }
 
 function Invoke-ApiRequest {
@@ -355,6 +496,104 @@ function Set-IntegramRecord {
     Invoke-ApiRequest -Endpoint "_m_set/$RecordId" -FormData $Fields | Out-Null
 }
 
+function Remove-IntegramRecord {
+    param([Parameter(Mandatory = $true)][string]$RecordId)
+
+    Invoke-ApiRequest -Endpoint "_m_del/$RecordId" -FormData @{} | Out-Null
+}
+
+function Save-MenuBackup {
+    param([Parameter(Mandatory = $true)][hashtable]$RoleIdByName)
+
+    if ([string]::IsNullOrWhiteSpace($BackupPath)) { return }
+
+    $backupRoles = @()
+    foreach ($roleBlock in @($script:MenuData.roles)) {
+        $roleName = [string]$roleBlock.role
+        $roleKey = Normalize-Key $roleName
+        if (-not $RoleIdByName.ContainsKey($roleKey)) { continue }
+
+        $roleId = [string]$RoleIdByName[$roleKey]
+        $menus = @()
+        if ($script:MenusByParent.ContainsKey($roleId)) {
+            foreach ($record in @($script:MenusByParent[$roleId])) {
+                $template = Resolve-MenuTemplate -Href ([string]$record.href)
+                $menus += [ordered]@{
+                    id              = [string]$record.id
+                    up              = [string]$record.up
+                    name            = [string]$record.name
+                    href            = [string]$record.href
+                    icon            = [string]$record.icon
+                    params          = [string]$record.params
+                    templateAction  = [string]$template.action
+                    templateExists  = [bool]$template.exists
+                    templatePath    = [string]$template.path
+                }
+            }
+        }
+
+        $backupRoles += [ordered]@{
+            role   = $roleName
+            roleId = $roleId
+            menus  = $menus
+        }
+    }
+
+    $backup = [ordered]@{
+        createdAt         = (Get-Date).ToUniversalTime().ToString("o")
+        baseUrl           = $BaseUrl
+        dbName            = $DbName
+        roleTableId       = $RoleTableId
+        menuTableId       = $MenuTableId
+        templateRootPath  = $TemplateRootPath
+        templateNamespace = $TemplateNamespace
+        roles             = $backupRoles
+    }
+
+    $backupDir = Split-Path -Parent $BackupPath
+    if (-not [string]::IsNullOrWhiteSpace($backupDir) -and -not (Test-Path -LiteralPath $backupDir)) {
+        New-Item -ItemType Directory -Path $backupDir | Out-Null
+    }
+    $backup | ConvertTo-Json -Depth 8 | Set-Content -Path $BackupPath -Encoding UTF8
+    Write-Log "   OK бэкап меню сохранён: $BackupPath"
+}
+
+function Remove-MissingTemplateMenus {
+    param([Parameter(Mandatory = $true)][hashtable]$RoleIdByName)
+
+    foreach ($roleBlock in @($script:MenuData.roles)) {
+        $roleName = [string]$roleBlock.role
+        $roleKey = Normalize-Key $roleName
+        if (-not $RoleIdByName.ContainsKey($roleKey)) { continue }
+
+        $roleId = [string]$RoleIdByName[$roleKey]
+        if (-not $script:MenusByParent.ContainsKey($roleId)) { continue }
+
+        foreach ($record in @($script:MenusByParent[$roleId])) {
+            $recordId = [string]$record.id
+            if ($script:ManagedMenuRecordIds.ContainsKey($recordId)) { continue }
+
+            $template = Resolve-MenuTemplate -Href ([string]$record.href)
+            if (-not $template.isTemplateRoute) {
+                Write-Log "   .. оставлен внешний/пустой пункт '$($record.name)' (id $recordId, up $roleId)"
+                continue
+            }
+            if ($template.exists) {
+                Write-Log "   .. оставлен дополнительный пункт '$($record.name)' -> '$($record.href)' (id $recordId): шаблон найден"
+                continue
+            }
+
+            if ($DryRun) {
+                Write-Log "   DRY-RUN удалить пункт '$($record.name)' -> '$($record.href)' (id $recordId, up $roleId): нет шаблона $($template.action).html"
+            } else {
+                Remove-IntegramRecord -RecordId $recordId
+                Write-Log "   OK удалён пункт '$($record.name)' -> '$($record.href)' (id $recordId, up $roleId): нет шаблона $($template.action).html"
+            }
+            $script:Deleted++
+        }
+    }
+}
+
 function Ensure-MenuItem {
     param(
         [Parameter(Mandatory = $true)]$Item,
@@ -423,11 +662,16 @@ $script:MenusByParent = @{}
 $script:Created = 0
 $script:Updated = 0
 $script:Skipped = 0
+$script:Deleted = 0
+$script:ManagedMenuRecordIds = @{}
 
 Write-Log "============================================================"
 Write-Log "Создание пунктов меню atex"
 Write-Log "База:   $BaseUrl/$DbName"
 Write-Log "Данные: $DataPath"
+Write-Log "Шаблоны: $TemplateRootPath"
+if (-not [string]::IsNullOrWhiteSpace($TemplateNamespace)) { Write-Log "Namespace шаблонов: $TemplateNamespace" }
+if ($PruneMissingTemplates) { Write-Log "Очистка: включена (-PruneMissingTemplates)" }
 if ($DryRun) { Write-Log "Режим:  DRY-RUN (без обращения к серверу)" }
 Write-Log "============================================================"
 
@@ -443,6 +687,7 @@ $menuCount = 0
 foreach ($roleBlock in $roleBlocks) { $menuCount += @($roleBlock.menus).Count }
 Write-Log ""
 Write-Log "Загружено ролей: $($roleBlocks.Count), пунктов меню: $menuCount"
+Assert-ConfiguredMenuTemplatesExist
 
 Write-Log ""
 Initialize-TokenSession
@@ -458,9 +703,17 @@ Load-ExistingMenus
 $existingMenuCount = 0
 foreach ($parent in $script:MenusByParent.Keys) { $existingMenuCount += @($script:MenusByParent[$parent]).Count }
 Write-Log "   Найдено пунктов меню: $existingMenuCount"
+if ($PruneMissingTemplates) {
+    if ([string]::IsNullOrWhiteSpace($BackupPath)) {
+        $BackupPath = Get-DefaultBackupPath
+    }
+    Write-Log ""
+    Write-Log "4. Бэкап существующего меню перед очисткой..."
+    Save-MenuBackup -RoleIdByName $roleIdByName
+}
 
 Write-Log ""
-Write-Log "4. Создание/обновление меню по ролям..."
+Write-Log "5. Создание/обновление меню по ролям..."
 foreach ($roleBlock in $roleBlocks) {
     $roleName = [string]$roleBlock.role
     if ([string]::IsNullOrWhiteSpace($roleName)) {
@@ -476,8 +729,15 @@ foreach ($roleBlock in $roleBlocks) {
     Write-Log ""
     Write-Log "   Роль '$roleName' (id $roleId), пунктов: $($menus.Count)"
     foreach ($menu in $menus) {
-        Ensure-MenuItem -Item $menu -ParentId $roleId | Out-Null
+        $menuId = Ensure-MenuItem -Item $menu -ParentId $roleId
+        $script:ManagedMenuRecordIds[[string]$menuId] = $true
     }
+}
+
+if ($PruneMissingTemplates) {
+    Write-Log ""
+    Write-Log "6. Удаление лишних пунктов меню без файлов-шаблонов..."
+    Remove-MissingTemplateMenus -RoleIdByName $roleIdByName
 }
 
 Write-Log ""
@@ -486,5 +746,7 @@ Write-Log "ГОТОВО"
 Write-Log "Пунктов создано:    $script:Created"
 Write-Log "Пунктов обновлено:  $script:Updated"
 Write-Log "Пунктов пропущено:  $script:Skipped"
+Write-Log "Пунктов удалено:    $script:Deleted"
+if (-not [string]::IsNullOrWhiteSpace($BackupPath)) { Write-Log "Бэкап меню:         $BackupPath" }
 Write-Log "============================================================"
 Write-Log "Лог сохранён в: $LogPath"

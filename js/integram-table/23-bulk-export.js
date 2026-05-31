@@ -3,7 +3,7 @@
             if (!this.checkboxMode) {
                 this.selectedRows.clear();
             }
-            this.render();
+            this.renderPreservingScroll(() => this.render());
         }
 
         /**
