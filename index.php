@@ -10579,6 +10579,23 @@ if(Validate_Token())
 			$id = $obj = $up;
 			break;
 
+		case "_t_alias":      // issue #2967: set/clear the alias (displayed name) of a table's first column
+		case "_settablealias":
+			if(strpos($val, ":") !== false)
+				my_die(t9n("[RU]Недопустимый символ &laquo;:&raquo; в псевдониме $val [EN] Invalid character &laquo;:&raquo; in the alias $val"));
+			if(!$row = mysqli_fetch_array(Exec_sql("SELECT id, t FROM $z WHERE id=$id AND up=0 AND id!=t AND t!=0", "Check table for alias")))
+				my_die(t9n("[RU]Таблица $id не найдена [EN]Table $id not found"));
+			if(Grant_1level($id) !== "WRITE")
+				my_die(t9n("[RU]У вас нет прав на изменение структуры таблицы[EN]You don't have permission to change the table structure"));
+			// The first column of a table is the term's own value, so its attrs are kept in a
+			// "self-descriptor" req (up=table, t=table, ord=0). Find it or create it on demand.
+			if($desc = mysqli_fetch_array(Exec_sql("SELECT id, val FROM $z WHERE up=$id AND t=$id LIMIT 1", "Get table self-descriptor")))
+				Update_Val($desc["id"], FieldAttrsSetAlias($desc["val"], $val));
+			else
+				Insert($id, 0, $id, FieldAttrsSetAlias("", $val), "Create table self-descriptor");
+			$obj = $id;
+			break;
+
 		case "_d_new":
 		case "_terms":
 			if($val == "")
@@ -10817,6 +10834,8 @@ if(Validate_Token())
         	while($row = mysqli_fetch_array($data_set)){
                 if($meta === "{")
         	        $meta .= "\"id\":\"".$row["id"]."\",\"up\":\"".$row["up"]."\",\"type\":\"".$row["t"]."\",\"val\":\"".$row["val"]."\"";
+                if(!is_null($row["ref_id"]) && $row["ref_id"] === $row["id"]) // issue #2967: skip the table self-descriptor row
+                    continue;
                 if(!isset($reqs))
                     $reqs = ",\"reqs\":{";
                 else
@@ -10852,8 +10871,11 @@ if(Validate_Token())
             $data = $data_set->fetch_all(MYSQLI_ASSOC);
             $reqs = Array();
 			$refs = Array();
+			$tableAttrs = Array(); // issue #2967: table alias stored in a self-descriptor req
         	foreach($data as $row) // Collect all the reqs to skip them later
-        	    if(!is_null($row["ref_id"]))
+        	    if(!is_null($row["ref_id"]) && $row["ref_id"] === $row["id"]) // Self-descriptor: req.t == own table id, holds the first-column attrs/alias
+        	        $tableAttrs[$row["id"]] = $row["attrs"];
+        	    elseif(!is_null($row["ref_id"]))
         	        $reqs[$row["ref_id"]] = $row["id"];
         	    elseif((int)$row["t"] > 17) // Reference: the type is not a base type
         	        $refs[$row["t"]] = $row["id"];
@@ -10862,7 +10884,8 @@ if(Validate_Token())
         	foreach($data as $row){
     		    if(($row["id"] === $row["t"]) || ($row["up"] !== "0"))
     		        die("Invalid Term id $id");
-                if(!$row["ord"] && isset($reqs[$row["id"]])) // Skip reqs with no reqs
+				$selfDesc = !is_null($row["ref_id"]) && $row["ref_id"] === $row["id"]; // issue #2967: table self-descriptor row
+                if(!$selfDesc && !$row["ord"] && isset($reqs[$row["id"]])) // Skip reqs with no reqs
                     continue;
                 if((int)$row["t"] > 17) // Skip refs
                     continue;
@@ -10872,11 +10895,18 @@ if(Validate_Token())
 					$granted = ",\"granted\":\"".$GLOBALS["GRANTS"][1]."\"";
 				else
 					$granted = "";
-				if(!isset($meta[$row["id"]]))
+				if(!isset($meta[$row["id"]])){
+					$tblAttrs = isset($tableAttrs[$row["id"]]) ? (string)$tableAttrs[$row["id"]] : "";
+					$tblAlias = strlen($tblAttrs) ? FieldAttrsAlias($tblAttrs, "") : "";
 					$meta[$row["id"]] = "\"id\":\"".$row["id"]."\",\"up\":\"".$row["up"]."\",\"type\":\"".$row["t"]."\",\"val\":\"".addcslashes($row["val"], "\\\'")."\",\"unique\":\"".$row["uniq"]."\""
 									.$granted . (isset($refs[$row["id"]]) ? ",\"referenced\":\"".$refs[$row["id"]]."\"" : "")
+									.(strlen($tblAttrs) ? FieldAttrsJsonProperty($tblAttrs) : "")
+									.($tblAlias !== "" ? ",\"alias\":\"".addcslashes($tblAlias, "\\\'")."\"" : "")
 									.(isset($GLOBALS["GRANTS"]["EXPORT"][$row["id"]]) || isset($GLOBALS["GRANTS"]["EXPORT"][1]) ? ",\"export\":\"1\"" : "")
 									.(isset($GLOBALS["GRANTS"]["DELETE"][$row["id"]]) || isset($GLOBALS["GRANTS"]["DELETE"][1]) ? ",\"delete\":\"1\"" : "");
+				}
+				if($selfDesc) // The self-descriptor is never emitted as a column
+					continue;
                 if($row["ord"])
 					if(!isset($GLOBALS["GRANTS"][$row["req_t"]]) || ($GLOBALS["GRANTS"][$row["req_t"]] !== "BARRED"))
 						$metaReqs[$row["id"]][] = "{\"num\":".$row["ord"].",\"id\":\"".$row["req_t"]."\""
@@ -10912,23 +10942,31 @@ if(Validate_Token())
 		    break;
 		    
 		case "terms":
-			$sql = "SELECT a.id, a.val, a.t, reqs.t reqs_t FROM $z a LEFT JOIN $z reqs ON reqs.up=a.id
+			$sql = "SELECT a.id, a.val, a.t, reqs.t reqs_t, reqs.val reqs_val FROM $z a LEFT JOIN $z reqs ON reqs.up=a.id
 					WHERE a.up=0 AND a.id!=a.t AND a.val!='' AND a.t!=0 ORDER BY a.val";
 			$data_set = Exec_sql($sql, "Get all independent Terms");
 
 			$typ = [];
 			$base = [];
 			$req = [];
+			$aliasByTerm = []; // issue #2967: table alias stored in a self-descriptor req
 
 			while($row = mysqli_fetch_array($data_set)) {
 				// All but buttons and calculatables
 				if(($GLOBALS["REV_BT"][$row["t"]] != "CALCULATABLE") && ($GLOBALS["REV_BT"][$row["t"]] != "BUTTON")) {
 					$base[$row["id"]] = $row["t"];
-					
+
+					if($row["reqs_t"] === $row["id"]) { // Self-descriptor: the table's first-column attrs/alias, not a real Req
+						$aliasByTerm[$row["id"]] = FieldAttrsAlias($row["reqs_val"], "");
+						if(!isset($req[$row["id"]])) // Keep the table listed even if it has no other columns
+							$typ[$row["id"]] = $row["val"];
+						continue;
+					}
+
 					if(!isset($req[$row["id"]])) { // Not used as Req yet
 						$typ[$row["id"]] = $row["val"];
 					}
-					
+
 					if($row["reqs_t"]) { // Check if our Reqs are on list of independents and remove them
 						unset($typ[$row["reqs_t"]]);
 						$req[$row["reqs_t"]] = ""; // Remember the Req ID
@@ -10940,11 +10978,14 @@ if(Validate_Token())
 			if(count($typ)) {
 				foreach($typ as $id => $val) {
 					if(Grant_1level($id)) {
-						$result[] = [
+						$item = [
 							"id" => (int)$id,
 							"type" => (int)$base[$id],
 							"name" => htmlspecialchars($val)
 						];
+						if(isset($aliasByTerm[$id]) && $aliasByTerm[$id] !== "")
+							$item["alias"] = htmlspecialchars($aliasByTerm[$id]);
+						$result[] = $item;
 					}
 				}
 			}

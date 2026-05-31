@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>issue #2967 — table alias before/after</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; color: #222; background:#fff; }
+  h1 { font-size: 20px; }
+  .panes { display: flex; gap: 28px; align-items: flex-start; }
+  .pane { flex: 1; border: 1px solid #dee2e6; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .pane h2 { font-size: 15px; margin: 0 0 4px; }
+  .tag { display:inline-block; font-size:11px; padding:2px 8px; border-radius:10px; color:#fff; }
+  .before .tag { background:#b02a37; }
+  .after  .tag { background:#198754; }
+  .note { font-size:12px; color:#666; margin: 4px 0 14px; }
+  table { width: 100%; border-collapse: collapse; }
+  caption { text-align:left; font-weight:600; font-size:16px; padding:8px 0; }
+  th { background:#f8f9fa; padding:10px 12px; text-align:left; border-bottom:2px solid #dee2e6; border-right:1px solid #e9ecef; }
+  td { padding:8px 12px; border-bottom:1px solid #dee2e6; border-right:1px solid #e9ecef; }
+  th:first-child { background:#eef6ff; }
+  .colmeta { font-size:11px; color:#888; margin-top:10px; }
+  code { background:#f4f4f4; padding:1px 4px; border-radius:3px; }
+</style>
+</head>
+<body>
+<h1>issue #2967 — псевдоним таблицы (table alias) в js/integram-table.js</h1>
+<p class="note">Обе таблицы построены реальным методом <code>IntegramTable.parseObjectFormat()</code> из собранного бандла <code>js/integram-table.js</code>. Различие — только наличие <code>alias</code> в метаданных.</p>
+<div class="panes">
+  <div class="pane before">
+    <h2><span class="tag">ДО</span> Без псевдонима</h2>
+    <p class="note">Метаданные: <code>{ val: "Клиент" }</code> — заголовок и первая колонка показывают «сырое» имя термина.</p>
+    <div id="before"></div>
+  </div>
+  <div class="pane after">
+    <h2><span class="tag">ПОСЛЕ</span> С псевдонимом</h2>
+    <p class="note">Метаданные: <code>{ val: "Клиент", alias: "Клиенты" }</code> — заголовок и первая колонка показывают псевдоним, термин остаётся «Клиент».</p>
+    <div id="after"></div>
+  </div>
+</div>
+
+<script src="../js/integram-table.js"></script>
+<script>
+// Minimal stubs so parseObjectFormat runs headless against the real bundle.
+// parseObjectFormat fetches row data after building columns; resolve it empty.
+window.fetch = () => Promise.resolve({ json: () => Promise.resolve([]) });
+
+function makeInstance() {
+  const t = Object.create(IntegramTable.prototype);
+  t.columns = []; t.columnOrder = []; t.visibleColumns = [];
+  t.metadataCache = {}; t.metadataFetchPromises = {};
+  t.options = { instanceName: 'tbl', title: '', pageSize: 10 };
+  t.filters = {}; t.sortColumn = null; t.sortDirection = null;
+  t.groupingEnabled = false; t.groupingColumns = []; t.loadedRecords = 0;
+  t.tableGranted = 'WRITE';
+  t.isTableWritable = () => true;
+  t.mapTypeIdToFormat = () => 'SHORT';
+  t.getApiBase = () => '/db';
+  t.getPageUrlParams = () => new URLSearchParams();
+  t.buildColumnFromMetadataReq = (req) => ({ id: String(req.id), name: req.val });
+  return t;
+}
+
+const sampleRows = [
+  ['Иванов Иван', '+7 900 111-22-33', 'ivanov@mail.ru'],
+  ['Петров Пётр', '+7 900 222-33-44', 'petrov@mail.ru'],
+  ['Сидорова Анна', '+7 900 333-44-55', 'sidorova@mail.ru'],
+];
+
+function renderTable(containerId, columns, title) {
+  const c = document.getElementById(containerId);
+  let html = '<table><caption>' + escapeHtml(title) + '</caption><thead><tr>';
+  columns.forEach(col => { html += '<th>' + escapeHtml(col.name) + '</th>'; });
+  html += '</tr></thead><tbody>';
+  sampleRows.forEach(r => {
+    html += '<tr>' + r.map(v => '<td>' + escapeHtml(v) + '</td>').join('') + '</tr>';
+  });
+  html += '</tbody></table>';
+  html += '<div class="colmeta">первая колонка → name=<b>' + escapeHtml(columns[0].name) +
+          '</b>, val=<b>' + escapeHtml(columns[0].val || '') +
+          '</b>, alias=<b>' + escapeHtml(columns[0].alias || '(нет)') + '</b></div>';
+  c.innerHTML = html;
+}
+function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+const reqs = [
+  { num: 1, id: '1001', val: 'Телефон', type: '3' },
+  { num: 2, id: '1002', val: 'Email', type: '3' },
+];
+
+(async () => {
+  const tBefore = makeInstance();
+  const resBefore = await tBefore.parseObjectFormat({ id: '1000', type: '3', val: 'Клиент', reqs });
+  renderTable('before', resBefore.columns, tBefore.options.title || 'Клиент');
+
+  const tAfter = makeInstance();
+  const resAfter = await tAfter.parseObjectFormat({ id: '1000', type: '3', val: 'Клиент', alias: 'Клиенты', reqs });
+  renderTable('after', resAfter.columns, tAfter.options.title || 'Клиент');
+
+  window.__ready = true;
+})();
+</script>
+</body>
+</html>

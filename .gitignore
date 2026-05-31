@@ -8,3 +8,4 @@
 
 # Local research artifacts for issue #2895
 experiments/
+.playwright-mcp/

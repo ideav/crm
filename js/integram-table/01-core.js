@@ -946,9 +946,11 @@
                 // Use fetchMetadata() to leverage globalMetadata cache and avoid redundant requests (issue #783)
                 const metadata = await this.fetchMetadata(this.options.tableTypeId);
 
-                // Auto-set table title from metadata if not explicitly provided
-                if (!this.options.title && (metadata.val || metadata.value || metadata.name)) {
-                    this.options.title = metadata.val || metadata.value || metadata.name;
+                // Auto-set table title from metadata if not explicitly provided.
+                // Prefer the table alias (issue #2967) over the raw first-column name.
+                if (!this.options.title) {
+                    const metaTitle = this.tableDisplayName(metadata);
+                    if (metaTitle) this.options.title = metaTitle;
                 }
 
                 // Store export flag from metadata (issue #1469)
@@ -971,12 +973,14 @@
                     id: String(metadata.id),
                     type: metadata.type || 'SHORT',
                     format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
-                    name: metadata.val || metadata.name || 'Значение',
+                    name: this.tableDisplayName(metadata) || 'Значение', // alias overrides the first-column name (issue #2967)
                     granted: mainColGranted,
                     ref: 0,
                     orig: metadata.id,
                     unique: metadata.unique, // Store unique flag for column edit form (issue #1026)
-                    paramId: metadata.id // For cell editing: use t{metadata.id} for first column
+                    paramId: metadata.id, // For cell editing: use t{metadata.id} for first column
+                    val: metadata.val, // raw first-column name (issue #2967)
+                    alias: metadata.alias || '' // table alias, if any (issue #2967)
                 });
 
                 // Add requisite columns (use req.id as column id for correct FR_{id} filter params - issue #793)
@@ -1043,8 +1047,9 @@
                 this.invalidateMetadataCache();
                 const refreshedMetadata = await this.fetchMetadata(this.options.tableTypeId);
 
-                if (!this.options.title && (refreshedMetadata.val || refreshedMetadata.value || refreshedMetadata.name)) {
-                    this.options.title = refreshedMetadata.val || refreshedMetadata.value || refreshedMetadata.name;
+                if (!this.options.title) {
+                    const refreshedTitle = this.tableDisplayName(refreshedMetadata);
+                    if (refreshedTitle) this.options.title = refreshedTitle;
                 }
                 this.tableExportAllowed = refreshedMetadata.export === '1' || refreshedMetadata.export === 1;
                 this.tableGranted = refreshedMetadata.granted !== undefined ? refreshedMetadata.granted : null;
@@ -1056,12 +1061,14 @@
                     id: String(refreshedMetadata.id),
                     type: refreshedMetadata.type || 'SHORT',
                     format: this.mapTypeIdToFormat(refreshedMetadata.type || 'SHORT'),
-                    name: refreshedMetadata.val || refreshedMetadata.name || 'Значение',
+                    name: this.tableDisplayName(refreshedMetadata) || 'Значение', // alias overrides the first-column name (issue #2967)
                     granted: mainColGranted,
                     ref: 0,
                     orig: refreshedMetadata.id,
                     unique: refreshedMetadata.unique,
-                    paramId: refreshedMetadata.id
+                    paramId: refreshedMetadata.id,
+                    val: refreshedMetadata.val, // raw first-column name (issue #2967)
+                    alias: refreshedMetadata.alias || '' // table alias, if any (issue #2967)
                 });
                 if (refreshedMetadata.reqs && Array.isArray(refreshedMetadata.reqs)) {
                     refreshedMetadata.reqs.forEach(req => {

@@ -963,9 +963,11 @@ class IntegramTable{
                 // Use fetchMetadata() to leverage globalMetadata cache and avoid redundant requests (issue #783)
                 const metadata = await this.fetchMetadata(this.options.tableTypeId);
 
-                // Auto-set table title from metadata if not explicitly provided
-                if (!this.options.title && (metadata.val || metadata.value || metadata.name)) {
-                    this.options.title = metadata.val || metadata.value || metadata.name;
+                // Auto-set table title from metadata if not explicitly provided.
+                // Prefer the table alias (issue #2967) over the raw first-column name.
+                if (!this.options.title) {
+                    const metaTitle = this.tableDisplayName(metadata);
+                    if (metaTitle) this.options.title = metaTitle;
                 }
 
                 // Store export flag from metadata (issue #1469)
@@ -988,12 +990,14 @@ class IntegramTable{
                     id: String(metadata.id),
                     type: metadata.type || 'SHORT',
                     format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
-                    name: metadata.val || metadata.name || 'Значение',
+                    name: this.tableDisplayName(metadata) || 'Значение', // alias overrides the first-column name (issue #2967)
                     granted: mainColGranted,
                     ref: 0,
                     orig: metadata.id,
                     unique: metadata.unique, // Store unique flag for column edit form (issue #1026)
-                    paramId: metadata.id // For cell editing: use t{metadata.id} for first column
+                    paramId: metadata.id, // For cell editing: use t{metadata.id} for first column
+                    val: metadata.val, // raw first-column name (issue #2967)
+                    alias: metadata.alias || '' // table alias, if any (issue #2967)
                 });
 
                 // Add requisite columns (use req.id as column id for correct FR_{id} filter params - issue #793)
@@ -1060,8 +1064,9 @@ class IntegramTable{
                 this.invalidateMetadataCache();
                 const refreshedMetadata = await this.fetchMetadata(this.options.tableTypeId);
 
-                if (!this.options.title && (refreshedMetadata.val || refreshedMetadata.value || refreshedMetadata.name)) {
-                    this.options.title = refreshedMetadata.val || refreshedMetadata.value || refreshedMetadata.name;
+                if (!this.options.title) {
+                    const refreshedTitle = this.tableDisplayName(refreshedMetadata);
+                    if (refreshedTitle) this.options.title = refreshedTitle;
                 }
                 this.tableExportAllowed = refreshedMetadata.export === '1' || refreshedMetadata.export === 1;
                 this.tableGranted = refreshedMetadata.granted !== undefined ? refreshedMetadata.granted : null;
@@ -1073,12 +1078,14 @@ class IntegramTable{
                     id: String(refreshedMetadata.id),
                     type: refreshedMetadata.type || 'SHORT',
                     format: this.mapTypeIdToFormat(refreshedMetadata.type || 'SHORT'),
-                    name: refreshedMetadata.val || refreshedMetadata.name || 'Значение',
+                    name: this.tableDisplayName(refreshedMetadata) || 'Значение', // alias overrides the first-column name (issue #2967)
                     granted: mainColGranted,
                     ref: 0,
                     orig: refreshedMetadata.id,
                     unique: refreshedMetadata.unique,
-                    paramId: refreshedMetadata.id
+                    paramId: refreshedMetadata.id,
+                    val: refreshedMetadata.val, // raw first-column name (issue #2967)
+                    alias: refreshedMetadata.alias || '' // table alias, if any (issue #2967)
                 });
                 if (refreshedMetadata.reqs && Array.isArray(refreshedMetadata.reqs)) {
                     refreshedMetadata.reqs.forEach(req => {
@@ -1120,6 +1127,18 @@ class IntegramTable{
                    !json.hasOwnProperty('data');
         }
 
+        /**
+         * Resolve the displayed name of a table / its first column (issue #2967).
+         * A table may carry an `alias` (stored in the first column's attrs) that
+         * overrides the raw term value used as both the table title and the first
+         * column header. Falls back to the term value/name.
+         */
+        tableDisplayName(metadata) {
+            if (!metadata) return '';
+            if (metadata.alias) return metadata.alias;
+            return metadata.val || metadata.value || metadata.name || '';
+        }
+
         buildColumnFromMetadataReq(req) {
             const attrs = this.parseAttrs(req.attrs);
             const isReference = req.hasOwnProperty('ref_id');
@@ -1158,9 +1177,11 @@ class IntegramTable{
          * }
          */
         async parseObjectFormat(metadata, append = false) {
-            // Auto-set table title from metadata if not explicitly provided
-            if (!this.options.title && (metadata.val || metadata.value)) {
-                this.options.title = metadata.val || metadata.value;
+            // Auto-set table title from metadata if not explicitly provided.
+            // Prefer the table alias when present (issue #2967).
+            if (!this.options.title) {
+                const title = this.tableDisplayName(metadata);
+                if (title) this.options.title = title;
             }
 
             // Store table-level granted value for access control (issue #1508)
@@ -1180,7 +1201,9 @@ class IntegramTable{
                 id: String(metadata.id),
                 type: metadata.type || 'SHORT',
                 format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
-                name: metadata.val || 'Значение',
+                name: this.tableDisplayName(metadata) || 'Значение', // alias overrides term value (issue #2967)
+                val: metadata.val, // Original first-column name for alias display (issue #2967)
+                alias: metadata.alias || '', // Table alias, if any (issue #2967)
                 granted: mainColGranted,
                 ref: 0,
                 orig: metadata.id, // Store the original table id
@@ -1266,7 +1289,9 @@ class IntegramTable{
                     id: String(refreshedMetadata.id),
                     type: refreshedMetadata.type || 'SHORT',
                     format: this.mapTypeIdToFormat(refreshedMetadata.type || 'SHORT'),
-                    name: refreshedMetadata.val || 'Значение',
+                    name: this.tableDisplayName(refreshedMetadata) || 'Значение', // alias overrides term value (issue #2967)
+                    val: refreshedMetadata.val,
+                    alias: refreshedMetadata.alias || '',
                     granted: mainColGranted,
                     ref: 0,
                     orig: refreshedMetadata.id,
@@ -1374,9 +1399,11 @@ class IntegramTable{
                 // Use fetchMetadata() to leverage globalMetadata cache and avoid redundant requests (issue #783)
                 const metadata = await this.fetchMetadata(typeId);
 
-                // Auto-set table title from metadata if not explicitly provided
-                if (!this.options.title && (metadata.val || metadata.value)) {
-                    this.options.title = metadata.val || metadata.value;
+                // Auto-set table title from metadata if not explicitly provided.
+                // Prefer the table alias when present (issue #2967).
+                if (!this.options.title) {
+                    const title = this.tableDisplayName(metadata);
+                    if (title) this.options.title = title;
                 }
 
                 // Store table-level granted value for access control (issue #1508)
@@ -1396,7 +1423,9 @@ class IntegramTable{
                     id: String(metadata.id),
                     type: metadata.type || 'SHORT',
                     format: this.mapTypeIdToFormat(metadata.type || 'SHORT'),
-                    name: metadata.val || metadata.name || 'Значение',
+                    name: this.tableDisplayName(metadata) || 'Значение', // alias overrides term value (issue #2967)
+                    val: metadata.val, // Original first-column name for alias display (issue #2967)
+                    alias: metadata.alias || '', // Table alias, if any (issue #2967)
                     granted: mainColGranted,
                     ref: 0,
                     orig: metadata.id,
@@ -7598,7 +7627,9 @@ class IntegramTable{
                         const isMulti = parsedAttrs.multi;
                         const isRequired = parsedAttrs.required;
                         const isKey = parsedAttrs.key;
-                        const alias = parsedAttrs.alias;
+                        // First column carries the table alias on col.alias (issue #2967),
+                        // other columns carry their alias inside attrs.
+                        const alias = parsedAttrs.alias || (isFirst ? col.alias : '');
                         const originalName = col.val || col.name;
                         const displayName = alias
                             ? `${ this.escapeHtml(alias) } <span class="col-original-name">(${this.escapeHtml(originalName)})</span>`
@@ -7858,6 +7889,9 @@ class IntegramTable{
 
             // Build the alias display value (either alias or original name)
             const currentAlias = parsedAttrs.alias || '';
+            // Table alias for the first column (issue #2967): the displayed table
+            // name, stored separately from the raw first-column name.
+            const currentTableAlias = isFirstColumn ? (col.alias || '') : '';
             // Original (base) column name for renaming (issue #1018)
             const currentName = col.val || col.name;
 
@@ -7884,6 +7918,10 @@ class IntegramTable{
                             ${ availableTypes.map(t => `<option value="${t.id}" ${ String(col.type) === String(t.id) ? 'selected' : '' }>${t.name}</option>`).join('') }
                         </select>` : `<span class="col-edit-value">Ссылочный тип (справочник)</span>` }
                     </div>
+                    ${ isFirstColumn ? `<div class="col-edit-row">
+                        <label class="col-edit-label">Псевдоним таблицы:</label>
+                        <input type="text" id="col-edit-table-alias-${instanceName}" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(currentTableAlias) }" placeholder="Отображаемое имя таблицы" autocomplete="off">
+                    </div>` : '' }
                     ${ isFirstColumn ? `<div class="col-edit-row">
                         <label class="col-edit-label col-edit-check-label">
                             <input type="checkbox" id="col-edit-unique-${instanceName}" ${ isUnique ? 'checked' : '' }>
@@ -8001,6 +8039,23 @@ class IntegramTable{
                         }
                         col.name = newName;
                         col.val = newName;
+                    }
+
+                    // 0b. Table alias for the first column (issue #2967): the
+                    // displayed table name, stored separately from the raw name.
+                    if (isFirstColumn) {
+                        const tableAliasInput = colEditModal.querySelector(`#col-edit-table-alias-${instanceName}`);
+                        const newTableAlias = tableAliasInput ? tableAliasInput.value.trim() : '';
+                        if (newTableAlias !== currentTableAlias) {
+                            const tableId = this.objectTableId || this.options.tableTypeId;
+                            const result = await this.setTableAlias(tableId, newTableAlias);
+                            if (!result.success) {
+                                showStatus('Ошибка установки псевдонима таблицы: ' + result.error, true);
+                                saveBtn.disabled = false;
+                                return;
+                            }
+                            col.alias = newTableAlias;
+                        }
                     }
 
                     // 1. Change base type (non-ref, non-free-link only)
@@ -8240,6 +8295,31 @@ class IntegramTable{
                 if (typeof xsrf !== 'undefined') params.append('_xsrf', xsrf);
 
                 const resp = await fetch(`${apiBase}/_d_alias/${colId}?JSON`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: params.toString()
+                });
+                if (!resp.ok) return { success: false, error: `HTTP ${resp.status}` };
+                return { success: true };
+            } catch (err) {
+                return { success: false, error: err.message };
+            }
+        }
+
+        /**
+         * Set (or clear) the table alias via API (issue #2967).
+         * Uses _t_alias/{tableId}?JSON. The alias is the displayed table name,
+         * stored in the first column's attrs via a self-descriptor requisite.
+         * Pass an empty alias to clear it.
+         */
+        async setTableAlias(tableId, alias) {
+            const apiBase = this.getApiBase();
+            try {
+                const params = new URLSearchParams();
+                params.append('val', alias);
+                if (typeof xsrf !== 'undefined') params.append('_xsrf', xsrf);
+
+                const resp = await fetch(`${apiBase}/_t_alias/${tableId}?JSON`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: params.toString()
