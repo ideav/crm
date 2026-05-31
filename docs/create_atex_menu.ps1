@@ -86,9 +86,17 @@ function Invoke-ApiRequest {
     foreach ($key in $FormData.Keys) {
         $body[$key] = $FormData[$key]
     }
+    $headers = @{}
     if (-not $Anonymous) {
         if ($script:XsrfToken) { $body["_xsrf"] = $script:XsrfToken }
-        if ($script:AuthToken) { $body["token"] = $script:AuthToken }
+        if ($script:AuthToken) {
+            $body["token"] = $script:AuthToken
+            # issue #3000: токен доходит до сервера только заголовком X-Authorization.
+            # Живой Integram игнорирует cookie, заданный вручную через -Headers, и
+            # строку запроса ?token= (см. atex#44), поэтому без этого заголовка
+            # сервер отвечает 401 "No authorization token provided".
+            $headers["X-Authorization"] = $script:AuthToken
+        }
     }
 
     if ($body.Count -gt 0) {
@@ -108,9 +116,9 @@ function Invoke-ApiRequest {
 
     try {
         if ($Method -eq "POST") {
-            return Invoke-RestMethod -Uri $url -Method Post -Body $body -ContentType "application/x-www-form-urlencoded"
+            return Invoke-RestMethod -Uri $url -Method Post -Body $body -ContentType "application/x-www-form-urlencoded" -Headers $headers
         }
-        return Invoke-RestMethod -Uri $url -Method Get -Body $body
+        return Invoke-RestMethod -Uri $url -Method Get -Body $body -Headers $headers
     } catch {
         $bodyText = Get-HttpErrorBody -ErrorRecord $_
         Write-Log "  ERROR: $($_.Exception.Message)"
@@ -149,9 +157,11 @@ function Get-XsrfByToken {
         $url = "$url&JSON=1"
     }
 
-    Write-Log "  GET xsrf  [cookie idb_$DbName=***]"
+    Write-Log "  GET xsrf  [X-Authorization ***; cookie idb_$DbName=***]"
     try {
-        return Invoke-RestMethod -Uri $url -Method Get -Headers @{ Cookie = "idb_$DbName=$TokenValue" }
+        # issue #3000: токен в заголовке X-Authorization — транспорт, который
+        # сервер реально читает; cookie дублируем для совместимости.
+        return Invoke-RestMethod -Uri $url -Method Get -Headers @{ "X-Authorization" = $TokenValue; Cookie = "idb_$DbName=$TokenValue" }
     } catch {
         $bodyText = Get-HttpErrorBody -ErrorRecord $_
         Write-Log "  ERROR: $($_.Exception.Message)"
