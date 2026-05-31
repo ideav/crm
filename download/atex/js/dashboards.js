@@ -10,7 +10,7 @@
 //   • списки/срезы — `GET /{db}/object/{typeId}/?JSON_OBJ&LIMIT={offset},{count}`
 //     постранично (WORKSPACE_DEVELOPMENT_GUIDE.md, раздел 6).
 // Запись отсутствует — дашборд только читает. ID таблиц и реквизитов не
-// хардкодятся: они резолвятся по именам из `GET /{db}/metadata?JSON=1`, поэтому
+// хардкодятся: они резолвятся по именам из `GET /{db}/metadata`, поэтому
 // код переживает пересборку базы. Перевод чтений на защищённый слой `report/` —
 // следующий этап и в объём этой задачи не входит (atex_workplaces.md §3.9).
 //
@@ -263,7 +263,7 @@
 
     AtexDashboards.prototype.loadMetadata = function() {
         var self = this;
-        return this.getJson('metadata?JSON=1').then(function(all) {
+        return this.getJson('metadata').then(function(all) {
             var list = Array.isArray(all) ? all : [all];
             function byName(name) {
                 return list.filter(function(t) {

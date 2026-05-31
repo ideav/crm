@@ -10,7 +10,7 @@
 // `object/{Производственная резка}/?JSON_OBJ[&F_I=…]`, далее по ссылке «Тип
 // резки» читается сам тип (`F_I={типРезкиId}`) и его полосы
 // (`object/{Полоса}/?F_U={типРезкиId}`). ID таблиц и реквизитов не хардкодятся:
-// они берутся по именам из `GET /{db}/metadata?JSON=1` (WORKSPACE_DEVELOPMENT_GUIDE.md,
+// они берутся по именам из `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md,
 // разделы 3 и 6). Перевод чтений на защищённый слой `report/` — следующий этап и
 // в объём этой задачи не входит.
 //
@@ -236,7 +236,7 @@
 
     AtexCutMap.prototype.loadMetadata = function() {
         var self = this;
-        return this.getJson('metadata?JSON=1').then(function(all) {
+        return this.getJson('metadata').then(function(all) {
             var list = Array.isArray(all) ? all : [all];
             function byName(name) {
                 return list.filter(function(t) {

@@ -2,10 +2,10 @@
  * Regression test for issue #3002 live ATEH walkthrough.
  *
  * On https://ideav.ru/ateh, `GET /ateh/metadata?JSON` stays pending in the
- * browser, while `GET /ateh/metadata?JSON=1` returns immediately. The Atex
- * dashboard count endpoint also needs JSON=1; otherwise the live server returns
- * HTML for `?_count=`. The Atex workplaces must use explicit JSON flags so role
- * screens can load during the production-path walkthrough.
+ * browser, but index.php's `metadata` route always returns JSON via api_dump()
+ * and does not need any JSON query flag. The Atex dashboard count endpoint is
+ * different and still needs JSON=1; otherwise the live server returns HTML for
+ * `?_count=`.
  *
  * Run with: node experiments/test-issue-3002-atex-live-transport.js
  */
@@ -28,8 +28,8 @@ scripts.forEach(function(file) {
     const source = fs.readFileSync(file, 'utf8');
 
     assert(
-        !/metadata\?JSON(?![=A-Za-z0-9_])/.test(source),
-        rel + ' does not use the live-blocking metadata?JSON form'
+        !/metadata\?JSON(?:=1)?/.test(source),
+        rel + ' uses the plain metadata endpoint without redundant JSON flags'
     );
 
     assert(
