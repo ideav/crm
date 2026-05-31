@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ATEX brand — before / after (ideav/crm#2982)</title>
+<!--
+  Визуальная проверка ideav/crm#2982.
+  BEFORE: фирменная шапка АТЕХ вложена в рабочее место (.atex-brand-header) —
+          над контентом две шапки: верхнее меню Интеграма + бренд-полоса.
+  AFTER:  бренд (логотип + цвета) перенесён в верхнее меню (.navbar) шаблона
+          main.html через brand.css; вложенной бренд-полосы нет.
+  Стили навбара воспроизводят css/main-app.css; бренд — download/atex/css/*.
+-->
+<style>
+  /* ---- палитра бренда (download/atex/css/atex-brand.css) ---- */
+  :root{
+    --atex-navy:#134174; --atex-navy-d:#0e3158; --atex-navy-l:#1d5596;
+    --atex-steel:#8da9c4; --atex-surface:#f1f1f1; --atex-ink:#1f2933;
+    --atex-on-navy:#fff;
+    --atex-font:"Montserrat",system-ui,-apple-system,"Segoe UI",Arial,sans-serif;
+    /* навбар Интеграма (css/main-app.css) */
+    --bg-secondary:#f8fafc; --border-color:#e2e8f0; --primary-color:#3b82f6;
+    --text-primary:#1f2933;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:system-ui,Arial,sans-serif;background:#cbd5e1;}
+  .case{margin:18px;border:1px solid #94a3b8;border-radius:8px;overflow:hidden;
+        box-shadow:0 2px 10px rgba(0,0,0,.15);background:#fff;}
+  .case > .label{padding:8px 14px;font-weight:700;font-size:14px;color:#fff;}
+  .label.bad{background:#b91c1c;} .label.good{background:#15803d;}
+
+  /* ---- верхнее меню (css/main-app.css .navbar) ---- */
+  .navbar{background-color:var(--bg-secondary);border-bottom:1px solid var(--border-color);
+    padding:0 1rem;display:flex;align-items:center;justify-content:space-between;height:56px;}
+  .navbar-brand{display:flex;align-items:center;gap:.75rem;text-decoration:none;}
+  .navbar-brand .logo{height:32px;width:32px;object-fit:contain;border-radius:6px;}
+  .navbar-brand .brand-name{font-size:1.1rem;font-weight:700;color:var(--primary-color);
+    text-transform:capitalize;}
+  .navbar-workspace{font-weight:600;color:var(--text-primary);}
+  .navbar-right{display:flex;align-items:center;gap:.6rem;}
+  .account-avatar{width:30px;height:30px;border-radius:50%;background:#e2e8f0;color:#334155;
+    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;}
+  .account-email{font-size:13px;color:var(--text-primary);}
+  .icon{width:30px;height:30px;border-radius:6px;display:flex;align-items:center;
+    justify-content:center;color:var(--text-primary);font-size:16px;}
+
+  .layout{display:flex;min-height:230px;}
+  .sidebar{width:150px;background:var(--bg-secondary);border-right:1px solid var(--border-color);
+    padding:10px;font-size:13px;color:#475569;}
+  .sidebar div{padding:6px 4px;}
+  .content{flex:1;background:var(--atex-surface);padding:0;}
+
+  /* ---- BEFORE: вложенная бренд-шапка (старый .atex-brand-header) ---- */
+  .atex-brand-header{display:flex;align-items:center;gap:16px;padding:12px 20px;
+    background:var(--atex-navy);color:var(--atex-on-navy);font-family:var(--atex-font);}
+  .atex-brand-header img{height:32px;}
+  .atex-brand-title{font-size:18px;font-weight:600;}
+
+  .workpane{padding:16px 20px;font-family:var(--atex-font);color:var(--atex-ink);}
+  .workpane h3{margin:0 0 10px;color:var(--atex-navy);}
+  .card{background:#fff;border:1px solid var(--atex-steel);border-radius:8px;
+    padding:12px 14px;max-width:340px;}
+  .btn{display:inline-block;margin-top:8px;background:var(--atex-navy);color:#fff;
+    border:none;border-radius:6px;padding:7px 14px;font-family:var(--atex-font);}
+
+  /* ---- AFTER: бренд в верхнем меню (download/atex/css/brand.css) ---- */
+  .branded .navbar{background-color:var(--atex-navy);border-bottom-color:var(--atex-navy-d);
+    font-family:var(--atex-font);}
+  .branded .navbar-brand .logo{width:auto;height:28px;border-radius:0;}
+  .branded .navbar-brand .brand-name{display:none;}
+  .branded .navbar-workspace,.branded .navbar-right .icon,
+  .branded .account-email{color:var(--atex-on-navy);}
+  .branded .account-avatar{background:var(--atex-navy-l);color:var(--atex-on-navy);}
+</style>
+</head>
+<body>
+
+<!-- ================= BEFORE ================= -->
+<div class="case">
+  <div class="label bad">ДО (ideav/crm#2975): две шапки — лого Интеграма сверху и вложенная бренд-полоса АТЕХ</div>
+  <nav class="navbar">
+    <a class="navbar-brand" href="#">
+      <img class="logo" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'><rect width='64' height='64' rx='12' fill='%233b82f6'/><text x='32' y='44' font-family='Arial' font-size='38' font-weight='700' fill='white' text-anchor='middle'>i</text></svg>" alt="Logo">
+      <span class="brand-name">atex</span>
+    </a>
+    <div class="navbar-workspace">Карта раскроя</div>
+    <div class="navbar-right">
+      <div class="icon">&#9728;</div>
+      <div class="account-avatar">О</div>
+      <span class="account-email">operator / Оператор</span>
+    </div>
+  </nav>
+  <div class="layout">
+    <aside class="sidebar"><div>Таблицы</div><div>Загрузка</div><div>Пользователи</div><div>Запросы</div><div>Формы</div></aside>
+    <main class="content">
+      <header class="atex-brand-header">
+        <img src="../download/atex/img/atex-logo.svg" alt="АТЕХ">
+        <span class="atex-brand-title">Карта раскроя</span>
+      </header>
+      <div class="workpane">
+        <h3>Карта раскроя</h3>
+        <div class="card">Партия №128 — бумага 1020 мм<br>Остаток: 4500 м
+          <br><button class="btn">Сохранить</button></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ================= AFTER ================= -->
+<div class="case branded">
+  <div class="label good">ПОСЛЕ (ideav/crm#2982): бренд в верхнем меню; вложенной шапки нет</div>
+  <nav class="navbar">
+    <a class="navbar-brand" href="#">
+      <img class="logo" src="../download/atex/img/atex-logo.svg" alt="АТЕХ">
+      <span class="brand-name">atex</span>
+    </a>
+    <div class="navbar-workspace">Карта раскроя</div>
+    <div class="navbar-right">
+      <div class="icon">&#9728;</div>
+      <div class="account-avatar">О</div>
+      <span class="account-email">operator / Оператор</span>
+    </div>
+  </nav>
+  <div class="layout">
+    <aside class="sidebar"><div>Таблицы</div><div>Загрузка</div><div>Пользователи</div><div>Запросы</div><div>Формы</div></aside>
+    <main class="content">
+      <div class="workpane">
+        <h3>Карта раскроя</h3>
+        <div class="card">Партия №128 — бумага 1020 мм<br>Остаток: 4500 м
+          <br><button class="btn">Сохранить</button></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+</body>
+</html>
