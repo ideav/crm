@@ -17,6 +17,9 @@
 
     var TABLE = { order: 'Заказ', position: 'Позиция заказа' };
     var REF_OPTIONS_LIMIT = 500;
+    var REF_SEARCH_LIMIT = 50;
+    var REF_DROPDOWN_LIMIT = 80;
+    var REF_SEARCH_DELAY = 250;
     var LIST_LIMIT = 5000;
 
     // Статусы — свободный текст (тип 3), поэтому фиксируем разумные наборы.
@@ -62,6 +65,7 @@
         expanded: {},
         statusFilter: '',
         refOptions: {},
+        refSearchSeq: 0,
         creating: false
     };
 
@@ -71,6 +75,10 @@
 
     function trimValue(value) {
         return String(value == null ? '' : value).trim();
+    }
+
+    function normalizeSearchText(value) {
+        return trimValue(value).toLowerCase().replace(/ё/g, 'е');
     }
 
     function escapeHtml(value) {
@@ -104,6 +112,64 @@
         var idx = text.indexOf(':');
         if (idx <= 0) return { id: text, label: text };
         return { id: text.slice(0, idx), label: text.slice(idx + 1) };
+    }
+
+    function parseRefOptionsData(data) {
+        var entries = [];
+        if (Array.isArray(data)) {
+            data.forEach(function(item) {
+                if (Array.isArray(item)) {
+                    entries.push({ id: String(item[0]), text: String(item[1] == null ? item[0] : item[1]) });
+                } else if (item && typeof item === 'object') {
+                    var id = item.id != null ? item.id : item.i;
+                    var text = item.text != null ? item.text : (item.val != null ? item.val : id);
+                    if (id != null) entries.push({ id: String(id), text: String(text) });
+                }
+            });
+        } else if (data && typeof data === 'object') {
+            Object.keys(data).forEach(function(id) {
+                entries.push({ id: String(id), text: String(data[id]) });
+            });
+        }
+        return entries;
+    }
+
+    function mergeRefOptions(existing, incoming) {
+        var result = (existing || []).slice();
+        var known = {};
+        result.forEach(function(opt) {
+            known[String(opt.id)] = true;
+        });
+        (incoming || []).forEach(function(opt) {
+            if (known[String(opt.id)]) return;
+            known[String(opt.id)] = true;
+            result.push(opt);
+        });
+        return result;
+    }
+
+    function findRefOption(options, current) {
+        var wanted = String(current == null ? '' : current);
+        if (!wanted) return null;
+        for (var i = 0; i < (options || []).length; i++) {
+            if (String(options[i].id) === wanted) return options[i];
+        }
+        return null;
+    }
+
+    function filterRefOptions(options, query, limit) {
+        var needle = normalizeSearchText(query);
+        var max = limit || REF_DROPDOWN_LIMIT;
+        var result = [];
+        (options || []).forEach(function(opt) {
+            if (result.length >= max) return;
+            var text = normalizeSearchText(opt.text);
+            var id = normalizeSearchText(opt.id);
+            if (!needle || text.indexOf(needle) !== -1 || id.indexOf(needle) !== -1) {
+                result.push(opt);
+            }
+        });
+        return result;
     }
 
     // Источники реквизитов из metadata: первая колонка (main) + reqs по порядку.
@@ -248,9 +314,14 @@
         return '/' + encodeURIComponent(db) + '/object/' + encodeURIComponent(tableId) + '/?' + params.join('&');
     }
 
-    function buildRefOptionsUrl(db, refReqId) {
-        return '/' + encodeURIComponent(db) + '/_ref_reqs/' + encodeURIComponent(refReqId) +
-            '?JSON&LIMIT=' + REF_OPTIONS_LIMIT;
+    function buildRefOptionsUrl(db, refReqId, query, limit) {
+        var url = '/' + encodeURIComponent(db) + '/_ref_reqs/' + encodeURIComponent(refReqId) +
+            '?JSON&LIMIT=' + encodeURIComponent(limit || REF_OPTIONS_LIMIT);
+        var search = trimValue(query);
+        if (search) {
+            url += '&q=' + encodeURIComponent(search);
+        }
+        return url;
     }
 
     // Тело POST: {t{reqId}: value, ...} + _xsrf → application/x-www-form-urlencoded.
@@ -367,27 +438,15 @@
         });
     }
 
-    function loadRefOptions(reqId) {
+    function loadRefOptions(reqId, query) {
         if (!reqId) return Promise.resolve([]);
-        if (state.refOptions[reqId]) return Promise.resolve(state.refOptions[reqId]);
-        return fetchJson(buildRefOptionsUrl(getApiBase(), reqId)).then(function(data) {
-            var entries = [];
-            if (Array.isArray(data)) {
-                data.forEach(function(item) {
-                    if (Array.isArray(item)) {
-                        entries.push({ id: String(item[0]), text: String(item[1] == null ? item[0] : item[1]) });
-                    } else if (item && typeof item === 'object') {
-                        var id = item.id != null ? item.id : item.i;
-                        var text = item.text != null ? item.text : (item.val != null ? item.val : id);
-                        if (id != null) entries.push({ id: String(id), text: String(text) });
-                    }
-                });
-            } else if (data && typeof data === 'object') {
-                Object.keys(data).forEach(function(id) {
-                    entries.push({ id: String(id), text: String(data[id]) });
-                });
-            }
-            state.refOptions[reqId] = entries;
+        var search = trimValue(query);
+        if (!search && state.refOptions[reqId]) return Promise.resolve(state.refOptions[reqId]);
+        return fetchJson(buildRefOptionsUrl(getApiBase(), reqId, search, search ? REF_SEARCH_LIMIT : REF_OPTIONS_LIMIT)).then(function(data) {
+            var entries = parseRefOptionsData(data);
+            state.refOptions[reqId] = search
+                ? mergeRefOptions(state.refOptions[reqId] || [], entries)
+                : entries;
             return entries;
         });
     }
@@ -421,12 +480,46 @@
         return '<select class="atex-orders-status"' + (dataAttrs || '') + '>' + options.join('') + '</select>';
     }
 
-    function refSelectHtml(id, options, current, placeholder) {
-        var opts = ['<option value="">' + escapeHtml(placeholder || '—') + '</option>'].concat((options || []).map(function(opt) {
-            var selected = String(opt.id) === String(current) ? ' selected' : '';
-            return '<option value="' + escapeHtml(opt.id) + '"' + selected + '>' + escapeHtml(opt.text) + '</option>';
-        }));
-        return '<select id="' + escapeHtml(id) + '" class="atex-orders-input">' + opts.join('') + '</select>';
+    function renderRefOptionItems(id, options, current) {
+        if (!(options || []).length) {
+            return '<div class="atex-orders-ref-empty">Ничего не найдено</div>';
+        }
+        return (options || []).map(function(opt, index) {
+            var selected = String(opt.id) === String(current);
+            return '<button type="button" id="' + escapeHtml(id) + '-option-' + index + '" ' +
+                'class="atex-orders-ref-option' + (selected ? ' is-selected' : '') + '" ' +
+                'role="option" data-ref-option data-value="' + escapeHtml(opt.id) + '" ' +
+                'aria-selected="' + (selected ? 'true' : 'false') + '">' +
+                escapeHtml(opt.text) + '</button>';
+        }).join('');
+    }
+
+    function searchableRefSelectHtml(id, options, current, placeholder, reqId) {
+        var selected = findRefOption(options, current);
+        var displayValue = selected ? selected.text : '';
+        var visibleOptions = filterRefOptions(options || [], '', REF_DROPDOWN_LIMIT);
+        var currentValue = trimValue(current);
+        var clearHidden = currentValue ? '' : ' hidden';
+        return '<div class="atex-orders-ref-select" data-ref-select data-ref-req-id="' + escapeHtml(reqId || '') + '">' +
+            '<div class="atex-orders-ref-control">' +
+            '<input id="' + escapeHtml(id) + '-search" class="atex-orders-input atex-orders-ref-search" ' +
+            'type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" ' +
+            'aria-controls="' + escapeHtml(id) + '-listbox" autocomplete="off" ' +
+            'placeholder="' + escapeHtml(placeholder || 'Поиск...') + '" ' +
+            'value="' + escapeHtml(displayValue) + '" data-ref-search>' +
+            '<button type="button" class="atex-orders-ref-clear" data-ref-clear ' +
+            'title="Очистить значение" aria-label="Очистить значение"' + clearHidden + '>' +
+            '<i class="pi pi-times"></i></button>' +
+            '</div>' +
+            '<input type="hidden" id="' + escapeHtml(id) + '" name="' + escapeHtml(id) + '" value="' + escapeHtml(currentValue) + '" data-ref-value>' +
+            '<div id="' + escapeHtml(id) + '-listbox" class="atex-orders-ref-dropdown" role="listbox" hidden>' +
+            renderRefOptionItems(id, visibleOptions, current) +
+            '</div>' +
+            '</div>';
+    }
+
+    function refSelectHtml(id, options, current, placeholder, reqId) {
+        return searchableRefSelectHtml(id, options, current, placeholder, reqId);
     }
 
     function renderFilter() {
@@ -486,8 +579,8 @@
         return '<form class="atex-orders-position-form" data-position-form="' + escapeHtml(order.id) + '" hidden>' +
             '<div class="atex-orders-fields">' +
             '<label>Кол-во<input class="atex-orders-input" type="number" min="0" data-field="qty"></label>' +
-            '<label>Вид сырья' + refSelectHtml('atex-pos-raw-' + order.id, rawOptions, '', 'Выберите вид сырья') + '</label>' +
-            '<label>Тип резки' + refSelectHtml('atex-pos-cut-' + order.id, cutOptions, '', 'Выберите тип резки') + '</label>' +
+            '<label>Вид сырья' + refSelectHtml('atex-pos-raw-' + order.id, rawOptions, '', 'Выберите вид сырья', rawCol && rawCol.reqId) + '</label>' +
+            '<label>Тип резки' + refSelectHtml('atex-pos-cut-' + order.id, cutOptions, '', 'Выберите тип резки', cutCol && cutCol.reqId) + '</label>' +
             '<label>Ширина, мм<input class="atex-orders-input" type="number" min="0" data-field="width"></label>' +
             '<label>Длина, м<input class="atex-orders-input" type="number" min="0" step="any" data-field="length"></label>' +
             '<label>Ø втулки<input class="atex-orders-input" type="number" min="0" data-field="sleeve"></label>' +
@@ -542,7 +635,7 @@
         if (!panel) return;
         panel.innerHTML =
             '<div class="atex-orders-fields">' +
-            '<label>Клиент' + refSelectHtml('atex-order-client', clientOptions, '', 'Выберите клиента') + '</label>' +
+            '<label>Клиент' + refSelectHtml('atex-order-client', clientOptions, '', 'Выберите клиента', clientCol && clientCol.reqId) + '</label>' +
             '<label>Статус' + statusSelectHtml(state.orderStatuses, state.orderStatuses[0], ' id="atex-order-status"') + '</label>' +
             '<label class="atex-orders-field-wide">Примечания<textarea class="atex-orders-input" id="atex-order-notes" rows="2"></textarea></label>' +
             '</div>' +
@@ -682,13 +775,210 @@
         var panel = document.getElementById('atex-order-create');
         if (panel) panel.hidden = false;
         renderCreateForm();
-        var client = document.getElementById('atex-order-client');
+        var client = document.getElementById('atex-order-client-search') || document.getElementById('atex-order-client');
         if (client) client.focus();
     }
 
     function closeCreateForm() {
         var panel = document.getElementById('atex-order-create');
         if (panel) panel.hidden = true;
+    }
+
+    function refWrapperFrom(target) {
+        return target && target.closest ? target.closest('[data-ref-select]') : null;
+    }
+
+    function updateRefClear(wrapper) {
+        if (!wrapper) return;
+        var hidden = wrapper.querySelector('[data-ref-value]');
+        var clear = wrapper.querySelector('[data-ref-clear]');
+        if (clear) clear.hidden = !(hidden && hidden.value);
+    }
+
+    function setRefExpanded(wrapper, expanded) {
+        if (!wrapper) return;
+        var dropdown = wrapper.querySelector('.atex-orders-ref-dropdown');
+        var search = wrapper.querySelector('[data-ref-search]');
+        if (dropdown) dropdown.hidden = !expanded;
+        if (search) search.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        if (!expanded && search) search.removeAttribute('aria-activedescendant');
+    }
+
+    function closeRefSelect(wrapper) {
+        setRefExpanded(wrapper, false);
+    }
+
+    function closeAllRefSelects(except) {
+        if (!state.root) return;
+        state.root.querySelectorAll('[data-ref-select]').forEach(function(wrapper) {
+            if (wrapper !== except) closeRefSelect(wrapper);
+        });
+    }
+
+    function setActiveRefOption(wrapper, index) {
+        if (!wrapper) return;
+        var search = wrapper.querySelector('[data-ref-search]');
+        var options = Array.prototype.slice.call(wrapper.querySelectorAll('[data-ref-option]'));
+        if (!options.length) {
+            if (search) search.removeAttribute('aria-activedescendant');
+            return;
+        }
+        var next = Math.max(0, Math.min(index, options.length - 1));
+        options.forEach(function(option, idx) {
+            option.classList.toggle('is-active', idx === next);
+        });
+        if (search) search.setAttribute('aria-activedescendant', options[next].id || '');
+        if (options[next].scrollIntoView) {
+            options[next].scrollIntoView({ block: 'nearest' });
+        }
+    }
+
+    function activeRefOptionIndex(wrapper) {
+        var options = Array.prototype.slice.call(wrapper.querySelectorAll('[data-ref-option]'));
+        for (var i = 0; i < options.length; i++) {
+            if (options[i].classList.contains('is-active')) return i;
+        }
+        return -1;
+    }
+
+    function renderRefSearchResults(wrapper, query) {
+        if (!wrapper) return;
+        var dropdown = wrapper.querySelector('.atex-orders-ref-dropdown');
+        var hidden = wrapper.querySelector('[data-ref-value]');
+        if (!dropdown || !hidden) return;
+        var reqId = wrapper.getAttribute('data-ref-req-id');
+        var options = state.refOptions[reqId] || [];
+        var visibleOptions = filterRefOptions(options, query, REF_DROPDOWN_LIMIT);
+        dropdown.innerHTML = renderRefOptionItems(hidden.id, visibleOptions, hidden.value);
+        setActiveRefOption(wrapper, 0);
+    }
+
+    function openRefSelect(wrapper) {
+        if (!wrapper) return;
+        var search = wrapper.querySelector('[data-ref-search]');
+        var hidden = wrapper.querySelector('[data-ref-value]');
+        closeAllRefSelects(wrapper);
+        renderRefSearchResults(wrapper, hidden && hidden.value ? '' : (search ? search.value : ''));
+        updateRefClear(wrapper);
+        setRefExpanded(wrapper, true);
+    }
+
+    function scheduleRefServerSearch(wrapper, query) {
+        if (!wrapper) return;
+        var reqId = wrapper.getAttribute('data-ref-req-id');
+        var search = trimValue(query);
+        clearTimeout(wrapper._atexOrdersRefTimer);
+        var seq = ++state.refSearchSeq;
+        wrapper._atexOrdersRefSeq = seq;
+        if (!reqId || search.length < 2) return;
+        wrapper._atexOrdersRefTimer = setTimeout(function() {
+            loadRefOptions(reqId, search).then(function() {
+                if (wrapper._atexOrdersRefSeq !== seq) return;
+                renderRefSearchResults(wrapper, search);
+                setRefExpanded(wrapper, true);
+            }).catch(function(error) {
+                if (window.INTEGRAM_DEBUG) {
+                    console.warn('Reference search failed:', error);
+                }
+            });
+        }, REF_SEARCH_DELAY);
+    }
+
+    function selectRefOption(option) {
+        var wrapper = refWrapperFrom(option);
+        if (!wrapper) return;
+        var hidden = wrapper.querySelector('[data-ref-value]');
+        var search = wrapper.querySelector('[data-ref-search]');
+        if (hidden) hidden.value = option.getAttribute('data-value') || '';
+        if (search) search.value = option.textContent || '';
+        updateRefClear(wrapper);
+        closeRefSelect(wrapper);
+    }
+
+    function clearRefSelect(wrapper) {
+        if (!wrapper) return;
+        var hidden = wrapper.querySelector('[data-ref-value]');
+        var search = wrapper.querySelector('[data-ref-search]');
+        if (hidden) hidden.value = '';
+        if (search) {
+            search.value = '';
+            search.focus();
+        }
+        updateRefClear(wrapper);
+        renderRefSearchResults(wrapper, '');
+        setRefExpanded(wrapper, true);
+    }
+
+    function attachRefSearchEvents() {
+        if (!state.root) return;
+
+        state.root.addEventListener('focusin', function(event) {
+            var search = event.target.closest && event.target.closest('[data-ref-search]');
+            if (!search) return;
+            openRefSelect(refWrapperFrom(search));
+        });
+
+        state.root.addEventListener('input', function(event) {
+            var search = event.target.closest && event.target.closest('[data-ref-search]');
+            if (!search) return;
+            var wrapper = refWrapperFrom(search);
+            var hidden = wrapper && wrapper.querySelector('[data-ref-value]');
+            if (hidden) hidden.value = '';
+            updateRefClear(wrapper);
+            renderRefSearchResults(wrapper, search.value);
+            setRefExpanded(wrapper, true);
+            scheduleRefServerSearch(wrapper, search.value);
+        });
+
+        state.root.addEventListener('keydown', function(event) {
+            var search = event.target.closest && event.target.closest('[data-ref-search]');
+            if (!search) return;
+            var wrapper = refWrapperFrom(search);
+            var dropdown = wrapper && wrapper.querySelector('.atex-orders-ref-dropdown');
+            var options = wrapper ? wrapper.querySelectorAll('[data-ref-option]') : [];
+            if (!wrapper) return;
+
+            if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                if (dropdown && dropdown.hidden) openRefSelect(wrapper);
+                setActiveRefOption(wrapper, activeRefOptionIndex(wrapper) + 1);
+            } else if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                setActiveRefOption(wrapper, activeRefOptionIndex(wrapper) - 1);
+            } else if (event.key === 'Enter' && dropdown && !dropdown.hidden && options.length) {
+                event.preventDefault();
+                var activeIndex = activeRefOptionIndex(wrapper);
+                selectRefOption(options[Math.max(0, activeIndex)]);
+            } else if (event.key === 'Escape') {
+                closeRefSelect(wrapper);
+            }
+        });
+
+        state.root.addEventListener('click', function(event) {
+            var option = event.target.closest && event.target.closest('[data-ref-option]');
+            if (option) {
+                selectRefOption(option);
+                return;
+            }
+
+            var clear = event.target.closest && event.target.closest('[data-ref-clear]');
+            if (clear) {
+                event.preventDefault();
+                clearRefSelect(refWrapperFrom(clear));
+                return;
+            }
+
+            var search = event.target.closest && event.target.closest('[data-ref-search]');
+            if (search) {
+                openRefSelect(refWrapperFrom(search));
+            }
+        });
+
+        document.addEventListener('click', function(event) {
+            if (!event.target.closest || !event.target.closest('[data-ref-select]')) {
+                closeAllRefSelects();
+            }
+        });
     }
 
     // ------------------------------------------------------------------
@@ -790,6 +1080,8 @@
                 }
             });
         }
+
+        attachRefSearchEvents();
     }
 
     function findOrder(orderId) {
@@ -872,7 +1164,12 @@
     // Чистые функции — для модульных тестов (без DOM/сети).
     window.AtexOrdersTesting = {
         normalizeFieldName: normalizeFieldName,
+        normalizeSearchText: normalizeSearchText,
         parseRef: parseRef,
+        parseRefOptionsData: parseRefOptionsData,
+        mergeRefOptions: mergeRefOptions,
+        findRefOption: findRefOption,
+        filterRefOptions: filterRefOptions,
         buildFieldSources: buildFieldSources,
         buildColumns: buildColumns,
         findMetadataByName: findMetadataByName,
@@ -885,11 +1182,15 @@
         buildCreateOrderRequest: buildCreateOrderRequest,
         buildCreatePositionRequest: buildCreatePositionRequest,
         buildSetStatusRequest: buildSetStatusRequest,
+        searchableRefSelectHtml: searchableRefSelectHtml,
         TABLE: TABLE,
         ORDER_FIELDS: ORDER_FIELDS,
         POSITION_FIELDS: POSITION_FIELDS,
         DEFAULT_ORDER_STATUSES: DEFAULT_ORDER_STATUSES,
-        DEFAULT_POSITION_STATUSES: DEFAULT_POSITION_STATUSES
+        DEFAULT_POSITION_STATUSES: DEFAULT_POSITION_STATUSES,
+        REF_OPTIONS_LIMIT: REF_OPTIONS_LIMIT,
+        REF_SEARCH_LIMIT: REF_SEARCH_LIMIT,
+        REF_DROPDOWN_LIMIT: REF_DROPDOWN_LIMIT
     };
 
     if (document.readyState === 'loading') {

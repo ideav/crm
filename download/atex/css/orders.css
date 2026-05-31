@@ -77,9 +77,98 @@
     font: inherit;
 }
 
+.atex-orders-fields .atex-orders-input {
+    width: 100%;
+    min-width: 0;
+}
+
 .atex-orders-input:focus {
     outline: 2px solid rgba(19, 65, 116, 0.18);
     border-color: var(--atex-navy, #134174);
+}
+
+.atex-orders-ref-select {
+    position: relative;
+    width: 100%;
+}
+
+.atex-orders-ref-control {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.atex-orders-ref-search {
+    padding-right: 34px;
+}
+
+.atex-orders-ref-clear {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-secondary, #64748b);
+    cursor: pointer;
+}
+
+.atex-orders-ref-clear:hover {
+    background: #e2e8f0;
+    color: var(--text-primary, #111827);
+}
+
+.atex-orders-ref-dropdown {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    max-height: 260px;
+    overflow-y: auto;
+    border: 1px solid var(--input-border, #cbd5e1);
+    border-radius: 7px;
+    background: var(--input-bg, #fff);
+    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.18);
+}
+
+.atex-orders-ref-option {
+    display: block;
+    width: 100%;
+    border: 0;
+    border-bottom: 1px solid #e2e8f0;
+    background: transparent;
+    color: var(--text-primary, #111827);
+    padding: 7px 10px;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.atex-orders-ref-option:last-child {
+    border-bottom: 0;
+}
+
+.atex-orders-ref-option:hover,
+.atex-orders-ref-option.is-active {
+    background: #eff6ff;
+}
+
+.atex-orders-ref-option.is-selected {
+    color: var(--atex-navy, #134174);
+    font-weight: 600;
+}
+
+.atex-orders-ref-empty {
+    padding: 10px;
+    color: var(--text-secondary, #64748b);
+    font-size: 0.88rem;
 }
 
 .atex-orders-message {
