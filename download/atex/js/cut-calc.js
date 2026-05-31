@@ -146,7 +146,7 @@
 
     function AtexCutCalc(root) {
         this.root = root;
-        this.db = root.getAttribute('data-db') || (location.pathname.split('/').filter(Boolean)[0] || '');
+        this.db = window.db || root.getAttribute('data-db') || '';
         this.meta = { cutType: null, strip: null, material: null };
         this.materials = [];      // [{ id, label }]
         this.cutTypes = [];       // список существующих типов резки [{ id, name }]

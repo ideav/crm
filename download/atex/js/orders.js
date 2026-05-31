@@ -6,17 +6,16 @@
  * и docs/WORKSPACE_DEVELOPMENT_GUIDE.md §3). Перевод чтений на защищённый слой
  * `report/` — следующий этап и в объём этого тикета не входит.
  *
- * Таблицы (id берутся из data-атрибутов, реквизиты резолвятся из metadata по имени,
- * чтобы не хардкодить t{reqId} — id зависят от сборки базы):
- *   107 «Заказ»            — up=1
- *   108 «Позиция заказа»   — up={orderId} (подчинённая Заказу)
- *   103 «Клиент», 100 «Вид сырья», 104 «Тип резки» — ссылки.
+ * Таблицы и реквизиты резолвятся из metadata по имени, чтобы не хардкодить
+ * object id и t{reqId} — id зависят от сборки базы:
+ *   «Заказ»            — up=1
+ *   «Позиция заказа»   — up={orderId} (подчинённая Заказу)
+ *   «Клиент», «Вид сырья», «Тип резки» — ссылки.
  */
 (function(window, document) {
     'use strict';
 
-    var DEFAULT_ORDER_TABLE = '107';
-    var DEFAULT_POSITION_TABLE = '108';
+    var TABLE = { order: 'Заказ', position: 'Позиция заказа' };
     var REF_OPTIONS_LIMIT = 500;
     var LIST_LIMIT = 5000;
 
@@ -50,8 +49,8 @@
     var state = {
         root: null,
         db: '',
-        orderTable: DEFAULT_ORDER_TABLE,
-        positionTable: DEFAULT_POSITION_TABLE,
+        orderTable: '',
+        positionTable: '',
         orderStatuses: DEFAULT_ORDER_STATUSES,
         positionStatuses: DEFAULT_POSITION_STATUSES,
         orderMeta: null,
@@ -160,6 +159,37 @@
                 reqId: source ? source.id : null
             };
         });
+    }
+
+    function findMetadataById(all, id) {
+        var wanted = trimValue(id);
+        if (!wanted) return null;
+        for (var i = 0; i < (all || []).length; i++) {
+            if (String(all[i].id) === wanted) return all[i];
+        }
+        return null;
+    }
+
+    function findMetadataByName(all, name) {
+        var wanted = normalizeFieldName(name);
+        for (var i = 0; i < (all || []).length; i++) {
+            if (normalizeFieldName(all[i].val) === wanted) return all[i];
+        }
+        return null;
+    }
+
+    function resolveTableMetadata(all, tableNames, overrides) {
+        var resolved = {};
+        Object.keys(tableNames || {}).forEach(function(key) {
+            var override = trimValue(overrides && overrides[key]);
+            var meta = override ? findMetadataById(all, override) : findMetadataByName(all, tableNames[key]);
+            if (!meta) {
+                throw new Error('В метаданных не найдена таблица «' + tableNames[key] + '»' +
+                    (override ? ' (id ' + override + ')' : ''));
+            }
+            resolved[key] = meta;
+        });
+        return resolved;
     }
 
     function getColumn(columns, key) {
@@ -291,11 +321,7 @@
     // ------------------------------------------------------------------
 
     function getApiBase() {
-        var dbName = state.db || window.db || '';
-        if (!dbName && window.location && window.location.pathname) {
-            dbName = window.location.pathname.split('/').filter(Boolean)[0] || '';
-        }
-        return dbName;
+        return state.db || window.db || '';
     }
 
     function getXsrf() {
@@ -335,10 +361,9 @@
         });
     }
 
-    function loadMetadata(tableId) {
-        return fetchJson('/' + encodeURIComponent(getApiBase()) + '/metadata/' +
-            encodeURIComponent(tableId) + '?JSON').then(function(payload) {
-            return Array.isArray(payload) ? payload[0] : payload;
+    function loadAllMetadata() {
+        return fetchJson('/' + encodeURIComponent(getApiBase()) + '/metadata?JSON').then(function(payload) {
+            return Array.isArray(payload) ? payload : [];
         });
     }
 
@@ -797,9 +822,11 @@
         state.root = document.getElementById('atex-orders-app');
         if (!state.root) return;
 
-        state.db = state.root.getAttribute('data-db') || window.db || '';
-        state.orderTable = state.root.getAttribute('data-order-table') || DEFAULT_ORDER_TABLE;
-        state.positionTable = state.root.getAttribute('data-position-table') || DEFAULT_POSITION_TABLE;
+        state.db = window.db || state.root.getAttribute('data-db') || '';
+        var tableOverrides = {
+            order: state.root.getAttribute('data-order-table'),
+            position: state.root.getAttribute('data-position-table')
+        };
         state.orderStatuses = parseStatusesAttr(state.root.getAttribute('data-order-statuses'), DEFAULT_ORDER_STATUSES);
         state.positionStatuses = parseStatusesAttr(state.root.getAttribute('data-position-statuses'), DEFAULT_POSITION_STATUSES);
 
@@ -807,10 +834,13 @@
         renderFilter();
         setMessage('Загрузка данных…', 'info');
 
-        Promise.all([loadMetadata(state.orderTable), loadMetadata(state.positionTable)])
-            .then(function(metas) {
-                state.orderMeta = metas[0] || {};
-                state.positionMeta = metas[1] || {};
+        loadAllMetadata()
+            .then(function(allMetadata) {
+                var metas = resolveTableMetadata(allMetadata, TABLE, tableOverrides);
+                state.orderMeta = metas.order || {};
+                state.positionMeta = metas.position || {};
+                state.orderTable = String(state.orderMeta.id || '');
+                state.positionTable = String(state.positionMeta.id || '');
                 state.orderColumns = buildColumns(ORDER_FIELDS, state.orderMeta);
                 state.positionColumns = buildColumns(POSITION_FIELDS, state.positionMeta);
 
@@ -845,6 +875,8 @@
         parseRef: parseRef,
         buildFieldSources: buildFieldSources,
         buildColumns: buildColumns,
+        findMetadataByName: findMetadataByName,
+        resolveTableMetadata: resolveTableMetadata,
         normalizeObjects: normalizeObjects,
         extractNewObjectId: extractNewObjectId,
         buildListUrl: buildListUrl,
@@ -853,6 +885,7 @@
         buildCreateOrderRequest: buildCreateOrderRequest,
         buildCreatePositionRequest: buildCreatePositionRequest,
         buildSetStatusRequest: buildSetStatusRequest,
+        TABLE: TABLE,
         ORDER_FIELDS: ORDER_FIELDS,
         POSITION_FIELDS: POSITION_FIELDS,
         DEFAULT_ORDER_STATUSES: DEFAULT_ORDER_STATUSES,

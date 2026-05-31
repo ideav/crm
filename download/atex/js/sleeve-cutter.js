@@ -164,7 +164,7 @@
 
     function AtexSleeveCutter(root) {
         this.root = root;
-        this.db = root.getAttribute('data-db') || (location.pathname.split('/').filter(Boolean)[0] || '');
+        this.db = window.db || root.getAttribute('data-db') || '';
         this.meta = { cut: null, task: null, cutter: null };
         this.cutters = [];        // справочник втулкорезов [{ id, label }]
         this.cuts = [];           // производственные резки [{ id, label, status }]
