@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Рабочие места встраиваются сюда через маркер "File: a". Правила разработки
+         (шаблонизатор _global_.* в фигурных скобках, API _m_*, XSRF, таблицы/отчёты, IntegramTable,
+         модальные окна, подсказки) — в docs/WORKSPACE_DEVELOPMENT_GUIDE.md. -->
+    <title>{_global_.action} - {_global_.z}</title>
+    <link rel="stylesheet" href="/css/styles.css">
+    <link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="/css/main-app.css">
+    <link rel="stylesheet" href="/download/{_global_.z}/css/brand.css?0{_global_.version}">
+    <link rel="stylesheet" href="/css/ai-chat.css">
+    <style>
+        html { font-size: .82rem; }
+        /* Brand background */
+        body.brand-bg-on::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            /* Фоновый рисунок можно изменить здась - укажите путь к вашему файлу в меню Файлы - download */
+            background-image: url('/i/bg1920.jpg');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            pointer-events: none;
+            z-index: 0;
+            opacity: var(--brand-bg-opacity, 0.3);
+        }
+        /* Make navbar and sidebar transparent when brand-bg is on */
+        body.brand-bg-on .navbar,
+        body.brand-bg-on .app-sidebar {
+            background-color: transparent !important;
+            backdrop-filter: blur(0px);
+        }
+        /* High-contrast text when brand-bg is on — light theme */
+        body.brand-bg-on {
+            --text-primary: #000000;
+            --text-secondary: #000000;
+        }
+        /* High-contrast text when brand-bg is on — dark theme */
+        [data-theme="dark"] body.brand-bg-on {
+            --text-primary: #ffffff;
+            --text-secondary: #ffffff;
+        }
+    </style>
+    <script>
+        // Font size control — global, stored in cookie integram-table-font-settings (issue #1626/#1628)
+        (function() {
+            var FONT_COOKIE = 'integram-table-font-settings';
+            var SIZE_MAP = { smaller: '.7rem', normal: '.82rem', larger: '.95rem' };
+
+            function applyPageFontSize(size) {
+                var value = SIZE_MAP[size] || SIZE_MAP.normal;
+                document.documentElement.style.fontSize = value;
+            }
+
+            function loadPageFontSize() {
+                var match = document.cookie.match(new RegExp('(?:^|; )' + FONT_COOKIE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+                if (match) {
+                    try {
+                        var settings = JSON.parse(decodeURIComponent(match[1]));
+                        return settings.pageFontSize || 'normal';
+                    } catch (e) {}
+                }
+                return 'normal';
+            }
+
+            // Apply stored font size immediately (before DOM render)
+            applyPageFontSize(loadPageFontSize());
+
+            window.setPageFontSize = function(size) {
+                document.cookie = FONT_COOKIE + '=' + encodeURIComponent(JSON.stringify({ pageFontSize: size })) + '; path=/; max-age=31536000';
+                applyPageFontSize(size);
+                // Update active state on font size buttons
+                document.querySelectorAll('.navbar-font-size-btn').forEach(function(btn) {
+                    btn.classList.toggle('active', btn.dataset.size === size);
+                });
+            };
+
+            // After DOM ready: mark the correct button as active
+            document.addEventListener('DOMContentLoaded', function() {
+                var current = loadPageFontSize();
+                document.querySelectorAll('.navbar-font-size-btn').forEach(function(btn) {
+                    btn.classList.toggle('active', btn.dataset.size === current);
+                });
+            });
+        })();
+    </script>
+    <script>
+        // Brand background opacity — stored in cookie (issue #1897, #1899)
+        (function() {
+            var BG_COOKIE = 'brand-bg-{_global_.z}';
+
+            function applyBrandBg(value) {
+                var opacity = parseFloat(value);
+                if (opacity > 0 && opacity <= 0.9) {
+                    document.documentElement.style.setProperty('--brand-bg-opacity', opacity);
+                    if (document.body) document.body.classList.add('brand-bg-on');
+                } else {
+                    document.documentElement.style.removeProperty('--brand-bg-opacity');
+                    if (document.body) document.body.classList.remove('brand-bg-on');
+                }
+            }
+
+            function loadBrandBg() {
+                var match = document.cookie.match(new RegExp('(?:^|; )' + BG_COOKIE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+                return match ? decodeURIComponent(match[1]) : '0';
+            }
+
+            // Apply immediately before DOM renders
+            applyBrandBg(loadBrandBg());
+
+            window.setBrandBg = function(value) {
+                document.cookie = BG_COOKIE + '=' + encodeURIComponent(value) + '; path=/; max-age=31536000';
+                applyBrandBg(value);
+                var sel = document.getElementById('brand-bg-select');
+                if (sel) sel.value = value;
+            };
+
+            document.addEventListener('DOMContentLoaded', function() {
+                var current = loadBrandBg();
+                applyBrandBg(current);
+                var sel = document.getElementById('brand-bg-select');
+                if (sel) sel.value = current;
+            });
+        })();
+    </script>
+    <script>
+        var db = '{_global_.z}',
+            xsrf = '{_global_.xsrf}',
+            id = '{_global_.id}',
+            token = '{_global_.token}',
+            uid = '{_global_.user_id}',
+            user = '{_global_.user}',
+            role = '{_global_.role}',
+            roleId = '{_global_.role_id}',
+            grants=JSON.parse(atob('{_global_.grants}')),
+            action = '{_global_.action}';
+    </script>
+    <script>
+        (function() {
+            var dbName = '{_global_.z}' || 'default';
+            var storageKey = 'appSidebarCollapsed_' + dbName;
+            var cookieName = 'sidebarWidth_' + dbName;
+            var isCollapsed = localStorage.getItem(storageKey) === 'true';
+            var savedWidth = null;
+            var match = document.cookie.match(new RegExp('(?:^|; )' + cookieName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^;]*)'));
+            if (match) savedWidth = decodeURIComponent(match[1]);
+            // Apply sidebar state via CSS before the DOM renders to prevent flash/jump
+            var cssRules = '.app-sidebar{transition:none!important;}';
+            if (isCollapsed) {
+                cssRules += '.app-sidebar{width:56px!important;}';
+            } else if (savedWidth) {
+                cssRules += '.app-sidebar{width:' + parseInt(savedWidth, 10) + 'px!important;}';
+            }
+            var el = document.createElement('style');
+            el.id = 'sidebar-init-style';
+            el.textContent = cssRules;
+            document.head.appendChild(el);
+        })();
+    </script>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+        <div class="navbar-left">
+            <button id="mobile-sidebar-toggle" class="mobile-sidebar-toggle" type="button" aria-label="Открыть меню" title="Открыть меню"><i class="pi pi-bars"></i></button>
+            <a href="/{_global_.z}/" class="navbar-brand">
+                <img src="/images/logo.png" alt="Logo" class="logo">
+                <span class="brand-name">{_global_.z}</span>
+            </a>
+        </div>
+        <div class="navbar-center">
+            <div class="navbar-workspace">{_global_.action}</div>
+        </div>
+        <div class="navbar-right">
+            <button id="ai-chat-toggle" class="ai-chat-toggle" type="button" title="ИИ-чат" aria-label="Открыть ИИ-чат" aria-controls="ai-chat-panel" aria-expanded="false">
+                <i class="pi pi-comments"></i>
+            </button>
+            <div class="user-menu-wrapper">
+                <button id="user-menu-toggle" class="account-info" type="button" title="Имя пользователя / роль">
+                    <div id="account-avatar" class="account-avatar">{_global_.user}</div>
+                    <span id="account-email" class="account-email">{_global_.user} / {_global_.role}</span>
+                    <i class="user-menu-arrow pi pi-chevron-down"></i>
+                </button>
+                <div id="user-menu-dropdown" class="user-menu-dropdown" style="display: none;">
+                    <div class="user-menu-userinfo">
+                        <span>{_global_.user} / {_global_.role}</span>
+                    </div>
+                    <div class="user-menu-divider user-menu-divider-mobile"></div>
+                    <!-- Begin: showCabinet --><!--{_global_.z}-->
+                    <a href="/my" target="my" class="user-menu-item">
+                        <i class="user-menu-icon pi pi-user"></i>
+                        <span>Личный кабинет</span>
+                    </a>
+                    <div class="user-menu-divider"></div>
+                    <!-- End: showCabinet -->
+                    <button id="theme-toggle" class="user-menu-item" type="button">
+                        <i class="user-menu-icon pi pi-moon" id="theme-icon"></i>
+                        <span>Тема</span>
+                        <span class="user-menu-value" id="theme-value">Темная</span>
+                    </button>
+                    <div class="user-menu-item user-menu-font-size-row" title="Размер шрифта">
+                        <i class="user-menu-icon pi pi-sliders-h"></i>
+                        <span>Шрифт</span>
+                        <div class="navbar-font-size-group">
+                            <button type="button" class="navbar-font-size-btn" data-size="smaller" onclick="setPageFontSize('smaller')" title="Шрифт меньше" style="font-size:11px;">А</button>
+                            <button type="button" class="navbar-font-size-btn" data-size="normal" onclick="setPageFontSize('normal')" title="Шрифт обычный" style="font-size:14px;">А</button>
+                            <button type="button" class="navbar-font-size-btn" data-size="larger" onclick="setPageFontSize('larger')" title="Шрифт больше" style="font-size:17px;">А</button>
+                        </div>
+                    </div>
+                    <div class="user-menu-item user-menu-font-size-row" title="Фоновый рисунок можно изменить в меню Файлы - в main.html: background-image: url">
+                        <i class="user-menu-icon pi pi-image" title="Фоновый рисунок можно изменить в меню Файлы - в main.html: background-image: url"></i>
+                        <span title="Фоновый рисунок можно изменить в меню Файлы - в main.html: background-image: url">Бренд-фон</span>
+                        <select id="brand-bg-select" onchange="setBrandBg(this.value)" title="Выберите интенсивность фонового рисунка для вашего удобства" style="margin-left:auto;border:1px solid var(--border-color);border-radius:4px;padding:2px 4px;background:var(--input-bg,var(--bg-secondary));color:var(--text-primary);font-size:0.85rem;cursor:pointer;">
+                            <option value="0">—</option>
+                            <option value="0.1">10%</option>
+                            <option value="0.2">20%</option>
+                            <option value="0.3">30%</option>
+                            <option value="0.4">40%</option>
+                            <option value="0.5">50%</option>
+                            <option value="0.6">60%</option>
+                            <option value="0.7">70%</option>
+                            <option value="0.8">80%</option>
+                            <option value="0.9">90%</option>
+                        </select>
+                    </div>
+                    <div class="user-menu-divider"></div>
+                    <button id="change-password-btn" class="user-menu-item" type="button" onclick="openChangePasswordForm();">
+                        <i class="user-menu-icon pi pi-lock"></i>
+                        <span>Сменить пароль</span>
+                    </button>
+                    <div class="user-menu-divider"></div>
+                    <button id="logout-everywhere-btn" class="user-menu-item user-menu-item-danger" type="button" title="Выйти на всех устройствах, где совершен вход">
+                        <i class="user-menu-icon pi pi-sign-out"></i>
+                        <span>Выйти везде</span>
+                    </button>
+                    <button id="logout-btn" class="user-menu-item user-menu-item-danger" type="button">
+                        <i class="user-menu-icon pi pi-sign-out"></i>
+                        <span>Выйти</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div id="ai-chat-backdrop" class="ai-chat-backdrop" hidden></div>
+    <aside id="ai-chat-panel" class="ai-chat-panel" aria-hidden="true" aria-labelledby="ai-chat-title" inert>
+        <div class="ai-chat-header">
+            <div>
+                <h2 id="ai-chat-title">ИИ-чат</h2>
+                <span id="ai-chat-status" class="ai-chat-status">Не подключен</span>
+            </div>
+            <button id="ai-chat-close" class="ai-chat-icon-btn" type="button" title="Закрыть" aria-label="Закрыть ИИ-чат">
+                <i class="pi pi-times"></i>
+            </button>
+        </div>
+
+        <div class="ai-chat-body">
+            <section class="ai-chat-config" aria-label="Настройки ИИ-сервиса">
+                <div class="ai-chat-config-grid">
+                    <div class="database-field-group">
+                        <label for="ai-service-provider" class="database-field-label">Сервис</label>
+                        <select id="ai-service-provider" class="database-field-input">
+                            <option value="gemini">Google Gemini</option>
+                            <option value="integram">Интеграм AI</option>
+                            <option value="openai">ChatGPT / OpenAI</option>
+                            <option value="gigachat">ГигаЧат</option>
+                            <option value="deepseek">DeepSeek</option>
+                            <option value="groq">Groq</option>
+                            <option value="mistral">Mistral AI</option>
+                            <option value="custom">Другой API</option>
+                        </select>
+                    </div>
+                    <div class="database-field-group">
+                        <label for="ai-token-mode" class="database-field-label">Токен</label>
+                        <select id="ai-token-mode" class="database-field-input">
+                            <option value="adc">Application Default Credentials</option>
+                            <option value="rotating">Токены Интеграма</option>
+                            <option value="own">Мой токен</option>
+                        </select>
+                    </div>
+                    <div class="database-field-group ai-chat-config-wide">
+                        <label for="ai-service-endpoint" class="database-field-label">API endpoint</label>
+                        <input id="ai-service-endpoint" class="database-field-input" type="text" autocomplete="off">
+                    </div>
+                    <div class="database-field-group">
+                        <label for="ai-service-model" class="database-field-label">Модель</label>
+                        <input id="ai-service-model" class="database-field-input" type="text" autocomplete="off">
+                    </div>
+                    <div class="database-field-group">
+                        <label for="ai-service-token" class="database-field-label">API token</label>
+                        <input id="ai-service-token" class="database-field-input" type="password" autocomplete="off">
+                    </div>
+                    <div class="database-field-group">
+                        <label for="ai-target-db" class="database-field-label">База данных</label>
+                        <select id="ai-target-db" class="database-field-input"></select>
+                    </div>
+                    <label class="ai-chat-checkbox-label">
+                        <input id="ai-charge-balance" type="checkbox">
+                        <span>Оплата с баланса ЛК</span>
+                    </label>
+                </div>
+                <div class="ai-chat-config-actions">
+                    <button id="ai-save-settings-btn" type="button" class="btn-secondary btn-small">
+                        <i class="pi pi-save"></i>
+                        <span>Сохранить</span>
+                    </button>
+                    <button id="ai-connect-service-btn" type="button" class="btn-primary btn-small">
+                        <i class="pi pi-link"></i>
+                        <span>Подключить</span>
+                    </button>
+                </div>
+                <span id="ai-settings-state" class="field-hint"></span>
+            </section>
+
+            <section class="ai-chat-presets" aria-label="Типовые команды">
+                <button type="button" class="ai-preset-btn" data-ai-command="create_table">
+                    <i class="pi pi-table"></i>
+                    <span>Создай таблицу</span>
+                </button>
+                <button type="button" class="ai-preset-btn" data-ai-command="create_structure">
+                    <i class="pi pi-sitemap"></i>
+                    <span>Создай структуру</span>
+                </button>
+                <button type="button" class="ai-preset-btn" data-ai-command="create_workspace">
+                    <i class="pi pi-desktop"></i>
+                    <span>Создай рабочее место</span>
+                </button>
+            </section>
+
+            <div id="ai-chat-messages" class="ai-chat-messages" role="log" aria-live="polite">
+                <div class="ai-chat-message ai-chat-message-assistant">
+                    <div class="ai-chat-message-author">Интеграм AI</div>
+                    <div class="ai-chat-message-text">Готов принять задачу для выбранной базы данных.</div>
+                </div>
+            </div>
+
+            <section id="ai-command-queue" class="ai-command-queue" aria-label="Команды ИИ">
+                <div class="ai-command-empty">Команд пока нет</div>
+            </section>
+        </div>
+
+        <div class="ai-chat-composer">
+            <textarea id="ai-chat-input" class="database-field-input" rows="3" placeholder="Опишите задачу"></textarea>
+            <button id="ai-chat-send" type="button" class="btn-primary" title="Отправить">
+                <i class="pi pi-send"></i>
+                <span>Отправить</span>
+            </button>
+        </div>
+    </aside>
+
+    <!-- Mobile sidebar backdrop overlay -->
+    <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
+
+    <!-- Main Application Layout -->
+    <div class="app-layout">
+        <!-- Left Sidebar Menu -->
+        <aside class="app-sidebar" id="app-sidebar">
+            <div class="sidebar-header">
+                <button id="sidebar-toggle" class="sidebar-toggle" type="button" title="Свернуть/развернуть меню" aria-label="Toggle sidebar"><i class="pi pi-bars"></i></button>
+                <div class="menu-search-wrapper">
+                    <i class="pi pi-search menu-search-icon"></i>
+                    <input type="text" id="menu-search" class="menu-search-input" placeholder="Поиск..." aria-label="Поиск по меню" autocomplete="off">
+                    <button type="button" id="menu-search-clear" class="menu-search-clear" style="display: none;" aria-label="Очистить поиск"><i class="pi pi-times"></i></button>
+                </div>
+            </div>
+            <nav class="app-menu" id="app-menu">
+                <!-- Menu will be built from menuData by JavaScript -->
+            </nav>
+            <button id="sidebar-settings" class="sidebar-settings" type="button" title="Редактировать меню" aria-label="Edit menu"><i class="pi pi-cog"></i></button>
+            <div class="sidebar-resize-handle"></div>
+        </aside>
+
+        <script src="/js/main.js"></script>
+        <!-- Main Content Area -->
+        <main class="app-content">
+            <!-- File: a -->
+        </main>
+    </div>
+
+    <script>
+        var menuData = [
+        <!-- Begin: MyRoleMenu -->
+        {menu_id:'{menu_id}',menu_up:'{menu_up}',name:'{name}',href:'{href}',icon:'{icon}'},
+        <!-- End: MyRoleMenu -->
+        ];
+    </script>
+    <script src="/js/app.js"></script>
+    <script src="/js/ai-chat.js"></script>
+    <script src="/js/main-app.js"></script>
+    <script>
+    function getChangePasswordFields(){
+        return document.querySelectorAll('#old-pwd,#new-pwd,#new-again');
+    }
+    function resetChangePasswordFields(){
+        getChangePasswordFields().forEach(function(el){
+            el.value='';
+            el.disabled=true;
+        });
+    }
+    function openChangePasswordForm(){
+        var form=document.querySelector('.cp-form');
+        if(form)form.style.display='block';
+        getChangePasswordFields().forEach(function(el){
+            el.value='';
+            el.disabled=false;
+        });
+        document.querySelectorAll('.ch-toggle').forEach(function(el){el.style.display='flex';});
+        document.querySelectorAll('.wait-toggle').forEach(function(el){el.style.display='none';});
+    }
+    function closeChangePasswordForm(){
+        var form=document.querySelector('.cp-form');
+        if(form)form.style.display='none';
+        resetChangePasswordFields();
+    }
+    function changePwd(){
+        var oldPwd=document.getElementById('old-pwd').value,
+            newPwd=document.getElementById('new-pwd').value,
+            newAgain=document.getElementById('new-again').value;
+        if(oldPwd===''||newPwd===''||newAgain==='')
+            return changeMsg('alert-danger','Заполните все поля');
+        document.querySelectorAll('.ch-toggle').forEach(function(el){el.style.display='none';});
+        document.querySelectorAll('.wait-toggle').forEach(function(el){el.style.display='block';});
+        var obj=new XMLHttpRequest();
+        obj.open('POST','/'+db+'/auth?JSON',true);
+        obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+        obj.onload=function(){
+            document.querySelectorAll('.ch-toggle').forEach(function(el){el.style.display='flex';});
+            document.querySelectorAll('.wait-toggle').forEach(function(el){el.style.display='none';});
+            var json;
+            try{json=JSON.parse(this.responseText);}
+            catch(e){console.log(e);document.getElementById('pwdchangemsg').innerHTML=this.responseText;}
+            if(json&&json.msg){
+                if(json.msg.indexOf('[err')===-1){
+                    changeMsg('alert-success',json.msg);
+                    resetChangePasswordFields();
+                }else
+                    changeMsg('alert-danger',json.msg.replace(/ ?\[.+\]/,''));
+                if(json.token)token=json.token;
+                if(json.xsrf)xsrf=json.xsrf;
+            }else
+                changeMsg('alert-danger','Неверный пароль');
+        };
+        obj.send('change=1&login='+user+'&pwd='+encodeURIComponent(oldPwd)+'&npw1='+encodeURIComponent(newPwd)+'&npw2='+encodeURIComponent(newAgain));
+    }
+    function changeMsg(cl,msg){
+        var el=document.getElementById('pwdchangemsg');
+        el.className='alert w-100 '+cl;
+        el.innerHTML=msg;
+        el.style.display='block';
+        setTimeout(function(){
+            el.style.transition='opacity 0.4s';
+            el.style.opacity='0';
+            setTimeout(function(){el.style.display='none';el.style.opacity='';el.style.transition='';},400);
+        },4500);
+    }
+    </script>
+
+    <!-- Change Password Modal -->
+    <div class="cp-form" style="display: none; position: fixed; top: 0; left: 0; height: 100%; width: 100%; z-index: 9999; background: rgba(0,0,0,.4);" onclick="closeChangePasswordForm();">
+        <div style="display: flex; align-items: center; justify-content: center; height: 100%;">
+            <div style="border-radius: 8px; background-color: #fff; max-width: 360px; width: 100%; padding: 1.5rem; box-shadow: 0 4px 24px rgba(0,0,0,.18);" onclick="event.stopPropagation();" onkeyup="if(event.keyCode===13)changePwd()">
+                <div style="text-align:center; margin-bottom:1rem;">
+                    <h5 style="margin:0;">Смена пароля</h5>
+                </div>
+                <div id="pwdchangemsg" class="alert w-100" style="display: none;"></div>
+                <label for="old-pwd" style="margin-bottom:0.25rem; display:block;">Действующий пароль</label>
+                <input type="password" id="old-pwd" autocomplete="current-password" disabled style="border: 1px solid lightgray; margin-bottom: 0.75rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px; box-sizing:border-box;">
+                <label for="new-pwd" style="margin-bottom:0.25rem; display:block;">Новый пароль</label>
+                <input type="password" id="new-pwd" autocomplete="new-password" disabled style="border: 1px solid lightgray; margin-bottom: 0.75rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px; box-sizing:border-box;">
+                <label for="new-again" style="margin-bottom:0.25rem; display:block;">Повторите пароль</label>
+                <input type="password" id="new-again" autocomplete="new-password" disabled style="border: 1px solid lightgray; margin-bottom: 1rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px; box-sizing:border-box;">
+                <div style="text-align:center; display:none;" class="wait-toggle"><img src="/i/ajax.gif"></div>
+                <div style="display: flex; gap: 0.5rem;" class="ch-toggle">
+                    <button style="flex:1; padding:0.5rem; background:#3b82f6; color:#fff; border:none; border-radius:6px; cursor:pointer;" type="button" onclick="changePwd()">Сменить</button>
+                    <button style="flex:1; padding:0.5rem; background:#fff; color:#333; border:1px solid #ccc; border-radius:6px; cursor:pointer;" type="button" onclick="closeChangePasswordForm();">Отменить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cookie Consent Banner -->
+    <div id="cookie-consent">
+        <span style="font-size:0.9rem;">Мы используем куки для обеспечения работы сайта. Продолжая использовать сайт, вы соглашаетесь с их использованием.</span>
+        <button type="button" onclick="cookieAccept()" style="background:#3b82f6; color:#fff; border:none; border-radius:6px; padding:0.5rem 1.25rem; font-size:0.9rem; cursor:pointer; white-space:nowrap;">Принять</button>
+    </div>
+    <script>
+        (function() {
+            if (!localStorage.getItem('cookie_consent')) {
+                document.getElementById('cookie-consent').style.display = 'flex';
+            }
+        })();
+        function cookieAccept() {
+            localStorage.setItem('cookie_consent', '1');
+            document.getElementById('cookie-consent').style.display = 'none';
+        }
+    </script>
+    <script>
+    (function() {
+        var fake = document.createElement('div');
+        fake.style.cssText = 'position:absolute;left:-9999px;opacity:0;pointer-events:none;';
+        fake.setAttribute('aria-hidden', 'true');
+        fake.innerHTML = '<input type="text" name="fake_username" value="" autocomplete="off" readonly tabindex="-1"><input type="password" name="fake_password" value="" autocomplete="off" readonly tabindex="-1">';
+        document.body.appendChild(fake);
+    })();
+    </script>
+</body>
+</html>
