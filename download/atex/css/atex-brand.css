@@ -2,8 +2,8 @@
    Палитра и логотип взяты с сайта клиента https://a-techgroup.ru/about/:
    тёмно-синий хедер #134174, стальной акцент #8da9c4, шрифт Montserrat.
    Файл подключается каждым рабочим местом ПЕРЕД его собственным CSS, чтобы
-   задать общие переменные бренда и стиль шапки с логотипом «АТЕХ».
-   Логотип лежит рядом: download/atex/img/atex-logo.svg. */
+   задать общие переменные бренда. Бренд верхнего меню подключается из
+   templates/atex/main.html через download/atex/css/brand.css. */
 
 :root {
     /* Фирменная палитра АТЕХ (значения сняты с a-techgroup.ru). */
@@ -20,34 +20,3 @@
 
 /* Базовый бренд-контейнер: фирменный шрифт для всего рабочего места. */
 .atex-brand { font-family: var(--atex-font); }
-
-/* Шапка рабочего места с логотипом — по образцу хедера сайта клиента. */
-.atex-brand-header {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 12px 20px;
-    background: var(--atex-navy);
-    color: var(--atex-on-navy);
-    font-family: var(--atex-font);
-}
-
-.atex-brand-logo {
-    display: block;
-    height: 32px;
-    width: auto;
-    flex: 0 0 auto;
-}
-
-.atex-brand-title {
-    font-size: 18px;
-    font-weight: 600;
-    letter-spacing: .01em;
-    line-height: 1.2;
-}
-
-@media (max-width: 520px) {
-    .atex-brand-header { padding: 10px 14px; gap: 12px; }
-    .atex-brand-logo { height: 26px; }
-    .atex-brand-title { font-size: 15px; }
-}
