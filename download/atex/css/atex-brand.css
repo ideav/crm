@@ -20,3 +20,46 @@
 
 /* Базовый бренд-контейнер: фирменный шрифт для всего рабочего места. */
 .atex-brand { font-family: var(--atex-font); }
+
+/* Общий контрол выбора ссылочного реквизита: скрытое значение + searchable input. */
+.atex-ref-select {
+    position: relative;
+    width: 100%;
+}
+
+.atex-ref-control {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.atex-ref-search {
+    width: 100%;
+    padding-right: 2.25rem !important;
+}
+
+.atex-ref-clear {
+    position: absolute;
+    right: 0.375rem;
+    top: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    transform: translateY(-50%);
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #5c6b7a;
+    cursor: pointer;
+    line-height: 1;
+}
+
+.atex-ref-clear:hover,
+.atex-ref-clear:focus {
+    background: rgba(19, 65, 116, 0.08);
+    color: var(--atex-navy);
+    outline: none;
+}

@@ -213,6 +213,7 @@
         this.cutTypes = [];        // справочник [{ id, label }]
         this.materialBatches = []; // справочник [{ id, label }]
         this.positions = [];       // позиции заказа [{ id, label }]
+        this.refOptions = {};      // кеш опций searchable reference inputs по reqId
         this.cuts = [];            // очередь резок [mapCutRecord]
         this.supplies = [];        // все записи «Обеспечения» (для подсчёта привязок)
         this.draft = this.blankDraft();
@@ -236,6 +237,10 @@
                 catch (e) { throw new Error('Некорректный JSON: ' + text.slice(0, 200)); }
             });
         });
+    };
+
+    AtexProductionPlanning.prototype.loadRefOptions = function(reqId, query, limit) {
+        return this.getJson(window.AtexRefSearch.buildRefOptionsPath(reqId, query, limit));
     };
 
     // POST команды `_m_*`. Токен XSRF подставляется обязательно (раздел 4 гайда).
@@ -449,32 +454,51 @@
         ]);
     }
 
-    AtexProductionPlanning.prototype.selectRef = function(items, value, placeholder, onChange) {
-        var sel = el('select', { class: 'atex-pp-input' });
-        sel.appendChild(el('option', { value: '', text: placeholder || '— не выбрано —' }));
-        items.forEach(function(it) {
+    AtexProductionPlanning.prototype.selectRef = function(items, value, placeholder, onChange, reqId, opts) {
+        var self = this;
+        var helper = (typeof window !== 'undefined' && window.AtexRefSearch) || null;
+        opts = opts || {};
+        if (helper && typeof helper.createSelect === 'function') {
+            return helper.createSelect({
+                classPrefix: 'atex-pp',
+                inputClass: 'atex-pp-input',
+                options: items || [],
+                value: value,
+                placeholder: placeholder || '— не выбрано —',
+                reqId: reqId,
+                cacheKey: opts.cacheKey,
+                cache: this.refOptions,
+                clearOnInput: opts.clearOnInput,
+                loadOptions: reqId ? function(reqId, query, limit) { return self.loadRefOptions(reqId, query, limit); } : null,
+                onChange: onChange
+            });
+        }
+
+        var refSelect = el('select', { class: 'atex-pp-input' });
+        refSelect.appendChild(el('option', { value: '', text: placeholder || '— не выбрано —' }));
+        (items || []).forEach(function(it) {
             var o = el('option', { value: it.id, text: it.label });
             if (String(value) === String(it.id)) o.selected = true;
-            sel.appendChild(o);
+            refSelect.appendChild(o);
         });
-        sel.addEventListener('change', function() { onChange(sel.value); });
-        return sel;
+        refSelect.addEventListener('change', function() { onChange(refSelect.value); });
+        return refSelect;
     };
 
     AtexProductionPlanning.prototype.selectText = function(values, value, onChange) {
-        var sel = el('select', { class: 'atex-pp-input' });
+        var textSelect = el('select', { class: 'atex-pp-input' });
         values.forEach(function(v) {
             var o = el('option', { value: v, text: v });
             if (String(value) === String(v)) o.selected = true;
-            sel.appendChild(o);
+            textSelect.appendChild(o);
         });
         if (value && values.indexOf(value) === -1) {
             var extra = el('option', { value: value, text: value });
             extra.selected = true;
-            sel.appendChild(extra);
+            textSelect.appendChild(extra);
         }
-        sel.addEventListener('change', function() { onChange(sel.value); });
-        return sel;
+        textSelect.addEventListener('change', function() { onChange(textSelect.value); });
+        return textSelect;
     };
 
     AtexProductionPlanning.prototype.renderForm = function() {
@@ -485,9 +509,12 @@
         form.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Новая производственная резка' }));
         form.appendChild(el('p', { class: 'atex-pp-hint', text: 'Номер присваивается автоматически при сохранении.' }));
 
-        form.appendChild(field('Слиттер', this.selectRef(this.slitters, d.slitterId, '— выберите слиттер —', function(v) { d.slitterId = v; })));
-        form.appendChild(field('Тип резки', this.selectRef(this.cutTypes, d.cutTypeId, '— выберите тип резки —', function(v) { d.cutTypeId = v; })));
-        form.appendChild(field('Партия сырья', this.selectRef(this.materialBatches, d.materialBatchId, '— не выбрано —', function(v) { d.materialBatchId = v; })));
+        form.appendChild(field('Слиттер', this.selectRef(this.slitters, d.slitterId, '— выберите слиттер —',
+            function(v) { d.slitterId = v; }, reqIdByName(this.meta.cut, CUT_REQ.slitter))));
+        form.appendChild(field('Тип резки', this.selectRef(this.cutTypes, d.cutTypeId, '— выберите тип резки —',
+            function(v) { d.cutTypeId = v; }, reqIdByName(this.meta.cut, CUT_REQ.cutType))));
+        form.appendChild(field('Партия сырья', this.selectRef(this.materialBatches, d.materialBatchId, '— не выбрано —',
+            function(v) { d.materialBatchId = v; }, reqIdByName(this.meta.cut, CUT_REQ.materialBatch))));
 
         var dateInput = el('input', { class: 'atex-pp-input', type: 'date' });
         dateInput.value = d.planDate || '';
@@ -515,7 +542,10 @@
 
         // Панель фильтров.
         var filters = el('div', { class: 'atex-pp-filters' });
-        var slitterFilter = this.selectRef(this.slitters, this.filter.slitter, 'Все слиттеры', function(v) { self.filter.slitter = v; self.renderQueue(); });
+        var slitterFilter = this.selectRef(this.slitters, this.filter.slitter, 'Все слиттеры',
+            function(v) { self.filter.slitter = v; self.renderQueue(); },
+            reqIdByName(this.meta.cut, CUT_REQ.slitter),
+            { clearOnInput: false });
         var statusFilter = this.selectText([''].concat(CUT_STATUSES), this.filter.status, function(v) { self.filter.status = v; self.renderQueue(); });
         // первый пункт статуса — «все»
         statusFilter.options[0].textContent = 'Все статусы';
@@ -571,7 +601,8 @@
 
         var draft = { positionId: '', footage: '', status: SUPPLY_STATUSES[0] };
 
-        box.appendChild(field('Позиция заказа', this.selectRef(this.positions, '', '— выберите позицию —', function(v) { draft.positionId = v; })));
+        box.appendChild(field('Позиция заказа', this.selectRef(this.positions, '', '— выберите позицию —',
+            function(v) { draft.positionId = v; }, null, { cacheKey: 'positions' })));
 
         var footage = el('input', { class: 'atex-pp-input', type: 'number', min: '0', step: 'any', placeholder: 'например, 1200' });
         footage.addEventListener('input', function() { draft.footage = footage.value; });
