@@ -6,11 +6,11 @@
     --cm-border: #d9dee5;
     --cm-bg: #ffffff;
     --cm-muted: #6b7280;
-    --cm-accent: #2563eb;
+    --cm-accent: var(--atex-navy, #134174);
     --cm-warn: #b91c1c;
     --cm-ok: #15803d;
     /* Цвета сегментов по назначению полосы */
-    --cm-order: #2563eb;
+    --cm-order: var(--atex-navy, #134174);
     --cm-stock: #0d9488;
     --cm-waste: #b45309;
     --cm-other: #6b7280;

@@ -35,14 +35,14 @@
 }
 
 .atex-wh-btn-primary {
-    background: #2563eb;
-    border-color: #2563eb;
+    background: var(--atex-navy, #134174);
+    border-color: var(--atex-navy, #134174);
     color: #ffffff;
 }
 
 .atex-wh-btn-primary:hover {
-    background: #1d4ed8;
-    border-color: #1d4ed8;
+    background: var(--atex-navy-d, #0e3158);
+    border-color: var(--atex-navy-d, #0e3158);
 }
 
 .atex-wh-btn-secondary {
@@ -72,8 +72,8 @@
 }
 
 .atex-wh-input:focus {
-    outline: 2px solid rgba(37, 99, 235, 0.18);
-    border-color: #2563eb;
+    outline: 2px solid rgba(19, 65, 116, 0.18);
+    border-color: var(--atex-navy, #134174);
 }
 
 .atex-wh-message {
