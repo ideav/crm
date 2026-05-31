@@ -6,6 +6,8 @@
 [дизайн-спека atex](https://github.com/ideav/atex/blob/main/docs/superpowers/specs/2026-05-26-atex-schema-setup-design.md)
 **Родительская задача:** [#2903](https://github.com/ideav/crm/issues/2903) —
 «Подключи рабочие места по API — создай отдельные тикеты на каждое».
+**Какая версия рабочих мест актуальная и как их объединить:**
+[`docs/atex_workplaces_consolidation.md`](atex_workplaces_consolidation.md) (#2970).
 
 ---
 
