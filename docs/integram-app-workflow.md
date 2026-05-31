@@ -51,23 +51,32 @@
 **Как агент использует токен** (без `/auth`, без капчи). Токен распознаётся механизмом валидации сессии в любом из видов:
 
 ```bash
-# 1. Через cookie idb_{db} (предпочтительно для GET-чтений)
+# 1. Через HTTP-заголовок X-Authorization (рекомендуется — это транспорт
+#    браузерного SPA, и его сервер читает на любом запросе)
+curl -s -H "X-Authorization: <token>" "https://ideav.ru/{db}/metadata?JSON=1"
+
+# 2. Через cookie idb_{db} (тоже читается сервером для GET-чтений)
 curl -s -b "idb_{db}=<token>" "https://ideav.ru/{db}/metadata?JSON=1"
 
-# 2. Через form-поле token= (для POST _m_*/_d_*)
+# 3. Через form-поле token= (для POST _m_*/_d_*)
 curl -s -X POST "https://ideav.ru/{db}/_m_new/18?JSON=1" \
   -F "token=<token>" -F "_xsrf=<xsrf>" -F "up=1" -F "t18=manager"
-
-# 3. Через HTTP-заголовок Authorization: Bearer (или X-Authorization)
-curl -s -H "Authorization: Bearer <token>" "https://ideav.ru/{db}/metadata?JSON=1"
 ```
+
+> ⚠️ Сервер читает токен **только** из заголовка `X-Authorization`, cookie
+> `idb_{db}` или form-поля `token=`. Заголовок `Authorization: Bearer <token>`
+> и строка запроса `?token=<token>` сервером **игнорируются** — на такой запрос
+> приходит `401 [{"error":"No authorization token provided"}]` (issue #3000,
+> подтверждено зондированием живого сервера в atex#44). PowerShell-скрипты в
+> `docs/` посылают токен заголовком `X-Authorization`, потому что вручную
+> заданный через `-Headers` cookie `Invoke-RestMethod` отбрасывает.
 
 **Получение `_xsrf` под токеном.** Для POST-команд изменения данных
 (`_m_*`/`_d_*`) нужен `_xsrf`. Имея только токен, его забирают одним вызовом —
 `/auth` (и значит капча) для этого не требуется:
 
 ```bash
-curl -s -b "idb_{db}=<token>" "https://ideav.ru/{db}/xsrf?JSON"
+curl -s -H "X-Authorization: <token>" "https://ideav.ru/{db}/xsrf?JSON"
 # Ответ: {"_xsrf":"<hex>","token":"<token>","user":"claude","role":"...","id":"<userId>","msg":""}
 ```
 
@@ -449,7 +458,7 @@ api_call() {
 1. **Получение `_xsrf` под уже выданным токеном:**
    ```bash
    GET /{db}/xsrf?JSON=1
-   Cookie: idb_{db}=<token>
+   X-Authorization: <token>
    Returns: { token, _xsrf, id, user, role }
    ```
    Агент не вызывает `POST /{db}/auth`: этот путь требует пароль и может упереться
@@ -627,7 +636,8 @@ api_call "_m_new/${positionTableId}?full=1" "up=${orderRecordId}&t${positionTabl
 ### 3.5 Чтение существующих записей и метаданных
 
 После создания структуры (и в любой момент позже) данные читаются GET-запросами;
-авторизация — через cookie `idb_{db}` (см. Этап инициации) или через `?token=...`.
+авторизация — через заголовок `X-Authorization: <token>` или cookie `idb_{db}`
+(см. Этап инициации). Строку запроса `?token=...` сервер игнорирует (issue #3000).
 
 **Метаданные базы — список всех таблиц и их колонок:**
 ```bash

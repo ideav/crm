@@ -42,11 +42,17 @@ function Invoke-ApiRequest {
         $body[$key] = $FormData[$key]
     }
 
+    $headers = @{}
     if ($XsrfToken) {
         $body["_xsrf"] = $XsrfToken
     }
     if ($AuthToken) {
         $body["token"] = $AuthToken
+        # issue #3000: токен доходит до сервера только заголовком X-Authorization.
+        # Живой Integram игнорирует cookie, заданный вручную через -Headers, и
+        # строку запроса ?token= (см. atex#44), поэтому без этого заголовка
+        # сервер отвечает 401 "No authorization token provided".
+        $headers["X-Authorization"] = $AuthToken
     }
 
     Write-Log "Request: $Method $url"
@@ -59,9 +65,9 @@ function Invoke-ApiRequest {
 
     try {
         if ($Method -eq "POST") {
-            $response = Invoke-RestMethod -Uri $url -Method Post -Body $body -ContentType "application/x-www-form-urlencoded"
+            $response = Invoke-RestMethod -Uri $url -Method Post -Body $body -ContentType "application/x-www-form-urlencoded" -Headers $headers
         } else {
-            $response = Invoke-RestMethod -Uri $url -Method Get -Body $body
+            $response = Invoke-RestMethod -Uri $url -Method Get -Body $body -Headers $headers
         }
         Write-Log "Response: $($response | ConvertTo-Json -Compress -Depth 20)"
         return $response
@@ -88,9 +94,11 @@ function Get-XsrfByToken {
     }
 
     Write-Log "Request: GET $url"
-    Write-Log "Cookie: idb_$DbName=***"
+    Write-Log "Headers: X-Authorization=***; Cookie: idb_$DbName=***"
     try {
-        return Invoke-RestMethod -Uri $url -Method Get -Headers @{ Cookie = "idb_$DbName=$TokenValue" }
+        # issue #3000: токен в заголовке X-Authorization — транспорт, который
+        # сервер реально читает; cookie дублируем для совместимости.
+        return Invoke-RestMethod -Uri $url -Method Get -Headers @{ "X-Authorization" = $TokenValue; Cookie = "idb_$DbName=$TokenValue" }
     } catch {
         Write-Log "ERROR: $($_.Exception.Message)"
         if ($_.Exception.Response) {
