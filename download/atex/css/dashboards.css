@@ -6,8 +6,8 @@
     --db-border: #d9dee5;
     --db-bg: #ffffff;
     --db-muted: #6b7280;
-    --db-accent: #2563eb;
-    --db-accent-l: #93b4f7;
+    --db-accent: var(--atex-navy, #134174);
+    --db-accent-l: var(--atex-steel, #8da9c4);
     --db-warn: #b91c1c;
     color: #1f2933;
     font-size: 14px;

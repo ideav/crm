@@ -6,8 +6,8 @@
     --sc-border: #d9dee5;
     --sc-bg: #ffffff;
     --sc-muted: #6b7280;
-    --sc-accent: #2563eb;
-    --sc-accent-d: #1d4ed8;
+    --sc-accent: var(--atex-navy, #134174);
+    --sc-accent-d: var(--atex-navy-d, #0e3158);
     --sc-warn: #b91c1c;
     --sc-ok: #15803d;
     color: #1f2933;
@@ -138,7 +138,7 @@
 .atex-sc-input:focus {
     outline: none;
     border-color: var(--sc-accent);
-    box-shadow: 0 0 0 2px rgba(37, 99, 235, .15);
+    box-shadow: 0 0 0 2px rgba(19, 65, 116, .15);
 }
 
 .atex-sc-card-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }

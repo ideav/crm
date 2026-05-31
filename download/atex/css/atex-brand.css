@@ -1,0 +1,53 @@
+/* Корпоративный стиль рабочих мест atex (ideav/crm#2974).
+   Палитра и логотип взяты с сайта клиента https://a-techgroup.ru/about/:
+   тёмно-синий хедер #134174, стальной акцент #8da9c4, шрифт Montserrat.
+   Файл подключается каждым рабочим местом ПЕРЕД его собственным CSS, чтобы
+   задать общие переменные бренда и стиль шапки с логотипом «АТЕХ».
+   Логотип лежит рядом: download/atex/img/atex-logo.svg. */
+
+:root {
+    /* Фирменная палитра АТЕХ (значения сняты с a-techgroup.ru). */
+    --atex-navy:    #134174; /* основной — фон хедера сайта и кнопки */
+    --atex-navy-d:  #0e3158; /* затемнённый — состояние hover */
+    --atex-navy-l:  #1d5596; /* осветлённый — ссылки/границы */
+    --atex-steel:   #8da9c4; /* вторичный акцент */
+    --atex-steel-l: #c4d2e1; /* светлый вариант акцента */
+    --atex-surface: #f1f1f1; /* фон страницы на сайте */
+    --atex-ink:     #1f2933; /* основной текст */
+    --atex-on-navy: #ffffff; /* текст и логотип на тёмном фоне */
+    --atex-font: "Montserrat", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+}
+
+/* Базовый бренд-контейнер: фирменный шрифт для всего рабочего места. */
+.atex-brand { font-family: var(--atex-font); }
+
+/* Шапка рабочего места с логотипом — по образцу хедера сайта клиента. */
+.atex-brand-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 20px;
+    background: var(--atex-navy);
+    color: var(--atex-on-navy);
+    font-family: var(--atex-font);
+}
+
+.atex-brand-logo {
+    display: block;
+    height: 32px;
+    width: auto;
+    flex: 0 0 auto;
+}
+
+.atex-brand-title {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: .01em;
+    line-height: 1.2;
+}
+
+@media (max-width: 520px) {
+    .atex-brand-header { padding: 10px 14px; gap: 12px; }
+    .atex-brand-logo { height: 26px; }
+    .atex-brand-title { font-size: 15px; }
+}

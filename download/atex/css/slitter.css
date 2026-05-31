@@ -6,8 +6,8 @@
     --sl-border: #d9dee5;
     --sl-bg: #ffffff;
     --sl-muted: #6b7280;
-    --sl-accent: #2563eb;
-    --sl-accent-d: #1d4ed8;
+    --sl-accent: var(--atex-navy, #134174);
+    --sl-accent-d: var(--atex-navy-d, #0e3158);
     --sl-warn: #b91c1c;
     --sl-ok: #15803d;
     color: #1f2933;
@@ -145,7 +145,7 @@
 .atex-sl-input:focus {
     outline: none;
     border-color: var(--sl-accent);
-    box-shadow: 0 0 0 2px rgba(37, 99, 235, .15);
+    box-shadow: 0 0 0 2px rgba(19, 65, 116, .15);
 }
 .atex-sl-textarea { resize: vertical; min-height: 44px; }
 .atex-sl-hint {
