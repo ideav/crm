@@ -1,0 +1,44 @@
+/* Фирменная шапка ATEX для верхнего меню Интеграма (ideav/crm#2982).
+   Подключается из templates/main.html по пути /download/<база>/css/brand.css.
+   Назначение: ЗАМЕНИТЬ верхнее меню и лого Интеграма фирменным стилем клиента,
+   а НЕ вкладывать бренд-шапку в рабочие места.
+   Палитра, шрифт и логотип берутся из atex-brand.css / atex-logo.svg.
+   Внутренние пути — относительные (файл лежит в download/<база>/css/), чтобы
+   стиль работал в любой базе независимо от её имени. */
+@import url("atex-brand.css");
+
+/* Верхнее меню (navbar) — фирменный тёмно-синий фон АТЕХ. */
+.navbar {
+    background-color: var(--atex-navy);
+    border-bottom-color: var(--atex-navy-d);
+    font-family: var(--atex-font);
+}
+
+/* Лого Интеграма заменяется логотипом АТЕХ (широкий логотип «АТЕХ»). */
+.navbar-brand .logo {
+    content: url("../img/atex-logo.svg");
+    width: auto;
+    height: 28px;
+    border-radius: 0;
+}
+
+/* Имя базы рядом с лого не нужно — логотип уже содержит название. */
+.navbar-brand .brand-name {
+    display: none;
+}
+
+/* Текст и иконки шапки — светлые на тёмном фоне. */
+.navbar-workspace,
+.navbar .ai-chat-toggle,
+.navbar .account-info,
+.navbar .account-email,
+.navbar .user-menu-arrow,
+.navbar .mobile-sidebar-toggle {
+    color: var(--atex-on-navy);
+}
+
+/* Аватар пользователя — на фоне светлого акцента бренда. */
+.navbar .account-avatar {
+    background-color: var(--atex-navy-l);
+    color: var(--atex-on-navy);
+}
