@@ -27,7 +27,7 @@ param(
     [string]$Token = $env:INTEGRAM_TOKEN,
     [string]$XsrfToken = $env:INTEGRAM_XSRF,
     [string]$BaseUrl = "https://ideav.ru",
-    [string]$DbName = "atex",
+    [string]$DbName = "ateh",
     [string]$DataPath = (Join-Path $PSScriptRoot "atex_menu.json"),
     [string]$LogPath = "create_atex_menu_log.txt",
     [string]$RoleTableId = "42",
