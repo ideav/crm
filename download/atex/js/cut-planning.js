@@ -291,10 +291,152 @@
 
     AtexCutPlanning.prototype.loadCutTypes = function() {
         var self = this;
-        return this.getJson('object/' + this.meta.cutType.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
+        var meta = this.meta.cutType;
+        var order = [meta.id].concat((meta.reqs || []).map(function(r) { return String(r.id); }));
+        var matReqId = reqIdByName(meta, CUT_REQ.material);
+        var matIdx = matReqId ? order.indexOf(String(matReqId)) : -1;
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
             self.cutTypes = (rows || []).map(function(r) {
-                return { id: String(r.i), name: (r.r && r.r[0]) || ('#' + r.i), row: r.r || [] };
+                var rr = r.r || [];
+                var matRef = matIdx >= 0 ? parseRef(rr[matIdx]) : { id: null };
+                return { id: String(r.i), name: rr[0] || ('#' + r.i), row: rr, materialId: matRef.id };
             });
+        });
+    };
+
+    // ── Дедупликация: поиск существующего типа с той же комбинацией ──
+
+    // Загрузить полосы одного типа резки (подчинённые записи Полоса).
+    AtexCutPlanning.prototype.loadStripsForType = function(typeId) {
+        var self = this;
+        var sm = this.meta.strip;
+        var order = [sm.id].concat((sm.reqs || []).map(function(r) { return String(r.id); }));
+        function sCol(name) {
+            var rid = reqIdByName(sm, name);
+            var i = rid ? order.indexOf(String(rid)) : -1;
+            return i >= 0 ? i : -1;
+        }
+        return this.getJson('object/' + sm.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(typeId) + '&LIMIT=0,1000')
+            .then(function(rows) {
+                return (rows || []).map(function(rec) {
+                    var r = rec.r || [];
+                    return {
+                        width: r[sCol(STRIP_REQ.width)] || '',
+                        qty: r[sCol(STRIP_REQ.qty)] || ''
+                    };
+                });
+            });
+    };
+
+    // Найти существующий тип резки с тем же сырьём и тем же мультинабором полос.
+    // Возвращает Promise<{id, name}> если дубль найден, иначе Promise<null>.
+    AtexCutPlanning.prototype.findDuplicateCutType = function(materialId, strips) {
+        var self = this;
+        var targetSig = combinationSignature(String(materialId), strips);
+        // Фильтруем по сырью (строковое сравнение id).
+        var candidates = this.cutTypes.filter(function(ct) {
+            return ct.materialId !== null && String(ct.materialId) === String(materialId);
+        });
+        if (!candidates.length) return Promise.resolve(null);
+        // Последовательно проверяем каждый кандидат.
+        var result = null;
+        return candidates.reduce(function(chain, ct) {
+            return chain.then(function() {
+                if (result) return; // уже нашли дубль
+                return self.loadStripsForType(ct.id).then(function(existingStrips) {
+                    var sig = combinationSignature(String(materialId), existingStrips);
+                    if (sig === targetSig) result = { id: ct.id, name: ct.name };
+                });
+            });
+        }, Promise.resolve()).then(function() { return result; });
+    };
+
+    // Сгенерировать имя типа резки из полос: «60×14 + 40×1».
+    function generateCutTypeName(strips) {
+        var parts = (strips || []).filter(function(s) {
+            return String(s.width).trim() !== '' && String(s.qty).trim() !== '';
+        }).map(function(s) {
+            return toNumber(s.width) + '×' + toNumber(s.qty);
+        });
+        return parts.length ? parts.join(' + ') : 'Без названия';
+    }
+
+    // ── Сохранение как «Тип резки» ──
+
+    AtexCutPlanning.prototype.saveAsCutType = function() {
+        var self = this;
+        if (this.busy) return;
+        var f = this.form;
+        var materialId = f.materialId;
+        var strips = this.strips;
+
+        // Валидация
+        if (!materialId) { this.notify('Укажите вид сырья', 'error'); return; }
+        var hasStrips = strips.some(function(s) {
+            return String(s.width).trim() !== '' && String(s.qty).trim() !== '';
+        });
+        if (!hasStrips) { this.notify('Нет полос для сохранения', 'error'); return; }
+
+        var meta = this.meta.cutType;
+        var sm = this.meta.strip;
+        var inputWidth = this.getInputWidth(materialId);
+
+        this.setBusy(true);
+
+        this.findDuplicateCutType(materialId, strips).then(function(dup) {
+            if (dup) {
+                self.setBusy(false);
+                self.notify('Такая комбинация уже есть: ' + dup.name, 'error');
+                return;
+            }
+            // Создать тип резки
+            var name = generateCutTypeName(strips);
+            var totalKnivesVal = strips.reduce(function(sum, s) { return sum + toNumber(s.qty); }, 0);
+            var usedW = usedWidth(strips);
+            var rem = round3(toNumber(inputWidth) - usedW);
+
+            var cutFields = {};
+            cutFields['t' + meta.id] = name;
+            cutFields['t' + reqIdByName(meta, CUT_REQ.material)] = materialId || '';
+            var iwReqId = reqIdByName(meta, CUT_REQ.inputWidth);
+            if (iwReqId) cutFields['t' + iwReqId] = inputWidth !== undefined ? inputWidth : '';
+            var tkReqId = reqIdByName(meta, CUT_REQ.totalKnives);
+            if (tkReqId) cutFields['t' + tkReqId] = totalKnivesVal;
+            var remReqId = reqIdByName(meta, CUT_REQ.remainder);
+            if (remReqId) cutFields['t' + remReqId] = rem;
+
+            return self.post('_m_new/' + meta.id + '?JSON&up=1&full=1', cutFields).then(function(res) {
+                var cutId = res && (res.obj || res.id || res.i);
+                if (!cutId) throw new Error('Сервер не вернул id нового типа резки');
+                cutId = String(cutId);
+                // Создать полосы (только непустые)
+                var widthReq = reqIdByName(sm, STRIP_REQ.width);
+                var qtyReq = reqIdByName(sm, STRIP_REQ.qty);
+                var purposeReq = reqIdByName(sm, STRIP_REQ.purpose);
+                var ops = [];
+                strips.forEach(function(s, idx) {
+                    var hasData = String(s.width).trim() !== '' || String(s.qty).trim() !== '';
+                    if (!hasData) return;
+                    var stripName = String(idx + 1);
+                    var params = {};
+                    params['t' + sm.id] = stripName;
+                    params['t' + widthReq] = (s.width === '' || s.width == null) ? '' : toNumber(s.width);
+                    params['t' + qtyReq] = (s.qty === '' || s.qty == null) ? '' : toNumber(s.qty);
+                    params['t' + purposeReq] = s.purpose || '';
+                    ops.push(function() {
+                        return self.post('_m_new/' + sm.id + '?JSON&up=' + encodeURIComponent(cutId), params);
+                    });
+                });
+                return ops.reduce(function(p, op) { return p.then(op); }, Promise.resolve());
+            }).then(function() {
+                return self.loadCutTypes();
+            }).then(function() {
+                self.setBusy(false);
+                self.notify('Тип резки «' + generateCutTypeName(strips) + '» сохранён', 'success');
+            });
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Ошибка сохранения: ' + err.message, 'error');
         });
     };
 
@@ -459,14 +601,12 @@
 
         // Кнопки результата
         var actions = el('div', { class: 'atex-cp-actions' });
-        // TODO(Task 4): кнопка «Сохранить как тип резки» — реализация в Task 4.
         var saveBtn = el('button', {
-            class: 'atex-cp-btn atex-cp-btn-secondary',
+            class: 'atex-cp-btn atex-cp-btn-primary',
             type: 'button',
-            text: 'Сохранить как тип резки',
-            disabled: 'disabled',
-            title: 'Будет доступно после проверки дублей (Task 4)'
+            text: 'Сохранить как тип резки'
         });
+        saveBtn.addEventListener('click', function() { self.saveAsCutType(); });
         actions.appendChild(saveBtn);
         box.appendChild(actions);
 
