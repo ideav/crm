@@ -346,9 +346,11 @@
         this.current = {
             id: b.id, name: b.name, materialId: b.materialId,
             arrivedAt: toIsoDate(b.arrivedAt) || b.arrivedAt,
-            received: b.received, remainder: b.remainder
+            received: b.received, remainder: b.remainder,
+            lengthM: b.lengthM, remainderM: b.remainderM
         };
         this.remainderTouched = true; // у существующей партии остаток уже задан
+        this.remainderMTouched = true;
         this.render();
     };
 
