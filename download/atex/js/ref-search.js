@@ -498,8 +498,23 @@
         });
     }
 
+    // Форматирование значения DATETIME (type 4): unix-штамп (секунды) →
+    // «ДД.ММ.ГГГГ ЧЧ:ММ» в локальном времени. Пустое → ''. Не-числовое
+    // (уже дата-строка) → возвращается как есть.
+    function formatDateTime(value) {
+        if (value == null || value === '') return '';
+        var s = String(value).trim();
+        if (!/^\d+$/.test(s)) return s;
+        var d = new Date(Number(s) * 1000);
+        if (isNaN(d.getTime())) return s;
+        function pad(n) { return (n < 10 ? '0' : '') + n; }
+        return pad(d.getDate()) + '.' + pad(d.getMonth() + 1) + '.' + d.getFullYear() +
+            ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    }
+
     return {
         cache: sharedCache,
+        formatDateTime: formatDateTime,
         trimText: trimText,
         normalizeSearchText: normalizeSearchText,
         parseOptionsData: parseOptionsData,

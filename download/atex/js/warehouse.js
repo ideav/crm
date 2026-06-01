@@ -453,6 +453,14 @@
         return (typeof window !== 'undefined' && window.AtexRefSearch) || null;
     }
 
+    // Дата прихода партии — DATETIME (type 4), приходит unix-штампом. Выводим
+    // как «ДД.ММ.ГГГГ ЧЧ:ММ» через общий форматтер; без него — значение как есть.
+    function fmtDate(value) {
+        var helper = refSearchHelper();
+        return helper && helper.formatDateTime ? helper.formatDateTime(value)
+            : (value == null ? '' : String(value));
+    }
+
     function loadRefOptions(reqId, query, limit) {
         var helper = refSearchHelper();
         if (!helper) return Promise.resolve([]);
@@ -535,7 +543,7 @@
         var rows = batches.map(function(batch) {
             return '<tr class="atex-wh-row" data-batch-id="' + escapeHtml(batch.id) + '">' +
                 '<td>' + escapeHtml(batch.id) + '</td>' +
-                '<td>' + escapeHtml(batch.values.arrived || batch.main || '') + '</td>' +
+                '<td>' + escapeHtml(fmtDate(batch.values.arrived || batch.main)) + '</td>' +
                 '<td>' + escapeHtml(batch.values.cutting || '') + '</td>' +
                 '<td>' + escapeHtml(batch.values.width || '') + '</td>' +
                 '<td>' + escapeHtml(batch.values.rolls || '') + '</td>' +
@@ -566,7 +574,7 @@
             if (!isAssigned && (!available || !sameCut)) return;
             refOptions.push({
                 id: batch.id,
-                label: 'Партия №' + batch.id + ' · ' + (batch.values.arrived || '') +
+                label: 'Партия №' + batch.id + ' · ' + fmtDate(batch.values.arrived) +
                     ' · ' + (batch.values.length || '') + ' м'
             });
         });
