@@ -45,7 +45,9 @@
         cut: 'Производственная резка',
         consumption: 'Расход сырья',
         event: 'Событие смены',
-        batch: 'Партия сырья'
+        batch: 'Партия сырья',
+        material: 'Вид сырья',
+        cutType: 'Тип резки'
     };
     var CUT_REQ = {
         slitter: 'Слиттер',
@@ -57,6 +59,7 @@
         counterEnd: 'Счётчик кон.',
         meterage: 'Погонаж факт, м',
         defect: 'Брак, м²',
+        defectM: 'Брак, м',
         notes: 'Примечания'
     };
     var CONS_REQ = { amount: 'Израсходовано, м²', batch: 'Партия сырья' };
@@ -155,6 +158,14 @@
         return round3(toNumber(remainder) + toNumber(restored));
     }
 
+    // Брак в м²: метры брака × ширина сырья (мм → м). Любой нуль → 0.
+    function defectM2(defectMeters, widthMm) {
+        var m = toNumber(defectMeters);
+        var w = toNumber(widthMm);
+        if (m <= 0 || w <= 0) return 0;
+        return round3(m * (w / 1000));
+    }
+
     // Дата-время события смены в формате «YYYY-MM-DD HH:MM:SS» (хронология,
     // первая колонка «Событие смены»). Принимает Date — детерминируется в тестах.
     function formatDateTime(date) {
@@ -178,7 +189,8 @@
         pickFifoBatch: pickFifoBatch,
         applyConsumption: applyConsumption,
         restoreConsumption: restoreConsumption,
-        formatDateTime: formatDateTime
+        formatDateTime: formatDateTime,
+        defectM2: defectM2
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -229,6 +241,7 @@
         this.userId = root.getAttribute('data-user-id') || '';
         this.meta = { cut: null, consumption: null, event: null, batch: null };
         this.batches = [];        // справочник партий сырья [{ id, label, date, remainder }]
+        this.materialWidths = {}; // { materialId: widthMm }
         this.refOptions = {};     // кеш опций searchable reference inputs по reqId
         this.cuts = [];           // производственные резки [{ id, label, status, slitter, cutType }]
         this.currentCutId = null; // выбранная резка
@@ -322,6 +335,8 @@
             self.meta.consumption = byName(TABLE.consumption);
             self.meta.event = byName(TABLE.event);
             self.meta.batch = byName(TABLE.batch);
+            self.meta.material = byName(TABLE.material);
+            self.meta.cutType = byName(TABLE.cutType);
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
             if (!self.meta.consumption) throw new Error('В метаданных не найдена таблица «' + TABLE.consumption + '»');
         });
@@ -345,6 +360,36 @@
                     remainderM: remMIdx >= 0 ? core.toNumber(row[remMIdx]) : 0
                 };
             });
+        });
+    };
+
+    // Карта ширин видов сырья: { id: Ширина,мм }. Для пересчёта брака,м → м².
+    AtexSlitter.prototype.loadMaterialWidths = function() {
+        var self = this;
+        var meta = this.meta.material;
+        if (!meta) { this.materialWidths = {}; return Promise.resolve(); }
+        var wIdx = colIndex(meta, 'Ширина, мм');
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
+            var map = {};
+            (rows || []).forEach(function(r) {
+                var row = r.r || [];
+                map[String(r.i)] = wIdx >= 0 ? core.toNumber(row[wIdx]) : 0;
+            });
+            self.materialWidths = map;
+        });
+    };
+
+    // Ширина сырья текущей резки: Тип резки → Вид сырья → Ширина,мм.
+    AtexSlitter.prototype.resolveCutWidth = function() {
+        var self = this;
+        var cut = this.currentCut;
+        var typeMeta = this.meta.cutType;
+        if (!cut || !cut.cutTypeId || !typeMeta) { if (cut) cut.materialWidthMm = 0; return Promise.resolve(); }
+        var matIdx = colIndex(typeMeta, 'Вид сырья');
+        return this.getJson('object/' + typeMeta.id + '/?JSON_OBJ&F_I=' + encodeURIComponent(cut.cutTypeId) + '&LIMIT=0,1').then(function(rows) {
+            var rec = (rows || [])[0];
+            var matId = rec && matIdx >= 0 ? parseRef((rec.r || [])[matIdx]).id : null;
+            cut.materialWidthMm = matId ? (self.materialWidths[String(matId)] || 0) : 0;
         });
     };
 
@@ -383,6 +428,7 @@
                 label: 'Резка №' + (row[0] || rec.i),
                 slitter: parseRef(val(CUT_REQ.slitter)).label,
                 cutType: parseRef(val(CUT_REQ.cutType)).label,
+                cutTypeId: parseRef(val(CUT_REQ.cutType)).id,
                 batch: parseRef(val(CUT_REQ.batch)).label,
                 batchId: parseRef(val(CUT_REQ.batch)).id,
                 savedMeterage: core.toNumber(val(CUT_REQ.meterage)),
@@ -392,6 +438,7 @@
                 counterEnd: val(CUT_REQ.counterEnd),
                 meterage: val(CUT_REQ.meterage),
                 defect: val(CUT_REQ.defect),
+                defectM: val(CUT_REQ.defectM),
                 notes: val(CUT_REQ.notes)
             };
         });
@@ -592,9 +639,19 @@
         meterField.appendChild(hint);
         grid.appendChild(meterField);
 
-        var defect = numInput(cut.defect, '0');
-        defect.addEventListener('input', function() { cut.defect = defect.value; });
-        grid.appendChild(field('Брак, м²', defect));
+        var defectM = numInput(cut.defectM, '0');
+        var defectHint = el('div', { class: 'atex-sl-hint', text: '' });
+        function refreshDefectM2() {
+            var m2 = core.defectM2(cut.defectM, cut.materialWidthMm);
+            cut.defect = m2 ? String(m2) : '';
+            defectHint.textContent = (core.toNumber(cut.defectM) > 0 && cut.materialWidthMm > 0)
+                ? ('= ' + m2 + ' м² (ширина ' + cut.materialWidthMm + ' мм)')
+                : (cut.materialWidthMm > 0 ? '' : 'ширина сырья не определена — м² не посчитать');
+        }
+        defectM.addEventListener('input', function() { cut.defectM = defectM.value; refreshDefectM2(); });
+        refreshDefectM2();
+        grid.appendChild(field('Брак, м', defectM));
+        grid.appendChild(defectHint);
 
         section.appendChild(grid);
 
@@ -734,7 +791,8 @@
         set(CUT_REQ.counterStart, num(cut.counterStart));
         set(CUT_REQ.counterEnd, num(cut.counterEnd));
         set(CUT_REQ.meterage, num(cut.meterage));
-        set(CUT_REQ.defect, num(cut.defect));
+        set(CUT_REQ.defectM, num(cut.defectM));
+        set(CUT_REQ.defect, core.defectM2(cut.defectM, cut.materialWidthMm));
         set(CUT_REQ.notes, cut.notes || '');
         return fields;
     };
@@ -933,17 +991,20 @@
         var self = this;
         this.setBusy(true);
         this.currentCutId = String(cutId);
-        Promise.all([
-            this.loadCut(cutId),
-            this.loadConsumptions(cutId),
-            this.loadEvents(cutId)
-        ]).then(function() {
-            self.setBusy(false);
-            self.render();
-        }).catch(function(err) {
-            self.setBusy(false);
-            self.notify('Не удалось открыть резку: ' + err.message, 'error');
-        });
+        this.loadCut(cutId)
+            .then(function() { return self.resolveCutWidth(); })
+            .then(function() {
+                return Promise.all([
+                    self.loadConsumptions(cutId),
+                    self.loadEvents(cutId)
+                ]);
+            }).then(function() {
+                self.setBusy(false);
+                self.render();
+            }).catch(function(err) {
+                self.setBusy(false);
+                self.notify('Не удалось открыть резку: ' + err.message, 'error');
+            });
     };
 
     AtexSlitter.prototype.setBusy = function(on) {
@@ -1000,7 +1061,7 @@
         this.mainEl.appendChild(el('div', { class: 'atex-sl-placeholder', text: 'Загрузка данных…' }));
 
         return this.loadMetadata()
-            .then(function() { return Promise.all([self.loadBatches(), self.loadCuts()]); })
+            .then(function() { return Promise.all([self.loadBatches(), self.loadCuts(), self.loadMaterialWidths()]); })
             .then(function() { self.render(); })
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
     };

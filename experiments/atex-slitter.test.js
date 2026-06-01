@@ -100,4 +100,10 @@ assertEqual(core.applyConsumption(4000, 300 - 0), 3700, 'остаток,м: пе
 assertEqual(core.restoreConsumption(3700, 300 - 250), 3750, 'остаток,м: правка погонажа вниз возвращает');
 assertEqual(core.applyConsumption(100, 300), 0, 'остаток,м: не ниже нуля');
 
+// ── defectM2: брак,м² = брак,м × ширина_мм/1000 ──
+assertEqual(core.defectM2(10, 910), 9.1, 'defectM2: 10 м при 910 мм = 9.1 м²');
+assertEqual(core.defectM2('5,5', 880), 4.84, 'defectM2: запятая-десятичная, 880 мм');
+assertEqual(core.defectM2(0, 910), 0, 'defectM2: ноль метров → 0');
+assertEqual(core.defectM2(10, 0), 0, 'defectM2: нет ширины → 0');
+
 console.log('\n' + passed + ' assertions passed');
