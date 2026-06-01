@@ -61,7 +61,7 @@
     };
     var CONS_REQ = { amount: 'Израсходовано, м²', batch: 'Партия сырья' };
     var EVENT_REQ = { type: 'Тип события', cut: 'Производственная резка', user: 'Пользователь', value: 'Значение', notes: 'Примечания' };
-    var BATCH_REQ = { kind: 'Вид сырья', date: 'Дата прихода', received: 'Получено, м²', remainder: 'Остаток, м²' };
+    var BATCH_REQ = { kind: 'Вид сырья', date: 'Дата прихода', received: 'Получено, м²', remainder: 'Остаток, м²', remainderM: 'Остаток, м' };
 
     // Статусы резки по дизайн-спеке atex (§3.5): жёсткая цепочка переходов.
     var STATUSES = ['Ожидает', 'Наладка', 'В работе', 'Завершён'];
@@ -334,13 +334,15 @@
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
             var dateIdx = colIndex(meta, BATCH_REQ.date);
             var remIdx = colIndex(meta, BATCH_REQ.remainder);
+            var remMIdx = colIndex(meta, BATCH_REQ.remainderM);
             self.batches = (rows || []).map(function(r) {
                 var row = r.r || [];
                 return {
                     id: String(r.i),
                     label: row[0] || ('Партия #' + r.i),
                     date: dateIdx >= 0 ? (row[dateIdx] || '') : '',
-                    remainder: remIdx >= 0 ? core.toNumber(row[remIdx]) : 0
+                    remainder: remIdx >= 0 ? core.toNumber(row[remIdx]) : 0,
+                    remainderM: remMIdx >= 0 ? core.toNumber(row[remMIdx]) : 0
                 };
             });
         });
@@ -382,6 +384,8 @@
                 slitter: parseRef(val(CUT_REQ.slitter)).label,
                 cutType: parseRef(val(CUT_REQ.cutType)).label,
                 batch: parseRef(val(CUT_REQ.batch)).label,
+                batchId: parseRef(val(CUT_REQ.batch)).id,
+                savedMeterage: core.toNumber(val(CUT_REQ.meterage)),
                 planDate: val(CUT_REQ.planDate),
                 status: core.normalizeStatus(val(CUT_REQ.status)),
                 counterStart: val(CUT_REQ.counterStart),
@@ -761,9 +765,31 @@
         var cut = this.currentCut;
         if (this.busy || !cut) return;
         this.setBusy(true);
+        var meterageNow = core.toNumber(cut.meterage);
+        var meterageWas = core.toNumber(cut.savedMeterage);
+        var delta = meterageNow - meterageWas; // сколько ещё списать с остатка,м
+        var batch = cut.batchId ? self.findBatch(cut.batchId) : null;
+        var batchMeta = this.meta.batch;
+
         this.post('_m_set/' + cut.id + '?JSON', this.cutFields(cut)).then(function() {
+            // Списываем дельту погонажа с остатка,м партии резки.
+            if (!batch || !batchMeta || delta === 0) return null;
+            var remReq = reqIdByName(batchMeta, BATCH_REQ.remainderM);
+            if (!remReq) return null;
+            var newRem = delta > 0
+                ? core.applyConsumption(batch.remainderM, delta)
+                : core.restoreConsumption(batch.remainderM, -delta);
+            var bf = {};
+            bf['t' + remReq] = newRem;
+            return self.post('_m_set/' + batch.id + '?JSON', bf).then(function() {
+                batch.remainderM = newRem;
+            });
+        }).then(function() {
+            cut.savedMeterage = meterageNow;
+            return self.loadBatches();
+        }).then(function() {
             self.setBusy(false);
-            self.notify('Показания сохранены', 'success');
+            self.notify('Показания сохранены; остаток партии (м) обновлён', 'success');
         }).catch(function(err) {
             self.setBusy(false);
             self.notify('Ошибка сохранения: ' + err.message, 'error');

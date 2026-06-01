@@ -95,4 +95,9 @@ assertEqual(rem, 100, 'cycle: cancel restores full 50 → 100');
 assertEqual(core.formatDateTime(new Date(2026, 4, 30, 9, 5, 7)), '2026-05-30 09:05:07',
     'formatDateTime pads month/day/time to YYYY-MM-DD HH:MM:SS');
 
+// ── остаток,м по дельте погонажа (используем applyConsumption/restoreConsumption) ──
+assertEqual(core.applyConsumption(4000, 300 - 0), 3700, 'остаток,м: первое списание погонажа');
+assertEqual(core.restoreConsumption(3700, 300 - 250), 3750, 'остаток,м: правка погонажа вниз возвращает');
+assertEqual(core.applyConsumption(100, 300), 0, 'остаток,м: не ниже нуля');
+
 console.log('\n' + passed + ' assertions passed');
