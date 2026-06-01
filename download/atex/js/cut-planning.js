@@ -308,7 +308,6 @@
 
     // Загрузить полосы одного типа резки (подчинённые записи Полоса).
     AtexCutPlanning.prototype.loadStripsForType = function(typeId) {
-        var self = this;
         var sm = this.meta.strip;
         var order = [sm.id].concat((sm.reqs || []).map(function(r) { return String(r.id); }));
         function sCol(name) {
@@ -332,7 +331,10 @@
     // Возвращает Promise<{id, name}> если дубль найден, иначе Promise<null>.
     AtexCutPlanning.prototype.findDuplicateCutType = function(materialId, strips) {
         var self = this;
-        var targetSig = combinationSignature(String(materialId), strips);
+        var nonEmpty = (strips || []).filter(function(s) {
+            return String(s.width).trim() !== '' || String(s.qty).trim() !== '';
+        });
+        var targetSig = combinationSignature(String(materialId), nonEmpty);
         // Фильтруем по сырью (строковое сравнение id).
         var candidates = this.cutTypes.filter(function(ct) {
             return ct.materialId !== null && String(ct.materialId) === String(materialId);
@@ -432,7 +434,7 @@
                 return self.loadCutTypes();
             }).then(function() {
                 self.setBusy(false);
-                self.notify('Тип резки «' + generateCutTypeName(strips) + '» сохранён', 'success');
+                self.notify('Тип резки «' + name + '» сохранён', 'success');
             });
         }).catch(function(err) {
             self.setBusy(false);
