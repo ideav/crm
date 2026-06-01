@@ -255,6 +255,8 @@
     color: var(--sl-warn);
     border-color: var(--sl-danger-border);
 }
+.atex-sl-btn-secondary { background: var(--sl-surface); }
+.atex-sl-photo { display: flex; align-items: center; gap: 8px; }
 
 /* Тосты-уведомления (без alert/confirm/prompt) */
 .atex-sl-toast {
