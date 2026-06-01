@@ -146,4 +146,15 @@ assertEqual(planning.rowsToPositions([{ position_id: '9', position_no: '3', posi
     [{ id: '9', label: '#9 · 3' }], 'rowsToPositions: без деталей — fallback на номер');
 assertEqual(planning.rowsToPositions([]), [], 'rowsToPositions: пустой ввод → пустой список');
 
+// ── rowsToBatches: строки material_batches (JSON_KV) → [{id,label}] для дропдауна ──
+var batchRows = [
+    { batch_id: '1946', batch_no: 'RM-АТХ-3002-2026-05-31', batch_material: 'MWR118', batch_remainder_m2: '2440.00' },
+    { batch_id: '8078', batch_no: 'Начальный остаток MR131', batch_material: 'MR131', batch_remainder_m2: '4588.35' }
+];
+assertEqual(planning.rowsToBatches(batchRows), [
+    { id: '1946', label: 'RM-АТХ-3002-2026-05-31' },
+    { id: '8078', label: 'Начальный остаток MR131' }
+], 'rowsToBatches: id записи партии + номер партии как подпись');
+assertEqual(planning.rowsToBatches([]), [], 'rowsToBatches: пустой ввод → пустой список');
+
 console.log('\n' + passed + ' assertions passed');

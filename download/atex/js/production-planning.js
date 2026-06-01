@@ -14,9 +14,10 @@
 //
 // Справочник позиций заказа (для привязки обеспечения) берётся отчётом
 // `GET /{db}/report/positions_list?JSON_KV` (`rowsToPositions`): Позиция заказа —
-// подчинённая таблица, прямое `object/`-чтение её не отдаёт. Справочники станков,
-// типов резки и партий сырья для формы читаются по именам из метаданных
-// (`object/{table}?JSON_OBJ`), поиск опций — через `AtexRefSearch`.
+// подчинённая таблица, прямое `object/`-чтение её не отдаёт. Партии сырья для
+// формы создания резки берутся отчётом `report/material_batches?JSON_KV`
+// (`rowsToBatches`). Справочники станков и типов резки читаются по именам из
+// метаданных (`object/{table}?JSON_OBJ`); поиск опций — через `AtexRefSearch`.
 //
 // Запись идёт прямыми командами `_m_*` (#2903): создание резки —
 // `_m_new/{Производственная резка}` (Номер не задаётся, у таблицы `unique=1` —
@@ -54,8 +55,7 @@
         cut: 'Производственная резка',
         supply: 'Обеспечение',
         slitter: 'Слиттер',
-        cutType: 'Тип резки',
-        materialBatch: 'Партия сырья'
+        cutType: 'Тип резки'
     };
     // Реквизиты «Производственной резки» (Номер — главное значение, автонумер).
     var CUT_REQ = {
@@ -231,6 +231,18 @@
         });
     }
 
+    // Строки отчёта material_batches (JSON_KV) → [{ id, label }] для дропдауна
+    // «Партия сырья». Подпись = номер партии (`batch_no`) — паритет с опциями
+    // серверного поиска AtexRefSearch (главное значение записи).
+    function rowsToBatches(rows) {
+        return (rows || []).map(function(row) {
+            return {
+                id: row.batch_id == null ? '' : String(row.batch_id),
+                label: row.batch_no == null ? '' : String(row.batch_no)
+            };
+        });
+    }
+
     var planning = {
         parseRef: parseRef,
         reqIdByName: reqIdByName,
@@ -240,7 +252,8 @@
         filterCuts: filterCuts,
         buildFields: buildFields,
         rowsToPlanning: rowsToPlanning,
-        rowsToPositions: rowsToPositions
+        rowsToPositions: rowsToPositions,
+        rowsToBatches: rowsToBatches
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -265,7 +278,7 @@
     function AtexProductionPlanning(root) {
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
-        this.meta = { cut: null, supply: null, slitter: null, cutType: null, materialBatch: null };
+        this.meta = { cut: null, supply: null, slitter: null, cutType: null };
         this.slitters = [];        // справочник [{ id, label }]
         this.cutTypes = [];        // справочник [{ id, label }]
         this.materialBatches = []; // справочник [{ id, label }]
@@ -337,7 +350,6 @@
             self.meta.supply = byName(TABLE.supply);
             self.meta.slitter = byName(TABLE.slitter);
             self.meta.cutType = byName(TABLE.cutType);
-            self.meta.materialBatch = byName(TABLE.materialBatch);
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
             if (!self.meta.supply) throw new Error('В метаданных не найдена таблица «' + TABLE.supply + '»');
         });
@@ -366,6 +378,14 @@
         var self = this;
         return this.getJson('report/positions_list?JSON_KV&LIMIT=0,2000').then(function(rows) {
             self.positions = rowsToPositions(rows || []);
+        });
+    };
+
+    // Справочник партий сырья отчётом material_batches (JSON_KV).
+    AtexProductionPlanning.prototype.loadMaterialBatches = function() {
+        var self = this;
+        return this.getJson('report/material_batches?JSON_KV&LIMIT=0,2000').then(function(rows) {
+            self.materialBatches = rowsToBatches(rows || []);
         });
     };
 
@@ -718,7 +738,7 @@
                 return Promise.all([
                     self.loadRef(self.meta.slitter).then(function(items) { self.slitters = items; }),
                     self.loadRef(self.meta.cutType).then(function(items) { self.cutTypes = items; }),
-                    self.loadRef(self.meta.materialBatch).then(function(items) { self.materialBatches = items; }),
+                    self.loadMaterialBatches(),
                     self.loadPositions(),
                     self.loadPlanning()
                 ]);
