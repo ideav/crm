@@ -45,7 +45,9 @@
         material: 'Вид сырья',
         arrivedAt: 'Дата прихода',
         received: 'Получено, м²',
-        remainder: 'Остаток, м²'
+        remainder: 'Остаток, м²',
+        lengthM: 'Длина, м',
+        remainderM: 'Остаток, м'
     };
 
     // ───────────────────────── Чистое ядро расчёта ─────────────────────────
@@ -67,6 +69,16 @@
     // Критерий приёмки #2914: «Остаток, м²» при оприходовании равен «Получено, м²».
     function initialRemainder(received) {
         return round3(toNumber(received));
+    }
+
+    // Длина джамбо по умолчанию: «Длина рулона, м» выбранного вида сырья.
+    // materials: [{ id, label, rollLength }]. Нет данных → 0.
+    function materialDefaultLength(materials, materialId) {
+        if (materialId == null) return 0;
+        var m = (materials || []).filter(function(x) {
+            return String(x.id) === String(materialId);
+        })[0];
+        return m ? round3(toNumber(m.rollLength)) : 0;
     }
 
     // Сортировочный ключ даты для FIFO: ISO (YYYY-MM-DD) и Д.М.Г → число.
@@ -105,6 +117,7 @@
         toNumber: toNumber,
         round3: round3,
         initialRemainder: initialRemainder,
+        materialDefaultLength: materialDefaultLength,
         dateKey: dateKey,
         sortFifo: sortFifo,
         summarize: summarize
@@ -172,6 +185,7 @@
         this.refOptions = {};  // кеш опций searchable reference inputs по reqId
         this.current = null;   // редактируемая/новая партия
         this.remainderTouched = false; // пользователь вручную правил «Остаток»?
+        this.remainderMTouched = false;
         this.busy = false;
     }
 
@@ -265,8 +279,14 @@
         var self = this;
         if (!this.meta.material) { this.materials = []; return Promise.resolve(); }
         return this.getJson('object/' + this.meta.material.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
+            var lenIdx = self.colIndex(self.meta.material, 'Длина рулона, м');
             self.materials = (rows || []).map(function(r) {
-                return { id: String(r.i), label: (r.r && r.r[0]) || ('#' + r.i) };
+                var row = r.r || [];
+                return {
+                    id: String(r.i),
+                    label: row[0] || ('#' + r.i),
+                    rollLength: lenIdx >= 0 ? (row[lenIdx] || '') : ''
+                };
             });
         });
     };
@@ -286,6 +306,8 @@
         var iArr = this.colIndex(meta, BATCH_REQ.arrivedAt);
         var iRec = this.colIndex(meta, BATCH_REQ.received);
         var iRem = this.colIndex(meta, BATCH_REQ.remainder);
+        var iLen = this.colIndex(meta, BATCH_REQ.lengthM);
+        var iRemM = this.colIndex(meta, BATCH_REQ.remainderM);
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
             var list = (rows || []).map(function(rec) {
                 var r = rec.r || [];
@@ -297,7 +319,9 @@
                     materialLabel: matRef.label,
                     arrivedAt: iArr >= 0 ? (r[iArr] || '') : '',
                     received: iRec >= 0 ? (r[iRec] || '') : '',
-                    remainder: iRem >= 0 ? (r[iRem] || '') : ''
+                    remainder: iRem >= 0 ? (r[iRem] || '') : '',
+                    lengthM: iLen >= 0 ? (r[iLen] || '') : '',
+                    remainderM: iRemM >= 0 ? (r[iRemM] || '') : ''
                 };
             });
             // FIFO: старые партии — первыми (сортировка по дате прихода).
@@ -313,6 +337,7 @@
             arrivedAt: todayIso(), received: '', remainder: ''
         };
         this.remainderTouched = false;
+        this.remainderMTouched = false;
     };
 
     AtexIntake.prototype.openBatch = function(id) {
@@ -403,7 +428,18 @@
             value: c.materialId,
             placeholder: '— не выбрано —',
             reqId: reqIdByName(this.meta.batch, BATCH_REQ.material),
-            onChange: function(value) { c.materialId = value || null; }
+            onChange: function(value) {
+                c.materialId = value || null;
+                if (!self.remainderMTouched && (c.lengthM === '' || c.lengthM == null)) {
+                    var def = calc.materialDefaultLength(self.materials, c.materialId);
+                    if (def > 0) {
+                        c.lengthM = String(def);
+                        c.remainderM = String(def);
+                        if (self.lengthInput) self.lengthInput.value = c.lengthM;
+                        if (self.remainderMInput) self.remainderMInput.value = c.remainderM;
+                    }
+                }
+            }
         });
         form.appendChild(field('Вид сырья', materialRef));
 
@@ -425,6 +461,29 @@
             }
         });
         form.appendChild(field('Получено, м²', recInput));
+
+        // Длина, м — метраж джамбо. Дефолт из «Длина рулона, м» вида сырья.
+        var lenInput = el('input', { class: 'atex-in-input', type: 'number', min: '0', step: 'any', placeholder: '0' });
+        lenInput.value = c.lengthM == null ? '' : c.lengthM;
+        lenInput.addEventListener('input', function() {
+            c.lengthM = lenInput.value;
+            if (!self.remainderMTouched) {
+                c.remainderM = lenInput.value;
+                if (self.remainderMInput) self.remainderMInput.value = lenInput.value;
+            }
+        });
+        this.lengthInput = lenInput;
+        form.appendChild(field('Длина, м', lenInput, 'Метраж рулона Jumbo Roll'));
+
+        // Остаток, м — по умолчанию = длине; правка фиксирует ручной режим.
+        var remMInput = el('input', { class: 'atex-in-input', type: 'number', min: '0', step: 'any', placeholder: '0' });
+        remMInput.value = c.remainderM == null ? '' : c.remainderM;
+        remMInput.addEventListener('input', function() {
+            c.remainderM = remMInput.value;
+            self.remainderMTouched = true;
+        });
+        this.remainderMInput = remMInput;
+        form.appendChild(field('Остаток, м', remMInput, 'Инициализируется значением «Длина, м»'));
 
         // Остаток, м² — по умолчанию = получено; правка фиксирует ручной режим.
         var remInput = el('input', { class: 'atex-in-input', type: 'number', min: '0', step: 'any', placeholder: '0' });
@@ -477,6 +536,14 @@
         fields['t' + reqIdByName(meta, BATCH_REQ.arrivedAt)] = c.arrivedAt || todayIso();
         fields['t' + reqIdByName(meta, BATCH_REQ.received)] = round3(toNumber(c.received));
         fields['t' + reqIdByName(meta, BATCH_REQ.remainder)] = remainder;
+        var lengthM = round3(toNumber(c.lengthM));
+        var remainderM = (c.remainderM === '' || c.remainderM == null)
+            ? lengthM
+            : round3(toNumber(c.remainderM));
+        var lenReqId = reqIdByName(meta, BATCH_REQ.lengthM);
+        var remMReqId = reqIdByName(meta, BATCH_REQ.remainderM);
+        if (lenReqId) fields['t' + lenReqId] = lengthM;
+        if (remMReqId) fields['t' + remMReqId] = remainderM;
 
         this.setBusy(true);
         var chain;
