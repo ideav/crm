@@ -35,7 +35,10 @@
         { key: 'approved', label: 'Дата согласования', names: ['Дата согласования'] },
         { key: 'status', label: 'Статус', names: ['Статус'], status: true },
         { key: 'lead', label: 'Лидер', names: ['Лидер'] },
-        { key: 'notes', label: 'Примечания', names: ['Примечания'] }
+        { key: 'notes', label: 'Примечания', names: ['Примечания'] },
+        // Счётчик подчинённых позиций (ROLLUP-колонка «Позиция заказа») — приходит
+        // в записи заказа сразу, до ленивой загрузки самих позиций.
+        { key: 'posCount', label: 'Позиций', names: ['Позиция заказа'] }
     ];
 
     // Карта полей подчинённой таблицы «Позиция заказа».
@@ -606,7 +609,12 @@
         }
 
         var rows = orders.map(function(order) {
-            var positions = state.positionsByOrder[order.id] || [];
+            var loadedPositions = state.positionsByOrder[order.id];
+            // Пока позиции не догружены (заказ не раскрыт) — берём счётчик из самой
+            // записи заказа (ROLLUP «Позиция заказа»); после загрузки считаем по факту.
+            var positionCount = loadedPositions
+                ? loadedPositions.length
+                : (parseInt(order.values.posCount, 10) || 0);
             var isOpen = !!state.expanded[order.id];
             var main = '<tr class="atex-orders-row" data-order-id="' + escapeHtml(order.id) + '">' +
                 '<td class="atex-orders-toggle-cell"><button type="button" class="atex-orders-toggle" data-toggle="' + escapeHtml(order.id) + '" title="Позиции">' +
@@ -617,7 +625,7 @@
                 '<td>' + escapeHtml(order.values.created || '') + '</td>' +
                 '<td>' + statusSelectHtml(state.orderStatuses, order.values.status,
                     ' data-order-status="' + escapeHtml(order.id) + '"') + '</td>' +
-                '<td class="atex-orders-count">' + positions.length + '</td>' +
+                '<td class="atex-orders-count">' + positionCount + '</td>' +
                 '</tr>';
             var detail = isOpen
                 ? '<tr class="atex-orders-detail-row"><td colspan="7">' + renderPositions(order) + '</td></tr>'
