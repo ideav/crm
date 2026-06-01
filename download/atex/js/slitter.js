@@ -330,13 +330,10 @@
 
     // Multipart-POST для файловых реквизитов (паттерн платформы, issue #1310):
     // тело FormData с _xsrf и t{reqId}=<File>. Возвращает разобранный JSON.
-    AtexSlitter.prototype.postFile = function(path, reqKey, file, extra) {
+    AtexSlitter.prototype.postFile = function(path, reqKey, file) {
         var fd = new FormData();
         fd.append('_xsrf', (typeof window !== 'undefined' && window.xsrf) || this.root.getAttribute('data-xsrf') || '');
         if (reqKey && file) fd.append(reqKey, file);
-        Object.keys(extra || {}).forEach(function(k) {
-            if (extra[k] !== undefined && extra[k] !== null && extra[k] !== '') fd.append(k, extra[k]);
-        });
         return fetch(this.url(path), { method: 'POST', credentials: 'same-origin', body: fd })
             .then(function(resp) {
                 return resp.text().then(function(text) {
@@ -907,7 +904,8 @@
         if (statusEl) statusEl.textContent = 'загрузка…';
         this.postFile('_m_set/' + cut.id + '?JSON', key, file).then(function() {
             self.setBusy(false);
-            cut.defectPhoto = file.name;
+            // флаг «фото есть» (серверное значение подтянется при следующей загрузке резки)
+            cut.defectPhoto = '1';
             if (statusEl) statusEl.textContent = 'фото загружено';
             self.notify('Фото брака загружено', 'success');
         }).catch(function(err) {
