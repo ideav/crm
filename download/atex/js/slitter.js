@@ -868,6 +868,9 @@
         var batch = cut.batchId ? self.findBatch(cut.batchId) : null;
         var batchMeta = this.meta.batch;
 
+        // Порядок «резка → остаток партии» безопасен для повтора: cut.savedMeterage
+        // двигаем только после успеха всей цепочки, поэтому при сбое второго POST
+        // повторное сохранение применит дельту заново без двойного списания.
         this.post('_m_set/' + cut.id + '?JSON', this.cutFields(cut)).then(function() {
             // Списываем дельту погонажа с остатка,м партии резки.
             if (!batch || !batchMeta || delta === 0) return null;
