@@ -7,7 +7,6 @@
 // Поля формы: Вид сырья (searchable-ref), целевая ширина, допуск (дефолт 20).
 // Кнопка «Подобрать» → loadPreferredWidths → suggestCombination → таблица полос.
 // Полосы редактируемы вручную (как в cut-calc.js). Итоги пересчитываются на лету.
-// Кнопка «Сохранить как тип резки» — заглушка для Task 4.
 //
 // Чистое ядро расчёта вынесено в объект `calc` и экспортируется через
 // module.exports для модульных тестов (experiments/atex-cut-planning.test.js).
@@ -406,6 +405,8 @@
             if (tkReqId) cutFields['t' + tkReqId] = totalKnivesVal;
             var remReqId = reqIdByName(meta, CUT_REQ.remainder);
             if (remReqId) cutFields['t' + remReqId] = rem;
+            var tolReqId = reqIdByName(meta, CUT_REQ.tolerance);
+            if (tolReqId) cutFields['t' + tolReqId] = (self.form && self.form.tolerance) || '20';
 
             return self.post('_m_new/' + meta.id + '?JSON&up=1&full=1', cutFields).then(function(res) {
                 var cutId = res && (res.obj || res.id || res.i);
