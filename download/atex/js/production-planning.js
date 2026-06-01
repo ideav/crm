@@ -12,6 +12,12 @@
 // `object/`-чтений резок и обеспечения, резолв метаданных для чтения не нужен
 // (правило: docs/integram-reports.md).
 //
+// Справочник позиций заказа (для привязки обеспечения) берётся отчётом
+// `GET /{db}/report/positions_list?JSON_KV` (`rowsToPositions`): Позиция заказа —
+// подчинённая таблица, прямое `object/`-чтение её не отдаёт. Справочники станков,
+// типов резки и партий сырья для формы читаются по именам из метаданных
+// (`object/{table}?JSON_OBJ`), поиск опций — через `AtexRefSearch`.
+//
 // Запись идёт прямыми командами `_m_*` (#2903): создание резки —
 // `_m_new/{Производственная резка}` (Номер не задаётся, у таблицы `unique=1` —
 // сервер сам считает автонумер), обеспечение — `_m_new/{Обеспечение}` с
@@ -47,7 +53,6 @@
     var TABLE = {
         cut: 'Производственная резка',
         supply: 'Обеспечение',
-        position: 'Позиция заказа',
         slitter: 'Слиттер',
         cutType: 'Тип резки',
         materialBatch: 'Партия сырья'
@@ -68,15 +73,6 @@
         finishedBatch: 'Партия ГП',
         status: 'Статус'
     };
-    // Реквизиты «Позиции заказа» — нужны лишь для подписи в списке привязки.
-    var POSITION_REQ = {
-        qty: 'Кол-во',
-        material: 'Вид сырья',
-        cutType: 'Тип резки',
-        width: 'Ширина, мм',
-        status: 'Статус'
-    };
-
     // Статусы — свободный текст (тип 3); фиксируем разумные наборы по дизайн-спеке.
     var CUT_STATUSES = ['Запланирована', 'В очереди', 'В работе', 'Готова', 'Отменена'];
     var SUPPLY_STATUSES = ['Зарезервировано', 'Выполнено', 'Отменено'];
@@ -220,6 +216,21 @@
         return { cuts: order.map(function(id) { return cutsById[id]; }), supplies: supplies };
     }
 
+    // Строки отчёта positions_list (JSON_KV) → [{ id, label }] для дропдауна
+    // привязки. Подпись: «#id · Тип резки · Ширина · Кол-во» (пустые поля
+    // пропускаются); если деталей нет — «#id · Номер».
+    function rowsToPositions(rows) {
+        return (rows || []).map(function(row) {
+            var id = row.position_id == null ? '' : String(row.position_id);
+            var parts = [row.position_cut_type, row.position_width, row.position_qty]
+                .map(function(v) { return v == null ? '' : String(v).trim(); })
+                .filter(function(v) { return v !== ''; });
+            var main = row.position_no == null ? '' : String(row.position_no).trim();
+            var label = '#' + id + (parts.length ? ' · ' + parts.join(' · ') : (main ? ' · ' + main : ''));
+            return { id: id, label: label };
+        });
+    }
+
     var planning = {
         parseRef: parseRef,
         reqIdByName: reqIdByName,
@@ -228,7 +239,8 @@
         groupBySlitter: groupBySlitter,
         filterCuts: filterCuts,
         buildFields: buildFields,
-        rowsToPlanning: rowsToPlanning
+        rowsToPlanning: rowsToPlanning,
+        rowsToPositions: rowsToPositions
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -253,7 +265,7 @@
     function AtexProductionPlanning(root) {
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
-        this.meta = { cut: null, supply: null, position: null, slitter: null, cutType: null, materialBatch: null };
+        this.meta = { cut: null, supply: null, slitter: null, cutType: null, materialBatch: null };
         this.slitters = [];        // справочник [{ id, label }]
         this.cutTypes = [];        // справочник [{ id, label }]
         this.materialBatches = []; // справочник [{ id, label }]
@@ -323,7 +335,6 @@
             }
             self.meta.cut = byName(TABLE.cut);
             self.meta.supply = byName(TABLE.supply);
-            self.meta.position = byName(TABLE.position);
             self.meta.slitter = byName(TABLE.slitter);
             self.meta.cutType = byName(TABLE.cutType);
             self.meta.materialBatch = byName(TABLE.materialBatch);
@@ -349,23 +360,12 @@
         });
     };
 
+    // Справочник позиций заказа отчётом positions_list (JSON_KV). Позиция
+    // подчинённая — прямое object/-чтение её не отдаёт, отчёт возвращает все.
     AtexProductionPlanning.prototype.loadPositions = function() {
         var self = this;
-        var meta = this.meta.position;
-        if (!meta) { this.positions = []; return Promise.resolve(); }
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,2000').then(function(rows) {
-            self.positions = (rows || []).map(function(r) {
-                var parts = [];
-                var main = (r.r && r.r[0]) || ('#' + r.i);
-                [POSITION_REQ.cutType, POSITION_REQ.width, POSITION_REQ.qty].forEach(function(name) {
-                    var idx = columnIndex(meta, name);
-                    if (idx >= 0 && r.r && r.r[idx] != null && String(r.r[idx]).trim() !== '') {
-                        parts.push(parseRef(r.r[idx]).label || String(r.r[idx]));
-                    }
-                });
-                var label = '#' + r.i + (parts.length ? ' · ' + parts.join(' · ') : (' · ' + main));
-                return { id: String(r.i), label: label };
-            });
+        return this.getJson('report/positions_list?JSON_KV&LIMIT=0,2000').then(function(rows) {
+            self.positions = rowsToPositions(rows || []);
         });
     };
 

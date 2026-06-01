@@ -133,4 +133,17 @@ assertEqual(planning.rowsToPlanning([]).cuts.length, 0, 'rowsToPlanning empty in
 assertEqual(planning.groupBySlitter(plan.cuts).map(function(g) { return g.slitter.label; }),
     ['Станок 1', 'Без станка'], 'groupBySlitter over rowsToPlanning cuts');
 
+// ── rowsToPositions: строки positions_list (JSON_KV) → [{id,label}] для дропдауна ──
+var posRows = [
+    { position_id: '8207', position_no: '1', position_cut_type: '', position_width: '25.00', position_qty: '70' },
+    { position_id: '8300', position_no: '2', position_cut_type: '110мм×8', position_width: '110.00', position_qty: '5' }
+];
+assertEqual(planning.rowsToPositions(posRows), [
+    { id: '8207', label: '#8207 · 25.00 · 70' },
+    { id: '8300', label: '#8300 · 110мм×8 · 110.00 · 5' }
+], 'rowsToPositions: «#id · тип · ширина · кол-во», пустые поля пропущены');
+assertEqual(planning.rowsToPositions([{ position_id: '9', position_no: '3', position_cut_type: '', position_width: '', position_qty: '' }]),
+    [{ id: '9', label: '#9 · 3' }], 'rowsToPositions: без деталей — fallback на номер');
+assertEqual(planning.rowsToPositions([]), [], 'rowsToPositions: пустой ввод → пустой список');
+
 console.log('\n' + passed + ' assertions passed');
