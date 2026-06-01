@@ -5,14 +5,26 @@
 // через подчинённую таблицу «Обеспечение». Решение задачи ideav/crm#2913
 // (часть #2903). Правила разработки рабочих мест — docs/WORKSPACE_DEVELOPMENT_GUIDE.md.
 //
-// На этом этапе рабочее место обращается к данным напрямую командами `_m_*`
-// (#2903): создание резки — `_m_new/{Производственная резка}` (Номер не задаётся,
-// у таблицы `unique=1` — сервер сам считает автонумер), обеспечение —
-// `_m_new/{Обеспечение}` с `up={позицияId}` и ссылкой `t{Производственная резка}`,
-// правки — `_m_set`. ID таблиц и реквизитов не хардкодятся: они берутся по именам
-// из `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6).
-// Перевод чтений на защищённый слой `report/` — следующий этап и в объём этой
-// задачи не входит.
+// Чтения очереди резок и их обеспечения берутся одним отчётом защищённого слоя
+// `GET /{db}/report/cut_planning?JSON_KV` (Резка→Обеспечение→Позиция). Чистая
+// `rowsToPlanning` разворачивает плоские строки в резки (dedup по `cut_id`) и
+// обеспечения (строки с непустым `supply_id`) — один запрос вместо отдельных
+// `object/`-чтений резок и обеспечения, резолв метаданных для чтения не нужен
+// (правило: docs/integram-reports.md).
+//
+// Справочник позиций заказа (для привязки обеспечения) берётся отчётом
+// `GET /{db}/report/positions_list?JSON_KV` (`rowsToPositions`): Позиция заказа —
+// подчинённая таблица, прямое `object/`-чтение её не отдаёт. Партии сырья для
+// формы создания резки берутся отчётом `report/material_batches?JSON_KV`
+// (`rowsToBatches`). Справочники станков и типов резки читаются по именам из
+// метаданных (`object/{table}?JSON_OBJ`); поиск опций — через `AtexRefSearch`.
+//
+// Запись идёт прямыми командами `_m_*` (#2903): создание резки —
+// `_m_new/{Производственная резка}` (Номер не задаётся, у таблицы `unique=1` —
+// сервер сам считает автонумер), обеспечение — `_m_new/{Обеспечение}` с
+// `up={позицияId}` и ссылкой `t{Производственная резка}`, правки — `_m_set`. ID
+// таблиц и реквизитов для записи не хардкодятся: берутся по именам из
+// `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6).
 //
 // Чистое ядро (разбор записей, группировка очереди по слиттерам, фильтрация,
 // сборка полей `t{reqId}`) вынесено в объект `planning` и экспортируется через
@@ -42,10 +54,8 @@
     var TABLE = {
         cut: 'Производственная резка',
         supply: 'Обеспечение',
-        position: 'Позиция заказа',
         slitter: 'Слиттер',
-        cutType: 'Тип резки',
-        materialBatch: 'Партия сырья'
+        cutType: 'Тип резки'
     };
     // Реквизиты «Производственной резки» (Номер — главное значение, автонумер).
     var CUT_REQ = {
@@ -63,15 +73,6 @@
         finishedBatch: 'Партия ГП',
         status: 'Статус'
     };
-    // Реквизиты «Позиции заказа» — нужны лишь для подписи в списке привязки.
-    var POSITION_REQ = {
-        qty: 'Кол-во',
-        material: 'Вид сырья',
-        cutType: 'Тип резки',
-        width: 'Ширина, мм',
-        status: 'Статус'
-    };
-
     // Статусы — свободный текст (тип 3); фиксируем разумные наборы по дизайн-спеке.
     var CUT_STATUSES = ['Запланирована', 'В очереди', 'В работе', 'Готова', 'Отменена'];
     var SUPPLY_STATUSES = ['Зарезервировано', 'Выполнено', 'Отменено'];
@@ -176,6 +177,86 @@
         return out;
     }
 
+    // Плоские строки отчёта cut_planning (JSON_KV) → { cuts, supplies }.
+    // Одна резка с N обеспечениями даёт N строк (LEFT JOIN) — резки dedup по
+    // `cut_id`; обеспечения собираются из строк с непустым `supply_id`. Резки без
+    // обеспечения (пустой `supply_id`) остаются в очереди и фантомных связей не
+    // создают. Формы записей совпадают с прежними mapCutRecord/loadSupplies:
+    // резка — { id, number, slitter:{id,label}, cutType:{id,label},
+    // materialBatch:{id,label}, planDate, status }; обеспечение —
+    // { id, positionId, cutId }.
+    function rowsToPlanning(rows) {
+        var cutsById = {};
+        var order = [];
+        var supplies = [];
+        function str(v) { return v == null ? '' : String(v); }
+        (rows || []).forEach(function(row) {
+            var cutId = str(row.cut_id);
+            if (cutId && !cutsById[cutId]) {
+                cutsById[cutId] = {
+                    id: cutId,
+                    number: str(row.cut_no),
+                    slitter: { id: row.cut_slitter_id ? String(row.cut_slitter_id) : null, label: str(row.cut_slitter) },
+                    cutType: { id: null, label: str(row.cut_type) },
+                    materialBatch: { id: null, label: str(row.cut_material_batch) },
+                    planDate: str(row.cut_plan_date),
+                    status: str(row.cut_status)
+                };
+                order.push(cutId);
+            }
+            var supplyId = str(row.supply_id);
+            if (supplyId) {
+                supplies.push({
+                    id: supplyId,
+                    positionId: row.supply_position_id ? String(row.supply_position_id) : null,
+                    cutId: cutId
+                });
+            }
+        });
+        return { cuts: order.map(function(id) { return cutsById[id]; }), supplies: supplies };
+    }
+
+    // Строки отчёта positions_list (JSON_KV) → [{ id, label }] для дропдауна
+    // привязки. Подпись: «#id · Тип резки · Ширина · Кол-во» (пустые поля
+    // пропускаются); если деталей нет — «#id · Номер».
+    function rowsToPositions(rows) {
+        return (rows || []).map(function(row) {
+            var id = row.position_id == null ? '' : String(row.position_id);
+            var parts = [row.position_cut_type, row.position_width, row.position_qty]
+                .map(function(v) { return v == null ? '' : String(v).trim(); })
+                .filter(function(v) { return v !== ''; });
+            var main = row.position_no == null ? '' : String(row.position_no).trim();
+            var label = '#' + id + (parts.length ? ' · ' + parts.join(' · ') : (main ? ' · ' + main : ''));
+            return { id: id, label: label };
+        });
+    }
+
+    // Строки отчёта material_batches (JSON_KV) → [{ id, label }] для дропдауна
+    // «Партия сырья». Подпись обогащённая: «Номер · Вид сырья · ост. N м²»
+    // (пустые части пропускаются). Дропдаун статический клиентский (см. renderForm),
+    // поэтому метка единообразна и при фильтрации по вводу.
+    // Остаток м² → строка: округление до 2 знаков, без незначащих нулей
+    // (2440.00 → «2440», 38400.366 → «38400.37»). Нечисло/пусто → ''.
+    function fmtRemainder(value) {
+        var n = parseFloat(String(value == null ? '' : value).replace(',', '.'));
+        return isFinite(n) ? String(Math.round(n * 100) / 100) : '';
+    }
+
+    function rowsToBatches(rows) {
+        return (rows || []).map(function(row) {
+            var no = row.batch_no == null ? '' : String(row.batch_no).trim();
+            var material = row.batch_material == null ? '' : String(row.batch_material).trim();
+            var rem = fmtRemainder(row.batch_remainder_m2);
+            var parts = [];
+            if (material) parts.push(material);
+            if (rem) parts.push('ост. ' + rem + ' м²');
+            return {
+                id: row.batch_id == null ? '' : String(row.batch_id),
+                label: no + (parts.length ? ' · ' + parts.join(' · ') : '')
+            };
+        });
+    }
+
     var planning = {
         parseRef: parseRef,
         reqIdByName: reqIdByName,
@@ -183,7 +264,10 @@
         mapCutRecord: mapCutRecord,
         groupBySlitter: groupBySlitter,
         filterCuts: filterCuts,
-        buildFields: buildFields
+        buildFields: buildFields,
+        rowsToPlanning: rowsToPlanning,
+        rowsToPositions: rowsToPositions,
+        rowsToBatches: rowsToBatches
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -208,7 +292,7 @@
     function AtexProductionPlanning(root) {
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
-        this.meta = { cut: null, supply: null, position: null, slitter: null, cutType: null, materialBatch: null };
+        this.meta = { cut: null, supply: null, slitter: null, cutType: null };
         this.slitters = [];        // справочник [{ id, label }]
         this.cutTypes = [];        // справочник [{ id, label }]
         this.materialBatches = []; // справочник [{ id, label }]
@@ -278,10 +362,8 @@
             }
             self.meta.cut = byName(TABLE.cut);
             self.meta.supply = byName(TABLE.supply);
-            self.meta.position = byName(TABLE.position);
             self.meta.slitter = byName(TABLE.slitter);
             self.meta.cutType = byName(TABLE.cutType);
-            self.meta.materialBatch = byName(TABLE.materialBatch);
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
             if (!self.meta.supply) throw new Error('В метаданных не найдена таблица «' + TABLE.supply + '»');
         });
@@ -304,48 +386,31 @@
         });
     };
 
+    // Справочник позиций заказа отчётом positions_list (JSON_KV). Позиция
+    // подчинённая — прямое object/-чтение её не отдаёт, отчёт возвращает все.
     AtexProductionPlanning.prototype.loadPositions = function() {
         var self = this;
-        var meta = this.meta.position;
-        if (!meta) { this.positions = []; return Promise.resolve(); }
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,2000').then(function(rows) {
-            self.positions = (rows || []).map(function(r) {
-                var parts = [];
-                var main = (r.r && r.r[0]) || ('#' + r.i);
-                [POSITION_REQ.cutType, POSITION_REQ.width, POSITION_REQ.qty].forEach(function(name) {
-                    var idx = columnIndex(meta, name);
-                    if (idx >= 0 && r.r && r.r[idx] != null && String(r.r[idx]).trim() !== '') {
-                        parts.push(parseRef(r.r[idx]).label || String(r.r[idx]));
-                    }
-                });
-                var label = '#' + r.i + (parts.length ? ' · ' + parts.join(' · ') : (' · ' + main));
-                return { id: String(r.i), label: label };
-            });
+        return this.getJson('report/positions_list?JSON_KV&LIMIT=0,2000').then(function(rows) {
+            self.positions = rowsToPositions(rows || []);
         });
     };
 
-    AtexProductionPlanning.prototype.loadCuts = function() {
+    // Справочник партий сырья отчётом material_batches (JSON_KV).
+    AtexProductionPlanning.prototype.loadMaterialBatches = function() {
         var self = this;
-        var meta = this.meta.cut;
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,2000').then(function(rows) {
-            self.cuts = (rows || []).map(function(r) { return mapCutRecord(r, meta); });
+        return this.getJson('report/material_batches?JSON_KV&LIMIT=0,2000').then(function(rows) {
+            self.materialBatches = rowsToBatches(rows || []);
         });
     };
 
-    AtexProductionPlanning.prototype.loadSupplies = function() {
+    // Очередь резок и их обеспечение одним отчётом cut_planning (JSON_KV).
+    // Заполняет this.cuts и this.supplies из плоских строк отчёта.
+    AtexProductionPlanning.prototype.loadPlanning = function() {
         var self = this;
-        var meta = this.meta.supply;
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
-            var cutIdx = columnIndex(meta, SUPPLY_REQ.cut);
-            self.supplies = (rows || []).map(function(r) {
-                var rr = r.r || [];
-                var cutRef = cutIdx >= 0 ? parseRef(rr[cutIdx]) : { id: null };
-                return {
-                    id: String(r.i),
-                    positionId: r.u != null ? String(r.u) : null,
-                    cutId: cutRef.id
-                };
-            });
+        return this.getJson('report/cut_planning?JSON_KV&LIMIT=0,5000').then(function(rows) {
+            var p = rowsToPlanning(rows || []);
+            self.cuts = p.cuts;
+            self.supplies = p.supplies;
         });
     };
 
@@ -424,7 +489,7 @@
         this.post('_m_new/' + meta.id + '?JSON&up=' + encodeURIComponent(opts.positionId), fields).then(function(res) {
             var id = res && (res.obj || res.id || res.i);
             if (!id) throw new Error('Сервер не вернул id обеспечения');
-            return self.loadSupplies().then(function() {
+            return self.loadPlanning().then(function() {
                 self.setBusy(false);
                 self.notify('Обеспечение создано: позиция связана с резкой', 'success');
                 self.render();
@@ -436,7 +501,7 @@
     };
 
     AtexProductionPlanning.prototype.reload = function() {
-        return Promise.all([this.loadCuts(), this.loadSupplies()]);
+        return this.loadPlanning();
     };
 
     // ── Рендеринг ──
@@ -513,8 +578,11 @@
             function(v) { d.slitterId = v; }, reqIdByName(this.meta.cut, CUT_REQ.slitter))));
         form.appendChild(field('Тип резки', this.selectRef(this.cutTypes, d.cutTypeId, '— выберите тип резки —',
             function(v) { d.cutTypeId = v; }, reqIdByName(this.meta.cut, CUT_REQ.cutType))));
+        // Партии предзагружены отчётом material_batches (обогащённые подписи) —
+        // статический клиентский список (как дропдаун позиций), без серверного
+        // поиска, иначе при вводе подпись свелась бы к голому номеру.
         form.appendChild(field('Партия сырья', this.selectRef(this.materialBatches, d.materialBatchId, '— не выбрано —',
-            function(v) { d.materialBatchId = v; }, reqIdByName(this.meta.cut, CUT_REQ.materialBatch))));
+            function(v) { d.materialBatchId = v; }, null, { cacheKey: 'batches' })));
 
         var dateInput = el('input', { class: 'atex-pp-input', type: 'date' });
         dateInput.value = d.planDate || '';
@@ -687,10 +755,9 @@
                 return Promise.all([
                     self.loadRef(self.meta.slitter).then(function(items) { self.slitters = items; }),
                     self.loadRef(self.meta.cutType).then(function(items) { self.cutTypes = items; }),
-                    self.loadRef(self.meta.materialBatch).then(function(items) { self.materialBatches = items; }),
+                    self.loadMaterialBatches(),
                     self.loadPositions(),
-                    self.loadCuts(),
-                    self.loadSupplies()
+                    self.loadPlanning()
                 ]);
             })
             .then(function() { self.render(); })
