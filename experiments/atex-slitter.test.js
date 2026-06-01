@@ -107,4 +107,8 @@ assertEqual(core.defectM2(0, 910), 0, 'defectM2: ноль метров → 0');
 assertEqual(core.defectM2(10, 0), 0, 'defectM2: нет ширины → 0');
 assertEqual(core.defectM2(-3, 910), 0, 'defectM2: отрицательные метры → 0');
 
+// ── photoFieldKey: ключ multipart-поля для реквизита FILE ──
+assertEqual(core.photoFieldKey('1118'), 't1118', 'photoFieldKey: t + reqId');
+assertEqual(core.photoFieldKey(null), '', 'photoFieldKey: нет reqId → пусто');
+
 console.log('\n' + passed + ' assertions passed');

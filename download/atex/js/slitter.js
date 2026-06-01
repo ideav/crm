@@ -60,6 +60,7 @@
         meterage: 'Погонаж факт, м',
         defect: 'Брак, м²',
         defectM: 'Брак, м',
+        defectPhoto: 'Фото брака',
         notes: 'Примечания'
     };
     var CONS_REQ = { amount: 'Израсходовано, м²', batch: 'Партия сырья' };
@@ -167,6 +168,11 @@
         return round3(m * (w / 1000));
     }
 
+    // Ключ multipart-поля для файлового реквизита: 't' + reqId (или '' если нет).
+    function photoFieldKey(reqId) {
+        return reqId ? ('t' + reqId) : '';
+    }
+
     // Дата-время события смены в формате «YYYY-MM-DD HH:MM:SS» (хронология,
     // первая колонка «Событие смены»). Принимает Date — детерминируется в тестах.
     function formatDateTime(date) {
@@ -191,7 +197,8 @@
         applyConsumption: applyConsumption,
         restoreConsumption: restoreConsumption,
         formatDateTime: formatDateTime,
-        defectM2: defectM2
+        defectM2: defectM2,
+        photoFieldKey: photoFieldKey
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -321,6 +328,26 @@
         });
     };
 
+    // Multipart-POST для файловых реквизитов (паттерн платформы, issue #1310):
+    // тело FormData с _xsrf и t{reqId}=<File>. Возвращает разобранный JSON.
+    AtexSlitter.prototype.postFile = function(path, reqKey, file, extra) {
+        var fd = new FormData();
+        fd.append('_xsrf', (typeof window !== 'undefined' && window.xsrf) || this.root.getAttribute('data-xsrf') || '');
+        if (reqKey && file) fd.append(reqKey, file);
+        Object.keys(extra || {}).forEach(function(k) {
+            if (extra[k] !== undefined && extra[k] !== null && extra[k] !== '') fd.append(k, extra[k]);
+        });
+        return fetch(this.url(path), { method: 'POST', credentials: 'same-origin', body: fd })
+            .then(function(resp) {
+                return resp.text().then(function(text) {
+                    var result;
+                    try { result = JSON.parse(text); } catch (e) { throw new Error('Сервер вернул не JSON: ' + text.slice(0, 200)); }
+                    if (result && (result.error || result.err)) throw new Error(result.error || result.err);
+                    return result;
+                });
+            });
+    };
+
     // ── Загрузка метаданных и справочников ──
 
     AtexSlitter.prototype.loadMetadata = function() {
@@ -440,6 +467,7 @@
                 meterage: val(CUT_REQ.meterage),
                 defect: val(CUT_REQ.defect),
                 defectM: val(CUT_REQ.defectM),
+                defectPhoto: val(CUT_REQ.defectPhoto),
                 notes: val(CUT_REQ.notes)
             };
         });
@@ -655,6 +683,17 @@
         defectField.appendChild(defectHint);
         grid.appendChild(defectField);
 
+        // Фото брака: выбор файла (камера на планшете) → multipart в реквизит FILE.
+        var photoInput = el('input', { type: 'file', accept: 'image/*', capture: 'environment', style: 'display:none' });
+        var photoBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: 'Фото брака' });
+        var photoStatus = el('span', { class: 'atex-sl-hint', text: cut.defectPhoto ? 'фото загружено' : '' });
+        photoBtn.addEventListener('click', function() { photoInput.click(); });
+        photoInput.addEventListener('change', function() {
+            var file = photoInput.files && photoInput.files[0];
+            if (file) self.uploadDefectPhoto(file, photoStatus);
+        });
+        grid.appendChild(field('Фото брака', el('div', { class: 'atex-sl-photo' }, [photoBtn, photoStatus, photoInput])));
+
         section.appendChild(grid);
 
         var notes = el('textarea', { class: 'atex-sl-input atex-sl-textarea', rows: '2', placeholder: 'Примечания' });
@@ -854,6 +893,27 @@
         }).catch(function(err) {
             self.setBusy(false);
             self.notify('Ошибка сохранения: ' + err.message, 'error');
+        });
+    };
+
+    AtexSlitter.prototype.uploadDefectPhoto = function(file, statusEl) {
+        var self = this;
+        var cut = this.currentCut;
+        if (this.busy || !cut) return;
+        var reqId = reqIdByName(this.meta.cut, CUT_REQ.defectPhoto);
+        var key = core.photoFieldKey(reqId);
+        if (!key) { this.notify('Реквизит «Фото брака» не найден', 'error'); return; }
+        this.setBusy(true);
+        if (statusEl) statusEl.textContent = 'загрузка…';
+        this.postFile('_m_set/' + cut.id + '?JSON', key, file).then(function() {
+            self.setBusy(false);
+            cut.defectPhoto = file.name;
+            if (statusEl) statusEl.textContent = 'фото загружено';
+            self.notify('Фото брака загружено', 'success');
+        }).catch(function(err) {
+            self.setBusy(false);
+            if (statusEl) statusEl.textContent = 'ошибка';
+            self.notify('Ошибка загрузки фото: ' + err.message, 'error');
         });
     };
 
