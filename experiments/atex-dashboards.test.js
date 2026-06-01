@@ -90,45 +90,50 @@ const source = fs.readFileSync(path.join(root, 'download/atex/js/dashboards.js')
 const styles = fs.readFileSync(path.join(root, 'download/atex/css/dashboards.css'), 'utf8');
 const docs = fs.readFileSync(path.join(root, 'docs/atex_workplaces.md'), 'utf8');
 
+assert(source.includes('cardProductionFlow'), 'dashboard renders the production path card');
+assert(styles.includes('.atex-db-flow-stage-done'), 'dashboard CSS styles completed production stages');
+assert(docs.includes('Путь продукции'), 'Atex workplace documentation mentions the production path card');
+
+// ── rowsToEntities: строки отчёта order_pipeline → сущности ──
+var PR = [
+  { order_id:'10', order_no:'A-1', order_status:'Новый',
+    position_id:'', provision_id:'', cut_id:'', gp_id:'' },
+  { order_id:'11', order_no:'A-2', order_status:'Выполнен',
+    position_id:'21', position_status:'Отгружена', position_cut_type:'TT', position_width_mm:'57', position_length_m:'10',
+    provision_id:'31', provision_used_m:'1200', provision_status:'Выполнено',
+    cut_id:'41', cut_no:'4', cut_slitter:'Станок 1', cut_status:'Завершён', cut_footage_m:'1300',
+    gp_id:'51', gp_status:'Отгружен', gp_rolls:'10', gp_footage_m:'1200', gp_address:'A-3', gp_cut_id:'41' }
+];
+var ent = dashboards.rowsToEntities(PR);
+assertEqual(ent.orders.length, 2, 'rowsToEntities: 2 заказа (dedup)');
+assertEqual(ent.orders[0], { id:'10', number:'A-1', status:'Новый' }, 'rowsToEntities: заказ');
+assertEqual(ent.cuts.length, 1, 'rowsToEntities: пустые стадии не создают резок');
+assertEqual(ent.cuts[0], { id:'41', number:'4', slitter:'Станок 1', status:'Завершён', footage:'1300' }, 'rowsToEntities: резка');
+assertEqual(ent.positions[0].orderId, '11', 'rowsToEntities: позиция знает заказ');
+assertEqual(ent.provisions[0], { id:'31', positionId:'21', cutId:'41', gpId:'51', footage:'1200', status:'Выполнено' }, 'rowsToEntities: обеспечение');
+assertEqual(ent.gpBatches[0], { id:'51', cutId:'41', status:'Отгружен', rolls:'10', footage:'1200', address:'A-3' }, 'rowsToEntities: ГП');
+
+// ── collect(): два отчёта → сводки ──
 global.window = { db: 'atex' };
-const controller = new api.Controller({ getAttribute: function() { return 'atex'; } });
+var controller = new api.Controller({ getAttribute: function() { return 'atex'; } });
+var collectCalls = [];
 controller.getJson = function(pathname) {
-    assert.strictEqual(pathname, 'metadata', 'dashboard controller requests metadata before reading live data');
-    return Promise.resolve([
-        { id: '107', val: 'Заказ' },
-        { id: '108', val: 'Позиция заказа' },
-        { id: '109', val: 'Обеспечение' },
-        { id: '110', val: 'Производственная резка' },
-        { id: '113', val: 'Партия ГП' },
-        { id: '106', val: 'Партия сырья' }
+    collectCalls.push(pathname);
+    if (pathname === 'report/order_pipeline?JSON_KV') return Promise.resolve(PR);
+    if (pathname === 'report/material_stock?JSON_KV') return Promise.resolve([
+        { material: 'Полиэтилен', material_received_m2: '500', material_remainder_m2: '200' }
     ]);
+    throw new Error('Unexpected getJson call: ' + pathname);
 };
 
-controller.loadMetadata().then(function() {
-    assert.strictEqual(controller.meta.position.id, '108', 'metadata resolver loads order positions for the production path');
-    assert.strictEqual(controller.meta.provision.id, '109', 'metadata resolver loads provisions for the production path');
-    assert(source.includes('cardProductionFlow'), 'dashboard renders the production path card');
-    assert(styles.includes('.atex-db-flow-stage-done'), 'dashboard CSS styles completed production stages');
-    assert(docs.includes('Путь продукции'), 'Atex workplace documentation mentions the production path card');
-    // ── rowsToEntities: строки отчёта order_pipeline → сущности ──
-    var PR = [
-      { order_id:'10', order_no:'A-1', order_status:'Новый',
-        position_id:'', provision_id:'', cut_id:'', gp_id:'' },
-      { order_id:'11', order_no:'A-2', order_status:'Выполнен',
-        position_id:'21', position_status:'Отгружена', position_cut_type:'TT', position_width_mm:'57', position_length_m:'10',
-        provision_id:'31', provision_used_m:'1200', provision_status:'Выполнено',
-        cut_id:'41', cut_no:'4', cut_slitter:'Станок 1', cut_status:'Завершён', cut_footage_m:'1300',
-        gp_id:'51', gp_status:'Отгружен', gp_rolls:'10', gp_footage_m:'1200', gp_address:'A-3', gp_cut_id:'41' }
-    ];
-    var ent = dashboards.rowsToEntities(PR);
-    assertEqual(ent.orders.length, 2, 'rowsToEntities: 2 заказа (dedup)');
-    assertEqual(ent.orders[0], { id:'10', number:'A-1', status:'Новый' }, 'rowsToEntities: заказ');
-    assertEqual(ent.cuts.length, 1, 'rowsToEntities: пустые стадии не создают резок');
-    assertEqual(ent.cuts[0], { id:'41', number:'4', slitter:'Станок 1', status:'Завершён', footage:'1300' }, 'rowsToEntities: резка');
-    assertEqual(ent.positions[0].orderId, '11', 'rowsToEntities: позиция знает заказ');
-    assertEqual(ent.provisions[0], { id:'31', positionId:'21', cutId:'41', gpId:'51', footage:'1200', status:'Выполнено' }, 'rowsToEntities: обеспечение');
-    assertEqual(ent.gpBatches[0], { id:'51', cutId:'41', status:'Отгружен', rolls:'10', footage:'1200', address:'A-3' }, 'rowsToEntities: ГП');
-
+controller.collect().then(function(result) {
+    assertEqual(collectCalls.sort(), ['report/material_stock?JSON_KV', 'report/order_pipeline?JSON_KV'],
+        'collect() запрашивает ровно два отчёта');
+    assert.strictEqual(result.counts.order, 2, 'collect(): counts.order = число уникальных заказов');
+    assert.strictEqual(result.counts.rawBatch, 1, 'collect(): counts.rawBatch = строки material_stock');
+    assert(result.orders && result.orders.rows, 'collect(): поле orders присутствует');
+    assert(result.materials && result.materials.rows.length === 1, 'collect(): поле materials присутствует');
+    assert.strictEqual(result.materials.rows[0].key, 'Полиэтилен', 'collect(): materials группируется по полю material');
     console.log('atex dashboards production path: ok');
 }).catch(function(err) {
     console.error(err && err.stack || err);

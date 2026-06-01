@@ -37,39 +37,6 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function() {
     'use strict';
 
-    // Имена таблиц и реквизитов схемы atex (docs/atex_metadata.json). По именам
-    // рабочее место находит конкретные числовые id в метаданных текущей сборки.
-    var TABLE = {
-        order: 'Заказ',
-        position: 'Позиция заказа',
-        provision: 'Обеспечение',
-        cut: 'Производственная резка',
-        gp: 'Партия ГП',
-        rawBatch: 'Партия сырья'
-    };
-    var ORDER_REQ = { status: 'Статус', created: 'Дата создания' };
-    var POSITION_REQ = {
-        qty: 'Кол-во',
-        cutType: 'Тип резки',
-        width: 'Ширина, мм',
-        length: 'Длина, м',
-        status: 'Статус'
-    };
-    var PROVISION_REQ = {
-        footage: 'Метраж, м',
-        cut: 'Производственная резка',
-        gp: 'Партия ГП',
-        status: 'Статус'
-    };
-    var CUT_REQ = { slitter: 'Слиттер', status: 'Статус', footage: 'Погонаж факт, м' };
-    var GP_REQ = {
-        cut: 'Производственная резка',
-        status: 'Статус',
-        rolls: 'Кол-во рулонов',
-        footage: 'Метраж, м',
-        address: 'Адрес хранения'
-    };
-    var RAW_REQ = { material: 'Вид сырья', received: 'Получено, м²', remainder: 'Остаток, м²' };
 
     // Метка для записей без значения в группирующем поле.
     var UNSET = '— не задано —';
@@ -344,8 +311,6 @@
     // ─────────────────────────── Браузерный слой ───────────────────────────
     // Ниже — DOM-контроллер. Требует window/document/fetch; в Node не выполняется.
 
-    var PAGE = 1000; // размер страницы для постраничного чтения списков
-
     function el(tag, attrs, children) {
         var node = document.createElement(tag);
         if (attrs) Object.keys(attrs).forEach(function(k) {
@@ -361,30 +326,6 @@
         return node;
     }
 
-    // Значение реквизита из метаданных по имени → его числовой id.
-    function reqIdByName(meta, name) {
-        var found = (meta && meta.reqs || []).filter(function(r) {
-            return String(r.val).trim().toLowerCase() === String(name).trim().toLowerCase();
-        })[0];
-        return found ? String(found.id) : null;
-    }
-
-    // Разбор значения-ссылки из JSON_OBJ: «id:Подпись» → id + подпись.
-    function refParts(raw) {
-        var m = String(raw == null ? '' : raw).match(/^(\d+):([\s\S]*)$/);
-        return m
-            ? { id: m[1], label: m[2] }
-            : { id: '', label: String(raw == null ? '' : raw) };
-    }
-
-    function refLabel(raw) {
-        return refParts(raw).label;
-    }
-
-    function refId(raw) {
-        return refParts(raw).id;
-    }
-
     // Форматирование чисел для показа: целые без дробной части, иначе до 2 знаков,
     // с разделением тысяч пробелом.
     function fmt(n) {
@@ -397,7 +338,6 @@
     function AtexDashboards(root) {
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
-        this.meta = {};
         this.busy = false;
     }
 
@@ -415,189 +355,25 @@
         });
     };
 
-    // Счётчик записей таблицы: `?_count=&JSON=1` → { count: N } (index.php:6832).
-    AtexDashboards.prototype.count = function(typeId) {
-        return this.getJson('object/' + typeId + '/?_count=&JSON=1').then(function(res) {
-            return res && typeof res.count !== 'undefined' ? Number(res.count) : 0;
-        });
-    };
-
-    // Постраничное чтение всех записей таблицы через JSON_OBJ.
-    AtexDashboards.prototype.loadAll = function(typeId) {
-        var self = this;
-        var rows = [];
-        function page(offset) {
-            return self.getJson('object/' + typeId + '/?JSON_OBJ&LIMIT=' + offset + ',' + PAGE).then(function(batch) {
-                var list = batch || [];
-                rows = rows.concat(list);
-                if (list.length === PAGE) return page(offset + PAGE);
-                return rows;
-            });
-        }
-        return page(0);
-    };
-
-    // Построитель доступа к колонкам JSON_OBJ по имени реквизита.
-    // Колонки идут в порядке: [главное значение, ...reqs по порядку].
-    function columnReader(meta) {
-        var order = [String(meta.id)].concat((meta.reqs || []).map(function(r) { return String(r.id); }));
-        return function(reqName) {
-            var rid = reqIdByName(meta, reqName);
-            var idx = order.indexOf(String(rid));
-            return function(rec) {
-                var r = (rec && rec.r) || [];
-                return idx >= 0 ? r[idx] : undefined;
-            };
-        };
-    }
-
-    // ── Загрузка метаданных ──
-
-    AtexDashboards.prototype.loadMetadata = function() {
-        var self = this;
-        return this.getJson('metadata').then(function(all) {
-            var list = Array.isArray(all) ? all : [all];
-            function byName(name) {
-                return list.filter(function(t) {
-                    return String(t.val).trim().toLowerCase() === name.trim().toLowerCase();
-                })[0] || null;
-            }
-            Object.keys(TABLE).forEach(function(key) {
-                self.meta[key] = byName(TABLE[key]);
-            });
-            var missing = Object.keys(TABLE).filter(function(k) { return !self.meta[k]; })
-                .map(function(k) { return TABLE[k]; });
-            if (missing.length) throw new Error('В метаданных не найдены таблицы: ' + missing.join(', '));
-        });
-    };
-
     // ── Сбор сводок ──
 
-    // Возвращает Promise<{ counts, orders, slitters, gp, materials, flow }>.
+    // Сбор сводок из двух отчётов (минимум запросов; агрегации — на клиенте).
     AtexDashboards.prototype.collect = function() {
-        var self = this;
-        var m = this.meta;
-
-        var countsP = Promise.all([
-            this.count(m.order.id), this.count(m.cut.id),
-            this.count(m.gp.id), this.count(m.rawBatch.id)
-        ]).then(function(c) {
-            return { order: c[0], cut: c[1], gp: c[2], rawBatch: c[3] };
-        });
-
         return Promise.all([
-            countsP,
-            this.loadAll(m.order.id),
-            this.loadAll(m.position.id),
-            this.loadAll(m.provision.id),
-            this.loadAll(m.cut.id),
-            this.loadAll(m.gp.id),
-            this.loadAll(m.rawBatch.id)
+            this.getJson('report/order_pipeline?JSON_KV'),
+            this.getJson('report/material_stock?JSON_KV')
         ]).then(function(res) {
-            var counts = res[0];
-            var orderRows = res[1], positionRows = res[2], provisionRows = res[3];
-            var cutRows = res[4], gpRows = res[5], rawRows = res[6];
-
-            var orderCol = columnReader(m.order);
-            var orderStatus = orderCol(ORDER_REQ.status);
-            var orders = orderRows.map(function(rec) {
-                return {
-                    id: String(rec.i),
-                    number: (rec.r && rec.r[0]) || ('#' + rec.i),
-                    status: orderStatus(rec)
-                };
+            var e = rowsToEntities(res[0] || []);
+            var rawBatches = (res[1] || []).map(function(r) {
+                return { material: r.material, received: r.material_received_m2, remainder: r.material_remainder_m2 };
             });
-
-            var positionCol = columnReader(m.position);
-            var positionStatus = positionCol(POSITION_REQ.status);
-            var positionCutType = positionCol(POSITION_REQ.cutType);
-            var positionWidth = positionCol(POSITION_REQ.width);
-            var positionLength = positionCol(POSITION_REQ.length);
-            var positionQty = positionCol(POSITION_REQ.qty);
-            var positions = positionRows.map(function(rec) {
-                return {
-                    id: String(rec.i),
-                    orderId: rec.u != null ? String(rec.u) : '',
-                    cutType: refLabel(positionCutType(rec)),
-                    width: positionWidth(rec),
-                    length: positionLength(rec),
-                    qty: positionQty(rec),
-                    status: positionStatus(rec)
-                };
-            });
-
-            var provisionCol = columnReader(m.provision);
-            var provisionStatus = provisionCol(PROVISION_REQ.status);
-            var provisionCut = provisionCol(PROVISION_REQ.cut);
-            var provisionGp = provisionCol(PROVISION_REQ.gp);
-            var provisionFootage = provisionCol(PROVISION_REQ.footage);
-            var provisions = provisionRows.map(function(rec) {
-                return {
-                    id: String(rec.i),
-                    positionId: rec.u != null ? String(rec.u) : '',
-                    cutId: refId(provisionCut(rec)),
-                    gpId: refId(provisionGp(rec)),
-                    footage: provisionFootage(rec),
-                    status: provisionStatus(rec)
-                };
-            });
-
-            var cutCol = columnReader(m.cut);
-            var cutSlitter = cutCol(CUT_REQ.slitter);
-            var cutStatus = cutCol(CUT_REQ.status);
-            var cutFootage = cutCol(CUT_REQ.footage);
-            var cuts = cutRows.map(function(rec) {
-                return {
-                    id: String(rec.i),
-                    number: (rec.r && rec.r[0]) || ('#' + rec.i),
-                    slitter: refLabel(cutSlitter(rec)),
-                    status: cutStatus(rec),
-                    footage: cutFootage(rec)
-                };
-            });
-
-            var gpCol = columnReader(m.gp);
-            var gpCut = gpCol(GP_REQ.cut);
-            var gpStatus = gpCol(GP_REQ.status);
-            var gpRolls = gpCol(GP_REQ.rolls);
-            var gpFootage = gpCol(GP_REQ.footage);
-            var gpAddress = gpCol(GP_REQ.address);
-            var gpBatches = gpRows.map(function(rec) {
-                return {
-                    id: String(rec.i),
-                    cutId: refId(gpCut(rec)),
-                    status: gpStatus(rec),
-                    rolls: gpRolls(rec),
-                    footage: gpFootage(rec),
-                    address: gpAddress(rec)
-                };
-            });
-
-            var rawCol = columnReader(m.rawBatch);
-            var rawMaterial = rawCol(RAW_REQ.material);
-            var rawReceived = rawCol(RAW_REQ.received);
-            var rawRemainder = rawCol(RAW_REQ.remainder);
-            var rawBatches = rawRows.map(function(rec) {
-                return {
-                    material: refLabel(rawMaterial(rec)),
-                    received: rawReceived(rec),
-                    remainder: rawRemainder(rec)
-                };
-            });
-
             return {
-                counts: counts,
-                orders: ordersByStatus(orders),
-                slitters: slitterLoad(cuts),
-                gp: gpOutput(gpBatches),
+                counts: { order: e.orders.length, cut: e.cuts.length, gp: e.gpBatches.length, rawBatch: rawBatches.length },
+                orders: ordersByStatus(e.orders),
+                slitters: slitterLoad(e.cuts),
+                gp: gpOutput(e.gpBatches),
                 materials: materialStock(rawBatches),
-                flow: productionFlow({
-                    orders: orders,
-                    positions: positions,
-                    provisions: provisions,
-                    cuts: cuts,
-                    gpBatches: gpBatches
-                })
+                flow: productionFlow({ orders: e.orders, positions: e.positions, provisions: e.provisions, cuts: e.cuts, gpBatches: e.gpBatches })
             };
         });
     };
@@ -785,8 +561,7 @@
         this.gridEl.appendChild(el('div', { class: 'atex-db-loading', text: 'Загрузка сводок…' }));
         this.root.appendChild(this.gridEl);
 
-        return this.loadMetadata()
-            .then(function() { return self.refresh(); })
+        return this.refresh()
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
     };
 
