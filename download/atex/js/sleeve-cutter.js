@@ -128,6 +128,16 @@
         return best;
     }
 
+    // Подпись диапазона диаметров: «20–25 мм», «от 20 мм», «до 76 мм» или ''.
+    function formatRange(min, max) {
+        var hasMin = !(min === '' || min == null);
+        var hasMax = !(max === '' || max == null);
+        if (hasMin && hasMax) return toNumber(min) + '–' + toNumber(max) + ' мм';
+        if (hasMin) return 'от ' + toNumber(min) + ' мм';
+        if (hasMax) return 'до ' + toNumber(max) + ' мм';
+        return '';
+    }
+
     var core = {
         STATUSES: STATUSES,
         toNumber: toNumber,
@@ -135,7 +145,8 @@
         nextStatus: nextStatus,
         isDone: isDone,
         summarize: summarize,
-        pickCutter: pickCutter
+        pickCutter: pickCutter,
+        formatRange: formatRange
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────

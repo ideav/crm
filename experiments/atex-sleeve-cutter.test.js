@@ -98,4 +98,10 @@ assertEqual(core.pickCutter(40, CUTTERS).id, '4', 'pickCutter: нескольк�
 assertEqual(core.pickCutter(100, CUTTERS), null, 'pickCutter: нет покрытия → null');
 assertEqual(core.pickCutter('', CUTTERS), null, 'pickCutter: пустой диаметр → null');
 
+// ── formatRange: подпись диапазона ──
+assertEqual(core.formatRange(20, 25), '20–25 мм', 'formatRange: обе границы');
+assertEqual(core.formatRange(20, ''), 'от 20 мм', 'formatRange: только min');
+assertEqual(core.formatRange('', 76), 'до 76 мм', 'formatRange: только max');
+assertEqual(core.formatRange('', ''), '', 'formatRange: пусто');
+
 console.log('\n' + passed + ' assertions passed');
