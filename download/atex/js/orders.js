@@ -21,6 +21,7 @@
     var REF_DROPDOWN_LIMIT = 80;
     var REF_SEARCH_DELAY = 250;
     var LIST_LIMIT = 5000;
+    var STRIPS_LIMIT = 1000;
 
     // Статусы — свободный текст (тип 3), поэтому фиксируем разумные наборы.
     // Их можно переопределить data-атрибутами data-order-statuses / data-position-statuses.
@@ -69,7 +70,10 @@
         statusFilter: '',
         refOptions: {},
         refSearchSeq: 0,
-        creating: false
+        creating: false,
+        metadata: [],
+        cutTypeIndex: {},           // { typeId: { materialId, widths? } }
+        stripsLoadedMaterials: {}   // { materialId: true } — для каких сырьёв полосы уже грузили
     };
 
     // ------------------------------------------------------------------
@@ -107,6 +111,44 @@
             '12': 'MEMO', '13': 'NUMBER', '14': 'SIGNED'
         };
         return map[String(typeId)] || 'SHORT';
+    }
+
+    // Терпимый разбор ширины: запятая как десятичный разделитель, пробелы прочь.
+    // Пусто/мусор → NaN (чтобы «нет ширины» отличалось от 0).
+    function parseWidth(value) {
+        var s = String(value == null ? '' : value).replace(/\s+/g, '').replace(/,/g, '.');
+        if (s === '') return NaN;
+        var x = parseFloat(s);
+        return isFinite(x) ? x : NaN;
+    }
+
+    // Подбор подходящих типов резки.
+    // index: { typeId: { materialId, widths:[Number,...] } } — widths может отсутствовать.
+    // Фильтр по сырью; при заданной ширине — точное совпадение с одной из ширин полос
+    //   (типы без загруженных полос при заданной ширине отсеиваются).
+    function matchCutTypes(index, materialId, width) {
+        var ids = Object.keys(index || {});
+        var mat = materialId == null ? '' : String(materialId);
+        if (mat !== '') {
+            ids = ids.filter(function(id) { return String(index[id].materialId) === mat; });
+        }
+        var w = parseWidth(width);
+        if (!isNaN(w)) {
+            ids = ids.filter(function(id) {
+                var ws = index[id].widths;
+                if (!ws) return false;
+                return ws.some(function(x) { return Number(x) === w; });
+            });
+        }
+        return ids;
+    }
+
+    // Индекс колонки JSON_OBJ по имени реквизита: позиция в [tableId, ...reqIds]; -1 если нет.
+    function findReqIndex(meta, reqName) {
+        if (!meta) return -1;
+        var order = [String(meta.id)].concat((meta.reqs || []).map(function(r){ return String(r.id); }));
+        var req = (meta.reqs || []).filter(function(r){ return String(r.val).trim().toLowerCase() === String(reqName).trim().toLowerCase(); })[0];
+        return req ? order.indexOf(String(req.id)) : -1;
     }
 
     // Разбор ссылочного значения "id:Отображение" → {id, label}.
@@ -454,6 +496,40 @@
         });
     }
 
+    // Индекс типов резки: { id: { materialId } }. Один запрос; ширины полос — лениво.
+    function loadCutTypeIndex() {
+        var meta = findMetadataByName(state.metadata, 'Тип резки');
+        if (!meta) return Promise.resolve();
+        var matIdx = findReqIndex(meta, 'Вид сырья');
+        return fetchJson('/' + encodeURIComponent(getApiBase()) + '/object/' + encodeURIComponent(meta.id) + '/?JSON_OBJ&LIMIT=0,' + LIST_LIMIT).then(function(rows){
+            (rows || []).forEach(function(rec){
+                var r = rec.r || [];
+                var mat = matIdx >= 0 ? parseRef(r[matIdx]) : { id: null };
+                state.cutTypeIndex[String(rec.i)] = { materialId: mat.id ? String(mat.id) : '' };
+            });
+        });
+    }
+
+    // Грузит ширины полос для всех типов указанного сырья (один раз на сырьё).
+    // Заполняет index[typeId].widths. Возвращает Promise.
+    function ensureStripWidths(materialId) {
+        var mat = materialId == null ? '' : String(materialId);
+        if (mat === '' || state.stripsLoadedMaterials[mat]) return Promise.resolve();
+        var stripMeta = findMetadataByName(state.metadata, 'Полоса');
+        if (!stripMeta) return Promise.resolve();
+        var wIdx = findReqIndex(stripMeta, 'Ширина, мм');
+        // typeIds опирается на то, что loadCutTypeIndex завершён при инициализации,
+        // поэтому пустой список означает: у данного сырья типов резки нет.
+        var typeIds = Object.keys(state.cutTypeIndex).filter(function(id){ return String(state.cutTypeIndex[id].materialId) === mat; });
+        return Promise.all(typeIds.map(function(id){
+            return fetchJson('/' + encodeURIComponent(getApiBase()) + '/object/' + encodeURIComponent(stripMeta.id) + '/?JSON_OBJ&F_U=' + encodeURIComponent(id) + '&LIMIT=0,' + STRIPS_LIMIT).then(function(rows){
+                var widths = (rows || []).map(function(rec){ var r = rec.r || []; return wIdx >= 0 ? parseWidth(r[wIdx]) : NaN; })
+                    .filter(function(x){ return !isNaN(x); });
+                state.cutTypeIndex[id].widths = widths;
+            }).catch(function(){ /* пропускаем тип при сбое запроса полос */ });
+        })).then(function(){ state.stripsLoadedMaterials[mat] = true; });
+    }
+
     // ------------------------------------------------------------------
     // Рендеринг
     // ------------------------------------------------------------------
@@ -594,6 +670,43 @@
             '<button type="submit" class="atex-orders-btn atex-orders-btn-primary"><i class="pi pi-check"></i><span>Сохранить позицию</span></button>' +
             '<button type="button" class="atex-orders-btn atex-orders-btn-secondary" data-cancel-position="' + escapeHtml(order.id) + '">Отмена</button>' +
             '</div></form>';
+    }
+
+    // Пересобирает список опций «Тип резки» формы позиции по текущему сырью/ширине.
+    // Сбрасывает выбранное значение, если оно не входит в подходящие.
+    // Работает с searchable-ref-select: обновляет data-atex-cuttype-allowed на обёртке
+    // и переотрисовывает dropdown через renderRefSearchResults.
+    function refreshCutTypeOptions(orderId, form) {
+        if (!form) return;
+        // Скрытые inputs searchable-ref-select для сырья и типа резки.
+        var cutHidden = form.querySelector('#atex-pos-cut-' + cssEscape(orderId));
+        var rawHidden = form.querySelector('#atex-pos-raw-' + cssEscape(orderId));
+        var widthInput = form.querySelector('[data-field="width"]');
+        if (!cutHidden) return;
+        // Обёртка [data-ref-select] — родитель скрытого input типа резки.
+        var cutWrapper = cutHidden.closest ? cutHidden.closest('[data-ref-select]') : null;
+        if (!cutWrapper) return;
+        var materialId = rawHidden ? rawHidden.value : '';
+        var width = widthInput ? widthInput.value : '';
+        var allowed = matchCutTypes(state.cutTypeIndex, materialId, width);
+        var allowedSet = {};
+        allowed.forEach(function(id){ allowedSet[String(id)] = true; });
+        // Сохраняем фильтр на обёртке для renderRefSearchResults.
+        cutWrapper.setAttribute('data-atex-cuttype-allowed', allowed.join(','));
+        // Сброс несовместимого выбора.
+        var prev = cutHidden.value;
+        if (prev && !allowedSet[String(prev)]) {
+            cutHidden.value = '';
+            var cutSearch = cutWrapper.querySelector('[data-ref-search]');
+            if (cutSearch) cutSearch.value = '';
+            updateRefClear(cutWrapper);
+        }
+        // Переотрисовываем dropdown (только если он сейчас открыт, иначе он обновится при открытии).
+        var dropdown = cutWrapper.querySelector('.atex-orders-ref-dropdown');
+        if (dropdown && !dropdown.hidden) {
+            var cutSearchEl = cutWrapper.querySelector('[data-ref-search]');
+            renderRefSearchResults(cutWrapper, cutSearchEl ? cutSearchEl.value : '');
+        }
     }
 
     function renderOrders() {
@@ -859,6 +972,14 @@
         if (!dropdown || !hidden) return;
         var reqId = wrapper.getAttribute('data-ref-req-id');
         var options = state.refOptions[reqId] || [];
+        // Ограничиваем список разрешёнными id, если выставлен фильтр типов резки.
+        // Атрибут ставит только refreshCutTypeOptions (фильтр «Тип резки» по сырью/ширине); на прочих ref-select его нет.
+        var allowedAttr = wrapper.getAttribute('data-atex-cuttype-allowed');
+        if (allowedAttr !== null) {
+            var allowedSet = {};
+            allowedAttr.split(',').forEach(function(id){ if (id) allowedSet[id] = true; });
+            options = options.filter(function(opt){ return allowedSet[String(opt.id)]; });
+        }
         var visibleOptions = filterRefOptions(options, query, REF_DROPDOWN_LIMIT);
         dropdown.innerHTML = renderRefOptionItems(hidden.id, visibleOptions, hidden.value);
         setActiveRefOption(wrapper, 0);
@@ -895,6 +1016,25 @@
         }, REF_SEARCH_DELAY);
     }
 
+    // Вызывается после изменения поля «Вид сырья» в форме позиции:
+    // по скрытому input определяет orderId и form, затем догружает полосы и
+    // обновляет список «Тип резки».
+    function onRawRefChanged(wrapper) {
+        if (!wrapper) return;
+        var rawCol = getColumn(state.positionColumns, 'raw');
+        if (!rawCol || !rawCol.reqId) return;
+        // Проверяем, что это именно ref-select «Вид сырья» (по reqId обёртки).
+        if (wrapper.getAttribute('data-ref-req-id') !== String(rawCol.reqId)) return;
+        var form = wrapper.closest ? wrapper.closest('[data-position-form]') : null;
+        if (!form) return;
+        var orderId = form.getAttribute('data-position-form');
+        var rawHidden = wrapper.querySelector('[data-ref-value]');
+        var materialId = rawHidden ? rawHidden.value : '';
+        ensureStripWidths(materialId).then(function() {
+            refreshCutTypeOptions(orderId, form);
+        });
+    }
+
     function selectRefOption(option) {
         var wrapper = refWrapperFrom(option);
         if (!wrapper) return;
@@ -904,6 +1044,8 @@
         if (search) search.value = option.textContent || '';
         updateRefClear(wrapper);
         closeRefSelect(wrapper);
+        // При выборе сырья в форме позиции — обновить список типов резки.
+        onRawRefChanged(wrapper);
     }
 
     function clearRefSelect(wrapper) {
@@ -918,6 +1060,8 @@
         updateRefClear(wrapper);
         renderRefSearchResults(wrapper, '');
         setRefExpanded(wrapper, true);
+        // При очистке сырья в форме позиции — обновить список типов резки.
+        onRawRefChanged(wrapper);
     }
 
     function attachRefSearchEvents() {
@@ -931,14 +1075,25 @@
 
         state.root.addEventListener('input', function(event) {
             var search = event.target.closest && event.target.closest('[data-ref-search]');
-            if (!search) return;
-            var wrapper = refWrapperFrom(search);
-            var hidden = wrapper && wrapper.querySelector('[data-ref-value]');
-            if (hidden) hidden.value = '';
-            updateRefClear(wrapper);
-            renderRefSearchResults(wrapper, search.value);
-            setRefExpanded(wrapper, true);
-            scheduleRefServerSearch(wrapper, search.value);
+            if (search) {
+                var wrapper = refWrapperFrom(search);
+                var hidden = wrapper && wrapper.querySelector('[data-ref-value]');
+                if (hidden) hidden.value = '';
+                updateRefClear(wrapper);
+                renderRefSearchResults(wrapper, search.value);
+                setRefExpanded(wrapper, true);
+                scheduleRefServerSearch(wrapper, search.value);
+                return;
+            }
+            // При вводе ширины в форме позиции — обновить список типов резки.
+            var widthInput = event.target.closest && event.target.closest('[data-field="width"]');
+            if (widthInput) {
+                var posForm = widthInput.closest ? widthInput.closest('[data-position-form]') : null;
+                if (posForm) {
+                    var posOrderId = posForm.getAttribute('data-position-form');
+                    refreshCutTypeOptions(posOrderId, posForm);
+                }
+            }
         });
 
         state.root.addEventListener('keydown', function(event) {
@@ -1050,7 +1205,15 @@
                 if (addPos) {
                     var addId = addPos.getAttribute('data-add-position');
                     var form = list.querySelector('[data-position-form="' + cssEscape(addId) + '"]');
-                    if (form) form.hidden = false;
+                    if (form) {
+                        form.hidden = false;
+                        // Фильтруем типы резки по текущему сырью (если уже выбрано).
+                        var rawHiddenInit = form.querySelector('#atex-pos-raw-' + cssEscape(addId));
+                        var matInit = rawHiddenInit ? rawHiddenInit.value : '';
+                        ensureStripWidths(matInit).then(function() {
+                            refreshCutTypeOptions(addId, form);
+                        });
+                    }
                     return;
                 }
 
@@ -1139,6 +1302,7 @@
 
         loadAllMetadata()
             .then(function(allMetadata) {
+                state.metadata = allMetadata;
                 var metas = resolveTableMetadata(allMetadata, TABLE, tableOverrides);
                 state.orderMeta = metas.order || {};
                 state.positionMeta = metas.position || {};
@@ -1156,7 +1320,8 @@
                     clientCol && clientCol.reqId ? loadRefOptions(clientCol.reqId) : Promise.resolve([]),
                     rawCol && rawCol.reqId ? loadRefOptions(rawCol.reqId) : Promise.resolve([]),
                     cutCol && cutCol.reqId ? loadRefOptions(cutCol.reqId) : Promise.resolve([]),
-                    sleeveCol && sleeveCol.reqId ? loadRefOptions(sleeveCol.reqId) : Promise.resolve([])
+                    sleeveCol && sleeveCol.reqId ? loadRefOptions(sleeveCol.reqId) : Promise.resolve([]),
+                    loadCutTypeIndex()
                 ]);
             })
             .then(function() {
@@ -1178,6 +1343,8 @@
     window.AtexOrdersTesting = {
         normalizeFieldName: normalizeFieldName,
         normalizeSearchText: normalizeSearchText,
+        parseWidth: parseWidth,
+        matchCutTypes: matchCutTypes,
         parseRef: parseRef,
         parseRefOptionsData: parseRefOptionsData,
         mergeRefOptions: mergeRefOptions,
@@ -1203,7 +1370,10 @@
         DEFAULT_POSITION_STATUSES: DEFAULT_POSITION_STATUSES,
         REF_OPTIONS_LIMIT: REF_OPTIONS_LIMIT,
         REF_SEARCH_LIMIT: REF_SEARCH_LIMIT,
-        REF_DROPDOWN_LIMIT: REF_DROPDOWN_LIMIT
+        REF_DROPDOWN_LIMIT: REF_DROPDOWN_LIMIT,
+        findReqIndex: findReqIndex,
+        loadCutTypeIndex: loadCutTypeIndex,
+        ensureStripWidths: ensureStripWidths
     };
 
     if (document.readyState === 'loading') {
