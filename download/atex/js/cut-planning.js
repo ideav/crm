@@ -306,7 +306,7 @@
         var url = 'report/preferable_widths?JSON_KV&FR_position_material_id=' + encodeURIComponent(materialId) +
                   '&TO_position_material_id=' + encodeURIComponent(materialId);
         return this.getJson(url).then(function(rows) {
-            return (rows || []).map(function(r) {
+            return (Array.isArray(rows) ? rows : []).map(function(r) {
                 return { width: parseFloat(r.position_width_mm), freq: parseFloat(r.position_qty_sum) };
             }).filter(function(c) { return isFinite(c.width) && c.width > 0; });
         });
@@ -529,16 +529,18 @@
         var tol = this.form.tolerance || '20';
         var used = usedWidth(this.strips);
         var rem = remainder(iw, this.strips);
-        var within = Math.abs(rem) <= Math.abs(toNumber(tol));
+        var over = rem < 0;
+        var within = !over && Math.abs(rem) <= Math.abs(toNumber(tol));
 
         this.summaryEl.innerHTML = '';
         this.summaryEl.appendChild(metric('Ширина входа, мм', iw));
         this.summaryEl.appendChild(metric('Занято, мм', used));
         var remNode = metric('Остаток, мм', rem);
-        if (rem > Math.abs(toNumber(tol))) remNode.classList.add('is-warn');
-        else if (rem >= 0) remNode.classList.add('is-ok');
+        if (over || Math.abs(rem) > Math.abs(toNumber(tol))) remNode.classList.add('is-warn');
+        else if (within) remNode.classList.add('is-ok');
         this.summaryEl.appendChild(remNode);
-        this.summaryEl.appendChild(metric('В допуске', within ? 'Да' : 'Нет'));
+        var withinLabel = within ? 'Да' : (over ? 'Нет (перебор)' : 'Нет');
+        this.summaryEl.appendChild(metric('В допуске', withinLabel));
 
         function metric(label, value) {
             return el('div', { class: 'atex-cp-metric' }, [
