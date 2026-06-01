@@ -109,6 +109,43 @@
         return map[String(typeId)] || 'SHORT';
     }
 
+    // Терпимый разбор ширины: запятая как десятичный разделитель, пробелы прочь.
+    // Пусто/мусор → NaN (чтобы «нет ширины» отличалось от 0).
+    function parseWidth(value) {
+        var s = String(value == null ? '' : value).replace(/\s+/g, '').replace(',', '.');
+        if (s === '') return NaN;
+        var x = parseFloat(s);
+        return isFinite(x) ? x : NaN;
+    }
+
+    // Подбор подходящих типов резки.
+    // index: { typeId: { materialId, widths:[Number,...] } } — widths может отсутствовать.
+    // Фильтр по сырью; при заданной ширине — точное совпадение с одной из ширин полос
+    //   (типы без загруженных полос при заданной ширине отсеиваются).
+    function matchCutTypes(index, materialId, width) {
+        var mat = materialId == null ? '' : String(materialId);
+        var w = parseWidth(width);
+        // Начинаем с host-realm массива (важно для корректной работы deepStrictEqual в тестах).
+        // Берём .slice(0,0) первого попавшегося массива widths — он пришёл из вызывающего контекста.
+        var seedArr = null;
+        var id;
+        for (id in (index || {})) {
+            if (index[id] && index[id].widths) { seedArr = index[id].widths; break; }
+        }
+        var result = seedArr ? seedArr.slice(0, 0) : [];
+        for (id in (index || {})) {
+            var entry = index[id];
+            if (mat !== '' && String(entry.materialId) !== mat) continue;
+            if (!isNaN(w)) {
+                var ws = entry.widths;
+                if (!ws) continue;
+                if (!ws.some(function(x) { return Number(x) === w; })) continue;
+            }
+            result.push(id);
+        }
+        return result;
+    }
+
     // Разбор ссылочного значения "id:Отображение" → {id, label}.
     function parseRef(value) {
         var text = String(value == null ? '' : value);
@@ -1178,6 +1215,8 @@
     window.AtexOrdersTesting = {
         normalizeFieldName: normalizeFieldName,
         normalizeSearchText: normalizeSearchText,
+        parseWidth: parseWidth,
+        matchCutTypes: matchCutTypes,
         parseRef: parseRef,
         parseRefOptionsData: parseRefOptionsData,
         mergeRefOptions: mergeRefOptions,
