@@ -134,7 +134,7 @@
             var s = c.slitter || { id: null, label: '' };
             var key = s.id == null ? '\u0000none' : String(s.id);
             if (!groups[key]) {
-                groups[key] = { slitter: { id: s.id, label: s.label || (s.id == null ? 'Без слиттера' : '#' + s.id) }, cuts: [] };
+                groups[key] = { slitter: { id: s.id, label: s.label || (s.id == null ? 'Без станка' : '#' + s.id) }, cuts: [] };
                 order.push(key);
             }
             groups[key].cuts.push(c);
@@ -362,7 +362,7 @@
         if (this.busy) return;
         var meta = this.meta.cut;
         var d = this.draft;
-        if (!d.slitterId) { this.notify('Выберите слиттер', 'error'); return; }
+        if (!d.slitterId) { this.notify('Выберите станок', 'error'); return; }
         if (!d.cutTypeId) { this.notify('Выберите тип резки', 'error'); return; }
 
         var reqIds = {
@@ -509,7 +509,7 @@
         form.appendChild(el('h2', { class: 'atex-pp-form-title', text: 'Новая производственная резка' }));
         form.appendChild(el('p', { class: 'atex-pp-hint', text: 'Номер присваивается автоматически при сохранении.' }));
 
-        form.appendChild(field('Слиттер', this.selectRef(this.slitters, d.slitterId, '— выберите слиттер —',
+        form.appendChild(field('Станок', this.selectRef(this.slitters, d.slitterId, '— выберите станок —',
             function(v) { d.slitterId = v; }, reqIdByName(this.meta.cut, CUT_REQ.slitter))));
         form.appendChild(field('Тип резки', this.selectRef(this.cutTypes, d.cutTypeId, '— выберите тип резки —',
             function(v) { d.cutTypeId = v; }, reqIdByName(this.meta.cut, CUT_REQ.cutType))));
@@ -542,14 +542,14 @@
 
         // Панель фильтров.
         var filters = el('div', { class: 'atex-pp-filters' });
-        var slitterFilter = this.selectRef(this.slitters, this.filter.slitter, 'Все слиттеры',
+        var slitterFilter = this.selectRef(this.slitters, this.filter.slitter, 'Все станки',
             function(v) { self.filter.slitter = v; self.renderQueue(); },
             reqIdByName(this.meta.cut, CUT_REQ.slitter),
             { clearOnInput: false });
         var statusFilter = this.selectText([''].concat(CUT_STATUSES), this.filter.status, function(v) { self.filter.status = v; self.renderQueue(); });
         // первый пункт статуса — «все»
         statusFilter.options[0].textContent = 'Все статусы';
-        filters.appendChild(field('Слиттер', slitterFilter));
+        filters.appendChild(field('Станок', slitterFilter));
         filters.appendChild(field('Статус', statusFilter));
         box.appendChild(filters);
 
@@ -669,7 +669,7 @@
         var layout = el('div', { class: 'atex-pp-layout' });
         this.formEl = el('section', { class: 'atex-pp-panel atex-pp-form' });
         var queueWrap = el('section', { class: 'atex-pp-panel atex-pp-queue-panel' }, [
-            el('h2', { class: 'atex-pp-form-title', text: 'Очередь резок по слиттерам' })
+            el('h2', { class: 'atex-pp-form-title', text: 'Очередь резок по станкам' })
         ]);
         this.queueEl = el('div', { class: 'atex-pp-queue' });
         queueWrap.appendChild(this.queueEl);
