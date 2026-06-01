@@ -69,7 +69,10 @@
         statusFilter: '',
         refOptions: {},
         refSearchSeq: 0,
-        creating: false
+        creating: false,
+        metadata: [],
+        cutTypeIndex: {},           // { typeId: { materialId, widths? } }
+        stripsLoadedMaterials: {}   // { materialId: true } — для каких сырьёв полосы уже грузили
     };
 
     // ------------------------------------------------------------------
@@ -482,6 +485,42 @@
                 : entries;
             return entries;
         });
+    }
+
+    // Индекс типов резки: { id: { materialId } }. Один запрос; ширины полос — лениво.
+    function loadCutTypeIndex() {
+        var meta = findMetadataByName(state.metadata, 'Тип резки');
+        if (!meta) return Promise.resolve();
+        var order = [String(meta.id)].concat((meta.reqs || []).map(function(r){ return String(r.id); }));
+        var matReq = (meta.reqs || []).filter(function(r){ return String(r.val).trim().toLowerCase() === 'вид сырья'; })[0];
+        var matIdx = matReq ? order.indexOf(String(matReq.id)) : -1;
+        return fetchJson('/' + encodeURIComponent(getApiBase()) + '/object/' + encodeURIComponent(meta.id) + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows){
+            (rows || []).forEach(function(rec){
+                var r = rec.r || [];
+                var mat = matIdx >= 0 ? parseRef(r[matIdx]) : { id: null };
+                state.cutTypeIndex[String(rec.i)] = { materialId: mat.id ? String(mat.id) : '' };
+            });
+        });
+    }
+
+    // Грузит ширины полос для всех типов указанного сырья (один раз на сырьё).
+    // Заполняет index[typeId].widths. Возвращает Promise.
+    function ensureStripWidths(materialId) {
+        var mat = materialId == null ? '' : String(materialId);
+        if (mat === '' || state.stripsLoadedMaterials[mat]) return Promise.resolve();
+        var stripMeta = findMetadataByName(state.metadata, 'Полоса');
+        if (!stripMeta) return Promise.resolve();
+        var sOrder = [String(stripMeta.id)].concat((stripMeta.reqs || []).map(function(r){ return String(r.id); }));
+        var wReq = (stripMeta.reqs || []).filter(function(r){ return String(r.val).trim().toLowerCase() === 'ширина, мм'; })[0];
+        var wIdx = wReq ? sOrder.indexOf(String(wReq.id)) : -1;
+        var typeIds = Object.keys(state.cutTypeIndex).filter(function(id){ return String(state.cutTypeIndex[id].materialId) === mat; });
+        return Promise.all(typeIds.map(function(id){
+            return fetchJson('/' + encodeURIComponent(getApiBase()) + '/object/' + encodeURIComponent(stripMeta.id) + '/?JSON_OBJ&F_U=' + encodeURIComponent(id) + '&LIMIT=0,1000').then(function(rows){
+                var widths = (rows || []).map(function(rec){ var r = rec.r || []; return wIdx >= 0 ? parseWidth(r[wIdx]) : NaN; })
+                    .filter(function(x){ return !isNaN(x); });
+                state.cutTypeIndex[id].widths = widths;
+            });
+        })).then(function(){ state.stripsLoadedMaterials[mat] = true; });
     }
 
     // ------------------------------------------------------------------
@@ -1169,6 +1208,7 @@
 
         loadAllMetadata()
             .then(function(allMetadata) {
+                state.metadata = allMetadata;
                 var metas = resolveTableMetadata(allMetadata, TABLE, tableOverrides);
                 state.orderMeta = metas.order || {};
                 state.positionMeta = metas.position || {};
@@ -1186,7 +1226,8 @@
                     clientCol && clientCol.reqId ? loadRefOptions(clientCol.reqId) : Promise.resolve([]),
                     rawCol && rawCol.reqId ? loadRefOptions(rawCol.reqId) : Promise.resolve([]),
                     cutCol && cutCol.reqId ? loadRefOptions(cutCol.reqId) : Promise.resolve([]),
-                    sleeveCol && sleeveCol.reqId ? loadRefOptions(sleeveCol.reqId) : Promise.resolve([])
+                    sleeveCol && sleeveCol.reqId ? loadRefOptions(sleeveCol.reqId) : Promise.resolve([]),
+                    loadCutTypeIndex()
                 ]);
             })
             .then(function() {
