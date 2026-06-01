@@ -112,7 +112,7 @@
     // Терпимый разбор ширины: запятая как десятичный разделитель, пробелы прочь.
     // Пусто/мусор → NaN (чтобы «нет ширины» отличалось от 0).
     function parseWidth(value) {
-        var s = String(value == null ? '' : value).replace(/\s+/g, '').replace(',', '.');
+        var s = String(value == null ? '' : value).replace(/\s+/g, '').replace(/,/g, '.');
         if (s === '') return NaN;
         var x = parseFloat(s);
         return isFinite(x) ? x : NaN;
