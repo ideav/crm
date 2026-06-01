@@ -73,8 +73,8 @@ var cuts = [
 
 var groups = planning.groupBySlitter(cuts);
 assertEqual(groups.map(function(g) { return g.slitter.label; }),
-    ['Слиттер №1', 'Слиттер №2', 'Без слиттера'],
-    'groupBySlitter orders by label, «без слиттера» last');
+    ['Слиттер №1', 'Слиттер №2', 'Без станка'],
+    'groupBySlitter orders by label, «без станка» last');
 assertEqual(groups[0].cuts.length, 2, 'groupBySlitter groups two cuts under Слиттер №1');
 
 // фильтр по слиттеру
