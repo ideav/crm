@@ -15,7 +15,7 @@
 ## Файлы
 - Modify: `download/atex/js/dashboards.js` — `agg` (+`rowsToEntities`), `collect()`, `start()`; удаление мёртвого кода.
 - Modify: `experiments/atex-dashboards.test.js` — тесты `rowsToEntities`.
-- Modify: `docs/atex_reports.md`, `docs/integram-app-workflow.md` — правило «минимум запросов».
+- Modify: `docs/integram-reports.md`, `docs/integram-app-workflow.md` — правило «минимум запросов».
 - Операционно (боевая ateh, API): расширить отчёт `order_pipeline` (8303), создать `material_stock`.
 
 ---
@@ -207,9 +207,9 @@ git commit -m "feat(atex): dashboards — данные из отчётов order
 
 ### Task 4: Правило «минимум серверных запросов» в документацию
 
-**Files:** `docs/atex_reports.md`, `docs/integram-app-workflow.md`.
+**Files:** `docs/integram-reports.md`, `docs/integram-app-workflow.md`.
 
-- [ ] **Step 1: Добавить правило в `docs/atex_reports.md`**
+- [ ] **Step 1: Добавить правило в `docs/integram-reports.md`**
 
 В раздел про выгоду отчётов добавить абзац:
 
@@ -228,7 +228,7 @@ git commit -m "feat(atex): dashboards — данные из отчётов order
 - [ ] **Step 3: Коммит**
 
 ```bash
-git add docs/atex_reports.md docs/integram-app-workflow.md
+git add docs/integram-reports.md docs/integram-app-workflow.md
 git commit -m "docs(atex): правило — минимум серверных запросов, агрегации на клиенте"
 ```
 

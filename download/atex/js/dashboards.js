@@ -7,7 +7,7 @@
 // docs/WORKSPACE_DEVELOPMENT_GUIDE.md, раздел про дашборды — atex_workplaces.md §3.9.
 //
 // Данные берутся двумя отчётами (`report/`), агрегации считаются на клиенте —
-// минимум серверных запросов (правило: docs/atex_reports.md):
+// минимум серверных запросов (правило: docs/integram-reports.md):
 //   • `GET /{db}/report/order_pipeline?JSON_KV`  — плоская цепочка
 //     Заказ→Позиция→Обеспечение→Резка→ГП; `rowsToEntities` разворачивает строки
 //     в сущности (dedup по *_id) → заказы по статусам, загрузка слиттеров,
