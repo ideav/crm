@@ -180,12 +180,12 @@
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
         this.meta = { batch: null, material: null };
-        this.materials = [];   // [{ id, label }]
+        this.materials = [];   // [{ id, label, rollLength }]
         this.batches = [];     // загруженные партии [{ id, name, materialId, materialLabel, arrivedAt, received, remainder }]
         this.refOptions = {};  // кеш опций searchable reference inputs по reqId
         this.current = null;   // редактируемая/новая партия
         this.remainderTouched = false; // пользователь вручную правил «Остаток»?
-        this.remainderMTouched = false;
+        this.remainderMTouched = false; // пользователь вручную правил «Остаток, м»?
         this.busy = false;
     }
 
@@ -334,7 +334,8 @@
     AtexIntake.prototype.newBatch = function() {
         this.current = {
             id: null, name: '', materialId: null,
-            arrivedAt: todayIso(), received: '', remainder: ''
+            arrivedAt: todayIso(), received: '', remainder: '',
+            lengthM: '', remainderM: ''
         };
         this.remainderTouched = false;
         this.remainderMTouched = false;
@@ -432,6 +433,7 @@
             reqId: reqIdByName(this.meta.batch, BATCH_REQ.material),
             onChange: function(value) {
                 c.materialId = value || null;
+                // подставляем дефолт длины только если длина ещё не задана (вручную не трогали)
                 if (!self.remainderMTouched && (c.lengthM === '' || c.lengthM == null)) {
                     var def = calc.materialDefaultLength(self.materials, c.materialId);
                     if (def > 0) {

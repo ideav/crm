@@ -90,6 +90,7 @@ var materials = [
     { id: '2', label: 'MWR110L', rollLength: '' }
 ];
 assertEqual(calc.materialDefaultLength(materials, '1'), 4000, 'default length from material roll length');
+assertEqual(calc.materialDefaultLength(materials, 1), 4000, 'numeric id matches string stored id');
 assertEqual(calc.materialDefaultLength(materials, '2'), 0, 'empty roll length → 0');
 assertEqual(calc.materialDefaultLength(materials, '999'), 0, 'unknown material → 0');
 assertEqual(calc.materialDefaultLength(materials, null), 0, 'null material → 0');
