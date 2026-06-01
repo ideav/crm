@@ -55,7 +55,8 @@
         cut: 'Производственная резка',
         supply: 'Обеспечение',
         slitter: 'Слиттер',
-        cutType: 'Тип резки'
+        cutType: 'Тип резки',
+        materialBatch: 'Партия сырья'
     };
     // Реквизиты «Производственной резки» (Номер — главное значение, автонумер).
     var CUT_REQ = {
@@ -83,6 +84,24 @@
     function parseRef(raw) {
         var m = String(raw == null ? '' : raw).match(/^(\d+):([\s\S]*)$/);
         return m ? { id: m[1], label: m[2] } : { id: null, label: String(raw == null ? '' : raw) };
+    }
+
+    // Разбор мультиссылки из JSON_OBJ: «id1,id2:Подпись1,Подпись2» → ['id1','id2'].
+    // Часть до первого «:» — id через запятую; без «:» — весь raw как id-часть.
+    // null / пустая строка → [].
+    function parseMultiRefIds(raw) {
+        var s = String(raw == null ? '' : raw);
+        if (s.trim() === '') return [];
+        var idsPart = s.indexOf(':') >= 0 ? s.slice(0, s.indexOf(':')) : s;
+        return idsPart.split(',').map(function(x) { return x.trim(); }).filter(function(x) { return x !== ''; });
+    }
+
+    // Проверка: есть ли materialId в массиве stopMaterialIds (сравнение строковое).
+    // Пустой materialId → false; пустой список → false.
+    function isMaterialBlocked(stopMaterialIds, materialId) {
+        var mid = String(materialId == null ? '' : materialId).trim();
+        if (mid === '') return false;
+        return (stopMaterialIds || []).some(function(id) { return String(id).trim() === mid; });
     }
 
     // Значение реквизита из метаданных по имени → его числовой id.
@@ -259,6 +278,8 @@
 
     var planning = {
         parseRef: parseRef,
+        parseMultiRefIds: parseMultiRefIds,
+        isMaterialBlocked: isMaterialBlocked,
         reqIdByName: reqIdByName,
         columnIndex: columnIndex,
         mapCutRecord: mapCutRecord,
@@ -292,10 +313,11 @@
     function AtexProductionPlanning(root) {
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
-        this.meta = { cut: null, supply: null, slitter: null, cutType: null };
-        this.slitters = [];        // справочник [{ id, label }]
+        this.meta = { cut: null, supply: null, slitter: null, cutType: null, materialBatch: null };
+        this.slitters = [];        // справочник [{ id, label, stopMaterialIds }]
         this.cutTypes = [];        // справочник [{ id, label }]
         this.materialBatches = []; // справочник [{ id, label }]
+        this.batchMaterialById = {}; // карта batch_id → вид_сырья_id (для стоп-листа)
         this.positions = [];       // позиции заказа [{ id, label }]
         this.refOptions = {};      // кеш опций searchable reference inputs по reqId
         this.cuts = [];            // очередь резок [mapCutRecord]
@@ -364,6 +386,7 @@
             self.meta.supply = byName(TABLE.supply);
             self.meta.slitter = byName(TABLE.slitter);
             self.meta.cutType = byName(TABLE.cutType);
+            self.meta.materialBatch = byName(TABLE.materialBatch);
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
             if (!self.meta.supply) throw new Error('В метаданных не найдена таблица «' + TABLE.supply + '»');
         });
@@ -383,6 +406,43 @@
                 }
                 return { id: String(r.i), label: label };
             });
+        });
+    };
+
+    // Справочник станков (слиттеров) с их стоп-листами сырья.
+    // Читает object/ с полем «Стоп-лист сырья» (мультиссылка → Вид сырья);
+    // разбирает через parseMultiRefIds → stopMaterialIds: ['id1','id2',...].
+    // Заменяет loadRef(meta.slitter) в начальной загрузке.
+    AtexProductionPlanning.prototype.loadSlittersWithStop = function() {
+        var meta = this.meta.slitter;
+        if (!meta) return Promise.resolve([]);
+        var stopIdx = columnIndex(meta, 'Стоп-лист сырья');
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
+            return (rows || []).map(function(r) {
+                var raw = (stopIdx >= 0 && r.r) ? r.r[stopIdx] : '';
+                return {
+                    id: String(r.i),
+                    label: (r.r && r.r[0]) || ('#' + r.i),
+                    stopMaterialIds: parseMultiRefIds(raw)
+                };
+            });
+        });
+    };
+
+    // Карта «партия сырья → вид сырья» (object/), только для проверки стоп-листа.
+    // Дропдаун партий сырья по-прежнему берётся из отчёта material_batches — не меняем.
+    AtexProductionPlanning.prototype.loadBatchMaterialMap = function() {
+        var self = this;
+        var meta = this.meta.materialBatch;
+        if (!meta) { this.batchMaterialById = {}; return Promise.resolve(); }
+        var matIdx = columnIndex(meta, 'Вид сырья');
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
+            var map = {};
+            (rows || []).forEach(function(r) {
+                var ref = (matIdx >= 0 && r.r) ? parseRef(r.r[matIdx]) : { id: null };
+                map[String(r.i)] = ref.id ? String(ref.id) : '';
+            });
+            self.batchMaterialById = map;
         });
     };
 
@@ -429,6 +489,18 @@
         var d = this.draft;
         if (!d.slitterId) { this.notify('Выберите станок', 'error'); return; }
         if (!d.cutTypeId) { this.notify('Выберите тип резки', 'error'); return; }
+
+        // Стоп-лист станка: сырьё выбранной партии не должно быть запрещено на станке.
+        if (d.materialBatchId) {
+            var slit = this.slitters.filter(function(s) { return String(s.id) === String(d.slitterId); })[0];
+            var matId = this.batchMaterialById && this.batchMaterialById[String(d.materialBatchId)];
+            var stop = (slit && slit.stopMaterialIds) || [];
+            if (matId && isMaterialBlocked(stop, matId)) {
+                var batch = this.materialBatches.filter(function(b) { return String(b.id) === String(d.materialBatchId); })[0];
+                this.notify('Сырьё «' + ((batch && batch.label) || matId) + '» запрещено на станке «' + ((slit && slit.label) || d.slitterId) + '»', 'error');
+                return;
+            }
+        }
 
         var reqIds = {
             slitter: reqIdByName(meta, CUT_REQ.slitter),
@@ -753,9 +825,10 @@
         return this.loadMetadata()
             .then(function() {
                 return Promise.all([
-                    self.loadRef(self.meta.slitter).then(function(items) { self.slitters = items; }),
+                    self.loadSlittersWithStop().then(function(items) { self.slitters = items; }),
                     self.loadRef(self.meta.cutType).then(function(items) { self.cutTypes = items; }),
                     self.loadMaterialBatches(),
+                    self.loadBatchMaterialMap(),
                     self.loadPositions(),
                     self.loadPlanning()
                 ]);
