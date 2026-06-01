@@ -235,11 +235,18 @@
     // «Партия сырья». Подпись обогащённая: «Номер · Вид сырья · ост. N м²»
     // (пустые части пропускаются). Дропдаун статический клиентский (см. renderForm),
     // поэтому метка единообразна и при фильтрации по вводу.
+    // Остаток м² → строка: округление до 2 знаков, без незначащих нулей
+    // (2440.00 → «2440», 38400.366 → «38400.37»). Нечисло/пусто → ''.
+    function fmtRemainder(value) {
+        var n = parseFloat(String(value == null ? '' : value).replace(',', '.'));
+        return isFinite(n) ? String(Math.round(n * 100) / 100) : '';
+    }
+
     function rowsToBatches(rows) {
         return (rows || []).map(function(row) {
             var no = row.batch_no == null ? '' : String(row.batch_no).trim();
             var material = row.batch_material == null ? '' : String(row.batch_material).trim();
-            var rem = row.batch_remainder_m2 == null ? '' : String(row.batch_remainder_m2).trim();
+            var rem = fmtRemainder(row.batch_remainder_m2);
             var parts = [];
             if (material) parts.push(material);
             if (rem) parts.push('ост. ' + rem + ' м²');

@@ -149,12 +149,14 @@ assertEqual(planning.rowsToPositions([]), [], 'rowsToPositions: пустой в�
 // ── rowsToBatches: строки material_batches (JSON_KV) → [{id,label}] для дропдауна ──
 var batchRows = [
     { batch_id: '1946', batch_no: 'RM-АТХ-3002-2026-05-31', batch_material: 'MWR118', batch_remainder_m2: '2440.00' },
-    { batch_id: '8078', batch_no: 'Начальный остаток MR131', batch_material: 'MR131', batch_remainder_m2: '4588.35' }
+    { batch_id: '8078', batch_no: 'Начальный остаток MR131', batch_material: 'MR131', batch_remainder_m2: '4588.35' },
+    { batch_id: '8082', batch_no: 'MR132', batch_material: 'MR132', batch_remainder_m2: '38400.366' }
 ];
 assertEqual(planning.rowsToBatches(batchRows), [
-    { id: '1946', label: 'RM-АТХ-3002-2026-05-31 · MWR118 · ост. 2440.00 м²' },
-    { id: '8078', label: 'Начальный остаток MR131 · MR131 · ост. 4588.35 м²' }
-], 'rowsToBatches: id партии + обогащённая подпись «номер · вид · ост. N м²»');
+    { id: '1946', label: 'RM-АТХ-3002-2026-05-31 · MWR118 · ост. 2440 м²' },
+    { id: '8078', label: 'Начальный остаток MR131 · MR131 · ост. 4588.35 м²' },
+    { id: '8082', label: 'MR132 · MR132 · ост. 38400.37 м²' }
+], 'rowsToBatches: подпись «номер · вид · ост. N м²», остаток округлён без хвостовых нулей');
 assertEqual(planning.rowsToBatches([{ batch_id: '5', batch_no: 'НК-9', batch_material: '', batch_remainder_m2: '' }]),
     [{ id: '5', label: 'НК-9' }], 'rowsToBatches: пустые вид/остаток → только номер');
 assertEqual(planning.rowsToBatches([]), [], 'rowsToBatches: пустой ввод → пустой список');
