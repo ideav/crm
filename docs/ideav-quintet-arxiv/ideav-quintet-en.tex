@@ -1,0 +1,486 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{natbib}
+\usepackage{url}
+\geometry{margin=1in}
+
+\title{The IDEAV Quintet: A Metadata-Compiled Data Model for Low-Code Business Applications}
+\author{Aleksej P. Semenov\\Integram / IDEAV}
+\date{Draft for arXiv cs.DB, May 2026}
+
+\newtheorem{definition}{Definition}
+\newtheorem{theorem}{Theorem}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Entity--Attribute--Value (EAV) schemas are often treated as a necessary but
+dangerous compromise: they make application schemas extensible, yet they move
+typing, integrity, navigation, and query planning out of the relational model
+and into ad hoc application code. This paper describes the IDEAV quintet, a
+metadata-compiled data model used in the Integram low-code platform to retain
+EAV-like schema plasticity while making the missing semantics explicit. The
+model represents all business metadata and values inside a uniform tuple space,
+but separates their roles into five cooperating elements: types, requisites,
+objects, links, and a compiler. The compiler, implemented by the
+\texttt{Compile\_Report} routine, turns a user-level report definition into SQL
+by following four formally defined navigation cases: reference to the current
+object, child array of the current object, reference from the new object back to
+the current object, and parent array reached from the current object. We give a
+formal description of the model, a proof sketch that the compiler covers every
+connected report graph expressible by the metadata, and a storage discussion
+grounded in the single-table patent family RU2650032C1 and US11138174B2. The
+paper also compares IDEAV with medical EAV systems, business EAV failures, and
+modern low-code products. Because controlled public benchmarks are not yet
+available, performance statements are stated as hypotheses and as a benchmark
+protocol rather than as measured claims.
+\end{abstract}
+
+\noindent\textbf{Keywords:} low-code, metadata-driven database, EAV, schema evolution, query compilation.
+
+\section{Introduction}
+
+Low-code platforms promise that a business analyst can change a process without
+waiting for a database migration. Classical relational design promises the
+opposite virtue: data structures are declared explicitly, typed, normalized, and
+optimized before workloads depend on them \citep{codd1970relational}. The
+practical tension between these promises is the reason Entity--Attribute--Value
+(EAV) schemas keep reappearing. EAV is easy to extend, but unstructured EAV
+frequently degenerates into dynamic string storage where the database can no
+longer see the real schema \citep{karwin2010sql,kyte2003effective}.
+
+The usual question is therefore: why not just use EAV? The short answer is that
+EAV by itself is not a model. It is a physical encoding pattern. It says that
+attributes may be rows, but it does not say how attributes are typed, how
+relations are distinguished from scalar values, how a query compiler should
+reconstruct joins, how arrays are represented, or what application invariant
+prevents a collection of triples from becoming a private programming language.
+
+IDEAV starts from the same need for late-bound structure, but it does not stop at
+attribute rows. Its central contribution is a quintet:
+
+\[
+  \mathcal{Q}_{IDEAV} =
+  \langle \mathcal{T}, \mathcal{R}, \mathcal{O}, \mathcal{L}, \mathcal{C} \rangle ,
+\]
+
+where \(\mathcal{T}\) is the set of logical types, \(\mathcal{R}\) is the set of
+requisites (fields and relations), \(\mathcal{O}\) is the set of objects,
+\(\mathcal{L}\) is the set of typed links, and \(\mathcal{C}\) is a metadata
+compiler. This fifth element is important. Without the compiler, the first four
+elements still risk becoming a named variant of EAV. With the compiler, reports,
+forms, and API calls operate against a graph of declared metadata rather than
+against arbitrary key-value strings.
+
+The model has been developed in the commercial Integram platform since 2015,
+with conceptual roots dating to 2003. It is also related to the patent family
+``Electronic database and method of its formation'' \citep{semenov2018ru} and
+``Electronic database and method for forming same'' \citep{semenov2021us}. The
+patents are not used here as marketing evidence. They are cited to establish a
+documented design lineage for a single-table, role-coded representation of
+metadata and data.
+
+\section{Related Work}
+
+\subsection{Medical and Scientific EAV}
+
+The strongest academic tradition around EAV is not commerce but medicine and
+scientific data capture. ACT/DB used attribute-value storage to manage clinical
+trial variables whose structure changed over time \citep{nadkarni1998actdb}.
+EAV/CR extended the idea with classes and relationships for heterogeneous
+scientific data \citep{nadkarni1999eavcr,marenco2003eavcr}. Web clinical
+databases and i2b2 showed that ontology-like metadata can support rich,
+evolving datasets \citep{anhoj2003generic,murphy2010i2b2}.
+
+These systems answer part of the ``why not EAV'' question: EAV can work when the
+domain accepts metadata as a first-class artifact. They also reveal the missing
+piece for operational business software. A hospital research schema often
+prioritizes sparse observation capture and later analysis. A CRM or ERP system
+also needs daily transactional forms, permissions, references, child tables,
+bulk imports, and user-defined reports. IDEAV therefore treats metadata not only
+as descriptive schema, but as executable schema for a compiler.
+
+\subsection{Business Uses and Failure Modes}
+
+Business systems adopted EAV for product attributes, custom fields, and CRM-like
+extension points. The cautionary literature is familiar: ``Bad CaRMa'' describes
+the pain of a catalog system whose entity-attribute design hid useful structure
+from the database engine \citep{gorman2006badcarma}. SQL antipattern discussions
+make similar points: generic attribute rows often defeat constraints, make
+queries verbose, and encourage application-only integrity \citep{karwin2010sql}.
+
+Magento and WooCommerce illustrate a more nuanced pattern. Adobe Commerce still
+documents extensible attributes \citep{adobeCommerceAttributes}, while
+WooCommerce introduced product lookup tables and high-performance order storage
+to reduce dependence on broad metadata tables for hot paths
+\citep{woocommerceLookup,woocommerceHPOS}. These are not simply failures of EAV;
+they are evidence that an extensibility encoding without a formal compiler,
+typed navigation rules, and workload-aware projections tends to require
+secondary structures later.
+
+The present draft does not cite unsupported anecdotal cases, including
+unarchived stories sometimes retold about cascade deletion in CRM products, as
+primary evidence. That omission is deliberate. The argument is stronger when it
+rests on public documentation and reproducible model properties.
+Likewise, the requested Kustomer comparison is retained only as a candidate for
+future archival verification: without a primary public source, it should not
+carry an empirical claim.
+
+\subsection{Modern Low-Code Platforms}
+
+Low-code systems solve schema evolution with different trade-offs. Some expose a
+spreadsheet-like database; some connect to an external relational database; some
+generate conventional tables; some keep metadata inside an application runtime.
+Table~\ref{tab:lowcode} summarizes the comparison at the model level.
+
+\begin{longtable}{p{0.18\linewidth}p{0.31\linewidth}p{0.39\linewidth}}
+\caption{Selected low-code systems and their schema strategy.}\label{tab:lowcode}\\
+\toprule
+System & Storage strategy & Implication for the EAV question \\
+\midrule
+\endfirsthead
+\toprule
+System & Storage strategy & Implication for the EAV question \\
+\midrule
+\endhead
+Airtable & Hosted base/table abstraction with API access \citep{airtableApi} &
+Strong user experience, but storage and compilation semantics are proprietary. \\
+Bubble & Application data types managed by the Bubble runtime
+\citep{bubbleData} & Flexible, but the database model is not a portable formal
+contract. \\
+Retool & Connects forms and workflows to external resources
+\citep{retoolResources} & Keeps real databases available; schema evolution is
+delegated to connected systems. \\
+NocoDB, Baserow & Spreadsheet-like interfaces over structured backends
+\citep{nocodb,baserow} & Useful low-code layer, usually table-oriented rather
+than a single formal metadata tuple space. \\
+Directus, Strapi & Headless data/content platforms over database schemas
+\citep{directus,strapi} & Excellent when the schema exists; less focused on
+compiling arbitrary business metadata into joins. \\
+Caspio, Knack, AppSheet & Hosted app builders \citep{caspio,knack,appsheet} &
+Reduce development cost, but do not publish a formal equivalent of the IDEAV
+compiler. \\
+Integram / IDEAV & Single role-coded tuple space plus metadata compiler
+\citep{integramWorkflow2026,integramMcp2026} & Treats schema evolution and query
+navigation as one formal problem. \\
+\bottomrule
+\end{longtable}
+
+\subsection{Database Systems Context}
+
+IDEAV is not a replacement for relational algebra, NewSQL, or document stores.
+It is a higher-level metadata model that uses a relational engine as execution
+substrate. NewSQL work shows that relational systems can scale transactional
+workloads when the schema is known \citep{pavlo2016newsql}. NoSQL and polyglot
+persistence work shows that alternate models can simplify specific access
+patterns \citep{sadalage2012nosql,floratou2012nosql}. IDEAV asks a narrower
+question: if business users create schema at runtime, what formal metadata must
+exist so that the generated relational query is still predictable?
+
+\section{The IDEAV Quintet Model}
+
+\subsection{Physical Tuple Space}
+
+The patented core describes an electronic database where elements are organized
+in a single table with identifiers, parent identifiers, values, and a type code
+\citep{semenov2018ru,semenov2021us}. The Integram implementation augments this
+minimal tuple with metadata columns used by the compiler. We write the physical
+universe as:
+
+\[
+  U = \{q_i = (id_i, t_i, up_i, val_i, A_i)\},
+\]
+
+where \(id_i\) is a stable identifier, \(t_i\) is the type identifier, \(up_i\)
+is the parent/object identifier, \(val_i\) is the stored value, and \(A_i\) is a
+finite map of implementation attributes such as aliases, reference markers,
+array markers, uniqueness flags, and permissions. This is not ``just EAV''
+because \(t\) and \(up\) are interpreted by declared role metadata rather than
+by each application screen independently.
+
+\subsection{Five Roles}
+
+\begin{definition}[Type]
+A type \(\tau \in \mathcal{T}\) declares a logical business class. In the API it
+is created by \texttt{\_d\_new}. Its first name field can be addressed as
+\texttt{t\(\tau\)}.
+\[
+  \tau = (id, name, parent, unique, permissions).
+\]
+\end{definition}
+
+\begin{definition}[Requisite]
+A requisite \(r \in \mathcal{R}\) is a field or structural relation belonging to
+a type. It is created by \texttt{\_d\_req}. A scalar requisite stores values; a
+reference requisite contains \texttt{ref} or \texttt{ref\_id}; an array
+requisite contains \texttt{arr\_id}.
+\[
+  r = (id, owner, name, domain, ref, ref\_id, arr\_id, attrs).
+\]
+\end{definition}
+
+\begin{definition}[Object]
+An object \(o \in \mathcal{O}\) is a typed business record.
+\[
+  o = (id, type(o), parent(o), name(o), \{r \mapsto v_r\}).
+\]
+Scalar values are stored as tuples under the object; the record name is stored
+as the value of the type row itself.
+\end{definition}
+
+\begin{definition}[Link]
+A link \(\ell \in \mathcal{L}\) is a typed navigation fact between objects or
+between a parent object and a child array item. References and arrays are kept
+separate because they compile into different join predicates.
+\[
+  \ell_{ref}: o_s \xrightarrow{r} o_t,\qquad
+  \ell_{arr}: o_p \xrightarrow{a} o_c.
+\]
+\end{definition}
+
+\begin{definition}[Compiler]
+The compiler \(\mathcal{C}\) maps metadata and a report definition to SQL:
+\[
+  \mathcal{C}: (\mathcal{T},\mathcal{R},\mathcal{L}, Report, \Gamma)
+  \rightarrow SQL ,
+\]
+where \(\Gamma\) contains aliases, filters, functions, and current block
+context. In the implementation this role is represented by
+\texttt{Compile\_Report}.
+\end{definition}
+
+\subsection{The Metadata Compiler}
+
+A report is a list of requested columns. Each column belongs to a logical type.
+The compiler maintains the set \(J\) of logical types already connected to the
+SQL query. For every new requested type \(n\), it searches for a type
+\(j \in J\) that can connect to \(n\). The implementation documents four cases:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Case & Metadata condition & Join shape \\
+\midrule
+Reference to us & \(j\) has reference requisite to \(n\) &
+\(j.ref = n.id\) \\
+We are an Array & \(n\) is an array child of \(j\) &
+\(n.up = j.id\) \\
+We have a Reference & \(n\) has reference requisite to \(j\) &
+\(n.ref = j.id\) \\
+We got an Array & \(j\) is an array child of \(n\) &
+\(j.up = n.id\) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+In simplified form:
+
+\begin{verbatim}
+J := {master type from the first report column}
+while uncompiled columns remain:
+    progress := false
+    for column c with type n not in J:
+        for each j in J:
+            if j references n: add join "j.ref = n.id"
+            else if n is array child of j: add join "n.up = j.id"
+            else if n references j: add join "n.ref = j.id"
+            else if j is array child of n: add join "j.up = n.id"
+            if a case matched:
+                J := J union {n}
+                progress := true
+                break
+    if not progress: fail with "cannot connect report columns"
+\end{verbatim}
+
+This is where IDEAV diverges from ordinary EAV. A generic attribute table can
+store ``customer'', ``invoice'', and ``invoice lines'' as rows, but it does not
+necessarily know which join is legal. IDEAV makes the four navigations explicit
+metadata and requires the compiler to choose one.
+
+\subsection{Correctness Sketch}
+
+\begin{theorem}[Connected report compilation]
+Let \(G_M=(V,E)\) be the undirected graph induced by IDEAV reference and array
+metadata for a report, where vertices are logical types and edges are legal
+instances of one of the four compiler cases. If the requested report types form
+a connected subgraph of \(G_M\) and every edge has an unambiguous metadata role,
+then \(\mathcal{C}\) can add a join path for every requested type.
+\end{theorem}
+
+\begin{proof}
+Choose the first report type as the master vertex. The invariant after each
+successful compiler step is that \(J\) is a connected set of vertices and the
+generated SQL contains a join path from the master to every vertex in \(J\).
+Initially the invariant holds for the singleton master. Suppose it holds for
+\(k\) vertices. Because the requested subgraph is connected, if not all vertices
+are in \(J\), there exists an edge from some \(j \in J\) to some
+\(n \notin J\). By construction every metadata edge is exactly one of the four
+compiler cases, so the compiler can add the corresponding join predicate and
+extend \(J\) to \(J \cup \{n\}\). The invariant is preserved. By induction over
+the number of requested types, all vertices are joined. If no such edge exists,
+the report is disconnected or ambiguous, and failure is the correct behavior.
+\end{proof}
+
+The theorem does not claim cost optimality. It claims semantic coverage for the
+metadata graph that the platform itself allows users to create. Query cost is an
+execution-engine and workload question, not a proof consequence.
+
+\subsection{Physical Storage and Indexing}
+
+The storage design keeps metadata and data in one physical relation, commonly
+with composite indexes over identifiers, type, parent, and value
+\citep{integramWorkflow2026}. This fixed tuple shape has two engineering
+advantages: schema changes become data changes, and the compiler can target a
+stable set of indexed columns. However, it would be misleading to treat this
+alone as a fixed performance bound. B-tree height depends on row count, page
+size, key distribution, and partitioning strategy. The defensible claim is
+more specific: a fixed tuple schema and partitionable identifier ranges give the
+implementation a stable mechanism for keeping metadata operations and generated
+joins inside a known operational envelope. Controlled benchmarks are needed to
+turn that mechanism into measured latency claims.
+
+\section{Empirical Validation}
+
+The model should be evaluated at three levels.
+
+\paragraph{Compiler correctness.}
+Synthetic metadata graphs should cover every legal combination of references and
+arrays. For each graph, a generated report should be compared with an equivalent
+hand-written relational query over a normalized schema. The minimum test suite
+contains chains, stars, diamonds, reverse references, parent-to-child arrays,
+child-to-parent arrays, and disconnected reports that must fail.
+
+\paragraph{Schema evolution.}
+A workload should create new types, add scalar requisites, add references, add
+arrays, and then execute reports without DDL migrations. The comparison systems
+should include conventional migrations, a generic EAV table, a JSON/document
+column design, and a metadata-compiled IDEAV design.
+
+\paragraph{Performance.}
+Benchmarks should report write latency, report compilation time, generated SQL
+execution time, index size, and storage overhead as functions of:
+
+\[
+  N_o = \text{objects},\quad
+  N_t = \text{types},\quad
+  N_r = \text{requisites per type},\quad
+  d = \text{report join depth}.
+\]
+
+Until those results are public, production history since 2015 should be treated
+as evidence of feasibility, not as a controlled performance proof. The benchmark
+protocol above is therefore part of the contribution: it identifies what must
+be measured before IDEAV can be compared fairly with relational, EAV, and JSON
+alternatives.
+
+\section{Discussion}
+
+IDEAV reframes the usual EAV debate. The problem with EAV in business systems is
+not that attributes are rows. The problem is that the row encoding is commonly
+asked to carry schema, constraints, navigation, UI behavior, and reporting
+semantics without a formal layer. IDEAV assigns those responsibilities to
+metadata and then makes the metadata executable through a compiler.
+
+This design also changes the role of AI-assisted development. A language model
+or scripted agent can call a compact API such as \texttt{\_d\_new},
+\texttt{\_d\_req}, \texttt{\_d\_ref}, \texttt{\_m\_new}, and
+\texttt{\_m\_save}. Those calls do not merely create tables in a UI; they extend
+the same metadata graph that the compiler later uses for reports and forms. The
+AI surface is therefore smaller than a full SQL migration surface but more
+formal than a screen-scraping automation layer.
+
+The limitations are real. Generated joins may be semantically correct and still
+slow. Highly analytical workloads may need materialized projections. Strong
+typing, migration history, and multi-tenant isolation must be specified
+carefully. The model also depends on good metadata governance: if users create
+poor types and relations, a compiler can preserve their meaning but cannot make
+the domain design good.
+
+\section{Conclusion}
+
+EAV failed in many business settings because it was used as a shortcut around
+modeling rather than as one layer in a formal model. The IDEAV quintet proposes
+a different contract: keep the extensible tuple space, but require explicit
+types, requisites, objects, links, and a compiler. The result is a low-code data
+model in which schema evolution is cheap, but not invisible; relations are
+dynamic, but not arbitrary; and generated SQL follows metadata rules that can be
+stated, tested, and reviewed.
+
+The next research step is empirical. Public benchmarks should compare IDEAV with
+classical EAV, normalized relational schemas, and JSON/document designs on
+schema evolution, report compilation, and query execution. If those measurements
+confirm the operational hypotheses, IDEAV becomes not a rejection of relational
+databases, but a disciplined metadata layer above them.
+
+\appendix
+
+\section{Patent References}
+
+RU2650032C1, ``Electronic database and method of its formation'', lists Aleksej
+Petrovich Semenov as inventor and describes a database whose elements are
+organized in a single table containing identifiers, parent identifiers, values,
+and datatype codes \citep{semenov2018ru}. The priority date is 2017-03-20 and
+the publication date is 2018-04-06.
+
+US11138174B2, ``Electronic database and method for forming same'', belongs to
+the same patent family and describes the single-table organization with rows
+for root element, datatype, term, term attribute, and data
+\citep{semenov2021us}. The priority date is 2017-03-20 and the publication date
+is 2021-10-05.
+
+The patents establish novelty claims around the physical organization. This
+paper's separate claim is model-level: IDEAV should be evaluated as the
+combination of physical tuple space, formal metadata roles, and compiler.
+
+\section{IDEAV API Sketch}
+
+The public repository documentation exposes a compact API for creating metadata
+and data \citep{integramMcp2026}. The following examples are schematic:
+
+\begin{verbatim}
+# Create a logical type/table.
+POST _d_new
+  val = "Customer"
+
+# Add a scalar requisite/column to a type.
+POST _d_req/{customerTypeId}
+  val = "Phone"
+  t   = "{stringTypeId}"
+
+# Create a reference domain and attach it as a requisite.
+POST _d_ref/{targetTypeId}
+POST _d_req/{sourceTypeId}
+  val = "Customer"
+  t   = "{createdReferenceTypeId}"
+
+# Attach an existing type as a subordinate array.
+POST _d_req/{parentTypeId}
+  val = "Invoice lines"
+  t   = "{lineTypeId}"
+
+# Create and save objects.
+POST _m_new/{typeId}
+POST _m_save/{objectId}
+  t{typeId} = "Object name"
+  {requisiteId} = "value"
+
+# Inspect metadata.
+GET metadata?JSON=1
+\end{verbatim}
+
+These commands are important because they demonstrate that IDEAV schema editing
+is not a separate migration subsystem. The API mutates the same metadata graph
+that the report compiler reads.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}
