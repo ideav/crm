@@ -138,6 +138,18 @@
         return '';
     }
 
+    // Авто-назначение втулкореза заданию по диаметру. Ручной выбор оператора
+    // (cutterId задан и не авто) не перетирается. Иначе — pickCutter и признак
+    // cutterAuto. Мутирует и возвращает задание.
+    function autoAssignCutter(task, cutters) {
+        if (!task) return task;
+        if (task.cutterId && !task.cutterAuto) return task;
+        var picked = pickCutter(task.diameter, cutters);
+        task.cutterId = picked ? picked.id : null;
+        task.cutterAuto = !!picked;
+        return task;
+    }
+
     var core = {
         STATUSES: STATUSES,
         toNumber: toNumber,
@@ -146,7 +158,8 @@
         isDone: isDone,
         summarize: summarize,
         pickCutter: pickCutter,
-        formatRange: formatRange
+        formatRange: formatRange,
+        autoAssignCutter: autoAssignCutter
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────

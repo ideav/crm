@@ -104,4 +104,12 @@ assertEqual(core.formatRange(20, ''), 'от 20 мм', 'formatRange: только
 assertEqual(core.formatRange('', 76), 'до 76 мм', 'formatRange: только max');
 assertEqual(core.formatRange('', ''), '', 'formatRange: пусто');
 
+// ── autoAssignCutter: авто-подбор без перетирания ручного выбора ──
+function mkTask(o){ return Object.assign({ diameter:'', cutterId:null, cutterAuto:false }, o); }
+assertEqual(core.autoAssignCutter(mkTask({diameter:20}), CUTTERS).cutterId, '1', 'autoAssign: пустое → авто');
+assertEqual(core.autoAssignCutter(mkTask({diameter:20}), CUTTERS).cutterAuto, true, 'autoAssign: ставит признак авто');
+assertEqual(core.autoAssignCutter(mkTask({diameter:20, cutterId:'3', cutterAuto:false}), CUTTERS).cutterId, '3', 'autoAssign: ручной выбор не трогаем');
+assertEqual(core.autoAssignCutter(mkTask({diameter:30, cutterId:'1', cutterAuto:true}), CUTTERS).cutterId, '2', 'autoAssign: прежний авто пере-подбирается');
+assertEqual(core.autoAssignCutter(mkTask({diameter:100, cutterId:'1', cutterAuto:true}), CUTTERS).cutterId, null, 'autoAssign: нет подходящего → очищаем');
+
 console.log('\n' + passed + ' assertions passed');
