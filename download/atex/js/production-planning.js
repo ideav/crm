@@ -232,13 +232,20 @@
     }
 
     // Строки отчёта material_batches (JSON_KV) → [{ id, label }] для дропдауна
-    // «Партия сырья». Подпись = номер партии (`batch_no`) — паритет с опциями
-    // серверного поиска AtexRefSearch (главное значение записи).
+    // «Партия сырья». Подпись обогащённая: «Номер · Вид сырья · ост. N м²»
+    // (пустые части пропускаются). Дропдаун статический клиентский (см. renderForm),
+    // поэтому метка единообразна и при фильтрации по вводу.
     function rowsToBatches(rows) {
         return (rows || []).map(function(row) {
+            var no = row.batch_no == null ? '' : String(row.batch_no).trim();
+            var material = row.batch_material == null ? '' : String(row.batch_material).trim();
+            var rem = row.batch_remainder_m2 == null ? '' : String(row.batch_remainder_m2).trim();
+            var parts = [];
+            if (material) parts.push(material);
+            if (rem) parts.push('ост. ' + rem + ' м²');
             return {
                 id: row.batch_id == null ? '' : String(row.batch_id),
-                label: row.batch_no == null ? '' : String(row.batch_no)
+                label: no + (parts.length ? ' · ' + parts.join(' · ') : '')
             };
         });
     }
@@ -564,8 +571,11 @@
             function(v) { d.slitterId = v; }, reqIdByName(this.meta.cut, CUT_REQ.slitter))));
         form.appendChild(field('Тип резки', this.selectRef(this.cutTypes, d.cutTypeId, '— выберите тип резки —',
             function(v) { d.cutTypeId = v; }, reqIdByName(this.meta.cut, CUT_REQ.cutType))));
+        // Партии предзагружены отчётом material_batches (обогащённые подписи) —
+        // статический клиентский список (как дропдаун позиций), без серверного
+        // поиска, иначе при вводе подпись свелась бы к голому номеру.
         form.appendChild(field('Партия сырья', this.selectRef(this.materialBatches, d.materialBatchId, '— не выбрано —',
-            function(v) { d.materialBatchId = v; }, reqIdByName(this.meta.cut, CUT_REQ.materialBatch))));
+            function(v) { d.materialBatchId = v; }, null, { cacheKey: 'batches' })));
 
         var dateInput = el('input', { class: 'atex-pp-input', type: 'date' });
         dateInput.value = d.planDate || '';

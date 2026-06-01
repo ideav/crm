@@ -152,9 +152,11 @@ var batchRows = [
     { batch_id: '8078', batch_no: 'Начальный остаток MR131', batch_material: 'MR131', batch_remainder_m2: '4588.35' }
 ];
 assertEqual(planning.rowsToBatches(batchRows), [
-    { id: '1946', label: 'RM-АТХ-3002-2026-05-31' },
-    { id: '8078', label: 'Начальный остаток MR131' }
-], 'rowsToBatches: id записи партии + номер партии как подпись');
+    { id: '1946', label: 'RM-АТХ-3002-2026-05-31 · MWR118 · ост. 2440.00 м²' },
+    { id: '8078', label: 'Начальный остаток MR131 · MR131 · ост. 4588.35 м²' }
+], 'rowsToBatches: id партии + обогащённая подпись «номер · вид · ост. N м²»');
+assertEqual(planning.rowsToBatches([{ batch_id: '5', batch_no: 'НК-9', batch_material: '', batch_remainder_m2: '' }]),
+    [{ id: '5', label: 'НК-9' }], 'rowsToBatches: пустые вид/остаток → только номер');
 assertEqual(planning.rowsToBatches([]), [], 'rowsToBatches: пустой ввод → пустой список');
 
 console.log('\n' + passed + ' assertions passed');
