@@ -65,16 +65,17 @@
         var fill = bestFill(rem, candidates, tol);
         fill.strips.forEach(function(s){ strips.push({ width: s.width, qty: s.qty, purpose: 'Склад' }); });
         var used = round3(strips.reduce(function(a,s){ return a + s.width*s.qty; }, 0));
-        var remainder = round3(W - used);
-        return { strips: strips, used: used, remainder: remainder,
-                 withinTolerance: Math.abs(remainder) <= Math.abs(tol) };
+        var remOut = round3(W - used);
+        return { strips: strips, used: used, remainder: remOut,
+                 withinTolerance: Math.abs(remOut) <= Math.abs(tol) };
     }
 
     // Перебор добора остатка rem ширинами candidates: {strips, leftover, freqSum}
     // с минимальным leftover (затем макс freqSum). Ограниченный поиск (rem конечен).
     function bestFill(rem, candidates, tol) {
-        var cands = (candidates || []).map(function(c){ return { width: toNumber(c.width), freq: toNumber(c.freq) }; })
-            .filter(function(c){ return c.width > 0 && c.width <= rem + Math.abs(toNumber(tol)); });
+        var cands = (candidates || []).map(function(c){ return { width: toNumber(c.width), freq: toNumber(c.freq) }; });
+        // допускаем кандидатов чуть шире rem (в пределах допуска) — DFS отсеет неуместившиеся
+        cands = cands.filter(function(c){ return c.width > 0 && c.width <= rem + Math.abs(toNumber(tol)); });
         var best = { strips: [], leftover: round3(rem), freqSum: 0 };
         (function dfs(i, left, acc, freqSum){
             var leftR = round3(left);
