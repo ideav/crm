@@ -124,7 +124,7 @@
             var max = (c.diaMax === '' || c.diaMax == null) ? Infinity : toNumber(c.diaMax);
             if (d < min || d > max) return;
             var width = max - min;
-            if (width < bestWidth) { best = c; bestWidth = width; }
+            if (best === null || width < bestWidth) { best = c; bestWidth = width; }
         });
         return best;
     }

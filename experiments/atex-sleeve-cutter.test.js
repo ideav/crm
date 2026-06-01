@@ -97,6 +97,8 @@ assertEqual(core.pickCutter(26, CUTTERS).id, '2', 'pickCutter: нижняя гр
 assertEqual(core.pickCutter(40, CUTTERS).id, '4', 'pickCutter: несколько покрывают → самый узкий');
 assertEqual(core.pickCutter(100, CUTTERS), null, 'pickCutter: нет покрытия → null');
 assertEqual(core.pickCutter('', CUTTERS), null, 'pickCutter: пустой диаметр → null');
+assertEqual(core.pickCutter(5, [{ id: 'a', diaMin: '', diaMax: 10 }]).id, 'a', 'pickCutter: открытый min (только max)');
+assertEqual(core.pickCutter(50, [{ id: 'b', diaMin: 40, diaMax: '' }]).id, 'b', 'pickCutter: открытый max (только min)');
 
 // ── formatRange: подпись диапазона ──
 assertEqual(core.formatRange(20, 25), '20–25 мм', 'formatRange: обе границы');
