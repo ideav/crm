@@ -105,5 +105,6 @@ assertEqual(core.defectM2(10, 910), 9.1, 'defectM2: 10 м при 910 мм = 9.1 
 assertEqual(core.defectM2('5,5', 880), 4.84, 'defectM2: запятая-десятичная, 880 мм');
 assertEqual(core.defectM2(0, 910), 0, 'defectM2: ноль метров → 0');
 assertEqual(core.defectM2(10, 0), 0, 'defectM2: нет ширины → 0');
+assertEqual(core.defectM2(-3, 910), 0, 'defectM2: отрицательные метры → 0');
 
 console.log('\n' + passed + ' assertions passed');

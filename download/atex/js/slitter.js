@@ -65,6 +65,7 @@
     var CONS_REQ = { amount: 'Израсходовано, м²', batch: 'Партия сырья' };
     var EVENT_REQ = { type: 'Тип события', cut: 'Производственная резка', user: 'Пользователь', value: 'Значение', notes: 'Примечания' };
     var BATCH_REQ = { kind: 'Вид сырья', date: 'Дата прихода', received: 'Получено, м²', remainder: 'Остаток, м²', remainderM: 'Остаток, м' };
+    var MATERIAL_REQ = { width: 'Ширина, мм' };
 
     // Статусы резки по дизайн-спеке atex (§3.5): жёсткая цепочка переходов.
     var STATUSES = ['Ожидает', 'Наладка', 'В работе', 'Завершён'];
@@ -368,7 +369,7 @@
         var self = this;
         var meta = this.meta.material;
         if (!meta) { this.materialWidths = {}; return Promise.resolve(); }
-        var wIdx = colIndex(meta, 'Ширина, мм');
+        var wIdx = colIndex(meta, MATERIAL_REQ.width);
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
             var map = {};
             (rows || []).forEach(function(r) {
@@ -650,8 +651,9 @@
         }
         defectM.addEventListener('input', function() { cut.defectM = defectM.value; refreshDefectM2(); });
         refreshDefectM2();
-        grid.appendChild(field('Брак, м', defectM));
-        grid.appendChild(defectHint);
+        var defectField = field('Брак, м', defectM);
+        defectField.appendChild(defectHint);
+        grid.appendChild(defectField);
 
         section.appendChild(grid);
 
@@ -792,7 +794,8 @@
         set(CUT_REQ.counterEnd, num(cut.counterEnd));
         set(CUT_REQ.meterage, num(cut.meterage));
         set(CUT_REQ.defectM, num(cut.defectM));
-        set(CUT_REQ.defect, core.defectM2(cut.defectM, cut.materialWidthMm));
+        var defM2 = core.defectM2(cut.defectM, cut.materialWidthMm);
+        if (defM2 > 0) set(CUT_REQ.defect, defM2);
         set(CUT_REQ.notes, cut.notes || '');
         return fields;
     };
