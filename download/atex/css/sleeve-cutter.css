@@ -207,3 +207,11 @@
 .atex-sc-toast-success { background: #15803d; }
 .atex-sc-toast-error { background: #b91c1c; }
 .atex-sc-toast-info { background: #334155; }
+
+/* Подсказка «нет втулкореза под диаметр» в карточке задания. */
+#atex-sleeve-cutter .atex-sc-hint {
+    display: block;
+    margin-top: 4px;
+    font-size: 12px;
+    color: #b45309;
+}

@@ -47,6 +47,7 @@
         factQty: 'Кол-во факт',
         status: 'Статус'
     };
+    var CUTTER_REQ = { diaMin: 'Диаметр min, мм', diaMax: 'Диаметр max, мм' };
 
     // Статусы задания по дизайн-спеке atex (§3.6): жёсткая цепочка переходов.
     var STATUSES = ['Ожидает', 'В работе', 'Готово'];
@@ -307,10 +308,27 @@
     AtexSleeveCutter.prototype.loadCutters = function() {
         var self = this;
         if (!this.meta.cutter) { this.cutters = []; return Promise.resolve(); }
-        return this.getJson('object/' + this.meta.cutter.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
+        var meta = this.meta.cutter;
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,1000').then(function(rows) {
+            var minIdx = colIndex(meta, CUTTER_REQ.diaMin);
+            var maxIdx = colIndex(meta, CUTTER_REQ.diaMax);
             self.cutters = (rows || []).map(function(r) {
-                return { id: String(r.i), label: (r.r && r.r[0]) || ('#' + r.i) };
+                var row = r.r || [];
+                return {
+                    id: String(r.i),
+                    label: row[0] || ('#' + r.i),
+                    diaMin: minIdx >= 0 ? (row[minIdx] || '') : '',
+                    diaMax: maxIdx >= 0 ? (row[maxIdx] || '') : ''
+                };
             });
+        });
+    };
+
+    // Опции выпадающего списка втулкорезов с подписью диапазона.
+    AtexSleeveCutter.prototype.cutterOptions = function() {
+        return (this.cutters || []).map(function(c) {
+            var range = core.formatRange(c.diaMin, c.diaMax);
+            return { id: c.id, label: range ? (c.label + ' (' + range + ')') : c.label };
         });
     };
 
@@ -349,6 +367,7 @@
                     name: r[0] || '',
                     planQty: planIdx >= 0 ? (r[planIdx] || '') : '',
                     cutterId: cutterRef.id,
+                    cutterAuto: false,
                     diameter: diamIdx >= 0 ? (r[diamIdx] || '') : '',
                     factQty: factIdx >= 0 ? (r[factIdx] || '') : '',
                     status: statusIdx >= 0 ? normalizeStatus(r[statusIdx]) : STATUSES[0]
@@ -358,7 +377,7 @@
     };
 
     AtexSleeveCutter.prototype.blankTask = function() {
-        return { id: null, name: '', planQty: '', cutterId: null, diameter: '', factQty: '', status: STATUSES[0] };
+        return { id: null, name: '', planQty: '', cutterId: null, cutterAuto: false, diameter: '', factQty: '', status: STATUSES[0] };
     };
 
     // ── Рендеринг ──
@@ -451,19 +470,28 @@
 
         var grid = el('div', { class: 'atex-sc-card-grid' });
 
-        // Втулкорез (ссылка).
+        // Втулкорез (ссылка). Подписи с диапазоном; ручной выбор снимает авто-признак.
         var cutterRef = this.refSelect({
-            options: this.cutters,
+            options: this.cutterOptions(),
             value: task.cutterId,
             placeholder: '— втулкорез —',
             reqId: reqIdByName(this.meta.task, TASK_REQ.cutter),
-            onChange: function(value) { task.cutterId = value || null; }
+            onChange: function(value) { task.cutterId = value || null; task.cutterAuto = false; }
         });
-        grid.appendChild(this.cardField('Втулкорез', cutterRef));
+        var cutterField = this.cardField('Втулкорез', cutterRef);
+        if (task.diameter !== '' && task.diameter != null && !core.pickCutter(task.diameter, this.cutters)) {
+            cutterField.appendChild(el('span', { class: 'atex-sc-hint', text: 'нет втулкореза под Ø' + core.toNumber(task.diameter) }));
+        }
+        grid.appendChild(cutterField);
 
-        // Диаметр.
+        // Диаметр. По завершении ввода — авто-подбор втулкореза.
         var diam = numInput(task.diameter, '76');
         diam.addEventListener('input', function() { task.diameter = diam.value; });
+        diam.addEventListener('change', function() {
+            task.diameter = diam.value;
+            core.autoAssignCutter(task, self.cutters);
+            self.renderTasks();
+        });
         grid.appendChild(this.cardField('Диаметр, мм', diam));
 
         // Кол-во план.
