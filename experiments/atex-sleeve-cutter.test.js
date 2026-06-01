@@ -84,4 +84,34 @@ assertEqual(core.summarize([
     percent: 50
 }, 'summarize parses comma decimals from form inputs');
 
+// ── pickCutter: подбор втулкореза по диапазону ──
+var CUTTERS = [
+    { id: '1', label: 'Втулкорез 1', diaMin: 20, diaMax: 25 },
+    { id: '2', label: 'Втулкорез 2', diaMin: 26, diaMax: 40 },
+    { id: '3', label: 'Втулкорез 3', diaMin: 41, diaMax: 76 },
+    { id: '4', label: 'Узкий 40',    diaMin: 40, diaMax: 40 }
+];
+assertEqual(core.pickCutter(20, CUTTERS).id, '1', 'pickCutter: внутри диапазона');
+assertEqual(core.pickCutter(25, CUTTERS).id, '1', 'pickCutter: верхняя граница включительно');
+assertEqual(core.pickCutter(26, CUTTERS).id, '2', 'pickCutter: нижняя граница включительно');
+assertEqual(core.pickCutter(40, CUTTERS).id, '4', 'pickCutter: несколько покрывают → самый узкий');
+assertEqual(core.pickCutter(100, CUTTERS), null, 'pickCutter: нет покрытия → null');
+assertEqual(core.pickCutter('', CUTTERS), null, 'pickCutter: пустой диаметр → null');
+assertEqual(core.pickCutter(5, [{ id: 'a', diaMin: '', diaMax: 10 }]).id, 'a', 'pickCutter: открытый min (только max)');
+assertEqual(core.pickCutter(50, [{ id: 'b', diaMin: 40, diaMax: '' }]).id, 'b', 'pickCutter: открытый max (только min)');
+
+// ── formatRange: подпись диапазона ──
+assertEqual(core.formatRange(20, 25), '20–25 мм', 'formatRange: обе границы');
+assertEqual(core.formatRange(20, ''), 'от 20 мм', 'formatRange: только min');
+assertEqual(core.formatRange('', 76), 'до 76 мм', 'formatRange: только max');
+assertEqual(core.formatRange('', ''), '', 'formatRange: пусто');
+
+// ── autoAssignCutter: авто-подбор без перетирания ручного выбора ──
+function mkTask(o){ return Object.assign({ diameter:'', cutterId:null, cutterAuto:false }, o); }
+assertEqual(core.autoAssignCutter(mkTask({diameter:20}), CUTTERS).cutterId, '1', 'autoAssign: пустое → авто');
+assertEqual(core.autoAssignCutter(mkTask({diameter:20}), CUTTERS).cutterAuto, true, 'autoAssign: ставит признак авто');
+assertEqual(core.autoAssignCutter(mkTask({diameter:20, cutterId:'3', cutterAuto:false}), CUTTERS).cutterId, '3', 'autoAssign: ручной выбор не трогаем');
+assertEqual(core.autoAssignCutter(mkTask({diameter:30, cutterId:'1', cutterAuto:true}), CUTTERS).cutterId, '2', 'autoAssign: прежний авто пере-подбирается');
+assertEqual(core.autoAssignCutter(mkTask({diameter:100, cutterId:'1', cutterAuto:true}), CUTTERS).cutterId, null, 'autoAssign: нет подходящего → очищаем');
+
 console.log('\n' + passed + ' assertions passed');
