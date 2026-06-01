@@ -123,27 +123,20 @@
     // Фильтр по сырью; при заданной ширине — точное совпадение с одной из ширин полос
     //   (типы без загруженных полос при заданной ширине отсеиваются).
     function matchCutTypes(index, materialId, width) {
+        var ids = Object.keys(index || {});
         var mat = materialId == null ? '' : String(materialId);
+        if (mat !== '') {
+            ids = ids.filter(function(id) { return String(index[id].materialId) === mat; });
+        }
         var w = parseWidth(width);
-        // Начинаем с host-realm массива (важно для корректной работы deepStrictEqual в тестах).
-        // Берём .slice(0,0) первого попавшегося массива widths — он пришёл из вызывающего контекста.
-        var seedArr = null;
-        var id;
-        for (id in (index || {})) {
-            if (index[id] && index[id].widths) { seedArr = index[id].widths; break; }
+        if (!isNaN(w)) {
+            ids = ids.filter(function(id) {
+                var ws = index[id].widths;
+                if (!ws) return false;
+                return ws.some(function(x) { return Number(x) === w; });
+            });
         }
-        var result = seedArr ? seedArr.slice(0, 0) : [];
-        for (id in (index || {})) {
-            var entry = index[id];
-            if (mat !== '' && String(entry.materialId) !== mat) continue;
-            if (!isNaN(w)) {
-                var ws = entry.widths;
-                if (!ws) continue;
-                if (!ws.some(function(x) { return Number(x) === w; })) continue;
-            }
-            result.push(id);
-        }
-        return result;
+        return ids;
     }
 
     // Разбор ссылочного значения "id:Отображение" → {id, label}.
