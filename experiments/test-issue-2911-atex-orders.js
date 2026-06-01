@@ -34,9 +34,9 @@ assert(!template.includes('data-order-table="107"'), 'template does not hardcode
 assert(!template.includes('data-position-table="108"'), 'template does not hardcode the position table id');
 
 const updateConf = fs.readFileSync(updateConfPath, 'utf8');
-assert(updateConf.includes('templates/atex/* : /var/www/www-root/data/www/ideav.ru/templates/custom/atex/'), 'update.conf deploys atex templates');
-assert(updateConf.includes('download/atex/js/* : /var/www/www-root/data/www/ideav.ru/download/atex/js/'), 'update.conf deploys atex js');
-assert(updateConf.includes('download/atex/css/* : /var/www/www-root/data/www/ideav.ru/download/atex/css/'), 'update.conf deploys atex css');
+assert(updateConf.includes('templates/atex/* : /var/www/www-root/data/www/ideav.ru/templates/custom/ateh/'), 'update.conf deploys atex templates to live ateh');
+assert(updateConf.includes('download/atex/js/* : /var/www/www-root/data/www/ideav.ru/download/ateh/js/'), 'update.conf deploys atex js to live ateh');
+assert(updateConf.includes('download/atex/css/* : /var/www/www-root/data/www/ideav.ru/download/ateh/css/'), 'update.conf deploys atex css to live ateh');
 
 // --- Запуск исходника в песочнице без DOM/сети ---
 const source = fs.readFileSync(scriptPath, 'utf8');
