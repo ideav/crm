@@ -102,4 +102,35 @@ assertEqual(planning.buildFields(
     { footage: '1200', cut: '501', status: 'Зарезервировано' }
 ), { t1082: '1200', t1084: '501' }, 'buildFields skips fields with null reqId');
 
+// ── rowsToPlanning: плоские строки отчёта cut_planning (JSON_KV) → { cuts, supplies } ──
+// LEFT JOIN: резка 10 с двумя обеспечениями = две строки; резка 20 без обеспечения.
+var reportRows = [
+    { cut_id: '10', cut_no: '1', cut_slitter: 'Станок 1', cut_slitter_id: '101',
+      cut_type: '99мм×9', cut_material_batch: 'НК-0400', cut_plan_date: '06.05.2026',
+      cut_status: 'В работе', supply_id: '900', supply_position_id: '700' },
+    { cut_id: '10', cut_no: '1', cut_slitter: 'Станок 1', cut_slitter_id: '101',
+      cut_type: '99мм×9', cut_material_batch: 'НК-0400', cut_plan_date: '06.05.2026',
+      cut_status: 'В работе', supply_id: '901', supply_position_id: '701' },
+    { cut_id: '20', cut_no: '2', cut_slitter: '', cut_slitter_id: '',
+      cut_type: '25мм×35', cut_material_batch: 'НК-0118', cut_plan_date: '27.05.2026',
+      cut_status: 'Ожидает', supply_id: '', supply_position_id: '' }
+];
+var plan = planning.rowsToPlanning(reportRows);
+assertEqual(plan.cuts, [
+    { id: '10', number: '1', slitter: { id: '101', label: 'Станок 1' },
+      cutType: { id: null, label: '99мм×9' }, materialBatch: { id: null, label: 'НК-0400' },
+      planDate: '06.05.2026', status: 'В работе' },
+    { id: '20', number: '2', slitter: { id: null, label: '' },
+      cutType: { id: null, label: '25мм×35' }, materialBatch: { id: null, label: 'НК-0118' },
+      planDate: '27.05.2026', status: 'Ожидает' }
+], 'rowsToPlanning dedups cuts by cut_id, slitter без id → {id:null}');
+assertEqual(plan.supplies, [
+    { id: '900', positionId: '700', cutId: '10' },
+    { id: '901', positionId: '701', cutId: '10' }
+], 'rowsToPlanning collects supplies from rows with supply_id, skips empty');
+assertEqual(planning.rowsToPlanning([]).cuts.length, 0, 'rowsToPlanning empty input → no cuts');
+// сценарий показа: группировка + счётчик связей поверх результата rowsToPlanning
+assertEqual(planning.groupBySlitter(plan.cuts).map(function(g) { return g.slitter.label; }),
+    ['Станок 1', 'Без станка'], 'groupBySlitter over rowsToPlanning cuts');
+
 console.log('\n' + passed + ' assertions passed');

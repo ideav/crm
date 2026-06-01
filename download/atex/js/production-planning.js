@@ -5,14 +5,19 @@
 // через подчинённую таблицу «Обеспечение». Решение задачи ideav/crm#2913
 // (часть #2903). Правила разработки рабочих мест — docs/WORKSPACE_DEVELOPMENT_GUIDE.md.
 //
-// На этом этапе рабочее место обращается к данным напрямую командами `_m_*`
-// (#2903): создание резки — `_m_new/{Производственная резка}` (Номер не задаётся,
-// у таблицы `unique=1` — сервер сам считает автонумер), обеспечение —
-// `_m_new/{Обеспечение}` с `up={позицияId}` и ссылкой `t{Производственная резка}`,
-// правки — `_m_set`. ID таблиц и реквизитов не хардкодятся: они берутся по именам
-// из `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6).
-// Перевод чтений на защищённый слой `report/` — следующий этап и в объём этой
-// задачи не входит.
+// Чтения очереди резок и их обеспечения берутся одним отчётом защищённого слоя
+// `GET /{db}/report/cut_planning?JSON_KV` (Резка→Обеспечение→Позиция). Чистая
+// `rowsToPlanning` разворачивает плоские строки в резки (dedup по `cut_id`) и
+// обеспечения (строки с непустым `supply_id`) — один запрос вместо отдельных
+// `object/`-чтений резок и обеспечения, резолв метаданных для чтения не нужен
+// (правило: docs/integram-reports.md).
+//
+// Запись идёт прямыми командами `_m_*` (#2903): создание резки —
+// `_m_new/{Производственная резка}` (Номер не задаётся, у таблицы `unique=1` —
+// сервер сам считает автонумер), обеспечение — `_m_new/{Обеспечение}` с
+// `up={позицияId}` и ссылкой `t{Производственная резка}`, правки — `_m_set`. ID
+// таблиц и реквизитов для записи не хардкодятся: берутся по именам из
+// `GET /{db}/metadata` (WORKSPACE_DEVELOPMENT_GUIDE.md, разделы 3 и 6).
 //
 // Чистое ядро (разбор записей, группировка очереди по слиттерам, фильтрация,
 // сборка полей `t{reqId}`) вынесено в объект `planning` и экспортируется через
@@ -176,6 +181,45 @@
         return out;
     }
 
+    // Плоские строки отчёта cut_planning (JSON_KV) → { cuts, supplies }.
+    // Одна резка с N обеспечениями даёт N строк (LEFT JOIN) — резки dedup по
+    // `cut_id`; обеспечения собираются из строк с непустым `supply_id`. Резки без
+    // обеспечения (пустой `supply_id`) остаются в очереди и фантомных связей не
+    // создают. Формы записей совпадают с прежними mapCutRecord/loadSupplies:
+    // резка — { id, number, slitter:{id,label}, cutType:{id,label},
+    // materialBatch:{id,label}, planDate, status }; обеспечение —
+    // { id, positionId, cutId }.
+    function rowsToPlanning(rows) {
+        var cutsById = {};
+        var order = [];
+        var supplies = [];
+        function str(v) { return v == null ? '' : String(v); }
+        (rows || []).forEach(function(row) {
+            var cutId = str(row.cut_id);
+            if (cutId && !cutsById[cutId]) {
+                cutsById[cutId] = {
+                    id: cutId,
+                    number: str(row.cut_no),
+                    slitter: { id: row.cut_slitter_id ? String(row.cut_slitter_id) : null, label: str(row.cut_slitter) },
+                    cutType: { id: null, label: str(row.cut_type) },
+                    materialBatch: { id: null, label: str(row.cut_material_batch) },
+                    planDate: str(row.cut_plan_date),
+                    status: str(row.cut_status)
+                };
+                order.push(cutId);
+            }
+            var supplyId = str(row.supply_id);
+            if (supplyId) {
+                supplies.push({
+                    id: supplyId,
+                    positionId: row.supply_position_id ? String(row.supply_position_id) : null,
+                    cutId: cutId
+                });
+            }
+        });
+        return { cuts: order.map(function(id) { return cutsById[id]; }), supplies: supplies };
+    }
+
     var planning = {
         parseRef: parseRef,
         reqIdByName: reqIdByName,
@@ -183,7 +227,8 @@
         mapCutRecord: mapCutRecord,
         groupBySlitter: groupBySlitter,
         filterCuts: filterCuts,
-        buildFields: buildFields
+        buildFields: buildFields,
+        rowsToPlanning: rowsToPlanning
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -324,28 +369,14 @@
         });
     };
 
-    AtexProductionPlanning.prototype.loadCuts = function() {
+    // Очередь резок и их обеспечение одним отчётом cut_planning (JSON_KV).
+    // Заполняет this.cuts и this.supplies из плоских строк отчёта.
+    AtexProductionPlanning.prototype.loadPlanning = function() {
         var self = this;
-        var meta = this.meta.cut;
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,2000').then(function(rows) {
-            self.cuts = (rows || []).map(function(r) { return mapCutRecord(r, meta); });
-        });
-    };
-
-    AtexProductionPlanning.prototype.loadSupplies = function() {
-        var self = this;
-        var meta = this.meta.supply;
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
-            var cutIdx = columnIndex(meta, SUPPLY_REQ.cut);
-            self.supplies = (rows || []).map(function(r) {
-                var rr = r.r || [];
-                var cutRef = cutIdx >= 0 ? parseRef(rr[cutIdx]) : { id: null };
-                return {
-                    id: String(r.i),
-                    positionId: r.u != null ? String(r.u) : null,
-                    cutId: cutRef.id
-                };
-            });
+        return this.getJson('report/cut_planning?JSON_KV&LIMIT=0,5000').then(function(rows) {
+            var p = rowsToPlanning(rows || []);
+            self.cuts = p.cuts;
+            self.supplies = p.supplies;
         });
     };
 
@@ -424,7 +455,7 @@
         this.post('_m_new/' + meta.id + '?JSON&up=' + encodeURIComponent(opts.positionId), fields).then(function(res) {
             var id = res && (res.obj || res.id || res.i);
             if (!id) throw new Error('Сервер не вернул id обеспечения');
-            return self.loadSupplies().then(function() {
+            return self.loadPlanning().then(function() {
                 self.setBusy(false);
                 self.notify('Обеспечение создано: позиция связана с резкой', 'success');
                 self.render();
@@ -436,7 +467,7 @@
     };
 
     AtexProductionPlanning.prototype.reload = function() {
-        return Promise.all([this.loadCuts(), this.loadSupplies()]);
+        return this.loadPlanning();
     };
 
     // ── Рендеринг ──
@@ -689,8 +720,7 @@
                     self.loadRef(self.meta.cutType).then(function(items) { self.cutTypes = items; }),
                     self.loadRef(self.meta.materialBatch).then(function(items) { self.materialBatches = items; }),
                     self.loadPositions(),
-                    self.loadCuts(),
-                    self.loadSupplies()
+                    self.loadPlanning()
                 ]);
             })
             .then(function() { self.render(); })
