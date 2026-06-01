@@ -674,12 +674,10 @@
 
     // Пересобирает список опций «Тип резки» формы позиции по текущему сырью/ширине.
     // Сбрасывает выбранное значение, если оно не входит в подходящие.
-    // Работает с searchable-ref-select: обновляет data-atex-allowed-ids на обёртке
+    // Работает с searchable-ref-select: обновляет data-atex-cuttype-allowed на обёртке
     // и переотрисовывает dropdown через renderRefSearchResults.
     function refreshCutTypeOptions(orderId, form) {
         if (!form) return;
-        var cutCol = getColumn(state.positionColumns, 'cutType');
-        var rawCol = getColumn(state.positionColumns, 'raw');
         // Скрытые inputs searchable-ref-select для сырья и типа резки.
         var cutHidden = form.querySelector('#atex-pos-cut-' + cssEscape(orderId));
         var rawHidden = form.querySelector('#atex-pos-raw-' + cssEscape(orderId));
@@ -694,7 +692,7 @@
         var allowedSet = {};
         allowed.forEach(function(id){ allowedSet[String(id)] = true; });
         // Сохраняем фильтр на обёртке для renderRefSearchResults.
-        cutWrapper.setAttribute('data-atex-allowed-ids', allowed.join(','));
+        cutWrapper.setAttribute('data-atex-cuttype-allowed', allowed.join(','));
         // Сброс несовместимого выбора.
         var prev = cutHidden.value;
         if (prev && !allowedSet[String(prev)]) {
@@ -975,7 +973,8 @@
         var reqId = wrapper.getAttribute('data-ref-req-id');
         var options = state.refOptions[reqId] || [];
         // Ограничиваем список разрешёнными id, если выставлен фильтр типов резки.
-        var allowedAttr = wrapper.getAttribute('data-atex-allowed-ids');
+        // Атрибут ставит только refreshCutTypeOptions (фильтр «Тип резки» по сырью/ширине); на прочих ref-select его нет.
+        var allowedAttr = wrapper.getAttribute('data-atex-cuttype-allowed');
         if (allowedAttr !== null) {
             var allowedSet = {};
             allowedAttr.split(',').forEach(function(id){ if (id) allowedSet[id] = true; });
