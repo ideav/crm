@@ -672,6 +672,45 @@
             '</div></form>';
     }
 
+    // Пересобирает список опций «Тип резки» формы позиции по текущему сырью/ширине.
+    // Сбрасывает выбранное значение, если оно не входит в подходящие.
+    // Работает с searchable-ref-select: обновляет data-atex-allowed-ids на обёртке
+    // и переотрисовывает dropdown через renderRefSearchResults.
+    function refreshCutTypeOptions(orderId, form) {
+        if (!form) return;
+        var cutCol = getColumn(state.positionColumns, 'cutType');
+        var rawCol = getColumn(state.positionColumns, 'raw');
+        // Скрытые inputs searchable-ref-select для сырья и типа резки.
+        var cutHidden = form.querySelector('#atex-pos-cut-' + cssEscape(orderId));
+        var rawHidden = form.querySelector('#atex-pos-raw-' + cssEscape(orderId));
+        var widthInput = form.querySelector('[data-field="width"]');
+        if (!cutHidden) return;
+        // Обёртка [data-ref-select] — родитель скрытого input типа резки.
+        var cutWrapper = cutHidden.closest ? cutHidden.closest('[data-ref-select]') : null;
+        if (!cutWrapper) return;
+        var materialId = rawHidden ? rawHidden.value : '';
+        var width = widthInput ? widthInput.value : '';
+        var allowed = matchCutTypes(state.cutTypeIndex, materialId, width);
+        var allowedSet = {};
+        allowed.forEach(function(id){ allowedSet[String(id)] = true; });
+        // Сохраняем фильтр на обёртке для renderRefSearchResults.
+        cutWrapper.setAttribute('data-atex-allowed-ids', allowed.join(','));
+        // Сброс несовместимого выбора.
+        var prev = cutHidden.value;
+        if (prev && !allowedSet[String(prev)]) {
+            cutHidden.value = '';
+            var cutSearch = cutWrapper.querySelector('[data-ref-search]');
+            if (cutSearch) cutSearch.value = '';
+            updateRefClear(cutWrapper);
+        }
+        // Переотрисовываем dropdown (только если он сейчас открыт, иначе он обновится при открытии).
+        var dropdown = cutWrapper.querySelector('.atex-orders-ref-dropdown');
+        if (dropdown && !dropdown.hidden) {
+            var cutSearchEl = cutWrapper.querySelector('[data-ref-search]');
+            renderRefSearchResults(cutWrapper, cutSearchEl ? cutSearchEl.value : '');
+        }
+    }
+
     function renderOrders() {
         var container = document.getElementById('atex-orders-list');
         if (!container) return;
@@ -935,6 +974,13 @@
         if (!dropdown || !hidden) return;
         var reqId = wrapper.getAttribute('data-ref-req-id');
         var options = state.refOptions[reqId] || [];
+        // Ограничиваем список разрешёнными id, если выставлен фильтр типов резки.
+        var allowedAttr = wrapper.getAttribute('data-atex-allowed-ids');
+        if (allowedAttr !== null) {
+            var allowedSet = {};
+            allowedAttr.split(',').forEach(function(id){ if (id) allowedSet[id] = true; });
+            options = options.filter(function(opt){ return allowedSet[String(opt.id)]; });
+        }
         var visibleOptions = filterRefOptions(options, query, REF_DROPDOWN_LIMIT);
         dropdown.innerHTML = renderRefOptionItems(hidden.id, visibleOptions, hidden.value);
         setActiveRefOption(wrapper, 0);
@@ -971,6 +1017,25 @@
         }, REF_SEARCH_DELAY);
     }
 
+    // Вызывается после изменения поля «Вид сырья» в форме позиции:
+    // по скрытому input определяет orderId и form, затем догружает полосы и
+    // обновляет список «Тип резки».
+    function onRawRefChanged(wrapper) {
+        if (!wrapper) return;
+        var rawCol = getColumn(state.positionColumns, 'raw');
+        if (!rawCol || !rawCol.reqId) return;
+        // Проверяем, что это именно ref-select «Вид сырья» (по reqId обёртки).
+        if (wrapper.getAttribute('data-ref-req-id') !== String(rawCol.reqId)) return;
+        var form = wrapper.closest ? wrapper.closest('[data-position-form]') : null;
+        if (!form) return;
+        var orderId = form.getAttribute('data-position-form');
+        var rawHidden = wrapper.querySelector('[data-ref-value]');
+        var materialId = rawHidden ? rawHidden.value : '';
+        ensureStripWidths(materialId).then(function() {
+            refreshCutTypeOptions(orderId, form);
+        });
+    }
+
     function selectRefOption(option) {
         var wrapper = refWrapperFrom(option);
         if (!wrapper) return;
@@ -980,6 +1045,8 @@
         if (search) search.value = option.textContent || '';
         updateRefClear(wrapper);
         closeRefSelect(wrapper);
+        // При выборе сырья в форме позиции — обновить список типов резки.
+        onRawRefChanged(wrapper);
     }
 
     function clearRefSelect(wrapper) {
@@ -994,6 +1061,8 @@
         updateRefClear(wrapper);
         renderRefSearchResults(wrapper, '');
         setRefExpanded(wrapper, true);
+        // При очистке сырья в форме позиции — обновить список типов резки.
+        onRawRefChanged(wrapper);
     }
 
     function attachRefSearchEvents() {
@@ -1007,14 +1076,25 @@
 
         state.root.addEventListener('input', function(event) {
             var search = event.target.closest && event.target.closest('[data-ref-search]');
-            if (!search) return;
-            var wrapper = refWrapperFrom(search);
-            var hidden = wrapper && wrapper.querySelector('[data-ref-value]');
-            if (hidden) hidden.value = '';
-            updateRefClear(wrapper);
-            renderRefSearchResults(wrapper, search.value);
-            setRefExpanded(wrapper, true);
-            scheduleRefServerSearch(wrapper, search.value);
+            if (search) {
+                var wrapper = refWrapperFrom(search);
+                var hidden = wrapper && wrapper.querySelector('[data-ref-value]');
+                if (hidden) hidden.value = '';
+                updateRefClear(wrapper);
+                renderRefSearchResults(wrapper, search.value);
+                setRefExpanded(wrapper, true);
+                scheduleRefServerSearch(wrapper, search.value);
+                return;
+            }
+            // При вводе ширины в форме позиции — обновить список типов резки.
+            var widthInput = event.target.closest && event.target.closest('[data-field="width"]');
+            if (widthInput) {
+                var posForm = widthInput.closest ? widthInput.closest('[data-position-form]') : null;
+                if (posForm) {
+                    var posOrderId = posForm.getAttribute('data-position-form');
+                    refreshCutTypeOptions(posOrderId, posForm);
+                }
+            }
         });
 
         state.root.addEventListener('keydown', function(event) {
@@ -1126,7 +1206,15 @@
                 if (addPos) {
                     var addId = addPos.getAttribute('data-add-position');
                     var form = list.querySelector('[data-position-form="' + cssEscape(addId) + '"]');
-                    if (form) form.hidden = false;
+                    if (form) {
+                        form.hidden = false;
+                        // Фильтруем типы резки по текущему сырью (если уже выбрано).
+                        var rawHiddenInit = form.querySelector('#atex-pos-raw-' + cssEscape(addId));
+                        var matInit = rawHiddenInit ? rawHiddenInit.value : '';
+                        ensureStripWidths(matInit).then(function() {
+                            refreshCutTypeOptions(addId, form);
+                        });
+                    }
                     return;
                 }
 
