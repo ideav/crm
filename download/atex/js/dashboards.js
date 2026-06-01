@@ -300,6 +300,32 @@
         };
     }
 
+    // Плоские строки отчёта order_pipeline → массивы сущностей (dedup по *_id),
+    // под ключи существующих агрегаторов и productionFlow. Пустые поздние стадии
+    // (LEFT JOIN) не создают фантомных записей.
+    function rowsToEntities(rows) {
+        var orders = {}, positions = {}, provisions = {}, cuts = {}, gp = {};
+        function vals(o) { return Object.keys(o).map(function(k) { return o[k]; }); }
+        (rows || []).forEach(function(r) {
+            if (r.order_id && !orders[r.order_id]) {
+                orders[r.order_id] = { id: r.order_id, number: r.order_no || ('#' + r.order_id), status: r.order_status };
+            }
+            if (r.position_id && !positions[r.position_id]) {
+                positions[r.position_id] = { id: r.position_id, orderId: r.order_id || '', cutType: r.position_cut_type, width: r.position_width_mm, length: r.position_length_m, status: r.position_status };
+            }
+            if (r.provision_id && !provisions[r.provision_id]) {
+                provisions[r.provision_id] = { id: r.provision_id, positionId: r.position_id || '', cutId: r.cut_id || '', gpId: r.gp_id || '', footage: r.provision_used_m, status: r.provision_status };
+            }
+            if (r.cut_id && !cuts[r.cut_id]) {
+                cuts[r.cut_id] = { id: r.cut_id, number: r.cut_no || ('#' + r.cut_id), slitter: r.cut_slitter, status: r.cut_status, footage: r.cut_footage_m };
+            }
+            if (r.gp_id && !gp[r.gp_id]) {
+                gp[r.gp_id] = { id: r.gp_id, cutId: r.gp_cut_id || '', status: r.gp_status, rolls: r.gp_rolls, footage: r.gp_footage_m, address: r.gp_address };
+            }
+        });
+        return { orders: vals(orders), positions: vals(positions), provisions: vals(provisions), cuts: vals(cuts), gpBatches: vals(gp) };
+    }
+
     var agg = {
         toNumber: toNumber,
         round3: round3,
@@ -311,6 +337,7 @@
         materialStock: materialStock,
         productionFlow: productionFlow,
         stageState: stageState,
+        rowsToEntities: rowsToEntities,
         UNSET: UNSET
     };
 

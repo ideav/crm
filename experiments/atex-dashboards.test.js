@@ -15,6 +15,10 @@ const root = path.join(__dirname, '..');
 const api = require('../download/atex/js/dashboards.js');
 const dashboards = api.agg;
 
+function assertEqual(actual, expected, name) {
+    assert.deepStrictEqual(actual, expected, name);
+}
+
 assert(dashboards, 'dashboard aggregation API is exported');
 
 const flow = dashboards.productionFlow({
@@ -106,6 +110,25 @@ controller.loadMetadata().then(function() {
     assert(source.includes('cardProductionFlow'), 'dashboard renders the production path card');
     assert(styles.includes('.atex-db-flow-stage-done'), 'dashboard CSS styles completed production stages');
     assert(docs.includes('Путь продукции'), 'Atex workplace documentation mentions the production path card');
+    // ── rowsToEntities: строки отчёта order_pipeline → сущности ──
+    var PR = [
+      { order_id:'10', order_no:'A-1', order_status:'Новый',
+        position_id:'', provision_id:'', cut_id:'', gp_id:'' },
+      { order_id:'11', order_no:'A-2', order_status:'Выполнен',
+        position_id:'21', position_status:'Отгружена', position_cut_type:'TT', position_width_mm:'57', position_length_m:'10',
+        provision_id:'31', provision_used_m:'1200', provision_status:'Выполнено',
+        cut_id:'41', cut_no:'4', cut_slitter:'Станок 1', cut_status:'Завершён', cut_footage_m:'1300',
+        gp_id:'51', gp_status:'Отгружен', gp_rolls:'10', gp_footage_m:'1200', gp_address:'A-3', gp_cut_id:'41' }
+    ];
+    var ent = dashboards.rowsToEntities(PR);
+    assertEqual(ent.orders.length, 2, 'rowsToEntities: 2 заказа (dedup)');
+    assertEqual(ent.orders[0], { id:'10', number:'A-1', status:'Новый' }, 'rowsToEntities: заказ');
+    assertEqual(ent.cuts.length, 1, 'rowsToEntities: пустые стадии не создают резок');
+    assertEqual(ent.cuts[0], { id:'41', number:'4', slitter:'Станок 1', status:'Завершён', footage:'1300' }, 'rowsToEntities: резка');
+    assertEqual(ent.positions[0].orderId, '11', 'rowsToEntities: позиция знает заказ');
+    assertEqual(ent.provisions[0], { id:'31', positionId:'21', cutId:'41', gpId:'51', footage:'1200', status:'Выполнено' }, 'rowsToEntities: обеспечение');
+    assertEqual(ent.gpBatches[0], { id:'51', cutId:'41', status:'Отгружен', rolls:'10', footage:'1200', address:'A-3' }, 'rowsToEntities: ГП');
+
     console.log('atex dashboards production path: ok');
 }).catch(function(err) {
     console.error(err && err.stack || err);
