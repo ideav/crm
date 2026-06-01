@@ -85,6 +85,7 @@ function reqId(columns, key) {
 assert.strictEqual(reqId(orderColumns, 'client'), '1052', 'client → req 1052');
 assert.strictEqual(reqId(orderColumns, 'manager'), '1054', 'manager (Пользователь) → req 1054');
 assert.strictEqual(reqId(orderColumns, 'status'), '1060', 'order status → req 1060');
+assert.strictEqual(reqId(orderColumns, 'posCount'), '1066', 'posCount (Позиция заказа) → req 1066');
 assert.strictEqual(reqId(positionColumns, 'qty'), '1067', 'qty → req 1067');
 assert.strictEqual(reqId(positionColumns, 'raw'), '1069', 'raw → req 1069');
 assert.strictEqual(reqId(positionColumns, 'cutType'), '1071', 'cutType → req 1071');
@@ -160,13 +161,16 @@ assert(posListUrl.indexOf('F_U=649') !== -1, 'positions list filters by parent o
 
 // --- Разбор ответа JSON_DATA в записи (ссылки разбираются как "id:label") ---
 const orders = helpers.normalizeObjects([
-    { i: 649, u: 1, o: 1, r: ['Заказ 649', '305:Ромашка', '42:victor_g', '2026-05-29', '', 'Новый', '', ''] }
+    { i: 649, u: 1, o: 1, r: ['Заказ 649', '305:Ромашка', '42:victor_g', '2026-05-29', '', 'Новый', '', '', '3'] }
 ], orderColumns);
 assert.strictEqual(orders.length, 1, 'one order parsed');
 assert.strictEqual(orders[0].id, '649', 'order id parsed');
 assert.strictEqual(orders[0].values.client, 'Ромашка', 'client label parsed from ref');
 assert.strictEqual(orders[0].refs.client, '305', 'client id parsed from ref');
 assert.strictEqual(orders[0].values.status, 'Новый', 'order status parsed');
+// Счётчик позиций приходит в записи заказа (ROLLUP «Позиция заказа») — список
+// показывает его до ленивой загрузки самих позиций.
+assert.strictEqual(orders[0].values.posCount, '3', 'order position count parsed from rollup column');
 
 const positions = helpers.normalizeObjects([
     { i: 700, u: 649, o: 1, r: ['Позиция 700', '10', '200:Бумага', '7:Прямая', '500', '1000', '76', 'Новая'] }
