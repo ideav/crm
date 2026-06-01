@@ -34,9 +34,9 @@ assert(!template.includes('data-order-table="107"'), 'template does not hardcode
 assert(!template.includes('data-position-table="108"'), 'template does not hardcode the position table id');
 
 const updateConf = fs.readFileSync(updateConfPath, 'utf8');
-assert(updateConf.includes('templates/atex/* : /var/www/www-root/data/www/ideav.ru/templates/custom/atex/'), 'update.conf deploys atex templates');
-assert(updateConf.includes('download/atex/js/* : /var/www/www-root/data/www/ideav.ru/download/atex/js/'), 'update.conf deploys atex js');
-assert(updateConf.includes('download/atex/css/* : /var/www/www-root/data/www/ideav.ru/download/atex/css/'), 'update.conf deploys atex css');
+assert(updateConf.includes('templates/atex/* : /var/www/www-root/data/www/ideav.ru/templates/custom/ateh/'), 'update.conf deploys atex templates to live ateh');
+assert(updateConf.includes('download/atex/js/* : /var/www/www-root/data/www/ideav.ru/download/ateh/js/'), 'update.conf deploys atex js to live ateh');
+assert(updateConf.includes('download/atex/css/* : /var/www/www-root/data/www/ideav.ru/download/ateh/css/'), 'update.conf deploys atex css to live ateh');
 
 // --- Запуск исходника в песочнице без DOM/сети ---
 const source = fs.readFileSync(scriptPath, 'utf8');
@@ -89,10 +89,12 @@ assert.strictEqual(reqId(positionColumns, 'qty'), '1067', 'qty → req 1067');
 assert.strictEqual(reqId(positionColumns, 'raw'), '1069', 'raw → req 1069');
 assert.strictEqual(reqId(positionColumns, 'cutType'), '1071', 'cutType → req 1071');
 assert.strictEqual(reqId(positionColumns, 'status'), '1079', 'position status → req 1079');
+assert.strictEqual(reqId(positionColumns, 'sleeve'), '1077', 'sleeve (Диаметр втулки) → req 1077');
 
 // Ссылочные колонки должны помечаться как ref.
 assert.strictEqual(orderColumns.filter(function(c) { return c.key === 'client'; })[0].ref, true, 'client is a reference column');
 assert.strictEqual(positionColumns.filter(function(c) { return c.key === 'raw'; })[0].ref, true, 'raw is a reference column');
+assert.strictEqual(positionColumns.filter(function(c) { return c.key === 'sleeve'; })[0].ref, true, 'sleeve (Диаметр втулки) is a reference column');
 
 // --- Создание заказа: _m_new/107?JSON&up=1 + реквизиты ---
 const createOrder = helpers.buildCreateOrderRequest({
@@ -125,7 +127,7 @@ const createPos = helpers.buildCreatePositionRequest({
     cutTypeId: '7',
     width: '500',
     length: '1000',
-    sleeve: '76',
+    sleeve: '210',
     status: 'Новая',
     xsrf: 'TOK'
 });
@@ -134,6 +136,7 @@ const posBody = new URLSearchParams(createPos.body);
 assert.strictEqual(posBody.get('t1067'), '10', 'position create sets qty');
 assert.strictEqual(posBody.get('t1069'), '200', 'position create sets raw ref');
 assert.strictEqual(posBody.get('t1071'), '7', 'position create sets cut type ref');
+assert.strictEqual(posBody.get('t1077'), '210', 'position create sets sleeve ref (ссылка на запись справочника «Диаметр втулки»)');
 assert.strictEqual(posBody.get('t1079'), 'Новая', 'position create sets status');
 
 // --- Смена статуса заказа: _m_set/{id}?JSON (статус — не первая колонка) ---

@@ -45,7 +45,7 @@
         { key: 'cutType', label: 'Тип резки', names: ['Тип резки'], ref: true },
         { key: 'width', label: 'Ширина, мм', names: ['Ширина, мм', 'Ширина'] },
         { key: 'length', label: 'Длина, м', names: ['Длина, м', 'Длина'] },
-        { key: 'sleeve', label: 'Диаметр втулки', names: ['Диаметр втулки'] },
+        { key: 'sleeve', label: 'Диаметр втулки', names: ['Диаметр втулки'], ref: true },
         { key: 'status', label: 'Статус', names: ['Статус'], status: true }
     ];
 
@@ -574,8 +574,10 @@
     function renderPositionForm(order) {
         var rawCol = getColumn(state.positionColumns, 'raw');
         var cutCol = getColumn(state.positionColumns, 'cutType');
+        var sleeveCol = getColumn(state.positionColumns, 'sleeve');
         var rawOptions = rawCol && rawCol.reqId ? state.refOptions[rawCol.reqId] : null;
         var cutOptions = cutCol && cutCol.reqId ? state.refOptions[cutCol.reqId] : null;
+        var sleeveOptions = sleeveCol && sleeveCol.reqId ? state.refOptions[sleeveCol.reqId] : null;
         return '<form class="atex-orders-position-form" data-position-form="' + escapeHtml(order.id) + '" hidden>' +
             '<div class="atex-orders-fields">' +
             '<label>Кол-во<input class="atex-orders-input" type="number" min="0" data-field="qty"></label>' +
@@ -583,7 +585,7 @@
             '<label>Тип резки' + refSelectHtml('atex-pos-cut-' + order.id, cutOptions, '', 'Выберите тип резки', cutCol && cutCol.reqId) + '</label>' +
             '<label>Ширина, мм<input class="atex-orders-input" type="number" min="0" data-field="width"></label>' +
             '<label>Длина, м<input class="atex-orders-input" type="number" min="0" step="any" data-field="length"></label>' +
-            '<label>Ø втулки<input class="atex-orders-input" type="number" min="0" data-field="sleeve"></label>' +
+            '<label>Ø втулки' + refSelectHtml('atex-pos-sleeve-' + order.id, sleeveOptions, '', 'Выберите диаметр', sleeveCol && sleeveCol.reqId) + '</label>' +
             '</div>' +
             '<div class="atex-orders-form-actions">' +
             '<button type="submit" class="atex-orders-btn atex-orders-btn-primary"><i class="pi pi-check"></i><span>Сохранить позицию</span></button>' +
@@ -717,6 +719,7 @@
     function createPosition(orderId, form) {
         var rawSel = form.querySelector('#atex-pos-raw-' + cssEscape(orderId));
         var cutSel = form.querySelector('#atex-pos-cut-' + cssEscape(orderId));
+        var sleeveSel = form.querySelector('#atex-pos-sleeve-' + cssEscape(orderId));
         function fieldVal(name) {
             var el = form.querySelector('[data-field="' + name + '"]');
             return el ? el.value : '';
@@ -732,7 +735,7 @@
             cutTypeId: cutSel ? cutSel.value : '',
             width: fieldVal('width'),
             length: fieldVal('length'),
-            sleeve: fieldVal('sleeve'),
+            sleeve: sleeveSel ? sleeveSel.value : '',
             status: state.positionStatuses[0],
             xsrf: getXsrf()
         });
@@ -1140,10 +1143,12 @@
                 var clientCol = getColumn(state.orderColumns, 'client');
                 var rawCol = getColumn(state.positionColumns, 'raw');
                 var cutCol = getColumn(state.positionColumns, 'cutType');
+                var sleeveCol = getColumn(state.positionColumns, 'sleeve');
                 return Promise.all([
                     clientCol && clientCol.reqId ? loadRefOptions(clientCol.reqId) : Promise.resolve([]),
                     rawCol && rawCol.reqId ? loadRefOptions(rawCol.reqId) : Promise.resolve([]),
-                    cutCol && cutCol.reqId ? loadRefOptions(cutCol.reqId) : Promise.resolve([])
+                    cutCol && cutCol.reqId ? loadRefOptions(cutCol.reqId) : Promise.resolve([]),
+                    sleeveCol && sleeveCol.reqId ? loadRefOptions(sleeveCol.reqId) : Promise.resolve([])
                 ]);
             })
             .then(function() {
