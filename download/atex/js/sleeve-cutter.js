@@ -111,13 +111,31 @@
         return Math.round(n * 1000) / 1000;
     }
 
+    // Подбор втулкореза по диаметру задания: запись, чей диапазон
+    // [diaMin..diaMax] покрывает diameter (границы включительно); при нескольких —
+    // с самым узким диапазоном; нет подходящего → null. Пустой диаметр → null.
+    function pickCutter(diameter, cutters) {
+        var d = toNumber(diameter);
+        if (!d || !cutters) return null;
+        var best = null, bestWidth = Infinity;
+        cutters.forEach(function(c) {
+            var min = (c.diaMin === '' || c.diaMin == null) ? -Infinity : toNumber(c.diaMin);
+            var max = (c.diaMax === '' || c.diaMax == null) ? Infinity : toNumber(c.diaMax);
+            if (d < min || d > max) return;
+            var width = max - min;
+            if (width < bestWidth) { best = c; bestWidth = width; }
+        });
+        return best;
+    }
+
     var core = {
         STATUSES: STATUSES,
         toNumber: toNumber,
         normalizeStatus: normalizeStatus,
         nextStatus: nextStatus,
         isDone: isDone,
-        summarize: summarize
+        summarize: summarize,
+        pickCutter: pickCutter
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────

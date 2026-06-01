@@ -84,4 +84,18 @@ assertEqual(core.summarize([
     percent: 50
 }, 'summarize parses comma decimals from form inputs');
 
+// ── pickCutter: подбор втулкореза по диапазону ──
+var CUTTERS = [
+    { id: '1', label: 'Втулкорез 1', diaMin: 20, diaMax: 25 },
+    { id: '2', label: 'Втулкорез 2', diaMin: 26, diaMax: 40 },
+    { id: '3', label: 'Втулкорез 3', diaMin: 41, diaMax: 76 },
+    { id: '4', label: 'Узкий 40',    diaMin: 40, diaMax: 40 }
+];
+assertEqual(core.pickCutter(20, CUTTERS).id, '1', 'pickCutter: внутри диапазона');
+assertEqual(core.pickCutter(25, CUTTERS).id, '1', 'pickCutter: верхняя граница включительно');
+assertEqual(core.pickCutter(26, CUTTERS).id, '2', 'pickCutter: нижняя граница включительно');
+assertEqual(core.pickCutter(40, CUTTERS).id, '4', 'pickCutter: несколько покрывают → самый узкий');
+assertEqual(core.pickCutter(100, CUTTERS), null, 'pickCutter: нет покрытия → null');
+assertEqual(core.pickCutter('', CUTTERS), null, 'pickCutter: пустой диаметр → null');
+
 console.log('\n' + passed + ' assertions passed');
