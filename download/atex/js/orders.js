@@ -21,6 +21,7 @@
     var REF_DROPDOWN_LIMIT = 80;
     var REF_SEARCH_DELAY = 250;
     var LIST_LIMIT = 5000;
+    var STRIPS_LIMIT = 1000;
 
     // Статусы — свободный текст (тип 3), поэтому фиксируем разумные наборы.
     // Их можно переопределить data-атрибутами data-order-statuses / data-position-statuses.
@@ -140,6 +141,14 @@
             });
         }
         return ids;
+    }
+
+    // Индекс колонки JSON_OBJ по имени реквизита: позиция в [tableId, ...reqIds]; -1 если нет.
+    function findReqIndex(meta, reqName) {
+        if (!meta) return -1;
+        var order = [String(meta.id)].concat((meta.reqs || []).map(function(r){ return String(r.id); }));
+        var req = (meta.reqs || []).filter(function(r){ return String(r.val).trim().toLowerCase() === String(reqName).trim().toLowerCase(); })[0];
+        return req ? order.indexOf(String(req.id)) : -1;
     }
 
     // Разбор ссылочного значения "id:Отображение" → {id, label}.
@@ -491,10 +500,8 @@
     function loadCutTypeIndex() {
         var meta = findMetadataByName(state.metadata, 'Тип резки');
         if (!meta) return Promise.resolve();
-        var order = [String(meta.id)].concat((meta.reqs || []).map(function(r){ return String(r.id); }));
-        var matReq = (meta.reqs || []).filter(function(r){ return String(r.val).trim().toLowerCase() === 'вид сырья'; })[0];
-        var matIdx = matReq ? order.indexOf(String(matReq.id)) : -1;
-        return fetchJson('/' + encodeURIComponent(getApiBase()) + '/object/' + encodeURIComponent(meta.id) + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows){
+        var matIdx = findReqIndex(meta, 'Вид сырья');
+        return fetchJson('/' + encodeURIComponent(getApiBase()) + '/object/' + encodeURIComponent(meta.id) + '/?JSON_OBJ&LIMIT=0,' + LIST_LIMIT).then(function(rows){
             (rows || []).forEach(function(rec){
                 var r = rec.r || [];
                 var mat = matIdx >= 0 ? parseRef(r[matIdx]) : { id: null };
@@ -510,16 +517,16 @@
         if (mat === '' || state.stripsLoadedMaterials[mat]) return Promise.resolve();
         var stripMeta = findMetadataByName(state.metadata, 'Полоса');
         if (!stripMeta) return Promise.resolve();
-        var sOrder = [String(stripMeta.id)].concat((stripMeta.reqs || []).map(function(r){ return String(r.id); }));
-        var wReq = (stripMeta.reqs || []).filter(function(r){ return String(r.val).trim().toLowerCase() === 'ширина, мм'; })[0];
-        var wIdx = wReq ? sOrder.indexOf(String(wReq.id)) : -1;
+        var wIdx = findReqIndex(stripMeta, 'Ширина, мм');
+        // typeIds опирается на то, что loadCutTypeIndex завершён при инициализации,
+        // поэтому пустой список означает: у данного сырья типов резки нет.
         var typeIds = Object.keys(state.cutTypeIndex).filter(function(id){ return String(state.cutTypeIndex[id].materialId) === mat; });
         return Promise.all(typeIds.map(function(id){
-            return fetchJson('/' + encodeURIComponent(getApiBase()) + '/object/' + encodeURIComponent(stripMeta.id) + '/?JSON_OBJ&F_U=' + encodeURIComponent(id) + '&LIMIT=0,1000').then(function(rows){
+            return fetchJson('/' + encodeURIComponent(getApiBase()) + '/object/' + encodeURIComponent(stripMeta.id) + '/?JSON_OBJ&F_U=' + encodeURIComponent(id) + '&LIMIT=0,' + STRIPS_LIMIT).then(function(rows){
                 var widths = (rows || []).map(function(rec){ var r = rec.r || []; return wIdx >= 0 ? parseWidth(r[wIdx]) : NaN; })
                     .filter(function(x){ return !isNaN(x); });
                 state.cutTypeIndex[id].widths = widths;
-            });
+            }).catch(function(){ /* пропускаем тип при сбое запроса полос */ });
         })).then(function(){ state.stripsLoadedMaterials[mat] = true; });
     }
 
@@ -1276,7 +1283,10 @@
         DEFAULT_POSITION_STATUSES: DEFAULT_POSITION_STATUSES,
         REF_OPTIONS_LIMIT: REF_OPTIONS_LIMIT,
         REF_SEARCH_LIMIT: REF_SEARCH_LIMIT,
-        REF_DROPDOWN_LIMIT: REF_DROPDOWN_LIMIT
+        REF_DROPDOWN_LIMIT: REF_DROPDOWN_LIMIT,
+        findReqIndex: findReqIndex,
+        loadCutTypeIndex: loadCutTypeIndex,
+        ensureStripWidths: ensureStripWidths
     };
 
     if (document.readyState === 'loading') {

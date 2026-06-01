@@ -38,4 +38,11 @@ eq(T.matchCutTypes(index, '1', '999'), [], 'no width match');
 eq(T.matchCutTypes(index, '1', '70'), [], 'unloaded widths excluded when width set');
 eq(T.matchCutTypes(index, '1', ' 110 '), ['10'], 'width tolerant parse');
 
+// findReqIndex — чистый хелпер поиска индекса колонки по имени реквизита.
+assert(typeof T.findReqIndex === 'function', 'findReqIndex exposed');
+var fMeta = { id: '104', reqs: [{ id: '1025', val: 'Вид сырья' }, { id: '1027', val: 'Ширина входа, мм' }] };
+assert.strictEqual(T.findReqIndex(fMeta, 'Вид сырья'), 1, 'findReqIndex known req → 1'); n++;
+assert.strictEqual(T.findReqIndex(fMeta, 'нет'), -1, 'findReqIndex unknown req → -1'); n++;
+assert.strictEqual(T.findReqIndex(null, 'x'), -1, 'findReqIndex null meta → -1'); n++;
+
 console.log(n + ' assertions passed');
