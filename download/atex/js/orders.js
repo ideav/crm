@@ -50,6 +50,7 @@
         { key: 'width', label: 'Ширина, мм', names: ['Ширина, мм', 'Ширина'] },
         { key: 'length', label: 'Длина, м', names: ['Длина, м', 'Длина'] },
         { key: 'sleeve', label: 'Диаметр втулки', names: ['Диаметр втулки'], ref: true },
+        { key: 'winding', label: 'Тип намотки', names: ['Тип намотки'] },
         { key: 'status', label: 'Статус', names: ['Статус'], status: true }
     ];
 
@@ -120,6 +121,13 @@
         if (s === '') return NaN;
         var x = parseFloat(s);
         return isFinite(x) ? x : NaN;
+    }
+
+    // Нормализация значения поля «Тип намотки»: IN/OUT (или пусто).
+    var WINDING_VALUES = ['IN', 'OUT'];
+    function normalizeWinding(value) {
+        var s = String(value == null ? '' : value).trim().toUpperCase();
+        return (s === 'IN' || s === 'OUT') ? s : '';
     }
 
     // Подбор подходящих типов резки.
@@ -416,6 +424,7 @@
         put('width', opts.width);
         put('length', opts.length);
         put('sleeve', opts.sleeve);
+        put('winding', normalizeWinding(opts.winding));
         put('status', opts.status);
 
         var url = '/' + encodeURIComponent(opts.db) + '/_m_new/' +
@@ -621,11 +630,11 @@
         var positions = state.positionsByOrder[order.id] || [];
         var head = '<thead><tr>' +
             '<th>Кол-во</th><th>Вид сырья</th><th>Тип резки</th>' +
-            '<th>Ширина, мм</th><th>Длина, м</th><th>Ø втулки</th><th>Статус</th>' +
+            '<th>Ширина, мм</th><th>Длина, м</th><th>Ø втулки</th><th>Тип намотки</th><th>Статус</th>' +
             '</tr></thead>';
         var body;
         if (!positions.length) {
-            body = '<tbody><tr><td colspan="7" class="atex-orders-empty">Позиций пока нет.</td></tr></tbody>';
+            body = '<tbody><tr><td colspan="8" class="atex-orders-empty">Позиций пока нет.</td></tr></tbody>';
         } else {
             body = '<tbody>' + positions.map(function(pos) {
                 return '<tr data-position-id="' + escapeHtml(pos.id) + '">' +
@@ -635,6 +644,7 @@
                     '<td>' + escapeHtml(pos.values.width || '') + '</td>' +
                     '<td>' + escapeHtml(pos.values.length || '') + '</td>' +
                     '<td>' + escapeHtml(pos.values.sleeve || '') + '</td>' +
+                    '<td>' + escapeHtml(pos.values.winding || '') + '</td>' +
                     '<td>' + statusSelectHtml(state.positionStatuses, pos.values.status,
                         ' data-position-status="' + escapeHtml(pos.id) + '"') + '</td>' +
                     '</tr>';
@@ -665,6 +675,11 @@
             '<label>Ширина, мм<input class="atex-orders-input" type="number" min="0" data-field="width"></label>' +
             '<label>Длина, м<input class="atex-orders-input" type="number" min="0" step="any" data-field="length"></label>' +
             '<label>Ø втулки' + refSelectHtml('atex-pos-sleeve-' + order.id, sleeveOptions, '', 'Выберите диаметр', sleeveCol && sleeveCol.reqId) + '</label>' +
+            '<label>Тип намотки<select class="atex-orders-input atex-orders-winding" data-field="winding">' +
+            '<option value="">— не задано —</option>' +
+            '<option value="IN">IN</option>' +
+            '<option value="OUT">OUT</option>' +
+            '</select></label>' +
             '</div>' +
             '<div class="atex-orders-form-actions">' +
             '<button type="submit" class="atex-orders-btn atex-orders-btn-primary"><i class="pi pi-check"></i><span>Сохранить позицию</span></button>' +
@@ -857,6 +872,7 @@
             width: fieldVal('width'),
             length: fieldVal('length'),
             sleeve: sleeveSel ? sleeveSel.value : '',
+            winding: fieldVal('winding'),
             status: state.positionStatuses[0],
             xsrf: getXsrf()
         });
@@ -1373,7 +1389,9 @@
         REF_DROPDOWN_LIMIT: REF_DROPDOWN_LIMIT,
         findReqIndex: findReqIndex,
         loadCutTypeIndex: loadCutTypeIndex,
-        ensureStripWidths: ensureStripWidths
+        ensureStripWidths: ensureStripWidths,
+        normalizeWinding: normalizeWinding,
+        WINDING_VALUES: WINDING_VALUES
     };
 
     if (document.readyState === 'loading') {
