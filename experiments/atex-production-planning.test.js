@@ -305,4 +305,19 @@ var b = [{id:'b1',materialId:'M',dateKey:20260102,remainder:100},{id:'b2',materi
 assertEqual(planning.pickBatchFIFO(b,'M'), 'b2', 'pickBatchFIFO: старейшая с остатком (b3 остаток 0)');
 assertEqual(planning.pickBatchFIFO(b,'Z'), null, 'pickBatchFIFO: нет сырья → null');
 
+// ── Task 2: generateCutPlan ──
+var gIdx = { T1:{materialId:'M', widths:[{width:60,qty:14}]} };
+var gIn = {
+  positions:[ {id:'p1',materialId:'M',width:60,qty:30}, {id:'p2',materialId:'M',width:999,qty:5}, {id:'p3',materialId:'M',width:60,qty:10} ],
+  supplies:[ {positionId:'p3'} ],
+  cutTypeIndex:gIdx,
+  slitters:[ {id:'10',stopMaterialIds:[]} ],
+  batches:[ {id:'b1',materialId:'M',dateKey:20260101,remainder:1000} ]
+};
+var g = planning.generateCutPlan(gIn);
+// p3 обеспечена → пропущена; p1 (qty30, perCut14)→ceil=3 резки; p2 ширина 999 нет типа → skipped
+assertEqual(g.plan.length, 3, 'generateCutPlan: p1 → 3 резки');
+assertEqual(g.plan.every(function(x){ return x.cutTypeId==='T1' && x.slitterId==='10' && x.batchId==='b1' && x.positionId==='p1'; }), true, 'generateCutPlan: поля резок p1');
+assertEqual(g.skipped.map(function(s){return s.positionId;}), ['p2'], 'generateCutPlan: p2 пропущена (нет типа)');
+
 console.log('\n' + passed + ' assertions passed');

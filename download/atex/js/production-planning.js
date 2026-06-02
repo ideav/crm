@@ -396,6 +396,28 @@
         return String(avail[0].id);
     }
 
+    function generateCutPlan(input){
+        input = input || {};
+        var idx = input.cutTypeIndex || {}, slitters = input.slitters || [], batches = input.batches || [];
+        var unsup = unsuppliedPositions(input.positions || [], input.supplies || []);
+        var load = {}; var seed = input.loadBySlitterId || {};
+        Object.keys(seed).forEach(function(k){ load[k] = Number(seed[k]) || 0; });
+        var plan = [], skipped = [];
+        unsup.forEach(function(p){
+            var tid = matchCutType(idx, p.materialId, p.width);
+            if (tid == null) { skipped.push({ positionId: String(p.id), reason: 'нет типа' }); return; }
+            var n = cutsNeeded(p.qty, rollersPerCut(idx, tid, p.width));
+            if (n <= 0) { skipped.push({ positionId: String(p.id), reason: 'нет роликов-в-резке' }); return; }
+            for (var i = 0; i < n; i++){
+                var sid = pickSlitter(slitters, p.materialId, load);
+                var bid = pickBatchFIFO(batches, p.materialId);
+                plan.push({ positionId: String(p.id), cutTypeId: String(tid), slitterId: sid, batchId: bid });
+                if (sid != null) load[String(sid)] = (load[String(sid)] || 0) + 1;
+            }
+        });
+        return { plan: plan, skipped: skipped };
+    }
+
     function startKey(c){ return [Number(c.rollerWidth) || 0, -(Number(c.knifeCount) || 0), String(c.id)]; }
     function cmpKey(a, b){ for (var i = 0; i < a.length; i++){ if (a[i] < b[i]) return -1; if (a[i] > b[i]) return 1; } return 0; }
     // Жадная последовательность: старт — argmin startKey (узкая/много-ножевая); далее argmin changeoverCost, tie-break startKey.
@@ -492,7 +514,8 @@
         rollersPerCut: rollersPerCut,
         cutsNeeded: cutsNeeded,
         pickSlitter: pickSlitter,
-        pickBatchFIFO: pickBatchFIFO
+        pickBatchFIFO: pickBatchFIFO,
+        generateCutPlan: generateCutPlan
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
