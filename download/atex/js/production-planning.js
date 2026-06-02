@@ -234,7 +234,16 @@
                     materialBatch: { id: null, label: str(row.cut_material_batch) },
                     planDate: str(row.cut_plan_date),
                     status: str(row.cut_status),
-                    sequence: (seqVal == null || seqVal === '') ? null : Number(seqVal)
+                    sequence: (seqVal == null || seqVal === '') ? null : Number(seqVal),
+                    materialId: str(row.cut_material_id),
+                    materialName: str(row.cut_material),
+                    batchId: str(row.cut_batch_id),
+                    jumboRemainingM: (row.cut_jumbo_remaining == null || row.cut_jumbo_remaining === '') ? 0 : Number(row.cut_jumbo_remaining),
+                    knifeCount: (row.cut_knives == null || row.cut_knives === '') ? 0 : Number(row.cut_knives),
+                    knifeWidths: [],
+                    winding: normWinding(row.cut_winding),
+                    rollerWidth: (row.cut_roller_width == null || row.cut_roller_width === '') ? 0 : Number(row.cut_roller_width),
+                    isFoil: /фольг/i.test(str(row.cut_material))
                 };
                 order.push(cutId);
             }
@@ -360,6 +369,29 @@
         });
     }
 
+    // Сгруппировать резки по станкам, упорядочить каждую группу через orderCuts,
+    // пронумеровать 1..N. Резки без станка (slitter.id == null) пропускаются.
+    // Возвращает плоский массив [{cutId, slitterId, sequence}].
+    function planQueues(cuts, weights) {
+        var groups = {};
+        var order = [];
+        (cuts || []).forEach(function(c) {
+            var sid = c && c.slitter && c.slitter.id;
+            if (sid == null) return; // пропускаем «без станка»
+            var key = String(sid);
+            if (!groups[key]) { groups[key] = []; order.push(key); }
+            groups[key].push(c);
+        });
+        var result = [];
+        order.forEach(function(sid) {
+            var ordered = orderCuts(groups[sid], weights);
+            ordered.forEach(function(c) {
+                result.push({ cutId: c.id, slitterId: sid, sequence: c.sequence });
+            });
+        });
+        return result;
+    }
+
     var planning = {
         parseRef: parseRef,
         parseMultiRefIds: parseMultiRefIds,
@@ -382,7 +414,8 @@
         awkwardRemainder: awkwardRemainder,
         changeoverCost: changeoverCost,
         greedySequence: greedySequence,
-        orderCuts: orderCuts
+        orderCuts: orderCuts,
+        planQueues: planQueues
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
