@@ -167,6 +167,19 @@
         return statusIn(status, TERMINAL_STATUSES);
     }
 
+    // Счётчики завершённых/отменённых заказов из отчёта orders_status_count
+    // (строки {order_status, cnt}). Эти заказы НЕ грузятся в order_pipeline (там
+    // только активные), поэтому их количество берём отдельным лёгким запросом.
+    function terminalOrderCounts(statusRows) {
+        var done = 0, cancelled = 0;
+        (statusRows || []).forEach(function(r) {
+            var n = toNumber(r.cnt != null ? r.cnt : r.count);
+            if (statusIn(r.order_status, ['Выполнен'])) done += n;
+            else if (statusIn(r.order_status, ['Отменён'])) cancelled += n;
+        });
+        return { done: done, cancelled: cancelled, total: done + cancelled };
+    }
+
     // Дата (ISO YYYY-MM-DD) в диапазоне [from, to] включительно; пустые границы
     // открыты, пустая дата не входит ни в какой непустой диапазон.
     function dateInRange(date, from, to) {
@@ -391,6 +404,7 @@
         buildSummaries: buildSummaries,
         selectOrders: selectOrders,
         isTerminalStatus: isTerminalStatus,
+        terminalOrderCounts: terminalOrderCounts,
         dateInRange: dateInRange,
         TERMINAL_STATUSES: TERMINAL_STATUSES,
         UNSET: UNSET
@@ -461,9 +475,12 @@
         var self = this;
         return Promise.all([
             this.getJson('report/order_pipeline?JSON_KV&FR_order_active=%25'),
-            this.getJson('report/material_stock?JSON_KV')
+            this.getJson('report/material_stock?JSON_KV'),
+            // Лёгкий агрегат: завершённые/отменённые заказы (их нет в order_pipeline).
+            this.getJson('report/orders_status_count?JSON_KV')
         ]).then(function(res) {
             self.raw = { pipelineRows: res[0] || [], materialRows: res[1] || [] };
+            self.statusCounts = res[2] || [];
             return buildSummaries(self.raw.pipelineRows, self.raw.materialRows, self.filter);
         });
     };
@@ -611,7 +628,15 @@
     };
 
     AtexDashboards.prototype.cardOrders = function(count, data) {
+        // Завершённые/отменённые заказы на дашборд не грузятся (только активные),
+        // поэтому их счётчики берём из отдельного отчёта orders_status_count.
+        var term = terminalOrderCounts(this.statusCounts || []);
         return card('Заказы по статусам', count, el('div', {}, [
+            metrics([
+                { label: 'завершено', value: term.done },
+                { label: 'отменено', value: term.cancelled }
+            ]),
+            el('h3', { class: 'atex-db-subhead', text: 'Активные по статусам' }),
             ordersBars(data.rows)
         ]));
     };
