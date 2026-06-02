@@ -17,10 +17,7 @@
 // подчинённая таблица, прямое `object/`-чтение её не отдаёт. Партии сырья для
 // формы создания резки берутся отчётом `report/material_batches?JSON_KV`
 // (`rowsToBatches`). Справочник станков читается по имени из метаданных
-// (`object/{table}?JSON_OBJ`, записей мало). «Тип резки» — большой справочник:
-// полная выборка упирается в серверный потолок размера ответа, поэтому первая
-// порция грузится ограниченным ref-search `_ref_reqs` (`loadCutTypes`), остальное
-// — поиском по вводу через `AtexRefSearch`.
+// (`object/{table}?JSON_OBJ`, записей мало).
 //
 // Запись идёт прямыми командами `_m_*` (#2903): создание резки —
 // `_m_new/{Производственная резка}` (Номер не задаётся, у таблицы `unique=1` —
@@ -58,13 +55,18 @@
         cut: 'Производственная резка',
         supply: 'Обеспечение',
         slitter: 'Слиттер',
-        cutType: 'Тип резки',
-        materialBatch: 'Партия сырья'
+        materialBatch: 'Партия сырья',
+        strip: 'Полоса'
+    };
+    // Реквизиты подчинённой «Полосы» (up = резка). Резолв по имени.
+    var STRIP_REQ = {
+        width: 'Ширина, мм',
+        qty: 'Количество',
+        purpose: 'Назначение'
     };
     // Реквизиты «Производственной резки» (Номер — главное значение, автонумер).
     var CUT_REQ = {
         slitter: 'Слиттер',
-        cutType: 'Тип резки',
         materialBatch: 'Партия сырья',
         planDate: 'Дата план',
         status: 'Статус',
@@ -81,6 +83,9 @@
     // Статусы — свободный текст (тип 3); фиксируем разумные наборы по дизайн-спеке.
     var CUT_STATUSES = ['Запланирована', 'В очереди', 'В работе', 'Готова', 'Отменена'];
     var SUPPLY_STATUSES = ['Зарезервировано', 'Выполнено', 'Отменено'];
+    // Параметры раскладки cut-layout при генерации резок.
+    var WINDOW_DAYS = 3;      // окно по сроку изготовления — позиции группируются в кластеры
+    var LAYOUT_TOLERANCE = 0; // допуск остатка джамбо (мм) для бейджа «в допуске»
 
     // ───────────────────────── Чистое ядро ─────────────────────────
 
@@ -142,7 +147,6 @@
             id: String(record && record.i),
             number: r[0] == null ? '' : String(r[0]),
             slitter: ref(CUT_REQ.slitter),
-            cutType: ref(CUT_REQ.cutType),
             materialBatch: ref(CUT_REQ.materialBatch),
             planDate: val(CUT_REQ.planDate),
             status: val(CUT_REQ.status),
@@ -242,7 +246,7 @@
     // `cut_id`; обеспечения собираются из строк с непустым `supply_id`. Резки без
     // обеспечения (пустой `supply_id`) остаются в очереди и фантомных связей не
     // создают. Формы записей совпадают с прежними mapCutRecord/loadSupplies:
-    // резка — { id, number, slitter:{id,label}, cutType:{id,label},
+    // резка — { id, number, slitter:{id,label},
     // materialBatch:{id,label}, planDate, status }; обеспечение —
     // { id, positionId, cutId }.
     function rowsToPlanning(rows) {
@@ -258,7 +262,6 @@
                     id: cutId,
                     number: str(row.cut_no),
                     slitter: { id: row.cut_slitter_id ? String(row.cut_slitter_id) : null, label: str(row.cut_slitter) },
-                    cutType: { id: null, label: str(row.cut_type) },
                     materialBatch: { id: null, label: str(row.cut_material_batch) },
                     planDate: str(row.cut_plan_date),
                     status: str(row.cut_status),
@@ -290,30 +293,32 @@
     }
 
     // Строки отчёта positions_list (JSON_KV) → [{ id, label }] для дропдауна
-    // привязки. Подпись: «#id · Тип резки · Ширина · Кол-во» (пустые поля
-    // пропускаются); если деталей нет — «#id · Номер».
+    // привязки. Подпись: «№<номер> · <ширина>мм» (ширина пропускается, если пустая).
+    // Прежняя метка использовала колонку position_cut_type, удалённую в F2 (упразднён
+    // «Тип резки») — теперь подпись строится из номера позиции и ширины.
     function rowsToPositions(rows) {
         return (rows || []).map(function(row) {
             var id = row.position_id == null ? '' : String(row.position_id);
-            var parts = [row.position_cut_type, row.position_width, row.position_qty]
-                .map(function(v) { return v == null ? '' : String(v).trim(); })
-                .filter(function(v) { return v !== ''; });
-            var main = row.position_no == null ? '' : String(row.position_no).trim();
-            var label = '#' + id + (parts.length ? ' · ' + parts.join(' · ') : (main ? ' · ' + main : ''));
+            var no = row.position_no == null ? '' : String(row.position_no).trim();
+            var width = row.position_width == null ? '' : String(row.position_width).trim();
+            var label = '№' + no + (width !== '' ? ' · ' + width + 'мм' : '');
             return { id: id, label: label };
         });
     }
 
-    // Строки отчёта positions_list (JSON_KV) → [{ id, materialId, width, qty }]
+    // Строки отчёта positions_list (JSON_KV) → [{ id, materialId, width, qty, dueKey }]
     // для генерации резок. position_material_id (добавлен в отчёт), position_width,
     // position_qty → числа; пустые значения → 0/'' но объект всегда присутствует.
+    // dueKey — числовой ключ «Срока изготовления» (position_due_date) через
+    // batchDateKey (для оконного отбора по сроку при генерации); нет срока → Infinity.
     function rowsToGenPositions(rows) {
         return (rows || []).map(function(row) {
             return {
                 id: row.position_id == null ? '' : String(row.position_id),
                 materialId: row.position_material_id == null ? '' : String(row.position_material_id),
                 width: Number(row.position_width) || 0,
-                qty: Number(row.position_qty) || 0
+                qty: Number(row.position_qty) || 0,
+                dueKey: batchDateKey(row.position_due_date)
             };
         });
     }
@@ -396,38 +401,68 @@
         return cost;
     }
 
-    // ───────────────────── Хелперы генерации резок (Task 1 — D3b) ─────────────────────
+    // ───────────────────── Хелперы генерации резок ─────────────────────
+
+    // Строки отчёта cut_strips (JSON_KV) → { cutId: {knifeCount, knifeWidths:[...]} }.
+    // cut_id — abn «Производственной резки»; strip_width — Полоса «Ширина, мм»;
+    // strip_qty — Полоса «Количество». Группировка по cut_id:
+    //   knifeCount += Number(strip_qty);
+    //   knifeWidths — Number(strip_width), развёрнутый по qty (полоса 110×2 → [110,110]),
+    //   нужен для widthSetDistance в changeoverCost. Заменяет удалённую в F2 колонку
+    //   cut_knives отчёта cut_planning (knifeCount теперь считается клиентом).
+    // Вход не мутируется.
+    function aggregateStrips(rows) {
+        var out = {};
+        (rows || []).forEach(function(row) {
+            var cutId = String(row.cut_id == null ? '' : row.cut_id);
+            if (cutId === '') return;
+            if (!out[cutId]) out[cutId] = { knifeCount: 0, knifeWidths: [] };
+            var qty = Number(row.strip_qty) || 0;
+            var width = Number(row.strip_width) || 0;
+            out[cutId].knifeCount += qty;
+            for (var n = 0; n < qty; n++) out[cutId].knifeWidths.push(width);
+        });
+        return out;
+    }
+
+    // ── Чистая сводка по полосам редактора (зеркало cut-calc calc.*) ──
+    // Модули самостоятельны: дублируем формулы из cut-calc, чтобы редактор полос
+    // не зависел от загрузки cut-calc.js. Вход — массив полос [{width, qty}];
+    // значения терпимо приводятся к числу (запятая → точка, мусор → 0), вход не мутируется.
+
+    // Терпимый разбор числа: запятая как десятичный разделитель, мусор/пусто → 0.
+    function stripNum(value) {
+        if (typeof value === 'number') return isFinite(value) ? value : 0;
+        var text = String(value == null ? '' : value).replace(/\s+/g, '').replace(',', '.');
+        var n = parseFloat(text);
+        return isFinite(n) ? n : 0;
+    }
+
+    // Округление до 3 знаков — убрать артефакты float-арифметики.
+    function round3(n) { return Math.round(n * 1000) / 1000; }
+
+    // Занятая полосами ширина — Σ(ширина × количество).
+    function stripsUsedWidth(strips) {
+        return round3((strips || []).reduce(function(sum, s) {
+            return sum + stripNum(s.width) * stripNum(s.qty);
+        }, 0));
+    }
+
+    // «Итого ножей» — сумма всех количеств полос (Σ qty).
+    function stripsTotalKnives(strips) {
+        return (strips || []).reduce(function(sum, s) { return sum + stripNum(s.qty); }, 0);
+    }
+
+    // «Остаток, мм» — ширина джамбо минус занятая полосами ширина.
+    function stripsRemainder(jumboWidth, strips) {
+        return round3(stripNum(jumboWidth) - stripsUsedWidth(strips));
+    }
 
     // Позиции, не имеющие ни одной записи обеспечения. supplies — [{positionId}].
     function unsuppliedPositions(positions, supplies){
         var sup = {}; (supplies || []).forEach(function(s){ if (s && s.positionId != null) sup[String(s.positionId)] = true; });
         return (positions || []).filter(function(p){ return !sup[String(p.id)]; });
     }
-
-    // Подобрать тип резки по сырью и ширине: среди совпадений выбрать с макс qty
-    // (по полосе); при равенстве — меньший typeId лексикографически. null если не найден.
-    function matchCutType(cutTypeIndex, materialId, width){
-        var w = Number(width), mat = String(materialId == null ? '' : materialId), best = null, bestQty = -1;
-        Object.keys(cutTypeIndex || {}).forEach(function(tid){
-            var t = cutTypeIndex[tid];
-            if (String(t.materialId) !== mat) return;
-            var strip = (t.widths || []).filter(function(s){ return Number(s.width) === w; })[0];
-            if (!strip) return;
-            var q = Number(strip.qty) || 0;
-            if (q > bestQty || (q === bestQty && (best == null || String(tid) < String(best)))) { bestQty = q; best = tid; }
-        });
-        return best;
-    }
-
-    // Число роликов за одну резку (qty полосы данной ширины в типе резки). 0 если не найдено.
-    function rollersPerCut(cutTypeIndex, typeId, width){
-        var t = (cutTypeIndex || {})[String(typeId)]; if (!t) return 0;
-        var w = Number(width), strip = (t.widths || []).filter(function(s){ return Number(s.width) === w; })[0];
-        return strip ? (Number(strip.qty) || 0) : 0;
-    }
-
-    // Число резок ceil(qty / perCut); min 1 если qty > 0; 0 если perCut = 0.
-    function cutsNeeded(qty, perCut){ var q = Number(qty) || 0, k = Number(perCut) || 0; return k > 0 ? Math.max(1, Math.ceil(q / k)) : 0; }
 
     // Выбрать станок: исключить запрещённые (стоп-лист), среди допустимых —
     // с наименьшей загрузкой (loadBySlitterId: {id→count}), тайбрейк — меньший id.
@@ -451,28 +486,6 @@
         if (!avail.length) return null;
         avail.sort(function(a, b){ return (Number(a.dateKey) || 0) - (Number(b.dateKey) || 0) || (String(a.id) < String(b.id) ? -1 : 1); });
         return String(avail[0].id);
-    }
-
-    function generateCutPlan(input){
-        input = input || {};
-        var idx = input.cutTypeIndex || {}, slitters = input.slitters || [], batches = input.batches || [];
-        var unsup = unsuppliedPositions(input.positions || [], input.supplies || []);
-        var load = {}; var seed = input.loadBySlitterId || {};
-        Object.keys(seed).forEach(function(k){ load[k] = Number(seed[k]) || 0; });
-        var plan = [], skipped = [];
-        unsup.forEach(function(p){
-            var tid = matchCutType(idx, p.materialId, p.width);
-            if (tid == null) { skipped.push({ positionId: String(p.id), reason: 'нет типа' }); return; }
-            var n = cutsNeeded(p.qty, rollersPerCut(idx, tid, p.width));
-            if (n <= 0) { skipped.push({ positionId: String(p.id), reason: 'нет роликов-в-резке' }); return; }
-            for (var i = 0; i < n; i++){
-                var sid = pickSlitter(slitters, p.materialId, load);
-                var bid = pickBatchFIFO(batches, p.materialId);
-                plan.push({ positionId: String(p.id), cutTypeId: String(tid), slitterId: sid, batchId: bid });
-                if (sid != null) load[String(sid)] = (load[String(sid)] || 0) + 1;
-            }
-        });
-        return { plan: plan, skipped: skipped };
     }
 
     function startKey(c){ return [Number(c.rollerWidth) || 0, -(Number(c.knifeCount) || 0), String(c.id)]; }
@@ -570,12 +583,12 @@
         planQueues: planQueues,
         moveInQueue: moveInQueue,
         unsuppliedPositions: unsuppliedPositions,
-        matchCutType: matchCutType,
-        rollersPerCut: rollersPerCut,
-        cutsNeeded: cutsNeeded,
         pickSlitter: pickSlitter,
         pickBatchFIFO: pickBatchFIFO,
-        generateCutPlan: generateCutPlan
+        aggregateStrips: aggregateStrips,
+        stripsUsedWidth: stripsUsedWidth,
+        stripsTotalKnives: stripsTotalKnives,
+        stripsRemainder: stripsRemainder
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -600,29 +613,29 @@
     function AtexProductionPlanning(root) {
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
-        this.meta = { cut: null, supply: null, slitter: null, cutType: null, materialBatch: null };
+        this.meta = { cut: null, supply: null, slitter: null, materialBatch: null, strip: null };
         this.slitters = [];        // справочник [{ id, label, stopMaterialIds }]
-        this.cutTypes = [];        // справочник [{ id, label }]
         this.materialBatches = []; // справочник [{ id, label }]
         this.batchMaterialById = {}; // карта batch_id → вид_сырья_id (для стоп-листа)
         this.positions = [];       // позиции заказа [{ id, label }]
         this.refOptions = {};      // кеш опций searchable reference inputs по reqId
         this.cuts = [];            // очередь резок [mapCutRecord]
         this.supplies = [];        // все записи «Обеспечения» (для подсчёта привязок)
-        // Данные для generateCutPlan (плумбинг D3b):
-        this.genPositions = [];    // [{ id, materialId, width, qty }] — все позиции
-        this.cutTypeIndex = {};    // { typeId: { materialId, widths:[{width,qty}] } }
-        this.cutTypeIndexLoaded = false;        // флаг: loadCutTypeIndex завершён
-        this.cutTypeStripsLoaded = {};          // { typeId: true } — полосы типа загружены
+        // Данные для генерации резок:
+        this.genPositions = [];    // [{ id, materialId, width, qty, dueKey }] — все позиции
         this.genBatches = [];      // [{ id, materialId, dateKey, remainder }]
+        this.stripAgg = {};        // карта cutId → { knifeCount, knifeWidths } (отчёт cut_strips)
+        this.jumboWidthByMaterial = {}; // карта materialId → ширина джамбо «Вид сырья»
+        this.preferredByMaterial = {};  // кеш ходовых ширин по сырью: materialId → [{width, popularity}]
         this.draft = this.blankDraft();
         this.filter = { slitter: '', status: '', date: todayISO() };  // дата плана по умолчанию — сегодня
         this.selectedCutId = null; // выбранная резка для привязки обеспечения
+        this.stripEditCutId = null; // резка с открытым инлайн-редактором полос (одна за раз)
         this.busy = false;
     }
 
     AtexProductionPlanning.prototype.blankDraft = function() {
-        return { slitterId: '', cutTypeId: '', materialBatchId: '', planDate: '', status: CUT_STATUSES[0], notes: '' };
+        return { slitterId: '', materialBatchId: '', planDate: '', status: CUT_STATUSES[0], notes: '' };
     };
 
     AtexProductionPlanning.prototype.url = function(path) {
@@ -670,7 +683,7 @@
         var self = this;
         return this.getJson('metadata').then(function(all) {
             var list = Array.isArray(all) ? all : [all];
-            self._metaAll = list; // кеш полного списка (нужен для «Полоса» в ensureCutTypeStrips)
+            self._metaAll = list; // кеш полного списка метаданных (резолв таблиц по имени)
             function byName(name) {
                 return list.filter(function(t) {
                     return String(t.val).trim().toLowerCase() === name.trim().toLowerCase();
@@ -679,8 +692,8 @@
             self.meta.cut = byName(TABLE.cut);
             self.meta.supply = byName(TABLE.supply);
             self.meta.slitter = byName(TABLE.slitter);
-            self.meta.cutType = byName(TABLE.cutType);
             self.meta.materialBatch = byName(TABLE.materialBatch);
+            self.meta.strip = byName(TABLE.strip); // подчинённая «Производственной резки» (Task 3)
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
             if (!self.meta.supply) throw new Error('В метаданных не найдена таблица «' + TABLE.supply + '»');
         });
@@ -743,7 +756,7 @@
     // Справочник позиций заказа отчётом positions_list (JSON_KV). Позиция
     // подчинённая — прямое object/-чтение её не отдаёт, отчёт возвращает все.
     // Параллельно строит this.genPositions = [{ id, materialId, width, qty }]
-    // для generateCutPlan (D3b): использует те же строки, не нужен доп. запрос.
+    // для генерации резок: использует те же строки, не нужен доп. запрос.
     AtexProductionPlanning.prototype.loadPositions = function() {
         var self = this;
         return this.getJson('report/positions_list?JSON_KV&LIMIT=0,2000').then(function(rows) {
@@ -760,70 +773,7 @@
         });
     };
 
-    // ── Загрузчики для generateCutPlan (D3b) ──
-
-    // Индекс типов резки: { typeId: { materialId } }. Один запрос на все типы резки.
-    // Зеркалирует loadCutTypeIndex из orders.js (там findMetadataByName/findReqIndex,
-    // здесь metadata уже в this.meta + columnIndex/reqIdByName).
-    // После завершения this.cutTypeIndexLoaded = true — сигнал для ensureCutTypeStrips.
-    AtexProductionPlanning.prototype.loadCutTypeIndexAll = function() {
-        var self = this;
-        if (this.cutTypeIndexLoaded) return Promise.resolve();   // не перезатирать уже загруженный индекс (refresh)
-        var meta = this.meta.cutType;
-        if (!meta) { this.cutTypeIndexLoaded = true; return Promise.resolve(); }
-        var matIdx = columnIndex(meta, 'Вид сырья');
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
-            (rows || []).forEach(function(rec) {
-                var r = rec.r || [];
-                var mat = matIdx >= 0 ? parseRef(r[matIdx]) : { id: null };
-                self.cutTypeIndex[String(rec.i)] = { materialId: mat.id ? String(mat.id) : '', widths: null };
-            });
-            self.cutTypeIndexLoaded = true;
-        });
-    };
-
-    // Загружает полосы («Ширина, мм», «Количество») для всех типов резки,
-    // чьё сырьё входит в переданный набор materialIds. Один запрос на тип резки.
-    // Зеркалирует ensureStripWidths из orders.js, но загружает widths:[{width,qty}]
-    // (orders.js хранит только widths:[Number], здесь нужна qty для matchCutType).
-    // Использует закешированный this._metaAll (от loadMetadata) — без доп. запроса.
-    // Вызывается один раз при инициализации после loadCutTypeIndexAll.
-    AtexProductionPlanning.prototype.ensureCutTypeStrips = function(materialIds) {
-        var self = this;
-        var needed = {};
-        (materialIds || []).forEach(function(m) { if (m) needed[String(m)] = true; });
-
-        var list = self._metaAll || [];
-        var stripMeta = null;
-        for (var i = 0; i < list.length; i++) {
-            if (String(list[i].val).trim().toLowerCase() === 'полоса') { stripMeta = list[i]; break; }
-        }
-        if (!stripMeta) return Promise.resolve();
-
-        var wIdx = columnIndex(stripMeta, 'Ширина, мм');
-        var qIdx = columnIndex(stripMeta, 'Количество');
-
-        var typeIds = Object.keys(self.cutTypeIndex).filter(function(tid) {
-            return needed[String(self.cutTypeIndex[tid].materialId)];
-        });
-
-        return Promise.all(typeIds.map(function(tid) {
-            if (self.cutTypeStripsLoaded[tid]) return Promise.resolve();
-            return self.getJson(
-                'object/' + stripMeta.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(tid) + '&LIMIT=0,500'
-            ).then(function(rows) {
-                var widths = (rows || []).map(function(rec) {
-                    var r = rec.r || [];
-                    return {
-                        width: wIdx >= 0 ? (Number(r[wIdx]) || 0) : 0,
-                        qty: qIdx >= 0 ? (Number(r[qIdx]) || 0) : 0
-                    };
-                }).filter(function(s) { return s.width > 0; });
-                self.cutTypeIndex[tid].widths = widths;
-                self.cutTypeStripsLoaded[tid] = true;
-            }).catch(function() { /* пропускаем тип при сбое запроса полос */ });
-        }));
-    };
+    // ── Загрузчики для генерации резок ──
 
     // Загружает «Партия сырья» через object/ и заполняет this.genBatches.
     // Результат: [{ id, materialId, dateKey (число), remainder }] для pickBatchFIFO.
@@ -850,39 +800,74 @@
         });
     };
 
-    // Объединяет loadCutTypeIndexAll + ensureCutTypeStrips для материалов из
-    // необеспеченных позиций. materialIds — уже отфильтрованный набор, или опциональный
-    // параметр; если не передан — берёт из this.genPositions (все позиции).
-    AtexProductionPlanning.prototype.loadCutTypeIndexForMaterials = function(materialIds) {
+    // Полосы всех резок отчётом cut_strips (JSON_KV) → this.stripAgg
+    // (карта cutId → {knifeCount, knifeWidths}). knifeCount/knifeWidths влиты в
+    // дескриптор каждой резки в loadPlanning (колонка cut_knives отчёта cut_planning
+    // удалена в F2 — knifeCount теперь считается клиентом из Полос).
+    AtexProductionPlanning.prototype.loadCutStrips = function() {
         var self = this;
-        return this.loadCutTypeIndexAll().then(function() {
-            var ids = materialIds || (self.genPositions || []).map(function(p) { return p.materialId; });
-            return self.ensureCutTypeStrips(ids);
+        return this.getJson('report/cut_strips?JSON_KV&LIMIT=0,5000').then(function(rows) {
+            self.stripAgg = aggregateStrips(rows || []);
         });
     };
 
-    // Справочник «Тип резки» — большой (сотни записей); полная выборка
-    // (`object/?JSON_OBJ` или отчёт) упирается в серверный потолок размера ответа
-    // и виснет. Поэтому предзагружаем только первую порцию через ограниченный
-    // ref-search `_ref_reqs/{reqId}?JSON&LIMIT` (как в остальных РМ); остальные
-    // типы доступны поиском по вводу в самом поле (reqId передаётся в selectRef).
-    AtexProductionPlanning.prototype.loadCutTypes = function() {
+    // Ширина джамбо по виду сырья: this.jumboWidthByMaterial = { materialId: ширина }.
+    // Таблица «Вид сырья» резолвится по имени из закешированного списка метаданных
+    // (this._metaAll); ширина — поле «Ширина, мм» (columnIndex по имени). Ключ карты —
+    // abn записи (r.i как String) = тот же id, что приходит в position_material_id /
+    // cut_material_id. Нужна как jumboWidth для cut-layout.planLayouts (Task 3).
+    AtexProductionPlanning.prototype.loadJumboWidths = function() {
         var self = this;
-        var reqId = reqIdByName(this.meta.cut, CUT_REQ.cutType);
-        if (!reqId) { this.cutTypes = []; return Promise.resolve(); }
-        return this.loadRefOptions(reqId, '', 50).then(function(payload) {
-            var helper = (typeof window !== 'undefined' && window.AtexRefSearch) || null;
-            self.cutTypes = (helper && typeof helper.parseOptionsData === 'function')
-                ? helper.parseOptionsData(payload) : [];
+        var list = this._metaAll || [];
+        var meta = list.filter(function(t) {
+            return String(t.val).trim().toLowerCase() === 'вид сырья';
+        })[0] || null;
+        if (!meta) { this.jumboWidthByMaterial = {}; return Promise.resolve(); }
+        var widthIdx = columnIndex(meta, 'Ширина, мм');
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
+            var map = {};
+            (rows || []).forEach(function(rec) {
+                var r = rec.r || [];
+                map[String(rec.i)] = widthIdx >= 0 ? (Number(r[widthIdx]) || 0) : 0;
+            });
+            self.jumboWidthByMaterial = map;
+        });
+    };
+
+    // Ходовые ширины для сырья отчётом preferable_widths (JSON_KV, фильтр по сырью).
+    // → [{ width:Number(position_width_mm), popularity:Number(position_qty_sum) }];
+    // кешируется в this.preferredByMaterial[materialId]. Ленивая загрузка по сырью
+    // (Task 3/4 — генерация и панель ходовых). Возвращает Promise с массивом.
+    AtexProductionPlanning.prototype.loadPreferredWidths = function(materialId) {
+        var self = this;
+        var mat = String(materialId == null ? '' : materialId);
+        if (mat === '') return Promise.resolve([]);
+        if (this.preferredByMaterial[mat]) return Promise.resolve(this.preferredByMaterial[mat]);
+        return this.getJson('report/preferable_widths?JSON_KV&FR_position_material_id=' + encodeURIComponent(mat)).then(function(rows) {
+            var list = (rows || []).map(function(row) {
+                return {
+                    width: Number(row.position_width_mm) || 0,
+                    popularity: Number(row.position_qty_sum) || 0
+                };
+            });
+            self.preferredByMaterial[mat] = list;
+            return list;
         });
     };
 
     // Очередь резок и их обеспечение одним отчётом cut_planning (JSON_KV).
-    // Заполняет this.cuts и this.supplies из плоских строк отчёта.
+    // Заполняет this.cuts и this.supplies из плоских строк отчёта; вливает
+    // knifeCount/knifeWidths из this.stripAgg (cut_strips) в каждую резку.
     AtexProductionPlanning.prototype.loadPlanning = function() {
         var self = this;
         return this.getJson('report/cut_planning?JSON_KV&LIMIT=0,5000').then(function(rows) {
             var p = rowsToPlanning(rows || []);
+            var agg = self.stripAgg || {};
+            p.cuts.forEach(function(cut) {
+                var a = agg[String(cut.id)] || {};
+                cut.knifeCount = a.knifeCount || 0;
+                cut.knifeWidths = a.knifeWidths || [];
+            });
             self.cuts = p.cuts;
             self.supplies = p.supplies;
         });
@@ -902,7 +887,6 @@
         var meta = this.meta.cut;
         var d = this.draft;
         if (!d.slitterId) { this.notify('Выберите станок', 'error'); return; }
-        if (!d.cutTypeId) { this.notify('Выберите тип резки', 'error'); return; }
 
         // Стоп-лист станка: сырьё выбранной партии не должно быть запрещено на станке.
         if (d.materialBatchId) {
@@ -918,7 +902,6 @@
 
         var reqIds = {
             slitter: reqIdByName(meta, CUT_REQ.slitter),
-            cutType: reqIdByName(meta, CUT_REQ.cutType),
             materialBatch: reqIdByName(meta, CUT_REQ.materialBatch),
             planDate: reqIdByName(meta, CUT_REQ.planDate),
             status: reqIdByName(meta, CUT_REQ.status),
@@ -926,7 +909,6 @@
         };
         var fields = buildFields(reqIds, {
             slitter: d.slitterId,
-            cutType: d.cutTypeId,
             materialBatch: d.materialBatchId,
             planDate: d.planDate,
             status: d.status,
@@ -987,136 +969,488 @@
     };
 
     AtexProductionPlanning.prototype.reload = function() {
-        return this.loadPlanning();
+        var self = this;
+        // Полосы перечитываем перед очередью, чтобы knifeCount/knifeWidths влились в свежие резки.
+        return this.loadCutStrips().then(function() { return self.loadPlanning(); });
     };
 
-    // Генерация резок под необеспеченные позиции: собирает входы для
-    // generateCutPlan, показывает inline-подтверждение, затем последовательно
-    // создаёт Производственную резку + Обеспечение для каждой записи плана.
-    // actionsEl — DOM-элемент тулбара (для inline-confirm fallback).
+    // ── Встроенный редактор Полос резки (база cut-calc renderStrips/computeSummary/syncStrips) ──
+
+    var STRIP_PURPOSES = ['Заказ', 'Склад', 'Отходы'];
+
+    // Загрузка текущих полос резки из object/ (подчинённые: F_U = cutId).
+    // Колонки JSON_OBJ резолвятся по имени (columnIndex). → [{id, width, qty, purpose}].
+    AtexProductionPlanning.prototype.loadStripsForCut = function(cutId) {
+        var sm = this.meta.strip;
+        var widthIdx = columnIndex(sm, STRIP_REQ.width);
+        var qtyIdx = columnIndex(sm, STRIP_REQ.qty);
+        var purposeIdx = columnIndex(sm, STRIP_REQ.purpose);
+        return this.getJson('object/' + sm.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(cutId) + '&LIMIT=0,500').then(function(rows) {
+            return (rows || []).map(function(rec) {
+                var r = rec.r || [];
+                return {
+                    id: String(rec.i),
+                    width: (widthIdx >= 0 && r[widthIdx] != null) ? String(r[widthIdx]) : '',
+                    qty: (qtyIdx >= 0 && r[qtyIdx] != null) ? String(r[qtyIdx]) : '',
+                    purpose: (purposeIdx >= 0 && r[purposeIdx] != null) ? String(r[purposeIdx]) : ''
+                };
+            });
+        });
+    };
+
+    // Открыть инлайн-панель редактора полос для резки. container — очередь (this.queueEl).
+    // Одна панель за раз: повторный клик по той же резке закрывает; по другой — переключает.
+    AtexProductionPlanning.prototype.openStrips = function(cut, container) {
+        var self = this;
+        if (!this.meta.strip) { this.notify('Не найдены метаданные таблицы «' + TABLE.strip + '»', 'error'); return; }
+
+        // Удалить существующую панель (если открыта).
+        var existing = container.querySelector('.atex-pp-strip-panel');
+        var wasSame = existing && String(existing.getAttribute('data-cut-id')) === String(cut.id);
+        if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+        if (wasSame) { this.stripEditCutId = null; return; } // повторный клик — закрыть
+        this.stripEditCutId = String(cut.id);
+
+        var panel = el('div', { class: 'atex-pp-strip-panel', dataset: { cutId: String(cut.id) } });
+        panel.appendChild(el('div', { class: 'atex-pp-strip-loading', text: 'Загрузка полос…' }));
+        container.appendChild(panel);
+
+        this.loadStripsForCut(cut.id).then(function(loaded) {
+            // Если за время загрузки панель закрыли/переключили — ничего не рисуем.
+            if (String(self.stripEditCutId) !== String(cut.id) || !panel.parentNode) return;
+            // Глубокая копия исходных полос для диффа при сохранении.
+            var original = loaded.map(function(s) { return { id: s.id, width: s.width, qty: s.qty, purpose: s.purpose }; });
+            var strips = loaded.map(function(s) { return { id: s.id, width: s.width, qty: s.qty, purpose: s.purpose }; });
+            self.renderStripPanel(panel, cut, strips, original);
+        }).catch(function(err) {
+            if (panel.parentNode) {
+                panel.innerHTML = '';
+                panel.appendChild(el('div', { class: 'atex-pp-empty', text: 'Ошибка загрузки полос: ' + err.message }));
+            }
+        });
+    };
+
+    // Рендер содержимого панели редактора полос (таблица + сводка + ходовые + кнопки).
+    AtexProductionPlanning.prototype.renderStripPanel = function(panel, cut, strips, original) {
+        var self = this;
+        var jumbo = Number(this.jumboWidthByMaterial[String(cut.materialId)]) || 0;
+        panel.innerHTML = '';
+
+        // Заголовок (read-only): сырьё + ширина джамбо.
+        var matLabel = (cut.materialBatch && cut.materialBatch.label) || cut.materialName || cut.materialId || '—';
+        panel.appendChild(el('div', { class: 'atex-pp-strip-header', text: 'Сырьё: ' + matLabel + ', Джамбо: ' + (jumbo || '—') + ' мм' }));
+
+        // Таблица полос.
+        var table = el('div', { class: 'atex-pp-strip-table' });
+        table.appendChild(el('div', { class: 'atex-pp-strip-row atex-pp-strip-head' }, [
+            el('span', { text: 'Ширина, мм' }),
+            el('span', { text: 'Количество' }),
+            el('span', { text: 'Назначение' }),
+            el('span', { text: '' })
+        ]));
+        var body = el('div', { class: 'atex-pp-strip-body' });
+        table.appendChild(body);
+        panel.appendChild(table);
+
+        var summaryEl = el('div', { class: 'atex-pp-strip-summary' });
+        panel.appendChild(summaryEl);
+
+        function recalc() {
+            var used = planning.stripsUsedWidth(strips);
+            var knives = planning.stripsTotalKnives(strips);
+            var rem = planning.stripsRemainder(jumbo, strips);
+            var within = Math.abs(rem) <= Math.abs(LAYOUT_TOLERANCE);
+            summaryEl.innerHTML = '';
+            summaryEl.appendChild(metric('Итого ножей', knives));
+            summaryEl.appendChild(metric('Занято, мм', used));
+            var remNode = metric('Остаток, мм', rem);
+            if (within) remNode.classList.add('is-ok'); else remNode.classList.add('is-warn');
+            summaryEl.appendChild(remNode);
+            var badge = el('span', { class: 'atex-pp-strip-badge ' + (within ? 'is-ok' : 'is-warn'), text: within ? 'в допуске' : 'вне допуска' });
+            summaryEl.appendChild(badge);
+        }
+
+        function metric(label, value) {
+            return el('div', { class: 'atex-pp-strip-metric' }, [
+                el('span', { class: 'atex-pp-strip-metric-label', text: label }),
+                el('span', { class: 'atex-pp-strip-metric-value', text: String(value) })
+            ]);
+        }
+
+        function renderRows() {
+            body.innerHTML = '';
+            strips.forEach(function(s, idx) {
+                var row = el('div', { class: 'atex-pp-strip-row' });
+
+                var w = el('input', { class: 'atex-pp-input', type: 'number', min: '0', step: 'any', placeholder: '0' });
+                w.value = s.width;
+                w.addEventListener('input', function() { s.width = w.value; recalc(); });
+                row.appendChild(w);
+
+                var q = el('input', { class: 'atex-pp-input', type: 'number', min: '0', step: '1', placeholder: '0' });
+                q.value = s.qty;
+                q.addEventListener('input', function() { s.qty = q.value; recalc(); });
+                row.appendChild(q);
+
+                row.appendChild(self.selectText(STRIP_PURPOSES, s.purpose, function(v) { s.purpose = v; }));
+
+                var del = el('button', { class: 'atex-pp-btn atex-pp-strip-del', type: 'button', title: 'Удалить полосу', text: '×' });
+                del.addEventListener('click', function() {
+                    strips.splice(idx, 1);
+                    renderRows();
+                    recalc();
+                });
+                row.appendChild(del);
+
+                body.appendChild(row);
+            });
+        }
+
+        // Кнопка «+ полоса».
+        var addBtn = el('button', { class: 'atex-pp-btn atex-pp-strip-add', type: 'button', text: '+ полоса' });
+        addBtn.addEventListener('click', function() {
+            strips.push({ id: null, width: '', qty: '', purpose: STRIP_PURPOSES[0] });
+            renderRows();
+            recalc();
+        });
+        panel.appendChild(addBtn);
+
+        // Панель ходовых ширин.
+        var prefWrap = el('div', { class: 'atex-pp-strip-pref' });
+        prefWrap.appendChild(el('div', { class: 'atex-pp-strip-pref-title', text: 'Ходовые ширины' }));
+        var prefList = el('div', { class: 'atex-pp-strip-pref-list' });
+        prefWrap.appendChild(prefList);
+        panel.appendChild(prefWrap);
+
+        function renderPreferred(list) {
+            prefList.innerHTML = '';
+            if (!list || !list.length) {
+                prefList.appendChild(el('div', { class: 'atex-pp-empty', text: 'Нет данных по ходовым ширинам.' }));
+                return;
+            }
+            list.forEach(function(p) {
+                var b = el('button', { class: 'atex-pp-btn atex-pp-strip-pref-item', type: 'button',
+                    text: p.width + ' мм · Популярность ' + p.popularity });
+                b.addEventListener('click', function() {
+                    strips.push({ id: null, width: String(p.width), qty: '1', purpose: 'Склад' });
+                    renderRows();
+                    recalc();
+                });
+                prefList.appendChild(b);
+            });
+        }
+
+        var matKey = String(cut.materialId == null ? '' : cut.materialId);
+        if (matKey !== '' && this.preferredByMaterial[matKey]) {
+            renderPreferred(this.preferredByMaterial[matKey]);
+        } else if (matKey !== '') {
+            prefList.appendChild(el('div', { class: 'atex-pp-strip-loading', text: 'Загрузка ходовых…' }));
+            this.loadPreferredWidths(matKey).then(function(list) {
+                if (String(self.stripEditCutId) === String(cut.id) && panel.parentNode) renderPreferred(list);
+            }).catch(function() {
+                if (panel.parentNode) renderPreferred([]);
+            });
+        } else {
+            renderPreferred([]);
+        }
+
+        // Кнопки действий.
+        var actions = el('div', { class: 'atex-pp-actions' });
+        var saveBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Сохранить полосы' });
+        saveBtn.addEventListener('click', function() {
+            if (self.busy) return;
+            self.saveStrips(cut.id, strips, original);
+        });
+        var closeBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Закрыть' });
+        closeBtn.addEventListener('click', function() {
+            self.stripEditCutId = null;
+            if (panel.parentNode) panel.parentNode.removeChild(panel);
+        });
+        actions.appendChild(saveBtn);
+        actions.appendChild(closeBtn);
+        panel.appendChild(actions);
+
+        renderRows();
+        recalc();
+    };
+
+    // Сохранить полосы резки — дифф original↔strips (зеркало cut-calc syncStrips):
+    //   нет id → _m_new (up=cutId); изменены width/qty/purpose → _m_set; удалённые id → _m_del.
+    // Реквизиты резолвятся по имени (STRIP_REQ). Возвращает Promise; setBusy/reload/notify.
+    AtexProductionPlanning.prototype.saveStrips = function(cutId, strips, original) {
+        var self = this;
+        var sm = this.meta.strip;
+        var reqIds = {
+            width: reqIdByName(sm, STRIP_REQ.width),
+            qty: reqIdByName(sm, STRIP_REQ.qty),
+            purpose: reqIdByName(sm, STRIP_REQ.purpose)
+        };
+
+        // Карта исходных полос по id для сравнения.
+        var origById = {};
+        (original || []).forEach(function(s) { if (s.id) origById[String(s.id)] = s; });
+        var keepIds = {};
+
+        var ops = [];
+        (strips || []).forEach(function(s) {
+            var hasData = String(s.width).trim() !== '' || String(s.qty).trim() !== '';
+            var fields = buildFields(reqIds, { width: s.width, qty: s.qty, purpose: s.purpose });
+            if (s.id) {
+                keepIds[String(s.id)] = true;
+                var o = origById[String(s.id)];
+                var changed = !o ||
+                    String(o.width).trim() !== String(s.width).trim() ||
+                    String(o.qty).trim() !== String(s.qty).trim() ||
+                    String(o.purpose).trim() !== String(s.purpose).trim();
+                if (changed) {
+                    ops.push(function() { return self.post('_m_set/' + s.id + '?JSON', fields); });
+                }
+            } else if (hasData) {
+                ops.push(function() {
+                    return self.post('_m_new/' + sm.id + '?JSON&up=' + encodeURIComponent(cutId), fields);
+                });
+            }
+        });
+        // Удалённые: исходные id, которых нет среди текущих полос.
+        Object.keys(origById).forEach(function(id) {
+            if (!keepIds[id]) ops.push(function() { return self.post('_m_del/' + id + '?JSON', {}); });
+        });
+
+        this.setBusy(true);
+        var chain = ops.reduce(function(p, op) { return p.then(op); }, Promise.resolve());
+        return chain.then(function() {
+            self.stripEditCutId = null;
+            return self.reload();
+        }).then(function() {
+            self.setBusy(false);
+            self.render();
+            self.notify('Полосы сохранены', 'success');
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Ошибка сохранения полос: ' + err.message, 'error');
+        });
+    };
+
+    // Генерация резок под необеспеченные позиции через чистое ядро cut-layout
+    // (window.AtexCutLayout.layout.planLayouts). Для каждого сырья строит раскладки
+    // (Полосы Заказ/Склад), затем последовательно создаёт: Резку → её Полосы →
+    // Обеспечения (по одному на покрытую позицию). Все реквизиты резолвятся по имени.
     AtexProductionPlanning.prototype.generateCuts = function(actionsEl) {
         var self = this;
         if (this.busy) return;
 
-        // 1. Считаем текущую загрузку станков из очереди (кол-во резок на станок).
+        var layoutCore = (typeof window !== 'undefined' && window.AtexCutLayout && window.AtexCutLayout.layout) || null;
+        if (!layoutCore || typeof layoutCore.planLayouts !== 'function') {
+            this.notify('Модуль раскладки cut-layout не загружен', 'error');
+            return;
+        }
+        if (!this.meta.cut || !this.meta.supply || !this.meta.strip) {
+            this.notify('Не найдены метаданные таблиц (Резка/Обеспечение/Полоса)', 'error');
+            return;
+        }
+
+        // Необеспеченные позиции, сгруппированные по сырью.
+        var unsup = unsuppliedPositions(this.genPositions, this.supplies);
+        if (!unsup.length) {
+            this.notify('Нет необеспеченных позиций для генерации', 'info');
+            return;
+        }
+        var byMaterial = {};
+        var matOrder = [];
+        unsup.forEach(function(p) {
+            var mat = String(p.materialId == null ? '' : p.materialId);
+            if (!byMaterial[mat]) { byMaterial[mat] = []; matOrder.push(mat); }
+            byMaterial[mat].push(p);
+        });
+
+        // Догрузить ходовые ширины для сырья, у которого их ещё нет в кеше.
+        var preloads = [];
+        matOrder.forEach(function(mat) {
+            if (mat !== '' && !self.preferredByMaterial[mat]) {
+                preloads.push(self.loadPreferredWidths(mat));
+            }
+        });
+
+        Promise.all(preloads).then(function() {
+            // Построить раскладки по каждому сырью; собрать пропуски.
+            var allLayouts = [];   // [{...layout, mat}]
+            var skipped = [];      // [{positionId, reason}]
+            matOrder.forEach(function(mat) {
+                var matPositions = byMaterial[mat];
+                var jw = self.jumboWidthByMaterial[mat];
+                if (!jw) {
+                    matPositions.forEach(function(p) { skipped.push({ positionId: p.id, reason: 'нет ширины джамбо' }); });
+                    return;
+                }
+                var res = layoutCore.planLayouts({
+                    jumboWidth: jw,
+                    positions: matPositions.map(function(p) {
+                        return { id: p.id, width: p.width, qty: p.qty, dueKey: p.dueKey };
+                    }),
+                    preferred: self.preferredByMaterial[mat] || [],
+                    options: { windowDays: WINDOW_DAYS, tolerance: LAYOUT_TOLERANCE }
+                });
+                (res.layouts || []).forEach(function(lay) { lay.mat = mat; allLayouts.push(lay); });
+                (res.skipped || []).forEach(function(s) { skipped.push(s); });
+            });
+
+            if (!allLayouts.length) {
+                self.notify('Нет необеспеченных позиций для генерации (пропущено ' + skipped.length + ')', 'info');
+                return;
+            }
+
+            // Счётчики для подтверждения: полос = число записей «Полоса» (как в итоговой
+            // нотификации), ножей = суммарное Количество (Σ qty).
+            var nCuts = allLayouts.length;
+            var nStrips = 0, nKnives = 0;
+            allLayouts.forEach(function(lay) {
+                (lay.strips || []).forEach(function(s) { nStrips += 1; nKnives += (Number(s.qty) || 0); });
+            });
+            var msg = 'Создать ' + nCuts + ' резок под необеспеченные позиции (полос ' + nStrips +
+                ', ножей ' + nKnives + ')? Пропущено ' + skipped.length + '.';
+
+            self.confirmAction(msg, actionsEl, 'Да, создать', function() {
+                self.runGenerateCuts(allLayouts, skipped);
+            });
+        }).catch(function(err) {
+            self.notify('Ошибка подготовки генерации: ' + err.message, 'error');
+        });
+    };
+
+    // Последовательное создание записей по подготовленным раскладкам.
+    // На каждую раскладку: Резка → её Полосы → Обеспечения (по покрытым позициям).
+    // Зависимые _m_new не запускаются параллельно (Полосе/Обеспечению нужен cutId).
+    AtexProductionPlanning.prototype.runGenerateCuts = function(layouts, skipped) {
+        var self = this;
+        var cutMeta = this.meta.cut;
+        var stripMeta = this.meta.strip;
+        var supplyMeta = this.meta.supply;
+
+        var cutReqIds = {
+            slitter: reqIdByName(cutMeta, CUT_REQ.slitter),
+            materialBatch: reqIdByName(cutMeta, CUT_REQ.materialBatch),
+            status: reqIdByName(cutMeta, CUT_REQ.status)
+        };
+        var stripReqIds = {
+            width: reqIdByName(stripMeta, STRIP_REQ.width),
+            qty: reqIdByName(stripMeta, STRIP_REQ.qty),
+            purpose: reqIdByName(stripMeta, STRIP_REQ.purpose)
+        };
+        var supplyReqIds = {
+            cut: reqIdByName(supplyMeta, SUPPLY_REQ.cut),
+            status: reqIdByName(supplyMeta, SUPPLY_REQ.status)
+        };
+
+        // Сид баланса станков из текущих резок (счётчик по slitterId).
         var loadBySlitterId = {};
         (this.cuts || []).forEach(function(c) {
             var sid = c && c.slitter && c.slitter.id;
             if (sid != null) loadBySlitterId[String(sid)] = (loadBySlitterId[String(sid)] || 0) + 1;
         });
 
-        // 2. Строим входы для generateCutPlan.
-        var input = {
-            positions: this.genPositions,
-            supplies: this.supplies,
-            cutTypeIndex: this.cutTypeIndex,
-            slitters: this.slitters,
-            batches: this.genBatches,
-            loadBySlitterId: loadBySlitterId
-        };
-        var res = planning.generateCutPlan(input);
+        var nStrips = 0;
+        var nPositions = 0;
 
-        if (!res.plan.length) {
-            var skipMsg = res.skipped.length ? ' (пропущено ' + res.skipped.length + ')' : '';
-            self.notify('Нет необеспеченных позиций для генерации' + skipMsg, 'info');
-            return;
-        }
+        this.setBusy(true);
+        var chain = Promise.resolve();
+        layouts.forEach(function(lay) {
+            chain = chain.then(function() {
+                // 1) Резка (корневой объект): статус + станок (баланс) + партия (FIFO).
+                var slitterId = pickSlitter(self.slitters, lay.mat, loadBySlitterId);
+                if (slitterId != null) loadBySlitterId[String(slitterId)] = (loadBySlitterId[String(slitterId)] || 0) + 1;
+                var batchId = pickBatchFIFO(self.genBatches, lay.mat);
+                var cutFields = buildFields(cutReqIds, {
+                    status: CUT_STATUSES[0],
+                    slitter: slitterId,
+                    materialBatch: batchId
+                });
+                return self.post('_m_new/' + cutMeta.id + '?JSON&up=1&full=1', cutFields).then(function(res) {
+                    var cutId = res && (res.obj || res.id || res.i);
+                    if (!cutId) throw new Error('Сервер не вернул id новой резки');
 
-        var N = res.plan.length;
-        var M = res.skipped.length;
-        var MSG = 'Создать ' + N + ' резок под необеспеченные позиции?' + (M ? ' (пропущено ' + M + ')' : '');
-
-        function doGenerate() {
-            self.setBusy(true);
-
-            var metaCut = self.meta.cut;
-            var metaSupply = self.meta.supply;
-
-            var cutReqIds = {
-                cutType: reqIdByName(metaCut, CUT_REQ.cutType),
-                slitter: reqIdByName(metaCut, CUT_REQ.slitter),
-                materialBatch: reqIdByName(metaCut, CUT_REQ.materialBatch),
-                status: reqIdByName(metaCut, CUT_REQ.status)
-            };
-            var supplyReqIds = {
-                cut: reqIdByName(metaSupply, SUPPLY_REQ.cut)
-            };
-
-            var created = 0;
-            var chain = Promise.resolve();
-
-            res.plan.forEach(function(entry) {
-                chain = chain.then(function() {
-                    // Шаг A: создать Производственную резку.
-                    var cutFields = buildFields(cutReqIds, {
-                        cutType: entry.cutTypeId || '',
-                        slitter: entry.slitterId || '',
-                        materialBatch: entry.batchId || '',
-                        status: CUT_STATUSES[0]  // 'Запланирована'
-                    });
-                    return self.post('_m_new/' + metaCut.id + '?JSON&up=1&full=1', cutFields)
-                        .then(function(cutRes) {
-                            var cutId = cutRes && (cutRes.obj || cutRes.id || cutRes.i);
-                            if (!cutId) throw new Error('Сервер не вернул id новой резки');
-                            // Шаг B: создать Обеспечение (up=positionId, ссылка на резку).
-                            var supplyFields = buildFields(supplyReqIds, {
-                                cut: String(cutId)
+                    // 2) Полосы резки (up = cutId), последовательно.
+                    var stripChain = Promise.resolve();
+                    (lay.strips || []).forEach(function(strip) {
+                        stripChain = stripChain.then(function() {
+                            var fields = buildFields(stripReqIds, {
+                                width: strip.width,
+                                qty: strip.qty,
+                                purpose: strip.purpose
                             });
-                            return self.post(
-                                '_m_new/' + metaSupply.id + '?JSON&up=' + encodeURIComponent(entry.positionId),
-                                supplyFields
-                            );
-                        })
-                        .then(function() {
-                            created++;
+                            return self.post('_m_new/' + stripMeta.id + '?JSON&up=' + encodeURIComponent(cutId), fields)
+                                .then(function() { nStrips += 1; });
                         });
+                    });
+
+                    // 3) Обеспечения (up = positionId, ссылка на резку), последовательно.
+                    return stripChain.then(function() {
+                        var supChain = Promise.resolve();
+                        (lay.positionsCovered || []).forEach(function(positionId) {
+                            supChain = supChain.then(function() {
+                                var fields = buildFields(supplyReqIds, {
+                                    cut: cutId,
+                                    status: SUPPLY_STATUSES[0]
+                                });
+                                return self.post('_m_new/' + supplyMeta.id + '?JSON&up=' + encodeURIComponent(positionId), fields)
+                                    .then(function() { nPositions += 1; });
+                            });
+                        });
+                        return supChain;
+                    });
                 });
             });
+        });
 
-            chain.then(function() {
-                return self.reload();
-            }).then(function() {
-                self.setBusy(false);
-                self.render();
-                var msg = 'Создано ' + created + ' резок';
-                if (M) {
-                    // Группируем причины пропусков для краткого итога.
-                    var byReason = {};
-                    res.skipped.forEach(function(s) { byReason[s.reason] = (byReason[s.reason] || 0) + 1; });
-                    var reasons = Object.keys(byReason).map(function(r) { return byReason[r] + ' ' + r; }).join(', ');
-                    msg += ', пропущено ' + M + ' позиций (' + reasons + ')';
-                }
-                self.notify(msg, 'success');
-            }).catch(function(err) {
-                self.setBusy(false);
-                self.notify('Ошибка генерации резок: ' + err.message, 'error');
-            });
-        }
+        chain.then(function() {
+            return self.reload();
+        }).then(function() {
+            self.setBusy(false);
+            self.render();
+            var reasons = self.groupSkipReasons(skipped);
+            self.notify('Создано ' + layouts.length + ' резок, полос ' + nStrips +
+                ', пропущено ' + skipped.length + ' позиций' + (reasons ? ' (' + reasons + ')' : ''), 'success');
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Ошибка генерации резок: ' + err.message, 'error');
+        });
+    };
 
-        // Подтверждение без native confirm — зеркало runPlanning.
+    // Сгруппировать причины пропуска → «причина ×N, …» (для итогового уведомления).
+    AtexProductionPlanning.prototype.groupSkipReasons = function(skipped) {
+        var counts = {};
+        var order = [];
+        (skipped || []).forEach(function(s) {
+            var r = (s && s.reason) || 'без причины';
+            if (!counts[r]) { counts[r] = 0; order.push(r); }
+            counts[r] += 1;
+        });
+        return order.map(function(r) { return r + ' ×' + counts[r]; }).join(', ');
+    };
+
+    // Подтверждение без native confirm. Mirror логики runPlanning:
+    // mainAppController.showDeleteConfirmModal (Promise) либо inline-блок в actionsEl.
+    AtexProductionPlanning.prototype.confirmAction = function(message, actionsEl, okLabel, onConfirm) {
         if (typeof window !== 'undefined' && window.mainAppController &&
             typeof window.mainAppController.showDeleteConfirmModal === 'function') {
-            window.mainAppController.showDeleteConfirmModal(MSG).then(function(ok) {
-                if (ok) doGenerate();
+            window.mainAppController.showDeleteConfirmModal(message).then(function(ok) {
+                if (ok) onConfirm();
             });
             return;
         }
-
-        // Inline-блок с двумя кнопками внутри actionsEl.
         if (actionsEl && actionsEl.querySelector('.atex-pp-confirm-bar')) return;
         var bar = el('div', { class: 'atex-pp-confirm-bar' });
-        bar.appendChild(el('span', { class: 'atex-pp-confirm-msg', text: MSG }));
-        var okBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Да, создать' });
+        bar.appendChild(el('span', { class: 'atex-pp-confirm-msg', text: message }));
+        var okBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: okLabel || 'Да' });
         var cancelBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Отмена' });
         function removeBar() { if (bar.parentNode) bar.parentNode.removeChild(bar); }
-        okBtn.addEventListener('click', function() { removeBar(); doGenerate(); });
+        okBtn.addEventListener('click', function() { removeBar(); onConfirm(); });
         cancelBtn.addEventListener('click', function() { removeBar(); });
         bar.appendChild(okBtn);
         bar.appendChild(cancelBtn);
         if (actionsEl) {
             actionsEl.appendChild(bar);
         } else {
-            doGenerate();
+            onConfirm();
         }
     };
 
@@ -1200,34 +1534,8 @@
             });
         }
 
-        // Подтверждение без native confirm.
-        // Вариант 1: mainAppController.showDeleteConfirmModal (Promise-based).
-        if (typeof window !== 'undefined' && window.mainAppController &&
-            typeof window.mainAppController.showDeleteConfirmModal === 'function') {
-            window.mainAppController.showDeleteConfirmModal(MSG_CONFIRM).then(function(ok) {
-                if (ok) doRun();
-            });
-            return;
-        }
-
-        // Вариант 2: inline-блок с двумя кнопками внутри actionsEl.
-        // Если блок уже показан — игнорируем повторный клик.
-        if (actionsEl && actionsEl.querySelector('.atex-pp-confirm-bar')) return;
-        var bar = el('div', { class: 'atex-pp-confirm-bar' });
-        bar.appendChild(el('span', { class: 'atex-pp-confirm-msg', text: MSG_CONFIRM }));
-        var okBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Да, перезаписать' });
-        var cancelBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Отмена' });
-        function removeBar() { if (bar.parentNode) bar.parentNode.removeChild(bar); }
-        okBtn.addEventListener('click', function() { removeBar(); doRun(); });
-        cancelBtn.addEventListener('click', function() { removeBar(); });
-        bar.appendChild(okBtn);
-        bar.appendChild(cancelBtn);
-        if (actionsEl) {
-            actionsEl.appendChild(bar);
-        } else {
-            // actionsEl недоступен (не должно происходить) — сразу запускаем.
-            doRun();
-        }
+        // Подтверждение без native confirm (общий хелпер confirmAction).
+        self.confirmAction(MSG_CONFIRM, actionsEl, 'Да, перезаписать', doRun);
     };
 
     // ── Рендеринг ──
@@ -1302,8 +1610,6 @@
 
         form.appendChild(field('Станок', this.selectRef(this.slitters, d.slitterId, '— выберите станок —',
             function(v) { d.slitterId = v; }, reqIdByName(this.meta.cut, CUT_REQ.slitter))));
-        form.appendChild(field('Тип резки', this.selectRef(this.cutTypes, d.cutTypeId, '— выберите тип резки —',
-            function(v) { d.cutTypeId = v; }, reqIdByName(this.meta.cut, CUT_REQ.cutType))));
         // Партии предзагружены отчётом material_batches (обогащённые подписи) —
         // статический клиентский список (как дропдаун позиций), без серверного
         // поиска, иначе при вводе подпись свелась бы к голому номеру.
@@ -1381,7 +1687,6 @@
                 var card = el('button', { class: 'atex-pp-cut' + (active ? ' is-active' : ''), type: 'button' }, [
                     el('span', { class: 'atex-pp-cut-num', text: '№ ' + (c.number || c.id) }),
                     el('span', { class: 'atex-pp-cut-seq', text: 'Очер.: ' + (c.sequence != null && !isNaN(c.sequence) ? c.sequence : '—') }),
-                    el('span', { class: 'atex-pp-cut-type', text: c.cutType.label || '—' }),
                     el('span', { class: 'atex-pp-cut-batch', text: c.materialBatch.label || '' }),
                     el('span', { class: 'atex-pp-cut-date', text: c.planDate || '' }),
                     el('span', { class: 'atex-pp-cut-status', text: c.status || '' }),
@@ -1404,9 +1709,15 @@
                     var p = moveInQueue(g.cuts, idx, 1);
                     if (p.length) self.saveSequences(p);
                 });
+                var strips = el('button', { class: 'atex-pp-strips', type: 'button', text: 'Полосы' });
+                strips.addEventListener('click', function() {
+                    if (self.busy) return;
+                    self.openStrips(c, box);
+                });
                 row.appendChild(up);
                 row.appendChild(card);
                 row.appendChild(down);
+                row.appendChild(strips);
                 groupEl.appendChild(row);
             });
             box.appendChild(groupEl);
@@ -1425,7 +1736,7 @@
             return;
         }
 
-        box.appendChild(el('p', { class: 'atex-pp-hint', text: 'Резка № ' + (cut.number || cut.id) + ' · ' + (cut.cutType.label || '') }));
+        box.appendChild(el('p', { class: 'atex-pp-hint', text: 'Резка № ' + (cut.number || cut.id) + ' · ' + ((cut.materialBatch && cut.materialBatch.label) || '') }));
 
         var draft = { positionId: '', footage: '', status: SUPPLY_STATUSES[0] };
 
@@ -1514,18 +1825,14 @@
             .then(function() {
                 return Promise.all([
                     self.loadSlittersWithStop().then(function(items) { self.slitters = items; }),
-                    self.loadRef(self.meta.cutType).then(function(items) { self.cutTypes = items; }),
                     self.loadMaterialBatches(),
                     self.loadBatchMaterialMap(),
-                    self.loadPositions(),  // заполняет genPositions тоже
-                    self.loadPlanning(),
-                    self.loadGenBatches()  // D3b: FIFO-партии для generateCutPlan
+                    self.loadPositions(),  // заполняет genPositions (с dueKey) тоже
+                    self.loadGenBatches(), // FIFO-партии для генерации резок
+                    self.loadJumboWidths(),// ширина джамбо по сырью (для cut-layout)
+                    // Полосы перед очередью: knifeCount/knifeWidths вливаются в резки в loadPlanning.
+                    self.loadCutStrips().then(function() { return self.loadPlanning(); })
                 ]);
-            })
-            .then(function() {
-                // D3b: индекс типов резки + полосы для материалов позиций.
-                // Запускается после loadPositions (genPositions уже заполнен).
-                return self.loadCutTypeIndexForMaterials();
             })
             .then(function() { self.render(); })
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });

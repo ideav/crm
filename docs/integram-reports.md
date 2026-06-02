@@ -213,7 +213,7 @@ QID=$(curl -s -H "X-Authorization: $TOKEN" --cookie "idb_ateh=$TOKEN" "$DB/_m_ne
 | `cut_material` | Партия сырья → Вид сырья (name) | — | определение Фольги (`/фольг/i`) → `isFoil`; флаг отправляет резку в конец очереди |
 | `cut_batch_id` | Резка → Партия сырья (abn_ID) | 85 (abn_ID) | ключ смены партии; штраф `remainder` при неудобном остатке |
 | `cut_jumbo_remaining` | Партия сырья → «Остаток, м» | — | `jumboRemainingM` (число, метры); входит в `awkwardRemainder` |
-| `cut_knives` | Тип резки → «Итого ножей» | — | `knifeCount` (число); расстояние конфигурации ножей в `changeoverCost` |
+| ~~`cut_knives`~~ | ~~Тип резки → «Итого ножей»~~ | — | **УДАЛЕНА в F2** (Тип резки упразднён). `knifeCount` теперь считается клиентом из подчинённых «Полос» резки (SUM Количество) — см. F3. |
 | `cut_winding` | Обеспечение → Позиция → «Тип намотки» | — | нормализуется `normWinding` → `'IN'`/`'OUT'`/`''`; вес `winding` в `changeoverCost` |
 | `cut_roller_width` | Позиция → «Ширина, мм» | — | `rollerWidth` (число, мм); штраф за сужение вала в `changeoverCost` |
 | `order_id` | Позиция → Заказ (abn_ID, t104=85) | 85 | id заказа резки (для группировки/отладки) |
@@ -237,14 +237,31 @@ QID=$(curl -s -H "X-Authorization: $TOKEN" --cookie "idb_ateh=$TOKEN" "$DB/_m_ne
 |---|---|---|
 | `position_id` | 1076 Позиция | abn_ID (t104=85) |
 | `position_no` | 1076 Позиция (Номер) | — |
-| `position_cut_type` | 1140 Тип резки (ref) | — |
+| ~~`position_cut_type`~~ | ~~1140 Тип резки~~ | **УДАЛЕНА в F2** (Тип резки упразднён, реквизит 1140 снят) |
 | `position_width` | 1141 Ширина, мм | — |
 | `position_qty` | 1137 Кол-во | — |
 | `position_material_id` | 1138 Вид сырья | 85 (abn_ID) |
+| `position_due_date` | 8627 Срок изготовления | — (F3: дата-окно объединения, `dueKey`) |
 
-`position_material_id` добавлена в рамках D3b (колонка 8527) — даёт сырьё позиции,
-чтобы `matchCutType`/`pickBatchFIFO` подобрали тип резки и партию по сырью.
+`position_material_id` (колонка 8527) — сырьё позиции; `position_due_date` (8654, F3) —
+«Срок изготовления» для окна объединения позиций в одну резку. `rowsToGenPositions`
+собирает `{ id, materialId, width, qty, dueKey }` для ядра `cut-layout.planLayouts`.
 Запуск: `GET /ateh/report/positions_list?JSON_KV`.
+
+## 8.2 `cut_strips` (queryId 8656, F3) — полосы (ножи) резок
+
+Резка → подчинённые «Полоса». Нужен production-planning, чтобы восстановить
+`knifeCount`/`knifeWidths` для движка очереди (`changeoverCost`), т.к. `cut_knives`
+из `cut_planning` убран в F2. `aggregateStrips(rows)` сворачивает в
+`{cutId: {knifeCount: Σ strip_qty, knifeWidths: [width×qty…]}}`.
+
+| Колонка (`t100`) | Источник (`t28`) | Функция |
+|---|---|---|
+| `cut_id` | 1078 Производственная резка | 85 (abn_ID) |
+| `strip_width` | Полоса «Ширина, мм» (1112) | — |
+| `strip_qty` | Полоса «Количество» (1114) | — |
+
+Запуск: `GET /ateh/report/cut_strips?JSON_KV`.
 
 ## 9. Следующий шаг
 
