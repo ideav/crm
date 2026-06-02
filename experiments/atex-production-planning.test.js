@@ -270,14 +270,15 @@ assertEqual(pq.filter(function(x){return x.slitterId==='10';}).map(function(x){r
 
 // ── moveInQueue ──
 function qc(id,seq){ return { id:id, sequence:seq }; }
-var d = planning.moveInQueue([qc('a',1),qc('b',2),qc('c',3)], 0, 1);
-assertEqual(d, [{cutId:'a',sequence:2},{cutId:'b',sequence:1}], 'moveInQueue вниз: swap a/b, только изменённые');
-var u = planning.moveInQueue([qc('a',1),qc('b',2),qc('c',3)], 2, -1);
-assertEqual(u, [{cutId:'b',sequence:3},{cutId:'c',sequence:2}], 'moveInQueue вверх: swap b/c');
+function byCut(a){ return (a||[]).slice().sort(function(x,y){ return x.cutId<y.cutId?-1:x.cutId>y.cutId?1:0; }); }
+// down: a/b swap → a:2, b:1 (order-independent)
+assertEqual(byCut(planning.moveInQueue([qc('a',1),qc('b',2),qc('c',3)],0,1)), byCut([{cutId:'a',sequence:2},{cutId:'b',sequence:1}]), 'moveInQueue вниз: swap a/b');
+// up: b/c swap → b:3, c:2
+assertEqual(byCut(planning.moveInQueue([qc('a',1),qc('b',2),qc('c',3)],2,-1)), byCut([{cutId:'b',sequence:3},{cutId:'c',sequence:2}]), 'moveInQueue вверх: swap b/c');
 assertEqual(planning.moveInQueue([qc('a',1),qc('b',2)], 0, -1), [], 'граница вверх → []');
 assertEqual(planning.moveInQueue([qc('a',1),qc('b',2)], 1, 1), [], 'граница вниз → []');
-var n = planning.moveInQueue([qc('a',null),qc('b',null),qc('c',null)], 0, 1);
-assertEqual(n, [{cutId:'b',sequence:1},{cutId:'a',sequence:2},{cutId:'c',sequence:3}], 'null → нормализация 1..N');
+// null normalization: a/b swap among nulls → new order [b,a,c] → b:1,a:2,c:3 (all changed)
+assertEqual(byCut(planning.moveInQueue([qc('a',null),qc('b',null),qc('c',null)],0,1)), byCut([{cutId:'a',sequence:2},{cutId:'b',sequence:1},{cutId:'c',sequence:3}]), 'null → нормализация 1..N');
 var src=[qc('a',1),qc('b',2)]; planning.moveInQueue(src,0,1); assertEqual(src[0].id,'a','вход не мутируется');
 
 console.log('\n' + passed + ' assertions passed');

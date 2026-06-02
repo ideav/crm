@@ -377,21 +377,9 @@
         var target = index + dir;
         if (index < 0 || index >= arr.length || target < 0 || target >= arr.length) return [];
         var tmp = arr[index]; arr[index] = arr[target]; arr[target] = tmp;
-        // Build new sequence map keyed by cut id
-        var newSeq = {};
-        arr.forEach(function(c, i){ newSeq[c.id] = i + 1; });
-        // Cuts that already had a sequence: report changed in original input order
-        // Cuts that had null sequence (newly normalised): report in new-array order
-        var withSeq = [], withoutSeq = [];
-        (orderedCuts || []).forEach(function(c){
-            var seq = newSeq[c.id];
-            if (c.sequence != null && Number(c.sequence) !== seq) withSeq.push({ cutId: c.id, sequence: seq });
-        });
-        arr.forEach(function(c){
-            var seq = newSeq[c.id];
-            if (c.sequence == null) withoutSeq.push({ cutId: c.id, sequence: seq });
-        });
-        return withSeq.concat(withoutSeq);
+        var changed = [];
+        arr.forEach(function(c, i){ var seq = i + 1; if (Number(c.sequence) !== seq) changed.push({ cutId: c.id, sequence: seq }); });
+        return changed;
     }
 
     // Сгруппировать резки по станкам, упорядочить каждую группу через orderCuts,
