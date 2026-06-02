@@ -394,3 +394,6 @@
 .atex-orders-cell .atex-orders-ref-select {
     min-width: 130px;
 }
+
+/* Черновая строка новой позиции (до первого сохранения) */
+.atex-orders-draft-row td { background: #fffdf2; }

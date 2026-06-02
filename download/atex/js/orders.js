@@ -69,6 +69,8 @@
         positionsByOrder: {},
         expanded: {},
         editingCell: null,          // активная ячейка поячейковой правки (DOM td) или null
+        draftOrderId: null,         // заказ, под которым показана черновая строка новой позиции
+        draftPos: null,             // синтетическая позиция-черновик { id:'__draft__', values, refs }
         statusFilter: '',
         filterFrom: '',
         filterTo: '',
@@ -722,14 +724,11 @@
             '<th>Кол-во</th><th>Вид сырья</th><th>Тип резки</th>' +
             '<th>Ширина, мм</th><th>Длина, м</th><th>Ø втулки</th><th>Тип намотки</th><th>Статус</th><th></th>' +
             '</tr></thead>';
-        var body;
-        if (!positions.length) {
-            body = '<tbody><tr><td colspan="9" class="atex-orders-empty">Позиций пока нет.</td></tr></tbody>';
-        } else {
-            body = '<tbody>' + positions.map(function(pos) {
-                return renderPositionRow(order, pos);
-            }).join('') + '</tbody>';
-        }
+        var rowsHtml = positions.map(function(pos) { return renderPositionRow(order, pos); }).join('');
+        if (state.draftOrderId === String(order.id)) rowsHtml += renderDraftRow(order);
+        var body = rowsHtml
+            ? '<tbody>' + rowsHtml + '</tbody>'
+            : '<tbody><tr><td colspan="9" class="atex-orders-empty">Позиций пока нет.</td></tr></tbody>';
 
         return '<div class="atex-orders-positions">' +
             '<table class="atex-orders-subtable">' + head + body + '</table>' +
@@ -771,6 +770,19 @@
             'aria-label="Удалить" data-del-pos="' + escapeHtml(pos.id) + '"><i class="pi pi-trash"></i></button>' +
             '</td>' +
             '</tr>';
+    }
+
+    // Черновая строка новой позиции (до первого ввода): редактируемые пустые ячейки + отмена.
+    // data-position-id="__draft__" — savePositionCell/activateCell распознают черновик через findPositionById.
+    function renderDraftRow(order) {
+        var draft = { id: '__draft__', values: {}, refs: {} };
+        var cells = EDITABLE_POSITION_CELLS.map(function(key) { return positionDisplayCell(draft, key); }).join('');
+        return '<tr class="atex-orders-draft-row" data-draft-order="' + escapeHtml(order.id) +
+            '" data-position-form="' + escapeHtml(order.id) + '">' + cells +
+            '<td class="atex-orders-pos-actions">' +
+            '<button type="button" class="atex-orders-icon-btn" title="Отменить черновик" ' +
+            'aria-label="Отменить черновик" data-cancel-draft="1"><i class="pi pi-times"></i></button>' +
+            '</td></tr>';
     }
 
     // Пересобирает список опций «Тип резки» формы позиции по текущему сырью/ширине.
@@ -974,29 +986,26 @@
     // Добавление позиции: сразу создаём пустую запись на сервере (только дефолтный
     // статус), берём id из ответа и перезагружаем отчётом — новая строка появляется
     // в таблице и редактируется поячейково, как остальные.
+    // «Добавить позицию» — показываем черновую строку до первого ввода (без записи на сервер).
+    // Первое сохранённое непустое поле создаёт позицию (_m_new) — см. savePositionCell.
     function createPosition(orderId) {
-        var req = buildCreatePositionRequest({
-            db: getApiBase(),
-            tableId: state.positionTable,
-            columns: state.positionColumns,
-            orderId: orderId,
-            status: state.positionStatuses[0],
-            xsrf: getXsrf()
-        });
-        setMessage('Добавление позиции…', 'info');
-        postForm(req.url, req.body).then(function(response) {
-            var newId = extractNewObjectId(response);
-            setMessage(newId ? 'Позиция №' + newId + ' добавлена.' : 'Позиция добавлена.', 'success');
-            state.expanded[orderId] = true;
-            return loadOrders();
-        }).catch(function(error) {
-            setMessage('Не удалось добавить позицию: ' + (error.message || error), 'error');
-        });
+        var oid = String(orderId);
+        state.draftOrderId = oid;
+        state.draftPos = { id: '__draft__', values: {}, refs: {} };
+        state.expanded[oid] = true;
+        renderOrders();
+        // Сразу активируем первую ячейку черновой строки для ввода.
+        var firstCell = document.querySelector('tr[data-draft-order="' + cssEscape(oid) +
+            '"] td.atex-orders-cell[data-cell="qty"]');
+        if (firstCell) activateCell(firstCell);
     }
 
     // Находит позицию и её orderId по id позиции в state.positionsByOrder.
     function findPositionById(posId) {
         var pid = String(posId);
+        if (pid === '__draft__') {
+            return state.draftPos ? { orderId: state.draftOrderId, position: state.draftPos } : null;
+        }
         var keys = Object.keys(state.positionsByOrder);
         for (var i = 0; i < keys.length; i++) {
             var list = state.positionsByOrder[keys[i]] || [];
@@ -1151,13 +1160,27 @@
         }
         var fields = {};
         fields[col.reqId] = key === 'winding' ? normalizeWinding(nextCompare) : nextCompare;
-        var url = '/' + encodeURIComponent(getApiBase()) + '/_m_set/' + encodeURIComponent(posId) + '?JSON';
-        var body = buildFormBody(fields, getXsrf());
+        var isDraft = posId === '__draft__';
+        var url, body;
+        if (isDraft) {
+            // Первое непустое поле черновой строки создаёт позицию (_m_new, up=orderId).
+            // Добавляем дефолтный статус, если правится не сам статус.
+            if (key !== 'status') {
+                var statusCol = getColumn(state.positionColumns, 'status');
+                if (statusCol && statusCol.reqId) fields[statusCol.reqId] = state.positionStatuses[0];
+            }
+            url = '/' + encodeURIComponent(getApiBase()) + '/_m_new/' + encodeURIComponent(state.positionTable) +
+                '?JSON&up=' + encodeURIComponent(state.draftOrderId);
+        } else {
+            url = '/' + encodeURIComponent(getApiBase()) + '/_m_set/' + encodeURIComponent(posId) + '?JSON';
+        }
+        body = buildFormBody(fields, getXsrf());
         setMessage('Сохранение…', 'info');
         // Оптимистично показываем введённое, чтобы не было прыжка; уточним по loadOrders.
         td.textContent = isRef ? (td.getAttribute('data-display') || positionCellText(pos, key)) : nextCompare;
         postForm(url, body).then(function() {
-            setMessage('Сохранено.', 'success');
+            if (isDraft) { state.draftOrderId = null; state.draftPos = null; }
+            setMessage(isDraft ? 'Позиция добавлена.' : 'Сохранено.', 'success');
             return loadOrders();
         }).catch(function(error) {
             setMessage('Не удалось сохранить: ' + (error.message || error), 'error');
@@ -1541,6 +1564,14 @@
                 var addPos = event.target.closest('[data-add-position]');
                 if (addPos) {
                     createPosition(addPos.getAttribute('data-add-position'));
+                    return;
+                }
+                var cancelDraft = event.target.closest('[data-cancel-draft]');
+                if (cancelDraft) {
+                    state.draftOrderId = null;
+                    state.draftPos = null;
+                    state.editingCell = null;
+                    renderOrders();
                     return;
                 }
 
