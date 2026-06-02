@@ -770,7 +770,7 @@
             }).then(function() {
                 self.setBusy(false);
                 self.render();
-                self.notify('Запланировано: ' + plan.length + ' резок', 'success');
+                self.notify('Запланировано: ' + plan.length + ' резок (изменено ' + changed.length + ')', 'success');
             }).catch(function(err) {
                 self.setBusy(false);
                 self.notify('Ошибка планирования: ' + err.message, 'error');
