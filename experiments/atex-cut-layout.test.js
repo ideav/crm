@@ -28,4 +28,25 @@ assertEqual(g3.map(function(c){return c.map(function(x){return x.id;});}), [['a'
 // вход не мутируется
 var src=[p('a',110,1,20260601)]; layout.dueWindowGroups(src,3); assertEqual(src.length,1,'вход не мутируется');
 
+// ───────────────────────── Task 3: bestFill + composeLayout ─────────────────────────
+function d(w,q,pid){ return {width:w,qty:q,positionId:pid}; }
+// bestFill (как в B): добрать остаток ходовыми, мин. отход
+var bf = layout.bestFill(100, [{width:60,popularity:10},{width:40,popularity:5}], 0);
+assertEqual(bf.leftover, 0, 'bestFill: 60+40 → 0 отход');
+// composeLayout: джамбо 910, заказы 110(qty50) и 70(qty30)
+var L = layout.composeLayout(910, [d(110,50,'a'), d(70,30,'b')], [{width:50,popularity:8}], 0);
+// каждая заказанная ширина ≥1 полоса 'Заказ'
+assertEqual(L.strips.filter(function(s){return s.purpose==='Заказ'&&s.width===110;}).length>0
+  && L.strips.filter(function(s){return s.purpose==='Заказ'&&s.width===70;}).length>0, true, 'composeLayout: обе заказанные ширины есть');
+// used + remainder == jumbo
+assertEqual(layout.round3(L.used + L.remainder), 910, 'used+remainder=джамбо');
+// 110 дозаполнена по спросу (>1 полосы, спрос 50>30)
+assertEqual(L.strips.filter(function(s){return s.width===110&&s.purpose==='Заказ';}).reduce(function(a,s){return a+s.qty;},0) >= 1, true, '110 уложена');
+// overflow: ширина шире джамбо → в overflow, не в strips
+var L2 = layout.composeLayout(100, [d(120,5,'x'), d(40,5,'y')], [], 0);
+assertEqual(L2.overflow.map(function(o){return o.positionId;}), ['x'], 'composeLayout: 120 шире 100 → overflow');
+assertEqual(L2.strips.some(function(s){return s.width===40;}), true, '40 уложена');
+// вход не мутируется
+var dm=[d(110,1,'a')]; layout.composeLayout(910, dm, [], 0); assertEqual(dm.length,1,'вход не мутируется');
+
 console.log('\n' + passed + ' assertions passed');

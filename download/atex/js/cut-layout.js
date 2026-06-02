@@ -48,7 +48,126 @@
     return groups;
   }
 
-  var layout = { toNumber: toNumber, round3: round3, dayDiff: dayDiff, dueWindowGroups: dueWindowGroups };
+  // bestFill: DFS-добор остатка rem ширинами preferred (как bestFill в B).
+  // preferred: [{width, popularity}] по убыванию популярности. tolerance — допустимый |отход|.
+  // Возврат: {strips:[{width,qty}], leftover, popSum} с мин. leftover (затем макс. popSum).
+  function bestFill(rem, preferred, tolerance){
+    var tol = toNumber(tolerance);
+    var cands = (preferred || []).map(function(c){ return { width: toNumber(c.width), popularity: toNumber(c.popularity) }; });
+    cands = cands.filter(function(c){ return c.width > 0 && c.width <= rem + Math.abs(tol); });
+    var best = { strips: [], leftover: round3(rem), popSum: 0 };
+    (function dfs(i, left, acc, popSum){
+      var leftR = round3(left);
+      if (leftR < best.leftover || (leftR === best.leftover && popSum > best.popSum)) {
+        best = { strips: acc.slice(), leftover: leftR, popSum: popSum };
+      }
+      if (leftR <= Math.abs(tol)) return;
+      for (var k = i; k < cands.length; k++) {
+        var c = cands[k];
+        if (c.width > leftR) continue;
+        var maxQ = Math.floor(leftR / c.width);
+        for (var q = maxQ; q >= 1; q--) {
+          acc.push({ width: c.width, qty: q });
+          dfs(k + 1, round3(leftR - c.width * q), acc, popSum + c.popularity * q);
+          acc.pop();
+        }
+      }
+    })(0, rem, [], 0);
+    return best;
+  }
+
+  // composeLayout: раскладка одного кластера в ширину джамбо.
+  // demands: [{width, qty, positionId}]; preferred: [{width, popularity}]; tolerance — |отход|.
+  // Возврат: {strips:[{width, qty, purpose:'Заказ'|'Склад', positionIds:[]}], used, remainder,
+  //           withinTolerance, overflow:[demands]}. Вход не мутирует, детерминировано.
+  function composeLayout(jumboWidth, demands, preferred, tolerance){
+    var W = toNumber(jumboWidth), tol = toNumber(tolerance);
+    // (a) агрегировать demands по ширине (Σ qty, собрать positionIds); ширины > джамбо → overflow.
+    var byWidth = {}; var order = []; var overflow = [];
+    (demands || []).forEach(function(dem){
+      var w = toNumber(dem.width);
+      if (w > W) { overflow.push({ width: dem.width, qty: dem.qty, positionId: dem.positionId }); return; }
+      var key = String(w);
+      if (!byWidth[key]) { byWidth[key] = { width: w, qty: 0, positionIds: [] }; order.push(key); }
+      byWidth[key].qty += toNumber(dem.qty);
+      if (dem.positionId != null && byWidth[key].positionIds.indexOf(dem.positionId) < 0) {
+        byWidth[key].positionIds.push(dem.positionId);
+      }
+    });
+    var widths = order.map(function(k){ return byWidth[k]; });
+    // (b) базовая укладка: по 1 полосе на каждую ширину (по убыванию ширины). Что не влезло → overflow.
+    widths.sort(function(a, b){ return b.width - a.width; });
+    var strips = []; // [{width, qty, purpose, positionIds, demandQty}]
+    var used = 0;
+    widths.forEach(function(g){
+      if (round3(used + g.width) <= W) {
+        strips.push({ width: g.width, qty: 1, purpose: 'Заказ', positionIds: g.positionIds.slice(), demandQty: g.qty });
+        used = round3(used + g.width);
+      } else {
+        overflow.push({ width: g.width, qty: g.qty, positionId: g.positionIds[0] });
+      }
+    });
+    // (c) дозаполнение по спросу: пока остаток вмещает любую заказанную ширину, добавлять полосу
+    // ширины с макс. неудовлетворённым спросом (при равенстве — бóльшая ширина, затем меньший id).
+    function unmet(s){ return s.demandQty - s.qty; }
+    var guard = 0;
+    while (guard++ < 100000) {
+      var rem = round3(W - used);
+      // кандидаты с непокрытым спросом, влезающие в остаток
+      var pick = null;
+      strips.forEach(function(s){
+        if (s.purpose !== 'Заказ') return;
+        if (s.width > rem) return;
+        if (unmet(s) <= 0) return;
+        if (pick === null) { pick = s; return; }
+        var u = unmet(s), pu = unmet(pick);
+        if (u > pu) { pick = s; return; }
+        if (u === pu) {
+          if (s.width > pick.width) { pick = s; return; }
+          if (s.width === pick.width) {
+            var sid = String(s.positionIds[0]), pid = String(pick.positionIds[0]);
+            if (sid < pid) pick = s;
+          }
+        }
+      });
+      if (!pick) break;
+      pick.qty += 1;
+      used = round3(used + pick.width);
+    }
+    // (d) добор остатка ходовыми → полосы purpose:'Склад'.
+    var rem2 = round3(W - used);
+    var fill = bestFill(rem2, preferred, tol);
+    fill.strips.forEach(function(s){
+      strips.push({ width: s.width, qty: s.qty, purpose: 'Склад', positionIds: [], demandQty: 0 });
+      used = round3(used + s.width * s.qty);
+    });
+    // объединить одинаковые ширины+purpose (positionIds объединяются)
+    var merged = []; var idx = {};
+    strips.forEach(function(s){
+      var key = s.purpose + '|' + round3(s.width);
+      if (idx[key] == null) {
+        idx[key] = merged.length;
+        merged.push({ width: s.width, qty: s.qty, purpose: s.purpose, positionIds: s.positionIds.slice() });
+      } else {
+        var m = merged[idx[key]];
+        m.qty += s.qty;
+        s.positionIds.forEach(function(pid){ if (m.positionIds.indexOf(pid) < 0) m.positionIds.push(pid); });
+      }
+    });
+    // (e) used / remainder / withinTolerance
+    var usedFinal = round3(merged.reduce(function(a, s){ return a + s.width * s.qty; }, 0));
+    var remainderOut = round3(W - usedFinal);
+    return {
+      strips: merged,
+      used: usedFinal,
+      remainder: remainderOut,
+      withinTolerance: Math.abs(remainderOut) <= Math.abs(tol),
+      overflow: overflow
+    };
+  }
+
+  var layout = { toNumber: toNumber, round3: round3, dayDiff: dayDiff, dueWindowGroups: dueWindowGroups,
+                 bestFill: bestFill, composeLayout: composeLayout };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = { layout: layout };
   if (typeof window !== 'undefined') window.AtexCutLayout = { layout: layout };
