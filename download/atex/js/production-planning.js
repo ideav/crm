@@ -330,6 +330,36 @@
         return cost;
     }
 
+    function startKey(c){ return [Number(c.rollerWidth) || 0, -(Number(c.knifeCount) || 0), String(c.id)]; }
+    function cmpKey(a, b){ for (var i = 0; i < a.length; i++){ if (a[i] < b[i]) return -1; if (a[i] > b[i]) return 1; } return 0; }
+    // Жадная последовательность: старт — argmin startKey (узкая/много-ножевая); далее argmin changeoverCost, tie-break startKey.
+    function greedySequence(cuts, weights){
+        var pool = (cuts || []).slice();
+        if (!pool.length) return [];
+        pool.sort(function(a, b){ return cmpKey(startKey(a), startKey(b)); });
+        var result = [pool.shift()];
+        while (pool.length){
+            var cur = result[result.length - 1], bestI = 0, bestCost = Infinity, bestKey = null;
+            for (var i = 0; i < pool.length; i++){
+                var c = changeoverCost(cur, pool[i], weights), k = startKey(pool[i]);
+                if (c < bestCost || (c === bestCost && cmpKey(k, bestKey) < 0)){ bestCost = c; bestI = i; bestKey = k; }
+            }
+            result.push(pool.splice(bestI, 1)[0]);
+        }
+        return result;
+    }
+    // Упорядочить резки станка: не-Фольга жадно, затем Фольга жадно; проставить sequence; вход не мутировать.
+    function orderCuts(cuts, weights){
+        var rest = [], foil = [];
+        (cuts || []).forEach(function(c){ (c && c.isFoil ? foil : rest).push(c); });
+        var seq = greedySequence(rest, weights).concat(greedySequence(foil, weights));
+        return seq.map(function(c, i){
+            var copy = {}; for (var k in c){ if (Object.prototype.hasOwnProperty.call(c, k)) copy[k] = c[k]; }
+            copy.sequence = i + 1;
+            return copy;
+        });
+    }
+
     var planning = {
         parseRef: parseRef,
         parseMultiRefIds: parseMultiRefIds,
@@ -346,10 +376,13 @@
         PLANNING_WEIGHTS: PLANNING_WEIGHTS,
         KNIFE_SCALE: KNIFE_SCALE,
         WIDTH_SCALE: WIDTH_SCALE,
+        REMAINDER_OK_M: REMAINDER_OK_M,
         normWinding: normWinding,
         widthSetDistance: widthSetDistance,
         awkwardRemainder: awkwardRemainder,
-        changeoverCost: changeoverCost
+        changeoverCost: changeoverCost,
+        greedySequence: greedySequence,
+        orderCuts: orderCuts
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────

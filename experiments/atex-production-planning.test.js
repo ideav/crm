@@ -215,4 +215,27 @@ assertEqual(planning.changeoverCost(base, clone(base,{winding:'OUT'}), null), 70
 assertEqual(planning.changeoverCost(base, clone(base,{knifeCount:20, knifeWidths:[20,20,20]}), null) >= 25 - 1e-9
             && planning.changeoverCost(base, clone(base,{knifeCount:20, knifeWidths:[20,20,20]}), null) <= 25 + 1e-9, true, 'cost: макс ножи ≈ 25');
 
+// ── orderCuts: жадное упорядочивание, Фольга в конец, настройка весов ──
+function cut(id,o){ return { id:id, materialId:o.m, winding:o.w||'IN', batchId:o.b||('B'+id), jumboRemainingM:o.r==null?0:o.r, knifeCount:o.k||4, knifeWidths:o.kw||[60], isFoil:!!o.foil, rollerWidth:o.rw||60 }; }
+// группировка по сырью (дефолтные веса): материалы не чередуются
+var inMat = [ cut('1',{m:'A'}), cut('2',{m:'B'}), cut('3',{m:'A'}), cut('4',{m:'B'}) ];
+var outMat = planning.orderCuts(inMat).map(function(c){return c.materialId;});
+// число границ смены сырья = (различных − 1) = 1
+var bnd = 0; for (var i=1;i<outMat.length;i++) if (outMat[i]!==outMat[i-1]) bnd++;
+assertEqual(bnd, 1, 'orderCuts: сырьё сгруппировано (1 граница)');
+// Фольга строго в конце
+var inFoil = [ cut('1',{m:'A',foil:true}), cut('2',{m:'A'}), cut('3',{m:'A'}) ];
+var outFoil = planning.orderCuts(inFoil).map(function(c){return c.id;});
+assertEqual(outFoil[outFoil.length-1], '1', 'orderCuts: Фольга в конце');
+// настраиваемость: winding>material → группировка сперва по намотке
+var mix = [ cut('1',{m:'A',w:'IN'}), cut('2',{m:'B',w:'OUT'}), cut('3',{m:'A',w:'OUT'}), cut('4',{m:'B',w:'IN'}) ];
+var byWind = planning.orderCuts(mix, { material:50, winding:100, batch:50, remainder:40, knife:25, width:10 }).map(function(c){return c.winding;});
+var wb=0; for (var j=1;j<byWind.length;j++) if (byWind[j]!==byWind[j-1]) wb++;
+assertEqual(wb, 1, 'orderCuts: с winding>material группировка по намотке (1 граница)');
+// sequence 1..N и вход не мутируется
+var src = [ cut('1',{m:'A'}), cut('2',{m:'A'}) ];
+var res = planning.orderCuts(src);
+assertEqual(res.map(function(c){return c.sequence;}), [1,2], 'sequence 1..N');
+assertEqual(src[0].sequence, undefined, 'вход не мутируется');
+
 console.log('\n' + passed + ' assertions passed');
