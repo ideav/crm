@@ -257,6 +257,43 @@ API-операции и критерии приёмки.
   запланирована, напр. только что сгенерированная). Над очередью — контрол «Дата
   плана» (`<input type=date>`, по умолчанию сегодня); смена даты перефильтровывает
   очередь. Дополняет фильтры по станку и статусу.
+- **Ядро динамической раскладки `cut-layout.js`** (исх. #52, подзадача F1 — эпик
+  «Упразднение Типа резки»): чистый ES5-UMD-модуль
+  `download/atex/js/cut-layout.js` (экспорт `layout` через
+  `module.exports`/`window.AtexCutLayout`), считающий раскладку ножей («Полосы»)
+  динамически вместо справочника «Тип резки». Все функции чисты (вход не
+  мутируют, детерминированы), без DOM/сети; покрыты node-тестами
+  `experiments/atex-cut-layout.test.js`. Контракт (для F3):
+  - `toNumber(v)` / `round3(v)` — нормировка и округление до 3 знаков (как в B);
+  - `dayDiff(aKey, bKey)` — |дни| между двумя ключами ГГГГММДД (нечисло/Infinity →
+    `Infinity`), через `Date.UTC`;
+  - `dueWindowGroups(positions, windowDays=3)` — объединяет позиции
+    `[{id, width, qty, dueKey}]` одного сырья в кластеры по «Сроку изготовления»:
+    датированные сортируются по `dueKey` (затем по `id`) и жадно набираются, пока
+    `dayDiff ≤ windowDays`; позиции без срока (`Infinity`) — отдельный последний
+    кластер;
+  - `bestFill(rem, preferred, tolerance)` — DFS-добор остатка ширинами
+    `preferred:[{width, popularity}]` (мин. `leftover`, затем макс. `popSum`);
+    реплика `bestFill` из `cut-planning.js` (B), но кандидаты несут `popularity`,
+    а не `freq`. Возврат `{strips:[{width,qty}], leftover, popSum}`;
+  - `composeLayout(jumboWidth, demands, preferred, tolerance)` — раскладка одного
+    кластера: (a) агрегирует `demands:[{width,qty,positionId}]` по ширине, ширины
+    шире джамбо → `overflow`; (b) базовая укладка по 1 полосе на каждую ширину
+    (по убыванию); (c) дозаполнение по спросу (макс. неудовлетворённый `qty`; при
+    равенстве — бóльшая ширина, затем меньший id); (d) добор остатка ходовыми
+    (`bestFill`) полосами `purpose:'Склад'`; (e) `used`/`remainder`/
+    `withinTolerance`. Возврат `{strips:[{width,qty,purpose:'Заказ'|'Склад',
+    positionIds:[]}], used, remainder, withinTolerance, overflow:[]}`;
+  - `planLayouts(input)` — оркестратор: `input = {jumboWidth, positions,
+    preferred, options:{windowDays=3, tolerance}}`; группирует по окну срока,
+    `composeLayout` на кластер, при непустом `overflow` с прогрессом — повторная
+    раскладка; позиции шире джамбо → `skipped` с reason `'шире джамбо'`. Возврат
+    `{layouts:[{positionsCovered, strips, used, remainder, withinTolerance,
+    dueKey}], skipped:[{positionId, reason}]}`;
+  - `combinationSignature(materialId, strips)` — канонический ключ комбинации
+    (сортированный мультинабор `widthxqty`, как в B) для дедупликации/отладки.
+  Загрузка данных, создание Полос/Резок, кол-во резок под `qty` (ceil) и UI — F3
+  (на этом ядре).
 
 ### 3.4 Приёмка сырья (Кладовщик)
 
