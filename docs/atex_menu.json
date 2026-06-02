@@ -5,7 +5,6 @@
       "role": "Администратор",
       "menus": [
         { "name": "Приём и ведение заказов", "href": "orders", "icon": "<i class=\"pi pi-shopping-cart\"></i>" },
-        { "name": "Калькулятор типов резки", "href": "cut-calc", "icon": "<i class=\"pi pi-calculator\"></i>" },
         { "name": "Расчёт резки", "href": "cut-planning", "icon": "<i class=\"pi pi-sliders-h\"></i>" },
         { "name": "Планирование производства", "href": "production-planning", "icon": "<i class=\"pi pi-calendar\"></i>" },
         { "name": "Приёмка сырья", "href": "intake", "icon": "<i class=\"pi pi-inbox\"></i>" },
@@ -26,7 +25,6 @@
     {
       "role": "Диспетчер",
       "menus": [
-        { "name": "Калькулятор типов резки", "href": "cut-calc", "icon": "<i class=\"pi pi-calculator\"></i>" },
         { "name": "Расчёт резки", "href": "cut-planning", "icon": "<i class=\"pi pi-sliders-h\"></i>" },
         { "name": "Планирование производства", "href": "production-planning", "icon": "<i class=\"pi pi-calendar\"></i>" }
       ]
