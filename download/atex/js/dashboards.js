@@ -130,6 +130,12 @@
             acc.received = round3((acc.received || 0) + toNumber(b.received));
             acc.remainder = round3((acc.remainder || 0) + toNumber(b.remainder));
         });
+        // #3073: остатки сырья сортируем по убыванию остатка (а не по count),
+        // ключ — вторичный для стабильности.
+        rows.sort(function(a, b) {
+            if (b.remainder !== a.remainder) return b.remainder - a.remainder;
+            return a.key < b.key ? -1 : (a.key > b.key ? 1 : 0);
+        });
         return {
             total: (batches || []).length,
             totalReceived: sumBy(batches, function(b) { return b.received; }),
@@ -148,6 +154,36 @@
     function statusIn(status, list) {
         var wanted = normalizeStatus(status);
         return (list || []).map(normalizeStatus).indexOf(wanted) !== -1;
+    }
+
+    // Терминальные статусы заказа (#3073): из «пути продукции» исключаются совсем,
+    // а в «заказах по статусам» показываются в конце серыми барами.
+    var TERMINAL_STATUSES = ['Выполнен', 'Отменён'];
+
+    function isTerminalStatus(status) {
+        return statusIn(status, TERMINAL_STATUSES);
+    }
+
+    // Дата (ISO YYYY-MM-DD) в диапазоне [from, to] включительно; пустые границы
+    // открыты, пустая дата не входит ни в какой непустой диапазон.
+    function dateInRange(date, from, to) {
+        var d = String(date == null ? '' : date).trim();
+        if (!d) return false;
+        if (from && d < from) return false;
+        if (to && d > to) return false;
+        return true;
+    }
+
+    // Выбор заказов под фильтр диапазона дат (#3073):
+    //   • обе границы пустые → только актуальные (не Выполнен/Отменён);
+    //   • иначе → заказы, чей «срок выполнения» (deadline) в диапазоне включительно.
+    function selectOrders(orders, from, to) {
+        var f = from ? String(from).trim() : '';
+        var t = to ? String(to).trim() : '';
+        if (!f && !t) {
+            return (orders || []).filter(function(o) { return !isTerminalStatus(o.status); });
+        }
+        return (orders || []).filter(function(o) { return dateInRange(o.deadline, f, t); });
     }
 
     function stageState(status, doneStatuses) {
@@ -246,6 +282,8 @@
         }
 
         orders.forEach(function(order) {
+            // #3073: заказы Выполнен/Отменён в «пути продукции» не показываем — неактуально.
+            if (isTerminalStatus(order.status)) return;
             var positions = positionsByOrder[String(order.id)] || [null];
             positions.forEach(function(position) {
                 var provisions = position ? (provisionsByPosition[String(position.id)] || [null]) : [null];
@@ -277,7 +315,7 @@
         function vals(o) { return Object.keys(o).map(function(k) { return o[k]; }); }
         (rows || []).forEach(function(r) {
             if (r.order_id && !orders[r.order_id]) {
-                orders[r.order_id] = { id: r.order_id, number: r.order_no || ('#' + r.order_id), status: r.order_status };
+                orders[r.order_id] = { id: r.order_id, number: r.order_no || ('#' + r.order_id), status: r.order_status, deadline: r.order_deadline || '' };
             }
             if (r.position_id && !positions[r.position_id]) {
                 positions[r.position_id] = { id: r.position_id, orderId: r.order_id || '', cutType: r.position_cut_type, width: r.position_width_mm, length: r.position_length_m, status: r.position_status };
@@ -295,6 +333,34 @@
         return { orders: vals(orders), positions: vals(positions), provisions: vals(provisions), cuts: vals(cuts), gpBatches: vals(gp) };
     }
 
+    // Сводки из строк отчётов под фильтр диапазона дат (#3073). Заказы отбираются
+    // через selectOrders (пустой диапазон → актуальные; заполненный → по сроку
+    // выполнения), затем плоские строки order_pipeline сужаются до отобранных
+    // заказов — так все зависимые агрегации (статусы, слиттеры, ГП, путь) считаются
+    // по одному и тому же срезу. Остатки сырья не привязаны к заказу — не фильтруются.
+    function buildSummaries(pipelineRows, materialRows, filter) {
+        filter = filter || {};
+        var from = filter.from ? String(filter.from).trim() : '';
+        var to = filter.to ? String(filter.to).trim() : '';
+        var allOrders = rowsToEntities(pipelineRows || []).orders;
+        var allowed = {};
+        selectOrders(allOrders, from, to).forEach(function(o) { allowed[String(o.id)] = true; });
+        var rows = (pipelineRows || []).filter(function(r) { return allowed[String(r.order_id)]; });
+        var e = rowsToEntities(rows);
+        var rawBatches = (materialRows || []).map(function(r) {
+            return { material: r.material, received: r.material_received_m2, remainder: r.material_remainder_m2 };
+        });
+        return {
+            counts: { order: e.orders.length, cut: e.cuts.length, gp: e.gpBatches.length, rawBatch: rawBatches.length },
+            orders: ordersByStatus(e.orders),
+            slitters: slitterLoad(e.cuts),
+            gp: gpOutput(e.gpBatches),
+            materials: materialStock(rawBatches),
+            flow: productionFlow({ orders: e.orders, positions: e.positions, provisions: e.provisions, cuts: e.cuts, gpBatches: e.gpBatches }),
+            filter: { from: from, to: to, active: !from && !to }
+        };
+    }
+
     var agg = {
         toNumber: toNumber,
         round3: round3,
@@ -307,6 +373,11 @@
         productionFlow: productionFlow,
         stageState: stageState,
         rowsToEntities: rowsToEntities,
+        buildSummaries: buildSummaries,
+        selectOrders: selectOrders,
+        isTerminalStatus: isTerminalStatus,
+        dateInRange: dateInRange,
+        TERMINAL_STATUSES: TERMINAL_STATUSES,
         UNSET: UNSET
     };
 
@@ -341,6 +412,10 @@
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
         this.busy = false;
+        // Фильтр диапазона дат (#3073): пустой → только актуальные заказы.
+        this.filter = { from: '', to: '' };
+        // Сырые строки отчётов — чтобы перефильтровывать по датам без перезапроса.
+        this.raw = null;
     }
 
     AtexDashboards.prototype.url = function(path) {
@@ -360,24 +435,23 @@
     // ── Сбор сводок ──
 
     // Сбор сводок из двух отчётов (минимум запросов; агрегации — на клиенте).
+    // Сырые строки сохраняются, чтобы фильтр дат перестраивал сводки без перезапроса.
     AtexDashboards.prototype.collect = function() {
+        var self = this;
         return Promise.all([
             this.getJson('report/order_pipeline?JSON_KV'),
             this.getJson('report/material_stock?JSON_KV')
         ]).then(function(res) {
-            var e = rowsToEntities(res[0] || []);
-            var rawBatches = (res[1] || []).map(function(r) {
-                return { material: r.material, received: r.material_received_m2, remainder: r.material_remainder_m2 };
-            });
-            return {
-                counts: { order: e.orders.length, cut: e.cuts.length, gp: e.gpBatches.length, rawBatch: rawBatches.length },
-                orders: ordersByStatus(e.orders),
-                slitters: slitterLoad(e.cuts),
-                gp: gpOutput(e.gpBatches),
-                materials: materialStock(rawBatches),
-                flow: productionFlow({ orders: e.orders, positions: e.positions, provisions: e.provisions, cuts: e.cuts, gpBatches: e.gpBatches })
-            };
+            self.raw = { pipelineRows: res[0] || [], materialRows: res[1] || [] };
+            return buildSummaries(self.raw.pipelineRows, self.raw.materialRows, self.filter);
         });
+    };
+
+    // Перестроить сводки из уже загруженных строк под текущий фильтр и перерисовать.
+    // Используется при смене диапазона дат — без повторного запроса к серверу.
+    AtexDashboards.prototype.applyFilter = function() {
+        if (!this.raw) return;
+        this.render(buildSummaries(this.raw.pipelineRows, this.raw.materialRows, this.filter));
     };
 
     // ── Рендеринг ──
@@ -416,6 +490,31 @@
             ]);
             box.appendChild(row);
         });
+        return box;
+    }
+
+    // «Заказы по статусам» (#3073): активные статусы рисуются как обычно, масштаб
+    // баров считается только по ним; терминальные (Выполнен/Отменён) выводятся в
+    // конце серыми барами и не влияют на пропорции остальных.
+    function ordersBars(rows) {
+        var all = rows || [];
+        if (!all.length) return el('div', { class: 'atex-db-empty', text: 'Нет данных' });
+        var active = all.filter(function(r) { return !isTerminalStatus(r.key); });
+        var terminal = all.filter(function(r) { return isTerminalStatus(r.key); });
+        var max = active.reduce(function(m, r) { return Math.max(m, toNumber(r.count)); }, 0) || 1;
+        var box = el('div', { class: 'atex-db-bars' });
+        function addRow(r, muted) {
+            var pct = Math.max(2, Math.min(100, Math.round(toNumber(r.count) / max * 100)));
+            box.appendChild(el('div', { class: 'atex-db-bar-row' }, [
+                el('span', { class: 'atex-db-bar-key', text: r.key, title: r.key }),
+                el('span', { class: 'atex-db-bar-track' }, [
+                    el('span', { class: 'atex-db-bar-fill' + (muted ? ' atex-db-bar-fill-muted' : ''), style: 'width:' + pct + '%' })
+                ]),
+                el('span', { class: 'atex-db-bar-val', text: fmt(r.count) })
+            ]));
+        }
+        active.forEach(function(r) { addRow(r, false); });
+        terminal.forEach(function(r) { addRow(r, true); });
         return box;
     }
 
@@ -479,7 +578,7 @@
 
     AtexDashboards.prototype.cardOrders = function(count, data) {
         return card('Заказы по статусам', count, el('div', {}, [
-            bars(data.rows, function(r) { return r.count; })
+            ordersBars(data.rows)
         ]));
     };
 
@@ -511,14 +610,15 @@
     };
 
     AtexDashboards.prototype.cardMaterials = function(count, data) {
+        // #3073: показываем только остаток сырья (без «получено»), отсортированный
+        // по убыванию (сортировка — в agg.materialStock).
         return card('Остатки сырья', count, el('div', {}, [
             metrics([
-                { label: 'получено, м²', value: data.totalReceived },
                 { label: 'остаток, м²', value: data.totalRemainder }
             ]),
             el('h3', { class: 'atex-db-subhead', text: 'По видам сырья (остаток, м²)' }),
             bars(data.rows, function(r) { return r.remainder; }, function(r) {
-                return fmt(r.remainder) + ' / ' + fmt(r.received) + ' м²';
+                return fmt(r.remainder) + ' м²';
             })
         ]));
     };
@@ -548,12 +648,32 @@
         });
     };
 
+    // Поле «дата» с подписью для диапазона дат (#3073). При изменении меняет фильтр
+    // и перестраивает сводки из уже загруженных строк, без повторного запроса.
+    AtexDashboards.prototype.dateField = function(labelText, key) {
+        var self = this;
+        var input = el('input', { type: 'date', class: 'atex-db-date', value: this.filter[key] || '', 'aria-label': 'Срок выполнения ' + labelText });
+        input.addEventListener('change', function() {
+            self.filter[key] = input.value || '';
+            self.applyFilter();
+        });
+        return el('label', { class: 'atex-db-filter' }, [
+            el('span', { class: 'atex-db-filter-label', text: labelText }),
+            input
+        ]);
+    };
+
     AtexDashboards.prototype.start = function() {
         var self = this;
         this.root.innerHTML = '';
         var toolbar = el('div', { class: 'atex-db-toolbar' }, [
             el('h1', { class: 'atex-db-heading', text: 'Дашборды и отчёты' })
         ]);
+        // #3073: диапазон дат по сроку выполнения. Пусто → только актуальные заказы.
+        toolbar.appendChild(el('div', { class: 'atex-db-range', title: 'Срок выполнения заказа' }, [
+            this.dateField('С', 'from'),
+            this.dateField('По', 'to')
+        ]));
         var refreshBtn = el('button', { class: 'atex-db-btn', type: 'button', text: 'Обновить' });
         refreshBtn.addEventListener('click', function() { self.refresh(); });
         toolbar.appendChild(refreshBtn);

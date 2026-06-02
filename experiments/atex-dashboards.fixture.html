@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<!--
+  Визуальный стенд РМ «Дашборды» (ideav/crm#3073). fetch замокан образцовыми
+  строками отчётов order_pipeline / material_stock, чтобы проверить:
+  · диапазон дат «С … По …» по сроку выполнения;
+  · «Заказы по статусам»: Выполнен/Отменён серыми в конце;
+  · «Путь продукции» без терминальных заказов;
+  · «Остатки сырья»: только остаток, по убыванию.
+  Открыть в браузере / Playwright.
+-->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>atex dashboards fixture #3073</title>
+<link rel="stylesheet" href="../download/atex/css/dashboards.css">
+<style> body { margin: 0; font-family: system-ui, Arial, sans-serif; background: #eef2f7; } </style>
+</head>
+<body>
+<div id="atex-dashboards" class="atex-db atex-brand" data-db="atex" data-user="boss"></div>
+<script>
+// ── Образцовые строки отчётов ──
+var PIPELINE = [
+    // Актуальные заказы (разные статусы) со сроком выполнения.
+    { order_id:'1', order_no:'АТХ-101', order_status:'Новый', order_deadline:'2026-06-10',
+      position_id:'', provision_id:'', cut_id:'', gp_id:'' },
+    { order_id:'2', order_no:'АТХ-102', order_status:'Согласован', order_deadline:'2026-06-12',
+      position_id:'p2', position_status:'Новая', position_cut_type:'TT-102', position_width_mm:'57', position_length_m:'800',
+      provision_id:'pr2', provision_used_m:'800', provision_status:'Зарезервировано',
+      cut_id:'c2', cut_no:'12', cut_slitter:'Слиттер 1', cut_status:'В работе', cut_footage_m:'820' },
+    { order_id:'3', order_no:'АТХ-103', order_status:'К выполнению', order_deadline:'2026-06-15',
+      position_id:'p3', position_status:'В работе', position_cut_type:'TT-103', position_width_mm:'40', position_length_m:'1200',
+      provision_id:'pr3', provision_used_m:'1200', provision_status:'Выполнено',
+      cut_id:'c3', cut_no:'13', cut_slitter:'Слиттер 2', cut_status:'Завершён', cut_footage_m:'1240',
+      gp_id:'g3', gp_status:'Готов', gp_rolls:'8', gp_footage_m:'1200', gp_address:'Склад-А', gp_cut_id:'c3' },
+    { order_id:'4', order_no:'АТХ-104', order_status:'В производстве', order_deadline:'2026-06-18',
+      position_id:'p4', position_status:'В работе', position_cut_type:'TT-104', position_width_mm:'60', position_length_m:'500',
+      provision_id:'pr4', provision_used_m:'500', provision_status:'Выполнено',
+      cut_id:'c4', cut_no:'14', cut_slitter:'Слиттер 1', cut_status:'В работе', cut_footage_m:'510' },
+    // Терминальные заказы — в путь не попадают, в «статусах» серыми.
+    { order_id:'5', order_no:'АТХ-105', order_status:'Выполнен', order_deadline:'2026-06-05',
+      position_id:'p5', position_status:'Отгружена', position_cut_type:'TT-105', position_width_mm:'57', position_length_m:'900',
+      provision_id:'pr5', provision_used_m:'900', provision_status:'Выполнено',
+      cut_id:'c5', cut_no:'15', cut_slitter:'Слиттер 2', cut_status:'Завершён', cut_footage_m:'910',
+      gp_id:'g5', gp_status:'Отгружен', gp_rolls:'9', gp_footage_m:'900', gp_address:'Склад-Б', gp_cut_id:'c5' },
+    { order_id:'6', order_no:'АТХ-106', order_status:'Выполнен', order_deadline:'2026-06-06',
+      position_id:'p6', position_status:'Отгружена', position_cut_type:'TT-106', position_width_mm:'57', position_length_m:'300',
+      provision_id:'pr6', provision_used_m:'300', provision_status:'Выполнено',
+      cut_id:'c6', cut_no:'16', cut_slitter:'Слиттер 1', cut_status:'Завершён', cut_footage_m:'305',
+      gp_id:'g6', gp_status:'Отгружен', gp_rolls:'3', gp_footage_m:'300', gp_address:'Склад-Б', gp_cut_id:'c6' },
+    { order_id:'7', order_no:'АТХ-107', order_status:'Отменён', order_deadline:'2026-06-07',
+      position_id:'', provision_id:'', cut_id:'', gp_id:'' }
+];
+var MATERIAL = [
+    { material:'Полиэтилен', material_received_m2:'5000', material_remainder_m2:'1200' },
+    { material:'Полипропилен', material_received_m2:'3000', material_remainder_m2:'2400' },
+    { material:'Лавсан', material_received_m2:'2000', material_remainder_m2:'150' },
+    { material:'ПВХ', material_received_m2:'1000', material_remainder_m2:'800' }
+];
+window.fetch = function(url) {
+    var body = url.indexOf('material_stock') !== -1 ? MATERIAL : PIPELINE;
+    return Promise.resolve({ text: function() { return Promise.resolve(JSON.stringify(body)); } });
+};
+</script>
+<script src="../download/atex/js/dashboards.js"></script>
+</body>
+</html>
