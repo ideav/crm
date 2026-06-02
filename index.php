@@ -7417,6 +7417,16 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				$add_path = "";
 			$blocks[$block]["path"][] = $path;
 			$blocks[$block]["add_path"][] = $add_path;
+			# API-режим: при ?JSON=1 команды dir_admin отвечают JSON-статусом вместо HTML-редиректа
+			# (обратносовместимо: без JSON поведение прежнее). Удобно для скриптов/агентов.
+			$apiJson = isset($_REQUEST["JSON"]);
+			$apiFolder = $blocks[$block]["folder"][0];
+			$apiResp = function($action) use ($apiJson, $apiFolder, $add_path) {
+				if(!$apiJson) return;
+				header("Content-Type: application/json; charset=utf-8");
+				echo json_encode(array("ok"=>true, "action"=>$action, "folder"=>$apiFolder, "add_path"=>$add_path), JSON_UNESCAPED_UNICODE);
+				myexit();
+			};
 			$fname = isset($_REQUEST["dir_name"])?strtolower(trim($_REQUEST["dir_name"])):"";
 			if(isset($_REQUEST["mkdir"]))
 			{
@@ -7428,6 +7438,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					if(is_dir($path."/".$fname))
 						die(t9n("[RU]Такой каталог уже существует![EN]This directory already exists!".BACK_LINK));
 					mkdir($path."/".$fname);
+					$apiResp("mkdir");
 					header("Location: /$z/dir_admin/?".$blocks[$block]["folder"][0]."=1&add_path=$add_path");
 					myexit();
 				}
@@ -7447,6 +7458,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                     if(is_file($path."/".$fname))
 						die(t9n("[RU]Такой файл ($fname) уже существует![EN]File ($fname) already exists!".BACK_LINK));
 					touch($path."/".$fname);
+					$apiResp("touch");
 					header("Location: /$z/dir_admin/?".$blocks[$block]["folder"][0]."=1&add_path=$add_path");
 					myexit();
 				}
@@ -7476,6 +7488,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 							if(!move_uploaded_file($value['tmp_name'], $path."/".$value["name"]))
 								die (t9n("[RU]Не удалось загрузить файл[EN]File uploading failed"));
 							$warning = t9n("[RU]Файл [EN]File ").$value["name"].t9n("[RU] загружен[EN] uploaded").$warning;
+							$apiResp("upload");
 							header("Location: /$z/dir_admin/?".$blocks[$block]["folder"][0]."=1&add_path=$add_path&warning=$warning");
 							myexit();
 						}
@@ -7495,6 +7508,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 						if(strlen($value))
 							RemoveDir($path."/".$value);
 #print_r($GLOBALS); die("is_dir($path./.$value) =".is_dir($path."/".$value));
+				$apiResp("delete");
 				header("Location: /$z/dir_admin/?".$blocks[$block]["folder"][0]."=1&add_path=$add_path");
 				myexit();
 			}
