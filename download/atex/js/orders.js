@@ -178,6 +178,20 @@
         return order.map(function(id) { return byId[id]; });
     }
 
+    // Клиентский поиск по всем полям заказа и его позиций.
+    function searchOrders(list, query) {
+        var q = normalizeSearchText(query);
+        if (!q) return (list || []).slice();
+        return (list || []).filter(function(o) {
+            var hay = [o.id].concat(Object.keys(o.values).map(function(k){ return o.values[k]; }));
+            (o.positions || []).forEach(function(p) {
+                hay.push(p.id);
+                Object.keys(p.values).forEach(function(k){ hay.push(p.values[k]); });
+            });
+            return normalizeSearchText(hay.join(' ')).indexOf(q) !== -1;
+        });
+    }
+
     // Индекс колонки JSON_OBJ по имени реквизита: позиция в [tableId, ...reqIds]; -1 если нет.
     function findReqIndex(meta, reqName) {
         if (!meta) return -1;
@@ -1389,6 +1403,7 @@
         parseWidth: parseWidth,
         matchCutTypes: matchCutTypes,
         rowsToOrders: rowsToOrders,
+        searchOrders: searchOrders,
         parseRef: parseRef,
         parseRefOptionsData: parseRefOptionsData,
         mergeRefOptions: mergeRefOptions,

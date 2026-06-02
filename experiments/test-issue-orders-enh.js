@@ -28,4 +28,13 @@ eq(out[0].positions[0].id, '100', 'rowsToOrders: id позиции');
 eq(out[0].positions[1].values.cutType, '110мм×8 / MW308', 'rowsToOrders: значения позиции');
 eq(out[1].positions.length, 0, 'rowsToOrders: заказ без позиций → пустой список');
 
+// searchOrders: заказ виден, если запрос совпал с любым полем заказа ИЛИ любой позиции
+// (регистронезависимо, по нормализованному тексту). Пустой запрос → весь список.
+const list = H.rowsToOrders(rows);
+eq(H.searchOrders(list, '').length, 2, 'searchOrders: пустой запрос → все');
+eq(H.searchOrders(list, 'ромашка').map(function(o){return o.id;}), ['10'], 'searchOrders: по клиенту (регистр)');
+eq(H.searchOrders(list, 'петров').map(function(o){return o.id;}), ['20'], 'searchOrders: по другому клиенту');
+eq(H.searchOrders(list, 'mw308').map(function(o){return o.id;}), ['10'], 'searchOrders: по полю позиции (тип резки)');
+eq(H.searchOrders(list, 'нетакого').length, 0, 'searchOrders: нет совпадений → пусто');
+
 console.log('\n' + passed + ' assertions passed');
