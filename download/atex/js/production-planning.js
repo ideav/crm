@@ -55,7 +55,14 @@
         cut: 'Производственная резка',
         supply: 'Обеспечение',
         slitter: 'Слиттер',
-        materialBatch: 'Партия сырья'
+        materialBatch: 'Партия сырья',
+        strip: 'Полоса'
+    };
+    // Реквизиты подчинённой «Полосы» (up = резка). Резолв по имени.
+    var STRIP_REQ = {
+        width: 'Ширина, мм',
+        qty: 'Количество',
+        purpose: 'Назначение'
     };
     // Реквизиты «Производственной резки» (Номер — главное значение, автонумер).
     var CUT_REQ = {
@@ -76,6 +83,9 @@
     // Статусы — свободный текст (тип 3); фиксируем разумные наборы по дизайн-спеке.
     var CUT_STATUSES = ['Запланирована', 'В очереди', 'В работе', 'Готова', 'Отменена'];
     var SUPPLY_STATUSES = ['Зарезервировано', 'Выполнено', 'Отменено'];
+    // Параметры раскладки cut-layout при генерации резок.
+    var WINDOW_DAYS = 3;      // окно по сроку изготовления — позиции группируются в кластеры
+    var LAYOUT_TOLERANCE = 0; // допуск остатка джамбо (мм) для бейджа «в допуске»
 
     // ───────────────────────── Чистое ядро ─────────────────────────
 
@@ -567,7 +577,7 @@
     function AtexProductionPlanning(root) {
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
-        this.meta = { cut: null, supply: null, slitter: null, materialBatch: null };
+        this.meta = { cut: null, supply: null, slitter: null, materialBatch: null, strip: null };
         this.slitters = [];        // справочник [{ id, label, stopMaterialIds }]
         this.materialBatches = []; // справочник [{ id, label }]
         this.batchMaterialById = {}; // карта batch_id → вид_сырья_id (для стоп-листа)
@@ -646,6 +656,7 @@
             self.meta.supply = byName(TABLE.supply);
             self.meta.slitter = byName(TABLE.slitter);
             self.meta.materialBatch = byName(TABLE.materialBatch);
+            self.meta.strip = byName(TABLE.strip); // подчинённая «Производственной резки» (Task 3)
             if (!self.meta.cut) throw new Error('В метаданных не найдена таблица «' + TABLE.cut + '»');
             if (!self.meta.supply) throw new Error('В метаданных не найдена таблица «' + TABLE.supply + '»');
         });
@@ -926,12 +937,226 @@
         return this.loadCutStrips().then(function() { return self.loadPlanning(); });
     };
 
-    // Генерация резок под необеспеченные позиции. Старый алгоритм на упразднённом
-    // справочнике (план + индекс типов) удалён вместе с этим справочником. Новая
-    // генерация через cut-layout (Резка + Полоса + Обеспечение) приходит в F3 Task 3.
-    // До тех пор кнопка сообщает, что функция в разработке (модуль остаётся валидным).
+    // Генерация резок под необеспеченные позиции через чистое ядро cut-layout
+    // (window.AtexCutLayout.layout.planLayouts). Для каждого сырья строит раскладки
+    // (Полосы Заказ/Склад), затем последовательно создаёт: Резку → её Полосы →
+    // Обеспечения (по одному на покрытую позицию). Все реквизиты резолвятся по имени.
     AtexProductionPlanning.prototype.generateCuts = function(actionsEl) {
-        this.notify('Генерация — в разработке (F3)', 'info');
+        var self = this;
+        if (this.busy) return;
+
+        var layoutCore = (typeof window !== 'undefined' && window.AtexCutLayout && window.AtexCutLayout.layout) || null;
+        if (!layoutCore || typeof layoutCore.planLayouts !== 'function') {
+            this.notify('Модуль раскладки cut-layout не загружен', 'error');
+            return;
+        }
+        if (!this.meta.cut || !this.meta.supply || !this.meta.strip) {
+            this.notify('Не найдены метаданные таблиц (Резка/Обеспечение/Полоса)', 'error');
+            return;
+        }
+
+        // Необеспеченные позиции, сгруппированные по сырью.
+        var unsup = unsuppliedPositions(this.genPositions, this.supplies);
+        if (!unsup.length) {
+            this.notify('Нет необеспеченных позиций для генерации', 'info');
+            return;
+        }
+        var byMaterial = {};
+        var matOrder = [];
+        unsup.forEach(function(p) {
+            var mat = String(p.materialId == null ? '' : p.materialId);
+            if (!byMaterial[mat]) { byMaterial[mat] = []; matOrder.push(mat); }
+            byMaterial[mat].push(p);
+        });
+
+        // Догрузить ходовые ширины для сырья, у которого их ещё нет в кеше.
+        var preloads = [];
+        matOrder.forEach(function(mat) {
+            if (mat !== '' && !self.preferredByMaterial[mat]) {
+                preloads.push(self.loadPreferredWidths(mat));
+            }
+        });
+
+        Promise.all(preloads).then(function() {
+            // Построить раскладки по каждому сырью; собрать пропуски.
+            var allLayouts = [];   // [{...layout, mat}]
+            var skipped = [];      // [{positionId, reason}]
+            matOrder.forEach(function(mat) {
+                var matPositions = byMaterial[mat];
+                var jw = self.jumboWidthByMaterial[mat];
+                if (!jw) {
+                    matPositions.forEach(function(p) { skipped.push({ positionId: p.id, reason: 'нет ширины джамбо' }); });
+                    return;
+                }
+                var res = layoutCore.planLayouts({
+                    jumboWidth: jw,
+                    positions: matPositions.map(function(p) {
+                        return { id: p.id, width: p.width, qty: p.qty, dueKey: p.dueKey };
+                    }),
+                    preferred: self.preferredByMaterial[mat] || [],
+                    options: { windowDays: WINDOW_DAYS, tolerance: LAYOUT_TOLERANCE }
+                });
+                (res.layouts || []).forEach(function(lay) { lay.mat = mat; allLayouts.push(lay); });
+                (res.skipped || []).forEach(function(s) { skipped.push(s); });
+            });
+
+            if (!allLayouts.length) {
+                self.notify('Нет необеспеченных позиций для генерации (пропущено ' + skipped.length + ')', 'info');
+                return;
+            }
+
+            // Счётчики для подтверждения.
+            var nCuts = allLayouts.length;
+            var nStrips = 0;
+            allLayouts.forEach(function(lay) {
+                (lay.strips || []).forEach(function(s) { nStrips += (Number(s.qty) || 0); });
+            });
+            var msg = 'Создать ' + nCuts + ' резок под необеспеченные позиции (раскладок ' + nCuts +
+                ', полос ' + nStrips + ')? Пропущено ' + skipped.length + '.';
+
+            self.confirmAction(msg, actionsEl, 'Да, создать', function() {
+                self.runGenerateCuts(allLayouts, skipped);
+            });
+        }).catch(function(err) {
+            self.notify('Ошибка подготовки генерации: ' + err.message, 'error');
+        });
+    };
+
+    // Последовательное создание записей по подготовленным раскладкам.
+    // На каждую раскладку: Резка → её Полосы → Обеспечения (по покрытым позициям).
+    // Зависимые _m_new не запускаются параллельно (Полосе/Обеспечению нужен cutId).
+    AtexProductionPlanning.prototype.runGenerateCuts = function(layouts, skipped) {
+        var self = this;
+        var cutMeta = this.meta.cut;
+        var stripMeta = this.meta.strip;
+        var supplyMeta = this.meta.supply;
+
+        var cutReqIds = {
+            slitter: reqIdByName(cutMeta, CUT_REQ.slitter),
+            materialBatch: reqIdByName(cutMeta, CUT_REQ.materialBatch),
+            status: reqIdByName(cutMeta, CUT_REQ.status)
+        };
+        var stripReqIds = {
+            width: reqIdByName(stripMeta, STRIP_REQ.width),
+            qty: reqIdByName(stripMeta, STRIP_REQ.qty),
+            purpose: reqIdByName(stripMeta, STRIP_REQ.purpose)
+        };
+        var supplyReqIds = {
+            cut: reqIdByName(supplyMeta, SUPPLY_REQ.cut),
+            status: reqIdByName(supplyMeta, SUPPLY_REQ.status)
+        };
+
+        // Сид баланса станков из текущих резок (счётчик по slitterId).
+        var loadBySlitterId = {};
+        (this.cuts || []).forEach(function(c) {
+            var sid = c && c.slitter && c.slitter.id;
+            if (sid != null) loadBySlitterId[String(sid)] = (loadBySlitterId[String(sid)] || 0) + 1;
+        });
+
+        var nStrips = 0;
+        var nPositions = 0;
+
+        this.setBusy(true);
+        var chain = Promise.resolve();
+        layouts.forEach(function(lay) {
+            chain = chain.then(function() {
+                // 1) Резка (корневой объект): статус + станок (баланс) + партия (FIFO).
+                var slitterId = pickSlitter(self.slitters, lay.mat, loadBySlitterId);
+                if (slitterId != null) loadBySlitterId[String(slitterId)] = (loadBySlitterId[String(slitterId)] || 0) + 1;
+                var batchId = pickBatchFIFO(self.genBatches, lay.mat);
+                var cutFields = buildFields(cutReqIds, {
+                    status: CUT_STATUSES[0],
+                    slitter: slitterId,
+                    materialBatch: batchId
+                });
+                return self.post('_m_new/' + cutMeta.id + '?JSON&up=1&full=1', cutFields).then(function(res) {
+                    var cutId = res && (res.obj || res.id || res.i);
+                    if (!cutId) throw new Error('Сервер не вернул id новой резки');
+
+                    // 2) Полосы резки (up = cutId), последовательно.
+                    var stripChain = Promise.resolve();
+                    (lay.strips || []).forEach(function(strip) {
+                        stripChain = stripChain.then(function() {
+                            var fields = buildFields(stripReqIds, {
+                                width: strip.width,
+                                qty: strip.qty,
+                                purpose: strip.purpose
+                            });
+                            return self.post('_m_new/' + stripMeta.id + '?JSON&up=' + encodeURIComponent(cutId), fields)
+                                .then(function() { nStrips += 1; });
+                        });
+                    });
+
+                    // 3) Обеспечения (up = positionId, ссылка на резку), последовательно.
+                    return stripChain.then(function() {
+                        var supChain = Promise.resolve();
+                        (lay.positionsCovered || []).forEach(function(positionId) {
+                            supChain = supChain.then(function() {
+                                var fields = buildFields(supplyReqIds, {
+                                    cut: cutId,
+                                    status: SUPPLY_STATUSES[0]
+                                });
+                                return self.post('_m_new/' + supplyMeta.id + '?JSON&up=' + encodeURIComponent(positionId), fields)
+                                    .then(function() { nPositions += 1; });
+                            });
+                        });
+                        return supChain;
+                    });
+                });
+            });
+        });
+
+        chain.then(function() {
+            return self.reload();
+        }).then(function() {
+            self.setBusy(false);
+            self.render();
+            var reasons = self.groupSkipReasons(skipped);
+            self.notify('Создано ' + layouts.length + ' резок, полос ' + nStrips +
+                ', пропущено ' + skipped.length + ' позиций' + (reasons ? ' (' + reasons + ')' : ''), 'success');
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Ошибка генерации резок: ' + err.message, 'error');
+        });
+    };
+
+    // Сгруппировать причины пропуска → «причина ×N, …» (для итогового уведомления).
+    AtexProductionPlanning.prototype.groupSkipReasons = function(skipped) {
+        var counts = {};
+        var order = [];
+        (skipped || []).forEach(function(s) {
+            var r = (s && s.reason) || 'без причины';
+            if (!counts[r]) { counts[r] = 0; order.push(r); }
+            counts[r] += 1;
+        });
+        return order.map(function(r) { return r + ' ×' + counts[r]; }).join(', ');
+    };
+
+    // Подтверждение без native confirm. Mirror логики runPlanning:
+    // mainAppController.showDeleteConfirmModal (Promise) либо inline-блок в actionsEl.
+    AtexProductionPlanning.prototype.confirmAction = function(message, actionsEl, okLabel, onConfirm) {
+        if (typeof window !== 'undefined' && window.mainAppController &&
+            typeof window.mainAppController.showDeleteConfirmModal === 'function') {
+            window.mainAppController.showDeleteConfirmModal(message).then(function(ok) {
+                if (ok) onConfirm();
+            });
+            return;
+        }
+        if (actionsEl && actionsEl.querySelector('.atex-pp-confirm-bar')) return;
+        var bar = el('div', { class: 'atex-pp-confirm-bar' });
+        bar.appendChild(el('span', { class: 'atex-pp-confirm-msg', text: message }));
+        var okBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: okLabel || 'Да' });
+        var cancelBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Отмена' });
+        function removeBar() { if (bar.parentNode) bar.parentNode.removeChild(bar); }
+        okBtn.addEventListener('click', function() { removeBar(); onConfirm(); });
+        cancelBtn.addEventListener('click', function() { removeBar(); });
+        bar.appendChild(okBtn);
+        bar.appendChild(cancelBtn);
+        if (actionsEl) {
+            actionsEl.appendChild(bar);
+        } else {
+            onConfirm();
+        }
     };
 
     // DRY-метод сохранения изменённых «Очередностей». pairs = [{cutId, sequence}].
@@ -1014,34 +1239,8 @@
             });
         }
 
-        // Подтверждение без native confirm.
-        // Вариант 1: mainAppController.showDeleteConfirmModal (Promise-based).
-        if (typeof window !== 'undefined' && window.mainAppController &&
-            typeof window.mainAppController.showDeleteConfirmModal === 'function') {
-            window.mainAppController.showDeleteConfirmModal(MSG_CONFIRM).then(function(ok) {
-                if (ok) doRun();
-            });
-            return;
-        }
-
-        // Вариант 2: inline-блок с двумя кнопками внутри actionsEl.
-        // Если блок уже показан — игнорируем повторный клик.
-        if (actionsEl && actionsEl.querySelector('.atex-pp-confirm-bar')) return;
-        var bar = el('div', { class: 'atex-pp-confirm-bar' });
-        bar.appendChild(el('span', { class: 'atex-pp-confirm-msg', text: MSG_CONFIRM }));
-        var okBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Да, перезаписать' });
-        var cancelBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Отмена' });
-        function removeBar() { if (bar.parentNode) bar.parentNode.removeChild(bar); }
-        okBtn.addEventListener('click', function() { removeBar(); doRun(); });
-        cancelBtn.addEventListener('click', function() { removeBar(); });
-        bar.appendChild(okBtn);
-        bar.appendChild(cancelBtn);
-        if (actionsEl) {
-            actionsEl.appendChild(bar);
-        } else {
-            // actionsEl недоступен (не должно происходить) — сразу запускаем.
-            doRun();
-        }
+        // Подтверждение без native confirm (общий хелпер confirmAction).
+        self.confirmAction(MSG_CONFIRM, actionsEl, 'Да, перезаписать', doRun);
     };
 
     // ── Рендеринг ──
