@@ -166,8 +166,75 @@
     };
   }
 
+  // combinationSignature: канонический ключ комбинации (как в B) — сырьё + отсортированный
+  // мультинабор ширина×кол-во. Детерминировано, не зависит от порядка полос.
+  function combinationSignature(materialId, strips){
+    var parts = (strips || []).map(function(s){ return round3(toNumber(s.width)) + 'x' + toNumber(s.qty); }).sort();
+    return String(materialId == null ? '' : materialId) + '|' + parts.join('+');
+  }
+
+  // planLayouts: оркестратор раскладки. input = {jumboWidth, positions, preferred, options:{windowDays=3, tolerance}}.
+  // Группирует позиции по окну срока, для каждого кластера composeLayout; пока overflow непустой
+  // и есть прогресс — повторный composeLayout на overflow → доп. раскладка. Позиции шире джамбо
+  // (overflow без прогресса) → skipped 'шире джамбо'. Вход не мутирует, детерминировано.
+  function planLayouts(input){
+    input = input || {};
+    var W = toNumber(input.jumboWidth);
+    var preferred = (input.preferred || []).slice();
+    var opts = input.options || {};
+    var windowDays = (opts.windowDays == null) ? 3 : opts.windowDays;
+    var tolerance = toNumber(opts.tolerance);
+    var positions = (input.positions || []).map(function(p){
+      return { id: p.id, width: toNumber(p.width), qty: toNumber(p.qty),
+               dueKey: isFinite(p.dueKey) ? p.dueKey : Infinity };
+    });
+
+    var groups = dueWindowGroups(positions, windowDays);
+    var layouts = [];
+    var skipped = [];
+
+    groups.forEach(function(cluster){
+      var clusterDueKey = Infinity;
+      cluster.forEach(function(p){ if (p.dueKey < clusterDueKey) clusterDueKey = p.dueKey; });
+
+      var pending = cluster.map(function(p){ return { width: p.width, qty: p.qty, positionId: p.id }; });
+      var guard = 0;
+      while (pending.length && guard++ < 100000) {
+        var result = composeLayout(W, pending, preferred, tolerance);
+        var ordered = [];
+        result.strips.forEach(function(s){
+          if (s.purpose === 'Заказ') {
+            s.positionIds.forEach(function(pid){ if (ordered.indexOf(pid) < 0) ordered.push(pid); });
+          }
+        });
+        // прогресс: хотя бы одна заказанная полоса уложена
+        var madeProgress = ordered.length > 0;
+        if (madeProgress) {
+          layouts.push({
+            positionsCovered: ordered,
+            strips: result.strips,
+            used: result.used,
+            remainder: result.remainder,
+            withinTolerance: result.withinTolerance,
+            dueKey: clusterDueKey
+          });
+        }
+        if (!result.overflow.length) break;
+        if (!madeProgress) {
+          // ничего не уложилось → остаток overflow не лезет (шире джамбо)
+          result.overflow.forEach(function(o){ skipped.push({ positionId: o.positionId, reason: 'шире джамбо' }); });
+          break;
+        }
+        pending = result.overflow.map(function(o){ return { width: o.width, qty: o.qty, positionId: o.positionId }; });
+      }
+    });
+
+    return { layouts: layouts, skipped: skipped };
+  }
+
   var layout = { toNumber: toNumber, round3: round3, dayDiff: dayDiff, dueWindowGroups: dueWindowGroups,
-                 bestFill: bestFill, composeLayout: composeLayout };
+                 bestFill: bestFill, composeLayout: composeLayout,
+                 combinationSignature: combinationSignature, planLayouts: planLayouts };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = { layout: layout };
   if (typeof window !== 'undefined') window.AtexCutLayout = { layout: layout };
