@@ -283,30 +283,32 @@
     }
 
     // Строки отчёта positions_list (JSON_KV) → [{ id, label }] для дропдауна
-    // привязки. Подпись: «#id · <деталь> · Ширина · Кол-во» (пустые поля
-    // пропускаются); если деталей нет — «#id · Номер».
+    // привязки. Подпись: «№<номер> · <ширина>мм» (ширина пропускается, если пустая).
+    // Прежняя метка использовала колонку position_cut_type, удалённую в F2 (упразднён
+    // «Тип резки») — теперь подпись строится из номера позиции и ширины.
     function rowsToPositions(rows) {
         return (rows || []).map(function(row) {
             var id = row.position_id == null ? '' : String(row.position_id);
-            var parts = [row.position_cut_type, row.position_width, row.position_qty]
-                .map(function(v) { return v == null ? '' : String(v).trim(); })
-                .filter(function(v) { return v !== ''; });
-            var main = row.position_no == null ? '' : String(row.position_no).trim();
-            var label = '#' + id + (parts.length ? ' · ' + parts.join(' · ') : (main ? ' · ' + main : ''));
+            var no = row.position_no == null ? '' : String(row.position_no).trim();
+            var width = row.position_width == null ? '' : String(row.position_width).trim();
+            var label = '№' + no + (width !== '' ? ' · ' + width + 'мм' : '');
             return { id: id, label: label };
         });
     }
 
-    // Строки отчёта positions_list (JSON_KV) → [{ id, materialId, width, qty }]
+    // Строки отчёта positions_list (JSON_KV) → [{ id, materialId, width, qty, dueKey }]
     // для генерации резок. position_material_id (добавлен в отчёт), position_width,
     // position_qty → числа; пустые значения → 0/'' но объект всегда присутствует.
+    // dueKey — числовой ключ «Срока изготовления» (position_due_date) через
+    // batchDateKey (для оконного отбора по сроку при генерации); нет срока → Infinity.
     function rowsToGenPositions(rows) {
         return (rows || []).map(function(row) {
             return {
                 id: row.position_id == null ? '' : String(row.position_id),
                 materialId: row.position_material_id == null ? '' : String(row.position_material_id),
                 width: Number(row.position_width) || 0,
-                qty: Number(row.position_qty) || 0
+                qty: Number(row.position_qty) || 0,
+                dueKey: batchDateKey(row.position_due_date)
             };
         });
     }
@@ -390,6 +392,28 @@
     }
 
     // ───────────────────── Хелперы генерации резок ─────────────────────
+
+    // Строки отчёта cut_strips (JSON_KV) → { cutId: {knifeCount, knifeWidths:[...]} }.
+    // cut_id — abn «Производственной резки»; strip_width — Полоса «Ширина, мм»;
+    // strip_qty — Полоса «Количество». Группировка по cut_id:
+    //   knifeCount += Number(strip_qty);
+    //   knifeWidths — Number(strip_width), развёрнутый по qty (полоса 110×2 → [110,110]),
+    //   нужен для widthSetDistance в changeoverCost. Заменяет удалённую в F2 колонку
+    //   cut_knives отчёта cut_planning (knifeCount теперь считается клиентом).
+    // Вход не мутируется.
+    function aggregateStrips(rows) {
+        var out = {};
+        (rows || []).forEach(function(row) {
+            var cutId = String(row.cut_id == null ? '' : row.cut_id);
+            if (cutId === '') return;
+            if (!out[cutId]) out[cutId] = { knifeCount: 0, knifeWidths: [] };
+            var qty = Number(row.strip_qty) || 0;
+            var width = Number(row.strip_width) || 0;
+            out[cutId].knifeCount += qty;
+            for (var n = 0; n < qty; n++) out[cutId].knifeWidths.push(width);
+        });
+        return out;
+    }
 
     // Позиции, не имеющие ни одной записи обеспечения. supplies — [{positionId}].
     function unsuppliedPositions(positions, supplies){
@@ -517,7 +541,8 @@
         moveInQueue: moveInQueue,
         unsuppliedPositions: unsuppliedPositions,
         pickSlitter: pickSlitter,
-        pickBatchFIFO: pickBatchFIFO
+        pickBatchFIFO: pickBatchFIFO,
+        aggregateStrips: aggregateStrips
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -551,8 +576,11 @@
         this.cuts = [];            // очередь резок [mapCutRecord]
         this.supplies = [];        // все записи «Обеспечения» (для подсчёта привязок)
         // Данные для генерации резок:
-        this.genPositions = [];    // [{ id, materialId, width, qty }] — все позиции
+        this.genPositions = [];    // [{ id, materialId, width, qty, dueKey }] — все позиции
         this.genBatches = [];      // [{ id, materialId, dateKey, remainder }]
+        this.stripAgg = {};        // карта cutId → { knifeCount, knifeWidths } (отчёт cut_strips)
+        this.jumboWidthByMaterial = {}; // карта materialId → ширина джамбо «Вид сырья»
+        this.preferredByMaterial = {};  // кеш ходовых ширин по сырью: materialId → [{width, popularity}]
         this.draft = this.blankDraft();
         this.filter = { slitter: '', status: '', date: todayISO() };  // дата плана по умолчанию — сегодня
         this.selectedCutId = null; // выбранная резка для привязки обеспечения
@@ -724,12 +752,74 @@
         });
     };
 
+    // Полосы всех резок отчётом cut_strips (JSON_KV) → this.stripAgg
+    // (карта cutId → {knifeCount, knifeWidths}). knifeCount/knifeWidths влиты в
+    // дескриптор каждой резки в loadPlanning (колонка cut_knives отчёта cut_planning
+    // удалена в F2 — knifeCount теперь считается клиентом из Полос).
+    AtexProductionPlanning.prototype.loadCutStrips = function() {
+        var self = this;
+        return this.getJson('report/cut_strips?JSON_KV&LIMIT=0,5000').then(function(rows) {
+            self.stripAgg = aggregateStrips(rows || []);
+        });
+    };
+
+    // Ширина джамбо по виду сырья: this.jumboWidthByMaterial = { materialId: ширина }.
+    // Таблица «Вид сырья» резолвится по имени из закешированного списка метаданных
+    // (this._metaAll); ширина — поле «Ширина, мм» (columnIndex по имени). Ключ карты —
+    // abn записи (r.i как String) = тот же id, что приходит в position_material_id /
+    // cut_material_id. Нужна как jumboWidth для cut-layout.planLayouts (Task 3).
+    AtexProductionPlanning.prototype.loadJumboWidths = function() {
+        var self = this;
+        var list = this._metaAll || [];
+        var meta = list.filter(function(t) {
+            return String(t.val).trim().toLowerCase() === 'вид сырья';
+        })[0] || null;
+        if (!meta) { this.jumboWidthByMaterial = {}; return Promise.resolve(); }
+        var widthIdx = columnIndex(meta, 'Ширина, мм');
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
+            var map = {};
+            (rows || []).forEach(function(rec) {
+                var r = rec.r || [];
+                map[String(rec.i)] = widthIdx >= 0 ? (Number(r[widthIdx]) || 0) : 0;
+            });
+            self.jumboWidthByMaterial = map;
+        });
+    };
+
+    // Ходовые ширины для сырья отчётом preferable_widths (JSON_KV, фильтр по сырью).
+    // → [{ width:Number(position_width_mm), popularity:Number(position_qty_sum) }];
+    // кешируется в this.preferredByMaterial[materialId]. Ленивая загрузка по сырью
+    // (Task 3/4 — генерация и панель ходовых). Возвращает Promise с массивом.
+    AtexProductionPlanning.prototype.loadPreferredWidths = function(materialId) {
+        var self = this;
+        var mat = String(materialId == null ? '' : materialId);
+        if (mat === '') return Promise.resolve([]);
+        if (this.preferredByMaterial[mat]) return Promise.resolve(this.preferredByMaterial[mat]);
+        return this.getJson('report/preferable_widths?JSON_KV&FR_position_material_id=' + encodeURIComponent(mat)).then(function(rows) {
+            var list = (rows || []).map(function(row) {
+                return {
+                    width: Number(row.position_width_mm) || 0,
+                    popularity: Number(row.position_qty_sum) || 0
+                };
+            });
+            self.preferredByMaterial[mat] = list;
+            return list;
+        });
+    };
+
     // Очередь резок и их обеспечение одним отчётом cut_planning (JSON_KV).
-    // Заполняет this.cuts и this.supplies из плоских строк отчёта.
+    // Заполняет this.cuts и this.supplies из плоских строк отчёта; вливает
+    // knifeCount/knifeWidths из this.stripAgg (cut_strips) в каждую резку.
     AtexProductionPlanning.prototype.loadPlanning = function() {
         var self = this;
         return this.getJson('report/cut_planning?JSON_KV&LIMIT=0,5000').then(function(rows) {
             var p = rowsToPlanning(rows || []);
+            var agg = self.stripAgg || {};
+            p.cuts.forEach(function(cut) {
+                var a = agg[String(cut.id)] || {};
+                cut.knifeCount = a.knifeCount || 0;
+                cut.knifeWidths = a.knifeWidths || [];
+            });
             self.cuts = p.cuts;
             self.supplies = p.supplies;
         });
@@ -831,7 +921,9 @@
     };
 
     AtexProductionPlanning.prototype.reload = function() {
-        return this.loadPlanning();
+        var self = this;
+        // Полосы перечитываем перед очередью, чтобы knifeCount/knifeWidths влились в свежие резки.
+        return this.loadCutStrips().then(function() { return self.loadPlanning(); });
     };
 
     // Генерация резок под необеспеченные позиции. Старый алгоритм на упразднённом
@@ -1235,9 +1327,11 @@
                     self.loadSlittersWithStop().then(function(items) { self.slitters = items; }),
                     self.loadMaterialBatches(),
                     self.loadBatchMaterialMap(),
-                    self.loadPositions(),  // заполняет genPositions тоже
-                    self.loadPlanning(),
-                    self.loadGenBatches()  // FIFO-партии для генерации резок
+                    self.loadPositions(),  // заполняет genPositions (с dueKey) тоже
+                    self.loadGenBatches(), // FIFO-партии для генерации резок
+                    self.loadJumboWidths(),// ширина джамбо по сырью (для cut-layout)
+                    // Полосы перед очередью: knifeCount/knifeWidths вливаются в резки в loadPlanning.
+                    self.loadCutStrips().then(function() { return self.loadPlanning(); })
                 ]);
             })
             .then(function() { self.render(); })

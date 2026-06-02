@@ -141,15 +141,15 @@ assertEqual(planning.groupBySlitter(plan.cuts).map(function(g) { return g.slitte
 
 // ── rowsToPositions: строки positions_list (JSON_KV) → [{id,label}] для дропдауна ──
 var posRows = [
-    { position_id: '8207', position_no: '1', position_cut_type: '', position_width: '25.00', position_qty: '70' },
-    { position_id: '8300', position_no: '2', position_cut_type: '110мм×8', position_width: '110.00', position_qty: '5' }
+    { position_id: '8207', position_no: '1', position_width: '25.00', position_qty: '70' },
+    { position_id: '8300', position_no: '2', position_width: '110.00', position_qty: '5' }
 ];
 assertEqual(planning.rowsToPositions(posRows), [
-    { id: '8207', label: '#8207 · 25.00 · 70' },
-    { id: '8300', label: '#8300 · 110мм×8 · 110.00 · 5' }
-], 'rowsToPositions: «#id · тип · ширина · кол-во», пустые поля пропущены');
-assertEqual(planning.rowsToPositions([{ position_id: '9', position_no: '3', position_cut_type: '', position_width: '', position_qty: '' }]),
-    [{ id: '9', label: '#9 · 3' }], 'rowsToPositions: без деталей — fallback на номер');
+    { id: '8207', label: '№1 · 25.00мм' },
+    { id: '8300', label: '№2 · 110.00мм' }
+], 'rowsToPositions: «№<номер> · <ширина>мм»');
+assertEqual(planning.rowsToPositions([{ position_id: '9', position_no: '3', position_width: '' }]),
+    [{ id: '9', label: '№3' }], 'rowsToPositions: без ширины — только номер');
 assertEqual(planning.rowsToPositions([]), [], 'rowsToPositions: пустой ввод → пустой список');
 
 // ── rowsToBatches: строки material_batches (JSON_KV) → [{id,label}] для дропдауна ──
@@ -303,9 +303,32 @@ var grp = planning.rowsToGenPositions([
   { position_id:'11', position_material_id:'5', position_width:'', position_qty:'' }
 ]);
 assertEqual(grp, [
-  { id:'10', materialId:'5', width:60, qty:30 },
-  { id:'11', materialId:'5', width:0, qty:0 }
-], 'rowsToGenPositions: маппинг + пустые ширина/кол-во → 0');
+  { id:'10', materialId:'5', width:60, qty:30, dueKey: Infinity },
+  { id:'11', materialId:'5', width:0, qty:0, dueKey: Infinity }
+], 'rowsToGenPositions: маппинг + пустые ширина/кол-во → 0, dueKey без срока → Infinity');
+
+// rowsToGenPositions читает срок изготовления → dueKey (batchDateKey)
+var grpDue = planning.rowsToGenPositions([
+  { position_id:'10', position_material_id:'5', position_width:'60', position_qty:'30', position_due_date:'2026-06-10' }
+]);
+assertEqual(grpDue[0].dueKey, 20260610, 'rowsToGenPositions: position_due_date → dueKey');
+
+// ── aggregateStrips: строки отчёта cut_strips (JSON_KV) → { cutId: {knifeCount, knifeWidths:[...]} } ──
+var agg = planning.aggregateStrips([
+  { cut_id:'10', strip_width:'110', strip_qty:'2' },
+  { cut_id:'10', strip_width:'70',  strip_qty:'1' },
+  { cut_id:'20', strip_width:'50',  strip_qty:'3' }
+]);
+assertEqual(agg['10'].knifeCount, 3, 'aggregateStrips: cut10 ножей 2+1=3');
+// различные ширины ножей cut10 (knifeWidths развёрнут по qty → [110,110,70], уникальные = {70,110})
+assertEqual(agg['10'].knifeWidths.slice().sort(function(a,b){return a-b;}).filter(function(v,i,a){return a.indexOf(v)===i;}), [70,110], 'aggregateStrips: cut10 различные ширины ножей');
+assertEqual(agg['20'].knifeCount, 3, 'aggregateStrips: cut20 ножей 3');
+assertEqual(agg['10'].knifeWidths.length, 3, 'aggregateStrips: knifeWidths развёрнут по qty (110,110,70)');
+// вход не мутируется
+var aggSrc = [{ cut_id:'1', strip_width:'60', strip_qty:'2' }];
+planning.aggregateStrips(aggSrc);
+assertEqual(aggSrc, [{ cut_id:'1', strip_width:'60', strip_qty:'2' }], 'aggregateStrips: вход не мутируется');
+assertEqual(planning.aggregateStrips([]), {}, 'aggregateStrips: пусто → {}');
 
 // batchDateKey: ISO / D.M.Y / D/M/Y → сортируемое число; пусто/мусор → Infinity (в конец FIFO)
 assertEqual(planning.batchDateKey('2026-01-05'), 20260105, 'batchDateKey: ISO');
