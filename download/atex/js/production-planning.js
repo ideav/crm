@@ -291,6 +291,45 @@
         });
     }
 
+    // Приоритет планирования: правь эти числа (10..100), чтобы изменить важность.
+    // Больше — тем дороже соответствующая переналадка. Сырьё>намотка>партия>остаток>ножи>ширина.
+    var PLANNING_WEIGHTS = { material: 100, winding: 70, batch: 50, remainder: 40, knife: 25, width: 10 };
+    var KNIFE_SCALE = 8;     // нормировка ножевой компоненты (переставленных ножей до «максимума»)
+    var WIDTH_SCALE = 100;   // нормировка ширины (мм «сужения» до «максимума»)
+    var REMAINDER_OK_M = 600;
+
+    function normWinding(v){ var s = String(v == null ? '' : v).trim().toUpperCase(); return (s === 'IN' || s === 'OUT') ? s : ''; }
+
+    // Симметрическая разность мультимножеств ширин (сколько ножей переставить). Терпимо к числам/строкам.
+    function widthSetDistance(a, b){
+        function tally(arr){ var m = {}; (arr || []).forEach(function(x){ var k = String(Number(x)); m[k] = (m[k] || 0) + 1; }); return m; }
+        var ma = tally(a), mb = tally(b), keys = {}, d = 0;
+        Object.keys(ma).forEach(function(k){ keys[k] = 1; });
+        Object.keys(mb).forEach(function(k){ keys[k] = 1; });
+        Object.keys(keys).forEach(function(k){ d += Math.abs((ma[k] || 0) - (mb[k] || 0)); });
+        return d;
+    }
+
+    // Неудобный остаток джамбо: 0 < m < REMAINDER_OK_M (не дорезан до ≈0 и не оставлен крупным).
+    function awkwardRemainder(m){ var x = Number(m); return !isNaN(x) && x > 1e-6 && x < REMAINDER_OK_M; }
+
+    // Стоимость перехода prev→next: взвешенная сумма нормированных компонент. weights по умолчанию PLANNING_WEIGHTS.
+    function changeoverCost(prev, next, weights){
+        var w = weights || PLANNING_WEIGHTS;
+        var cost = 0;
+        cost += (w.material || 0) * (String(prev.materialId) !== String(next.materialId) ? 1 : 0);
+        cost += (w.winding || 0) * (normWinding(prev.winding) !== normWinding(next.winding) ? 1 : 0);
+        var batchChange = String(prev.batchId) !== String(next.batchId);
+        cost += (w.batch || 0) * (batchChange ? 1 : 0);
+        cost += (w.remainder || 0) * ((batchChange && awkwardRemainder(prev.jumboRemainingM)) ? 1 : 0);
+        var knifeDist = Math.abs((Number(prev.knifeCount) || 0) - (Number(next.knifeCount) || 0))
+                      + widthSetDistance(prev.knifeWidths, next.knifeWidths);
+        cost += (w.knife || 0) * Math.min(1, knifeDist / KNIFE_SCALE);
+        var drop = Math.max(0, (Number(prev.rollerWidth) || 0) - (Number(next.rollerWidth) || 0));
+        cost += (w.width || 0) * Math.min(1, drop / WIDTH_SCALE);
+        return cost;
+    }
+
     var planning = {
         parseRef: parseRef,
         parseMultiRefIds: parseMultiRefIds,
@@ -303,7 +342,14 @@
         buildFields: buildFields,
         rowsToPlanning: rowsToPlanning,
         rowsToPositions: rowsToPositions,
-        rowsToBatches: rowsToBatches
+        rowsToBatches: rowsToBatches,
+        PLANNING_WEIGHTS: PLANNING_WEIGHTS,
+        KNIFE_SCALE: KNIFE_SCALE,
+        WIDTH_SCALE: WIDTH_SCALE,
+        normWinding: normWinding,
+        widthSetDistance: widthSetDistance,
+        awkwardRemainder: awkwardRemainder,
+        changeoverCost: changeoverCost
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────

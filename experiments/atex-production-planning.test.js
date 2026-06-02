@@ -193,4 +193,26 @@ var rp = planning.rowsToPlanning([
 assertEqual(rp.cuts[0].sequence, 3, 'rowsToPlanning: cut_sequence 3 → 3');
 assertEqual(rp.cuts[1].sequence, null, 'rowsToPlanning: пусто → null');
 
+// widthSetDistance — симметрическая разность мультимножеств ширин
+assertEqual(planning.widthSetDistance([60,60,40],[60,40,40]), 2, 'widthSetDistance: одна 60 и одна 40 расходятся');
+assertEqual(planning.widthSetDistance([],[]), 0, 'widthSetDistance: пустые → 0');
+assertEqual(planning.widthSetDistance(['60'],[60]), 0, 'widthSetDistance: строка==число');
+// awkwardRemainder — неудобный остаток джамбо (0<m<600)
+assertEqual(planning.awkwardRemainder(0), false, 'awkward: 0 → false');
+assertEqual(planning.awkwardRemainder(100), true, 'awkward: 100 → true');
+assertEqual(planning.awkwardRemainder(600), false, 'awkward: 600 → false');
+assertEqual(planning.awkwardRemainder(1200), false, 'awkward: 1200 → false');
+assertEqual(planning.awkwardRemainder(-5), false, 'awkward: отриц → false');
+// PLANNING_WEIGHTS экспортирован, значения 10..100
+assertEqual(planning.PLANNING_WEIGHTS.material, 100, 'вес material=100');
+// changeoverCost при дефолтах: одиночная смена сырья=100 > намотки=70 > макс ножей=25; одинаковые=0
+var base = { materialId:'1', winding:'IN', batchId:'b1', jumboRemainingM:0, knifeCount:4, knifeWidths:[60,60,60,60], rollerWidth:60 };
+function clone(o,patch){ var c={}; for(var k in o) c[k]=o[k]; for(var k in (patch||{})) c[k]=patch[k]; return c; }
+assertEqual(planning.changeoverCost(base, clone(base), null), 0, 'cost: идентичные → 0');
+assertEqual(planning.changeoverCost(base, clone(base,{materialId:'2'}), null), 100, 'cost: смена сырья = 100');
+assertEqual(planning.changeoverCost(base, clone(base,{winding:'OUT'}), null), 70, 'cost: смена намотки = 70');
+// макс смена ножей (полностью разная конфигурация) = вес knife (25), т.к. нормировка min(1,…)
+assertEqual(planning.changeoverCost(base, clone(base,{knifeCount:20, knifeWidths:[20,20,20]}), null) >= 25 - 1e-9
+            && planning.changeoverCost(base, clone(base,{knifeCount:20, knifeWidths:[20,20,20]}), null) <= 25 + 1e-9, true, 'cost: макс ножи ≈ 25');
+
 console.log('\n' + passed + ' assertions passed');
