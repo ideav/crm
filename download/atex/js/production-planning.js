@@ -742,13 +742,13 @@
         var o = opts || {};
         if (!pairs || !pairs.length) {
             if (!o.silent) self.notify('Очередь не изменилась', 'info');
-            return Promise.resolve();
+            return Promise.resolve(true);
         }
 
         var seqReqId = reqIdByName(this.meta.cut, CUT_REQ.sequence);
         if (!seqReqId) {
             self.notify('Реквизит «' + CUT_REQ.sequence + '» не найден в метаданных', 'error');
-            return Promise.resolve();
+            return Promise.resolve(false);
         }
 
         this.setBusy(true);
@@ -772,9 +772,11 @@
             if (!o.silent) {
                 self.notify(o.successMessage || 'Очередь сохранена', 'success');
             }
+            return true;
         }).catch(function(err) {
             self.setBusy(false);
             self.notify('Ошибка сохранения очереди: ' + err.message, 'error');
+            return false;
         });
     };
 
@@ -805,10 +807,9 @@
                 return;
             }
 
-            var successMsg = 'Запланировано: ' + plan.length + ' резок (изменено ' + changed.length + ')';
-            self.saveSequences(changed, { silent: true }).then(function() {
-                // saveSequences уже вызвал reload+render; добавляем итоговое уведомление.
-                self.notify(successMsg, 'success');
+            self.saveSequences(changed, { silent: true }).then(function(ok) {
+                // saveSequences уже вызвал reload+render; добавляем итоговое уведомление только при успехе.
+                if (ok) self.notify('Запланировано: ' + plan.length + ' резок (изменено ' + changed.length + ')', 'success');
             });
         }
 
