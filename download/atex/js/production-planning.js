@@ -194,6 +194,34 @@
         });
     }
 
+    // Видимость резки в очереди диспетчера (за сегодня и позже / по выбранной дате).
+    // Резка показывается, если ВСЕ условия выполнены:
+    //  1) статус не «Завершён» (выполненные резки в очередь не показываем);
+    //  2) заказ резки согласован — «Дата согласования» заказа не пустая
+    //     (orderApprovalDate из отчёта cut_planning, через Позиция→Заказ);
+    //  3) «Дата план» совпадает с выбранной датой ИЛИ пустая (ещё не запланирована —
+    //     напр. только что сгенерированная резка). selectedDate пустая → дата не фильтрует.
+    // Форматы дат разные («ДД.ММ.ГГГГ» из отчёта, «ГГГГ-ММ-ДД» из <input type=date>) —
+    // нормализуем общим batchDateKey.
+    function isCutVisible(cut, selectedDate) {
+        if (!cut) return false;
+        if (String(cut.status || '').trim() === 'Завершён') return false;
+        if (!String(cut.orderApprovalDate || '').trim()) return false;
+        var pd = String(cut.planDate || '').trim();
+        if (pd === '') return true;
+        var sd = String(selectedDate == null ? '' : selectedDate).trim();
+        if (sd === '') return true;
+        return batchDateKey(pd) === batchDateKey(sd);
+    }
+
+    // Текущая дата как «ГГГГ-ММ-ДД» для <input type=date> (только браузер).
+    function todayISO() {
+        var d = new Date();
+        var m = String(d.getMonth() + 1); if (m.length < 2) m = '0' + m;
+        var day = String(d.getDate()); if (day.length < 2) day = '0' + day;
+        return d.getFullYear() + '-' + m + '-' + day;
+    }
+
     // Сборка полей `t{reqId}` для записи. reqIds — { ключ: числовойId },
     // values — { ключ: значение }. Пустые значения (''/null/undefined) опускаются,
     // чтобы не перетирать данные и не плодить пустые реквизиты.
@@ -243,7 +271,9 @@
                     knifeWidths: [],
                     winding: normWinding(row.cut_winding),
                     rollerWidth: (row.cut_roller_width == null || row.cut_roller_width === '') ? 0 : Number(row.cut_roller_width),
-                    isFoil: /фольг/i.test(str(row.cut_material))
+                    isFoil: /фольг/i.test(str(row.cut_material)),
+                    orderId: str(row.order_id),
+                    orderApprovalDate: str(row.order_approval_date)
                 };
                 order.push(cutId);
             }
@@ -520,6 +550,7 @@
         mapCutRecord: mapCutRecord,
         groupBySlitter: groupBySlitter,
         filterCuts: filterCuts,
+        isCutVisible: isCutVisible,
         buildFields: buildFields,
         rowsToPlanning: rowsToPlanning,
         rowsToPositions: rowsToPositions,
@@ -585,7 +616,7 @@
         this.cutTypeStripsLoaded = {};          // { typeId: true } — полосы типа загружены
         this.genBatches = [];      // [{ id, materialId, dateKey, remainder }]
         this.draft = this.blankDraft();
-        this.filter = { slitter: '', status: '' };
+        this.filter = { slitter: '', status: '', date: todayISO() };  // дата плана по умолчанию — сегодня
         this.selectedCutId = null; // выбранная резка для привязки обеспечения
         this.busy = false;
     }
@@ -1321,11 +1352,16 @@
         var statusFilter = this.selectText([''].concat(CUT_STATUSES), this.filter.status, function(v) { self.filter.status = v; self.renderQueue(); });
         // первый пункт статуса — «все»
         statusFilter.options[0].textContent = 'Все статусы';
+        var dateFilter = el('input', { class: 'atex-pp-input', type: 'date', value: this.filter.date || '' });
+        dateFilter.addEventListener('change', function() { self.filter.date = dateFilter.value; self.renderQueue(); });
         filters.appendChild(field('Станок', slitterFilter));
+        filters.appendChild(field('Дата плана', dateFilter));
         filters.appendChild(field('Статус', statusFilter));
         box.appendChild(filters);
 
-        var filtered = filterCuts(this.cuts, this.filter);
+        // Базовая видимость очереди: не «Завершён», заказ согласован, дата плана = выбранной/пустая.
+        var visible = (this.cuts || []).filter(function(c) { return isCutVisible(c, self.filter.date); });
+        var filtered = filterCuts(visible, this.filter);
         var groups = groupBySlitter(filtered);
 
         if (!groups.length) {
