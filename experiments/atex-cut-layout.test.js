@@ -40,8 +40,12 @@ assertEqual(L.strips.filter(function(s){return s.purpose==='Заказ'&&s.width
   && L.strips.filter(function(s){return s.purpose==='Заказ'&&s.width===70;}).length>0, true, 'composeLayout: обе заказанные ширины есть');
 // used + remainder == jumbo
 assertEqual(layout.round3(L.used + L.remainder), 910, 'used+remainder=джамбо');
-// 110 дозаполнена по спросу (>1 полосы, спрос 50>30)
-assertEqual(L.strips.filter(function(s){return s.width===110&&s.purpose==='Заказ';}).reduce(function(a,s){return a+s.qty;},0) >= 1, true, '110 уложена');
+// 110 дозаполнена по спросу: спрос 50>30 → полос 110 строго больше, чем 70
+var q110 = L.strips.filter(function(s){return s.width===110&&s.purpose==='Заказ';}).reduce(function(a,s){return a+s.qty;},0);
+var q70 = L.strips.filter(function(s){return s.width===70&&s.purpose==='Заказ';}).reduce(function(a,s){return a+s.qty;},0);
+assertEqual(q110 > q70 && q110 >= 2, true, 'composeLayout: 110 дозаполнена по спросу (qty110>qty70, >1)');
+// джамбо заполнен без отхода (110×k + 70×m + добор = 910)
+assertEqual(L.remainder, 0, 'composeLayout: отход 0 (джамбо заполнен)');
 // overflow: ширина шире джамбо → в overflow, не в strips
 var L2 = layout.composeLayout(100, [d(120,5,'x'), d(40,5,'y')], [], 0);
 assertEqual(L2.overflow.map(function(o){return o.positionId;}), ['x'], 'composeLayout: 120 шире 100 → overflow');
@@ -60,7 +64,7 @@ var res = layout.planLayouts({
   preferred: [{width:50,popularity:8}],
   options: { windowDays:3, tolerance:0 }
 });
-assertEqual(res.layouts.length >= 1, true, 'planLayouts: есть раскладка');
+assertEqual(res.layouts.length, 1, 'planLayouts: a+b (одно окно) → ровно одна раскладка');
 assertEqual(res.layouts[0].positionsCovered.indexOf('a')>=0 && res.layouts[0].positionsCovered.indexOf('b')>=0, true, 'a и b в одной раскладке (окно)');
 assertEqual(res.skipped.map(function(s){return s.positionId;}), ['big'], 'big (шире джамбо) → skipped');
 // чистота

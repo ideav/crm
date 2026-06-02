@@ -86,7 +86,8 @@
     var byWidth = {}; var order = []; var overflow = [];
     (demands || []).forEach(function(dem){
       var w = toNumber(dem.width);
-      if (w > W) { overflow.push({ width: dem.width, qty: dem.qty, positionId: dem.positionId }); return; }
+      // ширина вне (0, джамбо] не укладывается (в т.ч. вырожденная ≤0) → overflow
+      if (w <= 0 || w > W) { overflow.push({ width: dem.width, qty: dem.qty, positionId: dem.positionId }); return; }
       var key = String(w);
       if (!byWidth[key]) { byWidth[key] = { width: w, qty: 0, positionIds: [] }; order.push(key); }
       byWidth[key].qty += toNumber(dem.qty);
