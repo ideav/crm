@@ -1495,7 +1495,7 @@
         var self = this;
         this.root.innerHTML = '';
         var layout = el('div', { class: 'atex-pp-layout' });
-        this.formEl = el('section', { class: 'atex-pp-panel atex-pp-form' });
+        this.formEl = el('section', { class: 'atex-pp-panel atex-pp-form', 'data-submit-scope': '' });
         var queueWrap = el('section', { class: 'atex-pp-panel atex-pp-queue-panel' }, [
             el('h2', { class: 'atex-pp-form-title', text: 'Очередь резок по станкам' })
         ]);
