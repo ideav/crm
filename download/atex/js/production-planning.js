@@ -582,7 +582,7 @@
         this.genPositions = [];    // [{ id, materialId, width, qty }] — все позиции
         this.cutTypeIndex = {};    // { typeId: { materialId, widths:[{width,qty}] } }
         this.cutTypeIndexLoaded = false;        // флаг: loadCutTypeIndex завершён
-        this.cutTypeStripsLoaded = {};          // { materialId: true } — полосы загружены
+        this.cutTypeStripsLoaded = {};          // { typeId: true } — полосы типа загружены
         this.genBatches = [];      // [{ id, materialId, dateKey, remainder }]
         this.draft = this.blankDraft();
         this.filter = { slitter: '', status: '' };
@@ -737,6 +737,7 @@
     // После завершения this.cutTypeIndexLoaded = true — сигнал для ensureCutTypeStrips.
     AtexProductionPlanning.prototype.loadCutTypeIndexAll = function() {
         var self = this;
+        if (this.cutTypeIndexLoaded) return Promise.resolve();   // не перезатирать уже загруженный индекс (refresh)
         var meta = this.meta.cutType;
         if (!meta) { this.cutTypeIndexLoaded = true; return Promise.resolve(); }
         var matIdx = columnIndex(meta, 'Вид сырья');

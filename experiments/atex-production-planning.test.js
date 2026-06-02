@@ -320,4 +320,23 @@ assertEqual(g.plan.length, 3, 'generateCutPlan: p1 → 3 резки');
 assertEqual(g.plan.every(function(x){ return x.cutTypeId==='T1' && x.slitterId==='10' && x.batchId==='b1' && x.positionId==='p1'; }), true, 'generateCutPlan: поля резок p1');
 assertEqual(g.skipped.map(function(s){return s.positionId;}), ['p2'], 'generateCutPlan: p2 пропущена (нет типа)');
 
+// ── Task 3: чистые хелперы плумбинга ──
+// rowsToGenPositions: маппинг строк positions_list → дескрипторы
+var grp = planning.rowsToGenPositions([
+  { position_id:'10', position_material_id:'5', position_width:'60', position_qty:'30' },
+  { position_id:'11', position_material_id:'5', position_width:'', position_qty:'' }
+]);
+assertEqual(grp, [
+  { id:'10', materialId:'5', width:60, qty:30 },
+  { id:'11', materialId:'5', width:0, qty:0 }
+], 'rowsToGenPositions: маппинг + пустые ширина/кол-во → 0');
+
+// batchDateKey: ISO / D.M.Y / D/M/Y → сортируемое число; пусто/мусор → Infinity (в конец FIFO)
+assertEqual(planning.batchDateKey('2026-01-05'), 20260105, 'batchDateKey: ISO');
+assertEqual(planning.batchDateKey('5.1.2026'), 20260105, 'batchDateKey: D.M.Y');
+assertEqual(planning.batchDateKey('5/1/2026'), 20260105, 'batchDateKey: D/M/Y');
+assertEqual(planning.batchDateKey('') === Infinity, true, 'batchDateKey: пусто → Infinity');
+assertEqual(planning.batchDateKey('мусор') === Infinity, true, 'batchDateKey: мусор → Infinity');
+assertEqual(planning.batchDateKey('2026-01-05') < planning.batchDateKey('2026-02-01'), true, 'batchDateKey: старше = меньше (FIFO)');
+
 console.log('\n' + passed + ' assertions passed');
