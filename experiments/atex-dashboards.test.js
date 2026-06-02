@@ -59,9 +59,12 @@ const flow = dashboards.productionFlow({
     ]
 });
 
-assert.strictEqual(flow.total, 2, 'two order positions are represented in the production path');
-assert.strictEqual(flow.done, 1, 'one position is fully shipped');
+// #3073: терминальные заказы (Выполнен/Отменён) в «путь продукции» не попадают —
+// остаётся только актуальная позиция заказа 2100.
+assert.strictEqual(flow.total, 1, 'terminal orders are excluded from the production path');
+assert.strictEqual(flow.done, 0, 'no fully shipped (terminal) order remains in the path');
 assert.strictEqual(flow.active, 1, 'one position is still active');
+assert(flow.rows.every(function(r) { return r.orderId !== '1966'; }), 'completed order 1966 is not shown in the path');
 
 const activeRow = flow.rows[0];
 assert.strictEqual(activeRow.orderId, '2100', 'active/incomplete production rows are shown first');
@@ -77,12 +80,6 @@ assert.deepStrictEqual(
     'active row distinguishes active stages from the missing GP/shipment stage'
 );
 
-const doneRow = flow.rows[1];
-assert.strictEqual(doneRow.progress, 100, 'shipped row reaches 100% progress');
-assert.strictEqual(doneRow.done, true, 'shipped row is marked done');
-assert.strictEqual(doneRow.stages[4].status, 'Отгружен', 'GP shipment status is visible');
-assert(doneRow.stages[4].detail.includes('A-3002-01'), 'GP storage address is carried into stage details');
-
 assert.strictEqual(dashboards.stageState('Завершен', ['Завершён', 'Завершен']), 'done', 'stageState accepts e/ё variants');
 assert.strictEqual(dashboards.stageState('', ['Выполнен']), 'pending', 'empty stage is pending');
 
@@ -96,9 +93,9 @@ assert(docs.includes('Путь продукции'), 'Atex workplace documentati
 
 // ── rowsToEntities: строки отчёта order_pipeline → сущности ──
 var PR = [
-  { order_id:'10', order_no:'A-1', order_status:'Новый',
+  { order_id:'10', order_no:'A-1', order_status:'Новый', order_deadline:'2026-06-10',
     position_id:'', provision_id:'', cut_id:'', gp_id:'' },
-  { order_id:'11', order_no:'A-2', order_status:'Выполнен',
+  { order_id:'11', order_no:'A-2', order_status:'Выполнен', order_deadline:'2026-06-20',
     position_id:'21', position_status:'Отгружена', position_cut_type:'TT', position_width_mm:'57', position_length_m:'10',
     provision_id:'31', provision_used_m:'1200', provision_status:'Выполнено',
     cut_id:'41', cut_no:'4', cut_slitter:'Станок 1', cut_status:'Завершён', cut_footage_m:'1300',
@@ -106,7 +103,7 @@ var PR = [
 ];
 var ent = dashboards.rowsToEntities(PR);
 assertEqual(ent.orders.length, 2, 'rowsToEntities: 2 заказа (dedup)');
-assertEqual(ent.orders[0], { id:'10', number:'A-1', status:'Новый' }, 'rowsToEntities: заказ');
+assertEqual(ent.orders[0], { id:'10', number:'A-1', status:'Новый', deadline:'2026-06-10' }, 'rowsToEntities: заказ (со сроком выполнения)');
 assertEqual(ent.cuts.length, 1, 'rowsToEntities: пустые стадии не создают резок');
 assertEqual(ent.cuts[0], { id:'41', number:'4', slitter:'Станок 1', status:'Завершён', footage:'1300' }, 'rowsToEntities: резка');
 assertEqual(ent.positions[0].orderId, '11', 'rowsToEntities: позиция знает заказ');
@@ -129,9 +126,13 @@ controller.getJson = function(pathname) {
 controller.collect().then(function(result) {
     assertEqual(collectCalls.sort(), ['report/material_stock?JSON_KV', 'report/order_pipeline?JSON_KV'],
         'collect() запрашивает ровно два отчёта');
-    assert.strictEqual(result.counts.order, 2, 'collect(): counts.order = число уникальных заказов');
+    // #3073: пустой диапазон дат → только актуальные заказы (Выполнен 'A-2' отфильтрован).
+    assert.strictEqual(result.counts.order, 1, 'collect(): пустой диапазон → только актуальные заказы');
     assert.strictEqual(result.counts.rawBatch, 1, 'collect(): counts.rawBatch = строки material_stock');
     assert(result.orders && result.orders.rows, 'collect(): поле orders присутствует');
+    assert(result.filter && result.filter.active === true, 'collect(): фильтр по умолчанию активен (без дат)');
+    assert(result.orders.rows.every(function(r) { return !dashboards.isTerminalStatus(r.key); }),
+        'collect(): по умолчанию терминальные статусы не показываются');
     assert(result.materials && result.materials.rows.length === 1, 'collect(): поле materials присутствует');
     assert.strictEqual(result.materials.rows[0].key, 'Полиэтилен', 'collect(): materials группируется по полю material');
     console.log('atex dashboards production path: ok');
@@ -139,3 +140,33 @@ controller.collect().then(function(result) {
     console.error(err && err.stack || err);
     process.exit(1);
 });
+
+// ── #3073: фильтр диапазона дат по сроку выполнения ──
+// Пустой диапазон → только актуальные; заполненный → заказы со сроком в диапазоне
+// (включительно), в т.ч. терминальные — для среза «заказы по статусам».
+var ranged = dashboards.buildSummaries(PR, [], { from: '2026-06-15', to: '2026-06-25' });
+assert.strictEqual(ranged.counts.order, 1, 'buildSummaries: диапазон выбирает заказ по сроку выполнения');
+assert.strictEqual(ranged.orders.rows[0].key, 'Выполнен', 'buildSummaries: терминальный заказ попадает в срез по дате');
+assert.strictEqual(ranged.flow.total, 0, 'buildSummaries: путь продукции всё равно скрывает терминальные заказы');
+assert.strictEqual(ranged.filter.active, false, 'buildSummaries: при заполненном диапазоне фильтр не «активный»');
+
+var emptyRange = dashboards.buildSummaries(PR, [], {});
+assert.strictEqual(emptyRange.counts.order, 1, 'buildSummaries: пустой диапазон → только актуальные');
+assert.strictEqual(emptyRange.orders.rows[0].key, 'Новый', 'buildSummaries: актуальный заказ виден без дат');
+
+// selectOrders / dateInRange / isTerminalStatus — точечно.
+assert.strictEqual(dashboards.isTerminalStatus('Отменен'), true, 'isTerminalStatus: «Отменен» (без ё) терминальный');
+assert.strictEqual(dashboards.isTerminalStatus('В производстве'), false, 'isTerminalStatus: активный статус не терминальный');
+assert.strictEqual(dashboards.dateInRange('2026-06-20', '2026-06-20', '2026-06-25'), true, 'dateInRange: нижняя граница включительно');
+assert.strictEqual(dashboards.dateInRange('2026-06-25', '2026-06-20', '2026-06-25'), true, 'dateInRange: верхняя граница включительно');
+assert.strictEqual(dashboards.dateInRange('2026-06-26', '2026-06-20', '2026-06-25'), false, 'dateInRange: вне диапазона');
+assert.strictEqual(dashboards.dateInRange('', '2026-06-20', ''), false, 'dateInRange: пустая дата не входит в непустой диапазон');
+
+// materialStock сортирует остатки по убыванию (#3073).
+var ms = dashboards.materialStock([
+    { material: 'Полипропилен', received: '100', remainder: '5' },
+    { material: 'Полиэтилен', received: '500', remainder: '200' },
+    { material: 'Лавсан', received: '300', remainder: '50' }
+]);
+assertEqual(ms.rows.map(function(r) { return r.key; }), ['Полиэтилен', 'Лавсан', 'Полипропилен'],
+    'materialStock: остатки отсортированы по убыванию');
