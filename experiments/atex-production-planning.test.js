@@ -60,7 +60,8 @@ assertEqual(planning.mapCutRecord(rec, cutMeta), {
     cutType: { id: '104', label: '25×35' },
     materialBatch: { id: '106', label: 'Партия A' },
     planDate: '2026-06-01',
-    status: 'В очереди'
+    status: 'В очереди',
+    sequence: null
 }, 'mapCutRecord flattens record using metadata');
 
 // ── groupBySlitter + filterCuts ──
@@ -119,10 +120,10 @@ var plan = planning.rowsToPlanning(reportRows);
 assertEqual(plan.cuts, [
     { id: '10', number: '1', slitter: { id: '101', label: 'Станок 1' },
       cutType: { id: null, label: '99мм×9' }, materialBatch: { id: null, label: 'НК-0400' },
-      planDate: '06.05.2026', status: 'В работе' },
+      planDate: '06.05.2026', status: 'В работе', sequence: null },
     { id: '20', number: '2', slitter: { id: null, label: '' },
       cutType: { id: null, label: '25мм×35' }, materialBatch: { id: null, label: 'НК-0118' },
-      planDate: '27.05.2026', status: 'Ожидает' }
+      planDate: '27.05.2026', status: 'Ожидает', sequence: null }
 ], 'rowsToPlanning dedups cuts by cut_id, slitter без id → {id:null}');
 assertEqual(plan.supplies, [
     { id: '900', positionId: '700', cutId: '10' },
@@ -174,5 +175,22 @@ assertEqual(planning.isMaterialBlocked(['1','2'], 3), false, 'isMaterialBlocked:
 assertEqual(planning.isMaterialBlocked(['1','2'], 1), true, 'isMaterialBlocked: число==строка');
 assertEqual(planning.isMaterialBlocked([], '1'), false, 'isMaterialBlocked: пустой список');
 assertEqual(planning.isMaterialBlocked(['1'], ''), false, 'isMaterialBlocked: пустой материал');
+
+// ── groupBySlitter сортирует резки внутри станка по sequence (возр., пустые в конец, стабильно) ──
+var seqCuts = [
+    { id:'1', slitter:{id:'10',label:'Станок 1'}, sequence:2 },
+    { id:'2', slitter:{id:'10',label:'Станок 1'}, sequence:1 },
+    { id:'3', slitter:{id:'10',label:'Станок 1'}, sequence:null },
+    { id:'4', slitter:{id:'10',label:'Станок 1'}, sequence:1 }
+];
+var g = planning.groupBySlitter(seqCuts)[0];
+assertEqual(g.cuts.map(function(c){return c.id;}), ['2','4','1','3'], 'сорт по sequence (возр), равные стабильно, пустые в конец');
+// ── rowsToPlanning читает cut_sequence → number|null ──
+var rp = planning.rowsToPlanning([
+    { cut_id:'100', cut_no:'5', cut_sequence:'3', supply_id:'' },
+    { cut_id:'101', cut_no:'6', cut_sequence:'', supply_id:'' }
+]);
+assertEqual(rp.cuts[0].sequence, 3, 'rowsToPlanning: cut_sequence 3 → 3');
+assertEqual(rp.cuts[1].sequence, null, 'rowsToPlanning: пусто → null');
 
 console.log('\n' + passed + ' assertions passed');

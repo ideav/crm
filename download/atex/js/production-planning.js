@@ -68,7 +68,8 @@
         materialBatch: 'Партия сырья',
         planDate: 'Дата план',
         status: 'Статус',
-        notes: 'Примечания'
+        notes: 'Примечания',
+        sequence: 'Очередность'
     };
     // Реквизиты подчинённого «Обеспечения» (up = позиция заказа).
     var SUPPLY_REQ = {
@@ -136,6 +137,7 @@
             var idx = columnIndex(meta, reqName);
             return idx >= 0 ? (r[idx] == null ? '' : String(r[idx])) : '';
         }
+        var seqRaw = val(CUT_REQ.sequence);
         return {
             id: String(record && record.i),
             number: r[0] == null ? '' : String(r[0]),
@@ -143,7 +145,8 @@
             cutType: ref(CUT_REQ.cutType),
             materialBatch: ref(CUT_REQ.materialBatch),
             planDate: val(CUT_REQ.planDate),
-            status: val(CUT_REQ.status)
+            status: val(CUT_REQ.status),
+            sequence: (seqRaw === '' || seqRaw == null) ? null : Number(seqRaw)
         };
     }
 
@@ -161,6 +164,13 @@
                 order.push(key);
             }
             groups[key].cuts.push(c);
+        });
+        // Сортировка резок внутри каждой группы по sequence (возр., null/NaN — в конец, стабильно).
+        function seqKey(c) { var s = c && c.sequence; var n = Number(s); return (s == null || isNaN(n)) ? Infinity : n; }
+        Object.keys(groups).forEach(function(k) {
+            groups[k].cuts = groups[k].cuts.map(function(c, i) { return { c: c, i: i }; })
+                .sort(function(a, b) { return seqKey(a.c) - seqKey(b.c) || a.i - b.i; })
+                .map(function(x) { return x.c; });
         });
         return order
             .map(function(k) { return groups[k]; })
@@ -215,6 +225,7 @@
         (rows || []).forEach(function(row) {
             var cutId = str(row.cut_id);
             if (cutId && !cutsById[cutId]) {
+                var seqVal = row.cut_sequence;
                 cutsById[cutId] = {
                     id: cutId,
                     number: str(row.cut_no),
@@ -222,7 +233,8 @@
                     cutType: { id: null, label: str(row.cut_type) },
                     materialBatch: { id: null, label: str(row.cut_material_batch) },
                     planDate: str(row.cut_plan_date),
-                    status: str(row.cut_status)
+                    status: str(row.cut_status),
+                    sequence: (seqVal == null || seqVal === '') ? null : Number(seqVal)
                 };
                 order.push(cutId);
             }
@@ -731,6 +743,7 @@
                 var supplies = self.supplyCount(c.id);
                 var card = el('button', { class: 'atex-pp-cut' + (active ? ' is-active' : ''), type: 'button' }, [
                     el('span', { class: 'atex-pp-cut-num', text: '№ ' + (c.number || c.id) }),
+                    el('span', { class: 'atex-pp-cut-seq', text: 'Очер.: ' + (c.sequence != null && !isNaN(c.sequence) ? c.sequence : '—') }),
                     el('span', { class: 'atex-pp-cut-type', text: c.cutType.label || '—' }),
                     el('span', { class: 'atex-pp-cut-batch', text: c.materialBatch.label || '' }),
                     el('span', { class: 'atex-pp-cut-date', text: c.planDate || '' }),
