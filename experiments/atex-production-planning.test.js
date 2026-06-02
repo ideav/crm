@@ -349,4 +349,21 @@ assertEqual(planning.isCutVisible(vc({planDate:'02.06.2026'}), ''), true, 'isCut
 assertEqual(planning.isCutVisible(vc({planDate:''}), ''), true, 'isCutVisible: обе пусты → видна');
 assertEqual(planning.isCutVisible(null, '2026-06-02'), false, 'isCutVisible: null → false');
 
+// ── Сводка по полосам редактора (stripsUsedWidth/stripsTotalKnives/stripsRemainder) ──
+// Полосы [{width:110,qty:2},{width:70,qty:1}] при джамбо 910:
+//   занято = 110*2 + 70*1 = 290; ножей = 2+1 = 3; остаток = 910 - 290 = 620.
+var sStrips = [{ width: 110, qty: 2 }, { width: 70, qty: 1 }];
+assertEqual(planning.stripsUsedWidth(sStrips), 290, 'stripsUsedWidth: 110*2+70*1=290');
+assertEqual(planning.stripsTotalKnives(sStrips), 3, 'stripsTotalKnives: 2+1=3');
+assertEqual(planning.stripsRemainder(910, sStrips), 620, 'stripsRemainder: 910-290=620');
+// терпимый разбор (строки, запятая, мусор → 0) и пустой вход
+assertEqual(planning.stripsUsedWidth([{ width: '25,5', qty: '2' }]), 51, 'stripsUsedWidth: запятая-десятичный, строки');
+assertEqual(planning.stripsTotalKnives([]), 0, 'stripsTotalKnives: пусто → 0');
+assertEqual(planning.stripsRemainder(910, []), 910, 'stripsRemainder: нет полос → весь джамбо');
+assertEqual(planning.stripsUsedWidth([{ width: 'мусор', qty: 'x' }]), 0, 'stripsUsedWidth: мусор → 0');
+// вход не мутируется
+var sSrc = [{ width: 110, qty: 2 }];
+planning.stripsUsedWidth(sSrc); planning.stripsTotalKnives(sSrc); planning.stripsRemainder(910, sSrc);
+assertEqual(sSrc, [{ width: 110, qty: 2 }], 'strips-сводка: вход не мутируется');
+
 console.log('\n' + passed + ' assertions passed');

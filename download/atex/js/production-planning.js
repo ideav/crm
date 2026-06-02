@@ -425,6 +425,39 @@
         return out;
     }
 
+    // ── Чистая сводка по полосам редактора (зеркало cut-calc calc.*) ──
+    // Модули самостоятельны: дублируем формулы из cut-calc, чтобы редактор полос
+    // не зависел от загрузки cut-calc.js. Вход — массив полос [{width, qty}];
+    // значения терпимо приводятся к числу (запятая → точка, мусор → 0), вход не мутируется.
+
+    // Терпимый разбор числа: запятая как десятичный разделитель, мусор/пусто → 0.
+    function stripNum(value) {
+        if (typeof value === 'number') return isFinite(value) ? value : 0;
+        var text = String(value == null ? '' : value).replace(/\s+/g, '').replace(',', '.');
+        var n = parseFloat(text);
+        return isFinite(n) ? n : 0;
+    }
+
+    // Округление до 3 знаков — убрать артефакты float-арифметики.
+    function round3(n) { return Math.round(n * 1000) / 1000; }
+
+    // Занятая полосами ширина — Σ(ширина × количество).
+    function stripsUsedWidth(strips) {
+        return round3((strips || []).reduce(function(sum, s) {
+            return sum + stripNum(s.width) * stripNum(s.qty);
+        }, 0));
+    }
+
+    // «Итого ножей» — сумма всех количеств полос (Σ qty).
+    function stripsTotalKnives(strips) {
+        return (strips || []).reduce(function(sum, s) { return sum + stripNum(s.qty); }, 0);
+    }
+
+    // «Остаток, мм» — ширина джамбо минус занятая полосами ширина.
+    function stripsRemainder(jumboWidth, strips) {
+        return round3(stripNum(jumboWidth) - stripsUsedWidth(strips));
+    }
+
     // Позиции, не имеющие ни одной записи обеспечения. supplies — [{positionId}].
     function unsuppliedPositions(positions, supplies){
         var sup = {}; (supplies || []).forEach(function(s){ if (s && s.positionId != null) sup[String(s.positionId)] = true; });
@@ -552,7 +585,10 @@
         unsuppliedPositions: unsuppliedPositions,
         pickSlitter: pickSlitter,
         pickBatchFIFO: pickBatchFIFO,
-        aggregateStrips: aggregateStrips
+        aggregateStrips: aggregateStrips,
+        stripsUsedWidth: stripsUsedWidth,
+        stripsTotalKnives: stripsTotalKnives,
+        stripsRemainder: stripsRemainder
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -594,6 +630,7 @@
         this.draft = this.blankDraft();
         this.filter = { slitter: '', status: '', date: todayISO() };  // дата плана по умолчанию — сегодня
         this.selectedCutId = null; // выбранная резка для привязки обеспечения
+        this.stripEditCutId = null; // резка с открытым инлайн-редактором полос (одна за раз)
         this.busy = false;
     }
 
@@ -935,6 +972,263 @@
         var self = this;
         // Полосы перечитываем перед очередью, чтобы knifeCount/knifeWidths влились в свежие резки.
         return this.loadCutStrips().then(function() { return self.loadPlanning(); });
+    };
+
+    // ── Встроенный редактор Полос резки (база cut-calc renderStrips/computeSummary/syncStrips) ──
+
+    var STRIP_PURPOSES = ['Заказ', 'Склад', 'Отходы'];
+
+    // Загрузка текущих полос резки из object/ (подчинённые: F_U = cutId).
+    // Колонки JSON_OBJ резолвятся по имени (columnIndex). → [{id, width, qty, purpose}].
+    AtexProductionPlanning.prototype.loadStripsForCut = function(cutId) {
+        var sm = this.meta.strip;
+        var widthIdx = columnIndex(sm, STRIP_REQ.width);
+        var qtyIdx = columnIndex(sm, STRIP_REQ.qty);
+        var purposeIdx = columnIndex(sm, STRIP_REQ.purpose);
+        return this.getJson('object/' + sm.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(cutId) + '&LIMIT=0,500').then(function(rows) {
+            return (rows || []).map(function(rec) {
+                var r = rec.r || [];
+                return {
+                    id: String(rec.i),
+                    width: (widthIdx >= 0 && r[widthIdx] != null) ? String(r[widthIdx]) : '',
+                    qty: (qtyIdx >= 0 && r[qtyIdx] != null) ? String(r[qtyIdx]) : '',
+                    purpose: (purposeIdx >= 0 && r[purposeIdx] != null) ? String(r[purposeIdx]) : ''
+                };
+            });
+        });
+    };
+
+    // Открыть инлайн-панель редактора полос для резки. container — очередь (this.queueEl).
+    // Одна панель за раз: повторный клик по той же резке закрывает; по другой — переключает.
+    AtexProductionPlanning.prototype.openStrips = function(cut, container) {
+        var self = this;
+        if (!this.meta.strip) { this.notify('Не найдены метаданные таблицы «' + TABLE.strip + '»', 'error'); return; }
+
+        // Удалить существующую панель (если открыта).
+        var existing = container.querySelector('.atex-pp-strip-panel');
+        var wasSame = existing && String(existing.getAttribute('data-cut-id')) === String(cut.id);
+        if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+        if (wasSame) { this.stripEditCutId = null; return; } // повторный клик — закрыть
+        this.stripEditCutId = String(cut.id);
+
+        var panel = el('div', { class: 'atex-pp-strip-panel', dataset: { cutId: String(cut.id) } });
+        panel.appendChild(el('div', { class: 'atex-pp-strip-loading', text: 'Загрузка полос…' }));
+        container.appendChild(panel);
+
+        this.loadStripsForCut(cut.id).then(function(loaded) {
+            // Если за время загрузки панель закрыли/переключили — ничего не рисуем.
+            if (String(self.stripEditCutId) !== String(cut.id) || !panel.parentNode) return;
+            // Глубокая копия исходных полос для диффа при сохранении.
+            var original = loaded.map(function(s) { return { id: s.id, width: s.width, qty: s.qty, purpose: s.purpose }; });
+            var strips = loaded.map(function(s) { return { id: s.id, width: s.width, qty: s.qty, purpose: s.purpose }; });
+            self.renderStripPanel(panel, cut, strips, original);
+        }).catch(function(err) {
+            if (panel.parentNode) {
+                panel.innerHTML = '';
+                panel.appendChild(el('div', { class: 'atex-pp-empty', text: 'Ошибка загрузки полос: ' + err.message }));
+            }
+        });
+    };
+
+    // Рендер содержимого панели редактора полос (таблица + сводка + ходовые + кнопки).
+    AtexProductionPlanning.prototype.renderStripPanel = function(panel, cut, strips, original) {
+        var self = this;
+        var jumbo = Number(this.jumboWidthByMaterial[String(cut.materialId)]) || 0;
+        panel.innerHTML = '';
+
+        // Заголовок (read-only): сырьё + ширина джамбо.
+        var matLabel = (cut.materialBatch && cut.materialBatch.label) || cut.materialName || cut.materialId || '—';
+        panel.appendChild(el('div', { class: 'atex-pp-strip-header', text: 'Сырьё: ' + matLabel + ', Джамбо: ' + (jumbo || '—') + ' мм' }));
+
+        // Таблица полос.
+        var table = el('div', { class: 'atex-pp-strip-table' });
+        table.appendChild(el('div', { class: 'atex-pp-strip-row atex-pp-strip-head' }, [
+            el('span', { text: 'Ширина, мм' }),
+            el('span', { text: 'Количество' }),
+            el('span', { text: 'Назначение' }),
+            el('span', { text: '' })
+        ]));
+        var body = el('div', { class: 'atex-pp-strip-body' });
+        table.appendChild(body);
+        panel.appendChild(table);
+
+        var summaryEl = el('div', { class: 'atex-pp-strip-summary' });
+        panel.appendChild(summaryEl);
+
+        function recalc() {
+            var used = planning.stripsUsedWidth(strips);
+            var knives = planning.stripsTotalKnives(strips);
+            var rem = planning.stripsRemainder(jumbo, strips);
+            var within = Math.abs(rem) <= Math.abs(LAYOUT_TOLERANCE);
+            summaryEl.innerHTML = '';
+            summaryEl.appendChild(metric('Итого ножей', knives));
+            summaryEl.appendChild(metric('Занято, мм', used));
+            var remNode = metric('Остаток, мм', rem);
+            if (within) remNode.classList.add('is-ok'); else remNode.classList.add('is-warn');
+            summaryEl.appendChild(remNode);
+            var badge = el('span', { class: 'atex-pp-strip-badge ' + (within ? 'is-ok' : 'is-warn'), text: within ? 'в допуске' : 'вне допуска' });
+            summaryEl.appendChild(badge);
+        }
+
+        function metric(label, value) {
+            return el('div', { class: 'atex-pp-strip-metric' }, [
+                el('span', { class: 'atex-pp-strip-metric-label', text: label }),
+                el('span', { class: 'atex-pp-strip-metric-value', text: String(value) })
+            ]);
+        }
+
+        function renderRows() {
+            body.innerHTML = '';
+            strips.forEach(function(s, idx) {
+                var row = el('div', { class: 'atex-pp-strip-row' });
+
+                var w = el('input', { class: 'atex-pp-input', type: 'number', min: '0', step: 'any', placeholder: '0' });
+                w.value = s.width;
+                w.addEventListener('input', function() { s.width = w.value; recalc(); });
+                row.appendChild(w);
+
+                var q = el('input', { class: 'atex-pp-input', type: 'number', min: '0', step: '1', placeholder: '0' });
+                q.value = s.qty;
+                q.addEventListener('input', function() { s.qty = q.value; recalc(); });
+                row.appendChild(q);
+
+                row.appendChild(self.selectText(STRIP_PURPOSES, s.purpose, function(v) { s.purpose = v; }));
+
+                var del = el('button', { class: 'atex-pp-btn atex-pp-strip-del', type: 'button', title: 'Удалить полосу', text: '×' });
+                del.addEventListener('click', function() {
+                    strips.splice(idx, 1);
+                    renderRows();
+                    recalc();
+                });
+                row.appendChild(del);
+
+                body.appendChild(row);
+            });
+        }
+
+        // Кнопка «+ полоса».
+        var addBtn = el('button', { class: 'atex-pp-btn atex-pp-strip-add', type: 'button', text: '+ полоса' });
+        addBtn.addEventListener('click', function() {
+            strips.push({ id: null, width: '', qty: '', purpose: STRIP_PURPOSES[0] });
+            renderRows();
+            recalc();
+        });
+        panel.appendChild(addBtn);
+
+        // Панель ходовых ширин.
+        var prefWrap = el('div', { class: 'atex-pp-strip-pref' });
+        prefWrap.appendChild(el('div', { class: 'atex-pp-strip-pref-title', text: 'Ходовые ширины' }));
+        var prefList = el('div', { class: 'atex-pp-strip-pref-list' });
+        prefWrap.appendChild(prefList);
+        panel.appendChild(prefWrap);
+
+        function renderPreferred(list) {
+            prefList.innerHTML = '';
+            if (!list || !list.length) {
+                prefList.appendChild(el('div', { class: 'atex-pp-empty', text: 'Нет данных по ходовым ширинам.' }));
+                return;
+            }
+            list.forEach(function(p) {
+                var b = el('button', { class: 'atex-pp-btn atex-pp-strip-pref-item', type: 'button',
+                    text: p.width + ' мм · Популярность ' + p.popularity });
+                b.addEventListener('click', function() {
+                    strips.push({ id: null, width: String(p.width), qty: '1', purpose: 'Склад' });
+                    renderRows();
+                    recalc();
+                });
+                prefList.appendChild(b);
+            });
+        }
+
+        var matKey = String(cut.materialId == null ? '' : cut.materialId);
+        if (matKey !== '' && this.preferredByMaterial[matKey]) {
+            renderPreferred(this.preferredByMaterial[matKey]);
+        } else if (matKey !== '') {
+            prefList.appendChild(el('div', { class: 'atex-pp-strip-loading', text: 'Загрузка ходовых…' }));
+            this.loadPreferredWidths(matKey).then(function(list) {
+                if (String(self.stripEditCutId) === String(cut.id) && panel.parentNode) renderPreferred(list);
+            }).catch(function() {
+                if (panel.parentNode) renderPreferred([]);
+            });
+        } else {
+            renderPreferred([]);
+        }
+
+        // Кнопки действий.
+        var actions = el('div', { class: 'atex-pp-actions' });
+        var saveBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Сохранить полосы' });
+        saveBtn.addEventListener('click', function() {
+            if (self.busy) return;
+            self.saveStrips(cut.id, strips, original);
+        });
+        var closeBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Закрыть' });
+        closeBtn.addEventListener('click', function() {
+            self.stripEditCutId = null;
+            if (panel.parentNode) panel.parentNode.removeChild(panel);
+        });
+        actions.appendChild(saveBtn);
+        actions.appendChild(closeBtn);
+        panel.appendChild(actions);
+
+        renderRows();
+        recalc();
+    };
+
+    // Сохранить полосы резки — дифф original↔strips (зеркало cut-calc syncStrips):
+    //   нет id → _m_new (up=cutId); изменены width/qty/purpose → _m_set; удалённые id → _m_del.
+    // Реквизиты резолвятся по имени (STRIP_REQ). Возвращает Promise; setBusy/reload/notify.
+    AtexProductionPlanning.prototype.saveStrips = function(cutId, strips, original) {
+        var self = this;
+        var sm = this.meta.strip;
+        var reqIds = {
+            width: reqIdByName(sm, STRIP_REQ.width),
+            qty: reqIdByName(sm, STRIP_REQ.qty),
+            purpose: reqIdByName(sm, STRIP_REQ.purpose)
+        };
+
+        // Карта исходных полос по id для сравнения.
+        var origById = {};
+        (original || []).forEach(function(s) { if (s.id) origById[String(s.id)] = s; });
+        var keepIds = {};
+
+        var ops = [];
+        (strips || []).forEach(function(s) {
+            var hasData = String(s.width).trim() !== '' || String(s.qty).trim() !== '';
+            var fields = buildFields(reqIds, { width: s.width, qty: s.qty, purpose: s.purpose });
+            if (s.id) {
+                keepIds[String(s.id)] = true;
+                var o = origById[String(s.id)];
+                var changed = !o ||
+                    String(o.width).trim() !== String(s.width).trim() ||
+                    String(o.qty).trim() !== String(s.qty).trim() ||
+                    String(o.purpose).trim() !== String(s.purpose).trim();
+                if (changed) {
+                    ops.push(function() { return self.post('_m_set/' + s.id + '?JSON', fields); });
+                }
+            } else if (hasData) {
+                ops.push(function() {
+                    return self.post('_m_new/' + sm.id + '?JSON&up=' + encodeURIComponent(cutId), fields);
+                });
+            }
+        });
+        // Удалённые: исходные id, которых нет среди текущих полос.
+        Object.keys(origById).forEach(function(id) {
+            if (!keepIds[id]) ops.push(function() { return self.post('_m_del/' + id + '?JSON', {}); });
+        });
+
+        this.setBusy(true);
+        var chain = ops.reduce(function(p, op) { return p.then(op); }, Promise.resolve());
+        return chain.then(function() {
+            self.stripEditCutId = null;
+            return self.reload();
+        }).then(function() {
+            self.setBusy(false);
+            self.render();
+            self.notify('Полосы сохранены', 'success');
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Ошибка сохранения полос: ' + err.message, 'error');
+        });
     };
 
     // Генерация резок под необеспеченные позиции через чистое ядро cut-layout
@@ -1415,9 +1709,15 @@
                     var p = moveInQueue(g.cuts, idx, 1);
                     if (p.length) self.saveSequences(p);
                 });
+                var strips = el('button', { class: 'atex-pp-strips', type: 'button', text: 'Полосы' });
+                strips.addEventListener('click', function() {
+                    if (self.busy) return;
+                    self.openStrips(c, box);
+                });
                 row.appendChild(up);
                 row.appendChild(card);
                 row.appendChild(down);
+                row.appendChild(strips);
                 groupEl.appendChild(row);
             });
             box.appendChild(groupEl);
