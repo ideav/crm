@@ -364,8 +364,20 @@
         };
     }
 
+    // Ширина бара по логарифмической шкале: диапазон [min..max] → [2..100]%.
+    // Равные ОТНОШЕНИЯ значений дают равные расстояния, поэтому рядом с огромными
+    // остатками видно и соотношение маленьких. v<=0 или min<=0 → минимум (2%).
+    function logBarWidth(v, min, max) {
+        v = toNumber(v); min = toNumber(min); max = toNumber(max);
+        if (v <= 0 || min <= 0) return 2;
+        if (max <= min) return 100;
+        var pct = Math.round((Math.log(v) - Math.log(min)) / (Math.log(max) - Math.log(min)) * 98) + 2;
+        return Math.max(2, Math.min(100, pct));
+    }
+
     var agg = {
         toNumber: toNumber,
+        logBarWidth: logBarWidth,
         round3: round3,
         groupBy: groupBy,
         sumBy: sumBy,
@@ -478,16 +490,29 @@
     }
 
     // Горизонтальная гистограмма по строкам [{ key, count, ... }].
-    function bars(rows, valueFn, formatFn) {
+    function bars(rows, valueFn, formatFn, opts) {
         if (!rows.length) return el('div', { class: 'atex-db-empty', text: 'Нет данных' });
+        opts = opts || {};
         var max = rows.reduce(function(m, r) { return Math.max(m, toNumber(valueFn(r))); }, 0) || 1;
-        var box = el('div', { class: 'atex-db-bars' });
+        // Для лог-шкалы нижняя граница диапазона — минимальное положительное значение.
+        var minPos = 1;
+        if (opts.logScale) {
+            minPos = rows.reduce(function(m, r) {
+                var x = toNumber(valueFn(r));
+                return x > 0 ? Math.min(m, x) : m;
+            }, Infinity);
+            if (!isFinite(minPos)) minPos = 1;
+        }
+        function widthPct(v) {
+            return opts.logScale ? logBarWidth(v, minPos, max) : Math.max(2, Math.round(v / max * 100));
+        }
+        var box = el('div', { class: 'atex-db-bars' + (opts.logScale ? ' atex-db-bars-log' : '') });
         rows.forEach(function(r) {
             var v = toNumber(valueFn(r));
             var row = el('div', { class: 'atex-db-bar-row' }, [
                 el('span', { class: 'atex-db-bar-key', text: r.key, title: r.key }),
                 el('span', { class: 'atex-db-bar-track' }, [
-                    el('span', { class: 'atex-db-bar-fill', style: 'width:' + Math.max(2, Math.round(v / max * 100)) + '%' })
+                    el('span', { class: 'atex-db-bar-fill', style: 'width:' + widthPct(v) + '%' })
                 ]),
                 el('span', { class: 'atex-db-bar-val', text: (formatFn ? formatFn(r) : fmt(v)) })
             ]);
@@ -619,10 +644,10 @@
             metrics([
                 { label: 'остаток, м²', value: data.totalRemainder }
             ]),
-            el('h3', { class: 'atex-db-subhead', text: 'По видам сырья (остаток, м²)' }),
+            el('h3', { class: 'atex-db-subhead', text: 'По видам сырья (остаток, м² — лог. шкала)', title: 'Длина бара — по логарифмической шкале: видно соотношение и маленьких остатков рядом с огромными. Число справа — точный остаток.' }),
             bars(data.rows, function(r) { return r.remainder; }, function(r) {
                 return fmt(r.remainder) + ' м²';
-            })
+            }, { logScale: true })
         ]));
     };
 
