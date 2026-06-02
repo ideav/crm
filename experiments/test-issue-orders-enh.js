@@ -37,4 +37,14 @@ eq(H.searchOrders(list, 'петров').map(function(o){return o.id;}), ['20'], 
 eq(H.searchOrders(list, 'mw308').map(function(o){return o.id;}), ['10'], 'searchOrders: по полю позиции (тип резки)');
 eq(H.searchOrders(list, 'нетакого').length, 0, 'searchOrders: нет совпадений → пусто');
 
+// sortOrders: сортировка заказов по ключу значения; dir 'asc'|'desc'.
+// Числа — численно, даты DD.MM.YYYY — хронологически, прочее — текст (localeCompare ru).
+const sl = H.rowsToOrders(rows);
+eq(H.sortOrders(sl, 'client', 'asc').map(function(o){return o.id;}), ['20','10'], 'sortOrders: по клиенту asc (ИП<ООО)');
+eq(H.sortOrders(sl, 'client', 'desc').map(function(o){return o.id;}), ['10','20'], 'sortOrders: по клиенту desc');
+eq(H.sortOrders(sl, 'created', 'asc').map(function(o){return o.id;}), ['10','20'], 'sortOrders: по дате создания asc');
+eq(H.sortOrders(sl, 'created', 'desc').map(function(o){return o.id;}), ['20','10'], 'sortOrders: по дате desc');
+// не мутирует исходный список:
+H.sortOrders(sl, 'client', 'desc'); eq(sl.map(function(o){return o.id;}), ['10','20'], 'sortOrders: не мутирует вход');
+
 console.log('\n' + passed + ' assertions passed');

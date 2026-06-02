@@ -192,6 +192,25 @@
         });
     }
 
+    // Парс даты DD.MM.YYYY → сортируемое число (YYYYMMDD); иначе NaN.
+    function sortKeyDate(v) {
+        var m = String(v == null ? '' : v).match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+        return m ? Number(m[3] + m[2] + m[1]) : NaN;
+    }
+    // Сортировка заказов по o.values[key] (id — по o.id). Возвращает новый массив.
+    function sortOrders(list, key, dir) {
+        var sign = dir === 'desc' ? -1 : 1;
+        var get = function(o) { return key === 'id' ? o.id : (o.values ? o.values[key] : ''); };
+        return (list || []).slice().sort(function(a, b) {
+            var va = get(a), vb = get(b);
+            var da = sortKeyDate(va), db = sortKeyDate(vb);
+            if (!isNaN(da) && !isNaN(db)) return sign * (da - db);
+            var na = parseFloat(va), nb = parseFloat(vb);
+            if (!isNaN(na) && !isNaN(nb) && String(va).trim() !== '' && String(vb).trim() !== '') return sign * (na - nb);
+            return sign * String(va).localeCompare(String(vb), 'ru');
+        });
+    }
+
     // Индекс колонки JSON_OBJ по имени реквизита: позиция в [tableId, ...reqIds]; -1 если нет.
     function findReqIndex(meta, reqName) {
         if (!meta) return -1;
@@ -1404,6 +1423,7 @@
         matchCutTypes: matchCutTypes,
         rowsToOrders: rowsToOrders,
         searchOrders: searchOrders,
+        sortOrders: sortOrders,
         parseRef: parseRef,
         parseRefOptionsData: parseRefOptionsData,
         mergeRefOptions: mergeRefOptions,
