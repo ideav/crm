@@ -733,9 +733,54 @@
         return this.loadPlanning();
     };
 
+    // DRY-метод сохранения изменённых «Очередностей». pairs = [{cutId, sequence}].
+    // opts.successMessage — если передан, показывается после reload вместо дефолтного;
+    // opts.silent — не показывать уведомление (runPlanning добавит своё).
+    // Если pairs пуст — уведомляет и возвращает resolved Promise.
+    AtexProductionPlanning.prototype.saveSequences = function(pairs, opts) {
+        var self = this;
+        var o = opts || {};
+        if (!pairs || !pairs.length) {
+            if (!o.silent) self.notify('Очередь не изменилась', 'info');
+            return Promise.resolve();
+        }
+
+        var seqReqId = reqIdByName(this.meta.cut, CUT_REQ.sequence);
+        if (!seqReqId) {
+            self.notify('Реквизит «' + CUT_REQ.sequence + '» не найден в метаданных', 'error');
+            return Promise.resolve();
+        }
+
+        this.setBusy(true);
+
+        // Последовательное сохранение (чтобы не перегружать сервер).
+        var fieldKey = 't' + seqReqId;
+        var chain = Promise.resolve();
+        pairs.forEach(function(p) {
+            chain = chain.then(function() {
+                var fields = {};
+                fields[fieldKey] = String(p.sequence);
+                return self.post('_m_set/' + p.cutId + '?JSON', fields);
+            });
+        });
+
+        return chain.then(function() {
+            return self.reload();
+        }).then(function() {
+            self.setBusy(false);
+            self.render();
+            if (!o.silent) {
+                self.notify(o.successMessage || 'Очередь сохранена', 'success');
+            }
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Ошибка сохранения очереди: ' + err.message, 'error');
+        });
+    };
+
     // Авто-планирование: запускает planQueues на текущих резках, сохраняет
-    // изменившиеся значения «Очередности» через _m_set, затем перезагружает очередь.
-    // Подтверждение реализуется без native confirm(): если доступен
+    // изменившиеся значения «Очередности» через saveSequences, затем перезагружает
+    // очередь. Подтверждение реализуется без native confirm(): если доступен
     // window.mainAppController.showDeleteConfirmModal — использует его (Promise);
     // иначе вставляет inline-блок подтверждения в переданный actionsEl.
     AtexProductionPlanning.prototype.runPlanning = function(actionsEl) {
@@ -745,12 +790,6 @@
         var MSG_CONFIRM = 'Перезаписать очередь автопланированием?';
 
         function doRun() {
-            var seqReqId = reqIdByName(self.meta.cut, CUT_REQ.sequence);
-            if (!seqReqId) {
-                self.notify('Реквизит «' + CUT_REQ.sequence + '» не найден в метаданных', 'error');
-                return;
-            }
-
             var plan = planQueues(self.cuts);
 
             // Отбираем резки с изменившейся очерёдностью.
@@ -766,28 +805,10 @@
                 return;
             }
 
-            self.setBusy(true);
-
-            // Последовательное сохранение (чтобы не перегружать сервер).
-            var fieldKey = 't' + seqReqId;
-            var chain = Promise.resolve();
-            changed.forEach(function(p) {
-                chain = chain.then(function() {
-                    var fields = {};
-                    fields[fieldKey] = String(p.sequence);
-                    return self.post('_m_set/' + p.cutId + '?JSON', fields);
-                });
-            });
-
-            chain.then(function() {
-                return self.reload();
-            }).then(function() {
-                self.setBusy(false);
-                self.render();
-                self.notify('Запланировано: ' + plan.length + ' резок (изменено ' + changed.length + ')', 'success');
-            }).catch(function(err) {
-                self.setBusy(false);
-                self.notify('Ошибка планирования: ' + err.message, 'error');
+            var successMsg = 'Запланировано: ' + plan.length + ' резок (изменено ' + changed.length + ')';
+            self.saveSequences(changed, { silent: true }).then(function() {
+                // saveSequences уже вызвал reload+render; добавляем итоговое уведомление.
+                self.notify(successMsg, 'success');
             });
         }
 
@@ -957,7 +978,7 @@
                 el('span', { class: 'atex-pp-queue-slitter', text: g.slitter.label }),
                 el('span', { class: 'atex-pp-queue-count', text: g.cuts.length + ' рез.' })
             ]));
-            g.cuts.forEach(function(c) {
+            g.cuts.forEach(function(c, idx) {
                 var active = String(self.selectedCutId) === String(c.id);
                 var supplies = self.supplyCount(c.id);
                 var card = el('button', { class: 'atex-pp-cut' + (active ? ' is-active' : ''), type: 'button' }, [
@@ -970,7 +991,26 @@
                     el('span', { class: 'atex-pp-cut-supplies', text: supplies ? ('связей: ' + supplies) : 'нет связей' })
                 ]);
                 card.addEventListener('click', function() { self.selectedCutId = c.id; self.render(); });
-                groupEl.appendChild(card);
+
+                var row = el('div', { class: 'atex-pp-cut-row' });
+                var up = el('button', { class: 'atex-pp-move', type: 'button', text: '↑' });
+                var down = el('button', { class: 'atex-pp-move', type: 'button', text: '↓' });
+                if (idx === 0) up.disabled = true;
+                if (idx === g.cuts.length - 1) down.disabled = true;
+                up.addEventListener('click', function() {
+                    if (self.busy) return;
+                    var p = moveInQueue(g.cuts, idx, -1);
+                    if (p.length) self.saveSequences(p);
+                });
+                down.addEventListener('click', function() {
+                    if (self.busy) return;
+                    var p = moveInQueue(g.cuts, idx, 1);
+                    if (p.length) self.saveSequences(p);
+                });
+                row.appendChild(up);
+                row.appendChild(card);
+                row.appendChild(down);
+                groupEl.appendChild(row);
             });
             box.appendChild(groupEl);
         });
