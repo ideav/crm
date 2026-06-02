@@ -20,7 +20,35 @@
     return Math.round(Math.abs(toDate(a) - toDate(b)) / 86400000);
   }
 
-  var layout = { toNumber: toNumber, round3: round3, dayDiff: dayDiff };
+  // dueWindowGroups: объединить позиции одного сырья в кластеры по «Сроку изготовления».
+  // positions: [{id, width, qty, dueKey}]; dueKey — ГГГГММДД (пустой срок → Infinity).
+  // Датированные сортируются по dueKey (затем по id); жадно набираем кластер, пока
+  // dayDiff(pos.dueKey, cluster[0].dueKey) <= windowDays. Бездатные → отдельный
+  // последний кластер. windowDays по умолчанию 3. Вход не мутирует, детерминировано.
+  function dueWindowGroups(positions, windowDays){
+    if (windowDays == null) windowDays = 3;
+    var list = (positions || []).slice();
+    var dated = [], undated = [];
+    list.forEach(function(p){ if (isFinite(p.dueKey)) dated.push(p); else undated.push(p); });
+    dated.sort(function(a, b){
+      if (a.dueKey !== b.dueKey) return a.dueKey - b.dueKey;
+      return String(a.id) < String(b.id) ? -1 : (String(a.id) > String(b.id) ? 1 : 0);
+    });
+    var groups = [];
+    var cur = null;
+    dated.forEach(function(p){
+      if (cur && dayDiff(p.dueKey, cur[0].dueKey) <= windowDays) {
+        cur.push(p);
+      } else {
+        cur = [p];
+        groups.push(cur);
+      }
+    });
+    if (undated.length) groups.push(undated);
+    return groups;
+  }
+
+  var layout = { toNumber: toNumber, round3: round3, dayDiff: dayDiff, dueWindowGroups: dueWindowGroups };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = { layout: layout };
   if (typeof window !== 'undefined') window.AtexCutLayout = { layout: layout };
