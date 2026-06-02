@@ -116,7 +116,7 @@ var controller = new api.Controller({ getAttribute: function() { return 'atex'; 
 var collectCalls = [];
 controller.getJson = function(pathname) {
     collectCalls.push(pathname);
-    if (pathname === 'report/order_pipeline?JSON_KV') return Promise.resolve(PR);
+    if (pathname === 'report/order_pipeline?JSON_KV&FR_order_active=%25') return Promise.resolve(PR);
     if (pathname === 'report/material_stock?JSON_KV') return Promise.resolve([
         { material: 'Полиэтилен', material_received_m2: '500', material_remainder_m2: '200' }
     ]);
@@ -124,8 +124,8 @@ controller.getJson = function(pathname) {
 };
 
 controller.collect().then(function(result) {
-    assertEqual(collectCalls.sort(), ['report/material_stock?JSON_KV', 'report/order_pipeline?JSON_KV'],
-        'collect() запрашивает ровно два отчёта');
+    assertEqual(collectCalls.sort(), ['report/material_stock?JSON_KV', 'report/order_pipeline?JSON_KV&FR_order_active=%25'],
+        'collect() запрашивает ровно два отчёта (order_pipeline — только активные)');
     // #3073: пустой диапазон дат → только актуальные заказы (Выполнен 'A-2' отфильтрован).
     assert.strictEqual(result.counts.order, 1, 'collect(): пустой диапазон → только актуальные заказы');
     assert.strictEqual(result.counts.rawBatch, 1, 'collect(): counts.rawBatch = строки material_stock');
