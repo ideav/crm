@@ -120,12 +120,18 @@ controller.getJson = function(pathname) {
     if (pathname === 'report/material_stock?JSON_KV') return Promise.resolve([
         { material: 'Полиэтилен', material_received_m2: '500', material_remainder_m2: '200' }
     ]);
+    if (pathname === 'report/orders_status_count?JSON_KV') return Promise.resolve([
+        { order_status: 'Выполнен', cnt: '7' },
+        { order_status: 'Отменён', cnt: '3' },
+        { order_status: 'Новый', cnt: '1' }
+    ]);
     throw new Error('Unexpected getJson call: ' + pathname);
 };
 
 controller.collect().then(function(result) {
-    assertEqual(collectCalls.sort(), ['report/material_stock?JSON_KV', 'report/order_pipeline?JSON_KV&FR_order_active=%25'],
-        'collect() запрашивает ровно два отчёта (order_pipeline — только активные)');
+    assertEqual(collectCalls.sort(), ['report/material_stock?JSON_KV', 'report/order_pipeline?JSON_KV&FR_order_active=%25', 'report/orders_status_count?JSON_KV'],
+        'collect() запрашивает три отчёта (order_pipeline активные + остатки + счётчик статусов)');
+    assert.strictEqual(controller.statusCounts.length, 3, 'collect(): statusCounts сохранён');
     // #3073: пустой диапазон дат → только актуальные заказы (Выполнен 'A-2' отфильтрован).
     assert.strictEqual(result.counts.order, 1, 'collect(): пустой диапазон → только актуальные заказы');
     assert.strictEqual(result.counts.rawBatch, 1, 'collect(): counts.rawBatch = строки material_stock');
@@ -192,3 +198,16 @@ assertEqual(dashboards.logBarWidth(5, 5, 5), 100, 'logBarWidth: max<=min → 100
 // Маленькое значение (10×min) на лог-шкале заметно шире, чем было бы линейно.
 var linW = Math.round(1000 / 10000 * 100);            // линейно = 10%
 assert(dashboards.logBarWidth(1000, 100, 10000) > linW, 'logBarWidth: мелкое значение видимее, чем линейно (51% > 10%)');
+
+// terminalOrderCounts: завершённые/отменённые из отчёта статусов.
+var tc = dashboards.terminalOrderCounts([
+    { order_status: 'Выполнен', cnt: '7' },
+    { order_status: 'Отменён', cnt: '3' },
+    { order_status: 'Новый', cnt: '120' }
+]);
+assertEqual(tc.done, 7, 'terminalOrderCounts: завершено = 7');
+assertEqual(tc.cancelled, 3, 'terminalOrderCounts: отменено = 3');
+assertEqual(tc.total, 10, 'terminalOrderCounts: всего терминальных = 10');
+// ё/регистр и пустой ввод
+assertEqual(dashboards.terminalOrderCounts([{ order_status: 'отменен', cnt: '5' }]).cancelled, 5, 'terminalOrderCounts: нормализация ё/регистра');
+assertEqual(dashboards.terminalOrderCounts([]).total, 0, 'terminalOrderCounts: пустой ввод → 0');
