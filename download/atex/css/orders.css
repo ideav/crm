@@ -320,3 +320,65 @@
 .atex-orders-search-wrap input { width: 100%; }
 .atex-orders-table th[data-sort].is-sorted-asc::after { content: ' \25B2'; }
 .atex-orders-table th[data-sort].is-sorted-desc::after { content: ' \25BC'; }
+
+/* Кнопки действий в строке позиции (✎ / 🗑 / Сохранить / Отмена) */
+.atex-orders-pos-actions {
+    white-space: nowrap;
+    width: 1%;
+    text-align: center;
+}
+
+.atex-orders-icon-btn {
+    border: 1px solid var(--input-border, #cbd5e1);
+    background: var(--input-bg, #fff);
+    color: var(--text-secondary, #475569);
+    border-radius: 6px;
+    padding: 4px 7px;
+    cursor: pointer;
+    line-height: 1;
+    margin: 0 2px;
+}
+
+.atex-orders-icon-btn:hover {
+    background: var(--bg-secondary, #f1f5f9);
+    color: var(--text-primary, #111827);
+}
+
+.atex-orders-icon-btn--danger:hover,
+.atex-orders-icon-btn--danger.is-confirm {
+    background: var(--danger-bg, #fee2e2);
+    border-color: var(--danger, #ef4444);
+    color: var(--danger, #ef4444);
+}
+
+.atex-orders-icon-btn--danger.is-confirm {
+    animation: atex-orders-pulse 0.8s ease-in-out infinite;
+}
+
+.atex-orders-icon-btn--ok:hover {
+    background: var(--success-bg, #dcfce7);
+    border-color: var(--success, #22c55e);
+    color: var(--success, #16a34a);
+}
+
+@keyframes atex-orders-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}
+
+/* Строка в режиме inline-правки: компактные контролы внутри ячеек */
+.atex-orders-edit-row > td {
+    background: var(--bg-secondary, #f8fafc);
+    vertical-align: top;
+}
+
+.atex-orders-edit-row .atex-orders-input,
+.atex-orders-edit-row .atex-orders-status {
+    width: 100%;
+    max-width: none;
+    box-sizing: border-box;
+}
+
+.atex-orders-edit-row .atex-orders-ref-select {
+    min-width: 130px;
+}
