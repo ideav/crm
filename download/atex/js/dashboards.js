@@ -128,8 +128,11 @@
     function materialStock(batches) {
         var rows = groupBy(batches, function(b) { return b.material; }, function(acc, b) {
             acc.received = round3((acc.received || 0) + toNumber(b.received));
-            acc.remainder = round3((acc.remainder || 0) + toNumber(b.remainder));
+            // Остаток суммируем точно; округляем до целых м² одним проходом ниже.
+            acc.remainder = (acc.remainder || 0) + toNumber(b.remainder);
         });
+        // Остаток сырья округляем до целых м² — дробные м² на складе это шум.
+        rows.forEach(function(r) { r.remainder = Math.round(r.remainder); });
         // #3073: остатки сырья сортируем по убыванию остатка (а не по count),
         // ключ — вторичный для стабильности.
         rows.sort(function(a, b) {
@@ -139,7 +142,7 @@
         return {
             total: (batches || []).length,
             totalReceived: sumBy(batches, function(b) { return b.received; }),
-            totalRemainder: sumBy(batches, function(b) { return b.remainder; }),
+            totalRemainder: Math.round(sumBy(batches, function(b) { return b.remainder; })),
             rows: rows
         };
     }
