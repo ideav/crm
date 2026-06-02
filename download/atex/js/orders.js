@@ -21,7 +21,6 @@
     var REF_DROPDOWN_LIMIT = 80;
     var REF_SEARCH_DELAY = 250;
     var LIST_LIMIT = 5000;
-    var STRIPS_LIMIT = 1000;
 
     // Статусы — свободный текст (тип 3), поэтому фиксируем разумные наборы.
     // Их можно переопределить data-атрибутами data-order-statuses / data-position-statuses.
@@ -80,9 +79,7 @@
         refOptions: {},
         refSearchSeq: 0,
         creating: false,
-        metadata: [],
-        cutTypeIndex: {},           // { typeId: { materialId, widths? } }
-        stripsLoadedMaterials: {}   // { materialId: true } — для каких сырьёв полосы уже грузили
+        metadata: []
     };
 
     // ------------------------------------------------------------------
@@ -137,27 +134,6 @@
     function normalizeWinding(value) {
         var s = String(value == null ? '' : value).trim().toUpperCase();
         return (s === 'IN' || s === 'OUT') ? s : '';
-    }
-
-    // Подбор подходящих типов резки.
-    // index: { typeId: { materialId, widths:[Number,...] } } — widths может отсутствовать.
-    // Фильтр по сырью; при заданной ширине — точное совпадение с одной из ширин полос
-    //   (типы без загруженных полос при заданной ширине отсеиваются).
-    function matchCutTypes(index, materialId, width) {
-        var ids = Object.keys(index || {});
-        var mat = materialId == null ? '' : String(materialId);
-        if (mat !== '') {
-            ids = ids.filter(function(id) { return String(index[id].materialId) === mat; });
-        }
-        var w = parseWidth(width);
-        if (!isNaN(w)) {
-            ids = ids.filter(function(id) {
-                var ws = index[id].widths;
-                if (!ws) return false;
-                return ws.some(function(x) { return Number(x) === w; });
-            });
-        }
-        return ids;
     }
 
     // Плоские строки отчёта orders_list (JSON_KV) → [{ id, values, positions:[{id,values}] }].
@@ -608,35 +584,6 @@
         });
     }
 
-    // Индекс типов резки: { id: { materialId } }. Один запрос; ширины полос — лениво.
-    // Индекс типов резки: { typeId: { materialId, widths:[ширины полос] } } — ОДНИМ
-    // отчётом cut_types_index (Тип резки→Полоса), а не выборкой полос по каждому типу
-    // (раньше открытие дропдауна «Тип резки» давало 50+ запросов object/{Полоса}?F_U=).
-    function loadCutTypeIndex() {
-        return fetchJson('/' + encodeURIComponent(getApiBase()) + '/report/cut_types_index?JSON_KV&LIMIT=0,5000').then(function(rows){
-            state.cutTypeIndex = {};
-            (rows || []).forEach(function(r){
-                var id = r.type_id == null ? '' : String(r.type_id);
-                if (!id) return;
-                if (!state.cutTypeIndex[id]) {
-                    state.cutTypeIndex[id] = {
-                        materialId: r.type_material_id == null ? '' : String(r.type_material_id),
-                        label: r.type_name == null ? '' : String(r.type_name),
-                        widths: []
-                    };
-                }
-                var w = parseWidth(r.strip_width);
-                if (!isNaN(w)) state.cutTypeIndex[id].widths.push(w);
-            });
-        });
-    }
-
-    // Ширины полос теперь приходят в loadCutTypeIndex (отчёт) — догрузка не нужна.
-    // Оставлено для совместимости вызовов (focusCellControl): резолвится мгновенно.
-    function ensureStripWidths() {
-        return Promise.resolve();
-    }
-
     // ------------------------------------------------------------------
     // Рендеринг
     // ------------------------------------------------------------------
@@ -720,7 +667,7 @@
     function renderPositions(order) {
         var positions = state.positionsByOrder[order.id] || [];
         var head = '<thead><tr>' +
-            '<th>Кол-во</th><th>Вид сырья</th><th>Тип резки</th>' +
+            '<th>Кол-во</th><th>Вид сырья</th>' +
             '<th>Ширина, мм</th><th>Длина, м</th><th>Ø втулки</th><th>Тип намотки</th><th>Статус</th><th></th>' +
             '</tr></thead>';
         var rowsHtml = positions.map(function(pos) { return renderPositionRow(order, pos); }).join('');
@@ -738,7 +685,7 @@
     }
 
     // Поячейково редактируемые столбцы позиции (по data-cell соответствует key в state.positionColumns).
-    var EDITABLE_POSITION_CELLS = ['qty', 'raw', 'cutType', 'width', 'length', 'sleeve', 'winding', 'status'];
+    var EDITABLE_POSITION_CELLS = ['qty', 'raw', 'width', 'length', 'sleeve', 'winding', 'status'];
 
     // Текст отображения значения ячейки позиции (для ref-полей — подпись из values).
     function positionCellText(pos, key) {
@@ -758,7 +705,6 @@
         return '<tr data-position-id="' + escapeHtml(pos.id) + '" data-position-form="' + escapeHtml(order.id) + '">' +
             positionDisplayCell(pos, 'qty') +
             positionDisplayCell(pos, 'raw') +
-            positionDisplayCell(pos, 'cutType') +
             positionDisplayCell(pos, 'width') +
             positionDisplayCell(pos, 'length') +
             positionDisplayCell(pos, 'sleeve') +
@@ -782,44 +728,6 @@
             '<button type="button" class="atex-orders-icon-btn" title="Отменить черновик" ' +
             'aria-label="Отменить черновик" data-cancel-draft="1"><i class="pi pi-times"></i></button>' +
             '</td></tr>';
-    }
-
-    // Пересобирает список опций «Тип резки» формы позиции по текущему сырью/ширине.
-    // Сбрасывает выбранное значение, если оно не входит в подходящие.
-    // Работает с searchable-ref-select: обновляет data-atex-cuttype-allowed на обёртке
-    // и переотрисовывает dropdown через renderRefSearchResults.
-    function refreshCutTypeOptions(orderId, form) {
-        if (!form) return;
-        // Обёртку ref-select «Тип резки» находим по реквизиту (data-ref-req-id).
-        var cutCol = getColumn(state.positionColumns, 'cutType');
-        var cutWrapper = cutCol && cutCol.reqId
-            ? form.querySelector('[data-ref-select][data-ref-req-id="' + cssEscape(cutCol.reqId) + '"]') : null;
-        if (!cutWrapper) return;
-        var cutHidden = cutWrapper.querySelector('[data-ref-value]');
-        if (!cutHidden) return;
-        // «Вид сырья» и «Ширина» берём из данных строки (позиция/черновик), а не из DOM:
-        // при поячейковой правке активна только ячейка «Тип резки», соседних контролов нет.
-        var materialId = rowMaterialId(form);
-        var width = rowWidthValue(form);
-        var allowed = matchCutTypes(state.cutTypeIndex, materialId, width);
-        var allowedSet = {};
-        allowed.forEach(function(id){ allowedSet[String(id)] = true; });
-        // Сохраняем фильтр на обёртке для renderRefSearchResults.
-        cutWrapper.setAttribute('data-atex-cuttype-allowed', allowed.join(','));
-        // Сброс несовместимого выбора.
-        var prev = cutHidden.value;
-        if (prev && !allowedSet[String(prev)]) {
-            cutHidden.value = '';
-            var cutSearch = cutWrapper.querySelector('[data-ref-search]');
-            if (cutSearch) cutSearch.value = '';
-            updateRefClear(cutWrapper);
-        }
-        // Переотрисовываем dropdown (только если он сейчас открыт, иначе он обновится при открытии).
-        var dropdown = cutWrapper.querySelector('.atex-orders-ref-dropdown');
-        if (dropdown && !dropdown.hidden) {
-            var cutSearchEl = cutWrapper.querySelector('[data-ref-search]');
-            renderRefSearchResults(cutWrapper, cutSearchEl ? cutSearchEl.value : '');
-        }
     }
 
     function renderOrders() {
@@ -1074,26 +982,7 @@
                 ' data-field="' + escapeHtml(key) + '" value="' + escapeHtml(pos.values[key] || '') + '">';
         }
         if (col && col.ref) {
-            var placeholder = key === 'raw' ? 'Выберите вид сырья'
-                : (key === 'cutType' ? 'Выберите тип резки' : 'Выберите диаметр');
-            if (key === 'cutType') {
-                // Опции «Тип резки» строим ЛОКАЛЬНО из cutTypeIndex, отфильтрованного по
-                // виду сырья+ширине строки. _ref_reqs не используем: там потолок 80 записей,
-                // и нужный тип (за пределами первых 80) не попадал в список → пусто.
-                var mat = refs.raw || '';
-                var wd = (pos.values && pos.values.width) || '';
-                var allowedIds = matchCutTypes(state.cutTypeIndex, mat, wd);
-                var cutOptions = allowedIds.map(function(tid) {
-                    var e = state.cutTypeIndex[tid] || {};
-                    return { id: String(tid), label: e.label || ('#' + tid) };
-                });
-                var curId = refs.cutType || '';
-                if (curId && !allowedIds.some(function(tid){ return String(tid) === String(curId); })) {
-                    // текущий выбранный тип (если не проходит фильтр) — показать, чтобы значение не пропало
-                    cutOptions.unshift({ id: String(curId), label: (pos.values && pos.values.cutType) || ('#' + curId) });
-                }
-                return refSelectHtml('atex-pos-cutType-cell-' + pos.id, cutOptions, curId, placeholder, null);
-            }
+            var placeholder = key === 'raw' ? 'Выберите вид сырья' : 'Выберите диаметр';
             var options = col.reqId ? state.refOptions[col.reqId] : null;
             return refSelectHtml('atex-pos-' + key + '-cell-' + pos.id, options, refs[key] || '', placeholder, col.reqId);
         }
@@ -1110,19 +999,12 @@
             ' data-field="status" class="atex-orders-status atex-orders-cell-input"');
     }
 
-    // Фокус на контрол внутри активированной ячейки + предзагрузка типов резки для ref.
+    // Фокус на контрол внутри активированной ячейки.
     function focusCellControl(td, key, orderId) {
         var col = getColumn(state.positionColumns, key);
         if (col && col.ref) {
             var search = td.querySelector('[data-ref-search]');
             if (search) search.focus();
-            // Фильтр «Тип резки» по текущему сырью/ширине строки.
-            var row = td.closest('tr');
-            if (row) {
-                ensureStripWidths(rowMaterialId(row)).then(function() {
-                    refreshCutTypeOptions(orderId, row);
-                });
-            }
             return;
         }
         var input = td.querySelector('[data-field]');
@@ -1342,14 +1224,6 @@
         if (!dropdown || !hidden) return;
         var reqId = wrapper.getAttribute('data-ref-req-id');
         var options = state.refOptions[reqId] || [];
-        // Ограничиваем список разрешёнными id, если выставлен фильтр типов резки.
-        // Атрибут ставит только refreshCutTypeOptions (фильтр «Тип резки» по сырью/ширине); на прочих ref-select его нет.
-        var allowedAttr = wrapper.getAttribute('data-atex-cuttype-allowed');
-        if (allowedAttr !== null) {
-            var allowedSet = {};
-            allowedAttr.split(',').forEach(function(id){ if (id) allowedSet[id] = true; });
-            options = options.filter(function(opt){ return allowedSet[String(opt.id)]; });
-        }
         var visibleOptions = filterRefOptions(options, query, REF_DROPDOWN_LIMIT);
         dropdown.innerHTML = renderRefOptionItems(hidden.id, visibleOptions, hidden.value);
         setActiveRefOption(wrapper, 0);
@@ -1386,25 +1260,6 @@
         }, REF_SEARCH_DELAY);
     }
 
-    // Вызывается после изменения поля «Вид сырья» в форме позиции:
-    // по скрытому input определяет orderId и form, затем догружает полосы и
-    // обновляет список «Тип резки».
-    function onRawRefChanged(wrapper) {
-        if (!wrapper) return;
-        var rawCol = getColumn(state.positionColumns, 'raw');
-        if (!rawCol || !rawCol.reqId) return;
-        // Проверяем, что это именно ref-select «Вид сырья» (по reqId обёртки).
-        if (wrapper.getAttribute('data-ref-req-id') !== String(rawCol.reqId)) return;
-        var form = wrapper.closest ? wrapper.closest('[data-position-form]') : null;
-        if (!form) return;
-        var orderId = form.getAttribute('data-position-form');
-        var rawHidden = wrapper.querySelector('[data-ref-value]');
-        var materialId = rawHidden ? rawHidden.value : '';
-        ensureStripWidths(materialId).then(function() {
-            refreshCutTypeOptions(orderId, form);
-        });
-    }
-
     function selectRefOption(option) {
         var wrapper = refWrapperFrom(option);
         if (!wrapper) return;
@@ -1423,8 +1278,6 @@
             savePositionCell(cell, value);
             return;
         }
-        // При выборе сырья в форме позиции — обновить список типов резки.
-        onRawRefChanged(wrapper);
     }
 
     function clearRefSelect(wrapper) {
@@ -1439,8 +1292,6 @@
         updateRefClear(wrapper);
         renderRefSearchResults(wrapper, '');
         setRefExpanded(wrapper, true);
-        // При очистке сырья в форме позиции — обновить список типов резки.
-        onRawRefChanged(wrapper);
     }
 
     function attachRefSearchEvents() {
@@ -1463,15 +1314,6 @@
                 setRefExpanded(wrapper, true);
                 scheduleRefServerSearch(wrapper, search.value);
                 return;
-            }
-            // При вводе ширины в форме позиции — обновить список типов резки.
-            var widthInput = event.target.closest && event.target.closest('[data-field="width"]');
-            if (widthInput) {
-                var posForm = widthInput.closest ? widthInput.closest('[data-position-form]') : null;
-                if (posForm) {
-                    var posOrderId = posForm.getAttribute('data-position-form');
-                    refreshCutTypeOptions(posOrderId, posForm);
-                }
             }
         });
 
@@ -1755,8 +1597,7 @@
                     clientCol && clientCol.reqId ? loadRefOptions(clientCol.reqId) : Promise.resolve([]),
                     rawCol && rawCol.reqId ? loadRefOptions(rawCol.reqId) : Promise.resolve([]),
                     cutCol && cutCol.reqId ? loadRefOptions(cutCol.reqId) : Promise.resolve([]),
-                    sleeveCol && sleeveCol.reqId ? loadRefOptions(sleeveCol.reqId) : Promise.resolve([]),
-                    loadCutTypeIndex()
+                    sleeveCol && sleeveCol.reqId ? loadRefOptions(sleeveCol.reqId) : Promise.resolve([])
                 ]);
             })
             .then(function() {
@@ -1779,7 +1620,6 @@
         normalizeFieldName: normalizeFieldName,
         normalizeSearchText: normalizeSearchText,
         parseWidth: parseWidth,
-        matchCutTypes: matchCutTypes,
         rowsToOrders: rowsToOrders,
         searchOrders: searchOrders,
         sortOrders: sortOrders,
@@ -1812,8 +1652,6 @@
         REF_SEARCH_LIMIT: REF_SEARCH_LIMIT,
         REF_DROPDOWN_LIMIT: REF_DROPDOWN_LIMIT,
         findReqIndex: findReqIndex,
-        loadCutTypeIndex: loadCutTypeIndex,
-        ensureStripWidths: ensureStripWidths,
         normalizeWinding: normalizeWinding,
         WINDING_VALUES: WINDING_VALUES
     };
