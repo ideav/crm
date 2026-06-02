@@ -155,7 +155,8 @@
                 byId[oid].positions.push({ id: pid, values: {
                     qty: s(r.position_qty), raw: s(r.position_raw), cutType: s(r.position_cut_type),
                     width: s(r.position_width), length: s(r.position_length), sleeve: s(r.position_sleeve),
-                    winding: s(r.position_winding), status: s(r.position_status)
+                    winding: s(r.position_winding), status: s(r.position_status),
+                    approved: s(r.position_approved)
                 }, refs: {
                     // id ссылок приходят прямо из отчёта (abn_ID-колонки) — детальная
                     // догрузка позиций (loadPositions) на каждый заказ больше не нужна.
@@ -668,13 +669,13 @@
         var positions = state.positionsByOrder[order.id] || [];
         var head = '<thead><tr>' +
             '<th>Кол-во</th><th>Вид сырья</th>' +
-            '<th>Ширина, мм</th><th>Длина, м</th><th>Ø втулки</th><th>Тип намотки</th><th>Статус</th><th></th>' +
+            '<th>Ширина, мм</th><th>Длина, м</th><th>Ø втулки</th><th>Тип намотки</th><th>Статус</th><th>Дата согл.</th><th></th>' +
             '</tr></thead>';
         var rowsHtml = positions.map(function(pos) { return renderPositionRow(order, pos); }).join('');
         if (state.draftOrderId === String(order.id)) rowsHtml += renderDraftRow(order);
         var body = rowsHtml
             ? '<tbody>' + rowsHtml + '</tbody>'
-            : '<tbody><tr><td colspan="8" class="atex-orders-empty">Позиций пока нет.</td></tr></tbody>';
+            : '<tbody><tr><td colspan="9" class="atex-orders-empty">Позиций пока нет.</td></tr></tbody>';
 
         return '<div class="atex-orders-positions">' +
             '<table class="atex-orders-subtable">' + head + body + '</table>' +
@@ -685,7 +686,7 @@
     }
 
     // Поячейково редактируемые столбцы позиции (по data-cell соответствует key в state.positionColumns).
-    var EDITABLE_POSITION_CELLS = ['qty', 'raw', 'width', 'length', 'sleeve', 'winding', 'status'];
+    var EDITABLE_POSITION_CELLS = ['qty', 'raw', 'width', 'length', 'sleeve', 'winding'];
 
     // Текст отображения значения ячейки позиции (для ref-полей — подпись из values).
     function positionCellText(pos, key) {
@@ -709,7 +710,10 @@
             positionDisplayCell(pos, 'length') +
             positionDisplayCell(pos, 'sleeve') +
             positionDisplayCell(pos, 'winding') +
-            positionDisplayCell(pos, 'status') +
+            (pos.values.status === 'Новая'
+                ? '<td><button type="button" class="atex-orders-btn atex-orders-btn-secondary atex-orders-approve" data-approve-pos="' + escapeHtml(pos.id) + '">Согласовано</button></td>'
+                : '<td>' + escapeHtml(pos.values.status || '') + '</td>') +
+            '<td>' + escapeHtml(pos.values.approved || '') + '</td>' +
             '<td class="atex-orders-pos-actions">' +
             '<button type="button" class="atex-orders-icon-btn atex-orders-icon-btn--danger" title="Удалить" ' +
             'aria-label="Удалить" data-del-pos="' + escapeHtml(pos.id) + '"><i class="pi pi-trash"></i></button>' +
@@ -724,6 +728,7 @@
         var cells = EDITABLE_POSITION_CELLS.map(function(key) { return positionDisplayCell(draft, key); }).join('');
         return '<tr class="atex-orders-draft-row" data-draft-order="' + escapeHtml(order.id) +
             '" data-position-form="' + escapeHtml(order.id) + '">' + cells +
+            '<td></td><td></td>' +
             '<td class="atex-orders-pos-actions">' +
             '<button type="button" class="atex-orders-icon-btn" title="Отменить черновик" ' +
             'aria-label="Отменить черновик" data-cancel-draft="1"><i class="pi pi-times"></i></button>' +
@@ -757,8 +762,9 @@
                 '<td>' + escapeHtml(order.values.client || '') + '</td>' +
                 '<td>' + escapeHtml(order.values.manager || '') + '</td>' +
                 '<td>' + escapeHtml(order.values.created || '') + '</td>' +
-                '<td>' + statusSelectHtml(state.orderStatuses, order.values.status,
-                    ' data-order-status="' + escapeHtml(order.id) + '"') + '</td>' +
+                '<td>' + (order.values.status === 'Новый'
+                    ? '<button type="button" class="atex-orders-btn atex-orders-btn-secondary atex-orders-approve" data-approve-order="' + escapeHtml(order.id) + '">Согласовано</button>'
+                    : escapeHtml(order.values.status || '')) + '</td>' +
                 '<td class="atex-orders-count">' + positionCount + '</td>' +
                 '</tr>';
             var detail = isOpen
@@ -1122,24 +1128,27 @@
         });
     }
 
-    function changeStatus(objId, statusReqId, statusValue, onDone) {
-        if (!statusReqId) {
-            setMessage('Не найден реквизит «Статус» в метаданных.', 'error');
-            return;
-        }
-        var req = buildSetStatusRequest({
-            db: getApiBase(),
-            objId: objId,
-            statusReqId: statusReqId,
-            statusValue: statusValue,
-            xsrf: getXsrf()
-        });
-        setMessage('Сохранение статуса…', 'info');
-        postForm(req.url, req.body).then(function() {
-            setMessage('Статус обновлён.', 'success');
-            if (onDone) onDone();
+    // Согласование заказа/позиции: вызов SET-отчёта approve_order / approve_position.
+    // Отчёт под правами владельца ставит статус «Согласован(а)» и дату согласования = сегодня.
+    function approveRecord(isOrder, recordId) {
+        var report = isOrder ? 'approve_order' : 'approve_position';
+        var filterKey = isOrder ? 'FR_order_id' : 'FR_position_id';
+        // Тело отчёта: «сырые» имена параметров (не t{reqId}) — buildFormBody здесь не подходит,
+        // т.к. он префиксует ключи 't'. Собираем application/x-www-form-urlencoded вручную.
+        var xsrf = getXsrf();
+        var params = [];
+        if (xsrf) params.push('_xsrf=' + encodeURIComponent(xsrf));
+        params.push('confirmed=1');
+        params.push(filterKey + '=' + encodeURIComponent(recordId));
+        var body = params.join('&');
+        var url = '/' + encodeURIComponent(getApiBase()) + '/report/' + report + '?JSON_KV';
+        setMessage('Согласование…', 'info');
+        postForm(url, body).then(function() {
+            return loadOrders();
+        }).then(function() {
+            setMessage('Согласовано.', 'success');
         }).catch(function(error) {
-            setMessage('Не удалось обновить статус: ' + (error.message || error), 'error');
+            setMessage('Не удалось согласовать: ' + (error.message || error), 'error');
         });
     }
 
@@ -1472,7 +1481,28 @@
                     }
                     return;
                 }
-                // Клик мимо кнопки удаления — сбросить незавершённое подтверждение.
+                // Кнопки «Согласовано» (заказ/позиция). Подтверждение двойным кликом, как у удаления.
+                var approveBtn = event.target.closest('[data-approve-order],[data-approve-pos]');
+                if (approveBtn) {
+                    var isOrderApprove = approveBtn.hasAttribute('data-approve-order');
+                    var approveId = approveBtn.getAttribute(isOrderApprove ? 'data-approve-order' : 'data-approve-pos');
+                    if (approveBtn.getAttribute('data-confirm') === '1') {
+                        approveRecord(isOrderApprove, approveId);
+                    } else {
+                        resetDeleteConfirm(list);
+                        approveBtn.setAttribute('data-confirm', '1');
+                        approveBtn.classList.add('is-confirm');
+                        approveBtn.textContent = 'Подтвердить?';
+                        setMessage('Нажмите ещё раз, чтобы согласовать.', 'info');
+                        approveBtn._atexApproveTimer = setTimeout(function() {
+                            approveBtn.removeAttribute('data-confirm');
+                            approveBtn.classList.remove('is-confirm');
+                            approveBtn.textContent = 'Согласовано';
+                        }, 4000);
+                    }
+                    return;
+                }
+                // Клик мимо кнопки удаления/согласования — сбросить незавершённое подтверждение.
                 resetDeleteConfirm(list);
 
                 // Поячейковая правка: клик по ячейке-отображению переводит её в правку.
@@ -1508,17 +1538,7 @@
             });
 
             list.addEventListener('change', function(event) {
-                var orderStatus = event.target.closest('[data-order-status]');
-                if (orderStatus) {
-                    var statusCol = getColumn(state.orderColumns, 'status');
-                    var orderId = orderStatus.getAttribute('data-order-status');
-                    var order = findOrder(orderId);
-                    changeStatus(orderId, statusCol && statusCol.reqId, orderStatus.value, function() {
-                        if (order) order.values.status = orderStatus.value;
-                    });
-                    return;
-                }
-                // Поячейковая правка winding/status: <select data-field> внутри активной ячейки.
+                // Поячейковая правка winding: <select data-field> внутри активной ячейки.
                 var cellSelect = event.target.closest('select[data-field]');
                 if (cellSelect) {
                     var selCell = cellSelect.closest('td.atex-orders-cell');
@@ -1540,6 +1560,12 @@
             btn.removeAttribute('data-confirm');
             btn.classList.remove('is-confirm');
             btn.setAttribute('title', 'Удалить');
+        });
+        scope.querySelectorAll('[data-approve-order][data-confirm="1"],[data-approve-pos][data-confirm="1"]').forEach(function(btn) {
+            if (btn._atexApproveTimer) clearTimeout(btn._atexApproveTimer);
+            btn.removeAttribute('data-confirm');
+            btn.classList.remove('is-confirm');
+            btn.textContent = 'Согласовано';
         });
     }
 
