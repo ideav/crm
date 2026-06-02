@@ -182,3 +182,13 @@ msRound.rows.forEach(function(r) { byMat[r.key] = r.remainder; });
 assertEqual(byMat['MR132'], 38401, 'materialStock: остаток MR132 = round(38400.366+0.5)=38401');
 assertEqual(byMat['MR194'], 414115, 'materialStock: остаток MR194 = round(414115.10)=414115');
 assertEqual(msRound.totalRemainder, 452516, 'materialStock: totalRemainder округлён до целых');
+
+// logBarWidth: логарифмическая шкала остатков [min..max] → [2..100]%.
+assertEqual(dashboards.logBarWidth(100, 100, 10000), 2, 'logBarWidth: минимум диапазона → 2%');
+assertEqual(dashboards.logBarWidth(10000, 100, 10000), 100, 'logBarWidth: максимум → 100%');
+assertEqual(dashboards.logBarWidth(1000, 100, 10000), 51, 'logBarWidth: середина по log (10×min) → 51%');
+assertEqual(dashboards.logBarWidth(0, 100, 10000), 2, 'logBarWidth: v<=0 → 2%');
+assertEqual(dashboards.logBarWidth(5, 5, 5), 100, 'logBarWidth: max<=min → 100%');
+// Маленькое значение (10×min) на лог-шкале заметно шире, чем было бы линейно.
+var linW = Math.round(1000 / 10000 * 100);            // линейно = 10%
+assert(dashboards.logBarWidth(1000, 100, 10000) > linW, 'logBarWidth: мелкое значение видимее, чем линейно (51% > 10%)');
