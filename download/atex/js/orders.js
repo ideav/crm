@@ -180,6 +180,10 @@
                     qty: s(r.position_qty), raw: s(r.position_raw), cutType: s(r.position_cut_type),
                     width: s(r.position_width), length: s(r.position_length), sleeve: s(r.position_sleeve),
                     winding: s(r.position_winding), status: s(r.position_status)
+                }, refs: {
+                    // id ссылок приходят прямо из отчёта (abn_ID-колонки) — детальная
+                    // догрузка позиций (loadPositions) на каждый заказ больше не нужна.
+                    raw: s(r.position_raw_id), cutType: s(r.position_cut_type_id), sleeve: s(r.position_sleeve_id)
                 } });
             }
         });
@@ -935,14 +939,6 @@
         });
     }
 
-    function loadPositions(orderId) {
-        var url = buildListUrl(getApiBase(), state.positionTable, orderId, null, '');
-        return fetchJson(url).then(function(json) {
-            state.positionsByOrder[orderId] = normalizeObjects(json, state.positionColumns);
-            renderOrders();
-        });
-    }
-
     function createOrder() {
         if (state.creating) return;
         var clientSel = document.getElementById('atex-order-client');
@@ -968,10 +964,7 @@
             setMessage(newId ? 'Заказ №' + newId + ' создан.' : 'Заказ создан.', 'success');
             closeCreateForm();
             return loadOrders().then(function() {
-                if (newId) {
-                    state.expanded[newId] = true;
-                    return loadPositions(newId);
-                }
+                if (newId) state.expanded[newId] = true;
             });
         }).catch(function(error) {
             setMessage('Не удалось создать заказ: ' + (error.message || error), 'error');
@@ -1064,22 +1057,8 @@
         var posId = td.getAttribute('data-position-id');
         var found = posId ? findPositionById(posId) : null;
         if (!found) return;
-        // Ref-полям (raw/cutType/sleeve) нужны id из refs; в данных отчёта их нет —
-        // догружаем позиции заказа детально, затем открываем ячейку.
-        var col = getColumn(state.positionColumns, key);
-        var isRef = col && col.ref;
-        if (isRef && !found.position.refs) {
-            setMessage('Загрузка позиции…', 'info');
-            loadPositions(found.orderId).then(function() {
-                setMessage('');
-                var fresh = document.querySelector('td.atex-orders-cell[data-cell="' + cssEscape(key) +
-                    '"][data-position-id="' + cssEscape(posId) + '"]');
-                if (fresh) activateCell(fresh);
-            }).catch(function(error) {
-                setMessage('Не удалось загрузить позицию: ' + (error.message || error), 'error');
-            });
-            return;
-        }
+        // id ссылок (raw/cutType/sleeve) приходят прямо из отчёта orders_list —
+        // отдельная догрузка позиций заказа больше не требуется.
         // Прежняя активная ячейка возвращается в отображение (без сохранения).
         if (state.editingCell && state.editingCell !== td) deactivateCell();
         state.editingCell = td;
@@ -1599,11 +1578,7 @@
                 if (toggle) {
                     var orderId = toggle.getAttribute('data-toggle');
                     state.expanded[orderId] = !state.expanded[orderId];
-                    if (state.expanded[orderId] && !state.positionsByOrder[orderId]) {
-                        loadPositions(orderId);
-                    } else {
-                        renderOrders();
-                    }
+                    renderOrders();   // позиции уже загружены отчётом orders_list
                     return;
                 }
 
