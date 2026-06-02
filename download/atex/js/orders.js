@@ -674,7 +674,7 @@
         if (state.draftOrderId === String(order.id)) rowsHtml += renderDraftRow(order);
         var body = rowsHtml
             ? '<tbody>' + rowsHtml + '</tbody>'
-            : '<tbody><tr><td colspan="9" class="atex-orders-empty">Позиций пока нет.</td></tr></tbody>';
+            : '<tbody><tr><td colspan="8" class="atex-orders-empty">Позиций пока нет.</td></tr></tbody>';
 
         return '<div class="atex-orders-positions">' +
             '<table class="atex-orders-subtable">' + head + body + '</table>' +
