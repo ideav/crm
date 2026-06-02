@@ -234,7 +234,16 @@
                     materialBatch: { id: null, label: str(row.cut_material_batch) },
                     planDate: str(row.cut_plan_date),
                     status: str(row.cut_status),
-                    sequence: (seqVal == null || seqVal === '') ? null : Number(seqVal)
+                    sequence: (seqVal == null || seqVal === '') ? null : Number(seqVal),
+                    materialId: str(row.cut_material_id),
+                    materialName: str(row.cut_material),
+                    batchId: str(row.cut_batch_id),
+                    jumboRemainingM: (row.cut_jumbo_remaining == null || row.cut_jumbo_remaining === '') ? 0 : Number(row.cut_jumbo_remaining),
+                    knifeCount: (row.cut_knives == null || row.cut_knives === '') ? 0 : Number(row.cut_knives),
+                    knifeWidths: [],
+                    winding: normWinding(row.cut_winding),
+                    rollerWidth: (row.cut_roller_width == null || row.cut_roller_width === '') ? 0 : Number(row.cut_roller_width),
+                    isFoil: /фольг/i.test(str(row.cut_material))
                 };
                 order.push(cutId);
             }
@@ -360,6 +369,29 @@
         });
     }
 
+    // Сгруппировать резки по станкам, упорядочить каждую группу через orderCuts,
+    // пронумеровать 1..N. Резки без станка (slitter.id == null) пропускаются.
+    // Возвращает плоский массив [{cutId, slitterId, sequence}].
+    function planQueues(cuts, weights) {
+        var groups = {};
+        var order = [];
+        (cuts || []).forEach(function(c) {
+            var sid = c && c.slitter && c.slitter.id;
+            if (sid == null) return; // пропускаем «без станка»
+            var key = String(sid);
+            if (!groups[key]) { groups[key] = []; order.push(key); }
+            groups[key].push(c);
+        });
+        var result = [];
+        order.forEach(function(sid) {
+            var ordered = orderCuts(groups[sid], weights);
+            ordered.forEach(function(c) {
+                result.push({ cutId: c.id, slitterId: sid, sequence: c.sequence });
+            });
+        });
+        return result;
+    }
+
     var planning = {
         parseRef: parseRef,
         parseMultiRefIds: parseMultiRefIds,
@@ -382,7 +414,8 @@
         awkwardRemainder: awkwardRemainder,
         changeoverCost: changeoverCost,
         greedySequence: greedySequence,
-        orderCuts: orderCuts
+        orderCuts: orderCuts,
+        planQueues: planQueues
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -686,6 +719,94 @@
         return this.loadPlanning();
     };
 
+    // Авто-планирование: запускает planQueues на текущих резках, сохраняет
+    // изменившиеся значения «Очередности» через _m_set, затем перезагружает очередь.
+    // Подтверждение реализуется без native confirm(): если доступен
+    // window.mainAppController.showDeleteConfirmModal — использует его (Promise);
+    // иначе вставляет inline-блок подтверждения в переданный actionsEl.
+    AtexProductionPlanning.prototype.runPlanning = function(actionsEl) {
+        var self = this;
+        if (this.busy) return;
+
+        var MSG_CONFIRM = 'Перезаписать очередь автопланированием?';
+
+        function doRun() {
+            var seqReqId = reqIdByName(self.meta.cut, CUT_REQ.sequence);
+            if (!seqReqId) {
+                self.notify('Реквизит «' + CUT_REQ.sequence + '» не найден в метаданных', 'error');
+                return;
+            }
+
+            var plan = planQueues(self.cuts);
+
+            // Отбираем резки с изменившейся очерёдностью.
+            var cutsById = {};
+            self.cuts.forEach(function(c) { cutsById[String(c.id)] = c; });
+            var changed = plan.filter(function(p) {
+                var cut = cutsById[String(p.cutId)];
+                return cut && Number(cut.sequence) !== p.sequence;
+            });
+
+            if (!changed.length) {
+                self.notify('Очередь уже оптимальна, изменений нет', 'info');
+                return;
+            }
+
+            self.setBusy(true);
+
+            // Последовательное сохранение (чтобы не перегружать сервер).
+            var fieldKey = 't' + seqReqId;
+            var chain = Promise.resolve();
+            changed.forEach(function(p) {
+                chain = chain.then(function() {
+                    var fields = {};
+                    fields[fieldKey] = String(p.sequence);
+                    return self.post('_m_set/' + p.cutId + '?JSON', fields);
+                });
+            });
+
+            chain.then(function() {
+                return self.reload();
+            }).then(function() {
+                self.setBusy(false);
+                self.render();
+                self.notify('Запланировано: ' + plan.length + ' резок (изменено ' + changed.length + ')', 'success');
+            }).catch(function(err) {
+                self.setBusy(false);
+                self.notify('Ошибка планирования: ' + err.message, 'error');
+            });
+        }
+
+        // Подтверждение без native confirm.
+        // Вариант 1: mainAppController.showDeleteConfirmModal (Promise-based).
+        if (typeof window !== 'undefined' && window.mainAppController &&
+            typeof window.mainAppController.showDeleteConfirmModal === 'function') {
+            window.mainAppController.showDeleteConfirmModal(MSG_CONFIRM).then(function(ok) {
+                if (ok) doRun();
+            });
+            return;
+        }
+
+        // Вариант 2: inline-блок с двумя кнопками внутри actionsEl.
+        // Если блок уже показан — игнорируем повторный клик.
+        if (actionsEl && actionsEl.querySelector('.atex-pp-confirm-bar')) return;
+        var bar = el('div', { class: 'atex-pp-confirm-bar' });
+        bar.appendChild(el('span', { class: 'atex-pp-confirm-msg', text: MSG_CONFIRM }));
+        var okBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Да, перезаписать' });
+        var cancelBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Отмена' });
+        function removeBar() { if (bar.parentNode) bar.parentNode.removeChild(bar); }
+        okBtn.addEventListener('click', function() { removeBar(); doRun(); });
+        cancelBtn.addEventListener('click', function() { removeBar(); });
+        bar.appendChild(okBtn);
+        bar.appendChild(cancelBtn);
+        if (actionsEl) {
+            actionsEl.appendChild(bar);
+        } else {
+            // actionsEl недоступен (не должно происходить) — сразу запускаем.
+            doRun();
+        }
+    };
+
     // ── Рендеринг ──
 
     AtexProductionPlanning.prototype.render = function() {
@@ -782,6 +903,11 @@
         var createBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Создать резку' });
         createBtn.addEventListener('click', function() { self.createCut(); });
         actions.appendChild(createBtn);
+
+        var planBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Запланировать' });
+        planBtn.addEventListener('click', function() { self.runPlanning(actions); });
+        actions.appendChild(planBtn);
+
         form.appendChild(actions);
     };
 

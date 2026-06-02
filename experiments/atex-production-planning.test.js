@@ -120,10 +120,14 @@ var plan = planning.rowsToPlanning(reportRows);
 assertEqual(plan.cuts, [
     { id: '10', number: '1', slitter: { id: '101', label: 'Станок 1' },
       cutType: { id: null, label: '99мм×9' }, materialBatch: { id: null, label: 'НК-0400' },
-      planDate: '06.05.2026', status: 'В работе', sequence: null },
+      planDate: '06.05.2026', status: 'В работе', sequence: null,
+      materialId: '', materialName: '', batchId: '',
+      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, isFoil: false },
     { id: '20', number: '2', slitter: { id: null, label: '' },
       cutType: { id: null, label: '25мм×35' }, materialBatch: { id: null, label: 'НК-0118' },
-      planDate: '27.05.2026', status: 'Ожидает', sequence: null }
+      planDate: '27.05.2026', status: 'Ожидает', sequence: null,
+      materialId: '', materialName: '', batchId: '',
+      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, isFoil: false }
 ], 'rowsToPlanning dedups cuts by cut_id, slitter без id → {id:null}');
 assertEqual(plan.supplies, [
     { id: '900', positionId: '700', cutId: '10' },
@@ -237,5 +241,31 @@ var src = [ cut('1',{m:'A'}), cut('2',{m:'A'}) ];
 var res = planning.orderCuts(src);
 assertEqual(res.map(function(c){return c.sequence;}), [1,2], 'sequence 1..N');
 assertEqual(src[0].sequence, undefined, 'вход не мутируется');
+
+// ── rowsToPlanning строит дескриптор движка из колонок отчёта ──
+var rpd = planning.rowsToPlanning([{
+  cut_id:'9', cut_no:'1', cut_slitter_id:'10', cut_slitter:'Станок 1',
+  cut_material_id:'1241', cut_material:'Фольга 38', cut_batch_id:'700',
+  cut_jumbo_remaining:'350', cut_knives:'14', cut_winding:'out', cut_roller_width:'60',
+  cut_sequence:'', supply_id:''
+}]);
+var c = rpd.cuts[0];
+assertEqual(c.materialId, '1241', 'descriptor materialId');
+assertEqual(c.batchId, '700', 'descriptor batchId');
+assertEqual(c.jumboRemainingM, 350, 'descriptor jumboRemainingM number');
+assertEqual(c.knifeCount, 14, 'descriptor knifeCount number');
+assertEqual(c.winding, 'OUT', 'descriptor winding normalized');
+assertEqual(c.rollerWidth, 60, 'descriptor rollerWidth number');
+assertEqual(c.isFoil, true, 'descriptor isFoil по имени Фольга');
+assertEqual(c.knifeWidths, [], 'descriptor knifeWidths пусто');
+// planQueues
+var pcuts = [
+  { id:'1', slitter:{id:'10',label:'С1'}, materialId:'A', winding:'IN', batchId:'b1', jumboRemainingM:0, knifeCount:4, knifeWidths:[], isFoil:false, rollerWidth:60 },
+  { id:'2', slitter:{id:'10',label:'С1'}, materialId:'A', winding:'IN', batchId:'b1', jumboRemainingM:0, knifeCount:4, knifeWidths:[], isFoil:false, rollerWidth:40 },
+  { id:'3', slitter:{id:null,label:''}, materialId:'A', winding:'IN', batchId:'b1', jumboRemainingM:0, knifeCount:4, knifeWidths:[], isFoil:false, rollerWidth:50 }
+];
+var pq = planning.planQueues(pcuts);
+assertEqual(pq.length, 2, 'planQueues: «без станка» исключён');
+assertEqual(pq.filter(function(x){return x.slitterId==='10';}).map(function(x){return x.sequence;}).sort(), [1,2], 'planQueues: sequence 1..N на станок');
 
 console.log('\n' + passed + ' assertions passed');
