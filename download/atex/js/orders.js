@@ -958,8 +958,18 @@
 
     function loadOrders() {
         var params = ['JSON_KV', 'LIMIT=0,5000'];
-        if (state.filterFrom) params.push('FR_order_created=' + encodeURIComponent(state.filterFrom));
-        if (state.filterTo) params.push('TO_order_created=' + encodeURIComponent(state.filterTo));
+        // Фильтр по дате создания. Обе границы заданы → диапазон без операторов
+        // (FR_=С & TO_=По). Только одна граница → оператор >= / <= (без него одиночные
+        // FR_/TO_ трактуются как точное совпадение и дают 0). Проверено на бою.
+        if (state.filterFrom && state.filterTo) {
+            params.push('FR_order_created=' + encodeURIComponent(state.filterFrom));
+            params.push('TO_order_created=' + encodeURIComponent(state.filterTo));
+        } else if (state.filterFrom) {
+            params.push('FR_order_created=>' + encodeURIComponent(state.filterFrom));
+        } else if (state.filterTo) {
+            params.push('TO_order_created=<' + encodeURIComponent(state.filterTo));
+        }
+        // Статус — точное совпадение (FR_ по тексту работает как exact).
         if (trimValue(state.statusFilter)) params.push('FR_order_status=' + encodeURIComponent(trimValue(state.statusFilter)));
         var url = '/' + encodeURIComponent(getApiBase()) + '/report/orders_list?' + params.join('&');
         return fetchJson(url).then(function(rows) {
