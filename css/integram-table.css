@@ -856,6 +856,8 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     z-index: 100;
     letter-spacing: 0.25px;
     transition: opacity 0.2s ease;
+    display: flex;
+    align-items: center;
 }
 
 /* Make semi-transparent when table rows are beneath it (issue #1922) */
