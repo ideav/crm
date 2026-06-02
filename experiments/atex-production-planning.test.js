@@ -34,7 +34,7 @@ assertEqual(planning.parseRef(null), { id: null, label: '' }, 'parseRef null →
 var cutMeta = {
     id: '110', val: 'Производственная резка', reqs: [
         { id: '1090', val: 'Слиттер' },
-        { id: '1092', val: 'Тип резки' },
+        { id: '1092', val: 'Очередность' },
         { id: '1094', val: 'Партия сырья' },
         { id: '1096', val: 'Дата план' },
         { id: '1098', val: 'Статус' },
@@ -52,12 +52,11 @@ assertEqual(planning.columnIndex(cutMeta, 'Слиттер'), 1, 'columnIndex: fi
 assertEqual(planning.columnIndex(cutMeta, 'Статус'), 5, 'columnIndex: status at index 5');
 
 // ── mapCutRecord ──
-var rec = { i: 501, r: ['7', '101:Слиттер №1', '104:25×35', '106:Партия A', '2026-06-01', 'В очереди', 'комм.'] };
+var rec = { i: 501, r: ['7', '101:Слиттер №1', '', '106:Партия A', '2026-06-01', 'В очереди', 'комм.'] };
 assertEqual(planning.mapCutRecord(rec, cutMeta), {
     id: '501',
     number: '7',
     slitter: { id: '101', label: 'Слиттер №1' },
-    cutType: { id: '104', label: '25×35' },
     materialBatch: { id: '106', label: 'Партия A' },
     planDate: '2026-06-01',
     status: 'В очереди',
@@ -92,9 +91,9 @@ assertEqual(planning.filterCuts(cuts, {}).length, 4, 'empty filter returns all c
 
 // ── buildFields: t{reqId}, пустые значения опускаются ──
 assertEqual(planning.buildFields(
-    { slitter: '1090', cutType: '1092', materialBatch: '1094', planDate: '1096', status: '1098', notes: '1108' },
-    { slitter: '101', cutType: '104', materialBatch: '', planDate: '2026-06-01', status: 'В очереди', notes: '' }
-), { t1090: '101', t1092: '104', t1096: '2026-06-01', t1098: 'В очереди' },
+    { slitter: '1090', winding: '1092', materialBatch: '1094', planDate: '1096', status: '1098', notes: '1108' },
+    { slitter: '101', winding: 'IN', materialBatch: '', planDate: '2026-06-01', status: 'В очереди', notes: '' }
+), { t1090: '101', t1092: 'IN', t1096: '2026-06-01', t1098: 'В очереди' },
     'buildFields prefixes t{id}, skips empty material/notes');
 
 // null id реквизита (нет в метаданных) — поле пропускается.
@@ -119,13 +118,13 @@ var reportRows = [
 var plan = planning.rowsToPlanning(reportRows);
 assertEqual(plan.cuts, [
     { id: '10', number: '1', slitter: { id: '101', label: 'Станок 1' },
-      cutType: { id: null, label: '99мм×9' }, materialBatch: { id: null, label: 'НК-0400' },
+      materialBatch: { id: null, label: 'НК-0400' },
       planDate: '06.05.2026', status: 'В работе', sequence: null,
       materialId: '', materialName: '', batchId: '',
       jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, isFoil: false,
       orderId: '', orderApprovalDate: '' },
     { id: '20', number: '2', slitter: { id: null, label: '' },
-      cutType: { id: null, label: '25мм×35' }, materialBatch: { id: null, label: 'НК-0118' },
+      materialBatch: { id: null, label: 'НК-0118' },
       planDate: '27.05.2026', status: 'Ожидает', sequence: null,
       materialId: '', materialName: '', batchId: '',
       jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, isFoil: false,
@@ -283,20 +282,10 @@ assertEqual(planning.moveInQueue([qc('a',1),qc('b',2)], 1, 1), [], 'границ
 assertEqual(byCut(planning.moveInQueue([qc('a',null),qc('b',null),qc('c',null)],0,1)), byCut([{cutId:'a',sequence:2},{cutId:'b',sequence:1},{cutId:'c',sequence:3}]), 'null → нормализация 1..N');
 var src=[qc('a',1),qc('b',2)]; planning.moveInQueue(src,0,1); assertEqual(src[0].id,'a','вход не мутируется');
 
-// ── Task 1: хелперы генерации резок ──
+// ── Хелперы генерации резок ──
 
 // unsuppliedPositions
 assertEqual(planning.unsuppliedPositions([{id:'1'},{id:'2'}], [{positionId:'1'}]).map(function(p){return p.id;}), ['2'], 'unsupplied: исключает обеспеченные');
-// matchCutType: сырьё+ширина, выбор по макс qty
-var idx = { T1:{materialId:'M', widths:[{width:60,qty:14}]}, T2:{materialId:'M', widths:[{width:60,qty:8},{width:40,qty:1}]}, T3:{materialId:'X', widths:[{width:60,qty:99}]} };
-assertEqual(planning.matchCutType(idx,'M',60), 'T1', 'matchCutType: сырьё M, ширина 60, макс qty → T1');
-assertEqual(planning.matchCutType(idx,'M',999), null, 'matchCutType: нет ширины → null');
-assertEqual(planning.matchCutType(idx,'Z',60), null, 'matchCutType: нет сырья → null');
-// rollersPerCut / cutsNeeded
-assertEqual(planning.rollersPerCut(idx,'T1',60), 14, 'rollersPerCut: 14');
-assertEqual(planning.cutsNeeded(30,14), 3, 'cutsNeeded: ceil(30/14)=3');
-assertEqual(planning.cutsNeeded(5,0), 0, 'cutsNeeded: perCut 0 → 0');
-assertEqual(planning.cutsNeeded(0,14), 1, 'cutsNeeded: qty 0 → min 1');
 // pickSlitter: стоп-лист E + балансировка
 var sl = [{id:'10',stopMaterialIds:['M']},{id:'20',stopMaterialIds:[]},{id:'30',stopMaterialIds:[]}];
 assertEqual(planning.pickSlitter(sl,'M',{}), '20', 'pickSlitter: 10 запрещает M, баланс → 20 (меньший id)');
@@ -307,22 +296,7 @@ var b = [{id:'b1',materialId:'M',dateKey:20260102,remainder:100},{id:'b2',materi
 assertEqual(planning.pickBatchFIFO(b,'M'), 'b2', 'pickBatchFIFO: старейшая с остатком (b3 остаток 0)');
 assertEqual(planning.pickBatchFIFO(b,'Z'), null, 'pickBatchFIFO: нет сырья → null');
 
-// ── Task 2: generateCutPlan ──
-var gIdx = { T1:{materialId:'M', widths:[{width:60,qty:14}]} };
-var gIn = {
-  positions:[ {id:'p1',materialId:'M',width:60,qty:30}, {id:'p2',materialId:'M',width:999,qty:5}, {id:'p3',materialId:'M',width:60,qty:10} ],
-  supplies:[ {positionId:'p3'} ],
-  cutTypeIndex:gIdx,
-  slitters:[ {id:'10',stopMaterialIds:[]} ],
-  batches:[ {id:'b1',materialId:'M',dateKey:20260101,remainder:1000} ]
-};
-var g = planning.generateCutPlan(gIn);
-// p3 обеспечена → пропущена; p1 (qty30, perCut14)→ceil=3 резки; p2 ширина 999 нет типа → skipped
-assertEqual(g.plan.length, 3, 'generateCutPlan: p1 → 3 резки');
-assertEqual(g.plan.every(function(x){ return x.cutTypeId==='T1' && x.slitterId==='10' && x.batchId==='b1' && x.positionId==='p1'; }), true, 'generateCutPlan: поля резок p1');
-assertEqual(g.skipped.map(function(s){return s.positionId;}), ['p2'], 'generateCutPlan: p2 пропущена (нет типа)');
-
-// ── Task 3: чистые хелперы плумбинга ──
+// ── Чистые хелперы плумбинга позиций/партий ──
 // rowsToGenPositions: маппинг строк positions_list → дескрипторы
 var grp = planning.rowsToGenPositions([
   { position_id:'10', position_material_id:'5', position_width:'60', position_qty:'30' },
