@@ -839,7 +839,7 @@ function t9n($msg)
 # Check file extension
 function BlackList($ext)
 {
-	if(stripos(". php cgi pl fcgi fpl phtml shtml php2 php3 php4 php5 asp jsp ", " $ext "))
+	if(stripos(". php php2 php3 php4 php5 php6 php7 php8 phps phtml pht phar shtml cgi pl fcgi fpl asp jsp htaccess htpasswd sh ", " $ext "))
 		my_die(t9n("[RU]Недопустимый тип файла![EN]Wrong file extension!"));
 }
 # Get a hashed string
@@ -7479,6 +7479,10 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 						if(strlen($value["name"]) > 0)
 						{
             			    trace("upload ".$value["name"]);
+							# Защита от path traversal: только базовое имя файла (без .. / \)
+							$value["name"] = basename(str_replace("\\", "/", $value["name"]));
+							if($value["name"] === "" || strpos($value["name"], "..") !== false)
+								die(t9n("[RU]Недопустимое имя файла[EN]Invalid file name".BACK_LINK));
 							BlackList(substr(strrchr($value["name"], '.'), 1)); # Check the file extension
 							if(file_exists($path."/".$value["name"]))
 								if(isset($_REQUEST["rewrite"]))
@@ -7505,8 +7509,12 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				check();
 				if(is_array($_POST["del"]))
 					foreach($_POST["del"] as $value)
-						if(strlen($value))
+						# Защита от path traversal: имя должно быть простым (без / \ ..)
+						if(strlen($value) && strpos($value, "..") === false && strpos($value, "/") === false && strpos($value, "\\") === false)
+						{
+							trace("dir_admin delete: ".$path."/".$value);
 							RemoveDir($path."/".$value);
+						}
 #print_r($GLOBALS); die("is_dir($path./.$value) =".is_dir($path."/".$value));
 				$apiResp("delete");
 				header("Location: /$z/dir_admin/?".$blocks[$block]["folder"][0]."=1&add_path=$add_path");
