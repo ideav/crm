@@ -959,6 +959,136 @@
         return this.loadPlanning();
     };
 
+    // Генерация резок под необеспеченные позиции: собирает входы для
+    // generateCutPlan, показывает inline-подтверждение, затем последовательно
+    // создаёт Производственную резку + Обеспечение для каждой записи плана.
+    // actionsEl — DOM-элемент тулбара (для inline-confirm fallback).
+    AtexProductionPlanning.prototype.generateCuts = function(actionsEl) {
+        var self = this;
+        if (this.busy) return;
+
+        // 1. Считаем текущую загрузку станков из очереди (кол-во резок на станок).
+        var loadBySlitterId = {};
+        (this.cuts || []).forEach(function(c) {
+            var sid = c && c.slitter && c.slitter.id;
+            if (sid != null) loadBySlitterId[String(sid)] = (loadBySlitterId[String(sid)] || 0) + 1;
+        });
+
+        // 2. Строим входы для generateCutPlan.
+        var input = {
+            positions: this.genPositions,
+            supplies: this.supplies,
+            cutTypeIndex: this.cutTypeIndex,
+            slitters: this.slitters,
+            batches: this.genBatches,
+            loadBySlitterId: loadBySlitterId
+        };
+        var res = planning.generateCutPlan(input);
+
+        if (!res.plan.length) {
+            var skipMsg = res.skipped.length ? ' (пропущено ' + res.skipped.length + ')' : '';
+            self.notify('Нет необеспеченных позиций для генерации' + skipMsg, 'info');
+            return;
+        }
+
+        var N = res.plan.length;
+        var M = res.skipped.length;
+        var MSG = 'Создать ' + N + ' резок под необеспеченные позиции?' + (M ? ' (пропущено ' + M + ')' : '');
+
+        function doGenerate() {
+            self.setBusy(true);
+
+            var metaCut = self.meta.cut;
+            var metaSupply = self.meta.supply;
+
+            var cutReqIds = {
+                cutType: reqIdByName(metaCut, CUT_REQ.cutType),
+                slitter: reqIdByName(metaCut, CUT_REQ.slitter),
+                materialBatch: reqIdByName(metaCut, CUT_REQ.materialBatch),
+                status: reqIdByName(metaCut, CUT_REQ.status)
+            };
+            var supplyReqIds = {
+                cut: reqIdByName(metaSupply, SUPPLY_REQ.cut)
+            };
+
+            var created = 0;
+            var chain = Promise.resolve();
+
+            res.plan.forEach(function(entry) {
+                chain = chain.then(function() {
+                    // Шаг A: создать Производственную резку.
+                    var cutFields = buildFields(cutReqIds, {
+                        cutType: entry.cutTypeId || '',
+                        slitter: entry.slitterId || '',
+                        materialBatch: entry.batchId || '',
+                        status: CUT_STATUSES[0]  // 'Запланирована'
+                    });
+                    return self.post('_m_new/' + metaCut.id + '?JSON&up=1&full=1', cutFields)
+                        .then(function(cutRes) {
+                            var cutId = cutRes && (cutRes.obj || cutRes.id || cutRes.i);
+                            if (!cutId) throw new Error('Сервер не вернул id новой резки');
+                            // Шаг B: создать Обеспечение (up=positionId, ссылка на резку).
+                            var supplyFields = buildFields(supplyReqIds, {
+                                cut: String(cutId)
+                            });
+                            return self.post(
+                                '_m_new/' + metaSupply.id + '?JSON&up=' + encodeURIComponent(entry.positionId),
+                                supplyFields
+                            );
+                        })
+                        .then(function() {
+                            created++;
+                        });
+                });
+            });
+
+            chain.then(function() {
+                return self.reload();
+            }).then(function() {
+                self.setBusy(false);
+                self.render();
+                var msg = 'Создано ' + created + ' резок';
+                if (M) {
+                    // Группируем причины пропусков для краткого итога.
+                    var byReason = {};
+                    res.skipped.forEach(function(s) { byReason[s.reason] = (byReason[s.reason] || 0) + 1; });
+                    var reasons = Object.keys(byReason).map(function(r) { return byReason[r] + ' ' + r; }).join(', ');
+                    msg += ', пропущено ' + M + ' позиций (' + reasons + ')';
+                }
+                self.notify(msg, 'success');
+            }).catch(function(err) {
+                self.setBusy(false);
+                self.notify('Ошибка генерации резок: ' + err.message, 'error');
+            });
+        }
+
+        // Подтверждение без native confirm — зеркало runPlanning.
+        if (typeof window !== 'undefined' && window.mainAppController &&
+            typeof window.mainAppController.showDeleteConfirmModal === 'function') {
+            window.mainAppController.showDeleteConfirmModal(MSG).then(function(ok) {
+                if (ok) doGenerate();
+            });
+            return;
+        }
+
+        // Inline-блок с двумя кнопками внутри actionsEl.
+        if (actionsEl && actionsEl.querySelector('.atex-pp-confirm-bar')) return;
+        var bar = el('div', { class: 'atex-pp-confirm-bar' });
+        bar.appendChild(el('span', { class: 'atex-pp-confirm-msg', text: MSG }));
+        var okBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Да, создать' });
+        var cancelBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Отмена' });
+        function removeBar() { if (bar.parentNode) bar.parentNode.removeChild(bar); }
+        okBtn.addEventListener('click', function() { removeBar(); doGenerate(); });
+        cancelBtn.addEventListener('click', function() { removeBar(); });
+        bar.appendChild(okBtn);
+        bar.appendChild(cancelBtn);
+        if (actionsEl) {
+            actionsEl.appendChild(bar);
+        } else {
+            doGenerate();
+        }
+    };
+
     // DRY-метод сохранения изменённых «Очередностей». pairs = [{cutId, sequence}].
     // opts.successMessage — если передан, показывается после reload вместо дефолтного;
     // opts.silent — не показывать уведомление (runPlanning добавит своё).
@@ -1169,6 +1299,10 @@
         var planBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Запланировать' });
         planBtn.addEventListener('click', function() { self.runPlanning(actions); });
         actions.appendChild(planBtn);
+
+        var genBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Сгенерировать резки' });
+        genBtn.addEventListener('click', function() { self.generateCuts(actions); });
+        actions.appendChild(genBtn);
 
         form.appendChild(actions);
     };
