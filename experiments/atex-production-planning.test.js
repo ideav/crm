@@ -281,4 +281,28 @@ assertEqual(planning.moveInQueue([qc('a',1),qc('b',2)], 1, 1), [], 'границ
 assertEqual(byCut(planning.moveInQueue([qc('a',null),qc('b',null),qc('c',null)],0,1)), byCut([{cutId:'a',sequence:2},{cutId:'b',sequence:1},{cutId:'c',sequence:3}]), 'null → нормализация 1..N');
 var src=[qc('a',1),qc('b',2)]; planning.moveInQueue(src,0,1); assertEqual(src[0].id,'a','вход не мутируется');
 
+// ── Task 1: хелперы генерации резок ──
+
+// unsuppliedPositions
+assertEqual(planning.unsuppliedPositions([{id:'1'},{id:'2'}], [{positionId:'1'}]).map(function(p){return p.id;}), ['2'], 'unsupplied: исключает обеспеченные');
+// matchCutType: сырьё+ширина, выбор по макс qty
+var idx = { T1:{materialId:'M', widths:[{width:60,qty:14}]}, T2:{materialId:'M', widths:[{width:60,qty:8},{width:40,qty:1}]}, T3:{materialId:'X', widths:[{width:60,qty:99}]} };
+assertEqual(planning.matchCutType(idx,'M',60), 'T1', 'matchCutType: сырьё M, ширина 60, макс qty → T1');
+assertEqual(planning.matchCutType(idx,'M',999), null, 'matchCutType: нет ширины → null');
+assertEqual(planning.matchCutType(idx,'Z',60), null, 'matchCutType: нет сырья → null');
+// rollersPerCut / cutsNeeded
+assertEqual(planning.rollersPerCut(idx,'T1',60), 14, 'rollersPerCut: 14');
+assertEqual(planning.cutsNeeded(30,14), 3, 'cutsNeeded: ceil(30/14)=3');
+assertEqual(planning.cutsNeeded(5,0), 0, 'cutsNeeded: perCut 0 → 0');
+assertEqual(planning.cutsNeeded(0,14), 1, 'cutsNeeded: qty 0 → min 1');
+// pickSlitter: стоп-лист E + балансировка
+var sl = [{id:'10',stopMaterialIds:['M']},{id:'20',stopMaterialIds:[]},{id:'30',stopMaterialIds:[]}];
+assertEqual(planning.pickSlitter(sl,'M',{}), '20', 'pickSlitter: 10 запрещает M, баланс → 20 (меньший id)');
+assertEqual(planning.pickSlitter(sl,'M',{'20':2}), '30', 'pickSlitter: 20 загружен → 30');
+assertEqual(planning.pickSlitter([{id:'10',stopMaterialIds:['M']}],'M',{}), null, 'pickSlitter: все запрещают → null');
+// pickBatchFIFO
+var b = [{id:'b1',materialId:'M',dateKey:20260102,remainder:100},{id:'b2',materialId:'M',dateKey:20260101,remainder:50},{id:'b3',materialId:'M',dateKey:20251231,remainder:0}];
+assertEqual(planning.pickBatchFIFO(b,'M'), 'b2', 'pickBatchFIFO: старейшая с остатком (b3 остаток 0)');
+assertEqual(planning.pickBatchFIFO(b,'Z'), null, 'pickBatchFIFO: нет сырья → null');
+
 console.log('\n' + passed + ' assertions passed');

@@ -339,6 +339,63 @@
         return cost;
     }
 
+    // ───────────────────── Хелперы генерации резок (Task 1 — D3b) ─────────────────────
+
+    // Позиции, не имеющие ни одной записи обеспечения. supplies — [{positionId}].
+    function unsuppliedPositions(positions, supplies){
+        var sup = {}; (supplies || []).forEach(function(s){ if (s && s.positionId != null) sup[String(s.positionId)] = true; });
+        return (positions || []).filter(function(p){ return !sup[String(p.id)]; });
+    }
+
+    // Подобрать тип резки по сырью и ширине: среди совпадений выбрать с макс qty
+    // (по полосе); при равенстве — меньший typeId лексикографически. null если не найден.
+    function matchCutType(cutTypeIndex, materialId, width){
+        var w = Number(width), mat = String(materialId == null ? '' : materialId), best = null, bestQty = -1;
+        Object.keys(cutTypeIndex || {}).forEach(function(tid){
+            var t = cutTypeIndex[tid];
+            if (String(t.materialId) !== mat) return;
+            var strip = (t.widths || []).filter(function(s){ return Number(s.width) === w; })[0];
+            if (!strip) return;
+            var q = Number(strip.qty) || 0;
+            if (q > bestQty || (q === bestQty && (best == null || String(tid) < String(best)))) { bestQty = q; best = tid; }
+        });
+        return best;
+    }
+
+    // Число роликов за одну резку (qty полосы данной ширины в типе резки). 0 если не найдено.
+    function rollersPerCut(cutTypeIndex, typeId, width){
+        var t = (cutTypeIndex || {})[String(typeId)]; if (!t) return 0;
+        var w = Number(width), strip = (t.widths || []).filter(function(s){ return Number(s.width) === w; })[0];
+        return strip ? (Number(strip.qty) || 0) : 0;
+    }
+
+    // Число резок ceil(qty / perCut); min 1 если qty > 0; 0 если perCut = 0.
+    function cutsNeeded(qty, perCut){ var q = Number(qty) || 0, k = Number(perCut) || 0; return k > 0 ? Math.max(1, Math.ceil(q / k)) : 0; }
+
+    // Выбрать станок: исключить запрещённые (стоп-лист), среди допустимых —
+    // с наименьшей загрузкой (loadBySlitterId: {id→count}), тайбрейк — меньший id.
+    // Возвращает String(id) или null если все запрещены.
+    function pickSlitter(slitters, materialId, loadBySlitterId){
+        var load = loadBySlitterId || {};
+        var allowed = (slitters || []).filter(function(s){ return !isMaterialBlocked(s.stopMaterialIds, materialId); });
+        if (!allowed.length) return null;
+        allowed.sort(function(a, b){
+            var la = Number(load[String(a.id)]) || 0, lb = Number(load[String(b.id)]) || 0;
+            return la - lb || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
+        });
+        return String(allowed[0].id);
+    }
+
+    // FIFO-партия: среди партий нужного сырья с остатком > 0 выбрать с наименьшим dateKey.
+    // batches — [{id, materialId, dateKey (число), remainder}]. null если нет подходящей.
+    function pickBatchFIFO(batches, materialId){
+        var mat = String(materialId == null ? '' : materialId);
+        var avail = (batches || []).filter(function(b){ return String(b.materialId) === mat && (Number(b.remainder) || 0) > 0; });
+        if (!avail.length) return null;
+        avail.sort(function(a, b){ return (Number(a.dateKey) || 0) - (Number(b.dateKey) || 0) || (String(a.id) < String(b.id) ? -1 : 1); });
+        return String(avail[0].id);
+    }
+
     function startKey(c){ return [Number(c.rollerWidth) || 0, -(Number(c.knifeCount) || 0), String(c.id)]; }
     function cmpKey(a, b){ for (var i = 0; i < a.length; i++){ if (a[i] < b[i]) return -1; if (a[i] > b[i]) return 1; } return 0; }
     // Жадная последовательность: старт — argmin startKey (узкая/много-ножевая); далее argmin changeoverCost, tie-break startKey.
@@ -429,7 +486,13 @@
         greedySequence: greedySequence,
         orderCuts: orderCuts,
         planQueues: planQueues,
-        moveInQueue: moveInQueue
+        moveInQueue: moveInQueue,
+        unsuppliedPositions: unsuppliedPositions,
+        matchCutType: matchCutType,
+        rollersPerCut: rollersPerCut,
+        cutsNeeded: cutsNeeded,
+        pickSlitter: pickSlitter,
+        pickBatchFIFO: pickBatchFIFO
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
