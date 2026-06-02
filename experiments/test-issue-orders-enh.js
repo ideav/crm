@@ -27,6 +27,7 @@ eq(out[0].positions.length, 2, 'rowsToOrders: 2 позиции у заказа 1
 eq(out[0].positions[0].id, '100', 'rowsToOrders: id позиции');
 eq(out[0].positions[1].values.cutType, '110мм×8 / MW308', 'rowsToOrders: значения позиции');
 eq(out[0].positions[0].refs, { raw:'1237', cutType:'1308', sleeve:'8190' }, 'rowsToOrders: id ссылок (refs) из отчёта');
+eq(out[0].positions[0].refs, { raw:'1237', cutType:'1308', sleeve:'8190' }, 'rowsToOrders: id ссылок (refs) из отчёта');
 eq(out[1].positions.length, 0, 'rowsToOrders: заказ без позиций → пустой список');
 
 // searchOrders: заказ виден, если запрос совпал с любым полем заказа ИЛИ любой позиции
