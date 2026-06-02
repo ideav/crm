@@ -68,7 +68,7 @@
         orders: [],
         positionsByOrder: {},
         expanded: {},
-        editingPosition: null,      // id позиции в режиме inline-правки (или null)
+        editingCell: null,          // активная ячейка поячейковой правки (DOM td) или null
         statusFilter: '',
         filterFrom: '',
         filterTo: '',
@@ -727,9 +727,7 @@
             body = '<tbody><tr><td colspan="9" class="atex-orders-empty">Позиций пока нет.</td></tr></tbody>';
         } else {
             body = '<tbody>' + positions.map(function(pos) {
-                return state.editingPosition === pos.id
-                    ? renderPositionEditRow(order, pos)
-                    : renderPositionViewRow(pos);
+                return renderPositionRow(order, pos);
             }).join('') + '</tbody>';
         }
 
@@ -738,93 +736,41 @@
             '<button type="button" class="atex-orders-btn atex-orders-btn-secondary" ' +
             'data-add-position="' + escapeHtml(order.id) + '">' +
             '<i class="pi pi-plus"></i><span>Добавить позицию</span></button>' +
-            renderPositionForm(order) +
             '</div>';
     }
 
-    // Обычная (нередактируемая) строка позиции: текст + select статуса + кнопки ✎/🗑.
-    function renderPositionViewRow(pos) {
-        return '<tr data-position-id="' + escapeHtml(pos.id) + '">' +
-            '<td>' + escapeHtml(pos.values.qty || '') + '</td>' +
-            '<td>' + escapeHtml(pos.values.raw || '') + '</td>' +
-            '<td>' + escapeHtml(pos.values.cutType || '') + '</td>' +
-            '<td>' + escapeHtml(pos.values.width || '') + '</td>' +
-            '<td>' + escapeHtml(pos.values.length || '') + '</td>' +
-            '<td>' + escapeHtml(pos.values.sleeve || '') + '</td>' +
-            '<td>' + escapeHtml(pos.values.winding || '') + '</td>' +
-            '<td>' + statusSelectHtml(state.positionStatuses, pos.values.status,
-                ' data-position-status="' + escapeHtml(pos.id) + '"') + '</td>' +
+    // Поячейково редактируемые столбцы позиции (по data-cell соответствует key в state.positionColumns).
+    var EDITABLE_POSITION_CELLS = ['qty', 'raw', 'cutType', 'width', 'length', 'sleeve', 'winding', 'status'];
+
+    // Текст отображения значения ячейки позиции (для ref-полей — подпись из values).
+    function positionCellText(pos, key) {
+        return pos.values[key] || '';
+    }
+
+    // Одна ячейка-отображение: кликабельна, превращается в контрол по клику.
+    function positionDisplayCell(pos, key) {
+        return '<td class="atex-orders-cell" data-cell="' + escapeHtml(key) +
+            '" data-position-id="' + escapeHtml(pos.id) + '" tabindex="0">' +
+            escapeHtml(positionCellText(pos, key)) + '</td>';
+    }
+
+    // Строка позиции: все редактируемые ячейки кликабельны + кнопка удаления.
+    // data-position-form на <tr> нужно делегированию ref-select/«Тип резки» (как раньше у формы).
+    function renderPositionRow(order, pos) {
+        return '<tr data-position-id="' + escapeHtml(pos.id) + '" data-position-form="' + escapeHtml(order.id) + '">' +
+            positionDisplayCell(pos, 'qty') +
+            positionDisplayCell(pos, 'raw') +
+            positionDisplayCell(pos, 'cutType') +
+            positionDisplayCell(pos, 'width') +
+            positionDisplayCell(pos, 'length') +
+            positionDisplayCell(pos, 'sleeve') +
+            positionDisplayCell(pos, 'winding') +
+            positionDisplayCell(pos, 'status') +
             '<td class="atex-orders-pos-actions">' +
-            '<button type="button" class="atex-orders-icon-btn" title="Редактировать" ' +
-            'aria-label="Редактировать" data-edit-pos="' + escapeHtml(pos.id) + '"><i class="pi pi-pencil"></i></button>' +
             '<button type="button" class="atex-orders-icon-btn atex-orders-icon-btn--danger" title="Удалить" ' +
             'aria-label="Удалить" data-del-pos="' + escapeHtml(pos.id) + '"><i class="pi pi-trash"></i></button>' +
             '</td>' +
             '</tr>';
-    }
-
-    // Строка позиции в режиме inline-правки: ячейки → редактируемые контролы.
-    // На <tr> ставим data-position-form (для делегирования ref-select/ширины из формы добавления)
-    // и data-edit-row (маркер строки правки).
-    function renderPositionEditRow(order, pos) {
-        var rawCol = getColumn(state.positionColumns, 'raw');
-        var cutCol = getColumn(state.positionColumns, 'cutType');
-        var sleeveCol = getColumn(state.positionColumns, 'sleeve');
-        var rawOptions = rawCol && rawCol.reqId ? state.refOptions[rawCol.reqId] : null;
-        var cutOptions = cutCol && cutCol.reqId ? state.refOptions[cutCol.reqId] : null;
-        var sleeveOptions = sleeveCol && sleeveCol.reqId ? state.refOptions[sleeveCol.reqId] : null;
-        // Для ref-полей берём id из refs (загружены через loadPositions); подпись из values.
-        var refs = pos.refs || {};
-        var pid = pos.id;
-        var windingVal = (pos.values.winding || '').toUpperCase();
-        return '<tr data-position-id="' + escapeHtml(pid) + '" data-edit-row="' + escapeHtml(pid) + '" ' +
-            'data-position-form="' + escapeHtml(order.id) + '" class="atex-orders-edit-row">' +
-            '<td><input class="atex-orders-input" type="number" min="0" data-field="qty" value="' + escapeHtml(pos.values.qty || '') + '"></td>' +
-            '<td>' + refSelectHtml('atex-pos-raw-edit-' + pid, rawOptions, refs.raw || '', 'Выберите вид сырья', rawCol && rawCol.reqId) + '</td>' +
-            '<td>' + refSelectHtml('atex-pos-cut-edit-' + pid, cutOptions, refs.cutType || '', 'Выберите тип резки', cutCol && cutCol.reqId) + '</td>' +
-            '<td><input class="atex-orders-input" type="number" min="0" data-field="width" value="' + escapeHtml(pos.values.width || '') + '"></td>' +
-            '<td><input class="atex-orders-input" type="number" min="0" step="any" data-field="length" value="' + escapeHtml(pos.values.length || '') + '"></td>' +
-            '<td>' + refSelectHtml('atex-pos-sleeve-edit-' + pid, sleeveOptions, refs.sleeve || '', 'Выберите диаметр', sleeveCol && sleeveCol.reqId) + '</td>' +
-            '<td><select class="atex-orders-input atex-orders-winding" data-field="winding">' +
-            '<option value=""' + (windingVal ? '' : ' selected') + '>— не задано —</option>' +
-            '<option value="IN"' + (windingVal === 'IN' ? ' selected' : '') + '>IN</option>' +
-            '<option value="OUT"' + (windingVal === 'OUT' ? ' selected' : '') + '>OUT</option>' +
-            '</select></td>' +
-            '<td>' + statusSelectHtml(state.positionStatuses, pos.values.status, ' data-field="status"') + '</td>' +
-            '<td class="atex-orders-pos-actions">' +
-            '<button type="button" class="atex-orders-icon-btn atex-orders-icon-btn--ok" title="Сохранить" ' +
-            'aria-label="Сохранить" data-save-pos="' + escapeHtml(pid) + '"><i class="pi pi-check"></i></button>' +
-            '<button type="button" class="atex-orders-icon-btn" title="Отмена" ' +
-            'aria-label="Отмена" data-cancel-edit="' + escapeHtml(pid) + '"><i class="pi pi-times"></i></button>' +
-            '</td>' +
-            '</tr>';
-    }
-
-    function renderPositionForm(order) {
-        var rawCol = getColumn(state.positionColumns, 'raw');
-        var cutCol = getColumn(state.positionColumns, 'cutType');
-        var sleeveCol = getColumn(state.positionColumns, 'sleeve');
-        var rawOptions = rawCol && rawCol.reqId ? state.refOptions[rawCol.reqId] : null;
-        var cutOptions = cutCol && cutCol.reqId ? state.refOptions[cutCol.reqId] : null;
-        var sleeveOptions = sleeveCol && sleeveCol.reqId ? state.refOptions[sleeveCol.reqId] : null;
-        return '<form class="atex-orders-position-form" data-position-form="' + escapeHtml(order.id) + '" hidden>' +
-            '<div class="atex-orders-fields">' +
-            '<label>Кол-во<input class="atex-orders-input" type="number" min="0" data-field="qty"></label>' +
-            '<label>Вид сырья' + refSelectHtml('atex-pos-raw-' + order.id, rawOptions, '', 'Выберите вид сырья', rawCol && rawCol.reqId) + '</label>' +
-            '<label>Тип резки' + refSelectHtml('atex-pos-cut-' + order.id, cutOptions, '', 'Выберите тип резки', cutCol && cutCol.reqId) + '</label>' +
-            '<label>Ширина, мм<input class="atex-orders-input" type="number" min="0" data-field="width"></label>' +
-            '<label>Длина, м<input class="atex-orders-input" type="number" min="0" step="any" data-field="length"></label>' +
-            '<label>Ø втулки' + refSelectHtml('atex-pos-sleeve-' + order.id, sleeveOptions, '', 'Выберите диаметр', sleeveCol && sleeveCol.reqId) + '</label>' +
-            '<label>Тип намотки<select class="atex-orders-input atex-orders-winding" data-field="winding">' +
-            '<option value="">— не задано —</option>' +
-            '<option value="IN">IN</option>' +
-            '<option value="OUT">OUT</option>' +
-            '</select></label>' +
-            '</div>' +
-            '<div class="atex-orders-form-actions">' +
-            '<button type="submit" class="atex-orders-btn atex-orders-btn-primary"><i class="pi pi-check"></i><span>Сохранить позицию</span></button>' +
-            '<button type="button" class="atex-orders-btn atex-orders-btn-secondary" data-cancel-position="' + escapeHtml(order.id) + '">Отмена</button>' +
-            '</div></form>';
     }
 
     // Пересобирает список опций «Тип резки» формы позиции по текущему сырью/ширине.
@@ -1025,35 +971,24 @@
         });
     }
 
-    function createPosition(orderId, form) {
-        var rawSel = form.querySelector('#atex-pos-raw-' + cssEscape(orderId));
-        var cutSel = form.querySelector('#atex-pos-cut-' + cssEscape(orderId));
-        var sleeveSel = form.querySelector('#atex-pos-sleeve-' + cssEscape(orderId));
-        function fieldVal(name) {
-            var el = form.querySelector('[data-field="' + name + '"]');
-            return el ? el.value : '';
-        }
-
+    // Добавление позиции: сразу создаём пустую запись на сервере (только дефолтный
+    // статус), берём id из ответа и перезагружаем отчётом — новая строка появляется
+    // в таблице и редактируется поячейково, как остальные.
+    function createPosition(orderId) {
         var req = buildCreatePositionRequest({
             db: getApiBase(),
             tableId: state.positionTable,
             columns: state.positionColumns,
             orderId: orderId,
-            qty: fieldVal('qty'),
-            rawId: rawSel ? rawSel.value : '',
-            cutTypeId: cutSel ? cutSel.value : '',
-            width: fieldVal('width'),
-            length: fieldVal('length'),
-            sleeve: sleeveSel ? sleeveSel.value : '',
-            winding: fieldVal('winding'),
             status: state.positionStatuses[0],
             xsrf: getXsrf()
         });
-
         setMessage('Добавление позиции…', 'info');
-        postForm(req.url, req.body).then(function() {
-            setMessage('Позиция добавлена.', 'success');
-            return loadPositions(orderId);
+        postForm(req.url, req.body).then(function(response) {
+            var newId = extractNewObjectId(response);
+            setMessage(newId ? 'Позиция №' + newId + ' добавлена.' : 'Позиция добавлена.', 'success');
+            state.expanded[orderId] = true;
+            return loadOrders();
         }).catch(function(error) {
             setMessage('Не удалось добавить позицию: ' + (error.message || error), 'error');
         });
@@ -1072,84 +1007,162 @@
         return null;
     }
 
-    // Переход строки позиции в режим inline-правки.
-    // Для предзаполнения ref-полей нужны id (refs); если позиция загружена отчётом
-    // (только подписи, без refs) — догружаем позиции заказа через loadPositions, затем открываем редактор.
-    function startEditPosition(posId) {
-        var found = findPositionById(posId);
+    // --- Поячейковая правка ---------------------------------------------------
+
+    // Закрывает активную ячейку без сохранения (восстанавливает её как отображение).
+    function deactivateCell() {
+        var td = state.editingCell;
+        state.editingCell = null;
+        if (!td || !td.parentNode) return;
+        var key = td.getAttribute('data-cell');
+        var posId = td.getAttribute('data-position-id');
+        var found = posId ? findPositionById(posId) : null;
+        td.classList.remove('is-editing');
+        td.textContent = found ? positionCellText(found.position, key) : (td.getAttribute('data-prev') || '');
+    }
+
+    // Переводит ячейку отображения в режим правки: подставляет контрол и даёт фокус.
+    function activateCell(td) {
+        if (!td || state.editingCell === td) return;
+        var key = td.getAttribute('data-cell');
+        var posId = td.getAttribute('data-position-id');
+        var found = posId ? findPositionById(posId) : null;
         if (!found) return;
-        function open() {
-            state.editingPosition = String(posId);
-            renderOrders();
-            // После рендера подгружаем допустимые типы резки по текущему сырью/ширине.
-            var row = document.querySelector('[data-edit-row="' + cssEscape(posId) + '"]');
-            if (row) {
-                var rawCol = getColumn(state.positionColumns, 'raw');
-                var rawWrapper = rawCol && rawCol.reqId
-                    ? row.querySelector('[data-ref-select][data-ref-req-id="' + cssEscape(rawCol.reqId) + '"]') : null;
-                var rawHidden = rawWrapper ? rawWrapper.querySelector('[data-ref-value]') : null;
-                var materialId = rawHidden ? rawHidden.value : '';
-                ensureStripWidths(materialId).then(function() {
-                    refreshCutTypeOptions(found.orderId, row);
-                });
-            }
-        }
-        // refs отсутствуют у позиций из отчёта — догрузим детально.
-        if (!found.position.refs) {
+        // Ref-полям (raw/cutType/sleeve) нужны id из refs; в данных отчёта их нет —
+        // догружаем позиции заказа детально, затем открываем ячейку.
+        var col = getColumn(state.positionColumns, key);
+        var isRef = col && col.ref;
+        if (isRef && !found.position.refs) {
             setMessage('Загрузка позиции…', 'info');
             loadPositions(found.orderId).then(function() {
                 setMessage('');
-                open();
+                var fresh = document.querySelector('td.atex-orders-cell[data-cell="' + cssEscape(key) +
+                    '"][data-position-id="' + cssEscape(posId) + '"]');
+                if (fresh) activateCell(fresh);
             }).catch(function(error) {
                 setMessage('Не удалось загрузить позицию: ' + (error.message || error), 'error');
             });
-        } else {
-            open();
+            return;
+        }
+        // Прежняя активная ячейка возвращается в отображение (без сохранения).
+        if (state.editingCell && state.editingCell !== td) deactivateCell();
+        state.editingCell = td;
+        td.classList.add('is-editing');
+        var pos = found.position;
+        var prevValue = positionCellText(pos, key);
+        td.setAttribute('data-prev', prevValue);
+        td.innerHTML = renderCellControl(found.orderId, pos, key);
+        focusCellControl(td, key, found.orderId);
+    }
+
+    // HTML контрола для ячейки по типу столбца.
+    function renderCellControl(orderId, pos, key) {
+        var col = getColumn(state.positionColumns, key);
+        var refs = pos.refs || {};
+        if (key === 'qty' || key === 'width' || key === 'length') {
+            var step = key === 'length' ? ' step="any"' : '';
+            return '<input class="atex-orders-input atex-orders-cell-input" type="number" min="0"' + step +
+                ' data-field="' + escapeHtml(key) + '" value="' + escapeHtml(pos.values[key] || '') + '">';
+        }
+        if (col && col.ref) {
+            var options = col.reqId ? state.refOptions[col.reqId] : null;
+            var placeholder = key === 'raw' ? 'Выберите вид сырья'
+                : (key === 'cutType' ? 'Выберите тип резки' : 'Выберите диаметр');
+            return refSelectHtml('atex-pos-' + key + '-cell-' + pos.id, options, refs[key] || '', placeholder, col.reqId);
+        }
+        if (key === 'winding') {
+            var w = (pos.values.winding || '').toUpperCase();
+            return '<select class="atex-orders-input atex-orders-cell-input atex-orders-winding" data-field="winding">' +
+                '<option value=""' + (w ? '' : ' selected') + '>— не задано —</option>' +
+                '<option value="IN"' + (w === 'IN' ? ' selected' : '') + '>IN</option>' +
+                '<option value="OUT"' + (w === 'OUT' ? ' selected' : '') + '>OUT</option>' +
+                '</select>';
+        }
+        // status
+        return statusSelectHtml(state.positionStatuses, pos.values.status,
+            ' data-field="status" class="atex-orders-status atex-orders-cell-input"');
+    }
+
+    // Фокус на контрол внутри активированной ячейки + предзагрузка типов резки для ref.
+    function focusCellControl(td, key, orderId) {
+        var col = getColumn(state.positionColumns, key);
+        if (col && col.ref) {
+            var search = td.querySelector('[data-ref-search]');
+            if (search) search.focus();
+            // Фильтр «Тип резки» по текущему сырью/ширине строки.
+            var row = td.closest('tr');
+            if (row) {
+                var rawCol = getColumn(state.positionColumns, 'raw');
+                var rawHidden = rawCol && rawCol.reqId
+                    ? rowRefValue(row, rawCol.reqId) : '';
+                ensureStripWidths(rawHidden).then(function() {
+                    refreshCutTypeOptions(orderId, row);
+                });
+            }
+            return;
+        }
+        var input = td.querySelector('[data-field]');
+        if (input) {
+            input.focus();
+            if (input.select) input.select();
         }
     }
 
-    function cancelEditPosition() {
-        state.editingPosition = null;
-        renderOrders();
+    // Значение скрытого ref-input строки по reqId (для фильтра типов резки строки).
+    // В строке ref-контрол есть только у активной ячейки; если сырьё не редактируется
+    // сейчас — берём id из данных позиции (refs).
+    function rowRefValue(row, reqId) {
+        var w = row.querySelector('[data-ref-select][data-ref-req-id="' + cssEscape(reqId) + '"]');
+        var hidden = w ? w.querySelector('[data-ref-value]') : null;
+        if (hidden) return hidden.value;
+        var posId = row.getAttribute('data-position-id');
+        var found = posId ? findPositionById(posId) : null;
+        var rawCol = getColumn(state.positionColumns, 'raw');
+        if (found && found.position.refs && rawCol && String(rawCol.reqId) === String(reqId)) {
+            return found.position.refs.raw || '';
+        }
+        return '';
     }
 
-    // Сохранение inline-правки: собираем значения из контролов строки → _m_set/{posId} → перезагрузка.
-    function savePosition(posId, row) {
-        if (!row) return;
-        function fieldVal(name) {
-            var el = row.querySelector('[data-field="' + name + '"]');
-            return el ? el.value : '';
+    // Сохранение одного поля позиции: _m_set/{posId} с единственным t{reqId}.
+    // Если значение не изменилось — просто возврат отображения, без запроса.
+    function savePositionCell(td, newValue) {
+        if (!td) return;
+        var key = td.getAttribute('data-cell');
+        var posId = td.getAttribute('data-position-id');
+        var col = getColumn(state.positionColumns, key);
+        var found = posId ? findPositionById(posId) : null;
+        state.editingCell = null;
+        td.classList.remove('is-editing');
+        if (!found || !col || !col.reqId) {
+            if (found) td.textContent = positionCellText(found.position, key);
+            return;
         }
-        function refVal(key) {
-            var col = getColumn(state.positionColumns, key);
-            if (!col || !col.reqId) return '';
-            var w = row.querySelector('[data-ref-select][data-ref-req-id="' + cssEscape(col.reqId) + '"]');
-            var hidden = w ? w.querySelector('[data-ref-value]') : null;
-            return hidden ? hidden.value : '';
+        var pos = found.position;
+        // Для ref-полей сравниваем по id (refs), не по подписи.
+        var isRef = !!col.ref;
+        var prevCompare = isRef ? ((pos.refs && pos.refs[key]) || '') : (pos.values[key] || '');
+        var nextCompare = newValue == null ? '' : String(newValue);
+        if (key === 'winding') nextCompare = normalizeWinding(nextCompare);
+        if (String(prevCompare) === String(nextCompare)) {
+            // Без изменений — вернуть отображение как было.
+            td.textContent = positionCellText(pos, key);
+            return;
         }
-        var req = buildSetPositionRequest({
-            db: getApiBase(),
-            objId: posId,
-            columns: state.positionColumns,
-            values: {
-                qty: fieldVal('qty'),
-                raw: refVal('raw'),
-                cutType: refVal('cutType'),
-                width: fieldVal('width'),
-                length: fieldVal('length'),
-                sleeve: refVal('sleeve'),
-                winding: fieldVal('winding'),
-                status: fieldVal('status')
-            },
-            xsrf: getXsrf()
-        });
-        setMessage('Сохранение позиции…', 'info');
-        postForm(req.url, req.body).then(function() {
-            state.editingPosition = null;
-            setMessage('Позиция сохранена.', 'success');
+        var fields = {};
+        fields[col.reqId] = key === 'winding' ? normalizeWinding(nextCompare) : nextCompare;
+        var url = '/' + encodeURIComponent(getApiBase()) + '/_m_set/' + encodeURIComponent(posId) + '?JSON';
+        var body = buildFormBody(fields, getXsrf());
+        setMessage('Сохранение…', 'info');
+        // Оптимистично показываем введённое, чтобы не было прыжка; уточним по loadOrders.
+        td.textContent = isRef ? (td.getAttribute('data-display') || positionCellText(pos, key)) : nextCompare;
+        postForm(url, body).then(function() {
+            setMessage('Сохранено.', 'success');
             return loadOrders();
         }).catch(function(error) {
-            setMessage('Не удалось сохранить позицию: ' + (error.message || error), 'error');
+            setMessage('Не удалось сохранить: ' + (error.message || error), 'error');
+            // Откат отображения.
+            td.textContent = positionCellText(pos, key);
         });
     }
 
@@ -1158,7 +1171,7 @@
         var req = buildDeleteRequest({ db: getApiBase(), objId: posId, xsrf: getXsrf() });
         setMessage('Удаление позиции…', 'info');
         postForm(req.url, req.body).then(function() {
-            if (state.editingPosition === String(posId)) state.editingPosition = null;
+            if (state.editingCell) state.editingCell = null;
             setMessage('Позиция удалена.', 'success');
             return loadOrders();
         }).catch(function(error) {
@@ -1336,10 +1349,19 @@
         if (!wrapper) return;
         var hidden = wrapper.querySelector('[data-ref-value]');
         var search = wrapper.querySelector('[data-ref-search]');
-        if (hidden) hidden.value = option.getAttribute('data-value') || '';
-        if (search) search.value = option.textContent || '';
+        var value = option.getAttribute('data-value') || '';
+        var label = option.textContent || '';
+        if (hidden) hidden.value = value;
+        if (search) search.value = label;
         updateRefClear(wrapper);
         closeRefSelect(wrapper);
+        // Поячейковая правка: ref-select внутри активной ячейки → сохранить выбор.
+        var cell = wrapper.closest ? wrapper.closest('td.atex-orders-cell') : null;
+        if (cell && cell === state.editingCell) {
+            cell.setAttribute('data-display', label);
+            savePositionCell(cell, value);
+            return;
+        }
         // При выборе сырья в форме позиции — обновить список типов резки.
         onRawRefChanged(wrapper);
     }
@@ -1515,48 +1537,13 @@
                     return;
                 }
 
+                // Добавление позиции — сразу создаём пустую строку на сервере.
                 var addPos = event.target.closest('[data-add-position]');
                 if (addPos) {
-                    var addId = addPos.getAttribute('data-add-position');
-                    var form = list.querySelector('form[data-position-form="' + cssEscape(addId) + '"]');
-                    if (form) {
-                        form.hidden = false;
-                        // Фильтруем типы резки по текущему сырью (если уже выбрано).
-                        var rawHiddenInit = form.querySelector('#atex-pos-raw-' + cssEscape(addId));
-                        var matInit = rawHiddenInit ? rawHiddenInit.value : '';
-                        ensureStripWidths(matInit).then(function() {
-                            refreshCutTypeOptions(addId, form);
-                        });
-                    }
+                    createPosition(addPos.getAttribute('data-add-position'));
                     return;
                 }
 
-                var cancelPos = event.target.closest('[data-cancel-position]');
-                if (cancelPos) {
-                    var cancelId = cancelPos.getAttribute('data-cancel-position');
-                    var cform = list.querySelector('[data-position-form="' + cssEscape(cancelId) + '"]:not([data-edit-row])');
-                    if (cform) cform.hidden = true;
-                    return;
-                }
-
-                // --- inline-правка позиций ---
-                var editBtn = event.target.closest('[data-edit-pos]');
-                if (editBtn) {
-                    startEditPosition(editBtn.getAttribute('data-edit-pos'));
-                    return;
-                }
-                var saveBtn = event.target.closest('[data-save-pos]');
-                if (saveBtn) {
-                    var saveId = saveBtn.getAttribute('data-save-pos');
-                    var saveRow = list.querySelector('[data-edit-row="' + cssEscape(saveId) + '"]');
-                    savePosition(saveId, saveRow);
-                    return;
-                }
-                var cancelEdit = event.target.closest('[data-cancel-edit]');
-                if (cancelEdit) {
-                    cancelEditPosition();
-                    return;
-                }
                 var delBtn = event.target.closest('[data-del-pos]');
                 if (delBtn) {
                     var delId = delBtn.getAttribute('data-del-pos');
@@ -1580,13 +1567,26 @@
                 }
                 // Клик мимо кнопки удаления — сбросить незавершённое подтверждение.
                 resetDeleteConfirm(list);
+
+                // Поячейковая правка: клик по ячейке-отображению переводит её в правку.
+                var cell = event.target.closest('td.atex-orders-cell');
+                if (cell && cell !== state.editingCell && !cell.classList.contains('is-editing')) {
+                    activateCell(cell);
+                }
             });
 
-            list.addEventListener('submit', function(event) {
-                var form = event.target.closest('form[data-position-form]');
-                if (!form) return;
-                event.preventDefault();
-                createPosition(form.getAttribute('data-position-form'), form);
+            // Сохранение текстовых/числовых ячеек при потере фокуса.
+            // Ref-select сохраняется по выбору опции (selectRefOption), winding/status — по change.
+            list.addEventListener('focusout', function(event) {
+                var input = event.target.closest && event.target.closest('input[data-field]');
+                if (!input) return;
+                var cell = input.closest('td.atex-orders-cell');
+                if (!cell || cell !== state.editingCell) return;
+                // Откладываем, чтобы не перехватить переход фокуса внутри того же контрола.
+                setTimeout(function() {
+                    if (state.editingCell !== cell) return;
+                    savePositionCell(cell, input.value);
+                }, 0);
             });
 
             list.addEventListener('change', function(event) {
@@ -1600,13 +1600,13 @@
                     });
                     return;
                 }
-                var posStatus = event.target.closest('[data-position-status]');
-                if (posStatus) {
-                    var posCol = getColumn(state.positionColumns, 'status');
-                    var posId = posStatus.getAttribute('data-position-status');
-                    changeStatus(posId, posCol && posCol.reqId, posStatus.value, function() {
-                        updatePositionStatus(posId, posStatus.value);
-                    });
+                // Поячейковая правка winding/status: <select data-field> внутри активной ячейки.
+                var cellSelect = event.target.closest('select[data-field]');
+                if (cellSelect) {
+                    var selCell = cellSelect.closest('td.atex-orders-cell');
+                    if (selCell && selCell === state.editingCell) {
+                        savePositionCell(selCell, cellSelect.value);
+                    }
                 }
             });
         }
@@ -1630,14 +1630,6 @@
             if (state.orders[i].id === String(orderId)) return state.orders[i];
         }
         return null;
-    }
-
-    function updatePositionStatus(posId, value) {
-        Object.keys(state.positionsByOrder).forEach(function(orderId) {
-            state.positionsByOrder[orderId].forEach(function(pos) {
-                if (pos.id === String(posId)) pos.values.status = value;
-            });
-        });
     }
 
     // ------------------------------------------------------------------
