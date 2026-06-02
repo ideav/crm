@@ -623,7 +623,7 @@
         aside.appendChild(this.summaryEl);
         this.listEl = el('div', { class: 'atex-in-list' });
         aside.appendChild(this.listEl);
-        this.formEl = el('section', { class: 'atex-in-form' });
+        this.formEl = el('section', { class: 'atex-in-form', 'data-submit-scope': '' });
         layout.appendChild(aside);
         layout.appendChild(this.formEl);
         this.root.appendChild(layout);

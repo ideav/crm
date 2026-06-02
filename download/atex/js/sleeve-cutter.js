@@ -461,7 +461,7 @@
 
     AtexSleeveCutter.prototype.renderTaskCard = function(task, idx) {
         var self = this;
-        var card = el('div', { class: 'atex-sc-card' + (core.isDone(task.status) ? ' is-done' : '') });
+        var card = el('div', { class: 'atex-sc-card' + (core.isDone(task.status) ? ' is-done' : ''), 'data-submit-scope': '' });
 
         card.appendChild(el('div', { class: 'atex-sc-card-head' }, [
             el('span', { class: 'atex-sc-card-num', text: '№ ' + (idx + 1) }),
