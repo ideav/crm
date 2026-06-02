@@ -208,7 +208,7 @@
     color: var(--atex-portal-warning-text);
 }
 
-.atex-portal-badge--впроизводстве,
+.atex-portal-badge--квыполнению,
 .atex-portal-badge--вработе {
     background: var(--atex-portal-progress-bg);
     color: var(--atex-portal-progress-text);
