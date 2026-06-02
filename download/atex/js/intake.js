@@ -43,6 +43,7 @@
     var TABLE = { batch: 'Партия сырья', material: 'Вид сырья' };
     var BATCH_REQ = {
         material: 'Вид сырья',
+        barcode: 'Штрих-код',
         arrivedAt: 'Дата прихода',
         received: 'Получено, м²',
         remainder: 'Остаток, м²',
@@ -170,10 +171,102 @@
         return found ? String(found.id) : null;
     }
 
+    // Колонки JSON_OBJ идут в порядке: [главное значение, ...reqs по порядку].
+    function columnIndex(meta, reqName) {
+        var order = [String(meta && meta.id)].concat((meta && meta.reqs || []).map(function(r) { return String(r.id); }));
+        var rid = reqIdByName(meta, reqName);
+        var idx = order.indexOf(String(rid));
+        return idx >= 0 ? idx : -1;
+    }
+
     // Разбор значения-ссылки из JSON_OBJ: «id:Подпись» → { id, label }.
     function parseRef(raw) {
         var m = String(raw == null ? '' : raw).match(/^(\d+):([\s\S]*)$/);
         return m ? { id: m[1], label: m[2] } : { id: null, label: String(raw == null ? '' : raw) };
+    }
+
+    function trimValue(value) {
+        return String(value == null ? '' : value).trim();
+    }
+
+    function appendQueryPart(parts, name, value) {
+        parts.push(encodeURIComponent(name) + '=' + encodeURIComponent(value));
+    }
+
+    function hasBatchFilters(filters) {
+        filters = filters || {};
+        return !!(trimValue(filters.materialId) || trimValue(filters.barcode) || trimValue(filters.arrivedAt));
+    }
+
+    function buildBatchListPath(meta, filters, limit) {
+        filters = filters || {};
+        var parts = ['JSON_OBJ', 'LIMIT=0,' + (limit || 5000)];
+        var materialReqId = reqIdByName(meta, BATCH_REQ.material);
+        var barcodeReqId = reqIdByName(meta, BATCH_REQ.barcode);
+        var arrivedReqId = reqIdByName(meta, BATCH_REQ.arrivedAt);
+        var materialId = trimValue(filters.materialId);
+        var barcode = trimValue(filters.barcode);
+        var arrivedAt = toIsoDate(filters.arrivedAt) || trimValue(filters.arrivedAt);
+
+        if (materialReqId && materialId) appendQueryPart(parts, 'FR_' + materialReqId, '@' + materialId);
+        if (barcodeReqId && barcode) appendQueryPart(parts, 'FR_' + barcodeReqId, barcode + '%');
+        if (arrivedReqId && arrivedAt) appendQueryPart(parts, 'FR_' + arrivedReqId, arrivedAt);
+        return 'object/' + encodeURIComponent(meta.id) + '/?' + parts.join('&');
+    }
+
+    function mapBatchRecord(rec, meta) {
+        var iMat = columnIndex(meta, BATCH_REQ.material);
+        var iBarcode = columnIndex(meta, BATCH_REQ.barcode);
+        var iArr = columnIndex(meta, BATCH_REQ.arrivedAt);
+        var iRec = columnIndex(meta, BATCH_REQ.received);
+        var iRem = columnIndex(meta, BATCH_REQ.remainder);
+        var iLen = columnIndex(meta, BATCH_REQ.lengthM);
+        var iRemM = columnIndex(meta, BATCH_REQ.remainderM);
+        var r = rec && rec.r || [];
+        var matRef = iMat >= 0 ? parseRef(r[iMat]) : { id: null, label: '' };
+        return {
+            id: String(rec && rec.i),
+            name: r[0] || '',
+            materialId: matRef.id,
+            materialLabel: matRef.label,
+            barcode: iBarcode >= 0 ? (r[iBarcode] || '') : '',
+            arrivedAt: iArr >= 0 ? (r[iArr] || '') : '',
+            received: iRec >= 0 ? (r[iRec] || '') : '',
+            remainder: iRem >= 0 ? (r[iRem] || '') : '',
+            lengthM: iLen >= 0 ? (r[iLen] || '') : '',
+            remainderM: iRemM >= 0 ? (r[iRemM] || '') : ''
+        };
+    }
+
+    function buildBatchFields(meta, c) {
+        c = c || {};
+        var fields = {};
+        function setReq(reqName, value, includeEmpty) {
+            var id = reqIdByName(meta, reqName);
+            if (!id) return;
+            if (value === undefined || value === null) return;
+            if (!includeEmpty && value === '') return;
+            fields['t' + id] = value;
+        }
+
+        setReq(BATCH_REQ.material, c.materialId);
+        setReq(BATCH_REQ.barcode, trimValue(c.barcode), true);
+        setReq(BATCH_REQ.arrivedAt, c.arrivedAt || todayIso());
+        setReq(BATCH_REQ.received, round3(toNumber(c.received)));
+
+        var remainder = (c.remainder === '' || c.remainder == null)
+            ? initialRemainder(c.received)
+            : round3(toNumber(c.remainder));
+        setReq(BATCH_REQ.remainder, remainder);
+
+        var lengthM = round3(toNumber(c.lengthM));
+        var remainderM = (c.remainderM === '' || c.remainderM == null)
+            ? lengthM
+            : round3(toNumber(c.remainderM));
+        setReq(BATCH_REQ.lengthM, lengthM);
+        setReq(BATCH_REQ.remainderM, remainderM);
+
+        return fields;
     }
 
     function AtexIntake(root) {
@@ -181,12 +274,15 @@
         this.db = window.db || root.getAttribute('data-db') || '';
         this.meta = { batch: null, material: null };
         this.materials = [];   // [{ id, label, rollLength }]
-        this.batches = [];     // загруженные партии [{ id, name, materialId, materialLabel, arrivedAt, received, remainder }]
+        this.batches = [];     // загруженные партии [{ id, name, materialId, materialLabel, barcode, arrivedAt, received, remainder }]
+        this.filters = { materialId: '', barcode: '', arrivedAt: '' };
         this.refOptions = {};  // кеш опций searchable reference inputs по reqId
         this.current = null;   // редактируемая/новая партия
         this.remainderTouched = false; // пользователь вручную правил «Остаток»?
         this.remainderMTouched = false; // пользователь вручную правил «Остаток, м»?
         this.busy = false;
+        this.filterTimer = null;
+        this.batchLoadSeq = 0;
     }
 
     AtexIntake.prototype.url = function(path) {
@@ -221,7 +317,8 @@
                 reqId: opts.reqId,
                 cache: this.refOptions,
                 loadOptions: function(reqId, query, limit) { return self.loadRefOptions(reqId, query, limit); },
-                onChange: opts.onChange
+                onChange: opts.onChange,
+                clearOnInput: opts.clearOnInput
             });
         }
 
@@ -241,7 +338,7 @@
         var body = new URLSearchParams();
         body.set('_xsrf', (typeof window !== 'undefined' && window.xsrf) || this.root.getAttribute('data-xsrf') || '');
         Object.keys(params || {}).forEach(function(k) {
-            if (params[k] !== undefined && params[k] !== null && params[k] !== '') body.set(k, params[k]);
+            if (params[k] !== undefined && params[k] !== null) body.set(k, params[k]);
         });
         return fetch(this.url(path), {
             method: 'POST',
@@ -291,49 +388,53 @@
         });
     };
 
-    // Колонки JSON_OBJ идут в порядке: [главное значение, ...reqs по порядку].
     AtexIntake.prototype.colIndex = function(meta, reqName) {
-        var order = [meta.id].concat((meta.reqs || []).map(function(r) { return String(r.id); }));
-        var rid = reqIdByName(meta, reqName);
-        var idx = order.indexOf(String(rid));
-        return idx >= 0 ? idx : -1;
+        return columnIndex(meta, reqName);
+    };
+
+    AtexIntake.prototype.fetchBatches = function() {
+        var meta = this.meta.batch;
+        return this.getJson(buildBatchListPath(meta, this.filters, 5000)).then(function(rows) {
+            return sortFifo((rows || []).map(function(rec) { return mapBatchRecord(rec, meta); }));
+        });
     };
 
     AtexIntake.prototype.loadBatches = function() {
         var self = this;
-        var meta = this.meta.batch;
-        var iMat = this.colIndex(meta, BATCH_REQ.material);
-        var iArr = this.colIndex(meta, BATCH_REQ.arrivedAt);
-        var iRec = this.colIndex(meta, BATCH_REQ.received);
-        var iRem = this.colIndex(meta, BATCH_REQ.remainder);
-        var iLen = this.colIndex(meta, BATCH_REQ.lengthM);
-        var iRemM = this.colIndex(meta, BATCH_REQ.remainderM);
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
-            var list = (rows || []).map(function(rec) {
-                var r = rec.r || [];
-                var matRef = iMat >= 0 ? parseRef(r[iMat]) : { id: null, label: '' };
-                return {
-                    id: String(rec.i),
-                    name: r[0] || '',
-                    materialId: matRef.id,
-                    materialLabel: matRef.label,
-                    arrivedAt: iArr >= 0 ? (r[iArr] || '') : '',
-                    received: iRec >= 0 ? (r[iRec] || '') : '',
-                    remainder: iRem >= 0 ? (r[iRem] || '') : '',
-                    lengthM: iLen >= 0 ? (r[iLen] || '') : '',
-                    remainderM: iRemM >= 0 ? (r[iRemM] || '') : ''
-                };
-            });
-            // FIFO: старые партии — первыми (сортировка по дате прихода).
-            self.batches = sortFifo(list);
+        return this.fetchBatches().then(function(list) {
+            self.batches = list;
         });
+    };
+
+    AtexIntake.prototype.reloadBatches = function() {
+        var self = this;
+        var ticket = ++this.batchLoadSeq;
+        if (this.listEl) this.listEl.classList.add('is-loading');
+        return this.fetchBatches().then(function(list) {
+            if (ticket !== self.batchLoadSeq) return;
+            self.batches = list;
+            if (self.listEl) self.listEl.classList.remove('is-loading');
+            self.renderList();
+        }).catch(function(err) {
+            if (ticket !== self.batchLoadSeq) return;
+            if (self.listEl) self.listEl.classList.remove('is-loading');
+            self.notify('Ошибка фильтра: ' + err.message, 'error');
+        });
+    };
+
+    AtexIntake.prototype.scheduleBatchReload = function(delay) {
+        var self = this;
+        if (this.filterTimer) clearTimeout(this.filterTimer);
+        this.filterTimer = setTimeout(function() {
+            self.reloadBatches();
+        }, delay || 0);
     };
 
     // ── Состояние формы ──
 
     AtexIntake.prototype.newBatch = function() {
         this.current = {
-            id: null, name: '', materialId: null,
+            id: null, name: '', materialId: null, barcode: '',
             arrivedAt: todayIso(), received: '', remainder: '',
             lengthM: '', remainderM: ''
         };
@@ -345,7 +446,7 @@
         var b = this.batches.filter(function(x) { return String(x.id) === String(id); })[0];
         if (!b) return;
         this.current = {
-            id: b.id, name: b.name, materialId: b.materialId,
+            id: b.id, name: b.name, materialId: b.materialId, barcode: b.barcode,
             arrivedAt: toIsoDate(b.arrivedAt) || b.arrivedAt,
             received: b.received, remainder: b.remainder,
             lengthM: b.lengthM, remainderM: b.remainderM
@@ -369,6 +470,64 @@
         this.renderForm();
     };
 
+    AtexIntake.prototype.renderFilters = function() {
+        if (!this.filtersEl || this.filtersRendered) return;
+        var self = this;
+        this.filtersRendered = true;
+        this.filtersEl.innerHTML = '';
+
+        var materialRef = this.refSelect({
+            id: 'atex-in-filter-material',
+            options: this.materials,
+            value: this.filters.materialId,
+            placeholder: 'Все виды сырья',
+            reqId: reqIdByName(this.meta.batch, BATCH_REQ.material),
+            onChange: function(value) {
+                self.filters.materialId = value || '';
+                self.scheduleBatchReload(0);
+            }
+        });
+        this.filtersEl.appendChild(filterField('Вид сырья', materialRef));
+
+        var barcodeInput = el('input', {
+            class: 'atex-in-input',
+            type: 'text',
+            autocomplete: 'off',
+            inputmode: 'text',
+            placeholder: 'Штрих-код'
+        });
+        barcodeInput.value = this.filters.barcode || '';
+        barcodeInput.addEventListener('input', function() {
+            self.filters.barcode = barcodeInput.value;
+            self.scheduleBatchReload(250);
+        });
+        this.filtersEl.appendChild(filterField('Штрих-код', barcodeInput));
+
+        var dateInput = el('input', { class: 'atex-in-input', type: 'date' });
+        dateInput.value = toIsoDate(this.filters.arrivedAt) || '';
+        dateInput.addEventListener('input', function() {
+            self.filters.arrivedAt = dateInput.value;
+            self.scheduleBatchReload(0);
+        });
+        this.filtersEl.appendChild(filterField('Дата прихода', dateInput));
+
+        var reset = el('button', { class: 'atex-in-btn atex-in-btn-secondary atex-in-filter-reset', type: 'button', text: 'Сбросить' });
+        reset.addEventListener('click', function() {
+            self.filters = { materialId: '', barcode: '', arrivedAt: '' };
+            self.filtersRendered = false;
+            self.renderFilters();
+            self.scheduleBatchReload(0);
+        });
+        this.filtersEl.appendChild(el('div', { class: 'atex-in-filter-action' }, [reset]));
+
+        function filterField(label, control) {
+            return el('div', { class: 'atex-in-filter-field' }, [
+                el('label', { class: 'atex-in-filter-label', text: label }),
+                control
+            ]);
+        }
+    };
+
     AtexIntake.prototype.renderList = function() {
         var self = this;
         var box = this.listEl;
@@ -381,13 +540,17 @@
         this.summaryEl.appendChild(metric('Остаток, м²', s.totalRemaining));
 
         if (!this.batches.length) {
-            box.appendChild(el('div', { class: 'atex-in-empty', text: 'Партий сырья пока нет' }));
+            box.appendChild(el('div', {
+                class: 'atex-in-empty',
+                text: hasBatchFilters(this.filters) ? 'Партий по фильтрам не найдено' : 'Партий сырья пока нет'
+            }));
             return;
         }
         // Шапка таблицы FIFO.
         box.appendChild(el('div', { class: 'atex-in-row atex-in-row-head' }, [
             el('span', { text: '№' }),
             el('span', { text: 'Вид сырья' }),
+            el('span', { text: 'Штрих-код' }),
             el('span', { text: 'Дата прихода' }),
             el('span', { text: 'Получено, м²' }),
             el('span', { text: 'Остаток, м²' })
@@ -400,6 +563,7 @@
             }, [
                 el('span', { class: 'atex-in-num', text: String(idx + 1) }),
                 el('span', { text: b.materialLabel || b.name || ('#' + b.id) }),
+                el('span', { class: 'atex-in-code', text: b.barcode || '—' }),
                 el('span', { text: toIsoDate(b.arrivedAt) || b.arrivedAt || '—' }),
                 el('span', { class: 'atex-in-amount', text: String(b.received || '—') }),
                 el('span', { class: 'atex-in-amount', text: String(b.remainder || '—') })
@@ -446,6 +610,19 @@
             }
         });
         form.appendChild(field('Вид сырья', materialRef));
+
+        // Штрих-код — короткая строка для сканера barcode-reader.
+        var barcodeInput = el('input', {
+            class: 'atex-in-input',
+            type: 'text',
+            autocomplete: 'off',
+            inputmode: 'text',
+            maxlength: '127',
+            placeholder: 'Отсканируйте или введите'
+        });
+        barcodeInput.value = c.barcode == null ? '' : c.barcode;
+        barcodeInput.addEventListener('input', function() { c.barcode = barcodeInput.value; });
+        form.appendChild(field('Штрих-код', barcodeInput));
 
         // Дата прихода
         var dateInput = el('input', { class: 'atex-in-input', type: 'date' });
@@ -530,24 +707,7 @@
 
         var meta = this.meta.batch;
         var name = String(c.name || '').trim() || this.autoName(c);
-        // Критерий приёмки #2914: если остаток не задан — он равен «Получено».
-        var remainder = (c.remainder === '' || c.remainder == null)
-            ? initialRemainder(c.received)
-            : round3(toNumber(c.remainder));
-
-        var fields = {};
-        fields['t' + reqIdByName(meta, BATCH_REQ.material)] = c.materialId;
-        fields['t' + reqIdByName(meta, BATCH_REQ.arrivedAt)] = c.arrivedAt || todayIso();
-        fields['t' + reqIdByName(meta, BATCH_REQ.received)] = round3(toNumber(c.received));
-        fields['t' + reqIdByName(meta, BATCH_REQ.remainder)] = remainder;
-        var lengthM = round3(toNumber(c.lengthM));
-        var remainderM = (c.remainderM === '' || c.remainderM == null)
-            ? lengthM
-            : round3(toNumber(c.remainderM));
-        var lenReqId = reqIdByName(meta, BATCH_REQ.lengthM);
-        var remMReqId = reqIdByName(meta, BATCH_REQ.remainderM);
-        if (lenReqId) fields['t' + lenReqId] = lengthM;
-        if (remMReqId) fields['t' + remMReqId] = remainderM;
+        var fields = buildBatchFields(meta, c);
 
         this.setBusy(true);
         var chain;
@@ -619,11 +779,13 @@
                 el('h2', { text: 'Партии сырья (FIFO)' })
             ])
         ]);
+        this.filtersEl = el('div', { class: 'atex-in-filters' });
+        aside.appendChild(this.filtersEl);
         this.summaryEl = el('div', { class: 'atex-in-summary' });
         aside.appendChild(this.summaryEl);
         this.listEl = el('div', { class: 'atex-in-list' });
         aside.appendChild(this.listEl);
-        this.formEl = el('section', { class: 'atex-in-form' });
+        this.formEl = el('section', { class: 'atex-in-form', 'data-submit-scope': '' });
         layout.appendChild(aside);
         layout.appendChild(this.formEl);
         this.root.appendChild(layout);
@@ -634,7 +796,7 @@
 
         return this.loadMetadata()
             .then(function() { return Promise.all([self.loadMaterials(), self.loadBatches()]); })
-            .then(function() { self.render(); })
+            .then(function() { self.renderFilters(); self.render(); })
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
     };
 
@@ -648,5 +810,15 @@
         controller.start();
     }
 
-    return { calc: calc, Controller: AtexIntake, init: init };
+    var helpers = {
+        reqIdByName: reqIdByName,
+        columnIndex: columnIndex,
+        parseRef: parseRef,
+        hasBatchFilters: hasBatchFilters,
+        buildBatchListPath: buildBatchListPath,
+        mapBatchRecord: mapBatchRecord,
+        buildBatchFields: buildBatchFields
+    };
+
+    return { calc: calc, helpers: helpers, Controller: AtexIntake, init: init };
 });

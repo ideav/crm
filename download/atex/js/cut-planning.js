@@ -699,7 +699,7 @@
         var self = this;
         this.root.innerHTML = '';
         var layout = el('div', { class: 'atex-cp-layout' });
-        this.formEl = el('section', { class: 'atex-cp-form' });
+        this.formEl = el('section', { class: 'atex-cp-form', 'data-submit-scope': '' });
         this.resultEl = el('section', { class: 'atex-cp-result' });
         this.resultEl.style.display = 'none';
         layout.appendChild(this.formEl);

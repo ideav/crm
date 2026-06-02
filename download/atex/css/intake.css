@@ -60,6 +60,33 @@
 }
 .atex-in-sidebar-head h2 { margin: 0; font-size: 15px; }
 
+.atex-in-filters {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.2fr) minmax(150px, 1fr) minmax(140px, .9fr) auto;
+    gap: 10px;
+    align-items: end;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--in-border);
+    background: var(--in-bg);
+}
+.atex-in-filter-field { min-width: 0; }
+.atex-in-filter-label {
+    display: block;
+    margin-bottom: 5px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--in-muted);
+}
+.atex-in-filter-action { display: flex; justify-content: flex-end; }
+.atex-in-filter-reset { white-space: nowrap; }
+@media (max-width: 1040px) {
+    .atex-in-filters { grid-template-columns: 1fr 1fr; }
+    .atex-in-filter-action { justify-content: flex-start; }
+}
+@media (max-width: 560px) {
+    .atex-in-filters { grid-template-columns: 1fr; }
+}
+
 .atex-in-summary {
     display: flex;
     flex-wrap: wrap;
@@ -73,12 +100,20 @@
 .atex-in-metric-value { font-size: 20px; font-weight: 700; }
 
 .atex-in-list { display: flex; flex-direction: column; max-height: 70vh; overflow: auto; }
+.atex-in-list.is-loading { opacity: .65; }
 .atex-in-row {
     display: grid;
-    grid-template-columns: 32px 1.4fr 1fr .9fr .9fr;
+    grid-template-columns: 32px minmax(120px, 1.3fr) minmax(110px, 1fr) minmax(105px, .9fr) minmax(95px, .85fr) minmax(95px, .85fr);
     gap: 8px;
     align-items: center;
+    min-width: 760px;
     padding: 9px 12px;
+}
+.atex-in-row > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .atex-in-row-head {
     font-size: 11px;
@@ -102,6 +137,7 @@
 .atex-in-row-item:hover { background: var(--in-surface); }
 .atex-in-row-item.is-active { background: var(--in-active-bg); font-weight: 600; }
 .atex-in-num { text-align: center; color: var(--in-muted); }
+.atex-in-code { font-variant-numeric: tabular-nums; }
 .atex-in-amount { text-align: right; font-variant-numeric: tabular-nums; }
 .atex-in-empty { padding: 14px; color: var(--in-muted); }
 
