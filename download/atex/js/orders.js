@@ -68,7 +68,13 @@
         orders: [],
         positionsByOrder: {},
         expanded: {},
+        editingPosition: null,      // id позиции в режиме inline-правки (или null)
         statusFilter: '',
+        filterFrom: '',
+        filterTo: '',
+        searchQuery: '',
+        sortKey: 'id',
+        sortDir: 'desc',
         refOptions: {},
         refSearchSeq: 0,
         creating: false,
@@ -150,6 +156,65 @@
             });
         }
         return ids;
+    }
+
+    // Плоские строки отчёта orders_list (JSON_KV) → [{ id, values, positions:[{id,values}] }].
+    // Заказы dedup по order_id; позиции из строк с непустым position_id; пустые поля LEFT JOIN ('').
+    function rowsToOrders(rows) {
+        var byId = {}, order = [];
+        function s(v) { return v == null ? '' : String(v); }
+        (rows || []).forEach(function(r) {
+            var oid = s(r.order_id);
+            if (oid && !byId[oid]) {
+                byId[oid] = { id: oid, values: {
+                    no: s(r.order_no), client: s(r.order_client), manager: s(r.order_manager),
+                    created: s(r.order_created), approved: s(r.order_approved), status: s(r.order_status)
+                }, positions: [] };
+                order.push(oid);
+            }
+            var pid = s(r.position_id);
+            if (oid && pid) {
+                byId[oid].positions.push({ id: pid, values: {
+                    qty: s(r.position_qty), raw: s(r.position_raw), cutType: s(r.position_cut_type),
+                    width: s(r.position_width), length: s(r.position_length), sleeve: s(r.position_sleeve),
+                    winding: s(r.position_winding), status: s(r.position_status)
+                } });
+            }
+        });
+        return order.map(function(id) { return byId[id]; });
+    }
+
+    // Клиентский поиск по всем полям заказа и его позиций.
+    function searchOrders(list, query) {
+        var q = normalizeSearchText(query);
+        if (!q) return (list || []).slice();
+        return (list || []).filter(function(o) {
+            var hay = [o.id].concat(Object.keys(o.values).map(function(k){ return o.values[k]; }));
+            (o.positions || []).forEach(function(p) {
+                hay.push(p.id);
+                Object.keys(p.values).forEach(function(k){ hay.push(p.values[k]); });
+            });
+            return normalizeSearchText(hay.join(' ')).indexOf(q) !== -1;
+        });
+    }
+
+    // Парс даты DD.MM.YYYY → сортируемое число (YYYYMMDD); иначе NaN.
+    function sortKeyDate(v) {
+        var m = String(v == null ? '' : v).match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+        return m ? Number(m[3] + m[2] + m[1]) : NaN;
+    }
+    // Сортировка заказов по o.values[key] (id — по o.id). Возвращает новый массив.
+    function sortOrders(list, key, dir) {
+        var sign = dir === 'desc' ? -1 : 1;
+        var get = function(o) { return key === 'id' ? o.id : (o.values ? o.values[key] : ''); };
+        return (list || []).slice().sort(function(a, b) {
+            var va = get(a), vb = get(b);
+            var da = sortKeyDate(va), db = sortKeyDate(vb);
+            if (!isNaN(da) && !isNaN(db)) return sign * (da - db);
+            var na = parseFloat(va), nb = parseFloat(vb);
+            if (!isNaN(na) && !isNaN(nb) && String(va).trim() !== '' && String(vb).trim() !== '') return sign * (na - nb);
+            return sign * String(va).localeCompare(String(vb), 'ru');
+        });
     }
 
     // Индекс колонки JSON_OBJ по имени реквизита: позиция в [tableId, ...reqIds]; -1 если нет.
@@ -433,6 +498,37 @@
         return { url: url, body: buildFormBody(fields, opts.xsrf) };
     }
 
+    // Запрос правки позиции: POST _m_set/{positionId} + реквизиты редактируемых полей.
+    // values — { qty, raw, cutType, width, length, sleeve, winding, status }; ключи без reqId пропускаются.
+    function buildSetPositionRequest(opts) {
+        var fields = {};
+        var cols = opts.columns || [];
+        var values = opts.values || {};
+        function put(key, value) {
+            var col = getColumn(cols, key);
+            if (col && col.reqId) fields[col.reqId] = value == null ? '' : value;
+        }
+        put('qty', values.qty);
+        put('raw', values.raw);
+        put('cutType', values.cutType);
+        put('width', values.width);
+        put('length', values.length);
+        put('sleeve', values.sleeve);
+        put('winding', normalizeWinding(values.winding));
+        put('status', values.status);
+
+        var url = '/' + encodeURIComponent(opts.db) + '/_m_set/' +
+            encodeURIComponent(opts.objId) + '?JSON';
+        return { url: url, body: buildFormBody(fields, opts.xsrf) };
+    }
+
+    // Запрос удаления записи: POST _m_del/{objId}.
+    function buildDeleteRequest(opts) {
+        var url = '/' + encodeURIComponent(opts.db) + '/_m_del/' +
+            encodeURIComponent(opts.objId) + '?JSON';
+        return { url: url, body: buildFormBody({}, opts.xsrf) };
+    }
+
     // Запрос смены статуса: статус — не первая колонка → _m_set.
     function buildSetStatusRequest(opts) {
         var fields = {};
@@ -620,35 +716,20 @@
         })).join('');
     }
 
-    function filteredOrders() {
-        if (!state.statusFilter) return state.orders;
-        return state.orders.filter(function(order) {
-            return trimValue(order.values.status) === trimValue(state.statusFilter);
-        });
-    }
-
     function renderPositions(order) {
         var positions = state.positionsByOrder[order.id] || [];
         var head = '<thead><tr>' +
             '<th>Кол-во</th><th>Вид сырья</th><th>Тип резки</th>' +
-            '<th>Ширина, мм</th><th>Длина, м</th><th>Ø втулки</th><th>Тип намотки</th><th>Статус</th>' +
+            '<th>Ширина, мм</th><th>Длина, м</th><th>Ø втулки</th><th>Тип намотки</th><th>Статус</th><th></th>' +
             '</tr></thead>';
         var body;
         if (!positions.length) {
-            body = '<tbody><tr><td colspan="8" class="atex-orders-empty">Позиций пока нет.</td></tr></tbody>';
+            body = '<tbody><tr><td colspan="9" class="atex-orders-empty">Позиций пока нет.</td></tr></tbody>';
         } else {
             body = '<tbody>' + positions.map(function(pos) {
-                return '<tr data-position-id="' + escapeHtml(pos.id) + '">' +
-                    '<td>' + escapeHtml(pos.values.qty || '') + '</td>' +
-                    '<td>' + escapeHtml(pos.values.raw || '') + '</td>' +
-                    '<td>' + escapeHtml(pos.values.cutType || '') + '</td>' +
-                    '<td>' + escapeHtml(pos.values.width || '') + '</td>' +
-                    '<td>' + escapeHtml(pos.values.length || '') + '</td>' +
-                    '<td>' + escapeHtml(pos.values.sleeve || '') + '</td>' +
-                    '<td>' + escapeHtml(pos.values.winding || '') + '</td>' +
-                    '<td>' + statusSelectHtml(state.positionStatuses, pos.values.status,
-                        ' data-position-status="' + escapeHtml(pos.id) + '"') + '</td>' +
-                    '</tr>';
+                return state.editingPosition === pos.id
+                    ? renderPositionEditRow(order, pos)
+                    : renderPositionViewRow(pos);
             }).join('') + '</tbody>';
         }
 
@@ -659,6 +740,64 @@
             '<i class="pi pi-plus"></i><span>Добавить позицию</span></button>' +
             renderPositionForm(order) +
             '</div>';
+    }
+
+    // Обычная (нередактируемая) строка позиции: текст + select статуса + кнопки ✎/🗑.
+    function renderPositionViewRow(pos) {
+        return '<tr data-position-id="' + escapeHtml(pos.id) + '">' +
+            '<td>' + escapeHtml(pos.values.qty || '') + '</td>' +
+            '<td>' + escapeHtml(pos.values.raw || '') + '</td>' +
+            '<td>' + escapeHtml(pos.values.cutType || '') + '</td>' +
+            '<td>' + escapeHtml(pos.values.width || '') + '</td>' +
+            '<td>' + escapeHtml(pos.values.length || '') + '</td>' +
+            '<td>' + escapeHtml(pos.values.sleeve || '') + '</td>' +
+            '<td>' + escapeHtml(pos.values.winding || '') + '</td>' +
+            '<td>' + statusSelectHtml(state.positionStatuses, pos.values.status,
+                ' data-position-status="' + escapeHtml(pos.id) + '"') + '</td>' +
+            '<td class="atex-orders-pos-actions">' +
+            '<button type="button" class="atex-orders-icon-btn" title="Редактировать" ' +
+            'aria-label="Редактировать" data-edit-pos="' + escapeHtml(pos.id) + '"><i class="pi pi-pencil"></i></button>' +
+            '<button type="button" class="atex-orders-icon-btn atex-orders-icon-btn--danger" title="Удалить" ' +
+            'aria-label="Удалить" data-del-pos="' + escapeHtml(pos.id) + '"><i class="pi pi-trash"></i></button>' +
+            '</td>' +
+            '</tr>';
+    }
+
+    // Строка позиции в режиме inline-правки: ячейки → редактируемые контролы.
+    // На <tr> ставим data-position-form (для делегирования ref-select/ширины из формы добавления)
+    // и data-edit-row (маркер строки правки).
+    function renderPositionEditRow(order, pos) {
+        var rawCol = getColumn(state.positionColumns, 'raw');
+        var cutCol = getColumn(state.positionColumns, 'cutType');
+        var sleeveCol = getColumn(state.positionColumns, 'sleeve');
+        var rawOptions = rawCol && rawCol.reqId ? state.refOptions[rawCol.reqId] : null;
+        var cutOptions = cutCol && cutCol.reqId ? state.refOptions[cutCol.reqId] : null;
+        var sleeveOptions = sleeveCol && sleeveCol.reqId ? state.refOptions[sleeveCol.reqId] : null;
+        // Для ref-полей берём id из refs (загружены через loadPositions); подпись из values.
+        var refs = pos.refs || {};
+        var pid = pos.id;
+        var windingVal = (pos.values.winding || '').toUpperCase();
+        return '<tr data-position-id="' + escapeHtml(pid) + '" data-edit-row="' + escapeHtml(pid) + '" ' +
+            'data-position-form="' + escapeHtml(order.id) + '" class="atex-orders-edit-row">' +
+            '<td><input class="atex-orders-input" type="number" min="0" data-field="qty" value="' + escapeHtml(pos.values.qty || '') + '"></td>' +
+            '<td>' + refSelectHtml('atex-pos-raw-edit-' + pid, rawOptions, refs.raw || '', 'Выберите вид сырья', rawCol && rawCol.reqId) + '</td>' +
+            '<td>' + refSelectHtml('atex-pos-cut-edit-' + pid, cutOptions, refs.cutType || '', 'Выберите тип резки', cutCol && cutCol.reqId) + '</td>' +
+            '<td><input class="atex-orders-input" type="number" min="0" data-field="width" value="' + escapeHtml(pos.values.width || '') + '"></td>' +
+            '<td><input class="atex-orders-input" type="number" min="0" step="any" data-field="length" value="' + escapeHtml(pos.values.length || '') + '"></td>' +
+            '<td>' + refSelectHtml('atex-pos-sleeve-edit-' + pid, sleeveOptions, refs.sleeve || '', 'Выберите диаметр', sleeveCol && sleeveCol.reqId) + '</td>' +
+            '<td><select class="atex-orders-input atex-orders-winding" data-field="winding">' +
+            '<option value=""' + (windingVal ? '' : ' selected') + '>— не задано —</option>' +
+            '<option value="IN"' + (windingVal === 'IN' ? ' selected' : '') + '>IN</option>' +
+            '<option value="OUT"' + (windingVal === 'OUT' ? ' selected' : '') + '>OUT</option>' +
+            '</select></td>' +
+            '<td>' + statusSelectHtml(state.positionStatuses, pos.values.status, ' data-field="status"') + '</td>' +
+            '<td class="atex-orders-pos-actions">' +
+            '<button type="button" class="atex-orders-icon-btn atex-orders-icon-btn--ok" title="Сохранить" ' +
+            'aria-label="Сохранить" data-save-pos="' + escapeHtml(pid) + '"><i class="pi pi-check"></i></button>' +
+            '<button type="button" class="atex-orders-icon-btn" title="Отмена" ' +
+            'aria-label="Отмена" data-cancel-edit="' + escapeHtml(pid) + '"><i class="pi pi-times"></i></button>' +
+            '</td>' +
+            '</tr>';
     }
 
     function renderPositionForm(order) {
@@ -694,14 +833,19 @@
     // и переотрисовывает dropdown через renderRefSearchResults.
     function refreshCutTypeOptions(orderId, form) {
         if (!form) return;
-        // Скрытые inputs searchable-ref-select для сырья и типа резки.
-        var cutHidden = form.querySelector('#atex-pos-cut-' + cssEscape(orderId));
-        var rawHidden = form.querySelector('#atex-pos-raw-' + cssEscape(orderId));
+        // Обёртки ref-select сырья и типа резки находим по реквизиту (data-ref-req-id),
+        // а не по id — так одна функция работает и для формы добавления, и для inline-правки строки.
+        var rawCol = getColumn(state.positionColumns, 'raw');
+        var cutCol = getColumn(state.positionColumns, 'cutType');
+        var rawWrapper = rawCol && rawCol.reqId
+            ? form.querySelector('[data-ref-select][data-ref-req-id="' + cssEscape(rawCol.reqId) + '"]') : null;
+        var cutWrapper = cutCol && cutCol.reqId
+            ? form.querySelector('[data-ref-select][data-ref-req-id="' + cssEscape(cutCol.reqId) + '"]') : null;
         var widthInput = form.querySelector('[data-field="width"]');
-        if (!cutHidden) return;
-        // Обёртка [data-ref-select] — родитель скрытого input типа резки.
-        var cutWrapper = cutHidden.closest ? cutHidden.closest('[data-ref-select]') : null;
         if (!cutWrapper) return;
+        var cutHidden = cutWrapper.querySelector('[data-ref-value]');
+        var rawHidden = rawWrapper ? rawWrapper.querySelector('[data-ref-value]') : null;
+        if (!cutHidden) return;
         var materialId = rawHidden ? rawHidden.value : '';
         var width = widthInput ? widthInput.value : '';
         var allowed = matchCutTypes(state.cutTypeIndex, materialId, width);
@@ -729,10 +873,10 @@
         var container = document.getElementById('atex-orders-list');
         if (!container) return;
 
-        var orders = filteredOrders();
+        var orders = sortOrders(searchOrders(state.orders, state.searchQuery), state.sortKey, state.sortDir);
         if (!orders.length) {
             container.innerHTML = '<div class="atex-orders-empty">' +
-                (state.orders.length ? 'Нет заказов с выбранным статусом.' : 'Заказов пока нет. Создайте первый.') +
+                (state.orders.length ? 'Ничего не найдено по поиску.' : 'Заказов нет за выбранный период.') +
                 '</div>';
             return;
         }
@@ -762,9 +906,26 @@
             return main + detail;
         }).join('');
 
-        container.innerHTML = '<table class="atex-orders-table">' +
-            '<thead><tr><th></th><th>№</th><th>Клиент</th><th>Менеджер</th><th>Дата создания</th><th>Статус</th><th>Позиций</th></tr></thead>' +
+        function sortableTh(key, label) {
+            var cls = state.sortKey === key ? (state.sortDir === 'desc' ? ' class="is-sorted-desc"' : ' class="is-sorted-asc"') : '';
+            return '<th data-sort="' + key + '"' + cls + '>' + label + '</th>';
+        }
+        var thead = '<thead><tr><th></th>' +
+            sortableTh('id', '№') + sortableTh('client', 'Клиент') + sortableTh('manager', 'Менеджер') +
+            sortableTh('created', 'Дата создания') + sortableTh('status', 'Статус') +
+            '<th>Позиций</th></tr></thead>';
+        container.innerHTML = '<table class="atex-orders-table">' + thead +
             '<tbody>' + rows + '</tbody></table>';
+
+        container.querySelectorAll('th[data-sort]').forEach(function(th) {
+            th.style.cursor = 'pointer';
+            th.addEventListener('click', function() {
+                var key = th.getAttribute('data-sort');
+                if (state.sortKey === key) state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+                else { state.sortKey = key; state.sortDir = 'asc'; }
+                renderOrders();
+            });
+        });
     }
 
     function renderCreateForm() {
@@ -796,15 +957,16 @@
     }
 
     function loadOrders() {
-        var statusCol = getColumn(state.orderColumns, 'status');
-        var url = buildListUrl(getApiBase(), state.orderTable, null,
-            null, ''); // фильтр по статусу делаем на клиенте (быстрее и переживает опечатки)
-        return fetchJson(url).then(function(json) {
-            state.orders = normalizeObjects(json, state.orderColumns).sort(function(a, b) {
-                return Number(b.id) - Number(a.id);
-            });
+        var params = ['JSON_KV', 'LIMIT=0,5000'];
+        if (state.filterFrom) params.push('FR_order_created=' + encodeURIComponent(state.filterFrom));
+        if (state.filterTo) params.push('TO_order_created=' + encodeURIComponent(state.filterTo));
+        if (trimValue(state.statusFilter)) params.push('FR_order_status=' + encodeURIComponent(trimValue(state.statusFilter)));
+        var url = '/' + encodeURIComponent(getApiBase()) + '/report/orders_list?' + params.join('&');
+        return fetchJson(url).then(function(rows) {
+            state.orders = rowsToOrders(rows || []);
+            state.positionsByOrder = {};
+            state.orders.forEach(function(o) { state.positionsByOrder[o.id] = o.positions; });
             renderOrders();
-            return statusCol;
         });
     }
 
@@ -884,6 +1046,113 @@
             return loadPositions(orderId);
         }).catch(function(error) {
             setMessage('Не удалось добавить позицию: ' + (error.message || error), 'error');
+        });
+    }
+
+    // Находит позицию и её orderId по id позиции в state.positionsByOrder.
+    function findPositionById(posId) {
+        var pid = String(posId);
+        var keys = Object.keys(state.positionsByOrder);
+        for (var i = 0; i < keys.length; i++) {
+            var list = state.positionsByOrder[keys[i]] || [];
+            for (var j = 0; j < list.length; j++) {
+                if (String(list[j].id) === pid) return { orderId: keys[i], position: list[j] };
+            }
+        }
+        return null;
+    }
+
+    // Переход строки позиции в режим inline-правки.
+    // Для предзаполнения ref-полей нужны id (refs); если позиция загружена отчётом
+    // (только подписи, без refs) — догружаем позиции заказа через loadPositions, затем открываем редактор.
+    function startEditPosition(posId) {
+        var found = findPositionById(posId);
+        if (!found) return;
+        function open() {
+            state.editingPosition = String(posId);
+            renderOrders();
+            // После рендера подгружаем допустимые типы резки по текущему сырью/ширине.
+            var row = document.querySelector('[data-edit-row="' + cssEscape(posId) + '"]');
+            if (row) {
+                var rawCol = getColumn(state.positionColumns, 'raw');
+                var rawWrapper = rawCol && rawCol.reqId
+                    ? row.querySelector('[data-ref-select][data-ref-req-id="' + cssEscape(rawCol.reqId) + '"]') : null;
+                var rawHidden = rawWrapper ? rawWrapper.querySelector('[data-ref-value]') : null;
+                var materialId = rawHidden ? rawHidden.value : '';
+                ensureStripWidths(materialId).then(function() {
+                    refreshCutTypeOptions(found.orderId, row);
+                });
+            }
+        }
+        // refs отсутствуют у позиций из отчёта — догрузим детально.
+        if (!found.position.refs) {
+            setMessage('Загрузка позиции…', 'info');
+            loadPositions(found.orderId).then(function() {
+                setMessage('');
+                open();
+            }).catch(function(error) {
+                setMessage('Не удалось загрузить позицию: ' + (error.message || error), 'error');
+            });
+        } else {
+            open();
+        }
+    }
+
+    function cancelEditPosition() {
+        state.editingPosition = null;
+        renderOrders();
+    }
+
+    // Сохранение inline-правки: собираем значения из контролов строки → _m_set/{posId} → перезагрузка.
+    function savePosition(posId, row) {
+        if (!row) return;
+        function fieldVal(name) {
+            var el = row.querySelector('[data-field="' + name + '"]');
+            return el ? el.value : '';
+        }
+        function refVal(key) {
+            var col = getColumn(state.positionColumns, key);
+            if (!col || !col.reqId) return '';
+            var w = row.querySelector('[data-ref-select][data-ref-req-id="' + cssEscape(col.reqId) + '"]');
+            var hidden = w ? w.querySelector('[data-ref-value]') : null;
+            return hidden ? hidden.value : '';
+        }
+        var req = buildSetPositionRequest({
+            db: getApiBase(),
+            objId: posId,
+            columns: state.positionColumns,
+            values: {
+                qty: fieldVal('qty'),
+                raw: refVal('raw'),
+                cutType: refVal('cutType'),
+                width: fieldVal('width'),
+                length: fieldVal('length'),
+                sleeve: refVal('sleeve'),
+                winding: fieldVal('winding'),
+                status: fieldVal('status')
+            },
+            xsrf: getXsrf()
+        });
+        setMessage('Сохранение позиции…', 'info');
+        postForm(req.url, req.body).then(function() {
+            state.editingPosition = null;
+            setMessage('Позиция сохранена.', 'success');
+            return loadOrders();
+        }).catch(function(error) {
+            setMessage('Не удалось сохранить позицию: ' + (error.message || error), 'error');
+        });
+    }
+
+    // Удаление позиции: _m_del/{posId} → перезагрузка отчётом.
+    function deletePosition(posId) {
+        var req = buildDeleteRequest({ db: getApiBase(), objId: posId, xsrf: getXsrf() });
+        setMessage('Удаление позиции…', 'info');
+        postForm(req.url, req.body).then(function() {
+            if (state.editingPosition === String(posId)) state.editingPosition = null;
+            setMessage('Позиция удалена.', 'success');
+            return loadOrders();
+        }).catch(function(error) {
+            setMessage('Не удалось удалить позицию: ' + (error.message || error), 'error');
         });
     }
 
@@ -1178,7 +1447,25 @@
         if (filter) {
             filter.addEventListener('change', function() {
                 state.statusFilter = filter.value || '';
-                renderOrders();
+                loadOrders();
+            });
+        }
+
+        var fromEl = document.getElementById('atex-orders-from');
+        var toEl = document.getElementById('atex-orders-to');
+        var searchEl = document.getElementById('atex-orders-search');
+        if (fromEl) {
+            var yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+            state.filterFrom = yesterday.toISOString().slice(0, 10);
+            fromEl.value = state.filterFrom;
+            fromEl.addEventListener('change', function() { state.filterFrom = fromEl.value; loadOrders(); });
+        }
+        if (toEl) toEl.addEventListener('change', function() { state.filterTo = toEl.value; loadOrders(); });
+        if (searchEl) {
+            var searchTimer = null;
+            searchEl.addEventListener('input', function() {
+                if (searchTimer) clearTimeout(searchTimer);
+                searchTimer = setTimeout(function() { state.searchQuery = searchEl.value; renderOrders(); }, 200);
             });
         }
 
@@ -1221,7 +1508,7 @@
                 var addPos = event.target.closest('[data-add-position]');
                 if (addPos) {
                     var addId = addPos.getAttribute('data-add-position');
-                    var form = list.querySelector('[data-position-form="' + cssEscape(addId) + '"]');
+                    var form = list.querySelector('form[data-position-form="' + cssEscape(addId) + '"]');
                     if (form) {
                         form.hidden = false;
                         // Фильтруем типы резки по текущему сырью (если уже выбрано).
@@ -1237,14 +1524,56 @@
                 var cancelPos = event.target.closest('[data-cancel-position]');
                 if (cancelPos) {
                     var cancelId = cancelPos.getAttribute('data-cancel-position');
-                    var cform = list.querySelector('[data-position-form="' + cssEscape(cancelId) + '"]');
+                    var cform = list.querySelector('[data-position-form="' + cssEscape(cancelId) + '"]:not([data-edit-row])');
                     if (cform) cform.hidden = true;
                     return;
                 }
+
+                // --- inline-правка позиций ---
+                var editBtn = event.target.closest('[data-edit-pos]');
+                if (editBtn) {
+                    startEditPosition(editBtn.getAttribute('data-edit-pos'));
+                    return;
+                }
+                var saveBtn = event.target.closest('[data-save-pos]');
+                if (saveBtn) {
+                    var saveId = saveBtn.getAttribute('data-save-pos');
+                    var saveRow = list.querySelector('[data-edit-row="' + cssEscape(saveId) + '"]');
+                    savePosition(saveId, saveRow);
+                    return;
+                }
+                var cancelEdit = event.target.closest('[data-cancel-edit]');
+                if (cancelEdit) {
+                    cancelEditPosition();
+                    return;
+                }
+                var delBtn = event.target.closest('[data-del-pos]');
+                if (delBtn) {
+                    var delId = delBtn.getAttribute('data-del-pos');
+                    // Подтверждение без confirm(): первый клик переводит кнопку в режим подтверждения,
+                    // второй (в течение 4с) — удаляет. Клик по другой кнопке сбрасывает состояние.
+                    if (delBtn.getAttribute('data-confirm') === '1') {
+                        deletePosition(delId);
+                    } else {
+                        resetDeleteConfirm(list);
+                        delBtn.setAttribute('data-confirm', '1');
+                        delBtn.classList.add('is-confirm');
+                        delBtn.setAttribute('title', 'Нажмите ещё раз для удаления');
+                        setMessage('Нажмите 🗑 ещё раз, чтобы удалить позицию.', 'info');
+                        delBtn._atexDelTimer = setTimeout(function() {
+                            delBtn.removeAttribute('data-confirm');
+                            delBtn.classList.remove('is-confirm');
+                            delBtn.setAttribute('title', 'Удалить');
+                        }, 4000);
+                    }
+                    return;
+                }
+                // Клик мимо кнопки удаления — сбросить незавершённое подтверждение.
+                resetDeleteConfirm(list);
             });
 
             list.addEventListener('submit', function(event) {
-                var form = event.target.closest('[data-position-form]');
+                var form = event.target.closest('form[data-position-form]');
                 if (!form) return;
                 event.preventDefault();
                 createPosition(form.getAttribute('data-position-form'), form);
@@ -1273,6 +1602,17 @@
         }
 
         attachRefSearchEvents();
+    }
+
+    // Сбрасывает все кнопки удаления из состояния «ожидание подтверждения».
+    function resetDeleteConfirm(scope) {
+        if (!scope) return;
+        scope.querySelectorAll('[data-del-pos][data-confirm="1"]').forEach(function(btn) {
+            if (btn._atexDelTimer) clearTimeout(btn._atexDelTimer);
+            btn.removeAttribute('data-confirm');
+            btn.classList.remove('is-confirm');
+            btn.setAttribute('title', 'Удалить');
+        });
     }
 
     function findOrder(orderId) {
@@ -1362,6 +1702,9 @@
         normalizeSearchText: normalizeSearchText,
         parseWidth: parseWidth,
         matchCutTypes: matchCutTypes,
+        rowsToOrders: rowsToOrders,
+        searchOrders: searchOrders,
+        sortOrders: sortOrders,
         parseRef: parseRef,
         parseRefOptionsData: parseRefOptionsData,
         mergeRefOptions: mergeRefOptions,
@@ -1378,6 +1721,8 @@
         buildFormBody: buildFormBody,
         buildCreateOrderRequest: buildCreateOrderRequest,
         buildCreatePositionRequest: buildCreatePositionRequest,
+        buildSetPositionRequest: buildSetPositionRequest,
+        buildDeleteRequest: buildDeleteRequest,
         buildSetStatusRequest: buildSetStatusRequest,
         searchableRefSelectHtml: searchableRefSelectHtml,
         TABLE: TABLE,
