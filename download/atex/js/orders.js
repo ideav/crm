@@ -801,7 +801,6 @@
             ? form.querySelector('[data-ref-select][data-ref-req-id="' + cssEscape(cutCol.reqId) + '"]') : null;
         if (!cutWrapper) return;
         var cutHidden = cutWrapper.querySelector('[data-ref-value]');
-        var rawHidden = rawWrapper ? rawWrapper.querySelector('[data-ref-value]') : null;
         if (!cutHidden) return;
         // «Вид сырья» и «Ширина» берём из данных строки (позиция/черновик), а не из DOM:
         // при поячейковой правке активна только ячейка «Тип резки», соседних контролов нет.
