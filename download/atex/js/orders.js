@@ -791,27 +791,18 @@
     // и переотрисовывает dropdown через renderRefSearchResults.
     function refreshCutTypeOptions(orderId, form) {
         if (!form) return;
-        // Обёртки ref-select сырья и типа резки находим по реквизиту (data-ref-req-id),
-        // а не по id — так одна функция работает и для формы добавления, и для inline-правки строки.
-        var rawCol = getColumn(state.positionColumns, 'raw');
+        // Обёртку ref-select «Тип резки» находим по реквизиту (data-ref-req-id).
         var cutCol = getColumn(state.positionColumns, 'cutType');
-        var rawWrapper = rawCol && rawCol.reqId
-            ? form.querySelector('[data-ref-select][data-ref-req-id="' + cssEscape(rawCol.reqId) + '"]') : null;
         var cutWrapper = cutCol && cutCol.reqId
             ? form.querySelector('[data-ref-select][data-ref-req-id="' + cssEscape(cutCol.reqId) + '"]') : null;
-        var widthInput = form.querySelector('[data-field="width"]');
         if (!cutWrapper) return;
         var cutHidden = cutWrapper.querySelector('[data-ref-value]');
         var rawHidden = rawWrapper ? rawWrapper.querySelector('[data-ref-value]') : null;
         if (!cutHidden) return;
-        var materialId = rawHidden ? rawHidden.value : '';
-        var width = widthInput ? widthInput.value : '';
-        // Черновая строка: сырьё/ширина ещё не в DOM как контролы (активна одна ячейка) —
-        // берём из памяти строки, чтобы фильтр «Тип резки» работал до создания позиции.
-        if (form.getAttribute && form.getAttribute('data-draft-order') && state.draftPos) {
-            if (!materialId) materialId = state.draftPos.refs.raw || '';
-            if (!width) width = state.draftPos.values.width || '';
-        }
+        // «Вид сырья» и «Ширина» берём из данных строки (позиция/черновик), а не из DOM:
+        // при поячейковой правке активна только ячейка «Тип резки», соседних контролов нет.
+        var materialId = rowMaterialId(form);
+        var width = rowWidthValue(form);
         var allowed = matchCutTypes(state.cutTypeIndex, materialId, width);
         var allowedSet = {};
         allowed.forEach(function(id){ allowedSet[String(id)] = true; });
@@ -1137,10 +1128,7 @@
             // Фильтр «Тип резки» по текущему сырью/ширине строки.
             var row = td.closest('tr');
             if (row) {
-                var rawCol = getColumn(state.positionColumns, 'raw');
-                var rawHidden = rawCol && rawCol.reqId
-                    ? rowRefValue(row, rawCol.reqId) : '';
-                ensureStripWidths(rawHidden).then(function() {
+                ensureStripWidths(rowMaterialId(row)).then(function() {
                     refreshCutTypeOptions(orderId, row);
                 });
             }
@@ -1167,6 +1155,30 @@
             return found.position.refs.raw || '';
         }
         return '';
+    }
+
+    // Источник строки правки (позиция или черновик) — для фильтра «Тип резки».
+    // В поячейковой правке активна одна ячейка, поэтому «Вид сырья»/«Ширину»
+    // берём из ДАННЫХ строки, а не из DOM (контролов соседних полей на странице нет).
+    function rowSourcePosition(form) {
+        if (form && form.getAttribute && form.getAttribute('data-draft-order')) return state.draftPos;
+        var idCell = form && form.querySelector ? form.querySelector('td[data-position-id]') : null;
+        var pid = idCell ? idCell.getAttribute('data-position-id') : null;
+        var f = pid ? findPositionById(pid) : null;
+        return f ? f.position : null;
+    }
+    function rowMaterialId(form) {
+        var rawCol = getColumn(state.positionColumns, 'raw');
+        var dom = rawCol && rawCol.reqId ? rowRefValue(form, rawCol.reqId) : '';
+        if (dom) return dom;
+        var pos = rowSourcePosition(form);
+        return pos && pos.refs ? (pos.refs.raw || '') : '';
+    }
+    function rowWidthValue(form) {
+        var w = form && form.querySelector ? form.querySelector('[data-field="width"]') : null;
+        if (w && w.value) return w.value;
+        var pos = rowSourcePosition(form);
+        return pos && pos.values ? (pos.values.width || '') : '';
     }
 
     // Сохранение одного поля позиции: _m_set/{posId} с единственным t{reqId}.
