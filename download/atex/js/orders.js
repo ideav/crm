@@ -619,7 +619,11 @@
                 var id = r.type_id == null ? '' : String(r.type_id);
                 if (!id) return;
                 if (!state.cutTypeIndex[id]) {
-                    state.cutTypeIndex[id] = { materialId: r.type_material_id == null ? '' : String(r.type_material_id), widths: [] };
+                    state.cutTypeIndex[id] = {
+                        materialId: r.type_material_id == null ? '' : String(r.type_material_id),
+                        label: r.type_name == null ? '' : String(r.type_name),
+                        widths: []
+                    };
                 }
                 var w = parseWidth(r.strip_width);
                 if (!isNaN(w)) state.cutTypeIndex[id].widths.push(w);
@@ -1070,9 +1074,27 @@
                 ' data-field="' + escapeHtml(key) + '" value="' + escapeHtml(pos.values[key] || '') + '">';
         }
         if (col && col.ref) {
-            var options = col.reqId ? state.refOptions[col.reqId] : null;
             var placeholder = key === 'raw' ? 'Выберите вид сырья'
                 : (key === 'cutType' ? 'Выберите тип резки' : 'Выберите диаметр');
+            if (key === 'cutType') {
+                // Опции «Тип резки» строим ЛОКАЛЬНО из cutTypeIndex, отфильтрованного по
+                // виду сырья+ширине строки. _ref_reqs не используем: там потолок 80 записей,
+                // и нужный тип (за пределами первых 80) не попадал в список → пусто.
+                var mat = refs.raw || '';
+                var wd = (pos.values && pos.values.width) || '';
+                var allowedIds = matchCutTypes(state.cutTypeIndex, mat, wd);
+                var cutOptions = allowedIds.map(function(tid) {
+                    var e = state.cutTypeIndex[tid] || {};
+                    return { id: String(tid), label: e.label || ('#' + tid) };
+                });
+                var curId = refs.cutType || '';
+                if (curId && !allowedIds.some(function(tid){ return String(tid) === String(curId); })) {
+                    // текущий выбранный тип (если не проходит фильтр) — показать, чтобы значение не пропало
+                    cutOptions.unshift({ id: String(curId), label: (pos.values && pos.values.cutType) || ('#' + curId) });
+                }
+                return refSelectHtml('atex-pos-cutType-cell-' + pos.id, cutOptions, curId, placeholder, null);
+            }
+            var options = col.reqId ? state.refOptions[col.reqId] : null;
             return refSelectHtml('atex-pos-' + key + '-cell-' + pos.id, options, refs[key] || '', placeholder, col.reqId);
         }
         if (key === 'winding') {
