@@ -1005,14 +1005,15 @@
                 return;
             }
 
-            // Счётчики для подтверждения.
+            // Счётчики для подтверждения: полос = число записей «Полоса» (как в итоговой
+            // нотификации), ножей = суммарное Количество (Σ qty).
             var nCuts = allLayouts.length;
-            var nStrips = 0;
+            var nStrips = 0, nKnives = 0;
             allLayouts.forEach(function(lay) {
-                (lay.strips || []).forEach(function(s) { nStrips += (Number(s.qty) || 0); });
+                (lay.strips || []).forEach(function(s) { nStrips += 1; nKnives += (Number(s.qty) || 0); });
             });
-            var msg = 'Создать ' + nCuts + ' резок под необеспеченные позиции (раскладок ' + nCuts +
-                ', полос ' + nStrips + ')? Пропущено ' + skipped.length + '.';
+            var msg = 'Создать ' + nCuts + ' резок под необеспеченные позиции (полос ' + nStrips +
+                ', ножей ' + nKnives + ')? Пропущено ' + skipped.length + '.';
 
             self.confirmAction(msg, actionsEl, 'Да, создать', function() {
                 self.runGenerateCuts(allLayouts, skipped);
