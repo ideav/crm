@@ -274,6 +274,33 @@
         });
     }
 
+    // Строки отчёта positions_list (JSON_KV) → [{ id, materialId, width, qty }]
+    // для генерации резок. position_material_id (добавлен в отчёт), position_width,
+    // position_qty → числа; пустые значения → 0/'' но объект всегда присутствует.
+    function rowsToGenPositions(rows) {
+        return (rows || []).map(function(row) {
+            return {
+                id: row.position_id == null ? '' : String(row.position_id),
+                materialId: row.position_material_id == null ? '' : String(row.position_material_id),
+                width: Number(row.position_width) || 0,
+                qty: Number(row.position_qty) || 0
+            };
+        });
+    }
+
+    // Преобразование «Дата прихода» в числовой ключ для FIFO-сортировки.
+    // ISO YYYY-MM-DD → YYYYMMDD; D.M.Y / D/M/Y → YYYYMMDD; пустое → Infinity.
+    function batchDateKey(value) {
+        var s = String(value == null ? '' : value).trim();
+        if (!s) return Infinity;
+        var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (iso) return Number(iso[1]) * 10000 + Number(iso[2]) * 100 + Number(iso[3]);
+        var dmy = s.match(/^(\d{1,2})[.\\/](\d{1,2})[.\\/](\d{4})/);
+        if (dmy) return Number(dmy[3]) * 10000 + Number(dmy[2]) * 100 + Number(dmy[1]);
+        var t = Date.parse(s);
+        return isNaN(t) ? Infinity : t;
+    }
+
     // Строки отчёта material_batches (JSON_KV) → [{ id, label }] для дропдауна
     // «Партия сырья». Подпись обогащённая: «Номер · Вид сырья · ост. N м²»
     // (пустые части пропускаются). Дропдаун статический клиентский (см. renderForm),
@@ -496,6 +523,8 @@
         buildFields: buildFields,
         rowsToPlanning: rowsToPlanning,
         rowsToPositions: rowsToPositions,
+        rowsToGenPositions: rowsToGenPositions,
+        batchDateKey: batchDateKey,
         rowsToBatches: rowsToBatches,
         PLANNING_WEIGHTS: PLANNING_WEIGHTS,
         KNIFE_SCALE: KNIFE_SCALE,
@@ -549,6 +578,12 @@
         this.refOptions = {};      // кеш опций searchable reference inputs по reqId
         this.cuts = [];            // очередь резок [mapCutRecord]
         this.supplies = [];        // все записи «Обеспечения» (для подсчёта привязок)
+        // Данные для generateCutPlan (плумбинг D3b):
+        this.genPositions = [];    // [{ id, materialId, width, qty }] — все позиции
+        this.cutTypeIndex = {};    // { typeId: { materialId, widths:[{width,qty}] } }
+        this.cutTypeIndexLoaded = false;        // флаг: loadCutTypeIndex завершён
+        this.cutTypeStripsLoaded = {};          // { materialId: true } — полосы загружены
+        this.genBatches = [];      // [{ id, materialId, dateKey, remainder }]
         this.draft = this.blankDraft();
         this.filter = { slitter: '', status: '' };
         this.selectedCutId = null; // выбранная резка для привязки обеспечения
@@ -604,6 +639,7 @@
         var self = this;
         return this.getJson('metadata').then(function(all) {
             var list = Array.isArray(all) ? all : [all];
+            self._metaAll = list; // кеш полного списка (нужен для «Полоса» в ensureCutTypeStrips)
             function byName(name) {
                 return list.filter(function(t) {
                     return String(t.val).trim().toLowerCase() === name.trim().toLowerCase();
@@ -675,10 +711,13 @@
 
     // Справочник позиций заказа отчётом positions_list (JSON_KV). Позиция
     // подчинённая — прямое object/-чтение её не отдаёт, отчёт возвращает все.
+    // Параллельно строит this.genPositions = [{ id, materialId, width, qty }]
+    // для generateCutPlan (D3b): использует те же строки, не нужен доп. запрос.
     AtexProductionPlanning.prototype.loadPositions = function() {
         var self = this;
         return this.getJson('report/positions_list?JSON_KV&LIMIT=0,2000').then(function(rows) {
             self.positions = rowsToPositions(rows || []);
+            self.genPositions = rowsToGenPositions(rows || []);
         });
     };
 
@@ -687,6 +726,106 @@
         var self = this;
         return this.getJson('report/material_batches?JSON_KV&LIMIT=0,2000').then(function(rows) {
             self.materialBatches = rowsToBatches(rows || []);
+        });
+    };
+
+    // ── Загрузчики для generateCutPlan (D3b) ──
+
+    // Индекс типов резки: { typeId: { materialId } }. Один запрос на все типы резки.
+    // Зеркалирует loadCutTypeIndex из orders.js (там findMetadataByName/findReqIndex,
+    // здесь metadata уже в this.meta + columnIndex/reqIdByName).
+    // После завершения this.cutTypeIndexLoaded = true — сигнал для ensureCutTypeStrips.
+    AtexProductionPlanning.prototype.loadCutTypeIndexAll = function() {
+        var self = this;
+        var meta = this.meta.cutType;
+        if (!meta) { this.cutTypeIndexLoaded = true; return Promise.resolve(); }
+        var matIdx = columnIndex(meta, 'Вид сырья');
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
+            (rows || []).forEach(function(rec) {
+                var r = rec.r || [];
+                var mat = matIdx >= 0 ? parseRef(r[matIdx]) : { id: null };
+                self.cutTypeIndex[String(rec.i)] = { materialId: mat.id ? String(mat.id) : '', widths: null };
+            });
+            self.cutTypeIndexLoaded = true;
+        });
+    };
+
+    // Загружает полосы («Ширина, мм», «Количество») для всех типов резки,
+    // чьё сырьё входит в переданный набор materialIds. Один запрос на тип резки.
+    // Зеркалирует ensureStripWidths из orders.js, но загружает widths:[{width,qty}]
+    // (orders.js хранит только widths:[Number], здесь нужна qty для matchCutType).
+    // Использует закешированный this._metaAll (от loadMetadata) — без доп. запроса.
+    // Вызывается один раз при инициализации после loadCutTypeIndexAll.
+    AtexProductionPlanning.prototype.ensureCutTypeStrips = function(materialIds) {
+        var self = this;
+        var needed = {};
+        (materialIds || []).forEach(function(m) { if (m) needed[String(m)] = true; });
+
+        var list = self._metaAll || [];
+        var stripMeta = null;
+        for (var i = 0; i < list.length; i++) {
+            if (String(list[i].val).trim().toLowerCase() === 'полоса') { stripMeta = list[i]; break; }
+        }
+        if (!stripMeta) return Promise.resolve();
+
+        var wIdx = columnIndex(stripMeta, 'Ширина, мм');
+        var qIdx = columnIndex(stripMeta, 'Количество');
+
+        var typeIds = Object.keys(self.cutTypeIndex).filter(function(tid) {
+            return needed[String(self.cutTypeIndex[tid].materialId)];
+        });
+
+        return Promise.all(typeIds.map(function(tid) {
+            if (self.cutTypeStripsLoaded[tid]) return Promise.resolve();
+            return self.getJson(
+                'object/' + stripMeta.id + '/?JSON_OBJ&F_U=' + encodeURIComponent(tid) + '&LIMIT=0,500'
+            ).then(function(rows) {
+                var widths = (rows || []).map(function(rec) {
+                    var r = rec.r || [];
+                    return {
+                        width: wIdx >= 0 ? (Number(r[wIdx]) || 0) : 0,
+                        qty: qIdx >= 0 ? (Number(r[qIdx]) || 0) : 0
+                    };
+                }).filter(function(s) { return s.width > 0; });
+                self.cutTypeIndex[tid].widths = widths;
+                self.cutTypeStripsLoaded[tid] = true;
+            }).catch(function() { /* пропускаем тип при сбое запроса полос */ });
+        }));
+    };
+
+    // Загружает «Партия сырья» через object/ и заполняет this.genBatches.
+    // Результат: [{ id, materialId, dateKey (число), remainder }] для pickBatchFIFO.
+    // Вид сырья: parseRef(«Вид сырья»).id; Дата прихода → batchDateKey;
+    // Остаток, м² → Number (ключевое поле для FIFO-выбора).
+    AtexProductionPlanning.prototype.loadGenBatches = function() {
+        var self = this;
+        var meta = this.meta.materialBatch;
+        if (!meta) { this.genBatches = []; return Promise.resolve(); }
+        var matIdx = columnIndex(meta, 'Вид сырья');
+        var dateIdx = columnIndex(meta, 'Дата прихода');
+        var remIdx = columnIndex(meta, 'Остаток, м²');
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
+            self.genBatches = (rows || []).map(function(rec) {
+                var r = rec.r || [];
+                var mat = matIdx >= 0 ? parseRef(r[matIdx]) : { id: null };
+                return {
+                    id: String(rec.i),
+                    materialId: mat.id ? String(mat.id) : '',
+                    dateKey: dateIdx >= 0 ? batchDateKey(r[dateIdx]) : Infinity,
+                    remainder: remIdx >= 0 ? (Number(r[remIdx]) || 0) : 0
+                };
+            });
+        });
+    };
+
+    // Объединяет loadCutTypeIndexAll + ensureCutTypeStrips для материалов из
+    // необеспеченных позиций. materialIds — уже отфильтрованный набор, или опциональный
+    // параметр; если не передан — берёт из this.genPositions (все позиции).
+    AtexProductionPlanning.prototype.loadCutTypeIndexForMaterials = function(materialIds) {
+        var self = this;
+        return this.loadCutTypeIndexAll().then(function() {
+            var ids = materialIds || (self.genPositions || []).map(function(p) { return p.materialId; });
+            return self.ensureCutTypeStrips(ids);
         });
     };
 
@@ -1207,9 +1346,15 @@
                     self.loadRef(self.meta.cutType).then(function(items) { self.cutTypes = items; }),
                     self.loadMaterialBatches(),
                     self.loadBatchMaterialMap(),
-                    self.loadPositions(),
-                    self.loadPlanning()
+                    self.loadPositions(),  // заполняет genPositions тоже
+                    self.loadPlanning(),
+                    self.loadGenBatches()  // D3b: FIFO-партии для generateCutPlan
                 ]);
+            })
+            .then(function() {
+                // D3b: индекс типов резки + полосы для материалов позиций.
+                // Запускается после loadPositions (genPositions уже заполнен).
+                return self.loadCutTypeIndexForMaterials();
             })
             .then(function() { self.render(); })
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
