@@ -221,6 +221,25 @@ QID=$(curl -s -H "X-Authorization: $TOKEN" --cookie "idb_ateh=$TOKEN" "$DB/_m_ne
 `rowsToPlanning` в `{ cuts, supplies }` (dedup резок по `cut_id`); дескриптор каждой
 резки содержит все 7 полей и передаётся напрямую в `orderCuts`/`planQueues`.
 
+## 8.1 `positions_list` (queryId 8409) — позиции заказов (+ сырьё)
+
+Отчёт-источник позиций для РМ «Планирование производства». Используется в D3b для
+генерации резок под необеспеченные позиции (`generateCutPlan`): из строк
+`rowsToGenPositions` собирает дескрипторы `{ id, materialId, width, qty }`.
+
+| Колонка (`t100`) | Источник (`t28`) | Функция |
+|---|---|---|
+| `position_id` | 1076 Позиция | abn_ID (t104=85) |
+| `position_no` | 1076 Позиция (Номер) | — |
+| `position_cut_type` | 1140 Тип резки (ref) | — |
+| `position_width` | 1141 Ширина, мм | — |
+| `position_qty` | 1137 Кол-во | — |
+| `position_material_id` | 1138 Вид сырья | 85 (abn_ID) |
+
+`position_material_id` добавлена в рамках D3b (колонка 8527) — даёт сырьё позиции,
+чтобы `matchCutType`/`pickBatchFIFO` подобрали тип резки и партию по сырью.
+Запуск: `GET /ateh/report/positions_list?JSON_KV`.
+
 ## 9. Следующий шаг
 
 Переключить **dashboards** на `report/8303` вместо 6 клиентских выгрузок —
