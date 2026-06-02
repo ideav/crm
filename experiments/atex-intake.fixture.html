@@ -6,11 +6,12 @@
 <head>
 <meta charset="utf-8">
 <title>atex · Приёмка сырья — стенд</title>
-<link rel="stylesheet" href="../css/atex-intake.css">
+<link rel="stylesheet" href="../download/atex/css/atex-brand.css">
+<link rel="stylesheet" href="../download/atex/css/intake.css">
 <style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#eef1f5}</style>
 </head>
 <body>
-<div id="atex-intake" class="atex-in" data-db="atex" data-xsrf="test-token">
+<div id="atex-intake" class="atex-in atex-brand" data-db="atex" data-xsrf="test-token">
     <div class="atex-in-loading">Загрузка…</div>
 </div>
 
@@ -19,26 +20,30 @@
 var META = [
     { id: 100, val: 'Вид сырья', reqs: [
         { id: 1001, val: 'Полное название' },
-        { id: 1003, val: 'Ширина, мм' }
+        { id: 1003, val: 'Ширина, мм' },
+        { id: 1005, val: 'Длина рулона, м' }
     ]},
     { id: 106, val: 'Партия сырья', reqs: [
         { id: 1044, val: 'Вид сырья' },
+        { id: 1155, val: 'Штрих-код' },
         { id: 1046, val: 'Дата прихода' },
         { id: 1048, val: 'Получено, м²' },
-        { id: 1050, val: 'Остаток, м²' }
+        { id: 1050, val: 'Остаток, м²' },
+        { id: 1147, val: 'Длина, м' },
+        { id: 1148, val: 'Остаток, м' }
     ]}
 ];
 
 // Хранилище-заглушка
 var DB = {
     materials: [
-        { i: 201, r: ['Бумага термо 80 г/м²'] },
-        { i: 202, r: ['Плёнка PP 50 мкм'] }
+        { i: 201, r: ['MR131', 'Бумага термо 80 г/м²', '80', '1200'] },
+        { i: 202, r: ['MWR118', 'Плёнка PP 50 мкм', '50', '1500'] }
     ],
-    // r = [главное значение, Вид сырья(ref), Дата прихода, Получено, Остаток]
+    // r = [главное значение, Вид сырья(ref), Штрих-код, Дата прихода, Получено, Остаток, Длина, Остаток м]
     batches: [
-        { i: 301, r: ['Бумага термо 80 г/м² от 2026-05-10', '201:Бумага термо 80 г/м²', '2026-05-10', '5000', '3200'] },
-        { i: 302, r: ['Плёнка PP 50 мкм от 2026-05-22', '202:Плёнка PP 50 мкм', '2026-05-22', '2400', '2400'] }
+        { i: 301, r: ['MR131 от 2026-05-10', '201:MR131', '4607001234567', '2026-05-10', '5000', '3200', '1200', '820'] },
+        { i: 302, r: ['MWR118 от 2026-05-22', '202:MWR118', '4607007654321', '2026-05-22', '2400', '2400', '1500', '1500'] }
     ],
     nextId: 500
 };
@@ -50,11 +55,29 @@ window.fetch = function(url, opts) {
         return Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     }
     if (/\/metadata(?:$|\?)/.test(u)) return json(META);
+    if (/\/_ref_reqs\/1044/.test(u)) return json(DB.materials.map(function(m) { return { id: m.i, label: m.r[0] }; }));
     var mObj = u.match(/\/object\/(\d+)\//);
     if (mObj) {
         var tid = mObj[1];
         if (tid === '100') return json(DB.materials);
-        if (tid === '106') return json(DB.batches);
+        if (tid === '106') {
+            var query = new URLSearchParams(u.split('?')[1] || '');
+            var rows = DB.batches.slice();
+            var material = query.get('FR_1044') || '';
+            var barcode = query.get('FR_1155') || '';
+            var arrived = query.get('FR_1046') || '';
+            if (material.charAt(0) === '@') {
+                rows = rows.filter(function(row) { return String(row.r[1]).indexOf(material.slice(1) + ':') === 0; });
+            }
+            if (barcode) {
+                var prefix = barcode.replace(/%$/, '');
+                rows = rows.filter(function(row) { return String(row.r[2]).indexOf(prefix) === 0; });
+            }
+            if (arrived) {
+                rows = rows.filter(function(row) { return String(row.r[3]) === arrived; });
+            }
+            return json(rows);
+        }
     }
     if (/\/_m_new\//.test(u)) {
         var id = DB.nextId++;
@@ -66,9 +89,12 @@ window.fetch = function(url, opts) {
         DB.batches.push({ i: id, r: [
             p.get('t106') || ('#' + id),
             matRef + ':' + (mat ? mat[0] : ''),
+            p.get('t1155') || '',
             p.get('t1046') || '',
             p.get('t1048') || '',
-            p.get('t1050') || ''
+            p.get('t1050') || '',
+            p.get('t1147') || '',
+            p.get('t1148') || ''
         ]});
         return json({ obj: id, i: id });
     }
@@ -79,6 +105,7 @@ window.fetch = function(url, opts) {
     return realFetch(url, opts);
 };
 </script>
-<script src="../js/atex-intake.js"></script>
+<script src="../download/atex/js/ref-search.js"></script>
+<script src="../download/atex/js/intake.js"></script>
 </body>
 </html>
