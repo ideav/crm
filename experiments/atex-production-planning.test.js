@@ -161,4 +161,18 @@ assertEqual(planning.rowsToBatches([{ batch_id: '5', batch_no: 'НК-9', batch_m
     [{ id: '5', label: 'НК-9' }], 'rowsToBatches: пустые вид/остаток → только номер');
 assertEqual(planning.rowsToBatches([]), [], 'rowsToBatches: пустой ввод → пустой список');
 
+// ── parseMultiRefIds ──
+assertEqual(planning.parseMultiRefIds('1,2:Фольга,Бумага'), ['1','2'], 'parseMultiRefIds: пара id');
+assertEqual(planning.parseMultiRefIds('5:Фольга'), ['5'], 'parseMultiRefIds: одиночное');
+assertEqual(planning.parseMultiRefIds(''), [], 'parseMultiRefIds: пусто');
+assertEqual(planning.parseMultiRefIds(null), [], 'parseMultiRefIds: null');
+assertEqual(planning.parseMultiRefIds(' 1 , 2 :a,b'), ['1','2'], 'parseMultiRefIds: пробелы');
+assertEqual(planning.parseMultiRefIds('7,8'), ['7','8'], 'parseMultiRefIds: без двоеточия');
+// ── isMaterialBlocked ──
+assertEqual(planning.isMaterialBlocked(['1','2'], '2'), true, 'isMaterialBlocked: в списке');
+assertEqual(planning.isMaterialBlocked(['1','2'], 3), false, 'isMaterialBlocked: не в списке');
+assertEqual(planning.isMaterialBlocked(['1','2'], 1), true, 'isMaterialBlocked: число==строка');
+assertEqual(planning.isMaterialBlocked([], '1'), false, 'isMaterialBlocked: пустой список');
+assertEqual(planning.isMaterialBlocked(['1'], ''), false, 'isMaterialBlocked: пустой материал');
+
 console.log('\n' + passed + ' assertions passed');
