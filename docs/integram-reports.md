@@ -213,7 +213,7 @@ QID=$(curl -s -H "X-Authorization: $TOKEN" --cookie "idb_ateh=$TOKEN" "$DB/_m_ne
 | `cut_material` | Партия сырья → Вид сырья (name) | — | определение Фольги (`/фольг/i`) → `isFoil`; флаг отправляет резку в конец очереди |
 | `cut_batch_id` | Резка → Партия сырья (abn_ID) | 85 (abn_ID) | ключ смены партии; штраф `remainder` при неудобном остатке |
 | `cut_jumbo_remaining` | Партия сырья → «Остаток, м» | — | `jumboRemainingM` (число, метры); входит в `awkwardRemainder` |
-| `cut_knives` | Тип резки → «Итого ножей» | — | `knifeCount` (число); расстояние конфигурации ножей в `changeoverCost` |
+| ~~`cut_knives`~~ | ~~Тип резки → «Итого ножей»~~ | — | **УДАЛЕНА в F2** (Тип резки упразднён). `knifeCount` теперь считается клиентом из подчинённых «Полос» резки (SUM Количество) — см. F3. |
 | `cut_winding` | Обеспечение → Позиция → «Тип намотки» | — | нормализуется `normWinding` → `'IN'`/`'OUT'`/`''`; вес `winding` в `changeoverCost` |
 | `cut_roller_width` | Позиция → «Ширина, мм» | — | `rollerWidth` (число, мм); штраф за сужение вала в `changeoverCost` |
 | `order_id` | Позиция → Заказ (abn_ID, t104=85) | 85 | id заказа резки (для группировки/отладки) |
@@ -237,7 +237,7 @@ QID=$(curl -s -H "X-Authorization: $TOKEN" --cookie "idb_ateh=$TOKEN" "$DB/_m_ne
 |---|---|---|
 | `position_id` | 1076 Позиция | abn_ID (t104=85) |
 | `position_no` | 1076 Позиция (Номер) | — |
-| `position_cut_type` | 1140 Тип резки (ref) | — |
+| ~~`position_cut_type`~~ | ~~1140 Тип резки~~ | **УДАЛЕНА в F2** (Тип резки упразднён, реквизит 1140 снят) |
 | `position_width` | 1141 Ширина, мм | — |
 | `position_qty` | 1137 Кол-во | — |
 | `position_material_id` | 1138 Вид сырья | 85 (abn_ID) |
