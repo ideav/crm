@@ -170,3 +170,15 @@ var ms = dashboards.materialStock([
 ]);
 assertEqual(ms.rows.map(function(r) { return r.key; }), ['Полиэтилен', 'Лавсан', 'Полипропилен'],
     'materialStock: остатки отсортированы по убыванию');
+
+// materialStock округляет остаток до целых м² (суммируя точно).
+var msRound = dashboards.materialStock([
+    { material: 'MR132', received: '38400.366', remainder: '38400.366' },
+    { material: 'MR132', received: '0', remainder: '0.5' },
+    { material: 'MR194', received: '414115.10', remainder: '414115.10' }
+]);
+var byMat = {};
+msRound.rows.forEach(function(r) { byMat[r.key] = r.remainder; });
+assertEqual(byMat['MR132'], 38401, 'materialStock: остаток MR132 = round(38400.366+0.5)=38401');
+assertEqual(byMat['MR194'], 414115, 'materialStock: остаток MR194 = round(414115.10)=414115');
+assertEqual(msRound.totalRemainder, 452516, 'materialStock: totalRemainder округлён до целых');
