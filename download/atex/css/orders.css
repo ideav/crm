@@ -314,3 +314,9 @@
     text-align: center;
     color: var(--text-secondary, #64748b);
 }
+
+.atex-orders-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.atex-orders-search-wrap { flex: 1 1 220px; }
+.atex-orders-search-wrap input { width: 100%; }
+.atex-orders-table th[data-sort].is-sorted-asc::after { content: ' \25B2'; }
+.atex-orders-table th[data-sort].is-sorted-desc::after { content: ' \25BC'; }

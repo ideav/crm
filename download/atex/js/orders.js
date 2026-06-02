@@ -69,6 +69,11 @@
         positionsByOrder: {},
         expanded: {},
         statusFilter: '',
+        filterFrom: '',
+        filterTo: '',
+        searchQuery: '',
+        sortKey: 'id',
+        sortDir: 'desc',
         refOptions: {},
         refSearchSeq: 0,
         creating: false,
@@ -679,13 +684,6 @@
         })).join('');
     }
 
-    function filteredOrders() {
-        if (!state.statusFilter) return state.orders;
-        return state.orders.filter(function(order) {
-            return trimValue(order.values.status) === trimValue(state.statusFilter);
-        });
-    }
-
     function renderPositions(order) {
         var positions = state.positionsByOrder[order.id] || [];
         var head = '<thead><tr>' +
@@ -788,10 +786,10 @@
         var container = document.getElementById('atex-orders-list');
         if (!container) return;
 
-        var orders = filteredOrders();
+        var orders = sortOrders(searchOrders(state.orders, state.searchQuery), state.sortKey, state.sortDir);
         if (!orders.length) {
             container.innerHTML = '<div class="atex-orders-empty">' +
-                (state.orders.length ? 'Нет заказов с выбранным статусом.' : 'Заказов пока нет. Создайте первый.') +
+                (state.orders.length ? 'Ничего не найдено по поиску.' : 'Заказов нет за выбранный период.') +
                 '</div>';
             return;
         }
@@ -821,9 +819,26 @@
             return main + detail;
         }).join('');
 
-        container.innerHTML = '<table class="atex-orders-table">' +
-            '<thead><tr><th></th><th>№</th><th>Клиент</th><th>Менеджер</th><th>Дата создания</th><th>Статус</th><th>Позиций</th></tr></thead>' +
+        function sortableTh(key, label) {
+            var cls = state.sortKey === key ? (state.sortDir === 'desc' ? ' class="is-sorted-desc"' : ' class="is-sorted-asc"') : '';
+            return '<th data-sort="' + key + '"' + cls + '>' + label + '</th>';
+        }
+        var thead = '<thead><tr><th></th>' +
+            sortableTh('id', '№') + sortableTh('client', 'Клиент') + sortableTh('manager', 'Менеджер') +
+            sortableTh('created', 'Дата создания') + sortableTh('status', 'Статус') +
+            '<th>Позиций</th></tr></thead>';
+        container.innerHTML = '<table class="atex-orders-table">' + thead +
             '<tbody>' + rows + '</tbody></table>';
+
+        container.querySelectorAll('th[data-sort]').forEach(function(th) {
+            th.style.cursor = 'pointer';
+            th.addEventListener('click', function() {
+                var key = th.getAttribute('data-sort');
+                if (state.sortKey === key) state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
+                else { state.sortKey = key; state.sortDir = 'asc'; }
+                renderOrders();
+            });
+        });
     }
 
     function renderCreateForm() {
@@ -855,15 +870,16 @@
     }
 
     function loadOrders() {
-        var statusCol = getColumn(state.orderColumns, 'status');
-        var url = buildListUrl(getApiBase(), state.orderTable, null,
-            null, ''); // фильтр по статусу делаем на клиенте (быстрее и переживает опечатки)
-        return fetchJson(url).then(function(json) {
-            state.orders = normalizeObjects(json, state.orderColumns).sort(function(a, b) {
-                return Number(b.id) - Number(a.id);
-            });
+        var params = ['JSON_KV', 'LIMIT=0,5000'];
+        if (state.filterFrom) params.push('FR_order_created=' + encodeURIComponent(state.filterFrom));
+        if (state.filterTo) params.push('TO_order_created=' + encodeURIComponent(state.filterTo));
+        if (trimValue(state.statusFilter)) params.push('FR_order_status=' + encodeURIComponent(trimValue(state.statusFilter)));
+        var url = '/' + encodeURIComponent(getApiBase()) + '/report/orders_list?' + params.join('&');
+        return fetchJson(url).then(function(rows) {
+            state.orders = rowsToOrders(rows || []);
+            state.positionsByOrder = {};
+            state.orders.forEach(function(o) { state.positionsByOrder[o.id] = o.positions; });
             renderOrders();
-            return statusCol;
         });
     }
 
@@ -1237,7 +1253,25 @@
         if (filter) {
             filter.addEventListener('change', function() {
                 state.statusFilter = filter.value || '';
-                renderOrders();
+                loadOrders();
+            });
+        }
+
+        var fromEl = document.getElementById('atex-orders-from');
+        var toEl = document.getElementById('atex-orders-to');
+        var searchEl = document.getElementById('atex-orders-search');
+        if (fromEl) {
+            var yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+            state.filterFrom = yesterday.toISOString().slice(0, 10);
+            fromEl.value = state.filterFrom;
+            fromEl.addEventListener('change', function() { state.filterFrom = fromEl.value; loadOrders(); });
+        }
+        if (toEl) toEl.addEventListener('change', function() { state.filterTo = toEl.value; loadOrders(); });
+        if (searchEl) {
+            var searchTimer = null;
+            searchEl.addEventListener('input', function() {
+                if (searchTimer) clearTimeout(searchTimer);
+                searchTimer = setTimeout(function() { state.searchQuery = searchEl.value; renderOrders(); }, 200);
             });
         }
 
