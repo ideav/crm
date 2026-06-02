@@ -122,12 +122,14 @@ assertEqual(plan.cuts, [
       cutType: { id: null, label: '99мм×9' }, materialBatch: { id: null, label: 'НК-0400' },
       planDate: '06.05.2026', status: 'В работе', sequence: null,
       materialId: '', materialName: '', batchId: '',
-      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, isFoil: false },
+      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, isFoil: false,
+      orderId: '', orderApprovalDate: '' },
     { id: '20', number: '2', slitter: { id: null, label: '' },
       cutType: { id: null, label: '25мм×35' }, materialBatch: { id: null, label: 'НК-0118' },
       planDate: '27.05.2026', status: 'Ожидает', sequence: null,
       materialId: '', materialName: '', batchId: '',
-      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, isFoil: false }
+      jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, isFoil: false,
+      orderId: '', orderApprovalDate: '' }
 ], 'rowsToPlanning dedups cuts by cut_id, slitter без id → {id:null}');
 assertEqual(plan.supplies, [
     { id: '900', positionId: '700', cutId: '10' },
@@ -338,5 +340,16 @@ assertEqual(planning.batchDateKey('5/1/2026'), 20260105, 'batchDateKey: D/M/Y');
 assertEqual(planning.batchDateKey('') === Infinity, true, 'batchDateKey: пусто → Infinity');
 assertEqual(planning.batchDateKey('мусор') === Infinity, true, 'batchDateKey: мусор → Infinity');
 assertEqual(planning.batchDateKey('2026-01-05') < planning.batchDateKey('2026-02-01'), true, 'batchDateKey: старше = меньше (FIFO)');
+
+// ── Фильтр видимости очереди isCutVisible (статус + согласование заказа + дата плана) ──
+function vc(over){ return Object.assign({ status:'Ожидает', orderApprovalDate:'31.05.2026', planDate:'02.06.2026' }, over||{}); }
+assertEqual(planning.isCutVisible(vc(), '2026-06-02'), true, 'isCutVisible: согласован, не завершён, дата совпадает → видна');
+assertEqual(planning.isCutVisible(vc({status:'Завершён'}), '2026-06-02'), false, 'isCutVisible: «Завершён» → скрыта');
+assertEqual(planning.isCutVisible(vc({orderApprovalDate:''}), '2026-06-02'), false, 'isCutVisible: заказ не согласован → скрыта');
+assertEqual(planning.isCutVisible(vc({planDate:'01.06.2026'}), '2026-06-02'), false, 'isCutVisible: дата плана ≠ выбранной → скрыта');
+assertEqual(planning.isCutVisible(vc({planDate:''}), '2026-06-02'), true, 'isCutVisible: дата плана пустая → видна (ещё не запланирована)');
+assertEqual(planning.isCutVisible(vc({planDate:'02.06.2026'}), ''), true, 'isCutVisible: дата не выбрана → по дате не фильтруем');
+assertEqual(planning.isCutVisible(vc({planDate:''}), ''), true, 'isCutVisible: обе пусты → видна');
+assertEqual(planning.isCutVisible(null, '2026-06-02'), false, 'isCutVisible: null → false');
 
 console.log('\n' + passed + ' assertions passed');

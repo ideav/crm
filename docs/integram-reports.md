@@ -216,6 +216,12 @@ QID=$(curl -s -H "X-Authorization: $TOKEN" --cookie "idb_ateh=$TOKEN" "$DB/_m_ne
 | `cut_knives` | Тип резки → «Итого ножей» | — | `knifeCount` (число); расстояние конфигурации ножей в `changeoverCost` |
 | `cut_winding` | Обеспечение → Позиция → «Тип намотки» | — | нормализуется `normWinding` → `'IN'`/`'OUT'`/`''`; вес `winding` в `changeoverCost` |
 | `cut_roller_width` | Позиция → «Ширина, мм» | — | `rollerWidth` (число, мм); штраф за сужение вала в `changeoverCost` |
+| `order_id` | Позиция → Заказ (abn_ID, t104=85) | 85 | id заказа резки (для группировки/отладки) |
+| `order_approval_date` | Позиция → Заказ → «Дата согласования» (1130) | — | фильтр видимости очереди: показываем только резки согласованных заказов (`isCutVisible`) |
+
+> Колонки `order_id` (8568) и `order_approval_date` (8566) добавлены для фильтра
+> видимости очереди (`isCutVisible`): движок отчёта дожойнивает Позиция→Заказ
+> (Позиция — подчинённая таблица Заказа).
 
 Запуск: `GET /ateh/report/cut_planning?JSON_KV&LIMIT=0,5000`. Строки разворачиваются
 `rowsToPlanning` в `{ cuts, supplies }` (dedup резок по `cut_id`); дескриптор каждой
