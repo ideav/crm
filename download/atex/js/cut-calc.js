@@ -670,7 +670,7 @@
         ]);
         this.listEl = el('div', { class: 'atex-cc-list' });
         aside.appendChild(this.listEl);
-        this.formEl = el('section', { class: 'atex-cc-form' });
+        this.formEl = el('section', { class: 'atex-cc-form', 'data-submit-scope': '' });
         layout.appendChild(aside);
         layout.appendChild(this.formEl);
         this.root.appendChild(layout);

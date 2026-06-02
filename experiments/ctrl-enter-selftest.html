@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="UTF-8"><title>selftest</title></head>
+<body>
+  <form id="real-form"><input id="in-form" type="text"><button type="submit">OK</button></form>
+  <div class="menu-modal"><input id="in-modal" type="text">
+    <button type="button" class="menu-modal-btn delete">Del</button>
+    <button type="button" class="menu-modal-btn save">Save</button>
+    <button type="button" class="menu-modal-btn cancel">Cancel</button></div>
+  <section data-submit-scope><input id="in-panel" type="text">
+    <button type="button" class="atex-in-btn atex-in-btn-primary">Primary</button></section>
+  <input id="in-stray" type="text">
+  <textarea id="in-ta-form-wrap"></textarea>
+  <div id="prevented-scope" data-submit-scope><input id="in-prevented" type="text">
+    <button type="button" class="atex-in-btn-primary">P2</button></div>
+  <pre id="RESULT">PENDING</pre>
+
+  <script>
+    window.fired = { form:0, modalSave:0, modalDelete:0, modalCancel:0, panelPrimary:0, preventedPrimary:0 };
+    document.getElementById('real-form').addEventListener('submit', function(e){ e.preventDefault(); fired.form++; });
+    document.querySelector('.menu-modal-btn.save').addEventListener('click', function(){ fired.modalSave++; });
+    document.querySelector('.menu-modal-btn.delete').addEventListener('click', function(){ fired.modalDelete++; });
+    document.querySelector('.menu-modal-btn.cancel').addEventListener('click', function(){ fired.modalCancel++; });
+    document.querySelector('section[data-submit-scope] .atex-in-btn-primary').addEventListener('click', function(){ fired.panelPrimary++; });
+    document.querySelector('#prevented-scope .atex-in-btn-primary').addEventListener('click', function(){ fired.preventedPrimary++; });
+    // Локальный обработчик, который сам обрабатывает Ctrl+Enter и зовёт preventDefault:
+    document.getElementById('in-prevented').addEventListener('keydown', function(e){
+      if (e.key==='Enter' && (e.ctrlKey||e.metaKey)) e.preventDefault();
+    });
+  </script>
+  <script src="../js/form-submit.js"></script>
+  <script>
+    function ce(id){
+      var el=document.getElementById(id); el.focus();
+      el.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',ctrlKey:true,bubbles:true,cancelable:true}));
+    }
+    window.addEventListener('load', function(){
+      ce('in-form');      // → form++
+      ce('in-modal');     // → modalSave++ (не delete/cancel)
+      ce('in-panel');     // → panelPrimary++
+      ce('in-stray');     // → ничего
+      ce('in-prevented'); // локальный preventDefault → preventedPrimary НЕ растёт
+      var expected = { form:1, modalSave:1, modalDelete:0, modalCancel:0, panelPrimary:1, preventedPrimary:0 };
+      var ok = JSON.stringify(window.fired) === JSON.stringify(expected);
+      document.getElementById('RESULT').textContent =
+        (ok?'PASS':'FAIL') + ' got='+JSON.stringify(window.fired)+' exp='+JSON.stringify(expected);
+    });
+  </script>
+</body></html>

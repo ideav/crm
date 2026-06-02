@@ -61,6 +61,28 @@
 }
 .atex-db-btn:hover { background: var(--db-track-bg); }
 
+/* Диапазон дат «Срок выполнения» (#3073) */
+.atex-db-range {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.atex-db-filter {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--db-muted);
+}
+.atex-db-date {
+    border: 1px solid var(--db-border);
+    background: var(--db-bg);
+    border-radius: 6px;
+    padding: 7px 8px;
+    font: inherit;
+    color: var(--text-primary, #1f2933);
+}
+
 /* Сетка карточек */
 .atex-db-grid {
     display: grid;
@@ -140,6 +162,11 @@
     height: 100%;
     background: linear-gradient(90deg, var(--db-accent-l), var(--db-accent));
     border-radius: 4px;
+}
+/* Терминальные статусы (Выполнен/Отменён) — серые, не задают масштаб (#3073). */
+.atex-db-bar-fill-muted {
+    background: var(--db-muted, #9aa5b1);
+    opacity: .55;
 }
 .atex-db-bar-val {
     font-variant-numeric: tabular-nums;
