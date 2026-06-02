@@ -609,37 +609,28 @@
     }
 
     // Индекс типов резки: { id: { materialId } }. Один запрос; ширины полос — лениво.
+    // Индекс типов резки: { typeId: { materialId, widths:[ширины полос] } } — ОДНИМ
+    // отчётом cut_types_index (Тип резки→Полоса), а не выборкой полос по каждому типу
+    // (раньше открытие дропдауна «Тип резки» давало 50+ запросов object/{Полоса}?F_U=).
     function loadCutTypeIndex() {
-        var meta = findMetadataByName(state.metadata, 'Тип резки');
-        if (!meta) return Promise.resolve();
-        var matIdx = findReqIndex(meta, 'Вид сырья');
-        return fetchJson('/' + encodeURIComponent(getApiBase()) + '/object/' + encodeURIComponent(meta.id) + '/?JSON_OBJ&LIMIT=0,' + LIST_LIMIT).then(function(rows){
-            (rows || []).forEach(function(rec){
-                var r = rec.r || [];
-                var mat = matIdx >= 0 ? parseRef(r[matIdx]) : { id: null };
-                state.cutTypeIndex[String(rec.i)] = { materialId: mat.id ? String(mat.id) : '' };
+        return fetchJson('/' + encodeURIComponent(getApiBase()) + '/report/cut_types_index?JSON_KV&LIMIT=0,5000').then(function(rows){
+            state.cutTypeIndex = {};
+            (rows || []).forEach(function(r){
+                var id = r.type_id == null ? '' : String(r.type_id);
+                if (!id) return;
+                if (!state.cutTypeIndex[id]) {
+                    state.cutTypeIndex[id] = { materialId: r.type_material_id == null ? '' : String(r.type_material_id), widths: [] };
+                }
+                var w = parseWidth(r.strip_width);
+                if (!isNaN(w)) state.cutTypeIndex[id].widths.push(w);
             });
         });
     }
 
-    // Грузит ширины полос для всех типов указанного сырья (один раз на сырьё).
-    // Заполняет index[typeId].widths. Возвращает Promise.
-    function ensureStripWidths(materialId) {
-        var mat = materialId == null ? '' : String(materialId);
-        if (mat === '' || state.stripsLoadedMaterials[mat]) return Promise.resolve();
-        var stripMeta = findMetadataByName(state.metadata, 'Полоса');
-        if (!stripMeta) return Promise.resolve();
-        var wIdx = findReqIndex(stripMeta, 'Ширина, мм');
-        // typeIds опирается на то, что loadCutTypeIndex завершён при инициализации,
-        // поэтому пустой список означает: у данного сырья типов резки нет.
-        var typeIds = Object.keys(state.cutTypeIndex).filter(function(id){ return String(state.cutTypeIndex[id].materialId) === mat; });
-        return Promise.all(typeIds.map(function(id){
-            return fetchJson('/' + encodeURIComponent(getApiBase()) + '/object/' + encodeURIComponent(stripMeta.id) + '/?JSON_OBJ&F_U=' + encodeURIComponent(id) + '&LIMIT=0,' + STRIPS_LIMIT).then(function(rows){
-                var widths = (rows || []).map(function(rec){ var r = rec.r || []; return wIdx >= 0 ? parseWidth(r[wIdx]) : NaN; })
-                    .filter(function(x){ return !isNaN(x); });
-                state.cutTypeIndex[id].widths = widths;
-            }).catch(function(){ /* пропускаем тип при сбое запроса полос */ });
-        })).then(function(){ state.stripsLoadedMaterials[mat] = true; });
+    // Ширины полос теперь приходят в loadCutTypeIndex (отчёт) — догрузка не нужна.
+    // Оставлено для совместимости вызовов (focusCellControl): резолвится мгновенно.
+    function ensureStripWidths() {
+        return Promise.resolve();
     }
 
     // ------------------------------------------------------------------
