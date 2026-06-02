@@ -148,7 +148,38 @@ ID компактнее символьных значений и удобнее 
   меняется через `_m_save/{queryId}?JSON t22=новое_имя` (именно `_m_save`, не
   `_m_set`; параметр `t22` — id типа, не `t{recordId}`; `up=1` не нужен).
 
-## 7. Следующий шаг
+## 7. `preferable_widths` (queryId 8421) — ходовые ширины по сырью
+
+Отчёт для РМ «Расчёт резки» (ideav/atex#52, подзадача B): какие ширины ролика и в
+каком суммарном количестве заказывают по каждому виду сырья — чтобы добирать остаток
+джамбо «ходовыми» ширинами. Над «Позиция заказа», группировка по ширине, `SUM(Кол-во)`
+по убыванию, внешний фильтр по виду сырья.
+
+| Колонка (`t100`) | Источник (`t28`, реквизит Позиции заказа) | Функция (`t104`) | Сортировка (`t109`) |
+|---|---|---|---|
+| `position_width_mm` | 1141 Ширина, мм | — (ключ группировки, для показа) | — |
+| `position_width_id` | 1141 Ширина, мм | 85 (abn_ID) | — |
+| `position_material_id` | 1138 Вид сырья | 85 (abn_ID) | — (внешний фильтр `FR_`) |
+| `position_qty_sum` | 1137 Кол-во | 73 (SUM) | −1 (по убыванию) |
+
+Имена — latin `snake_case`, поэтому `FR_position_material_id` в URL не требует
+кодирования кириллицы.
+
+Создание (проверенная последовательность, `DB=https://ideav.ru/ateh`):
+```bash
+XSRF=$(curl -s -H "X-Authorization: $TOKEN" --cookie "idb_ateh=$TOKEN" "$DB/xsrf?JSON=1" | jq -r ._xsrf)
+# Запрос (тип 22), up=1
+QID=$(curl -s -H "X-Authorization: $TOKEN" --cookie "idb_ateh=$TOKEN" "$DB/_m_new/22?JSON&up=1" \
+  --data-urlencode t22=preferable_widths --data-urlencode token=$TOKEN --data-urlencode _xsrf=$XSRF | jq -r '.id // .obj')
+# Колонки (тип 28), up=QID: t28=реквизит, t100=имя
+#   position_width_mm←1141, position_width_id←1141, position_material_id←1138, position_qty_sum←1137
+# Функции/сортировка через _m_set: t104=85 (abn_ID) для *_id; t104=73 (SUM) + t109=-1 для position_qty_sum
+```
+Запуск: `GET /ateh/report/preferable_widths?JSON_KV&FR_position_material_id={видСырьяID}`.
+`{видСырьяID}` — ID записи «Вид сырья» (= `position_material_id`/abn_ID из ответа).
+Незаданный фильтр → все сырьё. Создано и проверено 2026-06-01 (queryId 8421).
+
+## 8. Следующий шаг
 
 Переключить **dashboards** на `report/8303` вместо 6 клиентских выгрузок —
 максимальная выгода и ровно случай «Заказы-Позиции-расход». Это отдельная задача.

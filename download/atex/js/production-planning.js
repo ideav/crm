@@ -16,8 +16,11 @@
 // `GET /{db}/report/positions_list?JSON_KV` (`rowsToPositions`): Позиция заказа —
 // подчинённая таблица, прямое `object/`-чтение её не отдаёт. Партии сырья для
 // формы создания резки берутся отчётом `report/material_batches?JSON_KV`
-// (`rowsToBatches`). Справочники станков и типов резки читаются по именам из
-// метаданных (`object/{table}?JSON_OBJ`); поиск опций — через `AtexRefSearch`.
+// (`rowsToBatches`). Справочник станков читается по имени из метаданных
+// (`object/{table}?JSON_OBJ`, записей мало). «Тип резки» — большой справочник:
+// полная выборка упирается в серверный потолок размера ответа, поэтому первая
+// порция грузится ограниченным ref-search `_ref_reqs` (`loadCutTypes`), остальное
+// — поиском по вводу через `AtexRefSearch`.
 //
 // Запись идёт прямыми командами `_m_*` (#2903): создание резки —
 // `_m_new/{Производственная резка}` (Номер не задаётся, у таблицы `unique=1` —
@@ -460,6 +463,22 @@
         var self = this;
         return this.getJson('report/material_batches?JSON_KV&LIMIT=0,2000').then(function(rows) {
             self.materialBatches = rowsToBatches(rows || []);
+        });
+    };
+
+    // Справочник «Тип резки» — большой (сотни записей); полная выборка
+    // (`object/?JSON_OBJ` или отчёт) упирается в серверный потолок размера ответа
+    // и виснет. Поэтому предзагружаем только первую порцию через ограниченный
+    // ref-search `_ref_reqs/{reqId}?JSON&LIMIT` (как в остальных РМ); остальные
+    // типы доступны поиском по вводу в самом поле (reqId передаётся в selectRef).
+    AtexProductionPlanning.prototype.loadCutTypes = function() {
+        var self = this;
+        var reqId = reqIdByName(this.meta.cut, CUT_REQ.cutType);
+        if (!reqId) { this.cutTypes = []; return Promise.resolve(); }
+        return this.loadRefOptions(reqId, '', 50).then(function(payload) {
+            var helper = (typeof window !== 'undefined' && window.AtexRefSearch) || null;
+            self.cutTypes = (helper && typeof helper.parseOptionsData === 'function')
+                ? helper.parseOptionsData(payload) : [];
         });
     };
 
