@@ -123,6 +123,7 @@
         return isFinite(x) ? x : NaN;
     }
 
+    // Допустимые значения «Тип намотки»; экспортируется для движка планирования (D2/D3).
     // Нормализация значения поля «Тип намотки»: IN/OUT (или пусто).
     var WINDING_VALUES = ['IN', 'OUT'];
     function normalizeWinding(value) {

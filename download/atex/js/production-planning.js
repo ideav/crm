@@ -743,7 +743,7 @@
                 var supplies = self.supplyCount(c.id);
                 var card = el('button', { class: 'atex-pp-cut' + (active ? ' is-active' : ''), type: 'button' }, [
                     el('span', { class: 'atex-pp-cut-num', text: '№ ' + (c.number || c.id) }),
-                    el('span', { class: 'atex-pp-cut-seq', text: 'Очер.: ' + (c.sequence != null ? c.sequence : '—') }),
+                    el('span', { class: 'atex-pp-cut-seq', text: 'Очер.: ' + (c.sequence != null && !isNaN(c.sequence) ? c.sequence : '—') }),
                     el('span', { class: 'atex-pp-cut-type', text: c.cutType.label || '—' }),
                     el('span', { class: 'atex-pp-cut-batch', text: c.materialBatch.label || '' }),
                     el('span', { class: 'atex-pp-cut-date', text: c.planDate || '' }),
