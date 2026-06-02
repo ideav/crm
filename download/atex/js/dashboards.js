@@ -451,10 +451,16 @@
 
     // Сбор сводок из двух отчётов (минимум запросов; агрегации — на клиенте).
     // Сырые строки сохраняются, чтобы фильтр дат перестраивал сводки без перезапроса.
+    //
+    // ⚠️ На дашборд тянем ТОЛЬКО АКТИВНЫЕ заказы (не «Выполнен»/«Отменён») — иначе при
+    // тысячах завершённых заказов выгрузка распухает. Фильтр серверный: в отчёте
+    // order_pipeline есть колонка-формула `order_active` (= '1' для активных, NULL для
+    // терминальных: `IF([THIS] IN ('Выполнен','Отменён'),NULL,'1')` на Заказ.Статус),
+    // а `FR_order_active=%` (LIKE — матчит непустое, отсекает NULL) оставляет только их.
     AtexDashboards.prototype.collect = function() {
         var self = this;
         return Promise.all([
-            this.getJson('report/order_pipeline?JSON_KV'),
+            this.getJson('report/order_pipeline?JSON_KV&FR_order_active=%25'),
             this.getJson('report/material_stock?JSON_KV')
         ]).then(function(res) {
             self.raw = { pipelineRows: res[0] || [], materialRows: res[1] || [] };
