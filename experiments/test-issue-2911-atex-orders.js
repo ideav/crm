@@ -86,11 +86,15 @@ assert.strictEqual(reqId(orderColumns, 'client'), '1052', 'client → req 1052')
 assert.strictEqual(reqId(orderColumns, 'manager'), '1054', 'manager (Пользователь) → req 1054');
 assert.strictEqual(reqId(orderColumns, 'status'), '1060', 'order status → req 1060');
 assert.strictEqual(reqId(orderColumns, 'posCount'), '1066', 'posCount (Позиция заказа) → req 1066');
+// «Срок изготовления» (DATE) добавлен на Заказ и Позицию (эпик упразднения «Тип резки»).
+assert.strictEqual(reqId(orderColumns, 'dueDate'), '1158', 'order dueDate (Срок изготовления) → req 1158');
 assert.strictEqual(reqId(positionColumns, 'qty'), '1067', 'qty → req 1067');
 assert.strictEqual(reqId(positionColumns, 'raw'), '1069', 'raw → req 1069');
-assert.strictEqual(reqId(positionColumns, 'cutType'), '1071', 'cutType → req 1071');
 assert.strictEqual(reqId(positionColumns, 'status'), '1079', 'position status → req 1079');
 assert.strictEqual(reqId(positionColumns, 'sleeve'), '1077', 'sleeve (Диаметр втулки) → req 1077');
+assert.strictEqual(reqId(positionColumns, 'dueDate'), '1159', 'position dueDate (Срок изготовления) → req 1159');
+// «Тип резки» упразднён — поля cutType в POSITION_FIELDS больше нет.
+assert.strictEqual(positionColumns.filter(function(c) { return c.key === 'cutType'; }).length, 0, 'cutType column removed from POSITION_FIELDS');
 
 // Ссылочные колонки должны помечаться как ref.
 assert.strictEqual(orderColumns.filter(function(c) { return c.key === 'client'; })[0].ref, true, 'client is a reference column');
@@ -106,6 +110,7 @@ const createOrder = helpers.buildCreateOrderRequest({
     managerId: '42',
     created: '2026-05-29',
     status: 'Новый',
+    dueDate: '2026-06-15',
     notes: 'срочно',
     xsrf: 'TOK'
 });
@@ -116,6 +121,7 @@ assert.strictEqual(orderBody.get('t1052'), '305', 'order create sets client req'
 assert.strictEqual(orderBody.get('t1054'), '42', 'order create sets manager req');
 assert.strictEqual(orderBody.get('t1056'), '2026-05-29', 'order create sets created date');
 assert.strictEqual(orderBody.get('t1060'), 'Новый', 'order create sets status');
+assert.strictEqual(orderBody.get('t1158'), '2026-06-15', 'order create sets dueDate (Срок изготовления)');
 
 // --- Создание позиции: _m_new/108?JSON&up={orderId} (привязка через up) ---
 const createPos = helpers.buildCreatePositionRequest({
@@ -125,7 +131,6 @@ const createPos = helpers.buildCreatePositionRequest({
     orderId: '649',
     qty: '10',
     rawId: '200',
-    cutTypeId: '7',
     width: '500',
     length: '1000',
     sleeve: '210',
@@ -136,7 +141,7 @@ assert.strictEqual(createPos.url, '/atex/_m_new/108?JSON&up=649', 'position crea
 const posBody = new URLSearchParams(createPos.body);
 assert.strictEqual(posBody.get('t1067'), '10', 'position create sets qty');
 assert.strictEqual(posBody.get('t1069'), '200', 'position create sets raw ref');
-assert.strictEqual(posBody.get('t1071'), '7', 'position create sets cut type ref');
+assert.strictEqual(posBody.get('t1071'), null, 'position create no longer sets cut type (упразднён)');
 assert.strictEqual(posBody.get('t1077'), '210', 'position create sets sleeve ref (ссылка на запись справочника «Диаметр втулки»)');
 assert.strictEqual(posBody.get('t1079'), 'Новая', 'position create sets status');
 
@@ -161,23 +166,25 @@ assert(posListUrl.indexOf('F_U=649') !== -1, 'positions list filters by parent o
 
 // --- Разбор ответа JSON_DATA в записи (ссылки разбираются как "id:label") ---
 const orders = helpers.normalizeObjects([
-    { i: 649, u: 1, o: 1, r: ['Заказ 649', '305:Ромашка', '42:victor_g', '2026-05-29', '', 'Новый', '', '', '3'] }
+    { i: 649, u: 1, o: 1, r: ['Заказ 649', '305:Ромашка', '42:victor_g', '2026-05-29', '', 'Новый', '', '', '3', '2026-06-15'] }
 ], orderColumns);
 assert.strictEqual(orders.length, 1, 'one order parsed');
 assert.strictEqual(orders[0].id, '649', 'order id parsed');
 assert.strictEqual(orders[0].values.client, 'Ромашка', 'client label parsed from ref');
 assert.strictEqual(orders[0].refs.client, '305', 'client id parsed from ref');
 assert.strictEqual(orders[0].values.status, 'Новый', 'order status parsed');
+assert.strictEqual(orders[0].values.dueDate, '2026-06-15', 'order dueDate (Срок изготовления) parsed');
 // Счётчик позиций приходит в записи заказа (ROLLUP «Позиция заказа») — список
 // показывает его до ленивой загрузки самих позиций.
 assert.strictEqual(orders[0].values.posCount, '3', 'order position count parsed from rollup column');
 
 const positions = helpers.normalizeObjects([
-    { i: 700, u: 649, o: 1, r: ['Позиция 700', '10', '200:Бумага', '7:Прямая', '500', '1000', '76', 'Новая'] }
+    { i: 700, u: 649, o: 1, r: ['Позиция 700', '10', '200:Бумага', '7:Прямая', '500', '1000', '76', 'Новая', '', '', '2026-06-20'] }
 ], positionColumns);
 assert.strictEqual(positions[0].up, '649', 'position linked to order 649 via up');
 assert.strictEqual(positions[0].values.raw, 'Бумага', 'position raw label parsed');
 assert.strictEqual(positions[0].values.status, 'Новая', 'position status parsed');
+assert.strictEqual(positions[0].values.dueDate, '2026-06-20', 'position dueDate (Срок изготовления) parsed');
 
 // --- Прочие помощники ---
 assert.strictEqual(helpers.extractNewObjectId({ obj: 649 }), '649', 'new object id extracted from {obj}');

@@ -10,7 +10,7 @@
  * object id и t{reqId} — id зависят от сборки базы:
  *   «Заказ»            — up=1
  *   «Позиция заказа»   — up={orderId} (подчинённая Заказу)
- *   «Клиент», «Вид сырья», «Тип резки» — ссылки.
+ *   «Клиент», «Вид сырья», «Диаметр втулки» — ссылки.
  */
 (function(window, document) {
     'use strict';
@@ -33,6 +33,7 @@
         { key: 'manager', label: 'Менеджер', names: ['Менеджер', 'Пользователь'], ref: true },
         { key: 'created', label: 'Дата создания', names: ['Дата создания'] },
         { key: 'approved', label: 'Дата согласования', names: ['Дата согласования'] },
+        { key: 'dueDate', label: 'Срок изготовления', names: ['Срок изготовления'] },
         { key: 'status', label: 'Статус', names: ['Статус'], status: true },
         { key: 'lead', label: 'Лидер', names: ['Лидер'] },
         { key: 'notes', label: 'Примечания', names: ['Примечания'] },
@@ -45,12 +46,13 @@
     var POSITION_FIELDS = [
         { key: 'qty', label: 'Кол-во', names: ['Кол-во', 'Количество'] },
         { key: 'raw', label: 'Вид сырья', names: ['Вид сырья'], ref: true },
-        { key: 'cutType', label: 'Тип резки', names: ['Тип резки'], ref: true },
         { key: 'width', label: 'Ширина, мм', names: ['Ширина, мм', 'Ширина'] },
         { key: 'length', label: 'Длина, м', names: ['Длина, м', 'Длина'] },
         { key: 'sleeve', label: 'Диаметр втулки', names: ['Диаметр втулки'], ref: true },
         { key: 'winding', label: 'Тип намотки', names: ['Тип намотки'] },
-        { key: 'status', label: 'Статус', names: ['Статус'], status: true }
+        { key: 'status', label: 'Статус', names: ['Статус'], status: true },
+        // Срок изготовления — только для отображения (read-only), как «Дата согласования».
+        { key: 'dueDate', label: 'Срок изготовления', names: ['Срок изготовления'] }
     ];
 
     var state = {
@@ -146,21 +148,22 @@
             if (oid && !byId[oid]) {
                 byId[oid] = { id: oid, values: {
                     no: s(r.order_no), client: s(r.order_client), manager: s(r.order_manager),
-                    created: s(r.order_created), approved: s(r.order_approved), status: s(r.order_status)
+                    created: s(r.order_created), approved: s(r.order_approved),
+                    dueDate: s(r.order_due_date), status: s(r.order_status)
                 }, positions: [] };
                 order.push(oid);
             }
             var pid = s(r.position_id);
             if (oid && pid) {
                 byId[oid].positions.push({ id: pid, values: {
-                    qty: s(r.position_qty), raw: s(r.position_raw), cutType: s(r.position_cut_type),
+                    qty: s(r.position_qty), raw: s(r.position_raw),
                     width: s(r.position_width), length: s(r.position_length), sleeve: s(r.position_sleeve),
                     winding: s(r.position_winding), status: s(r.position_status),
-                    approved: s(r.position_approved)
+                    approved: s(r.position_approved), dueDate: s(r.position_due_date)
                 }, refs: {
                     // id ссылок приходят прямо из отчёта (abn_ID-колонки) — детальная
                     // догрузка позиций (loadPositions) на каждый заказ больше не нужна.
-                    raw: s(r.position_raw_id), cutType: s(r.position_cut_type_id), sleeve: s(r.position_sleeve_id)
+                    raw: s(r.position_raw_id), sleeve: s(r.position_sleeve_id)
                 } });
             }
         });
@@ -451,6 +454,7 @@
         put('manager', opts.managerId);
         put('created', opts.created);
         put('status', opts.status);
+        put('dueDate', opts.dueDate);
         put('notes', opts.notes);
 
         var url = '/' + encodeURIComponent(opts.db) + '/_m_new/' +
@@ -469,7 +473,6 @@
         }
         put('qty', opts.qty);
         put('raw', opts.rawId);
-        put('cutType', opts.cutTypeId);
         put('width', opts.width);
         put('length', opts.length);
         put('sleeve', opts.sleeve);
@@ -482,7 +485,7 @@
     }
 
     // Запрос правки позиции: POST _m_set/{positionId} + реквизиты редактируемых полей.
-    // values — { qty, raw, cutType, width, length, sleeve, winding, status }; ключи без reqId пропускаются.
+    // values — { qty, raw, width, length, sleeve, winding, status }; ключи без reqId пропускаются.
     function buildSetPositionRequest(opts) {
         var fields = {};
         var cols = opts.columns || [];
@@ -493,7 +496,6 @@
         }
         put('qty', values.qty);
         put('raw', values.raw);
-        put('cutType', values.cutType);
         put('width', values.width);
         put('length', values.length);
         put('sleeve', values.sleeve);
@@ -669,13 +671,13 @@
         var positions = state.positionsByOrder[order.id] || [];
         var head = '<thead><tr>' +
             '<th>Кол-во</th><th>Вид сырья</th>' +
-            '<th>Ширина, мм</th><th>Длина, м</th><th>Ø втулки</th><th>Тип намотки</th><th>Статус</th><th>Дата согл.</th><th></th>' +
+            '<th>Ширина, мм</th><th>Длина, м</th><th>Ø втулки</th><th>Тип намотки</th><th>Статус</th><th>Дата согл.</th><th>Срок изг.</th><th></th>' +
             '</tr></thead>';
         var rowsHtml = positions.map(function(pos) { return renderPositionRow(order, pos); }).join('');
         if (state.draftOrderId === String(order.id)) rowsHtml += renderDraftRow(order);
         var body = rowsHtml
             ? '<tbody>' + rowsHtml + '</tbody>'
-            : '<tbody><tr><td colspan="9" class="atex-orders-empty">Позиций пока нет.</td></tr></tbody>';
+            : '<tbody><tr><td colspan="10" class="atex-orders-empty">Позиций пока нет.</td></tr></tbody>';
 
         return '<div class="atex-orders-positions">' +
             '<table class="atex-orders-subtable">' + head + body + '</table>' +
@@ -701,7 +703,7 @@
     }
 
     // Строка позиции: все редактируемые ячейки кликабельны + кнопка удаления.
-    // data-position-form на <tr> нужно делегированию ref-select/«Тип резки» (как раньше у формы).
+    // data-position-form на <tr> нужно делегированию ref-select (как раньше у формы).
     function renderPositionRow(order, pos) {
         return '<tr data-position-id="' + escapeHtml(pos.id) + '" data-position-form="' + escapeHtml(order.id) + '">' +
             positionDisplayCell(pos, 'qty') +
@@ -714,6 +716,7 @@
                 ? '<td><button type="button" class="atex-orders-btn atex-orders-btn-secondary atex-orders-approve" data-approve-pos="' + escapeHtml(pos.id) + '">Согласовано</button></td>'
                 : '<td>' + escapeHtml(pos.values.status || '') + '</td>') +
             '<td>' + escapeHtml(pos.values.approved || '') + '</td>' +
+            '<td>' + escapeHtml(pos.values.dueDate || '') + '</td>' +
             '<td class="atex-orders-pos-actions">' +
             '<button type="button" class="atex-orders-icon-btn atex-orders-icon-btn--danger" title="Удалить" ' +
             'aria-label="Удалить" data-del-pos="' + escapeHtml(pos.id) + '"><i class="pi pi-trash"></i></button>' +
@@ -728,7 +731,7 @@
         var cells = EDITABLE_POSITION_CELLS.map(function(key) { return positionDisplayCell(draft, key); }).join('');
         return '<tr class="atex-orders-draft-row" data-draft-order="' + escapeHtml(order.id) +
             '" data-position-form="' + escapeHtml(order.id) + '">' + cells +
-            '<td></td><td></td>' +
+            '<td></td><td></td><td></td>' +
             '<td class="atex-orders-pos-actions">' +
             '<button type="button" class="atex-orders-icon-btn" title="Отменить черновик" ' +
             'aria-label="Отменить черновик" data-cancel-draft="1"><i class="pi pi-times"></i></button>' +
@@ -762,13 +765,14 @@
                 '<td>' + escapeHtml(order.values.client || '') + '</td>' +
                 '<td>' + escapeHtml(order.values.manager || '') + '</td>' +
                 '<td>' + escapeHtml(order.values.created || '') + '</td>' +
+                '<td>' + escapeHtml(order.values.dueDate || '') + '</td>' +
                 '<td>' + (order.values.status === 'Новый'
                     ? '<button type="button" class="atex-orders-btn atex-orders-btn-secondary atex-orders-approve" data-approve-order="' + escapeHtml(order.id) + '">Согласовано</button>'
                     : escapeHtml(order.values.status || '')) + '</td>' +
                 '<td class="atex-orders-count">' + positionCount + '</td>' +
                 '</tr>';
             var detail = isOpen
-                ? '<tr class="atex-orders-detail-row"><td colspan="7">' + renderPositions(order) + '</td></tr>'
+                ? '<tr class="atex-orders-detail-row"><td colspan="8">' + renderPositions(order) + '</td></tr>'
                 : '';
             return main + detail;
         }).join('');
@@ -779,7 +783,7 @@
         }
         var thead = '<thead><tr><th></th>' +
             sortableTh('id', '№') + sortableTh('client', 'Клиент') + sortableTh('manager', 'Менеджер') +
-            sortableTh('created', 'Дата создания') + sortableTh('status', 'Статус') +
+            sortableTh('created', 'Дата создания') + sortableTh('dueDate', 'Срок изготовления') + sortableTh('status', 'Статус') +
             '<th>Позиций</th></tr></thead>';
         container.innerHTML = '<table class="atex-orders-table">' + thead +
             '<tbody>' + rows + '</tbody></table>';
@@ -804,6 +808,7 @@
             '<div class="atex-orders-fields">' +
             '<label>Клиент' + refSelectHtml('atex-order-client', clientOptions, '', 'Выберите клиента', clientCol && clientCol.reqId) + '</label>' +
             '<label>Статус' + statusSelectHtml(state.orderStatuses, state.orderStatuses[0], ' id="atex-order-status"') + '</label>' +
+            '<label>Срок изготовления<input type="date" class="atex-orders-input" id="atex-order-due-date"></label>' +
             '<label class="atex-orders-field-wide">Примечания<textarea class="atex-orders-input" id="atex-order-notes" rows="2"></textarea></label>' +
             '</div>' +
             '<div class="atex-orders-form-actions">' +
@@ -851,6 +856,7 @@
         if (state.creating) return;
         var clientSel = document.getElementById('atex-order-client');
         var statusSel = document.getElementById('atex-order-status');
+        var dueDateEl = document.getElementById('atex-order-due-date');
         var notesEl = document.getElementById('atex-order-notes');
 
         var req = buildCreateOrderRequest({
@@ -861,6 +867,7 @@
             managerId: typeof window.uid !== 'undefined' ? window.uid : (typeof uid !== 'undefined' ? uid : ''),
             created: todayIso(),
             status: statusSel ? statusSel.value : '',
+            dueDate: dueDateEl ? dueDateEl.value : '',
             notes: notesEl ? notesEl.value : '',
             xsrf: getXsrf()
         });
@@ -965,7 +972,7 @@
         var posId = td.getAttribute('data-position-id');
         var found = posId ? findPositionById(posId) : null;
         if (!found) return;
-        // id ссылок (raw/cutType/sleeve) приходят прямо из отчёта orders_list —
+        // id ссылок (raw/sleeve) приходят прямо из отчёта orders_list —
         // отдельная догрузка позиций заказа больше не требуется.
         // Прежняя активная ячейка возвращается в отображение (без сохранения).
         if (state.editingCell && state.editingCell !== td) deactivateCell();
@@ -1036,7 +1043,7 @@
         return '';
     }
 
-    // Источник строки правки (позиция или черновик) — для фильтра «Тип резки».
+    // Источник строки правки (позиция или черновик) — для ref-фильтров по строке.
     // В поячейковой правке активна одна ячейка, поэтому «Вид сырья»/«Ширину»
     // берём из ДАННЫХ строки, а не из DOM (контролов соседних полей на странице нет).
     function rowSourcePosition(form) {
@@ -1086,8 +1093,8 @@
             return;
         }
         // Черновик: копим значение в памяти строки (без записи на сервер). Позиция
-        // создаётся при выходе из черновой строки (commitDraft) — так фильтр «Тип резки»
-        // видит выбранный вид сырья ещё до создания.
+        // создаётся при выходе из черновой строки (commitDraft) — так ref-фильтры по
+        // строке видят выбранный вид сырья ещё до создания.
         if (posId === '__draft__') {
             if (isRef) {
                 state.draftPos.refs[key] = nextCompare;
@@ -1617,12 +1624,10 @@
                 // Предзагрузка справочников для форм.
                 var clientCol = getColumn(state.orderColumns, 'client');
                 var rawCol = getColumn(state.positionColumns, 'raw');
-                var cutCol = getColumn(state.positionColumns, 'cutType');
                 var sleeveCol = getColumn(state.positionColumns, 'sleeve');
                 return Promise.all([
                     clientCol && clientCol.reqId ? loadRefOptions(clientCol.reqId) : Promise.resolve([]),
                     rawCol && rawCol.reqId ? loadRefOptions(rawCol.reqId) : Promise.resolve([]),
-                    cutCol && cutCol.reqId ? loadRefOptions(cutCol.reqId) : Promise.resolve([]),
                     sleeveCol && sleeveCol.reqId ? loadRefOptions(sleeveCol.reqId) : Promise.resolve([])
                 ]);
             })
