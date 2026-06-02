@@ -152,6 +152,32 @@
         return ids;
     }
 
+    // Плоские строки отчёта orders_list (JSON_KV) → [{ id, values, positions:[{id,values}] }].
+    // Заказы dedup по order_id; позиции из строк с непустым position_id; пустые поля LEFT JOIN ('').
+    function rowsToOrders(rows) {
+        var byId = {}, order = [];
+        function s(v) { return v == null ? '' : String(v); }
+        (rows || []).forEach(function(r) {
+            var oid = s(r.order_id);
+            if (oid && !byId[oid]) {
+                byId[oid] = { id: oid, values: {
+                    no: s(r.order_no), client: s(r.order_client), manager: s(r.order_manager),
+                    created: s(r.order_created), approved: s(r.order_approved), status: s(r.order_status)
+                }, positions: [] };
+                order.push(oid);
+            }
+            var pid = s(r.position_id);
+            if (oid && pid) {
+                byId[oid].positions.push({ id: pid, values: {
+                    qty: s(r.position_qty), raw: s(r.position_raw), cutType: s(r.position_cut_type),
+                    width: s(r.position_width), length: s(r.position_length), sleeve: s(r.position_sleeve),
+                    winding: s(r.position_winding), status: s(r.position_status)
+                } });
+            }
+        });
+        return order.map(function(id) { return byId[id]; });
+    }
+
     // Индекс колонки JSON_OBJ по имени реквизита: позиция в [tableId, ...reqIds]; -1 если нет.
     function findReqIndex(meta, reqName) {
         if (!meta) return -1;
@@ -1362,6 +1388,7 @@
         normalizeSearchText: normalizeSearchText,
         parseWidth: parseWidth,
         matchCutTypes: matchCutTypes,
+        rowsToOrders: rowsToOrders,
         parseRef: parseRef,
         parseRefOptionsData: parseRefOptionsData,
         mergeRefOptions: mergeRefOptions,
