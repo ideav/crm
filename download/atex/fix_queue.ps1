@@ -1,31 +1,30 @@
 # ============================================================================
-#  ateh - починка очереди резок (cleanup + пере-секвенс) с надёжной сети.
-#  Запуск (Win11):  powershell -ExecutionPolicy Bypass -File .\fix_queue.ps1
+#  ateh - починка очереди резок (cleanup + пере-секвенс) с надёжной сети (Windows).
+#  Запуск:  powershell -ExecutionPolicy Bypass -File .\fix_queue.ps1 -Token <ТОКЕН>
 #  Что делает: убирает дубли-обеспечения, удаляет резки-фантомы (без обеспечения),
 #  пере-нумерует "Очерёдность" каждого станка по orderCuts (мин. переналадка).
 #  Кириллица в логике собрана из кодов символов - кодировка файла не важна.
-#  ВАЖНО: подставь реальный токен ateh вместо xxx в $Token ниже.
-#  Если выведет "ТОКЕН НЕ ПРИНЯТ" - токен протух/не подставлен, запроси свежий.
+#  ВАЖНО: токен ateh передаётся аргументом -Token (или вместо xxx в значении по умолч.).
+#  Чтение отчётов одним запросом (LIMIT=2000 без запятой - PowerShell калечит запятую).
 # ============================================================================
+param([string]$Token = "xxx")
 $ErrorActionPreference = "Stop"
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
-$Token = "xxx"
-$Base  = "https://ideav.ru/ateh"
-$H     = @{ "X-Authorization" = $Token; "Cookie" = "idb_ateh=$Token" }
+$Base = "https://ideav.ru/ateh"
+$H    = @{ "X-Authorization" = $Token; "Cookie" = "idb_ateh=$Token" }
 
 # кириллица из кодов (не зависит от кодировки файла)
 $PLANNED = -join ([char[]](0x417,0x430,0x43f,0x43b,0x430,0x43d,0x438,0x440,0x43e,0x432,0x430,0x43d,0x430)) # Запланирована
 $FOIL    = -join ([char[]](0x444,0x43e,0x43b,0x44c,0x433))                                                 # фольг
 
-# веса/шкалы движка (production-planning.js)
 $Wm=100; $Ww=70; $Wb=50; $Wr=40; $Wk=25; $Wwidth=10
 $KNIFE_SCALE=8.0; $WIDTH_SCALE=100.0; $REMAINDER_OK_M=600.0
 
-function GetJson($path){ Invoke-RestMethod -Uri "$Base$path" -Headers $H -TimeoutSec 90 }
+function GetJson($path){ Invoke-RestMethod -Uri "$Base$path" -Headers $H -TimeoutSec 120 }
 function PostForm($path,[hashtable]$f){
   $f["token"]=$Token; $f["_xsrf"]=$Script:Xsrf
-  Invoke-RestMethod -Method Post -Uri "$Base$path" -Headers $H -Body $f -ContentType "application/x-www-form-urlencoded" -TimeoutSec 90
+  Invoke-RestMethod -Method Post -Uri "$Base$path" -Headers $H -Body $f -ContentType "application/x-www-form-urlencoded" -TimeoutSec 120
 }
 function Num($v){ $d=0.0; [double]::TryParse(("$v").Replace(',','.'),[ref]$d) | Out-Null; $d }
 function NormWind($v){ $s=("$v").Trim().ToUpper(); if($s -eq 'IN' -or $s -eq 'OUT'){$s}else{''} }
@@ -78,15 +77,15 @@ function OrderCuts($cuts){
 }
 
 # ── 0) xsrf (валидирует токен) ──
+if($Token -eq "xxx"){ Write-Host "Передай токен:  -Token <ТОКЕН>"; exit 1 }
 try { $Script:Xsrf = (GetJson "/xsrf?JSON=1")._xsrf } catch { Write-Host "ТОКЕН НЕ ПРИНЯТ (сеть/токен)"; exit 1 }
-if(-not $Script:Xsrf){ Write-Host "ТОКЕН НЕ ПРИНЯТ - напиши мне за свежим"; exit 1 }
+if(-not $Script:Xsrf){ Write-Host "ТОКЕН НЕ ПРИНЯТ - запроси свежий"; exit 1 }
 Write-Host "xsrf ок: $($Script:Xsrf)"
 
-# ── 1) cut_planning окнами по 30 (широкий отчёт) ──
-$rows=@(); $off=0
-while($true){ $c=@(GetJson "/report/cut_planning?JSON_KV&LIMIT=$off,30"); if($c.Count -eq 0){break}; $rows+=$c; $off+=30; if($c.Count -lt 30){break} }
+# ── 1) cut_planning одним запросом (без запятой в LIMIT) ──
+$rows = @(GetJson "/report/cut_planning?JSON_KV&LIMIT=5000")
 $plan = @($rows | Where-Object { $_.cut_status -eq $PLANNED })
-Write-Host "строк cut_planning ($PLANNED): $($plan.Count)"
+Write-Host "строк cut_planning (Запланирована): $($plan.Count), резок: $((@($plan | Select-Object -ExpandProperty cut_id -Unique)).Count)"
 
 # ── 2) дубли-обеспечения: позиция с >1 supply_id → оставить первый ──
 $byPos=@{}
@@ -95,7 +94,7 @@ $removed=@{}; $ndup=0
 foreach($pos in $byPos.Keys){ $ids=@($byPos[$pos] | Select-Object -Unique); if($ids.Count -gt 1){ foreach($sid in $ids[1..($ids.Count-1)]){ PostForm "/_m_del/$sid?JSON" @{} | Out-Null; $removed[$sid]=1; $ndup++ } } }
 Write-Host "удалено дублей-обеспечений: $ndup"
 
-# ── 3) дескрипторы по резкам, у которых есть выжившее обеспечение ──
+# ── 3) дескрипторы по резкам с выжившим обеспечением ──
 $ci=@{}; $cutNo=@{}
 foreach($r in $plan){
   $cutNo[$r.cut_id]=$r.cut_no
@@ -106,14 +105,13 @@ foreach($r in $plan){
       rollerWidth=(Num $r.cut_roller_width); isFoil=([bool]("$($r.cut_material)" -match $FOIL)); knifeWidths=@(); knifeCount=0 }
   }
 }
-# ── 4) резки-фантомы: Запланирована без выжившего обеспечения → удалить ──
+# ── 4) резки-фантомы (без выжившего обеспечения) → удалить ──
 $norph=0
 foreach($cid in @($cutNo.Keys)){ if(-not $ci.ContainsKey($cid)){ PostForm "/_m_del/$cid?JSON" @{} | Out-Null; $norph++ } }
 Write-Host "удалено резок-фантомов: $norph"
 
 # ── 5) ножи из cut_strips ──
-$strips=@(); $off=0
-while($true){ $c=@(GetJson "/report/cut_strips?JSON_KV&LIMIT=$off,60"); if($c.Count -eq 0){break}; $strips+=$c; $off+=60; if($c.Count -lt 60){break} }
+$strips = @(GetJson "/report/cut_strips?JSON_KV&LIMIT=5000")
 foreach($s in $strips){ if($ci.ContainsKey($s.cut_id) -and $s.strip_width){ $w=Num $s.strip_width; $q=[int](Num $s.strip_qty); for($i=0;$i -lt $q;$i++){ $ci[$s.cut_id].knifeWidths+=$w }; $ci[$s.cut_id].knifeCount+=$q } }
 
 # ── 6) пере-секвенс по станкам ──
