@@ -1,4 +1,4 @@
-# ============================================================================
+﻿# ============================================================================
 #  ateh - починка очереди резок (cleanup + пере-секвенс) с надёжной сети (Windows).
 #  Запуск:  powershell -ExecutionPolicy Bypass -File .\fix_queue.ps1 -Token <ТОКЕН>
 #  Что делает: убирает дубли-обеспечения, удаляет резки-фантомы (без обеспечения),
@@ -85,7 +85,8 @@ Write-Host "xsrf ок: $($Script:Xsrf)"
 # ── 1) cut_planning одним запросом (без запятой в LIMIT) ──
 $rows = @(GetJson "/report/cut_planning?JSON_KV&LIMIT=5000")
 $plan = @($rows | Where-Object { $_.cut_status -eq $PLANNED })
-Write-Host "строк cut_planning (Запланирована): $($plan.Count), резок: $((@($plan | Select-Object -ExpandProperty cut_id -Unique)).Count)"
+$uniqCuts = @($plan | ForEach-Object { $_.cut_id } | Select-Object -Unique)
+Write-Host "строк cut_planning (Запланирована): $($plan.Count), резок: $($uniqCuts.Count)"
 
 # ── 2) дубли-обеспечения: позиция с >1 supply_id → оставить первый ──
 $byPos=@{}
