@@ -245,6 +245,15 @@ var res = planning.orderCuts(src);
 assertEqual(res.map(function(c){return c.sequence;}), [1,2], 'sequence 1..N');
 assertEqual(src[0].sequence, undefined, 'вход не мутируется');
 
+// #3130: число ножей убывает по очереди станка (внутри не-Фольга группы)
+var knifeCuts = [
+    { id: '1', materialId: 'M', knifeCount: 3, knifeWidths: [], rollerWidth: 0 },
+    { id: '2', materialId: 'M', knifeCount: 7, knifeWidths: [], rollerWidth: 0 },
+    { id: '3', materialId: 'M', knifeCount: 5, knifeWidths: [], rollerWidth: 0 }
+];
+assertEqual(planning.orderCuts(knifeCuts).map(function(c){ return c.knifeCount; }), [7, 5, 3], 'orderCuts: ножи убывают к концу дня (7,5,3)');
+assertEqual(planning.byKnifeCountDesc([{ knifeCount: 2, id: 'a' }, { knifeCount: 2, id: 'b' }, { knifeCount: 9, id: 'c' }]).map(function(x){ return x.id; }), ['c', 'a', 'b'], 'byKnifeCountDesc: ↓, равные стабильно');
+
 // ── rowsToPlanning строит дескриптор движка из колонок отчёта ──
 var rpd = planning.rowsToPlanning([{
   cut_id:'9', cut_no:'1', cut_slitter_id:'10', cut_slitter:'Станок 1',
