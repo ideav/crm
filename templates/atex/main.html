@@ -315,7 +315,11 @@
                     </div>
                     <div class="database-field-group">
                         <label for="ai-service-token" class="database-field-label">API token</label>
-                        <input id="ai-service-token" class="database-field-input" type="password" autocomplete="off">
+                        <!-- Токен AI-сервиса — секрет, но не пароль входа. type="text" + маска
+                             text-security вместо type="password": иначе менеджер паролей браузера
+                             принимает пару «Модель + Токен» за логин и предлагает «Сохранить пароль»
+                             при любом submit-подобном событии (например, применении фильтра) — #3118. -->
+                        <input id="ai-service-token" class="database-field-input" type="text" autocomplete="off" data-lpignore="true" data-1p-ignore data-form-type="other" spellcheck="false" style="-webkit-text-security:disc; text-security:disc;">
                     </div>
                     <div class="database-field-group">
                         <label for="ai-target-db" class="database-field-label">База данных</label>
