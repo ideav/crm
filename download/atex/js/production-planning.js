@@ -85,7 +85,7 @@
     var SUPPLY_STATUSES = ['Зарезервировано', 'Выполнено', 'Отменено'];
     // Параметры раскладки cut-layout при генерации резок.
     var WINDOW_DAYS = 3;      // окно по сроку изготовления — позиции группируются в кластеры
-    var LAYOUT_TOLERANCE = 0; // допуск остатка джамбо (мм) для бейджа «в допуске»
+    var DEFAULT_TOLERANCE_MM = 20; // допуск остатка джамбо по умолчанию (мм), если у «Вида сырья» «Допуск, мм» не задан
 
     // ───────────────────────── Чистое ядро ─────────────────────────
 
@@ -444,6 +444,15 @@
     // Округление до 3 знаков — убрать артефакты float-арифметики.
     function round3(n) { return Math.round(n * 1000) / 1000; }
 
+    // Допуск остатка джамбо (мм): если задан (непустая строка) — берём его (терпимо
+    // к запятой), иначе дефолт. «0» считается заданным значением. #3120 + ideav/crm#3127.
+    function resolveTolerance(rawValue, defaultMm) {
+        var s = String(rawValue == null ? '' : rawValue).trim();
+        if (s === '') return Number(defaultMm) || 0;
+        var n = Number(s.replace(',', '.'));
+        return isFinite(n) ? n : (Number(defaultMm) || 0);
+    }
+
     // Занятая полосами ширина — Σ(ширина × количество).
     function stripsUsedWidth(strips) {
         return round3((strips || []).reduce(function(sum, s) {
@@ -638,7 +647,8 @@
         aggregateStrips: aggregateStrips,
         stripsUsedWidth: stripsUsedWidth,
         stripsTotalKnives: stripsTotalKnives,
-        stripsRemainder: stripsRemainder
+        stripsRemainder: stripsRemainder,
+        resolveTolerance: resolveTolerance
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -872,16 +882,26 @@
         var meta = list.filter(function(t) {
             return String(t.val).trim().toLowerCase() === 'вид сырья';
         })[0] || null;
-        if (!meta) { this.jumboWidthByMaterial = {}; return Promise.resolve(); }
+        if (!meta) { this.jumboWidthByMaterial = {}; this.toleranceByMaterial = {}; return Promise.resolve(); }
         var widthIdx = columnIndex(meta, 'Ширина, мм');
+        var tolIdx = columnIndex(meta, 'Допуск, мм');   // #3120: допуск по виду сырья (иначе дефолт)
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
-            var map = {};
+            var map = {}, tol = {};
             (rows || []).forEach(function(rec) {
                 var r = rec.r || [];
                 map[String(rec.i)] = widthIdx >= 0 ? (Number(r[widthIdx]) || 0) : 0;
+                // сырое значение допуска (пустое — если не задано): resolveTolerance даст дефолт
+                tol[String(rec.i)] = tolIdx >= 0 ? r[tolIdx] : '';
             });
             self.jumboWidthByMaterial = map;
+            self.toleranceByMaterial = tol;
         });
+    };
+
+    // Допуск остатка для вида сырья: «Допуск, мм» из справочника, иначе DEFAULT_TOLERANCE_MM.
+    AtexProductionPlanning.prototype.resolveToleranceMm = function(materialId) {
+        var raw = this.toleranceByMaterial ? this.toleranceByMaterial[String(materialId)] : '';
+        return resolveTolerance(raw, DEFAULT_TOLERANCE_MM);
     };
 
     // Ходовые ширины для сырья отчётом preferable_widths (JSON_KV, фильтр по сырью).
@@ -1147,7 +1167,8 @@
                 summaryEl.appendChild(el('span', { class: 'atex-pp-strip-badge', text: 'ширина джамбо не задана' }));
             } else {
                 var rem = planning.stripsRemainder(jumbo, strips);
-                var within = Math.abs(rem) <= Math.abs(LAYOUT_TOLERANCE);
+                var tol = self.resolveToleranceMm(cut.materialId);   // допуск вида сырья или дефолт 20
+                var within = Math.abs(rem) <= Math.abs(tol);
                 var remNode = metric('Остаток, мм', rem);
                 if (within) remNode.classList.add('is-ok'); else remNode.classList.add('is-warn');
                 summaryEl.appendChild(remNode);
@@ -1420,7 +1441,7 @@
                         return { id: p.id, width: p.width, qty: p.qty, dueKey: p.dueKey };
                     }),
                     preferred: self.preferredByMaterial[mat] || [],
-                    options: { windowDays: WINDOW_DAYS, tolerance: LAYOUT_TOLERANCE }
+                    options: { windowDays: WINDOW_DAYS, tolerance: self.resolveToleranceMm(mat) }
                 });
                 (res.layouts || []).forEach(function(lay) { lay.mat = mat; allLayouts.push(lay); });
                 (res.skipped || []).forEach(function(s) { skipped.push(s); });

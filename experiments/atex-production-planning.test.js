@@ -408,4 +408,12 @@ assertEqual(planning.cutMissingBatch({ materialId: '' }, gb), false, 'cutMissing
 // вход не мутируется (порядок исходного массива сохранён).
 assertEqual(fifoBatches[0].id, '10', 'reserveFifo: вход не мутируется (сортировка на копии)');
 
+// resolveTolerance: допуск вида сырья или дефолт (ideav/crm#3127 — «по умолчанию 20 мм»).
+assertEqual(planning.resolveTolerance('', 20), 20, 'resolveTolerance: пусто → дефолт 20');
+assertEqual(planning.resolveTolerance(null, 20), 20, 'resolveTolerance: null → дефолт');
+assertEqual(planning.resolveTolerance('5', 20), 5, 'resolveTolerance: задано → значение');
+assertEqual(planning.resolveTolerance('0', 20), 0, 'resolveTolerance: 0 — это заданное значение, не дефолт');
+assertEqual(planning.resolveTolerance('2,5', 20), 2.5, 'resolveTolerance: запятая-десятичный');
+assertEqual(planning.resolveTolerance('мусор', 20), 20, 'resolveTolerance: мусор → дефолт');
+
 console.log('\n' + passed + ' assertions passed');
