@@ -1163,9 +1163,24 @@
 
                 var del = el('button', { class: 'atex-pp-btn atex-pp-strip-del', type: 'button', title: 'Удалить полосу', text: '×' });
                 del.addEventListener('click', function() {
-                    strips.splice(idx, 1);
+                    if (self.busy) return;
+                    var removed = strips.splice(idx, 1)[0];
                     renderRows();
                     recalc();
+                    // Уже сохранённую полосу (есть id) удаляем на сервере сразу (#3124):
+                    // раньше _m_del уходил только по «Сохранить полосы», поэтому при
+                    // обновлении страницы удалённые полосы возвращались. Убираем и из
+                    // original, чтобы последующее «Сохранить» не пыталось удалить повторно.
+                    if (removed && removed.id) {
+                        for (var i = 0; i < original.length; i++) {
+                            if (String(original[i].id) === String(removed.id)) { original.splice(i, 1); break; }
+                        }
+                        self.post('_m_del/' + encodeURIComponent(removed.id) + '?JSON', {}).then(function() {
+                            self.notify('Полоса удалена', 'info');
+                        }).catch(function(err) {
+                            self.notify('Ошибка удаления полосы: ' + err.message, 'error');
+                        });
+                    }
                 });
                 row.appendChild(del);
 
