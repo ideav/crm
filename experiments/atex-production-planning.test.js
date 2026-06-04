@@ -442,6 +442,13 @@ assertEqual(sched[1], { cutId:'B', startMin:485.2, finishMin:489.2, setupMin:2, 
 assertEqual(planning.formatClock(482), '08:02', 'formatClock: 482 → 08:02');
 assertEqual(planning.formatClock(1440 + 90), '01:30 +1д', 'formatClock: за сутки → +1д');
 
+// Рабочее окно 08:00–16:30: резка, не влезающая до конца окна, переносится на след. день.
+// Узкое окно для теста (484): A влезает, B (старт 485.2 > 484) → день+1, 08:00 + setup.
+var schedW = planning.buildSchedule(schedCuts, { windPoints: pts, runLengthByCut: { A:300, B:600 }, shiftStartMin: 480, shiftEndMin: 484 });
+assertEqual(schedW[0].startMin, 482, 'buildSchedule(окно): A в первый день (482)');
+assertEqual([schedW[1].startMin, schedW[1].finishMin], [1922, 1926], 'buildSchedule(окно): B не влез до 16:30 → след. день 08:00+setup (1922–1926)');
+assertEqual(planning.SHIFT_END_MIN, 990, 'SHIFT_END_MIN = 16:30 (990)');
+
 // resolveTolerance: допуск вида сырья или дефолт (ideav/crm#3127 — «по умолчанию 20 мм»).
 assertEqual(planning.resolveTolerance('', 20), 20, 'resolveTolerance: пусто → дефолт 20');
 assertEqual(planning.resolveTolerance(null, 20), 20, 'resolveTolerance: null → дефолт');

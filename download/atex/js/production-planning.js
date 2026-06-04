@@ -484,26 +484,40 @@
         return round3(b.min + slope * (x - b.m));
     }
 
-    var SHIFT_START_MIN = 8 * 60;   // фикс. начало смены 08:00 (минут от полуночи) — якорь расписания
+    var SHIFT_START_MIN = 8 * 60;        // начало смены 08:00 (минут от полуночи)
+    var SHIFT_END_MIN = 16 * 60 + 30;    // конец рабочего времени 16:30 (далее 30 мин уборки до 17:00)
 
     // Расписание очереди (по порядку): для каждой резки — старт/финиш в минутах от
-    // начала смены. setup перед резкой = лидер (BETWEEN_CUTS) + переналадка с предыдущей
-    // (changeoverCost в минутах); длительность = намотка прогона (windingMinutes по метражу).
-    // opts: { windPoints, times, shiftStartMin, runLengthByCut:{cutId:метры} }. Вход не мутирует.
+    // полуночи дня 0 (через сутки — следующий рабочий день). setup перед резкой = лидер
+    // (BETWEEN_CUTS) + переналадка с предыдущей (changeoverCost, мин); длительность =
+    // намотка прогона (windingMinutes по метражу). Рабочее окно дня — [shiftStartMin,
+    // shiftEndMin] (08:00–16:30); резка, не влезающая до конца окна, переносится на
+    // 08:00 следующего дня. opts: { windPoints, times, shiftStartMin, shiftEndMin,
+    // runLengthByCut:{cutId:метры} }. Вход не мутирует.
     function buildSchedule(cuts, opts){
         opts = opts || {};
         var wind = opts.windPoints || [];
         var times = opts.times || DEFAULT_OP_TIMES;
         var leader = Number(times.BETWEEN_CUTS != null ? times.BETWEEN_CUTS : DEFAULT_OP_TIMES.BETWEEN_CUTS) || 0;
         var runLen = opts.runLengthByCut || {};
-        var t = Number(opts.shiftStartMin != null ? opts.shiftStartMin : SHIFT_START_MIN) || 0;
+        var shiftStart = Number(opts.shiftStartMin != null ? opts.shiftStartMin : SHIFT_START_MIN) || 0;
+        var shiftEnd = Number(opts.shiftEndMin != null ? opts.shiftEndMin : SHIFT_END_MIN) || 0;
+        var hasWindow = shiftEnd > shiftStart;
+        var t = shiftStart;   // день 0, начало смены
         var out = [];
         (cuts || []).forEach(function(c, i){
             var setup = leader + (i > 0 ? changeoverCost(cuts[i-1], c, times) : 0);
             var dur = windingMinutes(Number(runLen[String(c.id)]) || 0, wind);
-            var start = round3(t + setup);
-            var finish = round3(start + dur);
-            out.push({ cutId: String(c.id), startMin: start, finishMin: finish, setupMin: round3(setup), durationMin: dur });
+            var start = t + setup;
+            var day = Math.floor(start / 1440);
+            if (start < day * 1440 + shiftStart) start = day * 1440 + shiftStart;   // до 08:00 → ждём открытия
+            // не влезает до конца рабочего окна (16:30) → переносим на 08:00 след. дня
+            if (hasWindow && start + dur > day * 1440 + shiftEnd) {
+                day += 1;
+                start = day * 1440 + shiftStart + setup;
+            }
+            var finish = start + dur;
+            out.push({ cutId: String(c.id), startMin: round3(start), finishMin: round3(finish), setupMin: round3(setup), durationMin: dur });
             t = finish;
         });
         return out;
@@ -736,6 +750,7 @@
         buildSchedule: buildSchedule,
         formatClock: formatClock,
         SHIFT_START_MIN: SHIFT_START_MIN,
+        SHIFT_END_MIN: SHIFT_END_MIN,
         aggregateStrips: aggregateStrips,
         stripsUsedWidth: stripsUsedWidth,
         stripsTotalKnives: stripsTotalKnives,
