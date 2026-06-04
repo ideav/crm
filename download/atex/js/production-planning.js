@@ -1103,11 +1103,20 @@
     AtexProductionPlanning.prototype.renderStripPanel = function(panel, cut, strips, original) {
         var self = this;
         var jumbo = Number(this.jumboWidthByMaterial[String(cut.materialId)]) || 0;
+        var prefWidths = [];   // загруженные ходовые ширины (#3128, фильтруются по остатку)
         panel.innerHTML = '';
 
-        // Заголовок (read-only): сырьё + ширина джамбо.
+        // Заголовок: сырьё + ширина джамбо, справа — иконка закрытия (#3127).
         var matLabel = (cut.materialBatch && cut.materialBatch.label) || cut.materialName || cut.materialId || '—';
-        panel.appendChild(el('div', { class: 'atex-pp-strip-header', text: 'Сырьё: ' + matLabel + ', Джамбо: ' + (jumbo || '—') + ' мм' }));
+        var closeIcon = el('button', { class: 'atex-pp-strip-close', type: 'button', title: 'Закрыть', text: '×' });
+        closeIcon.addEventListener('click', function() {
+            self.stripEditCutId = null;
+            if (panel.parentNode) panel.parentNode.removeChild(panel);
+        });
+        panel.appendChild(el('div', { class: 'atex-pp-strip-header' }, [
+            el('span', { class: 'atex-pp-strip-header-text', text: 'Сырьё: ' + matLabel + ', Джамбо: ' + (jumbo || '—') + ' мм' }),
+            closeIcon
+        ]));
 
         // Таблица полос.
         var table = el('div', { class: 'atex-pp-strip-table' });
@@ -1136,15 +1145,16 @@
             if (!(jumbo > 0)) {
                 summaryEl.appendChild(metric('Остаток, мм', '—'));
                 summaryEl.appendChild(el('span', { class: 'atex-pp-strip-badge', text: 'ширина джамбо не задана' }));
-                return;
+            } else {
+                var rem = planning.stripsRemainder(jumbo, strips);
+                var within = Math.abs(rem) <= Math.abs(LAYOUT_TOLERANCE);
+                var remNode = metric('Остаток, мм', rem);
+                if (within) remNode.classList.add('is-ok'); else remNode.classList.add('is-warn');
+                summaryEl.appendChild(remNode);
+                var badge = el('span', { class: 'atex-pp-strip-badge ' + (within ? 'is-ok' : 'is-warn'), text: within ? 'в допуске' : 'вне допуска' });
+                summaryEl.appendChild(badge);
             }
-            var rem = planning.stripsRemainder(jumbo, strips);
-            var within = Math.abs(rem) <= Math.abs(LAYOUT_TOLERANCE);
-            var remNode = metric('Остаток, мм', rem);
-            if (within) remNode.classList.add('is-ok'); else remNode.classList.add('is-warn');
-            summaryEl.appendChild(remNode);
-            var badge = el('span', { class: 'atex-pp-strip-badge ' + (within ? 'is-ok' : 'is-warn'), text: within ? 'в допуске' : 'вне допуска' });
-            summaryEl.appendChild(badge);
+            renderPreferred();   // #3128 — перефильтровать ходовые по текущему остатку
         }
 
         function metric(label, value) {
@@ -1162,14 +1172,16 @@
                 var w = el('input', { class: 'atex-pp-input', type: 'number', min: '0', step: 'any', placeholder: '0' });
                 w.value = s.width;
                 w.addEventListener('input', function() { s.width = w.value; recalc(); });
+                w.addEventListener('change', function() { self.persistStrip(cut.id, s); });  // авто-сейв (#3127)
                 row.appendChild(w);
 
                 var q = el('input', { class: 'atex-pp-input', type: 'number', min: '0', step: '1', placeholder: '0' });
                 q.value = s.qty;
                 q.addEventListener('input', function() { s.qty = q.value; recalc(); });
+                q.addEventListener('change', function() { self.persistStrip(cut.id, s); });  // авто-сейв (#3127)
                 row.appendChild(q);
 
-                row.appendChild(self.selectText(STRIP_PURPOSES, s.purpose, function(v) { s.purpose = v; }));
+                row.appendChild(self.selectText(STRIP_PURPOSES, s.purpose, function(v) { s.purpose = v; self.persistStrip(cut.id, s); }));
 
                 var del = el('button', { class: 'atex-pp-btn atex-pp-strip-del', type: 'button', title: 'Удалить полосу', text: '×' });
                 del.addEventListener('click', function() {
@@ -1207,63 +1219,91 @@
         });
         panel.appendChild(addBtn);
 
-        // Панель ходовых ширин.
+        // Панель ходовых ширин (#3128: 3 ряда со скроллом — в CSS; скрываем те,
+        // что шире текущего остатка джамбо).
+        var matKey = String(cut.materialId == null ? '' : cut.materialId);
         var prefWrap = el('div', { class: 'atex-pp-strip-pref' });
         prefWrap.appendChild(el('div', { class: 'atex-pp-strip-pref-title', text: 'Ходовые ширины' }));
         var prefList = el('div', { class: 'atex-pp-strip-pref-list' });
         prefWrap.appendChild(prefList);
         panel.appendChild(prefWrap);
+        var prefLoading = (matKey !== '');
 
-        function renderPreferred(list) {
+        // Перерисовать ходовые с фильтром по текущему остатку (ширина ≤ остаток
+        // джамбо, если он задан). Вызывается из recalc при каждом изменении полос.
+        function renderPreferred() {
             prefList.innerHTML = '';
-            if (!list || !list.length) {
-                prefList.appendChild(el('div', { class: 'atex-pp-empty', text: 'Нет данных по ходовым ширинам.' }));
-                return;
-            }
+            if (prefLoading) { prefList.appendChild(el('div', { class: 'atex-pp-strip-loading', text: 'Загрузка ходовых…' })); return; }
+            if (!prefWidths.length) { prefList.appendChild(el('div', { class: 'atex-pp-empty', text: 'Нет данных по ходовым ширинам.' })); return; }
+            var rem = (jumbo > 0) ? (jumbo - planning.stripsUsedWidth(strips)) : null;
+            var list = prefWidths.filter(function(p) { return rem == null || (Number(p.width) || 0) <= rem; });
+            if (!list.length) { prefList.appendChild(el('div', { class: 'atex-pp-empty', text: 'Нет ходовых, помещающихся в остаток.' })); return; }
             list.forEach(function(p) {
                 var b = el('button', { class: 'atex-pp-btn atex-pp-strip-pref-item', type: 'button',
                     text: p.width + ' мм · Популярность ' + p.popularity });
                 b.addEventListener('click', function() {
-                    strips.push({ id: null, width: String(p.width), qty: '1', purpose: 'Склад' });
+                    var ns = { id: null, width: String(p.width), qty: '1', purpose: 'Склад' };
+                    strips.push(ns);
                     renderRows();
                     recalc();
+                    self.persistStrip(cut.id, ns);   // авто-сейв (#3127)
                 });
                 prefList.appendChild(b);
             });
         }
 
-        var matKey = String(cut.materialId == null ? '' : cut.materialId);
         if (matKey !== '' && this.preferredByMaterial[matKey]) {
-            renderPreferred(this.preferredByMaterial[matKey]);
+            prefWidths = this.preferredByMaterial[matKey]; prefLoading = false;
         } else if (matKey !== '') {
-            prefList.appendChild(el('div', { class: 'atex-pp-strip-loading', text: 'Загрузка ходовых…' }));
             this.loadPreferredWidths(matKey).then(function(list) {
-                if (String(self.stripEditCutId) === String(cut.id) && panel.parentNode) renderPreferred(list);
+                prefWidths = list || []; prefLoading = false;
+                if (String(self.stripEditCutId) === String(cut.id) && panel.parentNode) renderPreferred();
             }).catch(function() {
-                if (panel.parentNode) renderPreferred([]);
+                prefWidths = []; prefLoading = false;
+                if (panel.parentNode) renderPreferred();
             });
         } else {
-            renderPreferred([]);
+            prefLoading = false;
         }
 
-        // Кнопки действий.
-        var actions = el('div', { class: 'atex-pp-actions' });
-        var saveBtn = el('button', { class: 'atex-pp-btn atex-pp-btn-primary', type: 'button', text: 'Сохранить полосы' });
-        saveBtn.addEventListener('click', function() {
-            if (self.busy) return;
-            self.saveStrips(cut.id, strips, original);
-        });
-        var closeBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Закрыть' });
-        closeBtn.addEventListener('click', function() {
-            self.stripEditCutId = null;
-            if (panel.parentNode) panel.parentNode.removeChild(panel);
-        });
-        actions.appendChild(saveBtn);
-        actions.appendChild(closeBtn);
-        panel.appendChild(actions);
+        // Кнопка «Сохранить полосы» убрана (#3127): сохраняем по мере редактирования
+        // (persistStrip на change полей + при вставке ходовой; удаление шлёт _m_del).
+        // Закрытие — иконкой × в шапке панели.
 
         renderRows();
         recalc();
+    };
+
+    // Авто-сейв одной полосы по мере редактирования (#3127). Есть id → _m_set;
+    // нет id, но есть данные → _m_new (up=cutId), сохраняем выданный id в strip.id
+    // (флаг _creating защищает от двойного создания при близких change-событиях).
+    // Пустую новую полосу не создаём. Ошибки — тостом.
+    AtexProductionPlanning.prototype.persistStrip = function(cutId, strip) {
+        var self = this;
+        var sm = this.meta.strip;
+        if (!sm || !strip) return Promise.resolve();
+        var reqIds = {
+            width: reqIdByName(sm, STRIP_REQ.width),
+            qty: reqIdByName(sm, STRIP_REQ.qty),
+            purpose: reqIdByName(sm, STRIP_REQ.purpose)
+        };
+        var fields = buildFields(reqIds, { width: strip.width, qty: strip.qty, purpose: strip.purpose });
+        if (strip.id) {
+            return self.post('_m_set/' + strip.id + '?JSON', fields).catch(function(err) {
+                self.notify('Ошибка сохранения полосы: ' + err.message, 'error');
+            });
+        }
+        var hasData = String(strip.width).trim() !== '' || String(strip.qty).trim() !== '';
+        if (!hasData || strip._creating) return Promise.resolve();
+        strip._creating = true;
+        return self.post('_m_new/' + sm.id + '?JSON&up=' + encodeURIComponent(cutId), fields).then(function(res) {
+            var id = res && (res.obj || res.id || res.i);
+            if (id) strip.id = String(id);
+            strip._creating = false;
+        }).catch(function(err) {
+            strip._creating = false;
+            self.notify('Ошибка сохранения полосы: ' + err.message, 'error');
+        });
     };
 
     // Сохранить полосы резки — дифф original↔strips (зеркало cut-calc syncStrips):
