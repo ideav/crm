@@ -3676,14 +3676,20 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			$name = "'".str_replace("'", "\\'", $GLOBALS["STORED_REPS"][$id][REP_COL_NAME][1])."'";
 		else
 			$name = "id";
+		$rec_limit = "LIMIT ".DDLIST_ITEMS;
+		if(isset($_REQUEST["LIMIT"])){
+			$limits = explode(",", $_REQUEST["LIMIT"]);
+			if((int)$limits[0] >= 0)
+				$rec_limit = "LIMIT ".(int)(isset($limits[1]) ? $limits[1] : $limits[0]);
+		}
 		if(isset($GLOBALS["STORED_REPS"][$id]["references"][$typ][$typ])) // This is a reference attribute
     		$GLOBALS["STORED_REPS"][$id]["sql"] = " WITH RECURSIVE c AS (SELECT id, 0 t FROM $z WHERE t=$typ AND up!=0 AND t!=up $cond"
                     ."  UNION SELECT ref.up id, ref.t FROM $z ref INNER JOIN c ON c.id=ref.t WHERE ref.val='"
-                                .$GLOBALS["STORED_REPS"][$id]["references"][$typ][$typ]."')"
+                                .$GLOBALS["STORED_REPS"][$id]["references"][$typ][$typ]."' $rec_limit)"
                     ." SELECT DISTINCT id $name FROM c";
         else    // This is a dependent table items
     		$GLOBALS["STORED_REPS"][$id]["sql"] = " WITH RECURSIVE c AS (SELECT id, 0 t FROM $z WHERE t=$typ AND up!=0 AND t!=up AND val!='' $cond"
-                    ."  UNION SELECT ref.id id, ref.t FROM $z ref INNER JOIN c ON c.id=ref.up WHERE ref.t=$typ)"
+                    ."  UNION SELECT ref.id id, ref.t FROM $z ref INNER JOIN c ON c.id=ref.up WHERE ref.t=$typ $rec_limit)"
                     ." SELECT DISTINCT id $name FROM c";
         trace("RECURSIVE ".$GLOBALS["STORED_REPS"][$id]["sql"]);
         mywrite("\r\n".$GLOBALS["STORED_REPS"][$id]["sql"]);
