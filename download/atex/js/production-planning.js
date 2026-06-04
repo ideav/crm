@@ -491,6 +491,15 @@
         return String(avail[0].id);
     }
 
+    // #3120 группа C (Фаза 1a, п.4): у резки задан материал, но нет ни одной подходящей
+    // партии сырья с остатком (pickBatchFIFO === null) → резку нельзя обеспечить сырьём.
+    // Резки без материала (materialId пуст) не помечаем. genBatches — [{id,materialId,...,remainder}].
+    function cutMissingBatch(cut, genBatches){
+        var mat = cut && cut.materialId != null ? String(cut.materialId) : '';
+        if (mat === '') return false;
+        return pickBatchFIFO(genBatches || [], mat) === null;
+    }
+
     // Потребность резки в погонных метрах (#3120 группа C): длина прогона джамбо =
     // самая длинная обеспечиваемая позиция (параллельный слиттинг — все полосы режутся
     // за один прогон). supplyFootages — массив «Метраж, м» обеспечений резки.
@@ -623,6 +632,7 @@
         unsuppliedPositions: unsuppliedPositions,
         pickSlitter: pickSlitter,
         pickBatchFIFO: pickBatchFIFO,
+        cutMissingBatch: cutMissingBatch,
         requiredRunLengthM: requiredRunLengthM,
         reserveFifo: reserveFifo,
         aggregateStrips: aggregateStrips,
@@ -1777,7 +1787,10 @@
             // информация (клик = выбор резки) и контролы (↑/↓/Полосы). Панель полос
             // (#3120 п.8) openStrips добавляет внутрь этой же карточки (контейнер —
             // cardPanel), а не внизу всей очереди — поэтому она строго одна на карточку.
-            var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : ''), dataset: { cutId: String(c.id) } });
+            // #3120 п.4 (Фаза 1a): подсветка резки, у которой задан материал, но нет
+            // подходящей партии сырья с остатком (обеспечить нечем).
+            var unreserved = cutMissingBatch(c, self.genBatches);
+            var cardPanel = el('div', { class: 'atex-pp-cut' + (active ? ' is-active' : '') + (unreserved ? ' is-unreserved' : ''), dataset: { cutId: String(c.id) } });
 
             var info = el('div', { class: 'atex-pp-cut-info' }, [
                 el('span', { class: 'atex-pp-cut-num', text: '№ ' + (c.number || c.id) }),

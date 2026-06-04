@@ -398,6 +398,13 @@ assertEqual([r3.allocations.length, r3.reservedLinearM, r3.shortfallLinearM, r3.
 var r4 = planning.reserveFifo(fifoBatches, 0, 0.9);
 assertEqual([r4.allocations.length, r4.fullyReserved], [0, true], 'reserveFifo: N=0 → пусто, fullyReserved');
 
+// cutMissingBatch (#3120 п.4): материал задан, но нет партии с остатком → true.
+var gb = [{ id: '1', materialId: '2126', dateKey: 1, remainder: 100 }, { id: '2', materialId: '900', dateKey: 1, remainder: 0 }];
+assertEqual(planning.cutMissingBatch({ materialId: '2126' }, gb), false, 'cutMissingBatch: есть партия с остатком → false');
+assertEqual(planning.cutMissingBatch({ materialId: '900' }, gb), true, 'cutMissingBatch: партия есть, но остаток 0 → true');
+assertEqual(planning.cutMissingBatch({ materialId: '777' }, gb), true, 'cutMissingBatch: нет партий материала → true');
+assertEqual(planning.cutMissingBatch({ materialId: '' }, gb), false, 'cutMissingBatch: материал не задан → false');
+
 // вход не мутируется (порядок исходного массива сохранён).
 assertEqual(fifoBatches[0].id, '10', 'reserveFifo: вход не мутируется (сортировка на копии)');
 
